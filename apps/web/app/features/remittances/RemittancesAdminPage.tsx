@@ -1,11 +1,13 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
@@ -15,6 +17,10 @@ import { SearchInput } from '~/components/ui/search-input';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills';
 import { Textarea } from '~/components/ui/textarea';
+import {
+  CompactTable,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 
 export interface TransferConfirmationRecord {
   id: string;
@@ -29,6 +35,8 @@ export interface TransferConfirmationRecord {
   verifiedAt: string | null;
   fromLocationName: string;
   toLocationName: string;
+  fromProviderName: string | null;
+  toProviderName: string | null;
   shrinkageReason: string | null;
   /** Optional comment the receiver writes when marking received (incl. shrinkage notes). */
   receiverNotes?: string | null;
@@ -40,7 +48,7 @@ export interface TransferConfirmationRecord {
 
 export interface RemittancesAdminPageProps {
   remittances: TransferConfirmationRecord[];
-  locations: Array<{ id: string; name: string }>;
+  locations: Array<{ id: string; name: string; providerName?: string | null }>;
   senderOptions: string[];
   filters: {
     status: string;
@@ -54,6 +62,73 @@ export interface RemittancesAdminPageProps {
     periodAllTime: boolean;
   };
 }
+
+function formatLocationWithProvider(name: string, providerName: string | null | undefined): string {
+  return providerName ? `${name} — ${providerName}` : name;
+}
+
+const PROCESSED_TRANSFER_COLUMNS: CompactTableColumn<TransferConfirmationRecord>[] = [
+  {
+    key: 'product',
+    header: 'Product',
+    render: (r) => <span className="text-app-fg">{r.productName}</span>,
+  },
+  {
+    key: 'route',
+    header: 'From → To',
+    minWidth: 'min-w-[180px]',
+    render: (r) => (
+      <span className="text-app-fg-muted">
+        {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} →{' '}
+        {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
+      </span>
+    ),
+  },
+  {
+    key: 'sender',
+    header: 'Sent by',
+    render: (r) => <span className="text-app-fg-muted">{r.senderName ?? 'Unknown user'}</span>,
+  },
+  {
+    key: 'qty',
+    header: 'Qty',
+    align: 'right',
+    render: (r) => <span className="tabular-nums">{r.outcomeQuantity ?? r.quantityReceived ?? '—'}</span>,
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    render: (r) => (
+      <StatusBadge status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)} />
+    ),
+  },
+  {
+    key: 'comments',
+    header: 'Comments',
+    minWidth: 'min-w-[200px]',
+    render: (r) =>
+      r.receiverNotes || r.shrinkageReason ? (
+        <div className="space-y-0.5 max-w-[260px] text-sm text-app-fg-muted">
+          {r.receiverNotes ? (
+            <p className="text-app-fg whitespace-pre-line break-words">{r.receiverNotes}</p>
+          ) : null}
+          {(r.outcomeReason ?? r.shrinkageReason) ? (
+            <p className="text-xs text-warning-600 dark:text-warning-400">
+              Shrinkage: {r.outcomeReason ?? r.shrinkageReason}
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <span className="text-app-fg-muted">—</span>
+      ),
+  },
+  {
+    key: 'sent',
+    header: 'Sent',
+    nowrap: true,
+    render: (r) => <span className="text-app-fg-muted">{new Date(r.createdAt).toLocaleDateString()}</span>,
+  },
+];
 
 export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
@@ -93,12 +168,11 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     [remittances.length, sentRemittances.length, receivedCount, disputedCount],
   );
 
-  useEffect(() => {
-    if (fetcher.state === 'idle' && (fetcher.data as { success?: boolean } | undefined)?.success) {
-      setConfirmTarget(null);
-      setMarkingId(null);
-    }
-  }, [fetcher.state, fetcher.data]);
+  const handleRemittanceFetcherSuccess = useCallback(() => {
+    setConfirmTarget(null);
+    setMarkingId(null);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleRemittanceFetcherSuccess);
 
   const handleMarkReceived = (remittance: TransferConfirmationRecord) => {
     const qty = quantityReceived[remittance.id] ?? String(remittance.quantitySent);
@@ -156,6 +230,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       <PageHeader
         title="Stock Transfer Confirmations"
         description="Confirm in-transit stock transfers when goods arrive at the destination. No receipt upload required."
+        actions={<PageRefreshButton />}
       />
 
       <OverviewStatStrip
@@ -197,7 +272,10 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
             onChange={(e) => setFilterParam('locationId', e.target.value)}
             options={[
               { value: '', label: 'All locations' },
-              ...locations.map((loc) => ({ value: loc.id, label: loc.name })),
+              ...locations.map((loc) => ({
+                value: loc.id,
+                label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+              })),
             ]}
           />
           <FormSelect
@@ -252,7 +330,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-app-fg">{r.productName}</p>
                   <p className="text-sm text-app-fg-muted">
-                    From {r.fromLocationName} → {r.toLocationName}
+                    From {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} → {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
                   </p>
                   <p className="text-sm text-app-fg-muted">
                     Quantity sent: {r.quantitySent} · Created {new Date(r.createdAt).toLocaleString()}
@@ -335,93 +413,13 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       {/* Processed list (Received / Disputed) — visible on All / Received / Disputed. */}
       {(statusValue === '' || statusValue === 'RECEIVED' || statusValue === 'DISPUTED') &&
         receivedOrDisputed.length > 0 && (
-        <div>
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Product</th>
-                  <th className="table-header">From → To</th>
-                  <th className="table-header">Sent by</th>
-                  <th className="table-header text-right">Qty</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header">Comments</th>
-                  <th className="table-header">Sent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {receivedOrDisputed.map((r) => (
-                  <tr key={r.id} className="table-row align-top">
-                    <td className="table-cell text-app-fg">{r.productName}</td>
-                    <td className="table-cell text-app-fg-muted">
-                      {r.fromLocationName} → {r.toLocationName}
-                    </td>
-                    <td className="table-cell text-app-fg-muted">
-                      {r.senderName ?? 'Unknown user'}
-                    </td>
-                    <td className="table-cell text-right">{r.outcomeQuantity ?? r.quantityReceived ?? '—'}</td>
-                    <td className="table-cell">
-                      <StatusBadge
-                        status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)}
-                      />
-                    </td>
-                    <td className="table-cell text-app-fg-muted text-sm">
-                      {(r.receiverNotes || r.shrinkageReason) ? (
-                        <div className="space-y-0.5 max-w-[260px]">
-                          {r.receiverNotes && (
-                            <p className="text-app-fg whitespace-pre-line break-words">
-                              {r.receiverNotes}
-                            </p>
-                          )}
-                          {(r.outcomeReason ?? r.shrinkageReason) && (
-                            <p className="text-xs text-warning-600 dark:text-warning-400">
-                              Shrinkage: {r.outcomeReason ?? r.shrinkageReason}
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-app-fg-muted">—</span>
-                      )}
-                    </td>
-                    <td className="table-cell text-app-fg-muted">
-                      {new Date(r.createdAt).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="md:hidden space-y-3 px-1">
-            {receivedOrDisputed.map((r) => (
-              <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <p className="font-medium text-app-fg">{r.productName}</p>
-                  <StatusBadge
-                    status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)}
-                  />
-                </div>
-                <div className="text-sm text-app-fg-muted space-y-0.5">
-                  <div>From → To: {r.fromLocationName} → {r.toLocationName}</div>
-                  <div>Sent by: {r.senderName ?? 'Unknown user'}</div>
-                  <div>Qty: {r.outcomeQuantity ?? r.quantityReceived ?? '—'}</div>
-                  <div>Created: {new Date(r.createdAt).toLocaleDateString()}</div>
-                </div>
-                {r.receiverNotes && (
-                  <div className="text-sm rounded-md border border-app-border bg-app-hover p-2.5">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted mb-1">
-                      Receiver comment
-                    </p>
-                    <p className="text-app-fg whitespace-pre-line break-words">{r.receiverNotes}</p>
-                  </div>
-                )}
-                {(r.outcomeReason ?? r.shrinkageReason) && (
-                  <p className="text-xs text-warning-600 dark:text-warning-400">
-                    Shrinkage reason: {r.outcomeReason ?? r.shrinkageReason}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
+        <div className="border border-app-border rounded-lg overflow-hidden">
+          <CompactTable<TransferConfirmationRecord>
+            columns={PROCESSED_TRANSFER_COLUMNS}
+            rows={receivedOrDisputed}
+            rowKey={(r) => r.id}
+            withCard={false}
+          />
         </div>
       )}
 
@@ -453,7 +451,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm space-y-1.5">
             <p className="font-medium text-app-fg">{confirmTarget.productName}</p>
             <p className="text-app-fg-muted">
-              {confirmTarget.fromLocationName} → {confirmTarget.toLocationName}
+              {formatLocationWithProvider(confirmTarget.fromLocationName, confirmTarget.fromProviderName)} → {formatLocationWithProvider(confirmTarget.toLocationName, confirmTarget.toProviderName)}
             </p>
             <p className="text-app-fg-muted">
               Quantity sent: {confirmTarget.quantitySent}

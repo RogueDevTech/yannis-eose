@@ -18,7 +18,7 @@ export function useServerFontScaleSync(enabled: boolean) {
       if (readStoredFontScale() !== eff) {
         persistAndApplyFontScale(eff);
       }
-    })();
+    })().catch(() => {});
     return () => {
       cancelled = true;
     };

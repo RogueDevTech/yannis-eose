@@ -115,11 +115,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locations = locationsData?.locations ?? [];
 
   const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
+  const locationProviderById = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
   const riderById = new Map(ridersData.map((r) => [r.id, r]));
 
   const enrichedOrders = orders.map((o: Record<string, unknown>) => ({
     ...o,
     locationName: o.logisticsLocationId ? locationNameById.get(o.logisticsLocationId as string) ?? '—' : '—',
+    locationProviderName: o.logisticsLocationId ? locationProviderById.get(o.logisticsLocationId as string) ?? null : null,
     riderName: o.riderId ? riderById.get(o.riderId as string)?.name ?? '—' : '—',
   }));
 

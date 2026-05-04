@@ -176,8 +176,10 @@ export {
   rejectFundingRequestSchema,
   getFundingBalanceSchema,
   createAdSpendSchema,
+  createAdSpendWithBranchSchema,
   createAdSpendLogFormSchema,
   createAdSpendBatchSchema,
+  createAdSpendBatchWithBranchSchema,
   adPlatformSchema,
   adPlatformValues,
   listAdSpendSchema,
@@ -369,6 +371,8 @@ export {
   submitOnboardingSchema,
   approveOnboardingSchema,
   getOnboardingSchema,
+  staffOnboardingDocumentsFilterStatusSchema,
+  listStaffOnboardingDocumentsSchema,
 } from './staff-onboarding';
 
 export type {
@@ -380,6 +384,7 @@ export type {
   SubmitOnboardingInput,
   ApproveOnboardingInput,
   GetOnboardingInput,
+  ListStaffOnboardingDocumentsInput,
 } from './staff-onboarding';
 
 // Push Notification Center validators

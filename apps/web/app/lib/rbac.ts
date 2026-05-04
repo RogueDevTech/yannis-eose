@@ -16,6 +16,14 @@ export function isAdminLevel(user: { role: string } | null | undefined): boolean
   return ADMIN_LEVEL_ROLES.has(user.role);
 }
 
+/** Compare session user id vs profile id (case/spacing safe — UUID strings from DB vs Redis may differ slightly). */
+export function actorUserIdsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a == null || b == null) return false;
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  return x.length > 0 && x === y;
+}
+
 /**
  * True ONLY for SUPER_ADMIN — reserved for actions that manage other Admins,
  * transfer ownership, or access the initial system-setup flow.
@@ -37,15 +45,18 @@ export function isOrgWideDepartmentHead(user: {
   return !!user && (user.scopeOrgWideHead === true || ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(user.role));
 }
 
-/** Cross-branch session / listings — permission-driven mirror of apps/api `canViewAllBranches`. */
+/** Cross-branch session / listings — mirror of apps/api `canViewAllBranches`. */
 export function canViewAllBranches(user: {
   role: string;
   permissions?: string[];
+  scopeOrgWideHead?: boolean;
 } | null | undefined): boolean {
   if (!user) return false;
-  if (user.role === 'SUPER_ADMIN') return true;
+  if (isAdminLevel(user)) return true;
+  if (isOrgWideDepartmentHead(user)) return true;
   const normalized = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   return (
+    normalized.includes('branches.view_all') ||
     normalized.includes('branches.scope.global') ||
     normalized.includes('cs.scope.global') ||
     normalized.includes('marketing.scope.global') ||
@@ -53,33 +64,93 @@ export function canViewAllBranches(user: {
   );
 }
 
-/** Mirrors `hasFinanceAccess` in apps/api — finance role, hat, or costView permission. */
+/** Mirrors `hasFinanceAccess` in apps/api — finance role or finance.costs.view permission. */
 export function hasFinanceAccess(user: {
   role: string;
   permissions?: string[];
-  isFinanceOfficer?: boolean;
 } | null | undefined): boolean {
   if (!user) return false;
   if (user.role === 'SUPER_ADMIN') return true;
   if ((user.permissions ?? []).map((p) => canonicalPermissionCode(p)).includes('finance.costs.view')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
-  if (user.isFinanceOfficer === true) return true;
   return false;
 }
 
 /**
- * Global audit page / `audit.globalLog` — admin, finance (primary or hat), or `audit.read`.
+ * Global audit page / `audit.globalLog` — admin, finance, or `audit.read`.
  */
 export function canAccessGlobalAuditLog(user: {
   role: string;
   permissions?: string[];
-  isFinanceOfficer?: boolean;
 } | null | undefined): boolean {
   if (!user) return false;
   if (user.role === 'SUPER_ADMIN') return true;
   if (hasFinanceAccess(user)) return true;
   if ((user.permissions ?? []).map((p) => canonicalPermissionCode(p)).includes('audit.logs.view')) return true;
   return false;
+}
+
+/**
+ * Edit-access scope for `/hr/users/:id/edit` — mirrors
+ * `apps/api/src/common/authz.ts::canEditUser`. Same three states + same rules.
+ *
+ * `'limited'` viewers (HoCS over CS_AGENT, HoM over MEDIA_BUYER) can ONLY
+ * change `capacity` / `productIds` / `visibleOrderStatuses` /
+ * `restrictProductAccess` — the form should reflect that whitelist.
+ */
+export type EditUserAccessLevel = 'full' | 'limited' | 'none';
+
+export function canEditUser(
+  viewer:
+    | {
+        id: string;
+        role: string;
+        permissions?: string[];
+        currentBranchId?: string | null;
+        scopeTeamSupervisor?: boolean;
+      }
+    | null
+    | undefined,
+  target: { id: string; role: string; primaryBranchId?: string | null },
+): EditUserAccessLevel {
+  if (!viewer) return 'none';
+  if (actorUserIdsMatch(viewer.id, target.id)) return 'none';
+  if (ADMIN_LEVEL_ROLES.has(target.role)) return 'none';
+  if (isAdminLevel(viewer)) return 'full';
+
+  const perms = (viewer.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  const has = (code: string) => perms.includes(canonicalPermissionCode(code));
+
+  if (viewer.role === 'HR_MANAGER') {
+    const sameBranch =
+      !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
+    return sameBranch ? 'full' : 'none';
+  }
+
+  if (has('users.staff.update') || has('users.update')) {
+    if (isOrgWideDepartmentHead(viewer)) return 'full';
+    const sameBranch =
+      !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
+    return sameBranch ? 'full' : 'none';
+  }
+
+  const supervisedScope = has('users.staff.update_supervised');
+  if (!supervisedScope) return 'none';
+
+  const actorIsCsLead =
+    has('cs.teamOverview') || has('team.supervise_cs') || viewer.scopeTeamSupervisor === true;
+  const actorIsMarketingLead =
+    has('marketing.teamOverview') ||
+    has('team.supervise_marketing') ||
+    viewer.scopeTeamSupervisor === true;
+
+  const sameBranch =
+    !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
+
+  if (actorIsCsLead && target.role === 'CS_AGENT' && sameBranch) return 'limited';
+  if (actorIsMarketingLead && target.role === 'MEDIA_BUYER' && sameBranch) return 'limited';
+
+  return 'none';
 }
 
 const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([

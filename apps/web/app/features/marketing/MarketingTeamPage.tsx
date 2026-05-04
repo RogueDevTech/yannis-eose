@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -31,6 +35,19 @@ export interface MarketingTeamPageProps {
   q?: string;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
+  /** Org-wide profitability thresholds — colors the Profitability column. */
+  profitabilityConfig?: { targetRoas: number; greenThreshold: number };
+}
+
+/** Green if trueRoas ≥ green threshold, red below. Neutral when no spend/data. */
+function profitabilityCellColorClass(
+  row: FundingBalanceRow,
+  greenThreshold: number,
+): string {
+  if (row.profitabilityScore == null || row.trueRoas == null) return 'text-app-fg';
+  return row.trueRoas >= greenThreshold
+    ? 'text-success-600 dark:text-success-400 font-semibold'
+    : 'text-danger-600 dark:text-danger-400 font-semibold';
 }
 
 /** Build the query string to forward the active date filter to /admin/marketing/orders. */
@@ -80,7 +97,9 @@ export function MarketingTeamPage({
   q = '',
   sortBy: sortByFromLoader = 'name',
   sortDir: sortDirFromLoader = 'asc',
+  profitabilityConfig = { targetRoas: 3, greenThreshold: 2.5 },
 }: MarketingTeamPageProps) {
+  const greenThreshold = profitabilityConfig.greenThreshold;
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -117,29 +136,166 @@ export function MarketingTeamPage({
 
   const showSearchEmpty = unfilteredCount > 0 && teamMembers.length === 0;
 
+  const teamToolbarFilterBadge = useMemo(() => {
+    let n = 0;
+    if (sortByFromLoader !== 'name') n += 1;
+    if (sortDirFromLoader !== 'asc') n += 1;
+    return n;
+  }, [sortByFromLoader, sortDirFromLoader]);
+
+  const teamColumns = useMemo((): CompactTableColumn<FundingBalanceRow>[] => {
+    return [
+      {
+        key: 'member',
+        header: 'Member',
+        render: (m) => (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">{memberInitials(m.name)}</span>
+            </div>
+            <Link
+              to={`/hr/users/${m.userId}`}
+              prefetch="intent"
+              className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400"
+            >
+              {m.name}
+            </Link>
+          </div>
+        ),
+      },
+      {
+        key: 'balance',
+        header: 'Balance',
+        align: 'right',
+        nowrap: true,
+        render: (m) => (
+          <span className="font-medium text-brand-600 dark:text-brand-400">{formatNaira(Number(m.balance))}</span>
+        ),
+      },
+      {
+        key: 'received',
+        header: 'Received',
+        align: 'right',
+        nowrap: true,
+        render: (m) => <span className="text-app-fg-muted">{formatNaira(Number(m.totalReceived))}</span>,
+      },
+      {
+        key: 'spent',
+        header: 'Spent',
+        align: 'right',
+        nowrap: true,
+        render: (m) => <span className="text-app-fg-muted">{formatNaira(Number(m.totalSpend))}</span>,
+      },
+      {
+        key: 'cpa',
+        header: 'CPA',
+        align: 'right',
+        nowrap: true,
+        render: (m) => (m.cpa != null ? <NairaPrice amount={m.cpa} /> : '\u2014'),
+      },
+      {
+        key: 'profitability',
+        header: 'Profitability',
+        align: 'right',
+        nowrap: true,
+        cellClassName: (m) => profitabilityCellColorClass(m, greenThreshold),
+        cellTitle: (m) =>
+          m.profitabilityScore != null && m.trueRoas != null
+            ? `True ROAS ${m.trueRoas.toFixed(2)}x · target ${profitabilityConfig.targetRoas}x · green ≥ ${greenThreshold}x`
+            : undefined,
+        render: (m) => (m.profitabilityScore != null ? m.profitabilityScore.toFixed(1) : '\u2014'),
+      },
+      {
+        key: 'confirm',
+        header: 'Confirm %',
+        align: 'right',
+        nowrap: true,
+        cellClassName: (m) => confirmationRateColorClass(m.confirmationRate),
+        render: (m) => (m.confirmationRate != null ? `${Math.round(m.confirmationRate)}%` : '\u2014'),
+      },
+      {
+        key: 'delivery',
+        header: 'Delivery %',
+        align: 'right',
+        nowrap: true,
+        cellClassName: (m) => deliveryRateColorClass(m.deliveryRate),
+        render: (m) => (m.deliveryRate != null ? `${Math.round(m.deliveryRate)}%` : '\u2014'),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'right',
+        tight: true,
+        nowrap: true,
+        minWidth: 'min-w-[12rem]',
+        mobileShowLabel: false,
+        render: (m) => (
+          <div className="inline-flex flex-nowrap items-center justify-end gap-1.5 shrink-0">
+            <CompactTableActionButton to={buildOrdersQuery(m.userId, dateFilters)} tone="brand">
+              View orders
+            </CompactTableActionButton>
+            <CompactTableActionButton
+              to={`/hr/users/${m.userId}`}
+              className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+            >
+              View profile
+            </CompactTableActionButton>
+          </div>
+        ),
+      },
+    ];
+  }, [dateFilters, greenThreshold, profitabilityConfig.targetRoas]);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Team Analysis"
-        description="Media buyer funding, CPA, and profitability (True ROAS vs target) for the selected period."
+        description={`Media buyer funding, CPA, and profitability (True ROAS vs ${profitabilityConfig.targetRoas}x target — green ≥ ${greenThreshold}x).`}
         actions={
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-              <DateFilterBar
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowExportModal(true)}
-            >
-              Generate report
-            </Button>
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Team analysis tools"
+            sheetSubtitle={<span>Date range and export</span>}
+            triggerAriaLabel="Team analysis toolbar and date range"
+            desktop={
+              <>
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                  />
+                </div>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                  Generate report
+                </Button>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+              </>
+            )}
+          />
         }
       />
 
@@ -156,63 +312,50 @@ export function MarketingTeamPage({
         }
       />
 
-      {/* Funding Summary */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-app-fg mb-3">Funding Summary</h2>
-        <OverviewStatStrip
-          embedded
-          showScrollControls={false}
-          items={[
-            {
-              label: 'Total Sent',
-              value: <NairaPrice amount={parseFloat(fundingSummary.totalSent)} />,
-              valueClassName: 'text-app-fg',
-            },
-            {
-              label: 'Completed',
-              value: <NairaPrice amount={parseFloat(fundingSummary.totalCompleted)} />,
-              valueClassName: 'text-success-600 dark:text-success-400',
-            },
-            {
-              label: 'Disputed',
-              value: <NairaPrice amount={parseFloat(fundingSummary.totalDisputed)} />,
-              valueClassName:
-                parseFloat(fundingSummary.totalDisputed) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
-            },
-          ]}
-        />
-      </div>
+      <OverviewStatStrip
+        showScrollControls={false}
+        items={[
+          {
+            label: 'Total Sent',
+            value: <NairaPrice amount={parseFloat(fundingSummary.totalSent)} />,
+            valueClassName: 'text-app-fg',
+          },
+          {
+            label: 'Completed',
+            value: <NairaPrice amount={parseFloat(fundingSummary.totalCompleted)} />,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Disputed',
+            value: <NairaPrice amount={parseFloat(fundingSummary.totalDisputed)} />,
+            valueClassName:
+              parseFloat(fundingSummary.totalDisputed) > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg',
+          },
+        ]}
+      />
 
       <div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-app-fg">Team members</h2>
-            <p className="text-sm text-app-fg-muted mt-0.5">
-              Funding received (confirmed) minus approved ad spend
-            </p>
-            {totalCount > 0 && (q || sortByFromLoader !== 'name' || sortDirFromLoader !== 'asc') && (
-              <p className="text-xs text-app-fg-muted mt-1" aria-live="polite">
-                {totalCount} member{totalCount === 1 ? '' : 's'}
-                {q ? ` matching "${q}"` : ''}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col gap-2 w-full sm:w-auto sm:min-w-[20rem]">
-            <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto sm:min-w-0">
+        <ToolbarFiltersCollapsible
+          className="mb-4 !border-0 px-0 py-0"
+          badgeCount={teamToolbarFilterBadge}
+          sheetSubtitle={<span>Sort options apply immediately</span>}
+          searchRow={
+            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
               <SearchInput
                 value={searchQuery}
                 onChange={(v) => setSearchQuery(v)}
                 placeholder="Search by name or role…"
-                wrapperClassName="flex-1 min-w-0 w-full"
-                controlSize="sm"
+                wrapperClassName="min-w-0 flex-1"
                 name="q"
                 autoComplete="off"
               />
-              <Button type="submit" variant="secondary" size="sm" className="shrink-0 self-stretch sm:self-auto">
+              <Button type="submit" variant="secondary" size="sm">
                 Search
               </Button>
             </form>
-            <div className="flex flex-wrap items-end gap-2">
+          }
+          desktopInlineFilters={
+            <>
               <FormSelect
                 aria-label="Sort team list by"
                 value={sortByFromLoader}
@@ -222,8 +365,7 @@ export function MarketingTeamPage({
                   mergeListParams({ sortBy: next, sortDir: nextDir, page: 1 });
                 }}
                 options={TEAM_SORT_BY_OPTIONS}
-                controlSize="sm"
-                wrapperClassName="flex-1 min-w-[7.5rem]"
+                wrapperClassName="w-auto min-w-[11rem]"
               />
               <FormSelect
                 aria-label="Sort order"
@@ -233,12 +375,49 @@ export function MarketingTeamPage({
                   { value: 'asc', label: 'Ascending' },
                   { value: 'desc', label: 'Descending' },
                 ]}
-                controlSize="sm"
-                wrapperClassName="w-full sm:w-32 min-w-0"
+                wrapperClassName="w-auto min-w-[8rem]"
               />
-            </div>
-          </div>
-        </div>
+            </>
+          }
+          sheetFilterBody={
+            <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
+                <FormSelect
+                  aria-label="Sort team list by"
+                  value={sortByFromLoader}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    const nextDir: 'asc' | 'desc' = next === 'name' ? 'asc' : 'desc';
+                    mergeListParams({ sortBy: next, sortDir: nextDir, page: 1 });
+                  }}
+                  options={TEAM_SORT_BY_OPTIONS}
+                  wrapperClassName="w-full"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Order</span>
+                <FormSelect
+                  aria-label="Sort order"
+                  value={sortDirFromLoader}
+                  onChange={(e) => mergeListParams({ sortDir: e.target.value as 'asc' | 'desc', page: 1 })}
+                  options={[
+                    { value: 'asc', label: 'Ascending' },
+                    { value: 'desc', label: 'Descending' },
+                  ]}
+                  wrapperClassName="w-full"
+                />
+              </div>
+            </>
+          }
+        />
+
+        {totalCount > 0 && (q || sortByFromLoader !== 'name' || sortDirFromLoader !== 'asc') && (
+          <p className="text-xs text-app-fg-muted mb-3" aria-live="polite">
+            {totalCount} member{totalCount === 1 ? '' : 's'}
+            {q ? ` matching "${q}"` : ''}
+          </p>
+        )}
 
         {teamMembers.length === 0 && !showSearchEmpty ? (
           <div className="card">
@@ -259,93 +438,24 @@ export function MarketingTeamPage({
             {/* Mobile: always render card grid (table is unusable on a narrow viewport) */}
             <div className="md:hidden grid grid-cols-1 gap-3">
               {teamMembers.map((m) => (
-                <MediaBuyerBalanceCard key={m.userId} row={m} ordersDateFilters={dateFilters} />
+                <MediaBuyerBalanceCard
+                  key={m.userId}
+                  row={m}
+                  ordersDateFilters={dateFilters}
+                  profitabilityGreenThreshold={greenThreshold}
+                />
               ))}
             </div>
 
             {/* Desktop: table view (Grid toggle removed per CEO directive 2026-04-26 — the
                 grid duplicated the mobile card layout for desktop with no extra info). */}
             <div className="hidden md:block">
-              <div className="card p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[960px]">
-                <thead>
-                  <tr>
-                    <th className="table-header">Member</th>
-                    <th className="table-header text-right">Balance</th>
-                    <th className="table-header text-right">Received</th>
-                    <th className="table-header text-right">Spent</th>
-                    <th className="table-header text-right">CPA</th>
-                    <th className="table-header text-right">Profitability</th>
-                    <th className="table-header text-right">Confirm %</th>
-                    <th className="table-header text-right">Delivery %</th>
-                    <th className="table-header">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {teamMembers.map((m) => (
-                    <tr key={m.userId} className="table-row">
-                      <td className="table-cell">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-                            <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
-                              {memberInitials(m.name)}
-                            </span>
-                          </div>
-                          <Link
-                            to={`/hr/users/${m.userId}`}
-                            prefetch="intent"
-                            className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400"
-                          >
-                            {m.name}
-                          </Link>
-                        </div>
-                      </td>
-                      <td className="table-cell text-right font-medium text-brand-600 dark:text-brand-400 whitespace-nowrap">
-                        {formatNaira(Number(m.balance))}
-                      </td>
-                      <td className="table-cell text-right text-app-fg-muted whitespace-nowrap">
-                        {formatNaira(Number(m.totalReceived))}
-                      </td>
-                      <td className="table-cell text-right text-app-fg-muted whitespace-nowrap">
-                        {formatNaira(Number(m.totalSpend))}
-                      </td>
-                      <td className="table-cell text-right text-app-fg whitespace-nowrap">
-                        {m.cpa != null ? <NairaPrice amount={m.cpa} /> : '\u2014'}
-                      </td>
-                      <td className="table-cell text-right text-app-fg whitespace-nowrap tabular-nums">
-                        {m.profitabilityScore != null ? m.profitabilityScore.toFixed(1) : '\u2014'}
-                      </td>
-                      <td className={`table-cell text-right whitespace-nowrap tabular-nums ${confirmationRateColorClass(m.confirmationRate)}`}>
-                        {m.confirmationRate != null ? `${Math.round(m.confirmationRate)}%` : '\u2014'}
-                      </td>
-                      <td className={`table-cell text-right whitespace-nowrap tabular-nums ${deliveryRateColorClass(m.deliveryRate)}`}>
-                        {m.deliveryRate != null ? `${Math.round(m.deliveryRate)}%` : '\u2014'}
-                      </td>
-                      <td className="table-cell">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Link
-                            to={buildOrdersQuery(m.userId, dateFilters)}
-                            prefetch="intent"
-                            className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-                          >
-                            View orders
-                          </Link>
-                          <Link
-                            to={`/hr/users/${m.userId}`}
-                            prefetch="intent"
-                            className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-                          >
-                            View profile
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+              <CompactTable
+                columns={teamColumns}
+                rows={teamMembers}
+                rowKey={(m) => m.userId}
+                className="min-w-[960px]"
+              />
             </div>
 
             {totalPages > 1 && (
@@ -353,15 +463,6 @@ export function MarketingTeamPage({
             )}
           </>
         )}
-      </div>
-
-      <div className="card">
-        <p className="text-sm text-app-fg-muted">
-          <Link to="/admin/marketing/overview" prefetch="intent" className="text-brand-500 hover:text-brand-600">
-            Live Activities
-          </Link>
-          {' — '}dashboard with performance metrics.
-        </p>
       </div>
     </div>
   );

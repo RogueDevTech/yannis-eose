@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -14,6 +15,7 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { useFetcherToast } from '~/components/ui/toast';
 import type {
   MonthlyPayrollGroup,
@@ -64,11 +66,7 @@ function canReview(viewer: ViewerInfo): boolean {
 }
 
 function canProcess(viewer: ViewerInfo): boolean {
-  return (
-    ADMIN_ROLES.has(viewer.role) ||
-    viewer.role === 'FINANCE_OFFICER' ||
-    viewer.isFinanceOfficer === true
-  );
+  return ADMIN_ROLES.has(viewer.role) || viewer.role === 'FINANCE_OFFICER';
 }
 
 interface BatchDetail {
@@ -97,6 +95,123 @@ interface BatchDetail {
     createdAt: string;
   }>;
   allowedTransitions: string[];
+}
+
+type BatchPayoutLine = BatchDetail['payouts'][number];
+
+function buildBatchPayoutColumns(args: {
+  batch: BatchDetail['batch'];
+  adjustmentsByPayout: Map<string, BatchDetail['adjustments']>;
+  viewer: ViewerInfo;
+  onAdjust: (payoutId: string, staffName: string) => void;
+}): CompactTableColumn<BatchPayoutLine>[] {
+  const { batch, adjustmentsByPayout, viewer, onAdjust } = args;
+  const cols: CompactTableColumn<BatchPayoutLine>[] = [
+    {
+      key: 'staff',
+      header: 'Staff',
+      render: (p) => {
+        const adj = adjustmentsByPayout.get(p.id) ?? [];
+        return (
+          <div>
+            <p className="font-medium text-app-fg">{p.staffName}</p>
+            <p className="text-xs text-app-fg-muted">{p.staffRole?.replace(/_/g, ' ')}</p>
+            {adj.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {adj.map((a) => (
+                  <li key={a.id} className="text-xs text-app-fg-muted">
+                    <span className={Number(a.amount) < 0 ? 'text-danger-600' : 'text-success-600'}>
+                      {Number(a.amount) < 0 ? '−' : '+'}
+                      <NairaPrice amount={Math.abs(Number(a.amount))} />
+                    </span>
+                    <span className="ml-1 text-app-fg-muted">
+                      · {a.category} · {a.reason}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'base',
+      header: 'Base',
+      align: 'right',
+      nowrap: true,
+      render: (p) => <NairaPrice amount={Number(p.baseSalary)} />,
+    },
+    {
+      key: 'bonus',
+      header: 'Bonus',
+      align: 'right',
+      nowrap: true,
+      cellClassName: 'text-success-600 dark:text-success-400',
+      render: (p) => <NairaPrice amount={Number(p.performanceBonus)} />,
+    },
+    {
+      key: 'addons',
+      header: 'Add-ons',
+      align: 'right',
+      nowrap: true,
+      cellClassName: 'text-brand-600 dark:text-brand-400',
+      render: (p) => <NairaPrice amount={Number(p.addOnsTotal)} />,
+    },
+    {
+      key: 'deductions',
+      header: 'Deductions',
+      align: 'right',
+      nowrap: true,
+      cellClassName: 'text-danger-600 dark:text-danger-400',
+      render: (p) =>
+        Number(p.deductionsTotal) > 0 ? (
+          <>
+            −<NairaPrice amount={Number(p.deductionsTotal)} />
+          </>
+        ) : (
+          '—'
+        ),
+    },
+    {
+      key: 'net',
+      header: 'Net',
+      align: 'right',
+      nowrap: true,
+      render: (p) => (
+        <span className="font-semibold">
+          <NairaPrice amount={Number(p.totalPayout)} />
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      align: 'right',
+      render: (p) => <StatusBadge status={p.status} />,
+    },
+  ];
+  if (batch.status === 'PENDING_HR' && canReview(viewer)) {
+    cols.push({
+      key: 'adjust',
+      header: '',
+      mobileLabel: 'Adjust',
+      align: 'right',
+      tight: true,
+      nowrap: true,
+      render: (p) => (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="text-xs"
+          onClick={() => onAdjust(p.id, p.staffName)}
+        >
+          + Adjust
+        </Button>
+      ),
+    });
+  }
+  return cols;
 }
 
 interface PayrollPreview {
@@ -142,9 +257,10 @@ export function MonthlyPayrolls({
   const [generateDepartment, setGenerateDepartment] = useState<PayrollDepartment>('CS');
   const [generatePeriodMonth, setGeneratePeriodMonth] = useState('');
   const [preview, setPreview] = useState<PayrollPreview | null>(null);
-  // Tracks whether the most recent fetcher transition was a generate submit — so the close-on-success
-  // effect doesn't fire for OTHER actions sharing this fetcher (approve, reject, mark paid, etc.).
-  const generateInFlightRef = useRef(false);
+  // Generate-batch close-on-success uses the shared `useCloseOnFetcherSuccess`
+  // hook with `intent: 'generateBatch'` so the close fires only for THIS
+  // submission, not for other actions sharing this fetcher (approve / reject
+  // / mark paid). See CLAUDE.md → "Modal + Optimistic UI Pattern".
 
   /** Current month in YYYY-MM, e.g. "2026-04". Refreshes whenever the modal opens so a long-lived
    *  page that crosses midnight on the 1st of next month still defaults to the new period. */
@@ -215,41 +331,43 @@ export function MonthlyPayrolls({
     }, { replace: true });
   }
 
-  // Refresh detail after a successful action — fetcher returns to idle after each mutation
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data && openBatchId) {
-      const result = fetcher.data as { success?: boolean };
-      if (result.success) {
-        setLoadingDetail(true);
-        fetchBatchDetail(openBatchId)
-          .then((d) => setBatchDetail(d))
-          .finally(() => setLoadingDetail(false));
-      }
-    }
-  }, [fetcher.state, fetcher.data]);
+  // Refresh detail after a successful action — edge-trigger via shared hook,
+  // so the panel re-fetches the same tick the toast fires.
+  const handleBatchDetailRefresh = useCallback(() => {
+    if (!openBatchId) return;
+    setLoadingDetail(true);
+    fetchBatchDetail(openBatchId)
+      .then((d) => setBatchDetail(d))
+      .finally(() => setLoadingDetail(false));
+  }, [openBatchId]);
+  useCloseOnFetcherSuccess(fetcher, handleBatchDetailRefresh);
 
-  /** Generate-batch lifecycle: keep the modal open across the network round-trip, then close
-   *  on success or surface the error inline if the server rejected (e.g. CONFLICT for an
-   *  already-submitted batch). Other fetcher actions are ignored via the intent check. */
+  /** Generate-batch lifecycle:
+   *  - Close the modal the instant a `{ success: true }` response lands for the
+   *    `generateBatch` intent (other fetcher actions sharing this `fetcher`
+   *    are filtered out by the hook's intent option).
+   *  - Surface any server `error` inline (e.g. CONFLICT for an already-
+   *    submitted batch) so the user can retry without losing context.
+   *  - Clear the inline error when a fresh generate submission starts. */
+  const handleGenerateSuccess = useCallback(() => {
+    setShowGenerate(false);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleGenerateSuccess, { intent: 'generateBatch' });
+
   useEffect(() => {
-    if (!showGenerate) return;
-    const submittingGenerate =
-      fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'generateBatch';
-    if (submittingGenerate) {
-      generateInFlightRef.current = true;
+    if (
+      fetcher.state === 'submitting' &&
+      fetcher.formData?.get('intent') === 'generateBatch'
+    ) {
       setGenerateError(null);
-      return;
     }
-    if (fetcher.state === 'idle' && generateInFlightRef.current) {
-      generateInFlightRef.current = false;
-      const result = fetcher.data as { success?: boolean; error?: string } | undefined;
-      if (result?.success) {
-        setShowGenerate(false);
-      } else if (result?.error) {
-        setGenerateError(result.error);
-      }
-    }
-  }, [fetcher.state, fetcher.formData, fetcher.data, showGenerate]);
+  }, [fetcher.state, fetcher.formData]);
+
+  useEffect(() => {
+    if (!showGenerate || fetcher.state !== 'idle') return;
+    const result = fetcher.data as { success?: boolean; error?: string } | undefined;
+    if (result?.error && !result.success) setGenerateError(result.error);
+  }, [fetcher.state, fetcher.data, showGenerate]);
 
   useEffect(() => {
     if (!showGenerate) return;
@@ -305,7 +423,7 @@ export function MonthlyPayrolls({
           open
           onClose={() => {
             // Block backdrop / Esc dismissal while the request is mid-flight so we don't lose feedback.
-            if (generateInFlightRef.current || fetcher.state !== 'idle') return;
+            if (fetcher.state !== 'idle') return;
             setShowGenerate(false);
             setGenerateError(null);
             setPreview(null);
@@ -557,6 +675,13 @@ function BatchDetailModal({
     adjustmentsByPayout.set(a.payoutId, arr);
   }
 
+  const payoutColumns = buildBatchPayoutColumns({
+    batch,
+    adjustmentsByPayout,
+    viewer,
+    onAdjust: (payoutId, staffName) => setShowAdjust({ payoutId, staffName }),
+  });
+
   return (
     <Modal open onClose={onClose} maxWidth="max-w-4xl" backdropBlur contentClassName="p-5 space-y-5">
       {/* Header */}
@@ -604,72 +729,12 @@ function BatchDetailModal({
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr>
-                  <th className="table-header !py-2 !px-0 pr-3">Staff</th>
-                  <th className="table-header !py-2 !px-0 pr-3 text-right">Base</th>
-                  <th className="table-header !py-2 !px-0 pr-3 text-right">Bonus</th>
-                  <th className="table-header !py-2 !px-0 pr-3 text-right">Add-ons</th>
-                  <th className="table-header !py-2 !px-0 pr-3 text-right">Deductions</th>
-                  <th className="table-header !py-2 !px-0 pr-3 text-right">Net</th>
-                  <th className="table-header !py-2 !px-0 pr-3 text-right">Status</th>
-                  {batch.status === 'PENDING_HR' && canReview(viewer) && <th className="table-header !py-2 !px-0 pr-3 w-0" />}
-                </tr>
-              </thead>
-              <tbody>
-                {payouts.map((p) => {
-                  const adj = adjustmentsByPayout.get(p.id) ?? [];
-                  return (
-                    <tr key={p.id} className="border-t border-app-border align-top">
-                      <td className="py-2 pr-3">
-                        <p className="font-medium text-app-fg">{p.staffName}</p>
-                        <p className="text-xs text-app-fg-muted">{p.staffRole?.replace(/_/g, ' ')}</p>
-                        {adj.length > 0 && (
-                          <ul className="mt-1 space-y-0.5">
-                            {adj.map((a) => (
-                              <li key={a.id} className="text-xs text-app-fg-muted">
-                                <span className={Number(a.amount) < 0 ? 'text-danger-600' : 'text-success-600'}>
-                                  {Number(a.amount) < 0 ? '−' : '+'}
-                                  <NairaPrice amount={Math.abs(Number(a.amount))} />
-                                </span>
-                                <span className="ml-1 text-app-fg-muted">· {a.category} · {a.reason}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </td>
-                      <td className="py-2 pr-3 text-right"><NairaPrice amount={Number(p.baseSalary)} /></td>
-                      <td className="py-2 pr-3 text-right text-success-600 dark:text-success-400">
-                        <NairaPrice amount={Number(p.performanceBonus)} />
-                      </td>
-                      <td className="py-2 pr-3 text-right text-brand-600 dark:text-brand-400">
-                        <NairaPrice amount={Number(p.addOnsTotal)} />
-                      </td>
-                      <td className="py-2 pr-3 text-right text-danger-600 dark:text-danger-400">
-                        {Number(p.deductionsTotal) > 0 ? <>−<NairaPrice amount={Number(p.deductionsTotal)} /></> : '—'}
-                      </td>
-                      <td className="py-2 pr-3 text-right font-semibold"><NairaPrice amount={Number(p.totalPayout)} /></td>
-                      <td className="py-2 pr-3 text-right">
-                        <StatusBadge status={p.status} />
-                      </td>
-                      {batch.status === 'PENDING_HR' && canReview(viewer) && (
-                        <td className="py-2 pr-3 text-right">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => setShowAdjust({ payoutId: p.id, staffName: p.staffName })}
-                          >
-                            + Adjust
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <CompactTable
+              withCard={false}
+              columns={payoutColumns}
+              rows={payouts}
+              rowKey={(p) => p.id}
+            />
           </div>
         )}
       </div>

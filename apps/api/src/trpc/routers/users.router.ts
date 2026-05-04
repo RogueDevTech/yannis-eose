@@ -84,14 +84,6 @@ export const usersRouter = router({
   }),
 
   /**
-   * Returns the current Finance-hat holder (`{ id, name }`) or `null`.
-   * Used by the user create/edit forms to warn admins before reassigning the hat.
-   */
-  getCurrentFinanceOfficer: permissionProcedure('users.read', 'users.create', 'users.update').query(async () => {
-    return getUsersService().getCurrentFinanceOfficerHolder();
-  }),
-
-  /**
    * Get a single user by ID.
    */
   getById: authedProcedure
@@ -155,10 +147,7 @@ export const usersRouter = router({
    */
   getMyNotificationPreferences: authedProcedure.query(async ({ ctx }) => {
     const prefs = await getUsersService().getMyNotificationPreferences(ctx.user.id);
-    const relevantTypes = getRelevantNotificationTypesForRole(
-      ctx.user.role,
-      ctx.user.isFinanceOfficer === true,
-    );
+    const relevantTypes = getRelevantNotificationTypesForRole(ctx.user.role);
     const mandatory = new Set<string>(MANDATORY_EMAIL_TYPES);
     const items = relevantTypes
       .filter((t) => !mandatory.has(t))
@@ -249,6 +238,24 @@ export const usersRouter = router({
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...updateInput } = input;
       return getUsersService().update(updateInput, ctx.user);
+    }),
+
+  /**
+   * Re-stamp the user's permission snapshot from the current template baseline.
+   *
+   * Use case: a user was created during a window when `role_template_permissions`
+   * was empty (or before the snapshot model was wired up), so their
+   * `user_permissions` table is empty and every permission check fails. This
+   * mutation re-reads the current template baseline + any existing per-user
+   * overrides and stamps fresh rows. Idempotent — safe to call repeatedly.
+   *
+   * Gated to staff-admin (`users.staff.update`) — same audience that can edit
+   * permissions through the matrix. Honoured by SUPER_ADMIN bypass.
+   */
+  restampPermissions: permissionProcedure('users.staff.update', 'rbac.templates.manage')
+    .input(z.object({ userId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      return getUsersService().restampPermissions(input.userId, ctx.user);
     }),
 
   /**

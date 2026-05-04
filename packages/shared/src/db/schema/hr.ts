@@ -18,7 +18,7 @@ export const commissionPlans = pgTable('commission_plans', {
   rules: jsonb('rules').notNull(),
   effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),
   effectiveTo: timestamp('effective_to', { withTimezone: true }),
-  createdBy: text('created_by')
+  createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id),
   ...temporalColumns,
@@ -108,7 +108,7 @@ export const earningsAdjustments = pgTable('earnings_adjustments', {
   amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
   category: adjustmentCategoryEnum('category').notNull(),
   reason: text('reason').notNull(),
-  approvedBy: text('approved_by').references(() => users.id),
+  approvedBy: uuid('approved_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   ...temporalColumns,
 });

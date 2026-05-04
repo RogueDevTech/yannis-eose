@@ -9,6 +9,12 @@ export interface FundingRecord {
   verifiedAt: string | null;
   senderName?: string | null;
   receiverName?: string | null;
+  /**
+   * When this transfer was created from an approved funding request, this points back at
+   * the request id. The unified feeds use it to drop the request row (now redundant) and
+   * keep the transfer as the canonical record post-approval.
+   */
+  sourceFundingRequestId?: string | null;
 }
 
 export interface FundingBalanceRow {
@@ -56,6 +62,14 @@ export interface DistributingFundingTransferEntry {
   receiverId: string;
   receiverName: string | null;
   receiptUrl: string | null;
+  /**
+   * When this transfer was created from an approved funding request. Used in the unified
+   * feed to drop the now-redundant request row and surface a small "from request" chip
+   * on the transfer instead.
+   */
+  sourceFundingRequestId?: string | null;
+  /** Optional — original requester's name (for the "from request" chip). */
+  sourceRequesterName?: string | null;
 }
 
 export interface DistributingFundingRequestEntry {
@@ -76,6 +90,8 @@ export type DistributingFundingEntry =
   | DistributingFundingTransferEntry
   | DistributingFundingRequestEntry;
 
+export type AdPlatform = 'FACEBOOK' | 'TIKTOK' | 'GOOGLE' | 'OTHER';
+
 export interface AdSpendRecord {
   id: string;
   mediaBuyerId: string;
@@ -83,6 +99,9 @@ export interface AdSpendRecord {
   campaignId: string;
   spendAmount: string;
   screenshotUrl: string;
+  adUrl?: string | null;
+  platform?: AdPlatform;
+  platformCustomLabel?: string | null;
   spendDate: string;
   status: string;
   approvedAt: string | null;
@@ -295,10 +314,22 @@ export interface MarketingFundingLoaderData {
    * no branch scoping is being applied.
    */
   activeBranchName?: string | null;
+  /**
+   * Recipient candidates for the Request Funding modal (migration 0106). MBs see
+   * HoMs in their branch + Finance Officers org-wide; HoMs see Finance Officers.
+   * Sorted with preferred recipient (HoM for MB, first Finance for HoM) first.
+   */
+  fundingRequestRecipients?: Array<{
+    id: string;
+    name: string;
+    role: string;
+    isFinance: boolean;
+    isPreferred: boolean;
+    branchId: string | null;
+  }>;
 }
 
 export type AdSpendStatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED';
-export type AdPlatform = 'FACEBOOK' | 'TIKTOK' | 'GOOGLE';
 export type RolledStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
 
 /** Single line within an ad-spend day group (Phase 17 accordion). */
@@ -314,6 +345,7 @@ export interface AdSpendGroupLine {
   screenshotUrl: string;
   adUrl: string | null;
   platform: AdPlatform;
+  platformCustomLabel?: string | null;
   spendDate: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   rejectionReason: string | null;
@@ -374,4 +406,7 @@ export interface MarketingAdSpendLoaderData {
   groupsTotal: number;
   groupsPage: number;
   groupsTotalPages: number;
+  /** Current user's id — used to gate per-line "Edit" actions on the accordion
+   *  (MB can edit their own PENDING/REJECTED rows; moderators can edit any). */
+  currentUserId: string;
 }

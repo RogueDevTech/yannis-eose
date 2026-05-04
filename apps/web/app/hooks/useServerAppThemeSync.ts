@@ -18,7 +18,7 @@ export function useServerAppThemeSync(enabled: boolean) {
       if (readStoredThemeId() !== eff) {
         persistAndApplyTheme(eff);
       }
-    })();
+    })().catch(() => {});
     return () => {
       cancelled = true;
     };

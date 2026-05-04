@@ -5,6 +5,7 @@ import { Modal } from '~/components/ui/modal';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
 import { getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
@@ -125,6 +126,7 @@ export function NotificationsPage({
                   Mark all read
                 </Button>
               )}
+              <PageRefreshButton />
             </div>
           }
         />

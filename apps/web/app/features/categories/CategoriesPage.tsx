@@ -3,12 +3,13 @@ import { Form, useNavigation, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
-import { DataTable, type TableColumn } from '~/components/ui/data-table';
+import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { DescriptionList } from '~/components/ui/description-list';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -312,7 +313,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
 
   const activeCount = categories.filter((c) => c.status === 'ACTIVE').length;
 
-  const columns: TableColumn<Category>[] = useMemo(
+  const columns: CompactTableColumn<Category>[] = useMemo(
     () => [
       {
         key: 'idx',
@@ -334,45 +335,19 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       },
       {
         key: 'contact',
-        header: 'Brand phone / email',
-        className: 'hidden md:table-cell',
+        header: 'Brand contact',
         render: (cat) => (
-          <div className="text-xs text-app-fg-muted space-y-0.5">
+          <div className="min-w-0 space-y-0.5 text-xs text-app-fg-muted">
             {cat.brandPhone ? <div>{cat.brandPhone}</div> : null}
             {cat.brandEmail ? (
-              <div className="text-brand-500 dark:text-brand-400 break-all">{cat.brandEmail}</div>
+              <div className="break-all text-brand-500 dark:text-brand-400">{cat.brandEmail}</div>
             ) : null}
-            {!cat.brandPhone && !cat.brandEmail ? <span>—</span> : null}
-          </div>
-        ),
-      },
-      {
-        key: 'contactMobile',
-        header: 'Contact',
-        className: 'md:hidden',
-        render: (cat) => (
-          <div className="text-xs text-app-fg-muted space-y-0.5">
-            {cat.brandPhone ? <div>{cat.brandPhone}</div> : null}
-            {cat.brandEmail ? (
-              <div className="text-brand-500 dark:text-brand-400 break-all">{cat.brandEmail}</div>
-            ) : null}
-            {cat.brandWhatsapp ? <div>WA: {cat.brandWhatsapp}</div> : null}
-            {cat.smsSenderId ? <div>SMS: {cat.smsSenderId}</div> : null}
+            {cat.brandWhatsapp ? <div>WhatsApp: {cat.brandWhatsapp}</div> : null}
+            {cat.smsSenderId ? <div>Sender ID: {cat.smsSenderId}</div> : null}
             {!cat.brandPhone && !cat.brandEmail && !cat.brandWhatsapp && !cat.smsSenderId ? <span>—</span> : null}
           </div>
         ),
-      },
-      {
-        key: 'whatsapp',
-        header: 'WhatsApp',
-        className: 'hidden lg:table-cell',
-        render: (cat) => <span className="text-xs text-app-fg-muted">{cat.brandWhatsapp || '—'}</span>,
-      },
-      {
-        key: 'sender',
-        header: 'Sender ID',
-        className: 'hidden lg:table-cell',
-        render: (cat) => <span className="text-xs text-app-fg-muted">{cat.smsSenderId || '—'}</span>,
+        minWidth: 'min-w-[140px]',
       },
       {
         key: 'status',
@@ -382,32 +357,14 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       {
         key: 'actions',
         header: <span className="sr-only">Actions</span>,
+        mobileLabel: 'Actions',
         align: 'right',
+        tight: true,
         className: 'w-[1%] whitespace-nowrap',
         render: (cat) => (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setViewCategory(cat);
-              }}
-            >
-              View
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                setModalCategory(cat);
-              }}
-            >
-              Edit
-            </Button>
+            <CompactTableActionButton onClick={() => setViewCategory(cat)}>View</CompactTableActionButton>
+            <CompactTableActionButton onClick={() => setModalCategory(cat)}>Edit</CompactTableActionButton>
           </div>
         ),
       },
@@ -430,12 +387,15 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         title="Product Categories"
         description="Manage brand categories for products. Brand info appears on invoices and SMS."
         actions={
-          <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            New Category
-          </Button>
+          <>
+            <PageRefreshButton />
+            <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              New Category
+            </Button>
+          </>
         }
       />
 
@@ -469,11 +429,11 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       </div>
 
       <div className="card p-4 sm:p-6">
-        <DataTable
+        <CompactTable<Category>
           caption="Product categories"
           columns={columns}
-          data={categories}
-          keyField="id"
+          rows={categories}
+          rowKey={(c) => c.id}
           loading={isLoaderRefetchBusy}
           loadingVariant="overlay"
           emptyTitle="No categories found"
@@ -483,6 +443,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
               New category
             </Button>
           }
+          withCard={false}
         />
       </div>
 

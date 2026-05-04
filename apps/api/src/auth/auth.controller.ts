@@ -19,6 +19,7 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
+import { isAdminLevel } from '../common/authz';
 import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
@@ -318,6 +319,19 @@ export class AuthController {
     const appTheme = await this.usersService.getAppThemePreference(merged.id);
     const fontScale = await this.usersService.getFontScalePreference(merged.id);
     merged = { ...merged, appTheme, fontScale };
+
+    if (!isAdminLevel(merged)) {
+      const [onbRow] = await this.db
+        .select({ status: schema.staffOnboarding.status })
+        .from(schema.staffOnboarding)
+        .where(eq(schema.staffOnboarding.userId, merged.id))
+        .limit(1);
+      merged = {
+        ...merged,
+        staffOnboardingStatus: onbRow?.status ?? 'NOT_STARTED',
+      };
+    }
+
     return { user: merged };
   }
 

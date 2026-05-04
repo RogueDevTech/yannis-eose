@@ -7,6 +7,7 @@ const MAX_WIDTH_CLASSES: Record<string, string> = {
   'max-w-lg': 'md:max-w-lg',
   'max-w-xl': 'md:max-w-xl',
   'max-w-2xl': 'md:max-w-2xl',
+  'max-w-3xl': 'md:max-w-3xl',
   'max-w-4xl': 'md:max-w-4xl',
   /** Full width of the viewport padding area (see outer `md:p-4` wrapper). */
   'max-w-full': 'md:max-w-none',

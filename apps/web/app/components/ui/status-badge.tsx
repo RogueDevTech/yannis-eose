@@ -72,6 +72,10 @@ const STATUS_VARIANT_MAP: Record<string, BadgeVariant> = {
   closed: 'neutral',
   resolved: 'success',
   escalated: 'danger',
+  // Staff onboarding
+  not_started: 'neutral',
+  in_progress: 'info',
+  submitted: 'warning',
 };
 
 interface StatusBadgeProps {

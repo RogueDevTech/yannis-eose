@@ -7,7 +7,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { SessionStoreService } from '../../auth/session-store.service';
 import type { NotificationsService } from '../../notifications/notifications.service';
 import type { BranchTeamsService } from '../../branches/branch-teams.service';
-import { canMirror, isAdminLevel } from '../../common/authz';
+import { canMirror } from '../../common/authz';
 
 // Service instances injected via factory pattern
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
@@ -116,8 +116,9 @@ export const branchesRouter = router({
     .query(async ({ input, ctx }) => {
       const db = getDb();
       const teams = getBranchTeamsService();
-      const isAdminViewer = isAdminLevel(ctx.user);
+      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
       const hasBranchManagePermission = (ctx.user.permissions ?? []).includes('branches.manage');
+      const hasBranchManageUsersPermission = (ctx.user.permissions ?? []).includes('branches.manage_users');
 
       const membership = await db
         .select({ branchId: schema.userBranches.branchId })
@@ -129,13 +130,13 @@ export const branchesRouter = router({
           ),
         )
         .limit(1);
-      if (!isAdminViewer && !membership[0]) {
+      if (!isSuperAdmin && !hasBranchManagePermission && !membership[0]) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not a member of this branch' });
       }
 
       const isBranchSupervisor = await teams.isActorSupervisorOnBranch(ctx.user.id, input.branchId);
       const canAccessBranchPage =
-        isAdminViewer || hasBranchManagePermission || ctx.user.role === 'BRANCH_ADMIN' || isBranchSupervisor;
+        isSuperAdmin || hasBranchManagePermission || hasBranchManageUsersPermission || isBranchSupervisor;
       if (!canAccessBranchPage) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access this branch page' });
       }
@@ -178,7 +179,7 @@ export const branchesRouter = router({
           department: departmentForBranchMemberRole(effectiveRole),
         };
       });
-      const canManageBranchPage = isAdminViewer || hasBranchManagePermission;
+      const canManageBranchPage = isSuperAdmin || hasBranchManagePermission || hasBranchManageUsersPermission;
       let visibleMembers = members;
       if (!canManageBranchPage) {
         if (isBranchSupervisor) {
@@ -486,8 +487,9 @@ export const branchesRouter = router({
     .query(async ({ input, ctx }) => {
       const db = getDb();
       const teams = getBranchTeamsService();
-      const isAdminViewer = isAdminLevel(ctx.user);
+      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
       const hasBranchManagePermission = (ctx.user.permissions ?? []).includes('branches.manage');
+      const hasBranchManageUsersPermission = (ctx.user.permissions ?? []).includes('branches.manage_users');
       const [membership, isBranchSupervisor] = await Promise.all([
         db
           .select({ branchId: schema.userBranches.branchId })
@@ -502,8 +504,8 @@ export const branchesRouter = router({
         teams.isActorSupervisorOnBranch(ctx.user.id, input.branchId),
       ]);
       const canAccessBranchPage =
-        isAdminViewer || hasBranchManagePermission || ctx.user.role === 'BRANCH_ADMIN' || isBranchSupervisor;
-      if (!canAccessBranchPage || (!isAdminViewer && !membership[0])) {
+        isSuperAdmin || hasBranchManagePermission || hasBranchManageUsersPermission || isBranchSupervisor;
+      if (!canAccessBranchPage || (!isSuperAdmin && !hasBranchManagePermission && !membership[0])) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access branch teams' });
       }
       return teams.listTeamsWithMembers(input.branchId);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Link, useSearchParams, useNavigate } from '@remix-run/react';
+import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
@@ -7,11 +7,17 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
-import { Pagination } from '~/components/ui/pagination';
-import { EmptyState } from '~/components/ui/empty-state';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
@@ -66,8 +72,8 @@ export function MarketingOrdersPage({
   dailyCounts,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
+  const safeTotalPages = Math.max(1, totalPages);
   const liveState = useLiveIndicator(liveEvents ?? []);
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
@@ -131,6 +137,87 @@ export function MarketingOrdersPage({
       : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
   }));
 
+  const ordersToolbarFilterBadge = useMemo(() => {
+    let n = 0;
+    if (selectedStatus !== 'ALL') n += 1;
+    const mb = searchParams.get('mediaBuyerId') || 'ALL';
+    if (showMediaBuyerColumn && mediaBuyersForFilter.length > 0 && mb !== 'ALL') n += 1;
+    return n;
+  }, [selectedStatus, showMediaBuyerColumn, mediaBuyersForFilter.length, searchParams]);
+
+  const marketingOrderColumns: CompactTableColumn<Order>[] = useMemo(() => {
+    const cols: CompactTableColumn<Order>[] = [
+      {
+        key: 'id',
+        header: 'Order ID',
+        render: (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
+      },
+      {
+        key: 'customer',
+        header: 'Customer',
+        render: (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+      },
+    ];
+    if (showMediaBuyerColumn) {
+      cols.push({
+        key: 'mediaBuyer',
+        header: 'Media buyer',
+        render: (order) =>
+          order.mediaBuyerId ? (
+            <Link
+              to={`/hr/users/${order.mediaBuyerId}`}
+              className="text-brand-500 hover:text-brand-600 font-medium hover:underline"
+            >
+              {order.mediaBuyerName ?? 'View user'}
+            </Link>
+          ) : (
+            <span className="text-app-fg-muted">—</span>
+          ),
+      });
+    }
+    cols.push(
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        render: (order) => (
+          <span className="font-medium">
+            <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (order) => <OrderStatusBadge status={order.status} />,
+      },
+      {
+        key: 'created',
+        header: 'Created',
+        nowrap: true,
+        render: (order) => (
+          <span className="text-app-fg-muted">
+            {new Date(order.createdAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'center',
+        tight: true,
+        render: (order) => <CompactTableActionButton to={`/admin/orders/${order.id}`}>View</CompactTableActionButton>,
+      },
+    );
+    return cols;
+  }, [showMediaBuyerColumn]);
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -141,33 +228,77 @@ export function MarketingOrdersPage({
             : 'View orders across all media buyers'
         }
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {liveEvents != null && liveEvents.length > 0 && (
-              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+          <PageHeaderMobileTools
+            sheetTitle="Marketing orders tools"
+            sheetSubtitle={<span>Date range, chart toggle, and export</span>}
+            triggerAriaLabel="Orders toolbar and date range"
+            mobileLeading={
+              liveEvents != null && liveEvents.length > 0 ? (
+                <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+              ) : null
+            }
+            desktop={
+              <>
+                {liveEvents != null && liveEvents.length > 0 && (
+                  <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+                )}
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowChartView((v) => !v)}
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
+                <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
+                  Generate report
+                </Button>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowChartView((v) => !v);
+                  }}
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+              </>
             )}
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-              <DateFilterBar
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowChartView((v) => !v)}
-            >
-              {showChartView ? 'View as data' : 'View data in chart'}
-            </Button>
-            <Button
-              onClick={() => setShowExportModal(true)}
-              variant="secondary"
-              size="sm"
-            >
-              Generate report
-            </Button>
-          </div>
+          />
         }
       />
 
@@ -186,44 +317,87 @@ export function MarketingOrdersPage({
         ]}
       />
 
-      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center">
-        <form onSubmit={handleSearchSubmit} className="flex gap-2 flex-1 min-w-0">
-          <SearchInput
-            placeholder="Search by customer or order ID..."
-            value={searchQuery}
-            onChange={(val) => setSearchQuery(val)}
-            wrapperClassName="flex-1 min-w-0"
-          />
-          <Button type="submit" variant="secondary" size="sm">
-            Search
-          </Button>
-        </form>
-        <FormSelect
-          value={selectedStatus}
-          onChange={(e) => handleStatusChange(e.target.value)}
-          options={statusOptions}
-          wrapperClassName="w-auto min-w-[11rem]"
-        />
-        {showMediaBuyerColumn && mediaBuyersForFilter.length > 0 && (
-          <SearchableSelect
-            id="marketing-orders-filter-buyer"
-            value={searchParams.get('mediaBuyerId') || 'ALL'}
-            onChange={(v) => {
-              setSearchParams((p) => {
-                const next = new URLSearchParams(p);
-                next.set('page', '1');
-                if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                else next.delete('mediaBuyerId');
-                return next;
-              });
-            }}
-            options={mediaBuyerFilterOptions}
-            wrapperClassName="w-full sm:w-56 min-w-0"
-            placeholder="All media buyers"
-            searchPlaceholder="Search buyers…"
-          />
-        )}
-      </div>
+      <ToolbarFiltersCollapsible
+        badgeCount={ordersToolbarFilterBadge}
+        sheetSubtitle={<span>Status and media buyer apply immediately</span>}
+        searchRow={
+          <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+            <SearchInput
+              placeholder="Search by customer or order ID..."
+              value={searchQuery}
+              onChange={(val) => setSearchQuery(val)}
+              wrapperClassName="min-w-0 flex-1"
+            />
+            <Button type="submit" variant="secondary" size="sm">
+              Search
+            </Button>
+          </form>
+        }
+        desktopInlineFilters={
+          <>
+            <FormSelect
+              value={selectedStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              options={statusOptions}
+              wrapperClassName="w-auto min-w-[11rem]"
+            />
+            {showMediaBuyerColumn && mediaBuyersForFilter.length > 0 ? (
+              <SearchableSelect
+                id="marketing-orders-filter-buyer"
+                value={searchParams.get('mediaBuyerId') || 'ALL'}
+                onChange={(v) => {
+                  setSearchParams((p) => {
+                    const next = new URLSearchParams(p);
+                    next.set('page', '1');
+                    if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                    else next.delete('mediaBuyerId');
+                    return next;
+                  });
+                }}
+                options={mediaBuyerFilterOptions}
+                wrapperClassName="w-full min-w-0 sm:w-56"
+                placeholder="All media buyers"
+                searchPlaceholder="Search buyers…"
+              />
+            ) : null}
+          </>
+        }
+        sheetFilterBody={
+          <>
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-app-fg-muted">Status</span>
+              <FormSelect
+                value={selectedStatus}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                options={statusOptions}
+                wrapperClassName="w-full"
+              />
+            </div>
+            {showMediaBuyerColumn && mediaBuyersForFilter.length > 0 ? (
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                <SearchableSelect
+                  id="marketing-orders-filter-buyer-sheet"
+                  value={searchParams.get('mediaBuyerId') || 'ALL'}
+                  onChange={(v) => {
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                      else next.delete('mediaBuyerId');
+                      return next;
+                    });
+                  }}
+                  options={mediaBuyerFilterOptions}
+                  wrapperClassName="w-full"
+                  placeholder="All media buyers"
+                  searchPlaceholder="Search buyers…"
+                />
+              </div>
+            ) : null}
+          </>
+        }
+      />
 
       {showChartView ? (
         <OrdersChartView
@@ -233,148 +407,28 @@ export function MarketingOrdersPage({
           dailyCounts={dailyCounts}
         />
       ) : (
-      <div className="card p-0 scroll-mt-4">
+      <div className="card p-0 scroll-mt-4 overflow-hidden">
         <div className="px-4 py-3 border-b border-app-border">
           <h2 className="text-lg font-semibold text-app-fg">Orders ({total})</h2>
         </div>
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Order ID</th>
-                <th className="table-header">Customer</th>
-                {showMediaBuyerColumn && <th className="table-header">Media buyer</th>}
-                <th className="table-header text-right">Amount</th>
-                <th className="table-header">Status</th>
-                <th className="table-header">Created</th>
-                <th className="table-header text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id} className="table-row">
-                  <td className="table-cell">
-                    <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />
-                  </td>
-                  <td className="table-cell font-medium text-app-fg">
-                    {order.customerName}
-                  </td>
-                  {showMediaBuyerColumn && (
-                    <td className="table-cell text-app-fg-muted">
-                      {order.mediaBuyerId ? (
-                        <Link
-                          to={`/hr/users/${order.mediaBuyerId}`}
-                          className="text-brand-500 hover:text-brand-600 font-medium hover:underline"
-                        >
-                          {order.mediaBuyerName ?? 'View user'}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                  )}
-                  <td className="table-cell text-right font-medium">
-                    <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
-                  </td>
-                  <td className="table-cell">
-                    <OrderStatusBadge status={order.status} />
-                  </td>
-                  <td className="table-cell text-app-fg-muted">
-                    {new Date(order.createdAt).toLocaleDateString('en-NG', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </td>
-                  <td className="table-cell text-center">
-                    <Link
-                      to={`/admin/orders/${order.id}`}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 hover:bg-brand-100 dark:hover:bg-brand-900/30 transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      </svg>
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {orders.length === 0 && (
-          <div className="hidden md:block">
-            <EmptyState
-              title="No orders match your filters"
-              description="Try adjusting your status filter or search query"
-              variant="card"
-            />
-          </div>
-        )}
-
-        <div className="md:hidden space-y-3 px-1 py-3">
-          {orders.length === 0 && (
-            <EmptyState
-              title="No orders match your filters"
-              description="Try adjusting your status filter or search query"
-              variant="card"
-            />
-          )}
-          {orders.map((order) => (
-            <Link
-              key={order.id}
-              to={`/admin/orders/${order.id}`}
-              className="block rounded-lg border border-app-border bg-app-elevated p-4 hover:bg-app-hover/50 transition-colors"
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium text-app-fg">{order.customerName}</span>
-                <OrderStatusBadge status={order.status} />
-              </div>
-              {showMediaBuyerColumn && order.mediaBuyerName && (
-                <div className="text-sm mb-0.5">
-                  {order.mediaBuyerId ? (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        navigate(`/hr/users/${order.mediaBuyerId}`);
-                      }}
-                      className="text-brand-500 hover:text-brand-600 hover:underline text-left"
-                    >
-                      {order.mediaBuyerName}
-                    </button>
-                  ) : (
-                    <span className="text-app-fg-muted">{order.mediaBuyerName}</span>
-                  )}
-                </div>
-              )}
-              <div className="flex items-center justify-end text-sm">
-                <span className="font-medium text-app-fg">
-                  <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
-                </span>
-              </div>
-              <div className="flex items-center justify-between mt-1 text-xs text-app-fg-muted">
-                <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" />
-                <span>
-                  {new Date(order.createdAt).toLocaleDateString('en-NG', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-              </div>
-            </Link>
-          ))}
-        </div>
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-2 border-t border-app-border px-4 py-3">
-            <Pagination page={page} totalPages={totalPages} pageParam="page" />
-          </div>
-        )}
+        <CompactTable<Order>
+          withCard={false}
+          columns={marketingOrderColumns}
+          rows={orders}
+          rowKey={(order) => order.id}
+          emptyTitle="No orders match your filters"
+          emptyDescription="Try adjusting your status filter or search query"
+          pagination={
+            safeTotalPages > 1
+              ? {
+                  page,
+                  totalPages: safeTotalPages,
+                  pageParam: 'page',
+                  wrapperClassName: 'border-t border-app-border px-4 py-3 flex justify-center',
+                }
+              : undefined
+          }
+        />
       </div>
       )}
 

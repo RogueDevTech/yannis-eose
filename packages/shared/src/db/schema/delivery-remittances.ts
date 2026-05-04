@@ -14,7 +14,7 @@ export const deliveryRemittances = pgTable('delivery_remittances', {
   logisticsLocationId: uuid('logistics_location_id')
     .notNull()
     .references(() => logisticsLocations.id),
-  sentBy: text('sent_by')
+  sentBy: uuid('sent_by')
     .notNull()
     .references(() => users.id),
   /** One or more payment receipt URLs (3PL uploads). */
@@ -22,7 +22,7 @@ export const deliveryRemittances = pgTable('delivery_remittances', {
   status: remittanceStatusEnum('status').default('SENT').notNull(),
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }),
-  receivedBy: text('received_by').references(() => users.id),
+  receivedBy: uuid('received_by').references(() => users.id),
   disputeReason: text('dispute_reason'),
   notes: text('notes'),
   ...temporalColumns,
@@ -54,7 +54,7 @@ export const deliveryRemittanceOutcomes = pgTable('delivery_remittance_outcomes'
   orderCount: integer('order_count').notNull(),
   reason: text('reason'),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
-  recordedBy: text('recorded_by')
+  recordedBy: uuid('recorded_by')
     .notNull()
     .references(() => users.id),
   ...temporalColumns,

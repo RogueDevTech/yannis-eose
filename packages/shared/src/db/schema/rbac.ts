@@ -38,7 +38,7 @@ export const userPermissions = pgTable('user_permissions', {
     .notNull()
     .references(() => permissions.id, { onDelete: 'cascade' }),
   granted: boolean('granted').notNull().default(true),
-  grantedBy: text('granted_by').references(() => users.id),
+  grantedBy: uuid('granted_by').references(() => users.id),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

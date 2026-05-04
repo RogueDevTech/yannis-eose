@@ -1,44 +1,75 @@
 import { json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { useRouteLoaderData } from '@remix-run/react';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { isAdminLevel } from '~/lib/rbac';
 import { apiRequest, getCurrentUser, getSessionCookie, safeStatus } from '~/lib/api.server';
-import { RoleTemplatesPage } from '~/features/settings/RoleTemplatesPage';
-import type { PermissionCatalogRow, RoleTemplateOption } from '~/features/users/types';
+import {
+  RoleTemplatesPage,
+  type PermissionCatalogRow,
+} from '~/features/settings/RoleTemplatesPage';
+import type { RoleTemplateOption } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [{ title: 'Role templates — Yannis EOSE' }];
+
+/** Mirrors `RoleTemplatesService.listTemplates` — same users who can list templates may open this route. */
+function canAccessRoleTemplates(user: { role: string; permissions?: string[] }) {
+  const effective = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
+  return (
+    isAdminLevel(user) ||
+    effective.has('rbac.templates.manage') ||
+    effective.has('users.staff.create') ||
+    effective.has('users.staff.update') ||
+    effective.has('users.staff.view')
+  );
+}
+
+/** Matches tRPC mutations on this page (`roleTemplates.*`, `permissions.listCatalog` for catalog). */
+function canMutateRoleTemplates(user: { role: string; permissions?: string[] }) {
+  if (isAdminLevel(user)) return true;
+  const effective = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
+  return effective.has('rbac.templates.manage');
+}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw new Response('Unauthorized', { status: 401 });
-  const perms = user.permissions ?? [];
-  if (user.role !== 'SUPER_ADMIN' && !perms.includes('rbac.manage_templates')) {
+  if (!canAccessRoleTemplates(user)) {
     throw new Response('Forbidden', { status: 403 });
   }
 
   const cookie = getSessionCookie(request);
-  const [templatesRes, permRes] = await Promise.all([
+  const [templatesRes, permRes, baselinesRes] = await Promise.all([
     apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/permissions.listCodes', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie }),
   ]);
 
-  const templatesPayload = templatesRes.ok
+  const rawTemplates = templatesRes.ok
     ? ((templatesRes.data as { result?: { data?: { templates?: RoleTemplateOption[] } } })?.result?.data?.templates ??
         []) as RoleTemplateOption[]
     : [];
 
-  const permPayload = permRes.ok
+  const rawPerms = permRes.ok
     ? ((permRes.data as { result?: { data?: { permissions?: PermissionCatalogRow[] } } })?.result?.data
         ?.permissions ?? []) as PermissionCatalogRow[]
     : [];
 
-  return json({ templates: templatesPayload, permissions: permPayload });
+  const templatePermissionsById = baselinesRes.ok
+    ? ((baselinesRes.data as { result?: { data?: { byTemplateId?: Record<string, string[]> } } })?.result?.data
+        ?.byTemplateId ?? {}) as Record<string, string[]>
+    : {};
+
+  const templatesPayload = Array.isArray(rawTemplates) ? rawTemplates : [];
+  const permPayload = Array.isArray(rawPerms) ? rawPerms : [];
+
+  return json({ templates: templatesPayload, permissions: permPayload, templatePermissionsById });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) return json({ error: 'Unauthorized' }, { status: 401 });
-  const perms = user.permissions ?? [];
-  if (user.role !== 'SUPER_ADMIN' && !perms.includes('rbac.manage_templates')) {
+  if (!canMutateRoleTemplates(user)) {
     return json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -49,16 +80,20 @@ export async function action({ request }: ActionFunctionArgs) {
   try {
     if (intent === 'getTemplate') {
       const templateId = fd.get('templateId')?.toString() ?? '';
-      const res = await apiRequest<unknown>('/trpc/roleTemplates.get', {
-        method: 'POST',
+      // tRPC queries use GET + ?input={json} — POST is for mutations only (see trpc-openapi-docs).
+      const input = encodeURIComponent(JSON.stringify({ templateId }));
+      const res = await apiRequest<unknown>(`/trpc/roleTemplates.get?input=${input}`, {
+        method: 'GET',
         cookie,
-        body: { templateId },
       });
       if (!res.ok) {
         return json({ error: 'Failed to load template' }, { status: safeStatus(res.status) });
       }
       const data = (res.data as { result?: { data?: { permissionCodes?: string[] } } })?.result?.data;
-      return json({ permissionCodes: data?.permissionCodes ?? [] });
+      return json({
+        templateId,
+        permissionCodes: data?.permissionCodes ?? [],
+      });
     }
 
     if (intent === 'createTemplate') {
@@ -73,7 +108,7 @@ export async function action({ request }: ActionFunctionArgs) {
         body: { key, name, description, permissionCodes },
       });
       if (!res.ok) return json({ error: 'Create failed' }, { status: safeStatus(res.status) });
-      return json({ ok: true as const });
+      return json({ success: true as const });
     }
 
     if (intent === 'setTemplatePermissions') {
@@ -86,7 +121,7 @@ export async function action({ request }: ActionFunctionArgs) {
         body: { templateId, permissionCodes },
       });
       if (!res.ok) return json({ error: 'Save failed' }, { status: safeStatus(res.status) });
-      return json({ ok: true as const });
+      return json({ success: true as const });
     }
 
     return json({ error: 'Unknown intent' }, { status: 400 });
@@ -95,7 +130,19 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
+interface RoleTemplatesLoaderData {
+  templates: RoleTemplateOption[];
+  permissions: PermissionCatalogRow[];
+  templatePermissionsById: Record<string, string[]>;
+}
+
 export default function RoleTemplatesRoute() {
-  const data = useLoaderData<typeof loader>();
-  return <RoleTemplatesPage templates={data.templates} permissions={data.permissions} />;
+  const data = useRouteLoaderData('routes/admin.settings.role-templates') as RoleTemplatesLoaderData | undefined;
+  return (
+    <RoleTemplatesPage
+      templates={data?.templates ?? []}
+      permissions={data?.permissions ?? []}
+      templatePermissionsById={data?.templatePermissionsById ?? {}}
+    />
+  );
 }

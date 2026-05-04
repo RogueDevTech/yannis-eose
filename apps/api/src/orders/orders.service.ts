@@ -19,7 +19,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, canonicalPermissionCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
@@ -35,7 +35,6 @@ import {
 import { CartService } from '../cart/cart.service';
 import { PaystackService } from '../payments/paystack.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { isAdminLevel, isOrgWideDepartmentHead } from '../common/authz';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 
 const PENDING_PAYMENT_PREFIX = 'pending_payment:';
@@ -67,8 +66,11 @@ export class OrdersService {
     orderBranchId: string,
     orderStatus: string,
   ): Promise<void> {
-    const hasReassign = actor.permissions?.includes('orders.reassign') ?? false;
-    if (hasReassign || isAdminLevel(actor)) return;
+    const hasReassign =
+      (actor.permissions ?? [])
+        .map((p) => canonicalPermissionCode(p))
+        .includes(canonicalPermissionCode('orders.reassign'));
+    if (actor.role === 'SUPER_ADMIN' || hasReassign) return;
     if (!actor.currentBranchId || actor.currentBranchId !== orderBranchId) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -92,25 +94,33 @@ export class OrdersService {
 
   /**
    * True when the actor may change line unit prices (and derived totals) on this order.
-   * Admin-class; org-wide Head of CS / Head of Logistics (any branch); same-branch Branch Admin;
-   * or a branch CS team supervisor for the order's assigned agent.
+   *
+   * Capability gate: caller must hold `orders.line_price.edit`. SuperAdmin bypasses.
+   * Scope gate (runs after capability passes): org-wide via `cs.scope.global` /
+   * `logistics.scope.global` → any branch; otherwise same-branch only; CS team supervisors
+   * additionally pass for the orders of agents they supervise.
    */
   async canActorEditOrderLinePrices(
     actor: SessionUser,
     order: { branchId: string | null; assignedCsId: string | null },
   ): Promise<boolean> {
-    if (isAdminLevel(actor)) return true;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    if (!perms.includes(canonicalPermissionCode('orders.line_price.edit'))) return false;
     const ob = order.branchId;
     if (!ob) return false;
+    // Global scope (org-wide heads + admin who hold scope.global codes) → any branch.
     if (
-      isOrgWideDepartmentHead(actor) &&
-      (actor.role === 'HEAD_OF_CS' || actor.role === 'HEAD_OF_LOGISTICS')
+      perms.includes(canonicalPermissionCode('cs.scope.global')) ||
+      perms.includes(canonicalPermissionCode('logistics.scope.global'))
     ) {
       return true;
     }
     const cb = actor.currentBranchId ?? null;
     if (!cb || ob !== cb) return false;
-    if (actor.role === 'BRANCH_ADMIN') return true;
+    // Same-branch capability holders (e.g. Branch Admin) pass; otherwise fall back to
+    // the supervisor relationship for CS-team supervisors who only hold the capability.
+    if (perms.includes(canonicalPermissionCode('branches.manage'))) return true;
     if (order.assignedCsId) {
       return this.branchTeams.isCsSupervisorOf(actor.id, order.assignedCsId, ob);
     }
@@ -126,48 +136,42 @@ export class OrdersService {
     actor: SessionUser,
     order: { branchId: string | null; assignedCsId: string | null; status: string },
   ): Promise<void> {
-    if (isAdminLevel(actor)) return;
+    if (actor.role === 'SUPER_ADMIN') return;
 
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const has = (code: string) => perms.includes(canonicalPermissionCode(code));
     const ob = order.branchId;
-    const branchAdminSame =
-      actor.role === 'BRANCH_ADMIN' &&
-      !!ob &&
-      !!actor.currentBranchId &&
-      ob === actor.currentBranchId;
-    if (branchAdminSame) return;
 
-    if (actor.role === 'HEAD_OF_CS') {
-      if (ob) return;
+    // Branchless orders require explicit any_branch capability.
+    if (!ob) {
+      if (has('orders.update.any_branch')) return;
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Head of CS cannot update orders without a branch.',
+        message: 'This order has no branch context and you lack the org-wide update capability.',
       });
     }
 
-    if (actor.role === 'HEAD_OF_LOGISTICS') {
-      if (ob) return;
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Head of Logistics cannot update orders without a branch.',
-      });
+    // Org-wide scope on branched orders.
+    if (
+      has('orders.update.any_branch') ||
+      has('cs.scope.global') ||
+      has('logistics.scope.global')
+    ) {
+      return;
     }
 
-    if (ob && order.assignedCsId && actor.currentBranchId === ob) {
+    // Same-branch admin (Branch Admin).
+    if (has('branches.manage') && actor.currentBranchId === ob) return;
+
+    // CS team supervisor for the assignee in same branch.
+    if (order.assignedCsId && actor.currentBranchId === ob) {
       const sup = await this.branchTeams.isCsSupervisorOf(actor.id, order.assignedCsId, ob);
       if (sup) return;
     }
 
-    if (actor.role === 'CS_AGENT') {
-      const isAssigned = order.assignedCsId === actor.id;
-      const canTakePool = order.status === 'UNPROCESSED' && !order.assignedCsId;
-      if (isAssigned || canTakePool) return;
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Only the assigned CS agent may update this order.',
-      });
-    }
-
-    if (actor.role === 'TPL_MANAGER') return;
+    // Contextual ownership: assignee themselves, or claiming an unprocessed pool order.
+    if (order.assignedCsId === actor.id) return;
+    if (order.status === 'UNPROCESSED' && !order.assignedCsId && has('orders.read')) return;
 
     throw new TRPCError({
       code: 'FORBIDDEN',
@@ -846,15 +850,32 @@ export class OrdersService {
       })
       .catch(() => {});
 
-    // Notify Media Buyer if order is from their campaign
+    // Notify Media Buyer if order is from their campaign. Body is
+    // personalized with the customer name + campaign name so the MB can
+    // distinguish multiple notifications stacking up in their bell. Customer
+    // name is non-PII (Pillar 2 only protects the phone). Falls back to the
+    // generic body if either lookup fails.
     if (order.mediaBuyerId) {
+      const campaignName = order.campaignId
+        ? (
+            await this.db
+              .select({ name: schema.campaigns.name })
+              .from(schema.campaigns)
+              .where(eq(schema.campaigns.id, order.campaignId))
+              .limit(1)
+          )[0]?.name ?? null
+        : null;
+      const customerLabel = (order.customerName ?? '').trim() || 'A customer';
+      const body = campaignName
+        ? `${customerLabel} just placed an order via ${campaignName}.`
+        : `${customerLabel} just placed an order from your campaign.`;
       this.notifications
         .create({
           userId: order.mediaBuyerId,
           type: 'order:new_campaign',
           title: 'New order from your campaign',
-          body: 'A new order has been created from your campaign.',
-          data: { orderId: order.id },
+          body,
+          data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName, customerName: customerLabel },
         })
         .catch(() => {});
     }
@@ -1299,6 +1320,7 @@ export class OrdersService {
     name: string;
     address: string | null;
     whatsappGroupLink: string | null;
+    providerName: string | null;
     eligible: boolean;
     reason: string | null;
     availabilityByProduct: Array<{
@@ -1346,8 +1368,13 @@ export class OrdersService {
         name: schema.logisticsLocations.name,
         address: schema.logisticsLocations.address,
         whatsappGroupLink: schema.logisticsLocations.whatsappGroupLink,
+        providerName: schema.logisticsProviders.name,
       })
       .from(schema.logisticsLocations)
+      .leftJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
       .where(eq(schema.logisticsLocations.status, 'ACTIVE'))
       .orderBy(asc(schema.logisticsLocations.name));
 
@@ -1362,6 +1389,7 @@ export class OrdersService {
       name: string;
       address: string | null;
       whatsappGroupLink: string | null;
+      providerName: string | null;
       eligible: boolean;
       reason: string | null;
       availabilityByProduct: Array<{
@@ -1495,7 +1523,11 @@ export class OrdersService {
       });
     }
 
-    const isElevated = actor.role === 'HEAD_OF_CS' || (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN');
+    const elevatedPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const isElevated =
+      actor.role === 'SUPER_ADMIN' ||
+      elevatedPerms.includes(canonicalPermissionCode('cs.scope.global')) ||
+      elevatedPerms.includes(canonicalPermissionCode('orders.update.any_branch'));
     if (!isElevated && order.assignedCsId !== actor.id) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -1733,47 +1765,56 @@ export class OrdersService {
       });
     }
 
-    // Role check: CS-only transitions (engagement, confirm, cancel) require CS_AGENT (assigned when applicable),
-    // Head of CS, Branch Admin (same branch as order), or admin-class (SuperAdmin / Admin).
+    // Permission gates: short-circuit for SUPER_ADMIN, otherwise resolve the actor's
+    // canonical permission set once and reuse across the transition checks below.
+    const transitionPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasPerm = (code: string) =>
+      actor.role === 'SUPER_ADMIN' || transitionPerms.includes(canonicalPermissionCode(code));
+    const sameBranchAsOrder =
+      !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
+
+    // CS-only transitions (engagement, confirm, cancel): assigned CS agent, anyone with
+    // CS scope (`cs.scope.global`), or branch admin (`branches.manage` + same-branch).
     const csOnlyTransitions =
       (currentStatus === 'UNPROCESSED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
       (currentStatus === 'CS_ASSIGNED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
       (currentStatus === 'CS_ENGAGED' && (newStatus === 'CONFIRMED' || newStatus === 'CANCELLED'));
     if (csOnlyTransitions) {
-      const branchAdminSameBranch =
-        actor.role === 'BRANCH_ADMIN' &&
-        !!order.branchId &&
-        !!actor.currentBranchId &&
-        order.branchId === actor.currentBranchId;
       const isElevated =
-        actor.role === 'HEAD_OF_CS' || isAdminLevel(actor) || branchAdminSameBranch;
+        actor.role === 'SUPER_ADMIN' ||
+        hasPerm('cs.scope.global') ||
+        (hasPerm('branches.manage') && sameBranchAsOrder);
       if ((currentStatus === 'UNPROCESSED' || currentStatus === 'CS_ASSIGNED') && newStatus === 'CS_ENGAGED') {
-        if (!isElevated && actor.role !== 'CS_AGENT') {
+        // Anyone with CS read access can engage an order from the pool.
+        if (!isElevated && !hasPerm('orders.read')) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Only CS or Head of CS can take an order',
+            message: 'You do not have CS access required to take this order.',
           });
         }
       } else {
-        const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
+        const isAssignedCs = order.assignedCsId === actor.id;
         if (!isElevated && !isAssignedCs) {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message:
-              'Only the assigned CS agent, Head of CS, Branch Admin (same branch), or an Admin may perform this transition',
+              'Only the assigned CS agent, anyone with CS scope, a Branch Admin (same branch), or an Admin may perform this transition.',
           });
         }
       }
     }
 
-    // Role check: CONFIRMED → ALLOCATED can be triggered by the assigned CS agent (the one who
-    // confirmed the order), by Head of Logistics / Logistics Manager, or by Super Admin / Admin.
-    // CS agents "share" orders to a 3PL location the same way HoLogistics does from the logistics dashboard.
+    // CONFIRMED → ALLOCATED: assigned CS agent (CS-as-rider-proxy), anyone with logistics
+    // capability (`logistics.read` covers HoLogistics + LogisticsManager), or org-wide CS scope.
     if (currentStatus === 'CONFIRMED' && newStatus === 'ALLOCATED') {
-      const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
-      const isLogistics = actor.role === 'HEAD_OF_LOGISTICS' || actor.role === 'LOGISTICS_MANAGER';
-      const isElevated = actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN' || actor.role === 'HEAD_OF_CS';
-      if (!isAssignedCs && !isLogistics && !isElevated) {
+      const isAssignedCs = order.assignedCsId === actor.id;
+      const isAuthorized =
+        actor.role === 'SUPER_ADMIN' ||
+        hasPerm('cs.scope.global') ||
+        hasPerm('logistics.scope.global') ||
+        hasPerm('logistics.read') ||
+        isAssignedCs;
+      if (!isAuthorized) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Only the assigned CS agent, Logistics, or an Admin can allocate this order to a 3PL location.',
@@ -1781,26 +1822,26 @@ export class OrdersService {
       }
     }
 
-    // Role check: {ALLOCATED|DISPATCHED|IN_TRANSIT} → DELIVERED/PARTIALLY_DELIVERED can be triggered by:
-    //   - Head of Logistics / SuperAdmin / Admin (unrestricted).
-    //   - TPL_MANAGER, but only when the order was resolved (resolveReceiptUrl set) via Resolve order.
-    //   - The assigned CS agent, but only with a mandatory deliveryNote (>= 10 chars) since they
-    //     are confirming delivery via a follow-up call rather than rider OTP/GPS.
-    //   ALLOCATED is included because 3PL isn't in-app yet — CS / HoLogistics marks delivered
-    //   directly after ALLOCATED without the order ever physically transitioning through
-    //   DISPATCHED / IN_TRANSIT. Riders still submit a delivery confirmation request for HOL approval (not this path).
+    // {ALLOCATED|DISPATCHED|IN_TRANSIT} → DELIVERED/PARTIALLY_DELIVERED:
+    //   - anyone holding `orders.delivery.confirm` (HoLogistics, CS, TPL_MANAGER w/ receipt, Admin via ALL),
+    //   - assigned CS agent (rider-proxy follow-up call),
+    //   - TPL_MANAGER specifically requires the receipt to be present (resolveReceiptUrl).
+    //   3PL isn't in-app yet, so CS / HoLogistics marks delivered directly after ALLOCATED.
     if (
       (currentStatus === 'ALLOCATED' || currentStatus === 'DISPATCHED' || currentStatus === 'IN_TRANSIT') &&
       (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED')
     ) {
       const hasResolveReceipt = !!order.resolveReceiptUrl?.trim();
-      const tplManagerMayDeliver = actor.role === 'TPL_MANAGER' && hasResolveReceipt;
-      const isAssignedCs = actor.role === 'CS_AGENT' && order.assignedCsId === actor.id;
-      const isElevated =
-        actor.role === 'HEAD_OF_LOGISTICS' ||
+      const isAssignedCs = order.assignedCsId === actor.id;
+      // TPL_MANAGER specifically must have a resolve receipt — they're off-platform partners
+      // who can only mark delivered after the resolve flow attached the receipt.
+      const tplBlockedWithoutReceipt = actor.role === 'TPL_MANAGER' && !hasResolveReceipt;
+      const isAuthorized =
         actor.role === 'SUPER_ADMIN' ||
-        actor.role === 'ADMIN';
-      if (!isElevated && !tplManagerMayDeliver && !isAssignedCs) {
+        hasPerm('logistics.scope.global') ||
+        (hasPerm('orders.delivery.confirm') && !tplBlockedWithoutReceipt) ||
+        isAssignedCs;
+      if (!isAuthorized) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message:
@@ -1847,8 +1888,14 @@ export class OrdersService {
       updateFields['lockedBy'] = null;
     }
 
-    // Update agent's lastActionAt for dispatch tiebreaker + inactivity tracking
-    if (actor.role === 'CS_AGENT' || actor.role === 'HEAD_OF_CS') {
+    // Update agent's lastActionAt for dispatch tiebreaker + inactivity tracking.
+    // Tracked for anyone with CS scope (CS agents, anyone with cs.scope.global, etc.).
+    if (
+      transitionPerms.includes(canonicalPermissionCode('orders.read')) &&
+      (transitionPerms.includes(canonicalPermissionCode('cs.leaderboard')) ||
+        transitionPerms.includes(canonicalPermissionCode('cs.scope.global')) ||
+        transitionPerms.includes(canonicalPermissionCode('cs.teamOverview')))
+    ) {
       await withActor(this.db, actor, async (tx) => {
         await tx
           .update(schema.users)
@@ -2066,19 +2113,30 @@ export class OrdersService {
       }
     }
 
-    // TPL_MANAGER may update preferred delivery date, optional delivery fee/discount, and required receipt (Resolve order)
-    let workingInput: UpdateOrderInput =
-      actor.role === 'TPL_MANAGER'
-        ? {
-            orderId: input.orderId,
-            preferredDeliveryDate: input.preferredDeliveryDate,
-            deliveryFeeAddOn: input.deliveryFeeAddOn,
-            deliveryDiscountAmount: input.deliveryDiscountAmount,
-            resolveReceiptUrl: input.resolveReceiptUrl,
-          }
-        : input;
+    // 3PL operators (e.g. TPL_MANAGER who hold `orders.delivery.confirm` but no
+    // generic update capability) may update preferred delivery date, optional
+    // delivery fee/discount, and required receipt (Resolve order). They bypass
+    // the generic update gate via the narrow shape below.
+    const actorPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const isLogisticsResolveOnly =
+      actor.role !== 'SUPER_ADMIN' &&
+      actorPerms.includes(canonicalPermissionCode('orders.delivery.confirm')) &&
+      !actorPerms.includes(canonicalPermissionCode('orders.update.any_branch')) &&
+      !actorPerms.includes(canonicalPermissionCode('cs.scope.global')) &&
+      !actorPerms.includes(canonicalPermissionCode('logistics.scope.global')) &&
+      !actorPerms.includes(canonicalPermissionCode('branches.manage'));
 
-    if (actor.role !== 'TPL_MANAGER') {
+    let workingInput: UpdateOrderInput = isLogisticsResolveOnly
+      ? {
+          orderId: input.orderId,
+          preferredDeliveryDate: input.preferredDeliveryDate,
+          deliveryFeeAddOn: input.deliveryFeeAddOn,
+          deliveryDiscountAmount: input.deliveryDiscountAmount,
+          resolveReceiptUrl: input.resolveReceiptUrl,
+        }
+      : input;
+
+    if (!isLogisticsResolveOnly) {
       await this.assertActorMayUpdateOrder(actor, {
         branchId: order.branchId ?? null,
         assignedCsId: order.assignedCsId ?? null,
@@ -2086,7 +2144,7 @@ export class OrdersService {
       });
     }
 
-    if (actor.role !== 'TPL_MANAGER' && workingInput.items) {
+    if (!isLogisticsResolveOnly && workingInput.items) {
       const mayPrice = await this.canActorEditOrderLinePrices(actor, {
         branchId: order.branchId ?? null,
         assignedCsId: order.assignedCsId ?? null,
@@ -2096,7 +2154,7 @@ export class OrdersService {
         workingInput = { ...workingInput, items: clamped.items, totalAmount: clamped.totalAmount };
       }
     } else if (
-      actor.role !== 'TPL_MANAGER' &&
+      !isLogisticsResolveOnly &&
       workingInput.totalAmount !== undefined &&
       workingInput.items === undefined
     ) {
@@ -2325,7 +2383,28 @@ export class OrdersService {
       this.notifications.createForRole('HEAD_OF_CS', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
       this.notifications.createForRole('HEAD_OF_MARKETING', { type: 'order:new', title: 'New order received', body: 'A new order has been created.', data: { orderId: order.id } }).catch(() => {});
       if (order.mediaBuyerId) {
-        this.notifications.create({ userId: order.mediaBuyerId, type: 'order:new_campaign', title: 'New order from your campaign', body: 'A new order has been created from your campaign.', data: { orderId: order.id } }).catch(() => {});
+        const campaignNamePay = order.campaignId
+          ? (
+              await this.db
+                .select({ name: schema.campaigns.name })
+                .from(schema.campaigns)
+                .where(eq(schema.campaigns.id, order.campaignId))
+                .limit(1)
+            )[0]?.name ?? null
+          : null;
+        const customerLabelPay = (order.customerName ?? '').trim() || 'A customer';
+        const bodyPay = campaignNamePay
+          ? `${customerLabelPay} just placed an order via ${campaignNamePay}.`
+          : `${customerLabelPay} just placed an order from your campaign.`;
+        this.notifications
+          .create({
+            userId: order.mediaBuyerId,
+            type: 'order:new_campaign',
+            title: 'New order from your campaign',
+            body: bodyPay,
+            data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName: campaignNamePay, customerName: customerLabelPay },
+          })
+          .catch(() => {});
       }
       const mediaBuyerNamePay = order.mediaBuyerId
         ? await this.resolveUserNameById(order.mediaBuyerId)
@@ -2795,8 +2874,11 @@ export class OrdersService {
    * Agent-initiated order transfers have been removed — reassignment is management-only.
    */
   async listCSAgents(actor: SessionUser): Promise<Array<{ agentId: string; agentName: string }>> {
-    const hasReassign = actor.permissions?.includes('orders.reassign') ?? false;
-    if (hasReassign || isAdminLevel(actor)) {
+    const hasReassign =
+      (actor.permissions ?? [])
+        .map((p) => canonicalPermissionCode(p))
+        .includes(canonicalPermissionCode('orders.reassign'));
+    if (actor.role === 'SUPER_ADMIN' || hasReassign) {
       const agents = await this.db
         .select({ id: schema.users.id, name: schema.users.name })
         .from(schema.users)
@@ -3771,14 +3853,19 @@ export class OrdersService {
         const voipSetting = await this.settingsService.get('VOIP_ENABLED');
         const isVoipEnabled = voipSetting?.['enabled'] === true;
 
-        const branchAdminSameBranch =
-          actor.role === 'BRANCH_ADMIN' &&
-          !!order.branchId &&
-          !!actor.currentBranchId &&
-          order.branchId === actor.currentBranchId;
-        const bypassCallGate = isAdminLevel(actor) || branchAdminSameBranch;
+        const confirmPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+        const hasConfirmPerm = (code: string) =>
+          actor.role === 'SUPER_ADMIN' ||
+          confirmPerms.includes(canonicalPermissionCode(code));
+        const sameBranch =
+          !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
+        const bypassCallGate =
+          actor.role === 'SUPER_ADMIN' ||
+          hasConfirmPerm('orders.confirm.bypass_call_gate') ||
+          (hasConfirmPerm('branches.manage') && sameBranch);
 
-        const hoCsOversightPath = actor.role === 'HEAD_OF_CS' && !!order.branchId;
+        // Org-wide CS scope (e.g. HoCS) may confirm using any rep's qualifying call on the order.
+        const hoCsOversightPath = hasConfirmPerm('cs.scope.global') && !!order.branchId;
 
         if (!bypassCallGate) {
           if (hoCsOversightPath) {
@@ -4813,22 +4900,31 @@ export class OrdersService {
       }
     }
 
-    // Role-based filtering
-    const csRoles = new Set(['CS_AGENT', 'HEAD_OF_CS']);
-    const logisticsRoles = new Set(['HEAD_OF_LOGISTICS', 'STOCK_MANAGER', 'TPL_MANAGER', 'TPL_RIDER']);
+    // Permission-based filtering. Anyone with broad audit access sees everything;
+    // CS-scope actors and logistics-scope actors see CS+logistics events; marketing
+    // sees lifecycle events but not supervisor mirror events.
+    const eventPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasEventPerm = (code: string) =>
+      actor.role === 'SUPER_ADMIN' || eventPerms.includes(canonicalPermissionCode(code));
+    const seesAll =
+      actor.role === 'SUPER_ADMIN' ||
+      hasEventPerm('audit.read') ||
+      hasEventPerm('finance.read') ||
+      hasEventPerm('hr.read');
+    const seesCsAndLogistics =
+      hasEventPerm('cs.scope.global') ||
+      hasEventPerm('logistics.scope.global') ||
+      hasEventPerm('cs.leaderboard') ||
+      hasEventPerm('logistics.read') ||
+      actor.role === 'CS_AGENT';
 
     return mergedRows.filter((row) => {
       const eventType = row.eventType as string;
-      if ((actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') || actor.role === 'FINANCE_OFFICER' || actor.role === 'HR_MANAGER') {
-        return true;
-      }
-      if (csRoles.has(actor.role)) {
+      if (seesAll) return true;
+      if (seesCsAndLogistics) {
         return CS_EVENTS.has(eventType) || LOGISTICS_EVENTS.has(eventType);
       }
-      if (logisticsRoles.has(actor.role)) {
-        return LOGISTICS_EVENTS.has(eventType) || CS_EVENTS.has(eventType);
-      }
-      // Marketing roles — see order lifecycle but not supervisor events
+      // Marketing and other roles — see order lifecycle but not supervisor events
       return eventType !== 'SUPERVISOR_WATCHING';
     });
   }

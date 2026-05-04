@@ -146,7 +146,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Logistics locations — used by the "Allocate to logistics company" action available to the assigned
   // CS agent, Logistics, and admins when the order is CONFIRMED.
-  let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> = [];
+  let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }> = [];
   const locationsRes = await apiRequest<unknown>(
     `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
     deferredOpt,
@@ -157,9 +157,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   });
   if (locationsRes.ok) {
     const locationsData = locationsRes.data as {
-      result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null }> } };
+      result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }> } };
     };
-    logisticsLocations = locationsData?.result?.data?.locations ?? [];
+    logisticsLocations = (locationsData?.result?.data?.locations ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      address: l.address,
+      whatsappGroupLink: l.whatsappGroupLink ?? null,
+      providerName: l.providerName ?? null,
+    }));
   } else {
     logOrderDetailLoaderWarning(orderId, 'logistics.listLocations', `status ${locationsRes.status}`);
   }
@@ -169,6 +175,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     name: string;
     address: string | null;
     whatsappGroupLink?: string | null;
+    providerName: string | null;
     eligible: boolean;
     reason: string | null;
     availabilityByProduct: Array<{
@@ -194,6 +201,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           name: string;
           address: string | null;
           whatsappGroupLink?: string | null;
+          providerName?: string | null;
           eligible: boolean;
           reason: string | null;
           availabilityByProduct: Array<{
@@ -205,7 +213,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         }>;
       };
     };
-    allocatableLocations = data?.result?.data ?? [];
+    allocatableLocations = (data?.result?.data ?? []).map((loc) => ({
+      ...loc,
+      providerName: loc.providerName ?? null,
+    }));
   } else {
     logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', `status ${allocatableRes.status}`);
   }

@@ -5,8 +5,12 @@ import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/l
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { MarketingFormEditPage } from '~/features/campaigns/MarketingFormEditPage';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
-import { parseStandardFieldsPayload, toLegacyStandardFieldFlags } from '~/features/campaigns/standard-fields';
-import type { Campaign, CampaignFormConfig } from '~/features/campaigns/types';
+import {
+  parseAdditionalFieldSelectOptionsPayload,
+  parseStandardFieldsPayload,
+  toLegacyStandardFieldFlags,
+} from '~/features/campaigns/standard-fields';
+import type { Campaign, CampaignFormConfig, Product } from '~/features/campaigns/types';
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data?.campaign?.name ? `Edit: ${data.campaign.name} — Yannis EOSE` : 'Edit form — Yannis EOSE' },
@@ -31,7 +35,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Forbidden', { status: 403 });
   }
 
-  return { campaign };
+  const productsListInput = {
+    page: 1,
+    limit: 100,
+    sortBy: 'name' as const,
+    sortOrder: 'asc' as const,
+  };
+  const productsInputStr = encodeURIComponent(JSON.stringify(productsListInput));
+  const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie });
+
+  let formProducts: Product[] = [];
+  try {
+    const productsRes = await productsPromise;
+    if (productsRes.ok) {
+      const productsData = (productsRes.data as { result?: { data?: { products: Product[] } } })?.result?.data;
+      const all = productsData?.products ?? [];
+      const ids = new Set((campaign.productIds ?? []).filter(Boolean));
+      formProducts = all.filter((p) => ids.has(p.id));
+    }
+  } catch (err) {
+    console.error('[admin.marketing.forms.$id.edit] products.list error', err);
+  }
+
+  return { campaign, formProducts };
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -61,6 +87,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ error: parsedStandard.error }, { status: 400 });
   }
 
+  const parsedSelectOpts = parseAdditionalFieldSelectOptionsPayload(
+    formData.get('additionalFieldSelectOptions')?.toString(),
+  );
+  if (!parsedSelectOpts.ok) {
+    return json({ error: parsedSelectOpts.error }, { status: 400 });
+  }
+
   const parsedCustom = parseCustomFieldsPayload(formData.get('customFields')?.toString());
   if (!parsedCustom.ok) {
     return json({ error: parsedCustom.error }, { status: 400 });
@@ -76,7 +109,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const formConfig: CampaignFormConfig = {
     ...existingFormConfig,
     ...(heading ? { heading } : {}),
-    ...(subtitle ? { subtitle } : {}),
     ...(buttonText ? { buttonText } : {}),
     ...(accentColor ? { accentColor } : {}),
     ...(successCallbackUrl ? { successCallbackUrl } : {}),
@@ -84,7 +116,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
     standardFields: parsedStandard.fields,
     ...toLegacyStandardFieldFlags(parsedStandard.fields),
     customFields: parsedCustom.fields,
+    deliveryStateOptions: parsedSelectOpts.options.deliveryStateOptions,
+    preferredDeliveryDateOptions: parsedSelectOpts.options.preferredDeliveryDateOptions,
+    genderOptions: parsedSelectOpts.options.genderOptions,
   };
+  if (subtitle) {
+    formConfig.subtitle = subtitle;
+  } else {
+    delete formConfig.subtitle;
+  }
 
   const body: Record<string, unknown> = { id, formConfig };
   if (name) body.name = name;
@@ -102,6 +142,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function MarketingFormEditRoute() {
-  const { campaign } = useLoaderData<typeof loader>();
-  return <MarketingFormEditPage key={`${campaign.id}-${campaign.status}`} campaign={campaign} />;
+  const { campaign, formProducts } = useLoaderData<typeof loader>();
+  return (
+    <MarketingFormEditPage key={`${campaign.id}-${campaign.status}`} campaign={campaign} formProducts={formProducts} />
+  );
 }

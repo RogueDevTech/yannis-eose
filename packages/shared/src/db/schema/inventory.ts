@@ -104,11 +104,11 @@ export const transferRemittances = pgTable('transfer_remittances', {
   receiptUrl: text('receipt_url').notNull(),
   status: remittanceStatusEnum('status').default('SENT').notNull(),
   sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
-  sentBy: text('sent_by')
+  sentBy: uuid('sent_by')
     .notNull()
     .references(() => users.id),
   receivedAt: timestamp('received_at', { withTimezone: true }),
-  receivedBy: text('received_by').references(() => users.id),
+  receivedBy: uuid('received_by').references(() => users.id),
   shrinkageReason: text('shrinkage_reason'),
   ...temporalColumns,
 });
@@ -123,7 +123,7 @@ export const stockTransferOutcomes = pgTable('stock_transfer_outcomes', {
   quantity: integer('quantity').notNull(),
   reason: text('reason'),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
-  recordedBy: text('recorded_by')
+  recordedBy: uuid('recorded_by')
     .notNull()
     .references(() => users.id),
   ...temporalColumns,

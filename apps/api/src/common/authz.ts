@@ -44,14 +44,16 @@ export function isOrgWideDepartmentHead(user: {
 }
 
 /**
- * Returns true if the user is allowed to see cross-branch data.
- * Permission-first: grant via global scope permissions (plus SUPER_ADMIN).
+ * Returns true if the user is allowed to see cross-branch data without a session branch.
+ * Admin-class + org-wide department heads match multi-branch UX (CLAUDE.md); others need scope perms.
  */
 export function canViewAllBranches(user: {
   role: string;
   permissions?: string[];
+  scopeOrgWideHead?: boolean;
 }): boolean {
-  if (user.role === 'SUPER_ADMIN') return true;
+  if (isAdminLevel(user)) return true;
+  if (isOrgWideDepartmentHead(user)) return true;
   const permissionSet = new Set(user.permissions ?? []);
   return (
     permissionSet.has('branches.view_all') ||
@@ -66,7 +68,6 @@ export function canViewAllBranches(user: {
 export type GlobalAuditAccessUser = {
   role: string;
   permissions?: string[];
-  isFinanceOfficer?: boolean;
   currentBranchId?: string | null;
 };
 
@@ -98,6 +99,110 @@ export function shouldScopeGlobalAuditToBranch(user: GlobalAuditAccessUser): boo
  */
 export function isAdminLevelRole(role: string): boolean {
   return ADMIN_LEVEL_ROLES.has(role);
+}
+
+/**
+ * Edit-access scope for `/hr/users/:id/edit` and the underlying
+ * `users.update` mutation.
+ *
+ *   - `'full'`     — can change every field (admin-class, HR_MANAGER on branch).
+ *   - `'limited'`  — direct-report scope: HoCS over CS_AGENT, HoM over
+ *                    MEDIA_BUYER, on the same branch. Restricted to
+ *                    `capacity` / `productIds` / `visibleOrderStatuses` /
+ *                    `restrictProductAccess`.
+ *   - `'none'`     — cannot edit. Detail page hides the "Edit user" link;
+ *                    the edit-page loader 403s before rendering.
+ *
+ * The fields that `'limited'` may change are mirrored from the service
+ * whitelist in [users.service.ts:1133-1137](apps/api/src/users/users.service.ts#L1133-L1137).
+ * Keep the two in sync — they're the same contract enforced from two sides.
+ */
+export type EditUserAccessLevel = 'full' | 'limited' | 'none';
+
+export interface CanEditUserViewer {
+  id: string;
+  role: string;
+  permissions?: string[];
+  currentBranchId?: string | null;
+  scopeTeamSupervisor?: boolean;
+}
+
+export interface CanEditUserTarget {
+  id: string;
+  role: string;
+  primaryBranchId?: string | null;
+}
+
+/**
+ * Returns the edit-access scope a viewer has over a specific target user.
+ *
+ * SuperAdmin / Admin → always `'full'` unless the target is also admin-class.
+ * HR_MANAGER → `'full'` on users in their branch.
+ * Org-wide / branch-supervisor heads with `users.staff.update_supervised` →
+ * `'limited'` over their direct-report role on the same branch.
+ * Everyone else → `'none'`.
+ *
+ * Self-edit is intentionally `'none'` — that flow is `/admin/profile`, not
+ * the staff-management edit page (preserves the service-layer "Cannot edit
+ * your own account here" guard).
+ */
+export function canEditUser(
+  viewer: CanEditUserViewer,
+  target: CanEditUserTarget,
+): EditUserAccessLevel {
+  // Self-edit goes through /admin/profile, not the staff-management form.
+  if (viewer.id === target.id) return 'none';
+
+  // Admin-level accounts can't be edited from the staff-management page —
+  // mirrors the SUPER_ADMIN/ADMIN guard in users.service.ts and the loader
+  // gate at hr.users.$id.edit/route.tsx:78-80.
+  if (ADMIN_LEVEL_ROLES.has(target.role)) return 'none';
+
+  // Admin-class viewers can change anything on a non-admin target.
+  if (isAdminLevel(viewer)) return 'full';
+
+  const perms = new Set((viewer.permissions ?? []).map((p) => p));
+  const has = (code: string) => perms.has(code);
+
+  // HR_MANAGER on the target's branch — full access.
+  if (viewer.role === 'HR_MANAGER') {
+    const sameBranch =
+      !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
+    if (sameBranch) return 'full';
+    return 'none';
+  }
+
+  // Anyone holding `users.staff.update` outright (catalog-granted) — full,
+  // bounded by branch (org-wide heads with currentBranchId === null get
+  // 'full' since branch isn't required).
+  if (has('users.staff.update') || has('users.update')) {
+    if (isOrgWideDepartmentHead(viewer)) return 'full';
+    const sameBranch =
+      !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
+    if (sameBranch) return 'full';
+    return 'none';
+  }
+
+  // Team-lead supervised scope — same shape as users.service.ts:1094-1148.
+  // Need users.staff.update_supervised AND a domain-supervision marker
+  // (cs.teamOverview / team.supervise_cs / scopeTeamSupervisor=true).
+  const supervisedScope = has('users.staff.update_supervised');
+  if (!supervisedScope) return 'none';
+
+  const actorIsCsLead =
+    has('cs.teamOverview') || has('team.supervise_cs') || viewer.scopeTeamSupervisor === true;
+  const actorIsMarketingLead =
+    has('marketing.teamOverview') ||
+    has('team.supervise_marketing') ||
+    viewer.scopeTeamSupervisor === true;
+
+  const sameBranch =
+    !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
+
+  if (actorIsCsLead && target.role === 'CS_AGENT' && sameBranch) return 'limited';
+  if (actorIsMarketingLead && target.role === 'MEDIA_BUYER' && sameBranch) return 'limited';
+
+  return 'none';
 }
 
 /**

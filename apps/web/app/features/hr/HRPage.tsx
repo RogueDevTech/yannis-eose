@@ -1,9 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import {
+  applyOptimisticPatches,
+  isOptimisticPatched,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
 import { PageNotification } from '~/components/ui/page-notification';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
+import { TableActionButton } from '~/components/ui/table-action-button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -13,6 +20,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { TextInput } from '~/components/ui/text-input';
 import type { Adjustment, HRUser, HRStreamData } from './types';
@@ -55,15 +63,33 @@ export function HRPage({
     if (actionError) setDismissedError(false);
   }, [actionError]);
 
-  /** Close add-on modal after a successful mutation (same fetcher as approve actions). */
-  useEffect(() => {
-    if (fetcher.state !== 'idle') return;
-    const data = fetcher.data as { success?: boolean } | undefined;
-    if (data?.success && showAddAdjustment) setShowAddAdjustment(false);
-  }, [fetcher.state, fetcher.data, showAddAdjustment]);
+  /** Close add-on modal after a successful mutation (same fetcher handles
+   *  approve actions too — both intents resolve through this single hook). */
+  const handleHrFetcherSuccess = useCallback(() => {
+    setShowAddAdjustment(false);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleHrFetcherSuccess);
+
+  /** Optimistic-edit overlay: when HR clicks Approve on an adjustment row, flip
+   *  the row's `approvedBy` field IMMEDIATELY so the status badge changes from
+   *  PENDING to APPROVED on the same tick the toast fires. The canonical row
+   *  drops the overlay once revalidation completes. Snaps back if the action
+   *  fails — `useFetcherToast` surfaces the error. */
+  const buildAdjustmentApprovalPatches = useCallback<
+    (fd: FormData, intent: string) => { id: string; patch: Partial<Adjustment> }[] | null
+  >((fd, intent) => {
+    if (intent !== 'approveAdjustment') return null;
+    const adjustmentId = fd.get('adjustmentId')?.toString();
+    if (!adjustmentId) return null;
+    return [{ id: adjustmentId, patch: { approvedBy: viewer.id } }];
+  }, [viewer.id]);
+  const adjustmentApprovalPatches = useOptimisticListPatches<Adjustment>(
+    fetcher,
+    buildAdjustmentApprovalPatches,
+  );
 
   const isAdmin = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN';
-  const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER' || viewer.isFinanceOfficer;
+  const isHrOrFinance = isAdmin || viewer.role === 'HR_MANAGER' || viewer.role === 'FINANCE_OFFICER';
 
   return (
     <div className="space-y-4">
@@ -242,77 +268,114 @@ export function HRPage({
           {(resolvedAdjustments) => (
             <DeferredSection resolve={users} skeleton="table">
               {(resolvedUsers) => {
+                const overlaidAdjustments = applyOptimisticPatches(
+                  resolvedAdjustments,
+                  adjustmentApprovalPatches,
+                );
                 const getStaffName = (id: string) => resolvedUsers.find((u: HRUser) => u.id === id)?.name ?? id.slice(0, 8) + '...';
+                const adjustmentColumns: CompactTableColumn<Adjustment>[] = [
+                  {
+                    key: 'staff',
+                    header: 'Staff',
+                    render: (adj) => (
+                      <p className="text-sm font-medium text-app-fg">{getStaffName(adj.staffId)}</p>
+                    ),
+                  },
+                  {
+                    key: 'category',
+                    header: 'Category',
+                    render: (adj) => <StatusBadge status={adj.category} />,
+                  },
+                  {
+                    key: 'amount',
+                    header: 'Amount',
+                    align: 'right',
+                    render: (adj) => (
+                      <span
+                        className={`font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}
+                      >
+                        {Number(adj.amount) < 0 ? (
+                          <>
+                            <span>-</span>
+                            <NairaPrice amount={Math.abs(Number(adj.amount))} />
+                          </>
+                        ) : (
+                          <NairaPrice amount={Number(adj.amount)} />
+                        )}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'reason',
+                    header: 'Reason',
+                    render: (adj) => (
+                      <span className="text-sm text-app-fg-muted max-w-[200px] truncate block" title={adj.reason}>
+                        {adj.reason}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'approved',
+                    header: 'Approved',
+                    render: (adj) => <StatusBadge status={adj.approvedBy ? 'APPROVED' : 'PENDING'} />,
+                  },
+                  {
+                    key: 'date',
+                    header: 'Date',
+                    render: (adj) => (
+                      <span className="text-app-fg-muted text-sm">
+                        {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'action',
+                    header: 'Action',
+                    tight: true,
+                    render: (adj) =>
+                      !adj.approvedBy && adj.category !== 'CLAWBACK' ? (
+                        <fetcher.Form method="post" className="inline">
+                          <input type="hidden" name="intent" value="approveAdjustment" />
+                          <input type="hidden" name="adjustmentId" value={adj.id} />
+                          <TableActionButton
+                            type="submit"
+                            variant="primary"
+                            disabled={fetcher.state === 'submitting'}
+                          >
+                            Approve
+                          </TableActionButton>
+                        </fetcher.Form>
+                      ) : null,
+                  },
+                ];
                 return (
                   <div className="card p-0">
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr>
-                            <th className="table-header">Staff</th>
-                            <th className="table-header">Category</th>
-                            <th className="table-header text-right">Amount</th>
-                            <th className="table-header">Reason</th>
-                            <th className="table-header">Approved</th>
-                            <th className="table-header">Date</th>
-                            <th className="table-header">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {resolvedAdjustments.map((adj: Adjustment) => (
-                            <tr key={adj.id} className="table-row">
-                              <td className="table-cell">
-                                <p className="text-sm font-medium text-app-fg">{getStaffName(adj.staffId)}</p>
-                              </td>
-                              <td className="table-cell"><StatusBadge status={adj.category} /></td>
-                              <td className={`table-cell text-right font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}>
-                                {Number(adj.amount) < 0
-                                  ? <><span>-</span><NairaPrice amount={Math.abs(Number(adj.amount))} /></>
-                                  : <NairaPrice amount={Number(adj.amount)} />}
-                              </td>
-                              <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{adj.reason}</td>
-                              <td className="table-cell">
-                                <StatusBadge status={adj.approvedBy ? 'APPROVED' : 'PENDING'} />
-                              </td>
-                              <td className="table-cell text-app-fg-muted text-sm">
-                                {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                              </td>
-                              <td className="table-cell">
-                                {!adj.approvedBy && adj.category !== 'CLAWBACK' && (
-                                  <fetcher.Form method="post" className="inline">
-                                    <input type="hidden" name="intent" value="approveAdjustment" />
-                                    <input type="hidden" name="adjustmentId" value={adj.id} />
-                                    <Button type="submit" variant="primary" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Processing...">
-                                      Approve
-                                    </Button>
-                                  </fetcher.Form>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                          {resolvedAdjustments.length === 0 && (
-                            <tr>
-                              <td colSpan={7}>
-                                <EmptyState title="No earnings adjustments yet" description="Add an adjustment to get started." />
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="md:hidden space-y-3 px-1">
-                      {resolvedAdjustments.map((adj: Adjustment) => (
-                        <div key={adj.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+                    <CompactTable
+                      withCard={false}
+                      columns={adjustmentColumns}
+                      rows={overlaidAdjustments}
+                      rowKey={(adj) => adj.id}
+                      rowClassName={(adj) => (isOptimisticPatched(adjustmentApprovalPatches, adj.id) ? 'opacity-60' : '')}
+                      emptyTitle="No earnings adjustments yet"
+                      emptyDescription="Add an adjustment to get started."
+                      renderMobileCard={(adj) => (
+                        <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
                           <div className="flex items-center justify-between">
                             <span className="font-medium text-app-fg text-sm">{getStaffName(adj.staffId)}</span>
                             <StatusBadge status={adj.category} />
                           </div>
                           <div className="flex items-center justify-between">
-                            <span className={`font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}>
-                              {Number(adj.amount) < 0
-                                ? <><span>-</span><NairaPrice amount={Math.abs(Number(adj.amount))} /></>
-                                : <NairaPrice amount={Number(adj.amount)} />}
+                            <span
+                              className={`font-medium ${Number(adj.amount) < 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}
+                            >
+                              {Number(adj.amount) < 0 ? (
+                                <>
+                                  <span>-</span>
+                                  <NairaPrice amount={Math.abs(Number(adj.amount))} />
+                                </>
+                              ) : (
+                                <NairaPrice amount={Number(adj.amount)} />
+                              )}
                             </span>
                             <StatusBadge status={adj.approvedBy ? 'APPROVED' : 'PENDING'} />
                           </div>
@@ -321,15 +384,19 @@ export function HRPage({
                             <fetcher.Form method="post">
                               <input type="hidden" name="intent" value="approveAdjustment" />
                               <input type="hidden" name="adjustmentId" value={adj.id} />
-                              <Button type="submit" variant="primary" size="sm" className="text-xs w-full">Approve</Button>
+                              <TableActionButton
+                                type="submit"
+                                variant="primary"
+                                className="w-full justify-center"
+                                disabled={fetcher.state === 'submitting'}
+                              >
+                                Approve
+                              </TableActionButton>
                             </fetcher.Form>
                           )}
                         </div>
-                      ))}
-                      {resolvedAdjustments.length === 0 && (
-                        <EmptyState title="No adjustments yet" description="Add an adjustment to get started." />
                       )}
-                    </div>
+                    />
                   </div>
                 );
               }}

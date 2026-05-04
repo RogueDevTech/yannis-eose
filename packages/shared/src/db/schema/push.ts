@@ -39,7 +39,7 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
  */
 export const pushBroadcasts = pgTable('push_broadcasts', {
   id: uuidv7Pk(),
-  createdBy: text('created_by')
+  createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id),
   targetType: pushTargetTypeEnum('target_type').notNull(),
@@ -71,7 +71,7 @@ export const pushAutomationRules = pgTable('push_automation_rules', {
   bodyTemplate: text('body_template').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   branchId: uuid('branch_id').references(() => branches.id),
-  createdBy: text('created_by')
+  createdBy: uuid('created_by')
     .notNull()
     .references(() => users.id),
   lastFiredAt: timestamp('last_fired_at', { withTimezone: true }),

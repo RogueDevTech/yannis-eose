@@ -1,7 +1,8 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useFetcher } from '@remix-run/react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -13,6 +14,11 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 
 export const meta: MetaFunction = () => [{ title: 'Message Templates — Yannis EOSE' }];
 
@@ -25,6 +31,18 @@ interface MessageTemplate {
   createdAt: string;
   /** CS agents can only edit templates they themselves created. Heads/Admins can edit any. */
   createdBy: string;
+}
+
+function channelPillClass(channel: MessageTemplate['channel']): string {
+  return channel === 'WHATSAPP'
+    ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+    : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300';
+}
+
+function statusPillClass(status: MessageTemplate['status']): string {
+  return status === 'ACTIVE'
+    ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+    : 'bg-app-hover text-app-fg-muted';
 }
 
 // CS agents can read & contribute templates (own templates editable; others read-only).
@@ -295,8 +313,10 @@ export default function MessageTemplatesRoute() {
   const fetcher = useFetcher();
   // Heads / Admins / `messaging.templates.update` holders can edit any template.
   // CS agents can only edit ones they authored.
-  const canEditTemplate = (tpl: MessageTemplate) =>
-    canEditAnyTemplate || tpl.createdBy === currentUserId;
+  const canEditTemplate = useCallback(
+    (tpl: MessageTemplate) => canEditAnyTemplate || tpl.createdBy === currentUserId,
+    [canEditAnyTemplate, currentUserId],
+  );
   useFetcherToast(fetcher.data, { successMessage: 'Template saved' });
   const fetcherResult = fetcher.data as { success?: boolean; error?: string } | undefined;
 
@@ -307,7 +327,6 @@ export default function MessageTemplatesRoute() {
   const [filterChannel, setFilterChannel] = useState<'ALL' | 'SMS' | 'WHATSAPP'>('ALL');
   const [createBody, setCreateBody] = useState('');
   const [editBody, setEditBody] = useState('');
-  const [submittingIntent, setSubmittingIntent] = useState<'create' | 'update' | null>(null);
 
   const isSubmitting = fetcher.state !== 'idle';
   const createUnsupported = extractUnsupportedBodyTokens(createBody);
@@ -325,25 +344,80 @@ export default function MessageTemplatesRoute() {
     }
   }, [editTemplate]);
 
-  useEffect(() => {
-    if (!submittingIntent || fetcher.state !== 'idle') return;
-
-    if (fetcherResult?.success) {
-      if (submittingIntent === 'create') {
-        setCreateOpen(false);
-      } else {
-        setEditTemplate(null);
-      }
-    }
-
-    setSubmittingIntent(null);
-  }, [fetcher.state, fetcherResult?.success, submittingIntent]);
+  // Intent-filtered close: each modal closes only when its OWN action
+  // succeeds, so submitting create never tears down the edit panel and vice
+  // versa.
+  const handleCreateSuccess = useCallback(() => setCreateOpen(false), []);
+  const handleEditSuccess = useCallback(() => setEditTemplate(null), []);
+  useCloseOnFetcherSuccess(fetcher, handleCreateSuccess, { intent: 'create' });
+  useCloseOnFetcherSuccess(fetcher, handleEditSuccess, { intent: 'update' });
 
   const channelCounts = {
     ALL: templates.length,
     SMS: templates.filter((t) => t.channel === 'SMS').length,
     WHATSAPP: templates.filter((t) => t.channel === 'WHATSAPP').length,
   };
+
+  const templateColumns: CompactTableColumn<MessageTemplate>[] = useMemo(
+    () => [
+      {
+        key: 'name',
+        header: 'Name',
+        render: (tpl) => <span className="font-medium text-app-fg">{tpl.name}</span>,
+      },
+      {
+        key: 'channel',
+        header: 'Channel',
+        render: (tpl) => (
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${channelPillClass(tpl.channel)}`}>
+            {tpl.channel}
+          </span>
+        ),
+      },
+      {
+        key: 'preview',
+        header: 'Preview',
+        minWidth: 'min-w-[200px]',
+        cellClassName: 'max-w-xs',
+        cellTitle: (tpl) => toUiBody(tpl.body),
+        render: (tpl) => (
+          <span className="text-app-fg-muted text-xs truncate block">{toUiBody(tpl.body)}</span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (tpl) => (
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusPillClass(tpl.status)}`}>
+            {tpl.status}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        nowrap: true,
+        minWidth: 'min-w-[9.5rem]',
+        render: (tpl) => (
+          <div className="inline-flex flex-nowrap items-center justify-end gap-1.5 shrink-0">
+            <CompactTableActionButton onClick={() => setViewTemplate(tpl)}>View</CompactTableActionButton>
+            {canEditTemplate(tpl) ? (
+              <CompactTableActionButton
+                className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+                onClick={() => setEditTemplate(tpl)}
+              >
+                Edit
+              </CompactTableActionButton>
+            ) : null}
+          </div>
+        ),
+      },
+    ],
+    [canEditTemplate],
+  );
 
   return (
     <div className="space-y-4">
@@ -380,135 +454,47 @@ export default function MessageTemplatesRoute() {
         ]}
       />
 
-      {/* Templates table */}
-      <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="table-header-muted">Name</th>
-                <th className="table-header-muted">Channel</th>
-                <th className="table-header-muted">Preview</th>
-                <th className="table-header-muted">Status</th>
-                <th className="table-header-muted w-0" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-app-border">
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-app-fg-muted">
-                    No templates yet. Create one to enable SMS/WhatsApp messaging.
-                  </td>
-                </tr>
-              )}
-              {filtered.map((tpl) => (
-                <tr key={tpl.id} className="hover:bg-app-hover/50">
-                  <td className="px-4 py-3 font-medium text-app-fg">{tpl.name}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      tpl.channel === 'WHATSAPP'
-                        ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                        : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                    }`}>
-                      {tpl.channel}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-app-fg-muted text-xs max-w-xs truncate">
-                    {toUiBody(tpl.body)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                      tpl.status === 'ACTIVE'
-                        ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                        : 'bg-app-hover text-app-fg-muted'
-                    }`}>
-                      {tpl.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        onClick={() => setViewTemplate(tpl)}
-                      >
-                        View
-                      </Button>
-                      {canEditTemplate(tpl) && (
-                        <Button variant="secondary" size="sm" onClick={() => setEditTemplate(tpl)}>
-                          Edit
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="md:hidden space-y-3 p-3">
-          {filtered.length === 0 && (
-            <div className="rounded-lg border border-dashed border-app-border p-8 text-center text-app-fg-muted">
-              No templates yet. Create one to enable SMS/WhatsApp messaging.
-            </div>
-          )}
-          {filtered.map((tpl) => (
-            <div
-              key={tpl.id}
-              className="rounded-lg border border-app-border bg-app-elevated p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-medium text-app-fg truncate">{tpl.name}</p>
-                  <span className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                    tpl.channel === 'WHATSAPP'
-                      ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                      : 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                  }`}>
-                    {tpl.channel}
-                  </span>
-                </div>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                  tpl.status === 'ACTIVE'
-                    ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                    : 'bg-app-hover text-app-fg-muted'
-                }`}>
-                  {tpl.status}
+      <CompactTable<MessageTemplate>
+        columns={templateColumns}
+        rows={filtered}
+        rowKey={(tpl) => tpl.id}
+        emptyTitle="No templates yet"
+        emptyDescription="Create one to enable SMS/WhatsApp messaging."
+        renderMobileCard={(tpl) => (
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-medium text-app-fg truncate">{tpl.name}</p>
+                <span
+                  className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${channelPillClass(tpl.channel)}`}
+                >
+                  {tpl.channel}
                 </span>
               </div>
-              <p className="mt-3 text-xs text-app-fg-muted line-clamp-3 break-words">
-                {toUiBody(tpl.body)}
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  className="min-w-0 flex-1"
-                  onClick={() => setViewTemplate(tpl)}
-                >
-                  View
-                </Button>
-                {canEditTemplate(tpl) && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="min-w-0 flex-1"
-                    onClick={() => setEditTemplate(tpl)}
-                  >
-                    Edit
-                  </Button>
-                )}
-              </div>
-              {!canEditTemplate(tpl) && (
-                <p className="mt-2 text-center text-xs text-app-fg-muted">Read-only — created by another user</p>
-              )}
+              <span
+                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusPillClass(tpl.status)}`}
+              >
+                {tpl.status}
+              </span>
             </div>
-          ))}
-        </div>
-      </div>
+            <p className="text-xs text-app-fg-muted line-clamp-3 break-words">{toUiBody(tpl.body)}</p>
+            <div className="flex flex-nowrap items-stretch justify-end gap-2">
+              <CompactTableActionButton onClick={() => setViewTemplate(tpl)}>View</CompactTableActionButton>
+              {canEditTemplate(tpl) ? (
+                <CompactTableActionButton
+                  className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+                  onClick={() => setEditTemplate(tpl)}
+                >
+                  Edit
+                </CompactTableActionButton>
+              ) : null}
+            </div>
+            {!canEditTemplate(tpl) ? (
+              <p className="text-center text-xs text-app-fg-muted">Read-only — created by another user</p>
+            ) : null}
+          </div>
+        )}
+      />
 
       {viewTemplate && (
         <Modal
@@ -618,7 +604,6 @@ export default function MessageTemplatesRoute() {
                 event.preventDefault();
                 return;
               }
-              setSubmittingIntent('create');
             }}
           >
             <input type="hidden" name="intent" value="create" />
@@ -682,7 +667,6 @@ export default function MessageTemplatesRoute() {
                 event.preventDefault();
                 return;
               }
-              setSubmittingIntent('update');
             }}
           >
             <input type="hidden" name="intent" value="update" />

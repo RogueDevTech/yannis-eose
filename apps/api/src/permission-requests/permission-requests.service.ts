@@ -10,9 +10,31 @@ import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { withActor } from '../common/db/with-actor';
-import { isAdminLevel, isSuperAdminOnly } from '../common/authz';
+import { canonicalPermissionCode } from '@yannis/shared';
 import { ProductsService } from '../products/products.service';
 import { OrdersService } from '../orders/orders.service';
+
+/**
+ * Map of `permission_request.type` → the permission code that grants approve rights.
+ * Source of truth for both the queue-visibility filter and the approver gate. New
+ * request types added here are immediately surfaced in the approver matrix.
+ */
+const APPROVE_PERMISSION_BY_TYPE: Record<string, string> = {
+  USER_CREATION: 'permission_requests.user_creation.approve',
+  ROLE_CHANGE: 'permission_requests.role_change.approve',
+  PERMISSION_GRANT: 'permission_requests.permission_grant.approve',
+  PRODUCT_ARCHIVE: 'permission_requests.product_archive.approve',
+  ORDER_LINE_PRICE_CHANGE: 'permission_requests.order_line_price.approve',
+  ORDER_DELETION: 'permission_requests.order_deletion.approve',
+};
+
+/** True when `viewer.permissions` contains `code` (canonical-aware). */
+function viewerHasPermission(viewer: SessionUser, code: string): boolean {
+  const target = canonicalPermissionCode(code);
+  return (viewer.permissions ?? [])
+    .map((p) => canonicalPermissionCode(p))
+    .includes(target);
+}
 
 @Injectable()
 export class PermissionRequestsService {
@@ -24,19 +46,42 @@ export class PermissionRequestsService {
     private readonly ordersService: OrdersService,
   ) {}
 
+  /**
+   * Permission-first approver gate.
+   *
+   * Step 1 — capability: SuperAdmin always passes; otherwise the approver must hold
+   * the `permission_requests.<type>.approve` code (granted on SYSTEM templates by
+   * default, overridable per user via the permission matrix).
+   *
+   * Step 2 — context (order-domain types only): for ORDER_LINE_PRICE_CHANGE and
+   * ORDER_DELETION the approver must additionally pass the per-order branch/assignee
+   * check (`canActorEditOrderLinePrices`) so a HoCS in Branch A can't approve a
+   * price change on Branch B's order. Holding the permission grants the *capability*;
+   * this second gate enforces the *scope*.
+   */
   private async assertApproverMayProcessRequest(
     approver: SessionUser,
     req: InferSelectModel<typeof schema.permissionRequests>,
   ): Promise<void> {
-    if (req.type === 'PRODUCT_ARCHIVE') {
-      if (!isSuperAdminOnly(approver)) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Only SuperAdmin can process product archive requests.',
-        });
-      }
-      return;
+    // SuperAdmin bypasses both gates (locked CEO directive).
+    if (approver.role === 'SUPER_ADMIN') return;
+
+    const requiredCode = APPROVE_PERMISSION_BY_TYPE[req.type];
+    if (!requiredCode) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: `Unknown permission_request type: ${req.type}`,
+      });
     }
+
+    if (!viewerHasPermission(approver, requiredCode)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `You do not have permission to approve this request type. Requires \`${requiredCode}\`.`,
+      });
+    }
+
+    // Step 2 — order-domain contextual check.
     if (req.type === 'ORDER_LINE_PRICE_CHANGE' || req.type === 'ORDER_DELETION') {
       const payload = req.payload as { orderId?: string } | null;
       const orderId = payload?.orderId;
@@ -68,34 +113,55 @@ export class PermissionRequestsService {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message:
-            'Only Head of CS, Head of Logistics, Branch Admin, a CS team supervisor for the assignee, or an Admin may process this request.',
+            'You hold the approve permission but this order is outside your scope (different branch / not your team\'s assignee).',
         });
       }
-      return;
     }
-    const hasAudit = approver.permissions?.includes('audit.read') ?? false;
-    if (!hasAudit && !isAdminLevel(approver)) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'You do not have permission to process this type of request.',
-      });
+  }
+
+  /**
+   * Returns the set of permission_request types the viewer is allowed to see in the
+   * approval queue. Drives the server-side row filter — types the viewer can't
+   * approve are hidden, but rows the viewer personally submitted always surface
+   * (so a CS Agent can track their own price-change asks).
+   *
+   * Permission-first: a viewer sees a type iff they hold its approve code (or are
+   * admin-class). Adding a new request type is a one-line change to
+   * `APPROVE_PERMISSION_BY_TYPE` plus a default grant in `permission-catalog.ts`.
+   */
+  private viewableTypesForViewer(viewer: SessionUser): Set<string> {
+    if (viewer.role === 'SUPER_ADMIN') {
+      return new Set(Object.keys(APPROVE_PERMISSION_BY_TYPE));
     }
+    const types = new Set<string>();
+    for (const [type, code] of Object.entries(APPROVE_PERMISSION_BY_TYPE)) {
+      if (viewerHasPermission(viewer, code)) types.add(type);
+    }
+    return types;
   }
 
   /**
    * List all PENDING permission requests. Kept for backwards compatibility; thin wrapper
    * around {@link list} — new callers should use `list({ status: 'PENDING' })` directly.
    */
-  async listPending() {
-    return this.list({ status: 'PENDING' });
+  async listPending(viewer?: SessionUser) {
+    return this.list({ status: 'PENDING' }, viewer);
   }
 
   /**
    * List permission requests with an optional status filter.
    * Returns the full history (PENDING + APPROVED + REJECTED) when `status` is 'ALL' or omitted.
    * Enriched with requester, target, and approver names so the UI can show the full audit trail.
+   *
+   * When `viewer` is supplied, the result is scoped to:
+   *   - rows the viewer submitted (any type), AND
+   *   - rows of types the viewer is allowed to approve.
+   * SuperAdmin / Admin pass through unfiltered.
    */
-  async list(options?: { status?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' }) {
+  async list(
+    options?: { status?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' },
+    viewer?: SessionUser,
+  ) {
     const statusFilter = options?.status ?? 'PENDING';
 
     const baseQuery = this.db
@@ -116,11 +182,25 @@ export class PermissionRequestsService {
       })
       .from(schema.permissionRequests);
 
-    const rows = statusFilter === 'ALL'
+    const allRows = statusFilter === 'ALL'
       ? await baseQuery.orderBy(desc(schema.permissionRequests.createdAt))
       : await baseQuery
           .where(eq(schema.permissionRequests.status, statusFilter))
           .orderBy(desc(schema.permissionRequests.createdAt));
+
+    // Viewer-scope: when a viewer is supplied (every web call passes one), drop
+    // rows the caller has no business seeing. Admin-class users see everything;
+    // approvers see types they can approve; everyone else only sees rows they
+    // submitted personally. Without this, a CS Agent typing /admin/permission-requests
+    // could read every HR USER_CREATION, ORDER_DELETION reason, etc.
+    const rows = viewer && viewer.role !== 'SUPER_ADMIN'
+      ? (() => {
+          const viewableTypes = this.viewableTypesForViewer(viewer);
+          return allRows.filter(
+            (r) => r.requesterId === viewer.id || viewableTypes.has(r.type),
+          );
+        })()
+      : allRows;
 
     const enriched = await Promise.all(
       rows.map(async (row) => {

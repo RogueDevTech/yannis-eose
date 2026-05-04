@@ -1,20 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Link, useFetcher, useSearchParams, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { Checkbox } from '~/components/ui/checkbox';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { OrdersChartView } from '~/components/ui/orders-chart-view';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
-import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { Textarea } from '~/components/ui/textarea';
@@ -27,6 +27,8 @@ import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { CompactTable, type CompactTableColumn, type CompactTableMobileCardHelpers } from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
 import type { Order } from './types';
 
 // Status transitions that make sense for bulk operations
@@ -196,24 +198,6 @@ export function OrdersListPage({
     valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
   }));
 
-  // Checkbox handlers
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedIds.size === filteredOrders.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
-    }
-  };
-
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('Customer not picking');
 
@@ -296,6 +280,83 @@ export function OrdersListPage({
 
   const canBulkAction = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'STOCK_MANAGER';
 
+  const ordersListColumns = useMemo((): CompactTableColumn<Order>[] => {
+    const cols: CompactTableColumn<Order>[] = [
+      {
+        key: 'orderId',
+        header: 'Order ID',
+        render: (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
+      },
+      {
+        key: 'customer',
+        header: 'Customer',
+        render: (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+      },
+    ];
+    if (showCSAgentColumn) {
+      cols.push({
+        key: 'closer',
+        header: 'Assigned closer',
+        render: (order) => (
+          <span className="text-app-fg-muted">
+            {order.assignedCsId ? (
+              <Link
+                to={`/hr/users/${order.assignedCsId}`}
+                className="font-medium text-brand-500 hover:text-brand-600 hover:underline"
+              >
+                {order.assignedCsName ?? 'View user'}
+              </Link>
+            ) : (
+              '—'
+            )}
+          </span>
+        ),
+      });
+    }
+    cols.push(
+      {
+        key: 'status',
+        header: 'Status',
+        render: (order) => <OrderStatusBadge status={order.status} />,
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        headerClassName: 'text-right',
+        render: (order) => (
+          <span className="font-medium">
+            <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+          </span>
+        ),
+      },
+      {
+        key: 'created',
+        header: 'Created',
+        render: (order) => (
+          <span className="text-app-fg-muted">
+            {new Date(order.createdAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'center',
+        headerClassName: 'text-center',
+        tight: true,
+        mobileShowLabel: false,
+        render: (order) => <TableActionButton to={`/admin/orders/${order.id}`} variant="primary">View</TableActionButton>,
+      },
+    );
+    return cols;
+  }, [showCSAgentColumn]);
+
   const statusOptions = STATUS_OPTIONS.map((status) => ({
     value: status,
     label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
@@ -305,6 +366,14 @@ export function OrdersListPage({
     { value: 'ALL', label: 'All closers' },
     ...(csAgentsForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName })),
   ];
+
+  const ordersListToolbarFilterBadge = useMemo(() => {
+    let n = 0;
+    if (selectedStatus !== 'ALL') n += 1;
+    const agent = searchParams.get('csAgentId') || 'ALL';
+    if (showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && agent !== 'ALL') n += 1;
+    return n;
+  }, [selectedStatus, showCSAgentColumn, csAgentsForFilter?.length, searchParams]);
 
   return (
     <div className="space-y-4">
@@ -322,41 +391,87 @@ export function OrdersListPage({
         title={isCSAgent ? 'My Orders' : 'CS Orders'}
         description={isCSAgent ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {liveEvents != null && liveEvents.length > 0 && (
-              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+          <>
+            <PageHeaderMobileTools
+              sheetTitle="CS orders tools"
+              sheetSubtitle={<span>Chart, offline order, and export</span>}
+              triggerAriaLabel="CS orders toolbar"
+              mobileLeading={
+                liveEvents != null && liveEvents.length > 0 ? (
+                  <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+                ) : null
+              }
+              desktop={
+              <>
+                {liveEvents != null && liveEvents.length > 0 && (
+                  <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+                )}
+                <PageRefreshButton />
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
+                {canCreateOffline && (
+                  <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
+                    <span className="hidden sm:inline">Create offline order</span>
+                    <span className="sm:hidden">+ Order</span>
+                  </Button>
+                )}
+                <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                  Generate report
+                </Button>
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowChartView((v) => !v);
+                  }}
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </Button>
+                {canCreateOffline && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setCreateOfflineOpen(true);
+                    }}
+                  >
+                    Create offline order
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+              </>
             )}
-            <PageRefreshButton />
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowChartView((v) => !v)}
-            >
-              {showChartView ? 'View as data' : 'View data in chart'}
-            </Button>
-            {canCreateOffline && (
-              <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
-                <span className="hidden sm:inline">Create offline order</span>
-                <span className="sm:hidden">+ Order</span>
-              </Button>
-            )}
-          </div>
+            />
+            <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+              <DateFilterBar
+                startDate={filters?.startDate ?? ''}
+                endDate={filters?.endDate ?? ''}
+                periodAllTime={filters?.periodAllTime ?? false}
+              />
+            </div>
+          </>
         }
       />
-
-      {/* Secondary action row — Export only (Live moved up next to refresh; date filter lives in filters card below) */}
-      <div className="flex flex-wrap items-center gap-2 -mt-2">
-        <div className="ml-auto">
-          <Button
-            variant="secondary"
-            size="sm"
-              onClick={() => setShowExportModal(true)}
-          >
-            Generate report
-          </Button>
-        </div>
-      </div>
 
       {/* Status totals — moved above My Workload so the funnel snapshot reads first. */}
       <OverviewStatStrip
@@ -521,81 +636,129 @@ export function OrdersListPage({
         defaultColumns={showCSAgentColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
       />
 
-      {/* Filters bar */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Date pill — same chrome we use on MarketingTeamPage so the filter is visually
-              prominent and easy to spot. The bare DateFilterBar is just a text button which
-              disappears into the toolbar; the pill wrapper makes it a clear control. */}
-          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-            <DateFilterBar
-              startDate={filters?.startDate ?? ''}
-              endDate={filters?.endDate ?? ''}
-              periodAllTime={filters?.periodAllTime ?? false}
-            />
-          </div>
-          <form
-            method="get"
-            className="flex-1"
-            onSubmit={(e) => {
-              e.preventDefault();
-              setSearchParams((p) => {
-                const next = new URLSearchParams(p);
-                next.set('page', '1');
-                if (searchQuery.trim()) next.set('search', searchQuery.trim());
-                else next.delete('search');
-                return next;
-              });
-            }}
-          >
-            <SearchInput
-              name="search"
-              placeholder="Search by customer name..."
-              value={searchQuery}
-              onChange={(val) => setSearchQuery(val)}
-              wrapperClassName="w-full"
-            />
-          </form>
-          <FormSelect
-            value={selectedStatus}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSelectedStatus(v);
-              setSelectedIds(new Set());
-              setBulkResult(null);
-              setSearchParams((p) => {
-                const next = new URLSearchParams(p);
-                next.set('page', '1');
-                if (v === 'ALL') next.delete('status');
-                else next.set('status', v);
-                return next;
-              });
-            }}
-            options={statusOptions}
-            wrapperClassName="w-full sm:w-48"
-          />
-          {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && (
-            <SearchableSelect
-              id="orders-filter-closer"
-              value={searchParams.get('csAgentId') || 'ALL'}
-              onChange={(v) => {
-                setSelectedIds(new Set());
-                setBulkResult(null);
-                setSearchParams((p) => {
-                  const next = new URLSearchParams(p);
-                  next.set('page', '1');
-                  if (v && v !== 'ALL') next.set('csAgentId', v);
-                  else next.delete('csAgentId');
-                  return next;
-                });
-              }}
-              options={csAgentOptions}
-              wrapperClassName="w-full sm:w-48"
-              placeholder="All closers"
-              searchPlaceholder="Search closers..."
-            />
-          )}
-        </div>
+      <div className="card p-0 overflow-hidden">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          badgeCount={ordersListToolbarFilterBadge}
+          sheetSubtitle={<span>Status and closer apply immediately</span>}
+          searchRow={
+            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
+              <form
+                method="get"
+                className="min-w-0 w-full md:flex-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setSearchParams((p) => {
+                    const next = new URLSearchParams(p);
+                    next.set('page', '1');
+                    if (searchQuery.trim()) next.set('search', searchQuery.trim());
+                    else next.delete('search');
+                    return next;
+                  });
+                }}
+              >
+                <SearchInput
+                  name="search"
+                  placeholder="Search by customer name..."
+                  value={searchQuery}
+                  onChange={(val) => setSearchQuery(val)}
+                  wrapperClassName="w-full"
+                />
+              </form>
+              <div className="hidden shrink-0 items-center gap-3 md:flex">
+                <FormSelect
+                  value={selectedStatus}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedStatus(v);
+                    setSelectedIds(new Set());
+                    setBulkResult(null);
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v === 'ALL') next.delete('status');
+                      else next.set('status', v);
+                      return next;
+                    });
+                  }}
+                  options={statusOptions}
+                  wrapperClassName="w-full min-w-0 sm:w-48"
+                />
+                {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 ? (
+                  <SearchableSelect
+                    id="orders-filter-closer"
+                    value={searchParams.get('csAgentId') || 'ALL'}
+                    onChange={(v) => {
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('csAgentId', v);
+                        else next.delete('csAgentId');
+                        return next;
+                      });
+                    }}
+                    options={csAgentOptions}
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                    placeholder="All closers"
+                    searchPlaceholder="Search closers..."
+                  />
+                ) : null}
+              </div>
+            </div>
+          }
+          desktopInlineFilters={null}
+          sheetFilterBody={
+            <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                <FormSelect
+                  value={selectedStatus}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedStatus(v);
+                    setSelectedIds(new Set());
+                    setBulkResult(null);
+                    setSearchParams((p) => {
+                      const next = new URLSearchParams(p);
+                      next.set('page', '1');
+                      if (v === 'ALL') next.delete('status');
+                      else next.set('status', v);
+                      return next;
+                    });
+                  }}
+                  options={statusOptions}
+                  wrapperClassName="w-full"
+                />
+              </div>
+              {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Closer</span>
+                  <SearchableSelect
+                    id="orders-filter-closer-sheet"
+                    value={searchParams.get('csAgentId') || 'ALL'}
+                    onChange={(v) => {
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('csAgentId', v);
+                        else next.delete('csAgentId');
+                        return next;
+                      });
+                    }}
+                    options={csAgentOptions}
+                    wrapperClassName="w-full"
+                    placeholder="All closers"
+                    searchPlaceholder="Search closers..."
+                  />
+                </div>
+              ) : null}
+            </>
+          }
+        />
       </div>
 
       {/* Orders table — replaced with chart view when the user toggles "View data in chart" */}
@@ -608,181 +771,98 @@ export function OrdersListPage({
         />
       ) : (
       <TableLoadingOverlay show={isLoaderRefetchBusy}>
-      <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                {canBulkAction && (
-                  <th className="table-header w-10">
-                    <Checkbox
-                      checked={filteredOrders.length > 0 && selectedIds.size === filteredOrders.length}
-                      onChange={toggleSelectAll}
-                    />
-                  </th>
-                )}
-                <th className="table-header">Order ID</th>
-                <th className="table-header">Customer</th>
-                {showCSAgentColumn && <th className="table-header">Assigned closer</th>}
-                <th className="table-header">Status</th>
-                <th className="table-header text-right">Amount</th>
-                <th className="table-header">Created</th>
-                <th className="table-header text-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredOrders.map((order) => (
-                <tr
-                  key={order.id}
-                  className={`table-row ${selectedIds.has(order.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''} ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}
+        <div className="card p-0">
+          <CompactTable<Order>
+            withCard={false}
+            columns={ordersListColumns}
+            rows={filteredOrders}
+            rowKey={(o) => o.id}
+            rowClassName={(o) =>
+              [selectedIds.has(o.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '', highlightedIds.has(o.id) ? 'row-new-highlight' : '']
+                .filter(Boolean)
+                .join(' ')
+            }
+            selection={
+              canBulkAction
+                ? {
+                    selectedIds,
+                    onToggle: (id, selected) => {
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        if (selected) next.add(id);
+                        else next.delete(id);
+                        return next;
+                      });
+                    },
+                    onToggleAll: (selectAll) => {
+                      if (selectAll) setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
+                      else setSelectedIds(new Set());
+                    },
+                  }
+                : undefined
+            }
+            emptyTitle={orders.length === 0 ? 'No orders yet' : 'No orders found'}
+            emptyDescription={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}
+            renderMobileCard={(order, _i, helpers: CompactTableMobileCardHelpers<Order>) => (
+              <div className={`relative ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}>
+                {canBulkAction && helpers.rowSelection ? (
+                  <div className="absolute left-0 top-0 z-10">{helpers.rowSelection}</div>
+                ) : null}
+                <div
+                  className={['p-1', canBulkAction ? 'pl-10' : '', selectedIds.has(order.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '']
+                    .filter(Boolean)
+                    .join(' ')}
                 >
-                  {canBulkAction && (
-                    <td className="table-cell w-10">
-                      <Checkbox
-                        checked={selectedIds.has(order.id)}
-                        onChange={() => toggleSelect(order.id)}
-                      />
-                    </td>
-                  )}
-                  <td className="table-cell">
-                    <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />
-                  </td>
-                  <td className="table-cell font-medium text-app-fg">
-                    {order.customerName}
-                  </td>
-                  {showCSAgentColumn && (
-                    <td className="table-cell text-app-fg-muted">
-                      {order.assignedCsId ? (
-                        <Link
-                          to={`/hr/users/${order.assignedCsId}`}
-                          className="text-brand-500 hover:text-brand-600 font-medium hover:underline"
-                        >
-                          {order.assignedCsName ?? 'View user'}
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                  )}
-                  <td className="table-cell">
-                    <OrderStatusBadge status={order.status} />
-                  </td>
-                  <td className="table-cell text-right font-medium">
-                    <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
-                  </td>
-                  <td className="table-cell text-app-fg-muted">
-                    {new Date(order.createdAt).toLocaleDateString('en-NG', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex flex-wrap items-center justify-center gap-1.5">
-                      <Link
-                        to={`/admin/orders/${order.id}`}
-                        className="btn-secondary btn-sm"
-                      >
-                        View
-                      </Link>
+                  <Link to={`/admin/orders/${order.id}`} className="block rounded-md p-3 transition-opacity hover:opacity-90">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="font-medium text-app-fg">{order.customerName}</span>
+                      <OrderStatusBadge status={order.status} />
                     </div>
-                  </td>
-                </tr>
-              ))}
-              {filteredOrders.length === 0 && (
-                <tr>
-                  <td colSpan={(canBulkAction ? 1 : 0) + 5 + (showCSAgentColumn ? 1 : 0)}>
-                    <EmptyState
-                      title={orders.length === 0 ? 'No orders yet' : 'No orders found'}
-                      description={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}
-                      variant="card"
-                    />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile card list */}
-        <div className="md:hidden space-y-3 px-1">
-          {filteredOrders.map((order) => (
-            <div key={order.id} className={`rounded-lg border border-app-border bg-app-elevated relative ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}>
-              {canBulkAction && (
-                <div className="absolute top-4 left-4 z-10">
-                  <Checkbox
-                    checked={selectedIds.has(order.id)}
-                    onChange={() => toggleSelect(order.id)}
-                  />
-                </div>
-              )}
-              <div className={`p-4 ${canBulkAction ? 'pl-10' : ''} ${selectedIds.has(order.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : ''}`}>
-                <Link
-                  to={`/admin/orders/${order.id}`}
-                  className="block hover:opacity-90 transition-opacity"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-app-fg">
-                      {order.customerName}
-                    </span>
-                    <OrderStatusBadge status={order.status} />
-                  </div>
-                  {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) && (
-                    <div className="text-sm mb-0.5 text-app-fg-muted">
-                      {order.assignedCsId ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            navigate(`/hr/users/${order.assignedCsId}`);
-                          }}
-                        >
-                          {order.assignedCsName ?? 'View user'}
-                        </Button>
-                      ) : (
-                        <span>{order.assignedCsName ?? '—'}</span>
-                      )}
+                    {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) ? (
+                      <div className="mb-0.5 text-sm text-app-fg-muted">
+                        {order.assignedCsId ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              navigate(`/hr/users/${order.assignedCsId}`);
+                            }}
+                          >
+                            {order.assignedCsName ?? 'View user'}
+                          </Button>
+                        ) : (
+                          <span>{order.assignedCsName ?? '—'}</span>
+                        )}
+                      </div>
+                    ) : null}
+                    <div className="flex items-center justify-between text-sm text-app-fg-muted">
+                      <span className="font-mono">{order.customerPhoneDisplay}</span>
+                      <span className="font-medium text-app-fg">
+                        <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+                      </span>
                     </div>
-                  )}
-                  <div className="flex items-center justify-between text-sm text-app-fg-muted">
-                    <span className="font-mono">{order.customerPhoneDisplay}</span>
-                    <span className="font-medium text-app-fg">
-                      <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
-                    </span>
-                  </div>
-                  <div className="text-xs text-app-fg-muted mt-1">
-                    {new Date(order.createdAt).toLocaleDateString('en-NG', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </div>
-                </Link>
-                <div className="flex flex-wrap items-center gap-3 mt-2 pt-2 border-t border-app-border">
-                  <Link
-                    to={`/admin/orders/${order.id}`}
-                    className="btn-secondary btn-sm"
-                  >
-                    View
+                    <div className="mt-1 text-xs text-app-fg-muted">
+                      {new Date(order.createdAt).toLocaleDateString('en-NG', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </div>
                   </Link>
+                  <div className="flex flex-wrap items-center gap-3 border-t border-app-border px-3 pb-3 pt-2">
+                    <TableActionButton to={`/admin/orders/${order.id}`} variant="primary">
+                      View
+                    </TableActionButton>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-          {filteredOrders.length === 0 && (
-            <EmptyState
-              title={orders.length === 0 ? 'No orders yet' : 'No orders found'}
-              description={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}
-              variant="card"
-            />
-          )}
+            )}
+          />
         </div>
-      </div>
       </TableLoadingOverlay>
       )}
 

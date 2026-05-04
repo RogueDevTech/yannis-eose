@@ -26,6 +26,11 @@ interface PaginationProps {
   /** Number of sibling pages shown around the current page */
   siblingCount?: number;
   className?: string;
+  /**
+   * When true, still render Prev / Page X of Y / Next when there is only one page
+   * (buttons disabled as appropriate). Hidden when `totalPages` is 0.
+   */
+  showWhenSinglePage?: boolean;
 }
 
 function buildPages(page: number, total: number, siblings: number): (number | '...')[] {
@@ -51,10 +56,12 @@ export function Pagination({
   showEdgeButtons = false,
   siblingCount = 1,
   className = '',
+  showWhenSinglePage = false,
 }: PaginationProps) {
   const [searchParams] = useSearchParams();
 
-  if (totalPages <= 1) return null;
+  if (totalPages < 1) return null;
+  if (totalPages === 1 && !showWhenSinglePage) return null;
 
   function buildHref(p: number) {
     const params = new URLSearchParams(searchParams);

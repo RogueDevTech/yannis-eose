@@ -2,6 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requireStaffAccountsAccess, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
 import type {
   UserCreateProduct,
@@ -10,7 +11,6 @@ import type {
   UserCreateBranch,
   UserCreateLoaderData,
   ActiveHeadUser,
-  FinanceHatHolder,
   RoleTemplateOption,
   PermissionCatalogItem,
 } from '~/features/users/types';
@@ -22,21 +22,20 @@ export const meta: MetaFunction = () => [
 // ─── Loader ─────────────────────────────────────────────
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireStaffAccountsAccess(request);
+  const viewer = await requireStaffAccountsAccess(request);
   const cookie = getSessionCookie(request);
 
   const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20, sortBy: 'name', sortOrder: 'asc' }));
   const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
-  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, financeHolderRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
+  const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
     await Promise.all([
     apiRequest<unknown>(`/trpc/products.list?input=${productsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/users.getCurrentFinanceOfficer', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie }),
@@ -84,22 +83,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
         {})
     : {};
 
+  const branches = ((branchesRes.ok
+    ? (branchesRes.data as { result?: { data?: unknown[] } })?.result?.data
+    : []) ?? []) as UserCreateBranch[];
+
+  const activeBranchIds = new Set(branches.filter((b) => b.status === 'ACTIVE').map((b) => b.id));
+  const sessionBranchId = viewer.currentBranchId ?? null;
+  let defaultMembershipBranchId: string | null = null;
+  if (sessionBranchId && activeBranchIds.has(sessionBranchId)) {
+    defaultMembershipBranchId = sessionBranchId;
+  } else if (activeBranchIds.size === 1) {
+    defaultMembershipBranchId = [...activeBranchIds][0] ?? null;
+  }
+
   return {
     products: extractData(productsRes, 'products') as UserCreateProduct[],
-    locations: extractData(locationsRes, 'locations') as UserCreateLocation[],
+    locations: (extractData(locationsRes, 'locations') as Array<{ id: string; name: string; address: string; providerName?: string | null }>).map(
+      (l) => ({ id: l.id, name: l.name, address: l.address, providerName: l.providerName ?? null }),
+    ) as UserCreateLocation[],
     plans: extractData(plansRes, 'plans') as UserCreateCommissionPlan[],
-    branches: ((branchesRes.ok
-      ? (branchesRes.data as { result?: { data?: unknown[] } })?.result?.data
-      : []) ?? []) as UserCreateBranch[],
+    branches,
     activeHeads: ((activeHeadsRes.ok
       ? (activeHeadsRes.data as { result?: { data?: unknown[] } })?.result?.data
       : []) ?? []) as ActiveHeadUser[],
-    currentFinanceOfficer: (financeHolderRes.ok
-      ? (financeHolderRes.data as { result?: { data?: FinanceHatHolder | null } })?.result?.data ?? null
-      : null) as FinanceHatHolder | null,
     roleTemplates,
     permissionCatalog,
     templatePermissionsById,
+    defaultMembershipBranchId,
   };
 }
 
@@ -141,7 +151,6 @@ export async function action({ request }: ActionFunctionArgs) {
   // Section 4: Contact
   const phone = formData.get('phone')?.toString() || undefined;
 
-  const isFinanceOfficer = formData.get('isFinanceOfficer') === 'true';
   const permissionOverridesRaw = formData.get('permissionOverrides')?.toString();
 
   // Build request body (password is auto-generated on the backend)
@@ -151,7 +160,6 @@ export async function action({ request }: ActionFunctionArgs) {
     restrictProductAccess,
     primaryBranchId,
     branchIds: [],
-    isFinanceOfficer,
     roleTemplateId,
   };
 
@@ -200,10 +208,11 @@ export async function action({ request }: ActionFunctionArgs) {
   });
 
   if (!res.ok) {
-    const errorData = res.data as Record<string, unknown>;
-    const errObj = errorData?.error as Record<string, unknown> | undefined;
+    // Use the shared extractor — handles tRPC v11's `error.json.message`
+    // wrapping that the previous inline reader missed (and was falling back
+    // to "Failed to create user" for every error).
     return json(
-      { error: (errObj?.message as string) ?? 'Failed to create user' },
+      { error: extractApiErrorMessage(res.data, 'Failed to create user') },
       { status: safeStatus(res.status) },
     );
   }

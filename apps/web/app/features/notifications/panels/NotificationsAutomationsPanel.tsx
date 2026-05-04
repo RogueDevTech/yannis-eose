@@ -1,5 +1,11 @@
 import { useFetcher } from '@remix-run/react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -159,11 +165,7 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
   }
 
   const isSubmitting = fetcher.state !== 'idle';
-  useEffect(() => {
-    if (fetcher.state === 'idle' && (fetcher.data as { success?: boolean } | undefined)?.success) {
-      closeModal();
-    }
-  }, [fetcher.state, fetcher.data]);
+  useCloseOnFetcherSuccess(fetcher, closeModal);
 
   function handleDelete(rule: AutomationRule) {
     if (!window.confirm(`Delete rule "${rule.name}"? This cannot be undone.`)) return;
@@ -186,6 +188,62 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
   }
 
   const formIntent = editingRule ? 'update' : 'create';
+
+  const ruleColumns: CompactTableColumn<AutomationRule>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      render: (rule) => <span className="font-medium text-app-fg">{rule.name}</span>,
+    },
+    {
+      key: 'trigger',
+      header: 'Trigger',
+      render: (rule) => (
+        <span className="inline-flex items-center gap-1.5 max-w-[200px]">
+          <span
+            className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+              rule.triggerType === 'SCHEDULED' ? 'bg-info-500' : 'bg-warning-500'
+            }`}
+          />
+          <span className="truncate text-app-fg-muted">{describeCron(rule)}</span>
+        </span>
+      ),
+    },
+    {
+      key: 'target',
+      header: 'Target',
+      render: (rule) => <span className="text-app-fg-muted">{describeTarget(rule)}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (rule) => (
+        <ToggleSwitch
+          checked={rule.isActive}
+          onChange={() => handleToggle(rule)}
+          disabled={toggleFetcher.state !== 'idle'}
+        />
+      ),
+    },
+    {
+      key: 'lastFired',
+      header: 'Last fired',
+      render: (rule) => <span className="text-app-fg-muted">{relativeTime(rule.lastFiredAt)}</span>,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      tight: true,
+      render: (rule) => (
+        <div className="flex items-center gap-2">
+          <CompactTableActionButton onClick={() => openEdit(rule)}>Edit</CompactTableActionButton>
+          <CompactTableActionButton tone="danger" onClick={() => handleDelete(rule)}>
+            Delete
+          </CompactTableActionButton>
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -220,66 +278,13 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
             <p className="mt-1 text-xs">Create your first rule to get started.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-app-border">
-              <thead>
-                <tr>
-                  {['Name', 'Trigger', 'Target', 'Status', 'Last fired', 'Actions'].map((h) => (
-                    <th
-                      key={h}
-                      className="table-header"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-app-border">
-                {rules.map((rule) => (
-                  <tr key={rule.id} className="transition-colors hover:bg-app-hover/40">
-                    <td className="px-4 py-3 text-sm font-medium text-app-fg">{rule.name}</td>
-                    <td className="max-w-[200px] px-4 py-3 text-sm text-app-fg-muted">
-                      <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${
-                            rule.triggerType === 'SCHEDULED' ? 'bg-info-500' : 'bg-warning-500'
-                          }`}
-                        />
-                        <span className="truncate">{describeCron(rule)}</span>
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-app-fg-muted">{describeTarget(rule)}</td>
-                    <td className="px-4 py-3">
-                      <ToggleSwitch
-                        checked={rule.isActive}
-                        onChange={() => handleToggle(rule)}
-                        disabled={toggleFetcher.state !== 'idle'}
-                      />
-                    </td>
-                    <td className="px-4 py-3 text-sm text-app-fg-muted">{relativeTime(rule.lastFiredAt)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(rule)}
-                          className="text-xs font-medium text-brand-600 hover:text-brand-800 dark:text-brand-400 dark:hover:text-brand-300"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(rule)}
-                          className="text-xs font-medium text-danger-500 hover:text-danger-700 dark:text-danger-400 dark:hover:text-danger-300"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CompactTable
+            withCard={false}
+            columns={ruleColumns}
+            rows={rules}
+            rowKey={(rule) => rule.id}
+            rowClassName={() => 'transition-colors hover:bg-app-hover/40'}
+          />
         )}
       </div>
 

@@ -1,20 +1,28 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { FormConfigCustomFieldsPreview } from './form-config-custom-preview';
-import type { CustomFormField, StandardFieldConfig, StandardFieldKey } from './types';
-import { STANDARD_FIELD_LABELS } from './standard-fields';
+import type { CustomFormField, ProductOfferRow, StandardFieldConfig, StandardFieldKey } from './types';
+import {
+  cloneDefaultAdditionalFieldSelectOptions,
+  DEFAULT_GENDER_OPTIONS,
+  type AdditionalFieldSelectOptionsState,
+  STANDARD_FIELD_LABELS,
+} from './standard-fields';
 
 const DEFAULT_HEADING = 'Place Your Order';
-const DEFAULT_SUBTITLE = 'Fill in your details below';
 const DEFAULT_BUTTON = 'Submit Order';
 
-const PREVIEW_STATE_OPTIONS = ['Lagos', 'Abuja (FCT)', 'Rivers', 'Kano', 'Oyo', 'Delta'];
-const PREVIEW_DATE_OPTIONS = [
-  'As soon as possible',
-  'Within 1-2 days',
-  'Within 3-5 days',
-  'Next week',
-  'Specific date (mention in notes)',
-];
+function formatOfferPrice(price: string | number): string {
+  const num = typeof price === 'string' ? parseFloat(price) : price;
+  if (Number.isNaN(num)) return String(price);
+  const formatted = Math.abs(num).toLocaleString('en-NG');
+  return num < 0 ? `-₦${formatted}` : `₦${formatted}`;
+}
+
+export interface FormFullPreviewPreviewProduct {
+  id: string;
+  name: string;
+  offers: ProductOfferRow[];
+}
 
 export interface FormFullPreviewProps {
   heading: string;
@@ -25,6 +33,12 @@ export interface FormFullPreviewProps {
   standardFields: StandardFieldConfig[];
   successCallbackUrl?: string;
   customFields: CustomFormField[];
+  /** Single-product forms: offers from the selected catalog product. Omit the block when empty. */
+  previewOffers?: ProductOfferRow[];
+  /** Multi-product forms: each product’s tiers (from loader). Omit tiers when a product has no offers. */
+  previewProducts?: FormFullPreviewPreviewProduct[];
+  /** Dropdown option lists for gender / delivery state / preferred date (matches Edge). */
+  additionalSelectOptions?: AdditionalFieldSelectOptionsState;
   className?: string;
 }
 
@@ -37,13 +51,16 @@ export function FormFullPreview({
   standardFields,
   successCallbackUrl,
   customFields,
+  previewOffers = [],
+  previewProducts,
+  additionalSelectOptions,
   className = '',
 }: FormFullPreviewProps) {
   const [submitted, setSubmitted] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('');
 
   const h = heading.trim() || DEFAULT_HEADING;
-  const sub = subtitle.trim() || DEFAULT_SUBTITLE;
+  const sub = subtitle.trim();
   const btn = buttonText.trim() || DEFAULT_BUTTON;
 
   const sorted = [...customFields].sort((a, b) => a.order - b.order);
@@ -53,6 +70,82 @@ export function FormFullPreview({
   );
   const callbackUrl = (successCallbackUrl ?? '').trim();
   const validCallback = /^https?:\/\//i.test(callbackUrl);
+
+  const resolvedSelectOptions = useMemo(
+    () => additionalSelectOptions ?? cloneDefaultAdditionalFieldSelectOptions(),
+    [additionalSelectOptions],
+  );
+  const defaults = useMemo(() => cloneDefaultAdditionalFieldSelectOptions(), []);
+  const previewStateOpts = useMemo(
+    () =>
+      resolvedSelectOptions.deliveryStateOptions.length > 0
+        ? resolvedSelectOptions.deliveryStateOptions
+        : defaults.deliveryStateOptions,
+    [resolvedSelectOptions.deliveryStateOptions, defaults.deliveryStateOptions],
+  );
+  const previewDateOpts = useMemo(
+    () =>
+      resolvedSelectOptions.preferredDeliveryDateOptions.length > 0
+        ? resolvedSelectOptions.preferredDeliveryDateOptions
+        : defaults.preferredDeliveryDateOptions,
+    [resolvedSelectOptions.preferredDeliveryDateOptions, defaults.preferredDeliveryDateOptions],
+  );
+  const previewGenderOpts = useMemo(
+    () => (resolvedSelectOptions.genderOptions.length > 0 ? resolvedSelectOptions.genderOptions : DEFAULT_GENDER_OPTIONS),
+    [resolvedSelectOptions.genderOptions],
+  );
+
+  /** Reset demo submission when builder inputs change so the preview stays in sync. */
+  const previewSignature = useMemo(
+    () =>
+      JSON.stringify({
+        heading,
+        subtitle,
+        buttonText,
+        accentColor,
+        multiProduct,
+        standardFields,
+        successCallbackUrl: callbackUrl,
+        customFields: [...customFields].sort((a, b) => a.order - b.order),
+        previewOffers,
+        previewProducts,
+        additionalSelectOptions: resolvedSelectOptions,
+      }),
+    [
+      heading,
+      subtitle,
+      buttonText,
+      accentColor,
+      multiProduct,
+      standardFields,
+      callbackUrl,
+      customFields,
+      previewOffers,
+      previewProducts,
+      resolvedSelectOptions,
+    ],
+  );
+
+  const offerSections = useMemo(() => {
+    if (multiProduct) {
+      const rows = previewProducts ?? [];
+      return rows
+        .map((p) => ({
+          id: p.id,
+          name: p.name.trim() || 'Product',
+          offers: (p.offers ?? []).filter((o) => o.label?.trim()),
+        }))
+        .filter((p) => p.offers.length > 0);
+    }
+    const offers = (previewOffers ?? []).filter((o) => o.label?.trim());
+    if (offers.length === 0) return [];
+    return [{ id: 'single', name: '', offers }];
+  }, [multiProduct, previewProducts, previewOffers]);
+
+  useEffect(() => {
+    setSubmitted(false);
+    setPaymentMethod('');
+  }, [previewSignature]);
 
   if (submitted) {
     return (
@@ -102,7 +195,7 @@ export function FormFullPreview({
   return (
     <div
       className={[
-        'card text-left p-4 space-y-4 overflow-y-auto bg-[#efefef] dark:bg-app-elevated',
+        'card text-left p-3 sm:p-4 space-y-3 sm:space-y-4 overflow-y-auto bg-[#efefef] dark:bg-app-elevated',
         'max-h-[min(800px,calc(100vh-var(--header-height,3.5rem)-1.5rem))]',
         className,
       ]
@@ -110,51 +203,82 @@ export function FormFullPreview({
         .join(' ')}
     >
       <div>
-        <h2 className="text-3xl font-semibold text-app-fg leading-tight">{h}</h2>
-        {sub && <p className="text-2xl text-app-fg-muted mt-3">{sub}</p>}
+        <h2 className="text-2xl sm:text-3xl font-semibold text-app-fg leading-tight">{h}</h2>
+        {sub && <p className="text-lg sm:text-2xl text-app-fg-muted mt-2 sm:mt-3">{sub}</p>}
       </div>
-
-      <span className="inline-flex items-center rounded-xl bg-warning-100 text-warning-900 px-3 py-1.5 text-xl font-semibold w-fit">
-        Offline
-      </span>
 
       {multiProduct ? (
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-app-fg-muted mb-2">Select Product</label>
-          <div className="rounded-2xl border-2 border-[#c8c8c8] p-4 text-lg text-app-fg bg-transparent">Your customer picks a product...</div>
+          {previewProducts && previewProducts.length > 0 ? (
+            <div className="space-y-2">
+              {previewProducts.map((p) => (
+                <div
+                  key={p.id}
+                  className="rounded-2xl border-2 border-[#c8c8c8] px-4 py-3 text-lg font-semibold text-app-fg bg-transparent"
+                >
+                  {p.name.trim() || 'Product'}
+                </div>
+              ))}
+              <p className="text-xs text-app-fg-muted">Live form lets the buyer pick one product; offers update per product.</p>
+            </div>
+          ) : (
+            <div className="rounded-2xl border-2 border-[#c8c8c8] p-4 text-lg text-app-fg bg-transparent">
+              Your customer picks a product…
+            </div>
+          )}
         </div>
       ) : null}
 
       <form
-        className="space-y-4"
+        className="space-y-3 sm:space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
           setSubmitted(true);
         }}
       >
-        <div>
-          <span className="block text-xs font-bold uppercase tracking-wider text-app-fg-muted mb-2">Select Offer</span>
-          <div className="space-y-3">
-            <label className="flex items-center justify-between rounded-2xl border-2 border-[#c8c8c8] px-4 py-3 cursor-pointer">
-              <span className="flex items-center gap-3">
-                <input type="radio" name="preview-offer" defaultChecked />
-                <span className="text-xl tracking-wide font-semibold text-app-fg">BUY ONE GET ONE FREE</span>
-              </span>
-              <span className="text-xl font-semibold text-app-fg-muted">
-                1 UNIT <span style={{ color: accentColor }}>₦20,000</span>
-              </span>
-            </label>
-            <label className="flex items-center justify-between rounded-2xl border-2 border-[#c8c8c8] px-4 py-3 cursor-pointer">
-              <span className="flex items-center gap-3">
-                <input type="radio" name="preview-offer" />
-                <span className="text-xl tracking-wide font-semibold text-app-fg">BUY THREE GET TWO FREE</span>
-              </span>
-              <span className="text-xl font-semibold text-app-fg-muted">
-                3 UNITS <span style={{ color: accentColor }}>₦40,000</span>
-              </span>
-            </label>
+        {offerSections.length > 0 ? (
+          <div className="space-y-3 sm:space-y-4">
+            <span className="block text-xs font-bold uppercase tracking-wider text-app-fg-muted mb-1.5 sm:mb-2">
+              Select Offer
+            </span>
+            {offerSections.map((section) => (
+              <div key={section.id} className="space-y-2 sm:space-y-3">
+                {section.name ? (
+                  <p className="text-sm font-medium text-app-fg-muted -mt-1">{section.name}</p>
+                ) : null}
+                <div className="space-y-2 sm:space-y-3">
+                  {section.offers.map((o, idx) => (
+                    <label
+                      key={`${section.id}-${idx}-${o.label}`}
+                      className="flex items-start gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl border-2 border-[#c8c8c8] px-3 py-2.5 sm:px-4 sm:py-3 cursor-pointer"
+                    >
+                      <input
+                        type="radio"
+                        className="mt-1 shrink-0"
+                        name={multiProduct ? `preview-offer-${section.id}` : 'preview-offer'}
+                        defaultChecked={idx === 0}
+                      />
+                      <span className="min-w-0 flex-1 flex flex-col gap-1">
+                        <span className="text-base sm:text-xl tracking-wide font-semibold text-app-fg leading-snug">
+                          {o.label}
+                        </span>
+                        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0 text-sm text-app-fg-muted">
+                          <span>
+                            {o.qty} UNIT{o.qty > 1 ? 'S' : ''}
+                          </span>
+                          <span className="font-semibold" style={{ color: accentColor }}>
+                            {formatOfferPrice(o.price)}
+                          </span>
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
+        ) : null}
 
         <div>
           <label className="block text-sm font-medium text-app-fg mb-1">Full Name</label>
@@ -173,8 +297,11 @@ export function FormFullPreview({
             </label>
             <select className="select select-bordered w-full" required={!!standard.get('gender')?.required} defaultValue="">
               <option value="">Select gender...</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
+              {previewGenderOpts.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
             </select>
           </div>
         ) : null}
@@ -186,7 +313,7 @@ export function FormFullPreview({
             </label>
             <select className="select select-bordered w-full" required={!!standard.get('deliveryState')?.required} defaultValue="">
               <option value="">Select state...</option>
-              {PREVIEW_STATE_OPTIONS.map((opt) => (
+              {previewStateOpts.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
@@ -231,12 +358,27 @@ export function FormFullPreview({
             </label>
             <select className="select select-bordered w-full" required={!!standard.get('preferredDeliveryDate')?.required} defaultValue="">
               <option value="">Select...</option>
-              {PREVIEW_DATE_OPTIONS.map((opt) => (
+              {previewDateOpts.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
               ))}
             </select>
+          </div>
+        ) : null}
+
+        {standard.has('customerEmail') ? (
+          <div>
+            <label className="block text-sm font-medium text-app-fg mb-1">
+              {STANDARD_FIELD_LABELS.customerEmail}{' '}
+              {standard.get('customerEmail')?.required ? <span className="text-danger-500">*</span> : null}
+            </label>
+            <input
+              className="input input-bordered w-full"
+              type="email"
+              placeholder="your@email.com"
+              required={!!standard.get('customerEmail')?.required}
+            />
           </div>
         ) : null}
 
@@ -258,7 +400,7 @@ export function FormFullPreview({
                 <option value="PAY_ONLINE">Pay online (card / bank)</option>
               </select>
             </div>
-            {paymentMethod === 'PAY_ONLINE' ? (
+            {paymentMethod === 'PAY_ONLINE' && !standard.has('customerEmail') ? (
               <div>
                 <label className="block text-sm font-medium text-app-fg mb-1">
                   Email (for payment receipt) <span className="text-danger-500">*</span>
@@ -269,15 +411,9 @@ export function FormFullPreview({
           </div>
         ) : null}
 
-        <div className="pt-1 border-t border-app-border">
-          <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-2">Custom fields</p>
-          <FormConfigCustomFieldsPreview
-            fields={sorted}
-            accentColor={accentColor}
-            withOuterWrap={true}
-            emptyMessage="No custom fields on this form."
-          />
-        </div>
+        {sorted.length > 0 ? (
+          <FormConfigCustomFieldsPreview fields={sorted} accentColor={accentColor} withOuterWrap={false} />
+        ) : null}
 
         <button type="submit" className="btn btn-primary w-full" style={{ backgroundColor: accentColor, borderColor: accentColor }}>
           {btn}
@@ -287,4 +423,4 @@ export function FormFullPreview({
   );
 }
 
-export { DEFAULT_HEADING, DEFAULT_SUBTITLE, DEFAULT_BUTTON };
+export { DEFAULT_HEADING, DEFAULT_BUTTON };

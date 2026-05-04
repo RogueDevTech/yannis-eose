@@ -80,8 +80,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let locations: LocationOption[] = [];
   let locationsWithLock: LocationWithLock[] = [];
   if (locationsRes.ok) {
-    const data = (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string; address: string; dispatchLocked?: boolean; status: string }> } } })?.result?.data;
-    locations = (data?.locations ?? []).map((l) => ({ id: l.id, name: l.name }));
+    const data = (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string; address: string; dispatchLocked?: boolean; status: string; providerName?: string | null }> } } })?.result?.data;
+    locations = (data?.locations ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      providerName: l.providerName ?? null,
+    }));
     locationsWithLock = (data?.locations ?? []).map((l) => ({
       id: l.id,
       name: l.name,

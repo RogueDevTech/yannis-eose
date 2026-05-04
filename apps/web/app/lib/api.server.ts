@@ -1,6 +1,6 @@
 import { redirect } from '@remix-run/node';
 import { isNetworkErrorLike } from './network-error';
-import { canAccessGlobalAuditLog } from './rbac';
+import { canAccessGlobalAuditLog, isAdminLevel } from './rbac';
 import { canonicalPermissionCode } from './permission-codes';
 
 /**
@@ -8,7 +8,37 @@ import { canonicalPermissionCode } from './permission-codes';
  * Proxies requests to the NestJS backend with cookie forwarding.
  */
 
-const API_URL = process.env['API_URL'] ?? 'http://localhost:4444';
+/** Legacy + granular staff-directory capability codes (see seed — `users.read` aliases `users.staff.view`). */
+const STAFF_ACCOUNTS_PERMISSION_CODES = [
+  'users.staff.view',
+  'users.staff.create',
+  'users.staff.update',
+  'users.staff.deactivate',
+  'users.read',
+  'users.create',
+  'users.update',
+  'users.deactivate',
+] as const;
+
+/** Vite dev server (must match `vite.config` server.port — used only for `/trpc` SSR in dev). */
+const DEV_VITE_ORIGIN = 'http://127.0.0.1:4003';
+/** NestJS default listen port in local dev for non-proxied paths (`/auth/*`, etc.). */
+const DEV_NEST_ORIGIN = 'http://127.0.0.1:4444';
+
+/**
+ * Where Node-side `fetch` should send a path.
+ * - Explicit `API_URL` / `PUBLIC_API_URL` wins (production + custom dev).
+ * - Otherwise in dev: `/trpc/*` → Vite origin so `vite.config` can proxy to Nest; `/auth/*` and anything else → Nest
+ *   directly so Remix can own the browser route `GET /auth` without the proxy stealing HTML navigations.
+ */
+function resolveServerApiBase(resolvedPath: string): string {
+  const explicit = process.env['API_URL']?.trim() || process.env['PUBLIC_API_URL']?.trim();
+  if (explicit) return explicit;
+  if (process.env['NODE_ENV'] === 'production') {
+    return DEV_NEST_ORIGIN;
+  }
+  return resolvedPath.startsWith('/trpc') ? DEV_VITE_ORIGIN : DEV_NEST_ORIGIN;
+}
 
 /** Format a Date as YYYY-MM-DD in local time (avoids UTC offset bugs from toISOString). */
 export function toLocalDateString(d: Date): string {
@@ -33,14 +63,30 @@ export function defaultTodayRange(): { startDate: string; endDate: string } {
   return { startDate: today, endDate: today };
 }
 
-/** Default request timeout in ms. Deferred promises must resolve before Remix single-fetch timeout (~5s). */
-const DEFAULT_API_TIMEOUT_MS = 8_000;
+/**
+ * Default request timeout in ms.
+ *
+ * Set just under Remix's single-fetch server timeout (5_000ms). Reason:
+ * deferred loaders fan out many `apiRequest` calls into the streamed response;
+ * if any one exceeds 5s, Remix kills the whole stream with a generic
+ * `SanitizedError: Server Timeout` and the page renders an error icon.
+ *
+ * Bounding every call at 4.5s by default means a single slow upstream
+ * fail-fasts and the per-call fallback (`if (!res.ok) return [];` patterns
+ * pervasive across loaders) renders empty data for that section while the
+ * rest of the page resolves cleanly.
+ *
+ * Actions that genuinely need a longer budget (auth flows, CSV exports,
+ * heavy admin jobs) opt in by passing `timeoutMs: ...` explicitly. The login
+ * action already does this with 20_000ms.
+ */
+const DEFAULT_API_TIMEOUT_MS = 4_500;
 
 /** `/auth/me` can run on layout revalidation after tab resume — slightly longer than default to reduce false timeouts. */
 const AUTH_ME_TIMEOUT_MS = 15_000;
 
-/** Timeout used for deferred loader requests so they resolve before server timeout. */
-export const DEFERRED_LOADER_TIMEOUT_MS = 4_000;
+/** Timeout used for deferred loader requests — stay below Remix single-fetch turbo-stream cap (~4950ms). */
+export const DEFERRED_LOADER_TIMEOUT_MS = 4_700;
 
 interface ApiOptions {
   method?: string;
@@ -104,7 +150,7 @@ export async function apiRequest<T = unknown>(
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${resolvedPath}`, {
+    response = await fetch(`${resolveServerApiBase(resolvedPath)}${resolvedPath}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -195,9 +241,10 @@ export async function getCurrentUser(request: Request, options?: GetCurrentUserO
       logisticsLocationId?: string | null;
       currentBranchId?: string | null;
       appTheme?: string | null;
-      isFinanceOfficer?: boolean;
       /** Set when this session is in Mirror Mode — see CLAUDE.md "Mirror Mode". */
       mirroredBy?: { id: string; name: string; role: string } | null;
+      /** Staff onboarding packet — `/auth/me` omits for admin-class roles. */
+      staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
     };
   }>('/auth/me', { method: 'POST', cookie, timeoutMs: AUTH_ME_TIMEOUT_MS });
 
@@ -287,6 +334,37 @@ export async function requirePermission(
   return user;
 }
 
+/** Permissions for HR-facing onboarding pages (list + per-user HR view). Catalog: `seed-permissions.ts`. */
+export const HR_ONBOARDING_PAGE_PERMISSIONS = [
+  'hr.onboarding.read',
+  'hr.onboarding.write',
+  'hr.onboarding.approve',
+] as const;
+
+/**
+ * Staff onboarding pages that read/edit another user's record (`/hr/staff-onboarding-documents`,
+ * `/hr/users/:id/onboarding`). Matches API `OnboardingService.canManageAnyOnboarding`:
+ * admin-class bypass; everyone else needs at least one of `hr.onboarding.{read,write,approve}` —
+ * holding `HR_MANAGER` alone is not enough unless those grants are on the session/template.
+ */
+export async function requireOnboardingHrPagesAccess(request: Request): Promise<{
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  permissions?: string[];
+  roleTemplateId?: string | null;
+  currentBranchId?: string | null;
+}> {
+  const user = await getCurrentUser(request);
+  if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
+  if (isAdminLevel(user)) return user;
+  const codes = HR_ONBOARDING_PAGE_PERMISSIONS.map((c) => canonicalPermissionCode(c));
+  const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  if (codes.some((c) => perms.includes(c))) return user;
+  throw redirect(buildUnauthorizedRedirect(request, [...codes]));
+}
+
 /**
  * Require auth; allow specific roles without permission, others need one of the permissions.
  * Use for routes where Super Admin and Head of Marketing should always have access.
@@ -314,7 +392,7 @@ export async function requirePermissionOrRoles(
  * - Admin-level users (SUPER_ADMIN / ADMIN)
  * - HR manager
  * - Finance officer primary role
- * - Finance hat holders (isFinanceOfficer = true)
+ * - Anyone with the matching `users.staff.*` permission grant
  */
 export async function requireStaffAccountsAccess(
   request: Request,
@@ -325,28 +403,25 @@ export async function requireStaffAccountsAccess(
   role: string;
   permissions?: string[];
   logisticsLocationId?: string | null;
-  isFinanceOfficer?: boolean;
+  currentBranchId?: string | null;
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   if (user.role === 'SUPER_ADMIN') return user;
-  const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
-  if (
-    perms.includes('users.staff.view') ||
-    perms.includes('users.staff.create') ||
-    perms.includes('users.staff.update') ||
-    perms.includes('users.staff.deactivate')
-  ) {
+  if (isAdminLevel(user)) return user;
+  const perms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
+  const allowed = STAFF_ACCOUNTS_PERMISSION_CODES.some((c) => perms.has(canonicalPermissionCode(c)));
+  if (allowed) {
     return user;
   }
-  if (user.role === 'FINANCE_OFFICER' || user.isFinanceOfficer === true) {
+  if (user.role === 'FINANCE_OFFICER') {
     return user;
   }
   throw redirect(
     buildUnauthorizedRedirect(
       request,
-      ['users.staff.view', 'users.staff.create', 'users.staff.update', 'users.staff.deactivate'],
-      { roles: ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER', 'FINANCE_OFFICER'], action: 'manage staff accounts' },
+      [...STAFF_ACCOUNTS_PERMISSION_CODES],
+      { roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'], action: 'manage staff accounts' },
     ),
   );
 }
@@ -363,7 +438,6 @@ export async function requireGlobalAuditAccess(
   role: string;
   permissions?: string[];
   currentBranchId?: string | null;
-  isFinanceOfficer?: boolean;
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);

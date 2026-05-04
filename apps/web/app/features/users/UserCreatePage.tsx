@@ -18,7 +18,6 @@ import type {
   UserCreateLocation,
   UserCreateCommissionPlan,
   UserCreateBranch,
-  PermissionCatalogItem,
 } from './types';
 import { formatRole } from './types';
 import { PermissionMatrix } from './PermissionMatrix';
@@ -34,21 +33,83 @@ const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_
 // ADMIN + BRANCH_ADMIN are admin-class: if an HR user picks them, the backend will route the
 // request through the SuperAdmin approval flow (permission_requests).
 const ROLES = [
-  { value: 'ADMIN', label: 'Admin', description: 'Full platform access except managing other admins. Creating requires SuperAdmin approval.' },
-  { value: 'BRANCH_ADMIN', label: 'Branch Admin', description: 'Admin scoped to a single branch — users, settings, reports for that branch.' },
-  { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing', description: 'Oversees all marketing campaigns and media buyers' },
-  { value: 'MEDIA_BUYER', label: 'Media Buyer', description: 'Runs ad campaigns and manages ad spend' },
-  { value: 'HEAD_OF_CS', label: 'Head of CS', description: 'Manages customer service team and order processing' },
-  { value: 'CS_AGENT', label: 'CS Agent', description: 'Handles customer calls and order confirmation' },
-  { value: 'FINANCE_OFFICER', label: 'Finance Officer', description: 'Manages financials, invoices, and payouts' },
-  { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics', description: 'Oversees logistics operations, logistics companies, 3PL partners, and transfers' },
-  { value: 'STOCK_MANAGER', label: 'Stock Manager', description: 'Manages inventory and stock movements' },
-  { value: 'TPL_MANAGER', label: '3PL Manager', description: 'Manages a third-party logistics location' },
+  {
+    value: 'ADMIN',
+    label: 'Admin',
+    description:
+      'Full platform access except managing other admins. Creating requires SuperAdmin approval.',
+  },
+  {
+    value: 'BRANCH_ADMIN',
+    label: 'Branch Admin',
+    description: 'Admin scoped to a single branch — users, settings, reports for that branch.',
+  },
+  {
+    value: 'HEAD_OF_MARKETING',
+    label: 'Head of Marketing',
+    description: 'Oversees all marketing campaigns and media buyers',
+  },
+  {
+    value: 'MEDIA_BUYER',
+    label: 'Media Buyer',
+    description: 'Runs ad campaigns and manages ad spend',
+  },
+  {
+    value: 'HEAD_OF_CS',
+    label: 'Head of CS',
+    description: 'Manages customer service team and order processing',
+  },
+  {
+    value: 'CS_AGENT',
+    label: 'CS Agent',
+    description: 'Handles customer calls and order confirmation',
+  },
+  {
+    value: 'FINANCE_OFFICER',
+    label: 'Finance Officer',
+    description: 'Manages financials, invoices, and payouts',
+  },
+  {
+    value: 'HEAD_OF_LOGISTICS',
+    label: 'Head of Logistics',
+    description: 'Oversees logistics operations, logistics companies, 3PL partners, and transfers',
+  },
+  {
+    value: 'STOCK_MANAGER',
+    label: 'Stock Manager',
+    description: 'Manages inventory and stock movements',
+  },
+  {
+    value: 'TPL_MANAGER',
+    label: '3PL Manager',
+    description: 'Manages a third-party logistics location',
+  },
   { value: 'TPL_RIDER', label: '3PL Rider', description: 'Handles deliveries for a 3PL location' },
-  { value: 'HR_MANAGER', label: 'HR Manager', description: 'Manages payroll, commissions, and staff' },
+  {
+    value: 'HR_MANAGER',
+    label: 'HR Manager',
+    description: 'Manages payroll, commissions, and staff',
+  },
 ];
 
 // ─── Component ──────────────────────────────────────────
+
+export interface EditingUser {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  role: string;
+  status: string;
+  capacity: number | null;
+  logisticsLocationId: string | null;
+  productIds: string[];
+  restrictProductAccess: boolean;
+  primaryBranchId: string | null;
+  branchIds: string[];
+  roleTemplateId: string | null;
+  permissionOverrides: Record<string, boolean>;
+}
 
 export function UserCreatePage({
   products,
@@ -56,16 +117,24 @@ export function UserCreatePage({
   plans,
   branches,
   activeHeads,
-  currentFinanceOfficer,
   roleTemplates,
   permissionCatalog,
   templatePermissionsById,
+  defaultMembershipBranchId,
   usersBasePath = '/hr/users',
-}: UserCreateLoaderData & { usersBasePath?: string }) {
-  const actionData = useActionData<{ error?: string; success?: boolean; requiresApproval?: boolean; message?: string }>();
+  editingUser,
+}: UserCreateLoaderData & { usersBasePath?: string; editingUser?: EditingUser }) {
+  const isEditMode = !!editingUser;
+  const actionData = useActionData<{
+    error?: string;
+    success?: boolean;
+    requiresApproval?: boolean;
+    message?: string;
+  }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
   const errorRef = useRef<HTMLDivElement>(null);
+  const branchesAutoFilledRef = useRef(false);
   const [dismissedError, setDismissedError] = useState(false);
 
   useEffect(() => {
@@ -78,40 +147,69 @@ export function UserCreatePage({
     }
   }, [actionData?.error]);
 
-  const [selectedRole, setSelectedRole] = useState('');
-  const [selectedBranchId, setSelectedBranchId] = useState('');
-  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
-  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [selectedRole, setSelectedRole] = useState(editingUser?.role ?? '');
+  const [selectedBranchId, setSelectedBranchId] = useState(editingUser?.primaryBranchId ?? '');
+  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
+    editingUser?.branchIds ?? [],
+  );
+
+  useEffect(() => {
+    // Skip auto-fill when editing — the user already has assigned branches we shouldn't override.
+    if (isEditMode) return;
+    if (branchesAutoFilledRef.current) return;
+    if (!defaultMembershipBranchId) return;
+    if (selectedBranchIds.length > 0) return;
+    branchesAutoFilledRef.current = true;
+    setSelectedBranchIds([defaultMembershipBranchId]);
+    setSelectedBranchId(defaultMembershipBranchId);
+  }, [defaultMembershipBranchId, selectedBranchIds.length, isEditMode]);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>(
+    editingUser?.productIds ?? [],
+  );
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
-  const [assignFinanceHat, setAssignFinanceHat] = useState(false);
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
-  const [logisticsLocationId, setLogisticsLocationId] = useState('');
+  const [logisticsLocationId, setLogisticsLocationId] = useState(
+    editingUser?.logisticsLocationId ?? '',
+  );
   const [commissionPlanId, setCommissionPlanId] = useState('');
   // Local 10-digit phone (the part after +234). Validated to start with 7/8/9
   // so we never submit a number outside the Nigerian mobile prefix range.
+  // In edit mode we deliberately start blank (= "keep current") so existing numbers aren't
+  // re-submitted on save — only a fresh 10-digit value triggers an update.
+  // In edit mode: start blank ("keep current"). In create mode there's no editingUser, so '' too.
   const [phoneLocal, setPhoneLocal] = useState('');
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
-  const [permissionOverrides, setPermissionOverrides] = useState<Record<string, boolean>>({});
+  const [selectedTemplateId, setSelectedTemplateId] = useState(editingUser?.roleTemplateId ?? '');
+  const [permissionOverrides, setPermissionOverrides] = useState<Record<string, boolean>>(
+    editingUser?.permissionOverrides ?? {},
+  );
   const phoneIsComplete = /^[789]\d{9}$/.test(phoneLocal);
-  const phoneError = phoneLocal.length > 0 && !phoneIsComplete
-    ? phoneLocal.length < 10
-      ? 'Enter all 10 digits.'
-      : 'Number must start with 7, 8, or 9.'
-    : undefined;
+  const phoneError =
+    phoneLocal.length > 0 && !phoneIsComplete
+      ? phoneLocal.length < 10
+        ? isEditMode
+          ? 'Enter all 10 digits, or leave blank to keep current.'
+          : 'Enter all 10 digits.'
+        : 'Number must start with 7, 8, or 9.'
+      : undefined;
 
-  const conflictingHead = HEAD_ROLES.includes(selectedRole)
-    ? activeHeads.find((h) => {
-        if (h.role !== selectedRole) return false;
-        if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
-        return !!selectedBranchId && h.primaryBranchId === selectedBranchId;
-      })
-    : undefined;
+  // In edit mode, suppress the conflict warning when the role isn't actually changing —
+  // the existing user already holds that head slot and re-saving shouldn't trigger a warning
+  // about themselves. Also exclude the user being edited from the conflict candidates.
+  const conflictingHead =
+    HEAD_ROLES.includes(selectedRole) && !(isEditMode && selectedRole === editingUser?.role)
+      ? activeHeads.find((h) => {
+          if (h.role !== selectedRole) return false;
+          if (editingUser && h.id === editingUser.id) return false;
+          if (ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)) return true;
+          return !!selectedBranchId && h.primaryBranchId === selectedBranchId;
+        })
+      : undefined;
   const conflictingBranch = conflictingHead
     ? branches.find((b) => b.id === conflictingHead.primaryBranchId)
     : undefined;
   const conflictScopeLabel = ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
     ? 'The organization'
-    : conflictingBranch?.name ?? 'This branch';
+    : (conflictingBranch?.name ?? 'This branch');
 
   // Role-conditional visibility
   // Capacity is only meaningful for roles that work an individual workload — CS agents
@@ -121,7 +219,8 @@ export function UserCreatePage({
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const is3PLRole = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const showProductAssignment = selectedRole === 'MEDIA_BUYER';
-  const showCompensation = !!selectedRole;
+  // Compensation is edited in HR's commission plans page, not on the user form. Hide it in edit mode.
+  const showCompensation = !!selectedRole && !isEditMode;
 
   useEffect(() => {
     if (!showLogisticsLocation) setLogisticsLocationId('');
@@ -149,9 +248,14 @@ export function UserCreatePage({
 
   useEffect(() => {
     if (!selectedRole) return;
+    // In edit mode, keep the user's stored roleTemplateId as long as the role is unchanged —
+    // overriding it on mount with the SYSTEM template would lose any custom template assignment.
+    if (isEditMode && selectedRole === editingUser?.role && editingUser?.roleTemplateId) {
+      return;
+    }
     const tid = templateByRole.get(selectedRole);
     if (tid) setSelectedTemplateId(tid);
-  }, [selectedRole, templateByRole]);
+  }, [selectedRole, templateByRole, isEditMode, editingUser?.role, editingUser?.roleTemplateId]);
 
   const toggleBranch = (id: string) => {
     setSelectedBranchIds((prev) => {
@@ -169,26 +273,63 @@ export function UserCreatePage({
     });
   };
 
+  // Reset permission overrides whenever the role/template changes — but in edit mode,
+  // keep the seeded user overrides on initial mount (when role + template still match the
+  // user's stored values). Once the user actually changes the role or template, deltas reset.
   useEffect(() => {
+    if (
+      isEditMode &&
+      selectedRole === editingUser?.role &&
+      selectedTemplateId === (editingUser?.roleTemplateId ?? '')
+    ) {
+      return;
+    }
     setPermissionOverrides({});
-  }, [selectedTemplateId, selectedRole]);
+  }, [
+    selectedTemplateId,
+    selectedRole,
+    isEditMode,
+    editingUser?.role,
+    editingUser?.roleTemplateId,
+  ]);
 
-  const templatePermissionCodes = selectedTemplateId ? templatePermissionsById[selectedTemplateId] ?? [] : [];
+  const templatePermissionCodes = selectedTemplateId
+    ? (templatePermissionsById[selectedTemplateId] ?? [])
+    : [];
 
   return (
     <div className="w-full space-y-6">
-      <Breadcrumb items={[{ label: 'Users', to: usersBasePath }, { label: 'Add User' }]} />
+      <Breadcrumb
+        items={
+          isEditMode && editingUser
+            ? [
+                { label: 'Users', to: usersBasePath },
+                { label: editingUser.name, to: `${usersBasePath}/${editingUser.id}` },
+                { label: 'Edit' },
+              ]
+            : [{ label: 'Users', to: usersBasePath }, { label: 'Add User' }]
+        }
+      />
 
       <PageHeader
-        title="Add User"
-        description="Create a new account for a team member with role-specific settings."
+        title={isEditMode ? 'Edit user' : 'Add User'}
+        description={
+          isEditMode
+            ? 'Update account, branch memberships, permissions, and role settings.'
+            : 'Create a new account for a team member with role-specific settings.'
+        }
       />
 
       {/* Success: requires approval */}
       {actionData?.requiresApproval && (
         <div className="rounded-lg bg-success-50 dark:bg-success-700/20 border border-success-200 dark:border-success-700/50 px-4 py-3">
-          <p className="text-sm text-success-700 dark:text-success-500">{actionData.message ?? 'User creation request submitted. SuperAdmin will review.'}</p>
-          <Link to="/admin/permission-requests" className="text-sm font-medium text-success-600 dark:text-success-400 hover:underline mt-1 inline-block">
+          <p className="text-sm text-success-700 dark:text-success-500">
+            {actionData.message ?? 'User creation request submitted. SuperAdmin will review.'}
+          </p>
+          <Link
+            to="/admin/permission-requests"
+            className="text-sm font-medium text-success-600 dark:text-success-400 hover:underline mt-1 inline-block"
+          >
             View pending requests →
           </Link>
         </div>
@@ -217,15 +358,25 @@ export function UserCreatePage({
           }
         }}
       >
+        {/* Update intent — only sent in edit mode */}
+        {isEditMode && <input type="hidden" name="intent" value="update" />}
         {/* Hidden fields for JSON arrays */}
         {showProductAssignment && selectedProductIds.length > 0 && (
           <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
         )}
         <input type="hidden" name="branchIds" value={JSON.stringify(selectedBranchIds)} />
         <input type="hidden" name="primaryBranchId" value={selectedBranchId} />
-        {selectedTemplateId ? <input type="hidden" name="roleTemplateId" value={selectedTemplateId} /> : null}
-        <input type="hidden" name="permissionOverrides" value={JSON.stringify(permissionOverrides)} />
-        {showLogisticsLocation ? <input type="hidden" name="logisticsLocationId" value={logisticsLocationId} /> : null}
+        {selectedTemplateId ? (
+          <input type="hidden" name="roleTemplateId" value={selectedTemplateId} />
+        ) : null}
+        <input
+          type="hidden"
+          name="permissionOverrides"
+          value={JSON.stringify(permissionOverrides)}
+        />
+        {showLogisticsLocation ? (
+          <input type="hidden" name="logisticsLocationId" value={logisticsLocationId} />
+        ) : null}
         {compensationMode === 'existing' && filteredPlans.length > 0 ? (
           <input type="hidden" name="commissionPlanId" value={commissionPlanId} />
         ) : null}
@@ -264,14 +415,12 @@ export function UserCreatePage({
 
             {selectedRole && permissionCatalog.length > 0 && (
               <div className="sm:col-span-2 space-y-1">
-                <p className="text-xs text-app-fg-muted">
-                  Pre-checked rows come from the role you picked. Add or remove for this user — only your changes are stored as overrides.
-                </p>
                 <PermissionMatrix
-                  permissions={permissionCatalog as PermissionCatalogItem[]}
+                  permissions={permissionCatalog}
                   templateCodes={templatePermissionCodes}
                   overrides={permissionOverrides}
                   onOverridesChange={setPermissionOverrides}
+                  selectedRoleLabel={selectedRole ? formatRole(selectedRole) : undefined}
                 />
               </div>
             )}
@@ -284,6 +433,7 @@ export function UserCreatePage({
                 required
                 minLength={2}
                 placeholder="John Doe"
+                defaultValue={editingUser?.name ?? ''}
               />
             </div>
 
@@ -295,12 +445,19 @@ export function UserCreatePage({
                 label="Email Address"
                 required
                 placeholder="john@company.com"
-                hint="A password will be auto-generated and sent to this email."
+                defaultValue={editingUser?.email ?? ''}
+                hint={
+                  isEditMode
+                    ? 'Email changes require SuperAdmin approval before taking effect.'
+                    : 'A password will be auto-generated and sent to this email.'
+                }
               />
             </div>
 
             <div className="sm:col-span-2 space-y-3">
-              <label className="block text-sm font-medium text-app-fg-muted">Branch Memberships</label>
+              <label className="block text-sm font-medium text-app-fg-muted">
+                Branch Memberships
+              </label>
               <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
                 {branches
                   .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
@@ -349,13 +506,40 @@ export function UserCreatePage({
             )}
 
             <div>
-              <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
-                Status
-              </label>
-              <p className="text-sm text-app-fg-muted">
-                New users are created as <strong>Pending</strong> and become <strong>Active</strong> after they log in for the first time.
-              </p>
-              <input type="hidden" name="status" value="PENDING" />
+              {isEditMode ? (
+                editingUser?.status === 'DEACTIVATED' ? (
+                  <>
+                    <p className="text-sm font-medium text-app-fg-muted mb-1.5">Status</p>
+                    <p className="text-sm text-app-fg-muted">
+                      Deactivated accounts cannot be reactivated. Re-invite to create a new account.
+                    </p>
+                  </>
+                ) : (
+                  <RadioGroup
+                    name="status"
+                    label="Status"
+                    layout="horizontal"
+                    defaultValue={editingUser?.status ?? 'PENDING'}
+                    options={(
+                      ['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const
+                    ).map((s) => ({
+                      value: s,
+                      label: s.charAt(0) + s.slice(1).toLowerCase(),
+                    }))}
+                  />
+                )
+              ) : (
+                <>
+                  <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                    Status
+                  </label>
+                  <p className="text-sm text-app-fg-muted">
+                    New users are created as <strong>Pending</strong> and become{' '}
+                    <strong>Active</strong> after they log in for the first time.
+                  </p>
+                  <input type="hidden" name="status" value="PENDING" />
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -375,7 +559,11 @@ export function UserCreatePage({
                   label="Order Capacity"
                   min={1}
                   max={100}
-                  defaultValue="10"
+                  defaultValue={
+                    isEditMode && editingUser?.capacity != null
+                      ? String(editingUser.capacity)
+                      : '10'
+                  }
                   wrapperClassName="w-full sm:w-32"
                   hint="Maximum concurrent orders this agent can handle."
                 />
@@ -394,7 +582,7 @@ export function UserCreatePage({
                   searchPlaceholder="Search locations..."
                   options={locations.map((loc: UserCreateLocation) => ({
                     value: loc.id,
-                    label: loc.name,
+                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                     description: loc.address,
                   }))}
                 />
@@ -430,7 +618,9 @@ export function UserCreatePage({
                           onChange={() => toggleProduct(product.id)}
                         />
                         <span className="text-sm text-app-fg">{product.name}</span>
-                        <span className="text-xs text-app-fg-muted ml-auto">{product.category ?? ''}</span>
+                        <span className="text-xs text-app-fg-muted ml-auto">
+                          {product.category ?? ''}
+                        </span>
                       </label>
                     ))}
                   </div>
@@ -444,6 +634,7 @@ export function UserCreatePage({
                       <Checkbox
                         name="restrictProductAccess"
                         value="true"
+                        defaultChecked={editingUser?.restrictProductAccess ?? false}
                       />
                       <span className="text-sm text-app-fg-muted">
                         Restrict access to only assigned products
@@ -494,9 +685,7 @@ export function UserCreatePage({
             {/* No plans for this role — show Create plan action */}
             {compensationMode === 'existing' && filteredPlans.length === 0 && (
               <div className="rounded-lg bg-app-hover border border-app-border px-4 py-3">
-                <p className="text-sm text-app-fg-muted">
-                  No commission plans for this role yet.
-                </p>
+                <p className="text-sm text-app-fg-muted">No commission plans for this role yet.</p>
                 <Link
                   to="/hr/payroll?open=plan"
                   className="text-sm font-medium text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 mt-2 inline-block"
@@ -512,7 +701,10 @@ export function UserCreatePage({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Fixed Salary */}
                   <div>
-                    <label htmlFor="fixedSalary" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                    <label
+                      htmlFor="fixedSalary"
+                      className="block text-sm font-medium text-app-fg-muted mb-1.5"
+                    >
                       Fixed Salary
                     </label>
                     <AmountInput
@@ -526,7 +718,10 @@ export function UserCreatePage({
 
                   {/* Bonus */}
                   <div>
-                    <label htmlFor="bonus" className="block text-sm font-medium text-app-fg-muted mb-1.5">
+                    <label
+                      htmlFor="bonus"
+                      className="block text-sm font-medium text-app-fg-muted mb-1.5"
+                    >
                       Bonus
                     </label>
                     <AmountInput
@@ -542,40 +737,6 @@ export function UserCreatePage({
                 <p className="text-xs text-app-fg-muted">
                   Fixed salary, bonus, and flat commission amounts are monthly.
                 </p>
-
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Section 3b: Finance hat — deputize this user with Finance Officer powers on top of
-            their primary role. Exactly one user in the org can hold the hat at a time. */}
-        {selectedRole && (
-          <div className="card space-y-3">
-            <h2 className="text-lg font-semibold text-app-fg">Finance hat</h2>
-            <p className="text-sm text-app-fg-muted">
-              Assigning the Finance hat gives this user Finance Officer powers (column-level cost visibility, approvals, remittance) <strong>in addition to</strong> their primary role. Only one user can hold the hat at any time. Skip this unless you're deputizing someone to cover for an absent accountant.
-            </p>
-            {selectedRole === 'FINANCE_OFFICER' ? (
-              <p className="text-xs text-app-fg-muted">
-                Primary role is already Finance Officer — the hat isn't needed.
-              </p>
-            ) : (
-              <>
-                <input type="hidden" name="isFinanceOfficer" value={assignFinanceHat ? 'true' : 'false'} />
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <Checkbox
-                    checked={assignFinanceHat}
-                    onChange={(e) => setAssignFinanceHat((e.target as HTMLInputElement).checked)}
-                  />
-                  <span className="text-sm text-app-fg">Give this user the Finance hat</span>
-                </label>
-                {assignFinanceHat && currentFinanceOfficer && (
-                  <InlineNotification
-                    variant="warning"
-                    message={`The Finance hat is currently held by ${currentFinanceOfficer.name}. Creating this user with the hat will revoke it from them automatically.`}
-                  />
-                )}
               </>
             )}
           </div>
@@ -606,11 +767,20 @@ export function UserCreatePage({
                   setPhoneLocal(digits.slice(0, 10));
                 }}
                 leftAddon="+234"
-                hint="10 digits, starting with 7, 8, or 9. Must be unique across all staff. Never displayed publicly; masked in all views."
+                hint={
+                  isEditMode
+                    ? undefined
+                    : '10 digits, starting with 7, 8, or 9. Must be unique across all staff. Never displayed publicly; masked in all views.'
+                }
                 error={phoneError}
-                required
+                required={!isEditMode}
                 maxLength={10}
               />
+              {isEditMode && (
+                <p className="text-xs text-app-fg-muted mt-1">
+                  Current: {editingUser?.phone ?? 'Not set'}. Leave blank to keep unchanged.
+                </p>
+              )}
               <input
                 type="hidden"
                 name="phone"
@@ -622,7 +792,10 @@ export function UserCreatePage({
 
         {/* Actions */}
         <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
-          <Link to={usersBasePath} className="btn-secondary w-full sm:w-auto">
+          <Link
+            to={isEditMode && editingUser ? `${usersBasePath}/${editingUser.id}` : usersBasePath}
+            className="btn-secondary w-full sm:w-auto"
+          >
             Cancel
           </Link>
           <Button
@@ -630,10 +803,21 @@ export function UserCreatePage({
             variant="primary"
             className="w-full sm:w-auto"
             loading={isSubmitting}
-            loadingText="Creating..."
-            disabled={!selectedRole || !phoneIsComplete || selectedBranchIds.length === 0 || !selectedBranchId}
+            loadingText={isEditMode ? 'Saving...' : 'Creating...'}
+            disabled={
+              isEditMode
+                ? !selectedRole ||
+                  selectedBranchIds.length === 0 ||
+                  !selectedBranchId ||
+                  // phoneLocal is optional on edit — if non-empty, it must be a complete value
+                  (phoneLocal.length > 0 && !phoneIsComplete)
+                : !selectedRole ||
+                  !phoneIsComplete ||
+                  selectedBranchIds.length === 0 ||
+                  !selectedBranchId
+            }
           >
-            Create User
+            {isEditMode ? 'Save changes' : 'Create User'}
           </Button>
         </div>
       </Form>
@@ -669,11 +853,7 @@ export function UserCreatePage({
             (or deactivate them) from their profile page.
           </p>
           <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setConflictModalOpen(false)}
-            >
+            <Button type="button" variant="secondary" onClick={() => setConflictModalOpen(false)}>
               Back
             </Button>
             <Link
@@ -689,4 +869,3 @@ export function UserCreatePage({
     </div>
   );
 }
-

@@ -1,17 +1,22 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData, useFetcher, Link } from '@remix-run/react';
-import { useEffect, useRef, useState } from 'react';
+import { useLoaderData, useFetcher } from '@remix-run/react';
+import { useCallback, useMemo, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { EmptyState } from '~/components/ui/empty-state';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 
 export const meta: MetaFunction = () => [{ title: 'Branch Management — Yannis EOSE' }];
 
@@ -85,22 +90,62 @@ export default function BranchManagementRoute() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editBranch, setEditBranch] = useState<Branch | null>(null);
 
-  const wasSubmittingRef = useRef(false);
-  useEffect(() => {
-    if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
-      wasSubmittingRef.current = true;
-      return;
-    }
-    if (fetcher.state === 'idle' && wasSubmittingRef.current) {
-      wasSubmittingRef.current = false;
-      if (fetcher.data?.success) {
-        setCreateOpen(false);
-        setEditBranch(null);
-      }
-    }
-  }, [fetcher.state, fetcher.data]);
+  const handleBranchSuccess = useCallback(() => {
+    setCreateOpen(false);
+    setEditBranch(null);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleBranchSuccess);
 
   const isSubmitting = fetcher.state !== 'idle';
+
+  const branchColumns: CompactTableColumn<Branch>[] = useMemo(
+    () => [
+      {
+        key: 'name',
+        header: 'Name',
+        render: (branch) => <span className="font-medium text-app-fg">{branch.name}</span>,
+      },
+      {
+        key: 'code',
+        header: 'Code',
+        render: (branch) => <span className="font-mono text-xs text-app-fg-muted">{branch.code}</span>,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (branch) => <StatusBadge status={branch.status} />,
+      },
+      {
+        key: 'created',
+        header: 'Created',
+        render: (branch) => (
+          <span className="text-xs text-app-fg-muted">
+            {new Date(branch.createdAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (branch) => (
+          <div className="inline-flex items-center justify-end gap-2">
+            <CompactTableActionButton to={`/admin/branches/${branch.id}`}>View</CompactTableActionButton>
+            <Button variant="secondary" size="sm" onClick={() => setEditBranch(branch)}>
+              Edit
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
 
   return (
     <div className="space-y-6">
@@ -115,97 +160,15 @@ export default function BranchManagementRoute() {
       />
 
       {/* Branches Table */}
-      <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="table-header-muted">Name</th>
-                <th className="table-header-muted">Code</th>
-                <th className="table-header-muted">Status</th>
-                <th className="table-header-muted">Created</th>
-                <th className="table-header-muted w-0" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-app-border">
-              {branches.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-4 py-10">
-                    <EmptyState
-                      title="No branches yet"
-                      description="Create one to enable multi-branch mode."
-                      variant="inline"
-                    />
-                  </td>
-                </tr>
-              )}
-              {branches.map((branch) => (
-                <tr key={branch.id} className="hover:bg-app-hover/50">
-                  <td className="px-4 py-3 font-medium text-app-fg">{branch.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-app-fg-muted">{branch.code}</td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={branch.status} />
-                  </td>
-                  <td className="px-4 py-3 text-app-fg-muted text-xs">
-                    {new Date(branch.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <div className="inline-flex items-center gap-2 justify-end">
-                      <Link
-                        to={`/admin/branches/${branch.id}`}
-                        className="inline-flex items-center justify-center rounded-lg border border-app-border bg-app-elevated px-3 py-1.5 text-xs font-medium text-app-fg hover:bg-app-hover transition-colors"
-                      >
-                        View
-                      </Link>
-                      <Button variant="secondary" size="sm" onClick={() => setEditBranch(branch)}>
-                        Edit
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="md:hidden space-y-3 p-3">
-          {branches.length === 0 && (
-            <EmptyState
-              title="No branches yet"
-              description="Create one to enable multi-branch mode."
-              variant="inline"
-              bordered
-            />
-          )}
-          {branches.map((branch) => (
-            <div
-              key={branch.id}
-              className="rounded-lg border border-app-border bg-app-elevated p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-medium text-app-fg truncate">{branch.name}</p>
-                  <p className="mt-1 font-mono text-xs text-app-fg-muted">{branch.code}</p>
-                </div>
-                <StatusBadge status={branch.status} />
-              </div>
-              <p className="mt-3 text-xs text-app-fg-muted">
-                Created {new Date(branch.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </p>
-              <div className="mt-3 flex items-center gap-2">
-                <Link
-                  to={`/admin/branches/${branch.id}`}
-                  className="inline-flex flex-1 items-center justify-center rounded-lg border border-app-border bg-app-elevated px-3 py-2 text-xs font-medium text-app-fg hover:bg-app-hover transition-colors"
-                >
-                  View
-                </Link>
-                <Button variant="secondary" size="sm" className="flex-1" onClick={() => setEditBranch(branch)}>
-                  Edit
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="card p-0 overflow-hidden">
+        <CompactTable<Branch>
+          columns={branchColumns}
+          rows={branches}
+          rowKey={(b) => b.id}
+          withCard={false}
+          emptyTitle="No branches yet"
+          emptyDescription="Create one to enable multi-branch mode."
+        />
       </div>
 
       {/* Create Modal */}

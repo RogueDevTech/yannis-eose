@@ -66,3 +66,29 @@ export const getOnboardingSchema = z.object({
   userId: z.string().uuid().optional(),
 });
 export type GetOnboardingInput = z.infer<typeof getOnboardingSchema>;
+
+/** HR overview table — filter by logical onboarding state (`NOT_STARTED` includes users with no row yet). */
+export const staffOnboardingDocumentsFilterStatusSchema = z.enum([
+  'ALL',
+  'NOT_STARTED',
+  'IN_PROGRESS',
+  'SUBMITTED',
+  'APPROVED',
+]);
+
+export const listStaffOnboardingDocumentsSchema = z.object({
+  search: z.string().optional(),
+  onboardingStatus: staffOnboardingDocumentsFilterStatusSchema.default('ALL'),
+  userStatus: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
+  branchId: z.string().uuid().optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(20),
+  sortBy: z.enum(['name', 'onboardingUpdatedAt']).default('name'),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+  /**
+   * Admin-class only: bypass auto-scoping by session `currentBranchId` (same semantics as `users.list`).
+   */
+  allBranches: z.boolean().optional(),
+});
+
+export type ListStaffOnboardingDocumentsInput = z.infer<typeof listStaffOnboardingDocumentsSchema>;

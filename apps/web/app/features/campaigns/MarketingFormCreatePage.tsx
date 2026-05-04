@@ -1,21 +1,22 @@
+import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import type { CustomFormField, Product, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
 import { FormFullPreview } from './form-full-preview';
+import { cloneDefaultAdditionalFieldSelectOptions } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormCreatePageProps {
   products: Product[];
   productsLoadError?: string | null;
 }
-
-const DEFAULT_ACCENT = '#6366f1';
 
 /**
  * Full-page create flow: basic form settings + custom field builder, single submit to
@@ -24,7 +25,7 @@ const DEFAULT_ACCENT = '#6366f1';
 export function MarketingFormCreatePage({ products, productsLoadError = null }: MarketingFormCreatePageProps) {
   const fetcher = useFetcher<{ error?: string }>();
 
-  const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
+  const [accentColor, setAccentColor] = useState(DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
   const [fields, setFields] = useState<CustomFormField[]>([]);
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>([]);
   const [dismissedProductsError, setDismissedProductsError] = useState(false);
@@ -35,9 +36,14 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
   const [successCallbackUrl, setSuccessCallbackUrl] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [showProductImages, setShowProductImages] = useState(true);
+  const [additionalSelectOptions, setAdditionalSelectOptions] = useState(cloneDefaultAdditionalFieldSelectOptions);
 
   const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
   const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
+  const additionalFieldSelectOptionsJson = useMemo(
+    () => JSON.stringify(additionalSelectOptions),
+    [additionalSelectOptions],
+  );
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
 
   useEffect(() => {
@@ -52,6 +58,12 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
       })),
     [products],
   );
+
+  const selectedProduct = useMemo(
+    () => products.find((p) => p.id === selectedProductId),
+    [products, selectedProductId],
+  );
+  const previewOffers = useMemo(() => selectedProduct?.offers ?? [], [selectedProduct]);
 
   return (
     <div className="space-y-4">
@@ -91,6 +103,7 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             <input type="hidden" name="intent" value="createForm" />
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
+            <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="productId" value={selectedProductId} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
@@ -123,7 +136,8 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
                   <TextInput
                     name="formSubtitle"
                     label="Form subtitle"
-                    placeholder="Default: Fill in your details below"
+                    hint="Optional. Leave blank to hide subtitle text on the public form."
+                    placeholder="e.g. Fill in your details below"
                     value={formSubtitle}
                     onChange={(e) => setFormSubtitle(e.target.value)}
                   />
@@ -155,12 +169,7 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
                     className="sm:col-span-2"
                   />
                   <label className="sm:col-span-2 inline-flex items-center gap-2 text-sm text-app-fg-muted cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showProductImages}
-                      onChange={(e) => setShowProductImages(e.target.checked)}
-                      className="rounded border-app-border text-brand-600"
-                    />
+                    <Checkbox checked={showProductImages} onChange={(e) => setShowProductImages(e.target.checked)} />
                     Show product images on the form
                   </label>
                 </div>
@@ -168,8 +177,13 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             </div>
 
             <div>
-              <h2 className="text-sm font-semibold text-app-fg mb-2">Standard fields</h2>
-              <StandardFieldsEditor fields={standardFields} onFieldsChange={setStandardFields} />
+              <h2 className="text-sm font-semibold text-app-fg mb-2">Additional fields</h2>
+              <StandardFieldsEditor
+                fields={standardFields}
+                onFieldsChange={setStandardFields}
+                selectOptions={additionalSelectOptions}
+                onSelectOptionsChange={setAdditionalSelectOptions}
+              />
             </div>
 
             <div>
@@ -179,8 +193,8 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
                 onFieldsChange={setFields}
                 footnote={
                   <span>
-                    Standard field toggles are in <strong className="text-app-fg">Basic settings</strong> above. Submit once
-                    to create the form with these custom fields.
+                    Additional field toggles are in <strong className="text-app-fg">Additional fields</strong> above. Submit
+                    once to create the form with these custom fields.
                   </span>
                 }
               />
@@ -208,6 +222,8 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             standardFields={standardFields}
             successCallbackUrl={successCallbackUrl}
             customFields={fields}
+            previewOffers={previewOffers}
+            additionalSelectOptions={additionalSelectOptions}
           />
         </div>
       </div>

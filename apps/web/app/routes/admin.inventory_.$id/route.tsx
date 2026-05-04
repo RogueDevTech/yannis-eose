@@ -1,10 +1,21 @@
+import { useMemo, useState } from 'react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Link, useLoaderData } from '@remix-run/react';
+import { Link, useLoaderData, useSearchParams } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { FilterPills } from '~/components/ui/filter-pills';
+import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { Tabs } from '~/components/ui/tabs';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
+import { Modal } from '~/components/ui/modal';
+import { RoleBadge } from '~/components/ui/role-badge';
+import { DescriptionList } from '~/components/ui/description-list';
+import { Button } from '~/components/ui/button';
 import type { StockMovement } from '~/features/inventory/types';
 import { MOVEMENT_COLORS, formatMovementType } from '~/features/inventory/types';
 
@@ -39,7 +50,16 @@ interface LoaderData {
   batches: LevelBatch[];
   movements: StockMovement[];
   total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  inQty: number;
+  outQty: number;
+  startDate: string | null;
+  endDate: string | null;
 }
+
+const PAGE_SIZE = 20;
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
@@ -50,19 +70,50 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const id = params['id'];
   if (!id) throw new Response('Inventory level ID required', { status: 400 });
 
+  const url = new URL(request.url);
+  const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);
+  const startDate = url.searchParams.get('startDate')?.trim() || undefined;
+  const endDate = url.searchParams.get('endDate')?.trim() || undefined;
+
   const cookie = getSessionCookie(request);
-  const input = { id, limit: 200 };
+  const input: Record<string, unknown> = { id, page, limit: PAGE_SIZE };
+  if (startDate) input['startDate'] = startDate;
+  if (endDate) input['endDate'] = endDate;
   const res = await apiRequest<unknown>(
     `/trpc/inventory.getLevelById?input=${encodeURIComponent(JSON.stringify(input))}`,
     { method: 'GET', cookie },
   );
 
   if (!res.ok) {
-    return json<LoaderData>({ level: null, batches: [], movements: [], total: 0 });
+    return json<LoaderData>({
+      level: null,
+      batches: [],
+      movements: [],
+      total: 0,
+      page: 1,
+      limit: PAGE_SIZE,
+      totalPages: 1,
+      inQty: 0,
+      outQty: 0,
+      startDate: startDate ?? null,
+      endDate: endDate ?? null,
+    });
   }
 
   const data = (res.data as {
-    result?: { data?: { level: LevelHeader; batches: LevelBatch[]; movements: StockMovement[]; total: number } };
+    result?: {
+      data?: {
+        level: LevelHeader;
+        batches: LevelBatch[];
+        movements: StockMovement[];
+        total: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+        inQty: number;
+        outQty: number;
+      };
+    };
   })?.result?.data;
 
   return json<LoaderData>({
@@ -70,11 +121,157 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     batches: data?.batches ?? [],
     movements: data?.movements ?? [],
     total: data?.total ?? 0,
+    page: data?.page ?? page,
+    limit: data?.limit ?? PAGE_SIZE,
+    totalPages: data?.totalPages ?? 1,
+    inQty: data?.inQty ?? 0,
+    outQty: data?.outQty ?? 0,
+    startDate: startDate ?? null,
+    endDate: endDate ?? null,
   });
 }
 
+type DirectionFilter = 'all' | 'in' | 'out';
+
+const INCOMING_TYPES = new Set(['INTAKE', 'TRANSFER_IN', 'RESTOCK']);
+const OUTGOING_TYPES = new Set([
+  'DELIVERY',
+  'TRANSFER_OUT',
+  'WRITE_OFF',
+  'RETURN',
+  'DISPATCH',
+]);
+
+function classifyMovement(m: StockMovement): 'in' | 'out' | 'neutral' {
+  if (INCOMING_TYPES.has(m.movementType)) return 'in';
+  if (OUTGOING_TYPES.has(m.movementType)) return 'out';
+  if (m.movementType === 'ADJUSTMENT') return m.quantity >= 0 ? 'in' : 'out';
+  return 'neutral';
+}
+
+function counterpartLabel(m: StockMovement): string | null {
+  if (m.movementType === 'TRANSFER_OUT' && m.toLocationName) return `to ${m.toLocationName}`;
+  if (m.movementType === 'TRANSFER_IN' && m.fromLocationName) return `from ${m.fromLocationName}`;
+  return null;
+}
+
+function auditTrailColumns(
+  onView: (m: StockMovement) => void,
+): CompactTableColumn<StockMovement>[] {
+  return [
+    {
+      key: 'when',
+      header: 'When',
+      nowrap: true,
+      cellClassName: 'text-app-fg-muted',
+      render: (m) =>
+        new Date(m.createdAt).toLocaleString('en-NG', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      nowrap: true,
+      render: (m) => (
+        <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
+          {formatMovementType(m.movementType)}
+        </span>
+      ),
+    },
+    {
+      key: 'qty',
+      header: 'Qty',
+      align: 'right',
+      nowrap: true,
+      cellClassName: (m) => {
+        const dir = classifyMovement(m);
+        if (dir === 'in') return 'font-semibold text-success-600 dark:text-success-400';
+        if (dir === 'out') return 'font-semibold text-danger-600 dark:text-danger-400';
+        return 'font-semibold text-app-fg-muted';
+      },
+      render: (m) => {
+        const dir = classifyMovement(m);
+        const prefix = dir === 'in' ? '+' : dir === 'out' ? '−' : '→';
+        return `${prefix}${Math.abs(m.quantity)}`;
+      },
+    },
+    {
+      key: 'by',
+      header: 'By',
+      nowrap: true,
+      render: (m) =>
+        m.actorName ? (
+          <span className="font-medium text-app-fg">{m.actorName}</span>
+        ) : (
+          <span className="italic text-app-fg-muted">System</span>
+        ),
+    },
+    {
+      key: 'reference',
+      header: 'Reference',
+      nowrap: true,
+      cellClassName: 'text-app-fg-muted',
+      render: (m) => {
+        if (m.orderShortId) {
+          return <OrderIdBadge id={m.orderShortId} linkTo={`/admin/orders/${m.orderShortId}`} />;
+        }
+        const cp = counterpartLabel(m);
+        if (cp) return <span>{cp}</span>;
+        return <span>—</span>;
+      },
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      cellClassName: 'text-app-fg-muted italic truncate max-w-xs',
+      cellTitle: (m) => m.reason ?? undefined,
+      render: (m) => m.reason ?? '—',
+    },
+    {
+      key: 'action',
+      header: 'Action',
+      align: 'right',
+      tight: true,
+      render: (m) => (
+        <CompactTableActionButton onClick={() => onView(m)}>View</CompactTableActionButton>
+      ),
+    },
+  ];
+}
+
+type TabId = 'batches' | 'audit';
+
 export default function InventoryLevelDetailRoute() {
-  const { level, batches, movements, total } = useLoaderData<typeof loader>();
+  const {
+    level,
+    batches,
+    movements,
+    total,
+    page,
+    totalPages,
+    inQty,
+    outQty,
+    startDate,
+    endDate,
+  } = useLoaderData<typeof loader>();
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab') === 'audit' ? 'audit' : 'batches';
+  const [activeTab, setActiveTab] = useState<TabId>(tabParam as TabId);
+  const [direction, setDirection] = useState<DirectionFilter>('all');
+  const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null);
+  const [selectedBatch, setSelectedBatch] = useState<LevelBatch | null>(null);
+
+  const filteredMovements = useMemo(() => {
+    if (direction === 'all') return movements;
+    return movements.filter((m) => classifyMovement(m) === direction);
+  }, [movements, direction]);
+
+  const periodAllTime = !startDate && !endDate;
 
   if (!level) {
     return (
@@ -121,140 +318,412 @@ export default function InventoryLevelDetailRoute() {
             <span className="font-semibold text-app-fg">{locationLabel}</span>
           </span>
         }
+        actions={
+          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+            <DateFilterBar startDate={startDate ?? undefined} endDate={endDate ?? undefined} />
+          </div>
+        }
       />
 
-      {/* Snapshot */}
-      <div className="card">
-        <div className="pb-4 mb-4 border-b border-app-border">
-          <p className="text-xs font-medium uppercase tracking-wide text-app-fg-muted">Stock location</p>
-          <p className="text-base font-semibold text-app-fg mt-1">{locationLabel}</p>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div>
-            <p className="text-xs text-app-fg-muted">Stock</p>
-            <p className="text-2xl font-semibold text-app-fg">{level.stockCount}</p>
-          </div>
-          <div>
-            <p className="text-xs text-app-fg-muted">Reserved</p>
-            <p className="text-2xl font-semibold text-warning-600 dark:text-warning-400">{level.reservedCount}</p>
-          </div>
-          <div>
-            <p className="text-xs text-app-fg-muted">Available</p>
-            <p className="text-2xl font-semibold text-success-600 dark:text-success-400">{available}</p>
-          </div>
-          <div>
-            <p className="text-xs text-app-fg-muted mb-1">Status</p>
-            <StatusBadge status={level.status} />
-          </div>
-        </div>
-      </div>
+      {/* Overview — live state + date-filtered movement totals (in/out within range) */}
+      <OverviewStatStrip
+        tileClassName="min-w-[7rem]"
+        items={[
+          {
+            label: 'Stock',
+            value: level.stockCount,
+            valueClassName: 'text-app-fg',
+          },
+          {
+            label: 'Reserved',
+            value: level.reservedCount,
+            valueClassName: 'text-warning-600 dark:text-warning-400',
+          },
+          {
+            label: 'Available',
+            value: available,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Status',
+            value: <StatusBadge status={level.status} />,
+            plainValue: true,
+          },
+          {
+            label: periodAllTime ? 'In (all time)' : 'In (period)',
+            value: `+${inQty}`,
+            valueClassName: 'text-success-600 dark:text-success-400',
+            title: 'Total units received in the selected date range',
+          },
+          {
+            label: periodAllTime ? 'Out (all time)' : 'Out (period)',
+            value: `−${outQty}`,
+            valueClassName: 'text-danger-600 dark:text-danger-400',
+            title: 'Total units delivered, transferred out, or written off in the selected date range',
+          },
+          {
+            label: 'Net',
+            value: `${inQty - outQty >= 0 ? '+' : ''}${inQty - outQty}`,
+            valueClassName:
+              inQty - outQty >= 0
+                ? 'text-success-600 dark:text-success-400'
+                : 'text-danger-600 dark:text-danger-400',
+          },
+          {
+            label: 'Events',
+            value: total,
+            valueClassName: 'text-app-fg',
+          },
+        ]}
+      />
 
-      {/* FIFO batches */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-app-fg mb-3">FIFO batches at {locationLabel}</h2>
-        {batches.length === 0 ? (
-          <p className="text-sm text-app-fg-muted italic">No batches received at this location yet.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-app-border">
-            <table className="w-full text-sm">
-              <thead className="bg-app-hover">
-                <tr>
-                  <th className="text-left px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Received</th>
-                  <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Intake qty</th>
-                  <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Remaining</th>
-                  <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Factory ₦</th>
-                  <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Landing ₦</th>
-                  <th className="text-right px-3 py-2 font-medium text-xs text-app-fg-muted uppercase tracking-wide">Landed ₦</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.map((b) => {
-                  const depleted = b.remainingQuantity === 0;
-                  return (
-                    <tr key={b.id} className={`border-t border-app-border ${depleted ? 'opacity-60' : ''}`}>
-                      <td className="px-3 py-2 text-app-fg-muted">
-                        {new Date(b.receivedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium text-app-fg">{b.quantity}</td>
-                      <td className={`px-3 py-2 text-right font-medium ${depleted ? 'text-app-fg-muted' : 'text-success-600 dark:text-success-400'}`}>
-                        {b.remainingQuantity}
-                      </td>
-                      <td className="px-3 py-2 text-right text-app-fg-muted">
-                        {Number(b.factoryCost).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-2 text-right text-app-fg-muted">
-                        {Number(b.landingCost).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-2 text-right font-medium text-app-fg">
-                        {Number(b.totalLandedCost).toLocaleString()}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* Tabs: FIFO batches | Audit trail */}
+      <Tabs
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as TabId)}
+        tabs={[
+          { value: 'batches', label: `FIFO batches at ${locationLabel}` },
+          { value: 'audit', label: `Audit trail (${total})` },
+        ]}
+      />
 
-      {/* Movement history */}
-      <div className="card">
-        <h2 className="text-lg font-semibold text-app-fg mb-3">Movement history</h2>
-        {movements.length === 0 ? (
-          <EmptyState
-            title="No movements yet"
-            description="Stock intakes, transfers, and other events will appear here."
+      {activeTab === 'batches' && (
+        <CompactTable<LevelBatch>
+          rows={batches}
+          rowKey={(b) => b.id}
+          rowClassName={(b) => (b.remainingQuantity === 0 ? 'opacity-60' : '')}
+          emptyTitle="No batches at this location"
+          emptyDescription="Stock intakes received here will appear as cost layers."
+          columns={[
+            {
+              key: 'received',
+              header: 'Received',
+              cellClassName: 'text-app-fg-muted',
+              render: (b) =>
+                new Date(b.receivedAt).toLocaleDateString('en-NG', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                }),
+            },
+            {
+              key: 'quantity',
+              header: 'Intake qty',
+              align: 'right',
+              cellClassName: 'font-medium text-app-fg',
+              render: (b) => b.quantity,
+            },
+            {
+              key: 'remaining',
+              header: 'Remaining',
+              align: 'right',
+              cellClassName: (b) =>
+                `font-medium ${b.remainingQuantity === 0 ? 'text-app-fg-muted' : 'text-success-600 dark:text-success-400'}`,
+              render: (b) => b.remainingQuantity,
+            },
+            {
+              key: 'factoryCost',
+              header: 'Factory ₦',
+              align: 'right',
+              cellClassName: 'text-app-fg-muted',
+              render: (b) => Number(b.factoryCost).toLocaleString(),
+            },
+            {
+              key: 'landingCost',
+              header: 'Landing ₦',
+              align: 'right',
+              cellClassName: 'text-app-fg-muted',
+              render: (b) => Number(b.landingCost).toLocaleString(),
+            },
+            {
+              key: 'totalLanded',
+              header: 'Landed ₦',
+              align: 'right',
+              cellClassName: 'font-medium text-app-fg',
+              render: (b) => Number(b.totalLandedCost).toLocaleString(),
+            },
+            {
+              key: 'action',
+              header: 'Action',
+              align: 'right',
+              tight: true,
+              render: (b) => (
+                <CompactTableActionButton onClick={() => setSelectedBatch(b)}>
+                  View
+                </CompactTableActionButton>
+              ),
+            },
+          ]}
+        />
+      )}
+
+      {activeTab === 'audit' && (
+        <>
+          {total > 0 && (
+            <div>
+              <FilterPills
+                value={direction}
+                onChange={(v) => setDirection(v as DirectionFilter)}
+                options={[
+                  { value: 'all', label: `All (${total})` },
+                  { value: 'in', label: 'Stock in' },
+                  { value: 'out', label: 'Stock out' },
+                ]}
+              />
+            </div>
+          )}
+
+          <CompactTable<StockMovement>
+            rows={filteredMovements}
+            rowKey={(m) => m.id}
+            pagination={{ page, totalPages }}
+            emptyTitle={total === 0 ? 'No movements in this range' : 'No matching movements'}
+            emptyDescription={
+              total === 0
+                ? 'Adjust the date filter or wait for stock activity.'
+                : 'Switch the filter to see other stock events.'
+            }
+            columns={auditTrailColumns(setSelectedMovement)}
           />
-        ) : (
-          <ul className="space-y-2">
-            {movements.map((m) => {
-              const isIncoming =
-                m.movementType === 'INTAKE' ||
-                m.movementType === 'TRANSFER_IN' ||
-                m.movementType === 'RESTOCK' ||
-                (m.movementType === 'ADJUSTMENT' && m.quantity > 0);
-              const isNeutral = m.movementType === 'ALLOCATION' || m.movementType === 'RESERVATION';
-              const qtyColor = isNeutral
-                ? 'text-app-fg-muted'
-                : isIncoming
-                  ? 'text-success-600 dark:text-success-400'
-                  : 'text-danger-600 dark:text-danger-400';
-              const qtyPrefix = isNeutral ? '→' : isIncoming ? '+' : '';
+        </>
+      )}
 
-              return (
-                <li
-                  key={m.id}
-                  className="rounded-lg border border-app-border bg-app-canvas px-3 py-2.5 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
-                        {formatMovementType(m.movementType)}
-                      </span>
-                      <span className={`font-medium ${qtyColor}`}>
-                        {qtyPrefix}{Math.abs(m.quantity)}
-                      </span>
-                    </div>
-                    <span className="text-xs text-app-fg-muted whitespace-nowrap">
-                      {new Date(m.createdAt).toLocaleString('en-NG', {
-                        month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
-                      })}
-                    </span>
-                  </div>
-                  {m.reason && (
-                    <p className="text-xs text-app-fg-muted mt-1 italic">{m.reason}</p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {total > movements.length && (
-          <p className="text-xs text-app-fg-muted mt-3">
-            Showing latest {movements.length} of {total} movements.
-          </p>
-        )}
-      </div>
+      <AuditMovementDetailModal
+        movement={selectedMovement}
+        locationLabel={locationLabel}
+        onClose={() => setSelectedMovement(null)}
+      />
+      <BatchDetailModal
+        batch={selectedBatch}
+        locationLabel={locationLabel}
+        onClose={() => setSelectedBatch(null)}
+      />
     </div>
+  );
+}
+
+function AuditMovementDetailModal({
+  movement,
+  locationLabel,
+  onClose,
+}: {
+  movement: StockMovement | null;
+  locationLabel: string;
+  onClose: () => void;
+}) {
+  if (!movement) return null;
+  const dir = classifyMovement(movement);
+  const qtyColor =
+    dir === 'in'
+      ? 'text-success-600 dark:text-success-400'
+      : dir === 'out'
+        ? 'text-danger-600 dark:text-danger-400'
+        : 'text-app-fg-muted';
+  const qtyPrefix = dir === 'in' ? '+' : dir === 'out' ? '−' : '→';
+  const counterpartLabel =
+    movement.movementType === 'TRANSFER_OUT' && movement.toLocationName
+      ? `to ${movement.toLocationName}`
+      : movement.movementType === 'TRANSFER_IN' && movement.fromLocationName
+        ? `from ${movement.fromLocationName}`
+        : null;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      maxWidth="max-w-md"
+      backdropBlur
+      aria-labelledby="audit-movement-detail-title"
+    >
+      <div className="space-y-5 px-5 pt-5 md:px-6 md:pt-6 pb-2">
+        <div>
+          <h2 id="audit-movement-detail-title" className="text-base font-semibold text-app-fg">
+            Movement details
+          </h2>
+          <p className="text-xs text-app-fg-muted mt-0.5">Stock event at {locationLabel}</p>
+        </div>
+
+        <div className="rounded-lg border border-app-border bg-app-canvas px-4 py-3 flex items-center justify-between gap-3">
+          <span className={MOVEMENT_COLORS[movement.movementType] ?? 'badge'}>
+            {formatMovementType(movement.movementType)}
+          </span>
+          <span className={`text-2xl font-semibold ${qtyColor}`}>
+            {qtyPrefix}{Math.abs(movement.quantity)}
+            <span className="text-sm font-normal text-app-fg-muted ml-1">units</span>
+          </span>
+        </div>
+
+        <DescriptionList
+          layout="horizontal"
+          divided
+          items={[
+            {
+              label: 'When',
+              value: new Date(movement.createdAt).toLocaleString('en-NG', {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+            },
+            {
+              label: 'By',
+              value: movement.actorName ? (
+                <span className="inline-flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-app-fg">{movement.actorName}</span>
+                  {movement.actorRole && <RoleBadge role={movement.actorRole} />}
+                </span>
+              ) : (
+                <span className="italic text-app-fg-muted">System</span>
+              ),
+            },
+            ...(counterpartLabel
+              ? [{ label: 'Counterpart', value: counterpartLabel }]
+              : []),
+            ...(movement.orderShortId
+              ? [
+                  {
+                    label: 'Order',
+                    value: (
+                      <OrderIdBadge id={movement.orderShortId} linkTo={`/admin/orders/${movement.orderShortId}`} />
+                    ),
+                  },
+                ]
+              : []),
+            {
+              label: 'Reason',
+              value: movement.reason ? (
+                <span className="italic">{movement.reason}</span>
+              ) : (
+                <span className="text-app-fg-muted">—</span>
+              ),
+              fullWidth: true,
+            },
+            {
+              label: 'Movement ID',
+              value: <span className="font-mono text-xs break-all">{movement.id}</span>,
+              fullWidth: true,
+            },
+          ]}
+        />
+
+        <div className="flex justify-end pt-1">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function BatchDetailModal({
+  batch,
+  locationLabel,
+  onClose,
+}: {
+  batch: LevelBatch | null;
+  locationLabel: string;
+  onClose: () => void;
+}) {
+  if (!batch) return null;
+  const used = batch.quantity - batch.remainingQuantity;
+  const depleted = batch.remainingQuantity === 0;
+  const remainingColor = depleted
+    ? 'text-app-fg-muted'
+    : 'text-success-600 dark:text-success-400';
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      maxWidth="max-w-md"
+      backdropBlur
+      aria-labelledby="batch-detail-title"
+    >
+      <div className="space-y-5 px-5 pt-5 md:px-6 md:pt-6 pb-2">
+        <div>
+          <h2 id="batch-detail-title" className="text-base font-semibold text-app-fg">
+            FIFO batch
+          </h2>
+          <p className="text-xs text-app-fg-muted mt-0.5">Cost layer at {locationLabel}</p>
+        </div>
+
+        <div className="rounded-lg border border-app-border bg-app-canvas px-4 py-3">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-xs font-medium text-app-fg-muted uppercase tracking-wide">Remaining</span>
+            <span className={`text-2xl font-semibold ${remainingColor}`}>
+              {batch.remainingQuantity}
+              <span className="text-sm font-normal text-app-fg-muted ml-1">/ {batch.quantity}</span>
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 rounded-full bg-app-hover overflow-hidden">
+            <div
+              className={depleted ? 'h-full bg-app-border' : 'h-full bg-success-500'}
+              style={{
+                width: batch.quantity > 0
+                  ? `${Math.max(0, Math.min(100, (batch.remainingQuantity / batch.quantity) * 100))}%`
+                  : '0%',
+              }}
+            />
+          </div>
+        </div>
+
+        <DescriptionList
+          layout="horizontal"
+          divided
+          items={[
+            {
+              label: 'Received',
+              value: new Date(batch.receivedAt).toLocaleString('en-NG', {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+            },
+            {
+              label: 'Intake qty',
+              value: <span className="font-medium text-app-fg">{batch.quantity}</span>,
+            },
+            {
+              label: 'Used',
+              value: <span className="font-medium text-app-fg">{used}</span>,
+            },
+            {
+              label: 'Factory cost',
+              value: <span className="text-app-fg">₦{Number(batch.factoryCost).toLocaleString()}</span>,
+            },
+            {
+              label: 'Landing cost',
+              value: <span className="text-app-fg">₦{Number(batch.landingCost).toLocaleString()}</span>,
+            },
+            {
+              label: 'Total landed',
+              value: (
+                <span className="font-semibold text-app-fg">
+                  ₦{Number(batch.totalLandedCost).toLocaleString()}
+                </span>
+              ),
+            },
+            {
+              label: 'Batch ID',
+              value: <span className="font-mono text-xs break-all">{batch.id}</span>,
+              fullWidth: true,
+            },
+          ]}
+        />
+
+        <div className="flex justify-end pt-1">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

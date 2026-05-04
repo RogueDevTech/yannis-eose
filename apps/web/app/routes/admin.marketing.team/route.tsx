@@ -59,14 +59,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
 
-  const [balancesRes, summaryRes, leaderboardRes] = await Promise.all([
+  const [balancesRes, summaryRes, leaderboardRes, profitabilityRes] = await Promise.all([
     apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
       { method: 'GET', cookie },
     ),
+    apiRequest<unknown>('/trpc/marketing.profitabilityConfig', { method: 'GET', cookie }),
   ]);
+  const profitabilityConfig = profitabilityRes.ok
+    ? (profitabilityRes.data as { result?: { data?: { targetRoas: number; greenThreshold: number } } })
+        ?.result?.data ?? { targetRoas: 3, greenThreshold: 2.5 }
+    : { targetRoas: 3, greenThreshold: 2.5 };
   redirectIfUnauthorized(balancesRes, new URL(request.url).pathname);
   let teamMembers = parseBalancesList(balancesRes);
   const fundingSummary = parseFundingSummary(summaryRes);
@@ -223,6 +228,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortBy,
     sortDir,
     unfilteredCount,
+    profitabilityConfig,
   };
 }
 
@@ -241,6 +247,7 @@ export default function MarketingTeamRoute() {
       sortBy={data.sortBy}
       sortDir={data.sortDir}
       unfilteredCount={data.unfilteredCount}
+      profitabilityConfig={data.profitabilityConfig}
     />
   );
 }

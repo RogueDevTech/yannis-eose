@@ -6,7 +6,7 @@ import { canonicalPermissionCode, db as schema } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { isAdminLevel, isSuperAdminOnly } from '../common/authz';
+import { isSuperAdminOnly } from '../common/authz';
 
 @Injectable()
 export class RoleTemplatesService {
@@ -16,8 +16,7 @@ export class RoleTemplatesService {
     // Align with tRPC `permissionProcedure`: session may carry legacy codes (`users.create`, etc.).
     const effective = new Set((actor.permissions ?? []).map((p) => canonicalPermissionCode(p)));
     const canSee =
-      isSuperAdminOnly(actor) ||
-      isAdminLevel(actor) ||
+      actor.role === 'SUPER_ADMIN' ||
       effective.has('rbac.templates.manage') ||
       effective.has('users.staff.create') ||
       effective.has('users.staff.update') ||

@@ -3,8 +3,30 @@
  *
  * Usage (from repo root or Docker `/app`):
  *   PGSSLMODE=require DATABASE_URL=... pnpm --filter @yannis/shared exec tsx src/migrations/cli.ts
+ *
+ * If DATABASE_URL is not exported, loads `.env` from `apps/api/.env` and repo root `.env`
+ * (searches upward from cwd) — same convenience as `db:seed-permissions`.
  */
+import { existsSync } from 'fs';
+import path from 'path';
+import { config as loadDotenv } from 'dotenv';
 import postgres from 'postgres';
+
+function loadDotenvForMigrateCli(): void {
+  let dir = path.resolve(process.cwd());
+  for (let depth = 0; depth < 10; depth++) {
+    for (const file of [path.join(dir, 'apps', 'api', '.env'), path.join(dir, '.env')]) {
+      if (existsSync(file)) {
+        loadDotenv({ path: file });
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+}
+
+loadDotenvForMigrateCli();
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as schema from '../db/index';
 import { resolveMigrationsDirectory, runSqlMigrations } from './run-sql-migrations';
@@ -19,7 +41,9 @@ function postgresSslOption(url: string): boolean | { rejectUnauthorized: boolean
 async function main(): Promise<void> {
   const url = process.env['DATABASE_URL'] ?? process.env['TEST_DATABASE_URL'];
   if (!url || url.trim() === '') {
-    throw new Error('DATABASE_URL (or TEST_DATABASE_URL) is required');
+    throw new Error(
+      'DATABASE_URL (or TEST_DATABASE_URL) is required. Add it to apps/api/.env or the repo root .env, or export it in the shell.',
+    );
   }
 
   const pg = postgres(url, {

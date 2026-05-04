@@ -1,8 +1,23 @@
+import { existsSync } from 'fs';
 import { config } from 'dotenv';
+import dns from 'node:dns';
 import { resolve } from 'path';
 
-// Load .env from apps/api/ (works when running from dist/)
-config({ path: resolve(__dirname, '../.env') });
+// Load env: repo root `.env` first (shared monorepo vars), then `apps/api/.env` overrides,
+// then path relative to `dist/` / `src/` so `pnpm dev` from any cwd still picks up API keys.
+const envCandidates = [
+  resolve(process.cwd(), '.env'),
+  resolve(process.cwd(), 'apps/api/.env'),
+  resolve(__dirname, '../.env'),
+];
+for (const envPath of envCandidates) {
+  if (existsSync(envPath)) {
+    config({ path: envPath, override: true });
+  }
+}
+
+// Prefer IPv4 when resolving API hosts (SendGrid, etc.) — some networks break IPv6 DNS.
+dns.setDefaultResultOrder('ipv4first');
 
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';

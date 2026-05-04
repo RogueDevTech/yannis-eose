@@ -1,15 +1,21 @@
-import { useEffect, useState, useRef } from 'react';
-import { Link, useFetcher, useSearchParams, useRevalidator } from '@remix-run/react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { Button } from '~/components/ui/button';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
-import { EmptyState } from '~/components/ui/empty-state';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { Pagination } from '~/components/ui/pagination';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Textarea } from '~/components/ui/textarea';
@@ -97,7 +103,6 @@ export function ProductsListPage({
   const [archiveReason, setArchiveReason] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
   const safeTotalPages = Math.max(1, totalPages);
-  const { revalidate } = useRevalidator();
   const { toast } = useToast();
 
   const archiveFetcher = useFetcher<{
@@ -106,26 +111,33 @@ export function ProductsListPage({
     requiresApproval?: boolean;
     message?: string | null;
   }>();
-  const prevArchiveFetcherState = useRef(archiveFetcher.state);
 
-  useEffect(() => {
-    const wasSubmitting = prevArchiveFetcherState.current === 'submitting';
-    prevArchiveFetcherState.current = archiveFetcher.state;
-    if (!wasSubmitting || archiveFetcher.state !== 'idle' || !archiveFetcher.data) return;
-    const d = archiveFetcher.data;
-    if (d.success) {
-      if (d.requiresApproval) {
-        toast.info('Request submitted', d.message ?? 'A Super Admin will review your archive request.');
+  // Close-on-success — see CLAUDE.md → "Modal + Optimistic UI Pattern".
+  // We can't use the generic `useFetcherToast` here because the toast copy
+  // depends on `requiresApproval` (immediate archive vs request submitted),
+  // so we fire the toast from inside the onSuccess callback instead.
+  const handleArchiveSuccess = useCallback(
+    (data: { success: true } & Record<string, unknown>) => {
+      if (data['requiresApproval']) {
+        const message = (data['message'] as string | null | undefined) ?? 'A Super Admin will review your archive request.';
+        toast.info('Request submitted', message);
       } else {
         toast.success('Product archived');
       }
       setArchiveTarget(null);
       setArchiveReason('');
-      revalidate();
-    } else if (d.error) {
+    },
+    [toast],
+  );
+  useCloseOnFetcherSuccess(archiveFetcher, handleArchiveSuccess);
+
+  // Surface error toasts (success path is handled by the hook above).
+  useEffect(() => {
+    const d = archiveFetcher.data;
+    if (archiveFetcher.state === 'idle' && d && !d.success && d.error) {
       toast.error('Archive failed', d.error);
     }
-  }, [archiveFetcher.state, archiveFetcher.data, revalidate, toast]);
+  }, [archiveFetcher.state, archiveFetcher.data, toast]);
 
   // Whether to show the cost column — driven by whether the API stripped costPrice
   // from any row. (Column-level security at API; if user lacks finance access, every
@@ -151,6 +163,112 @@ export function ProductsListPage({
     return true;
   });
 
+  const productsToolbarFilterBadge = useMemo(() => (statusFilter !== 'ACTIVE' ? 1 : 0), [statusFilter]);
+
+  const productColumns = useMemo((): CompactTableColumn<Product>[] => {
+    const cols: CompactTableColumn<Product>[] = [
+      {
+        key: 'product',
+        header: 'Product',
+        minWidth: 'min-w-[200px]',
+        render: (product) => (
+          <div className="flex items-center gap-3">
+            <ProductThumb product={product} />
+            <div className="min-w-0">
+              <div className="font-medium text-app-fg">{product.name}</div>
+              {product.brandName ? <div className="text-xs text-app-fg-muted truncate">{product.brandName}</div> : null}
+            </div>
+          </div>
+        ),
+      },
+      {
+        key: 'category',
+        header: 'Category',
+        render: (product) => <span className="text-sm text-app-fg-muted">{getDisplayCategory(product)}</span>,
+      },
+      {
+        key: 'baseSalePrice',
+        header: 'Base Price',
+        align: 'right',
+        render: (product) => (
+          <span className="font-medium tabular-nums">
+            <NairaPrice amount={Number(product.baseSalePrice)} />
+          </span>
+        ),
+      },
+    ];
+    if (showCostColumn) {
+      cols.push({
+        key: 'costPrice',
+        header: 'Cost',
+        align: 'right',
+        render: (product) => {
+          const cost =
+            product.costPrice !== null && product.costPrice !== undefined ? Number(product.costPrice) : null;
+          return (
+            <span className="tabular-nums text-app-fg-muted">
+              {cost !== null ? <NairaPrice amount={cost} /> : '—'}
+            </span>
+          );
+        },
+      });
+    }
+    cols.push(
+      {
+        key: 'stock',
+        header: 'Stock',
+        align: 'right',
+        render: (product) => {
+          const stock = product.totalStock ?? 0;
+          return (
+            <span
+              className={`font-medium tabular-nums ${stock <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}
+            >
+              {stock.toLocaleString()}
+            </span>
+          );
+        },
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (product) => <StatusBadge status={product.status} size="sm" />,
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (product) => (
+          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+            <CompactTableActionButton onClick={() => setViewProduct(product)}>View</CompactTableActionButton>
+            {canEditProduct ? (
+              <CompactTableActionButton
+                to={`/admin/products/${product.id}?mode=edit`}
+                className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+              >
+                Edit
+              </CompactTableActionButton>
+            ) : null}
+            {canEditProduct && product.status !== 'ARCHIVED' ? (
+              <CompactTableActionButton
+                tone="danger"
+                onClick={() => {
+                  setArchiveReason('');
+                  setArchiveTarget(product);
+                }}
+              >
+                {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
+              </CompactTableActionButton>
+            ) : null}
+          </div>
+        ),
+      },
+    );
+    return cols;
+  }, [showCostColumn, canEditProduct, canInstantArchiveProduct]);
+
   const goToPage = (nextPage: number) => {
     const clamped = Math.min(Math.max(1, nextPage), safeTotalPages);
     const next = new URLSearchParams(searchParams);
@@ -165,17 +283,40 @@ export function ProductsListPage({
         title="Products"
         description="Manage your product catalog and bundle offers"
         actions={
-          <>
-            <PageRefreshButton />
-            {canCreateProduct ? (
-              <Link to="/admin/products/new" className="btn-primary">
-                <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                Add Product
-              </Link>
-            ) : null}
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Products tools"
+            sheetSubtitle={<span>Refresh and add product</span>}
+            triggerAriaLabel="Products toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                {canCreateProduct ? (
+                  <Link to="/admin/products/new" className="btn-primary">
+                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Add Product
+                  </Link>
+                ) : null}
+              </>
+            }
+            sheet={({ closeSheet }) =>
+              canCreateProduct ? (
+                <Link
+                  to="/admin/products/new"
+                  className="btn-primary inline-flex w-full items-center justify-center gap-2"
+                  onClick={() => closeSheet()}
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  Add Product
+                </Link>
+              ) : (
+                <p className="text-center text-sm text-app-fg-muted">You do not have permission to create products.</p>
+              )
+            }
+          />
         }
       />
 
@@ -195,222 +336,73 @@ export function ProductsListPage({
         ]}
       />
 
-      {/* Filters */}
-      <div className="card">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <SearchInput
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search by name..."
-            className="flex-1"
-          />
-          <FormSelect
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            options={[
-              { value: 'ALL', label: 'All Status' },
-              { value: 'ACTIVE', label: 'Active' },
-              { value: 'INACTIVE', label: 'Inactive' },
-              { value: 'ARCHIVED', label: 'Archived' },
-            ]}
-            className="w-full sm:w-40"
-          />
-        </div>
+      <div className="card p-0 overflow-hidden">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          badgeCount={productsToolbarFilterBadge}
+          sheetSubtitle={<span>Status applies immediately</span>}
+          searchRow={
+            <SearchInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Search by name..."
+              wrapperClassName="min-w-0 flex-1 md:min-w-0"
+            />
+          }
+          desktopInlineFilters={
+            <FormSelect
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              options={[
+                { value: 'ALL', label: 'All Status' },
+                { value: 'ACTIVE', label: 'Active' },
+                { value: 'INACTIVE', label: 'Inactive' },
+                { value: 'ARCHIVED', label: 'Archived' },
+              ]}
+              wrapperClassName="w-full min-w-0 sm:w-40"
+            />
+          }
+          sheetFilterBody={
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-app-fg-muted">Status</span>
+              <FormSelect
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                options={[
+                  { value: 'ALL', label: 'All Status' },
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                  { value: 'ARCHIVED', label: 'Archived' },
+                ]}
+                wrapperClassName="w-full"
+              />
+            </div>
+          }
+        />
       </div>
 
-      {/* Desktop table */}
-      <div className="card p-0 hidden md:block">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header w-12"></th>
-                <th className="table-header">Name</th>
-                <th className="table-header">Category</th>
-                <th className="table-header text-right">Base Price</th>
-                {showCostColumn && <th className="table-header text-right">Cost</th>}
-                <th className="table-header text-right">Stock</th>
-                <th className="table-header">Status</th>
-                <th className="table-header text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map((product) => {
-                const cost = product.costPrice !== null && product.costPrice !== undefined
-                  ? Number(product.costPrice)
-                  : null;
-                const stock = product.totalStock ?? 0;
-                return (
-                  <tr key={product.id} className="table-row">
-                    <td className="table-cell">
-                      <ProductThumb product={product} />
-                    </td>
-                    <td className="table-cell">
-                      <div className="font-medium text-app-fg">{product.name}</div>
-                      {product.brandName && (
-                        <div className="text-xs text-app-fg-muted">{product.brandName}</div>
-                      )}
-                    </td>
-                    <td className="table-cell text-sm text-app-fg-muted">
-                      {getDisplayCategory(product)}
-                    </td>
-                    <td className="table-cell text-right font-medium tabular-nums">
-                      <NairaPrice amount={Number(product.baseSalePrice)} />
-                    </td>
-                    {showCostColumn && (
-                      <td className="table-cell text-right tabular-nums text-app-fg-muted">
-                        {cost !== null ? <NairaPrice amount={cost} /> : <span className="text-app-fg-muted">—</span>}
-                      </td>
-                    )}
-                    <td className={`table-cell text-right font-medium tabular-nums ${stock <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}>
-                      {stock.toLocaleString()}
-                    </td>
-                    <td className="table-cell">
-                      <StatusBadge status={product.status} size="sm" />
-                    </td>
-                    <td className="table-cell text-right">
-                      <div className="inline-flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setViewProduct(product)}
-                          className="btn-primary btn-sm text-xs"
-                        >
-                          View
-                        </button>
-                        {canEditProduct && (
-                          <Link
-                            to={`/admin/products/${product.id}?mode=edit`}
-                            prefetch="intent"
-                            className="btn-secondary btn-sm text-xs"
-                          >
-                            Edit
-                          </Link>
-                        )}
-                        {canEditProduct && product.status !== 'ARCHIVED' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setArchiveReason('');
-                              setArchiveTarget(product);
-                            }}
-                            className="btn-secondary btn-sm text-xs text-danger-600 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
-                          >
-                            {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredProducts.length === 0 && (
-                <tr>
-                  <td colSpan={showCostColumn ? 8 : 7}>
-                    <EmptyState
-                      title={products.length === 0 ? 'No products yet' : 'No matching products found'}
-                      description={products.length === 0 ? 'Add your first product with Add Product above.' : 'Try adjusting your search or filters.'}
-                    />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Mobile cards */}
-      <div className="md:hidden space-y-3 px-1">
-        {filteredProducts.map((product) => {
-          const cost = product.costPrice !== null && product.costPrice !== undefined
-            ? Number(product.costPrice)
-            : null;
-          const stock = product.totalStock ?? 0;
-          return (
-            <article
-              key={product.id}
-              className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <ProductThumb product={product} />
-                  <div className="min-w-0">
-                    <h3 className="font-medium text-app-fg truncate">{product.name}</h3>
-                    <p className="text-xs text-app-fg-muted truncate">{getDisplayCategory(product)}</p>
-                  </div>
-                </div>
-                <StatusBadge status={product.status} size="sm" />
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-sm">
-                <div>
-                  <p className="text-xs text-app-fg-muted">Base Price</p>
-                  <p className="font-medium text-app-fg tabular-nums">
-                    <NairaPrice amount={Number(product.baseSalePrice)} />
-                  </p>
-                </div>
-                {showCostColumn && (
-                  <div>
-                    <p className="text-xs text-app-fg-muted">Cost</p>
-                    <p className="font-medium text-app-fg-muted tabular-nums">
-                      {cost !== null ? <NairaPrice amount={cost} /> : '—'}
-                    </p>
-                  </div>
-                )}
-                <div>
-                  <p className="text-xs text-app-fg-muted">Stock</p>
-                  <p className={`font-medium tabular-nums ${stock <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}>
-                    {stock.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 pt-2 border-t border-app-border">
-                <button
-                  type="button"
-                  onClick={() => setViewProduct(product)}
-                  className="btn-primary btn-sm text-xs"
-                >
-                  View
-                </button>
-                {canEditProduct && (
-                  <Link
-                    to={`/admin/products/${product.id}?mode=edit`}
-                    prefetch="intent"
-                    className="btn-secondary btn-sm text-xs"
-                  >
-                    Edit
-                  </Link>
-                )}
-                {canEditProduct && product.status !== 'ARCHIVED' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setArchiveReason('');
-                      setArchiveTarget(product);
-                    }}
-                    className="btn-secondary btn-sm text-xs text-danger-600 dark:text-danger-400 ml-auto"
-                  >
-                    {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
-                  </button>
-                )}
-              </div>
-            </article>
-          );
-        })}
-        {filteredProducts.length === 0 && (
-          <EmptyState
-            title={products.length === 0 ? 'No products yet' : 'No matching products found'}
-            description={products.length === 0 ? 'Add your first product with Add Product above.' : 'Try adjusting your search or filters.'}
-            bordered
-          />
-        )}
-      </div>
-
-      {/* Pagination */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-app-fg-muted">
-          Showing {filteredProducts.length} of {total} products
-        </p>
-        <Pagination page={page} totalPages={safeTotalPages} onPageChange={goToPage} showLabel />
-      </div>
+      <CompactTable<Product>
+        columns={productColumns}
+        rows={filteredProducts}
+        rowKey={(p) => p.id}
+        emptyTitle={products.length === 0 ? 'No products yet' : 'No matching products found'}
+        emptyDescription={
+          products.length === 0
+            ? 'Add your first product with Add Product above.'
+            : 'Try adjusting your search or filters.'
+        }
+        pagination={{
+          page,
+          totalPages: safeTotalPages,
+          onPageChange: goToPage,
+          summary: (
+            <span>
+              Showing {filteredProducts.length} of {total} products
+            </span>
+          ),
+          wrapperClassName: 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
+        }}
+      />
 
       {/* Super Admin: archive immediately */}
       {archiveTarget && canInstantArchiveProduct && (

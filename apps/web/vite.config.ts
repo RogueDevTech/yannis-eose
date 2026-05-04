@@ -34,6 +34,14 @@ export default defineConfig({
       port: 4003,
     },
     proxy: {
+      // Remix loaders run in Node and call API_URL; default in dev is this dev server so cookies + host line up.
+      // Forward /trpc to Nest so permissions.listCatalog and other procedures work without a manual API_URL.
+      '/trpc': {
+        target: 'http://127.0.0.1:4444',
+        changeOrigin: true,
+      },
+      // Do NOT proxy `/auth` — browser navigations to `/auth` must hit Remix. SSR posts to `/auth/*`
+      // use api.server `resolveServerApiBase` (direct :4444 in dev).
       '/socket.io': {
         target: 'http://127.0.0.1:4444',
         ws: true,

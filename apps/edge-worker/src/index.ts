@@ -1,3 +1,5 @@
+import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
+
 /**
  * Yannis EOSE — Edge Worker
  *
@@ -141,19 +143,30 @@ interface CampaignConfig {
     showDeliveryState?: boolean;
     showGender?: boolean;
     showPreferredDeliveryDate?: boolean;
+    showCustomerEmail?: boolean;
     showPaymentMethod?: boolean;
     requireDeliveryAddress?: boolean;
     requireDeliveryNotes?: boolean;
     requireDeliveryState?: boolean;
     requireGender?: boolean;
     requirePreferredDeliveryDate?: boolean;
+    requireCustomerEmail?: boolean;
     requirePaymentMethod?: boolean;
     standardFields?: Array<{
-      key: 'deliveryAddress' | 'deliveryNotes' | 'deliveryState' | 'gender' | 'preferredDeliveryDate' | 'paymentMethod';
+      key:
+        | 'deliveryAddress'
+        | 'deliveryNotes'
+        | 'deliveryState'
+        | 'gender'
+        | 'preferredDeliveryDate'
+        | 'customerEmail'
+        | 'paymentMethod';
       required: boolean;
     }>;
     deliveryStateOptions?: string[];
     preferredDeliveryDateOptions?: string[];
+    genderOptions?: string[];
+    showProductImages?: boolean;
     /** Form-builder output. The Edge Worker renders these between the standard fields and
      *  the submit button. Submission collects values into `customFields[id] = value` keyed
      *  by `field.id` and forwards them to the API → `orders.custom_fields` JSONB. */
@@ -369,25 +382,19 @@ async function checkRateLimit(ip: string, env: Env): Promise<RateLimitResult> {
 }
 
 // ── Turnstile CAPTCHA Verification ─────────────────────────────
-
-async function verifyTurnstile(token: string, ip: string, env: Env): Promise<boolean> {
-  if (!env.TURNSTILE_SECRET_KEY) return true; // Skip if not configured
-  try {
-    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        secret: env.TURNSTILE_SECRET_KEY,
-        response: token,
-        remoteip: ip,
-      }),
-    });
-    const result = await response.json() as { success: boolean };
-    return result.success;
-  } catch {
-    return false;
-  }
-}
+// Disabled — we switched to honeypot-based bot protection (see handleSubmission step 1a).
+// Helper kept (commented) so the wiring is documented for anyone re-enabling Turnstile later.
+//
+// async function verifyTurnstile(token: string, ip: string, env: Env): Promise<boolean> {
+//   if (!env.TURNSTILE_SECRET_KEY) return true;
+//   const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+//     body: new URLSearchParams({ secret: env.TURNSTILE_SECRET_KEY, response: token, remoteip: ip }),
+//   });
+//   const result = await response.json() as { success: boolean };
+//   return result.success;
+// }
 
 // ── Dedup Check ────────────────────────────────────────────────
 
@@ -638,16 +645,31 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .product-name{font-weight:600;font-size:.875rem}
     .yannis-form-card .product-price{color:${accentColor};font-weight:700;font-size:.875rem}
     .yannis-form-card .offer-selector{display:flex;flex-direction:column;gap:.5rem;margin-bottom:1rem}
-    .yannis-form-card .offer-option{display:flex;align-items:center;gap:.75rem;padding:.75rem;border:2px solid #ddd;border-radius:8px;cursor:pointer;transition:border-color .2s,background .2s}
-    .yannis-form-card .offer-thumb{width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid #e5e5e5}
+    .yannis-form-card .offer-option{display:flex;align-items:flex-start;gap:.625rem;padding:.75rem;border:2px solid #ddd;border-radius:10px;cursor:pointer;transition:border-color .2s,background .2s}
+    .yannis-form-card .offer-thumb{width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;border:1px solid #e5e5e5;margin-top:.125rem}
     .yannis-form-card .offer-option:hover{border-color:${accentColor}}
     .yannis-form-card .offer-option.selected{border-color:${accentColor};background:${accentColor}08}
-    .yannis-form-card .offer-option input[type=radio]{accent-color:${accentColor};width:18px;height:18px;flex-shrink:0}
-    .yannis-form-card .offer-label{font-weight:600;font-size:.875rem;flex:1}
-    .yannis-form-card .offer-details{display:flex;align-items:center;gap:.5rem}
-    .yannis-form-card .offer-qty{font-size:.75rem;color:#666;white-space:nowrap}
-    .yannis-form-card .offer-price{color:${accentColor};font-weight:700;font-size:.875rem;white-space:nowrap}
-    .yannis-form-card .offline-badge{display:inline-flex;align-items:center;gap:.25rem;padding:.25rem .5rem;background:#fef3c7;color:#92400e;border-radius:6px;font-size:.75rem;font-weight:600;margin-bottom:.75rem}
+    .yannis-form-card .offer-option input[type=radio]{accent-color:${accentColor};width:18px;height:18px;flex-shrink:0;margin-top:.25rem}
+    .yannis-form-card .offer-body{display:flex;flex-direction:column;align-items:flex-start;gap:.25rem;flex:1;min-width:0}
+    .yannis-form-card .offer-label{font-weight:600;font-size:.875rem;line-height:1.35;width:100%}
+    .yannis-form-card .offer-details{display:flex;flex-wrap:wrap;align-items:center;column-gap:.5rem;row-gap:.125rem}
+    .yannis-form-card .offer-qty{font-size:.75rem;color:#666}
+    .yannis-form-card .offer-price{color:${accentColor};font-weight:700;font-size:.9375rem}
+    @media (max-width:480px){
+      .yannis-form-card{padding:1rem;border-radius:10px}
+      .yannis-form-card h2{font-size:1.25rem;margin-bottom:.375rem}
+      .yannis-form-card .subtitle{font-size:.8125rem;margin-bottom:1rem}
+      .yannis-form-card label{font-size:.6875rem;margin-bottom:.2rem}
+      .yannis-form-card input,.yannis-form-card textarea,.yannis-form-card select{padding:.5rem .625rem;font-size:16px;margin-bottom:.75rem;border-radius:8px}
+      .yannis-form-card .btn{padding:.6875rem;font-size:.9375rem}
+      .yannis-form-card .offer-option{padding:.625rem .75rem;gap:.5rem;border-radius:10px;border-width:1px}
+      .yannis-form-card .offer-thumb{width:40px;height:40px}
+      .yannis-form-card .offer-label{font-size:.8125rem}
+      .yannis-form-card .offer-price{font-size:.875rem}
+      .yannis-form-card .offer-selector{gap:.375rem;margin-bottom:.75rem}
+      .yannis-form-card .product-option{padding:.625rem}
+      .yannis-form-card .product-selector{margin-bottom:.75rem}
+    }
     .yannis-form-card .embed-success{padding:1rem .5rem;text-align:center}
     .yannis-form-card .embed-success-icon{width:44px;height:44px;margin:0 auto .75rem;border-radius:9999px;background:#ecfdf5;color:#059669;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.125rem;border:1px solid #a7f3d0}
     .yannis-form-card .embed-success h3{margin:0 0 .375rem;font-size:1.05rem;color:#111827}
@@ -655,6 +677,9 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .embed-success-actions{margin-top:.875rem;display:flex;justify-content:center;gap:.5rem;flex-wrap:wrap}
     .yannis-form-card .embed-success-actions .btn{width:auto;min-width:140px;padding:.625rem .875rem}
     .yannis-form-card .embed-success-actions .btn-secondary{background:#fff;color:#374151;border:1px solid #d1d5db}
+    @media (max-width:480px){
+      body{padding:.5rem!important;align-items:flex-start}
+    }
   `;
 }
 
@@ -673,7 +698,6 @@ function getFormScript(
       var form = document.getElementById('yannisOrderForm');
       var msg = document.getElementById('yannisMsg');
       var btn = document.getElementById('yannisSubmitBtn');
-      var offlineBadge = document.getElementById('yannisOffline');
       var selectedProduct = null;
       var selectedOffer = null;
       var products = ${JSON.stringify(products)};
@@ -805,7 +829,6 @@ function getFormScript(
       var isOnline = navigator.onLine;
       function updateOnlineStatus() {
         isOnline = navigator.onLine;
-        if (offlineBadge) offlineBadge.className = isOnline ? 'offline-badge hidden' : 'offline-badge';
       }
       window.addEventListener('online', function() { updateOnlineStatus(); syncPending(); });
       window.addEventListener('offline', updateOnlineStatus);
@@ -870,18 +893,28 @@ function getFormScript(
       // Try syncing on load if online
       if (isOnline) syncPending();
 
+      // Nigerian phone regex — mirrors the worker's /cart + /submit validators.
+      // Accepts 0XXXXXXXXXX (11 digits, leading 0 + 7/8/9) or +234XXXXXXXXXX.
+      var NG_PHONE_RE = /^(?:0[789]\\d{9}|\\+234[789]\\d{9})$/;
+
       // Cart abandonment: save name+phone when both filled (debounced)
       var savedCartId = null;
       var cartSaveTimeout = null;
       var CART_DEBOUNCE_MS = 600;
+      function isValidNgPhone(value) {
+        return NG_PHONE_RE.test((value || '').trim());
+      }
       function maybeSaveCart() {
         if (!selectedProduct || !selectedOffer) return;
         var nameEl = form.querySelector('#customerName') || form.querySelector('[name="customerName"]');
         var phoneEl = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
         if (!nameEl || !phoneEl) return;
         var name = (nameEl.value || '').trim();
-        var phone = (phoneEl.value || '').replace(/\\D/g, '');
-        if (name.length < 2 || phone.length < 10) return;
+        if (name.length < 2) return;
+        // Gate on a real Nigerian phone — prevents a noisy 400 on /cart while the
+        // user is mid-type. The save was already best-effort (errors swallowed),
+        // but a malformed phone produces a visible network error otherwise.
+        if (!isValidNgPhone(phoneEl.value)) return;
         if (!isOnline) return;
         clearTimeout(cartSaveTimeout);
         cartSaveTimeout = setTimeout(function() {
@@ -908,17 +941,66 @@ function getFormScript(
       if (phoneInput) phoneInput.addEventListener('input', maybeSaveCart);
       if (phoneInput) phoneInput.addEventListener('blur', maybeSaveCart);
 
+      // Inline phone validation — show a friendly error below the input on blur
+      // if the value is filled but invalid. Cleared on input.
+      if (phoneInput) {
+        var phoneError = document.createElement('p');
+        phoneError.className = 'field-error';
+        phoneError.style.cssText = 'color:#dc2626;font-size:0.875rem;margin:0.25rem 0 0;display:none;';
+        phoneError.textContent = 'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567).';
+        if (phoneInput.parentNode) {
+          phoneInput.parentNode.insertBefore(phoneError, phoneInput.nextSibling);
+        }
+        // Live sanitizer: strip everything except digits and a single leading +,
+        // then cap at the Nigerian-number max length (14 chars including +, 11
+        // without). The HTML maxlength attribute caps total chars, but it would
+        // count dashes / spaces / parens against the limit and let the user run
+        // out of room before reaching 11 digits — so we strip those characters
+        // here as they type. Also handles paste / autofill of formatted numbers.
+        phoneInput.addEventListener('input', function() {
+          var raw = phoneInput.value || '';
+          var hadPlus = raw.charAt(0) === '+';
+          var digits = raw.replace(/\\D/g, '');
+          var maxDigits = hadPlus ? 13 : 11; // +234XXXXXXXXXX (13) or 0XXXXXXXXXX (11)
+          if (digits.length > maxDigits) digits = digits.substring(0, maxDigits);
+          var next = hadPlus ? '+' + digits : digits;
+          if (next !== raw) {
+            // Preserve cursor position by writing through .value (browser will
+            // place the caret at end, which is the expected behavior when
+            // autocorrecting input).
+            phoneInput.value = next;
+          }
+        });
+        phoneInput.addEventListener('blur', function() {
+          var v = (phoneInput.value || '').trim();
+          phoneError.style.display = v.length > 0 && !isValidNgPhone(v) ? '' : 'none';
+        });
+        phoneInput.addEventListener('input', function() {
+          if (phoneError.style.display !== 'none') phoneError.style.display = 'none';
+        });
+      }
+
       var pmSelect = form.querySelector('#paymentMethod');
       if (pmSelect) {
         var emailWrap = document.getElementById('customerEmailWrap');
         var emailInput = document.getElementById('customerEmail');
         function togglePaymentEmail() {
+          if (!emailInput) return;
+          var standaloneEmail = form.dataset.showCustomerEmail === 'true';
+          var requireStandalone = form.dataset.requireCustomerEmail === 'true';
           if (pmSelect.value === 'PAY_ONLINE') {
             if (emailWrap) emailWrap.classList.remove('hidden');
-            if (emailInput) { emailInput.setAttribute('required', 'required'); }
+            emailInput.setAttribute('required', 'required');
           } else {
-            if (emailWrap) emailWrap.classList.add('hidden');
-            if (emailInput) { emailInput.removeAttribute('required'); emailInput.value = ''; }
+            if (emailWrap && !standaloneEmail) {
+              emailWrap.classList.add('hidden');
+              emailInput.value = '';
+            }
+            if (standaloneEmail && requireStandalone) {
+              emailInput.setAttribute('required', 'required');
+            } else {
+              emailInput.removeAttribute('required');
+            }
           }
         }
         pmSelect.addEventListener('change', togglePaymentEmail);
@@ -1013,6 +1095,9 @@ function getFormScript(
         var orderData = {
           campaignId: '${campaignId}',
           mediaBuyerId: ${mediaBuyerIdJson},
+          // Honeypot — humans never fill this; bots usually do. Server checks and silently
+          // drops the submission. Sent every time so an absent field also fails closed.
+          yannis_website_url: fd.get('yannis_website_url') || '',
           customerName: fd.get('customerName'),
           customerPhone: fd.get('customerPhone'),
           deliveryAddress: fd.get('deliveryAddress') || undefined,
@@ -1021,7 +1106,7 @@ function getFormScript(
           customerGender: fd.get('customerGender') || undefined,
           preferredDeliveryDate: fd.get('preferredDeliveryDate') || undefined,
           paymentMethod: paymentMethod === 'PAY_ONLINE' ? 'PAY_ONLINE' : 'PAY_ON_DELIVERY',
-          customerEmail: paymentMethod === 'PAY_ONLINE' ? customerEmail : undefined,
+          customerEmail: customerEmail ? customerEmail : undefined,
           items: [{ productId: selectedProduct, quantity: selectedOffer.qty, unitPrice: selectedOffer.price, offerLabel: selectedOffer.label }],
           cartId: savedCartId || undefined,
           totalAmount: (selectedOffer.qty * parseFloat(selectedOffer.price)).toString(),
@@ -1092,70 +1177,6 @@ function getFormScript(
             msg.textContent = result.data.message || 'Order received successfully! We will contact you shortly.';
             form.reset();
             selectedOffer = null;
-          } else if (result.status === 423 && result.data.captchaRequired) {
-            // Server requires CAPTCHA — load Turnstile widget
-            var siteKey = result.data.turnstileSiteKey;
-            if (!siteKey) { msg.className = 'msg msg-error'; msg.textContent = 'CAPTCHA required but not configured.'; return; }
-            msg.className = 'msg msg-info';
-            msg.textContent = 'Please complete the CAPTCHA below to verify you are human.';
-            var captchaDiv = document.getElementById('yannisCaptcha');
-            if (!captchaDiv) {
-              captchaDiv = document.createElement('div');
-              captchaDiv.id = 'yannisCaptcha';
-              captchaDiv.style.marginBottom = '1rem';
-              btn.parentNode.insertBefore(captchaDiv, btn);
-            }
-            captchaDiv.innerHTML = '';
-            // Load Turnstile script if not already loaded
-            if (!window.turnstile) {
-              var s = document.createElement('script');
-              s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoad';
-              s.async = true;
-              window.onTurnstileLoad = function() {
-                window.turnstile.render(captchaDiv, {
-                  sitekey: siteKey,
-                  callback: function(token) {
-                    orderData.turnstileToken = token;
-                    submitOrder(orderData).then(function(r2) {
-                      if (r2.ok) {
-                        if (showInlineSuccess(r2.data.message || 'Order received successfully!')) {
-                          return;
-                        }
-                        msg.className = 'msg msg-success';
-                        msg.textContent = r2.data.message || 'Order received successfully!';
-                        form.reset(); quantity = 1; if (qtyVal) qtyVal.textContent = '1';
-                        if (captchaDiv) captchaDiv.innerHTML = '';
-                      } else {
-                        msg.className = 'msg msg-error';
-                        msg.textContent = r2.data.error || 'Submission failed. Please try again.';
-                      }
-                    });
-                  }
-                });
-              };
-              document.head.appendChild(s);
-            } else {
-              window.turnstile.render(captchaDiv, {
-                sitekey: siteKey,
-                callback: function(token) {
-                  orderData.turnstileToken = token;
-                  submitOrder(orderData).then(function(r2) {
-                    if (r2.ok) {
-                      if (showInlineSuccess(r2.data.message || 'Order received successfully!')) {
-                        return;
-                      }
-                      msg.className = 'msg msg-success';
-                      msg.textContent = r2.data.message || 'Order received successfully!';
-                      form.reset(); quantity = 1; if (qtyVal) qtyVal.textContent = '1';
-                      if (captchaDiv) captchaDiv.innerHTML = '';
-                    } else {
-                      msg.className = 'msg msg-error';
-                      msg.textContent = r2.data.error || 'Submission failed. Please try again.';
-                    }
-                  });
-                }
-              });
-            }
           } else {
             msg.className = 'msg msg-error';
             msg.textContent = result.data.error || 'Something went wrong. Please try again.';
@@ -1189,29 +1210,43 @@ function getFormScript(
 function getFormInnerHTML(config: CampaignConfig): string {
   const fc = config.formConfig ?? {};
   const heading = fc.heading ?? 'Place Your Order';
-  const subtitle = fc.subtitle ?? 'Fill in your details below';
+  const subtitleTrimmed = typeof fc.subtitle === 'string' ? fc.subtitle.trim() : '';
+  const subtitleBlock = subtitleTrimmed
+    ? `<p class="subtitle">${escapeHtml(subtitleTrimmed)}</p>`
+    : '';
   const buttonText = fc.buttonText ?? 'Submit Order';
   const standard = new Map((fc.standardFields ?? []).map((f) => [f.key, { required: !!f.required }]));
   const hasStandard = standard.size > 0;
-  const showField = (key: 'deliveryAddress' | 'deliveryNotes' | 'deliveryState' | 'gender' | 'preferredDeliveryDate' | 'paymentMethod') => {
+  type StdFieldKey =
+    | 'deliveryAddress'
+    | 'deliveryNotes'
+    | 'deliveryState'
+    | 'gender'
+    | 'preferredDeliveryDate'
+    | 'customerEmail'
+    | 'paymentMethod';
+  const showField = (key: StdFieldKey) => {
     if (hasStandard) return standard.has(key);
     if (key === 'deliveryAddress') return fc.showDeliveryAddress !== false;
     if (key === 'deliveryNotes') return fc.showDeliveryNotes === true;
     if (key === 'deliveryState') return fc.showDeliveryState === true;
     if (key === 'gender') return fc.showGender === true;
     if (key === 'preferredDeliveryDate') return fc.showPreferredDeliveryDate === true;
+    if (key === 'customerEmail') return fc.showCustomerEmail === true;
     return fc.showPaymentMethod === true;
   };
-  const requiredField = (key: 'deliveryAddress' | 'deliveryNotes' | 'deliveryState' | 'gender' | 'preferredDeliveryDate' | 'paymentMethod') => {
+  const requiredField = (key: StdFieldKey) => {
     if (hasStandard) return standard.get(key)?.required === true;
     if (key === 'deliveryAddress') return fc.requireDeliveryAddress === true;
     if (key === 'deliveryNotes') return fc.requireDeliveryNotes === true;
     if (key === 'deliveryState') return fc.requireDeliveryState === true;
     if (key === 'gender') return fc.requireGender === true;
     if (key === 'preferredDeliveryDate') return fc.requirePreferredDeliveryDate === true;
+    if (key === 'customerEmail') return fc.requireCustomerEmail === true;
     return fc.requirePaymentMethod === true;
   };
   const showPaymentMethod = showField('paymentMethod');
+  const showStandaloneEmail = showField('customerEmail');
   const showProductImages = fc.showProductImages !== false;
 
   const hasSingleProduct = config.products.length === 1;
@@ -1241,10 +1276,12 @@ function getFormInnerHTML(config: CampaignConfig): string {
         <input type="radio" name="${radioName}" class="offer-radio"
           data-offer='${JSON.stringify({ label: o.label, qty: o.qty, price: o.price }).replace(/'/g, '&#39;')}'>
         ${thumbHtml}
-        <span class="offer-label">${escapeHtml(o.label)}</span>
-        <span class="offer-details">
-          <span class="offer-qty">${o.qty} unit${o.qty > 1 ? 's' : ''}</span>
-          <span class="offer-price">${formatPrice(o.price)}</span>
+        <span class="offer-body">
+          <span class="offer-label">${escapeHtml(o.label)}</span>
+          <span class="offer-details">
+            <span class="offer-qty">${o.qty} unit${o.qty > 1 ? 's' : ''}</span>
+            <span class="offer-price">${formatPrice(o.price)}</span>
+          </span>
         </span>
       </label>`;
     }).join('\n');
@@ -1259,10 +1296,17 @@ function getFormInnerHTML(config: CampaignConfig): string {
 
   return `
     <h2>${escapeHtml(heading)}</h2>
-    <p class="subtitle">${escapeHtml(subtitle)}</p>
-    <div id="yannisOffline" class="offline-badge hidden">Offline</div>
+    ${subtitleBlock}
     <div id="yannisMsg" class="msg hidden"></div>
-    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}"${singleProductAttr}>
+    <form id="yannisOrderForm" data-btn-text="${escapeHtml(buttonText)}" data-show-payment-method="${showPaymentMethod ? 'true' : 'false'}" data-show-customer-email="${showStandaloneEmail ? 'true' : 'false'}" data-require-customer-email="${requiredField('customerEmail') ? 'true' : 'false'}" data-success-callback="${escapeHtml(fc.successCallbackUrl ?? '')}"${singleProductAttr}>
+      <!-- Honeypot: bots auto-fill every input they see; humans never touch this. Field is
+           visually hidden + tabindex=-1 + autocomplete=off + aria-hidden so real users and
+           screen readers skip it entirely. If submitted with a value, the worker silently
+           drops the order. Do NOT remove or rename without updating the server check below. -->
+      <div aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none">
+        <label for="yannis_website_url">Website (leave blank)</label>
+        <input id="yannis_website_url" name="yannis_website_url" type="text" tabindex="-1" autocomplete="off" />
+      </div>
       ${!hasSingleProduct ? `<label>Select Product</label>
       <div class="product-selector">${productOptionsHtml}</div>` : ''}
       <label>Select Offer</label>
@@ -1270,12 +1314,15 @@ function getFormInnerHTML(config: CampaignConfig): string {
       <label for="customerName">Full Name</label>
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
+      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       ${showField('gender') ? `<label for="customerGender">Gender${requiredField('gender') ? ' <span class="required">*</span>' : ''}</label>
       <select id="customerGender" name="customerGender"${requiredField('gender') ? ' required' : ''}>
         <option value="">Select gender...</option>
-        <option value="male">Male</option>
-        <option value="female">Female</option>
+        ${(
+          fc.genderOptions && fc.genderOptions.length > 0
+            ? fc.genderOptions
+            : ['Male', 'Female']
+        ).map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('\n')}
       </select>` : ''}
       ${showField('deliveryState') ? `<label for="deliveryState">Delivery State${requiredField('deliveryState') ? ' <span class="required">*</span>' : ''}</label>
       <select id="deliveryState" name="deliveryState"${requiredField('deliveryState') ? ' required' : ''}>
@@ -1297,16 +1344,18 @@ function getFormInnerHTML(config: CampaignConfig): string {
           : ['As soon as possible', 'Within 1-2 days', 'Within 3-5 days', 'Next week', 'Specific date (mention in notes)']
         ).map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('\n')}
       </select>` : ''}
+      ${showStandaloneEmail ? `<label for="customerEmail">Email${requiredField('customerEmail') ? ' <span class="required">*</span>' : ''}</label>
+      <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com"${requiredField('customerEmail') ? ' required' : ''}>` : ''}
       ${showPaymentMethod ? `<label for="paymentMethod">Payment method${requiredField('paymentMethod') ? ' <span class="required">*</span>' : ''}</label>
       <select id="paymentMethod" name="paymentMethod"${requiredField('paymentMethod') ? ' required' : ''}>
         <option value="">Select payment method...</option>
         <option value="PAY_ON_DELIVERY">Pay on delivery</option>
         <option value="PAY_ONLINE">Pay online (card / bank)</option>
       </select>
-      <div id="customerEmailWrap" class="hidden">
+      ${showStandaloneEmail ? '' : `<div id="customerEmailWrap" class="hidden">
         <label for="customerEmail">Email (for payment receipt) <span class="required">*</span></label>
         <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com">
-      </div>` : ''}
+      </div>`}` : ''}
       ${renderCustomFields(fc.customFields)}
       <button type="submit" class="btn" id="yannisSubmitBtn">${escapeHtml(buttonText)}</button>
     </form>
@@ -1433,7 +1482,7 @@ const FALLBACK_PRODUCTS: CampaignConfig['products'] = [
 
 function renderFallbackForm(campaignId: string, workerUrl: string): Response {
   // Render a simplified form without product selection
-  const accentColor = '#6366f1';
+  const accentColor = DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1447,14 +1496,12 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
 <body>
   <div class="yannis-form-card">
     <h2>Place Your Order</h2>
-    <p class="subtitle">Fill in your details below</p>
-    <div id="yannisOffline" class="offline-badge hidden">Offline</div>
     <div id="yannisMsg" class="msg hidden"></div>
     <form id="yannisOrderForm">
       <label for="customerName">Full Name</label>
       <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
       <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
+      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
       <label for="deliveryAddress">Delivery Address</label>
       <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"></textarea>
       <label for="deliveryNotes">Delivery Notes (optional)</label>
@@ -1476,7 +1523,7 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
 // ── Hosted Form Page (GET /form/:campaignId) ───────────────────
 
 function renderHostedForm(config: CampaignConfig, workerUrl: string): Response {
-  const accentColor = config.formConfig?.accentColor ?? '#6366f1';
+  const accentColor = config.formConfig?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1505,7 +1552,7 @@ function renderHostedForm(config: CampaignConfig, workerUrl: string): Response {
 // ── Embeddable Script (GET /embed.js?campaign=:id) ─────────────
 
 function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response {
-  const accentColor = config.formConfig?.accentColor ?? '#6366f1';
+  const accentColor = config.formConfig?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
 
   // Self-executing script that injects form into Shadow DOM
   const js = `(function(){
@@ -1541,7 +1588,7 @@ function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response 
 
 function renderIframeForm(config: CampaignConfig, workerUrl: string): Response {
   // Same as hosted but with iframe-friendly styles (no body centering)
-  const accentColor = config.formConfig?.accentColor ?? '#6366f1';
+  const accentColor = config.formConfig?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1791,6 +1838,16 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     return corsResponse({ error: 'Invalid JSON body' }, 400);
   }
 
+  // 1a. Honeypot check. The form ships a hidden `yannis_website_url` input that real users
+  // never see. Bots auto-fill every input they encounter, so if this field has any value
+  // we silently drop the submission and return a fake "success" so the bot stops retrying.
+  // This is the primary spam protection now that the Turnstile path is disabled.
+  const honeypotValue = (body as Record<string, unknown>)['yannis_website_url'];
+  if (typeof honeypotValue === 'string' && honeypotValue.trim().length > 0) {
+    // Pretend everything worked — no order is created, no API call is made, no KV write.
+    return corsResponse({ success: true, orderId: 'queued', alreadySubmitted: false }, 200);
+  }
+
   // 2. Validate input
   const validation = validateSubmission(body);
   if (!validation.valid) {
@@ -1809,25 +1866,14 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  // CAPTCHA path is intentionally disabled — we use a honeypot field for bot protection
+  // instead (see step 1a). The rate limiter still hard-blocks at RATE_LIMIT_MAX_REQUESTS,
+  // so abusive IPs get 429 once they cross 5 submissions in 5 minutes. The intermediate
+  // 'captcha_required' state now falls through to normal processing because we'd otherwise
+  // have to ship a CAPTCHA widget, and we don't want to register for one. If you ever wire
+  // up Turnstile or hCaptcha later, restore the verification block here.
   if (rateLimitResult === 'captcha_required') {
-    const turnstileToken = (body as Record<string, unknown>)['turnstileToken'] as string | undefined;
-    if (!turnstileToken) {
-      return corsResponse(
-        {
-          error: 'CAPTCHA verification required',
-          captchaRequired: true,
-          turnstileSiteKey: env.TURNSTILE_SITE_KEY || '',
-        },
-        423, // 423 = Locked — signals client to show CAPTCHA
-      );
-    }
-    const captchaValid = await verifyTurnstile(turnstileToken, clientIp, env);
-    if (!captchaValid) {
-      return corsResponse(
-        { error: 'CAPTCHA verification failed. Please try again.', captchaRequired: true },
-        403,
-      );
-    }
+    // No-op: let the request through. Honeypot + rate-limit hard cap handle abuse.
   }
 
   // 4. Dedup check (phone + product + mediaBuyerId within 6hr window).

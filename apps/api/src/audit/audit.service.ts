@@ -82,12 +82,20 @@ export interface AuditLogFilters {
   limit?: number;
 }
 
-/** Base tables whose *_history rows include `branch_id` (native uuid after migration 0062). */
+/**
+ * Base tables whose *_history rows include `branch_id` (native uuid after migration 0062).
+ *
+ * NOTE: `marketing_funding_requests` is intentionally NOT in this set — funding requests
+ * aren't branch-scoped at the row level (branch context flows through requester/receiver
+ * users, not the request itself). Migration 0041 added `branch_id` to every other branch-
+ * scoped *_history table and deliberately skipped this one. Adding it here would break
+ * the audit query with `column "branch_id" does not exist` whenever a branch filter is
+ * active in the viewer's session.
+ */
 const HISTORY_TABLES_WITH_BRANCH_ID = new Set<string>([
   'orders',
   'campaigns',
   'marketing_funding',
-  'marketing_funding_requests',
   'ad_spend_logs',
   'inventory_levels',
   'commission_plans',

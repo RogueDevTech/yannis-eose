@@ -110,13 +110,6 @@ export const createStaffSchema = z.object({
   branchIds: z.array(z.string().uuid()).min(1, 'Select at least one branch').optional(),
   primaryBranchId: z.string().uuid().optional(),
 
-  /**
-   * "Finance hat" — deputize this user with Finance Officer powers on top of their primary role.
-   * At most one user in the org can have this set. If true at create time, the service will either
-   * succeed (if no one else holds it) or reject with the name of the current holder.
-   */
-  isFinanceOfficer: z.boolean().optional(),
-
   // Contact — Nigerian phone: 0XXXXXXXXXX or +234XXXXXXXXXX.
   // Required on create (CEO directive 2026-04-24) — every staff member must have a reachable
   // number and it must be unique across the org. Existing users without a phone can still be
@@ -178,11 +171,6 @@ export const updateStaffSchema = z.object({
   productIds: z.array(z.string().uuid()).optional(),
   branchIds: z.array(z.string().uuid()).min(1).optional(),
   primaryBranchId: z.string().uuid().optional(),
-  /**
-   * Toggle the Finance hat. Setting to `true` auto-clears the flag from whoever previously held it
-   * (atomic swap inside the same transaction). Setting to `false` revokes without reassigning.
-   */
-  isFinanceOfficer: z.boolean().optional(),
 });
 
 export type UpdateStaffInput = z.infer<typeof updateStaffSchema>;

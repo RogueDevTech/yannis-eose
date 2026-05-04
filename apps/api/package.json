@@ -15,7 +15,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "run-permission-backfill": "tsx scripts/run-permission-snapshot-backfill.ts",
+    "run-permission-backfill:standalone": "tsx scripts/backfill-permission-snapshot-standalone.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -59,6 +61,7 @@
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "ts-loader": "^9.5.4",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vitest": "^2.1.0",
     "webpack": "^5.105.3",

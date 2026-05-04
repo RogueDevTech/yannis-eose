@@ -1,7 +1,8 @@
 import { redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Link, useLoaderData, useFetcher, useRevalidator } from '@remix-run/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { apiRequest, getCurrentUser, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
@@ -19,6 +20,7 @@ import { SearchInput } from '~/components/ui/search-input';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Pagination } from '~/components/ui/pagination';
+import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
@@ -456,6 +458,64 @@ function BranchMembersPanel({ members, canManage }: { members: OverviewMember[];
   const pageStart = (page - 1) * MEMBERS_PAGE_SIZE;
   const pageRows = filtered.slice(pageStart, pageStart + MEMBERS_PAGE_SIZE);
 
+  const memberColumns = useMemo((): CompactTableColumn<OverviewMember>[] => {
+    return [
+      {
+        key: 'name',
+        header: 'Name',
+        render: (m) => <span className="font-medium text-app-fg">{m.name}</span>,
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        render: (m) => <RoleBadge role={m.effectiveRole} size="sm" />,
+      },
+      {
+        key: 'department',
+        header: 'Department',
+        hideOnMobile: true,
+        render: (m) => <span className="text-sm text-app-fg-muted">{DEPT_LABEL[m.department]}</span>,
+      },
+      {
+        key: 'primary',
+        header: 'Primary',
+        render: (m) =>
+          m.isPrimary ? (
+            <span className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
+              <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Yes
+            </span>
+          ) : (
+            <span className="text-app-fg-muted text-sm">—</span>
+          ),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'right',
+        tight: true,
+        nowrap: true,
+        mobileShowLabel: false,
+        render: (m) => (
+          <div className="inline-flex flex-nowrap items-center justify-end gap-3 shrink-0">
+            <CompactTableActionButton to={`/hr/users/${m.userId}`}>Profile</CompactTableActionButton>
+            {canManage ? (
+              <CompactTableActionButton tone="danger" onClick={() => setRemoveTarget(m)}>
+                Remove
+              </CompactTableActionButton>
+            ) : null}
+          </div>
+        ),
+      },
+    ];
+  }, [canManage]);
+
   if (members.length === 0) {
     return (
       <EmptyState
@@ -493,67 +553,13 @@ function BranchMembersPanel({ members, canManage }: { members: OverviewMember[];
       ) : (
         <div className="card p-0">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px]">
-              <thead>
-                <tr>
-                  <th className="table-header">Name</th>
-                  <th className="table-header">Role</th>
-                  <th className="table-header max-sm:hidden">Department</th>
-                  <th className="table-header">Primary</th>
-                  <th className="table-header text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((m) => (
-                  <tr key={m.userId} className="table-row">
-                    <td className="table-cell">
-                      <span className="font-medium text-app-fg">{m.name}</span>
-                    </td>
-                    <td className="table-cell">
-                      <RoleBadge role={m.effectiveRole} size="sm" />
-                    </td>
-                    <td className="table-cell max-sm:hidden">
-                      <span className="text-sm text-app-fg-muted">{DEPT_LABEL[m.department]}</span>
-                    </td>
-                    <td className="table-cell">
-                      {m.isPrimary ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-brand-600 dark:text-brand-400 font-medium">
-                          <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          Yes
-                        </span>
-                      ) : (
-                        <span className="text-app-fg-muted text-sm">—</span>
-                      )}
-                    </td>
-                    <td className="table-cell text-right whitespace-nowrap">
-                      <div className="inline-flex items-center gap-3 justify-end">
-                        <Link
-                          to={`/hr/users/${m.userId}`}
-                          className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                        >
-                          Profile
-                        </Link>
-                        {canManage ? (
-                          <button
-                            type="button"
-                            onClick={() => setRemoveTarget(m)}
-                            className="text-xs font-medium text-danger-600 hover:text-danger-700 dark:text-danger-400"
-                          >
-                            Remove
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <CompactTable
+              withCard={false}
+              className="min-w-[720px]"
+              columns={memberColumns}
+              rows={pageRows}
+              rowKey={(m) => m.userId}
+            />
           </div>
           {totalPages > 1 && (
             <div className="border-t border-app-border px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -581,6 +587,79 @@ const DEPT_TEAM_LABEL: Record<'CS' | 'MARKETING', string> = {
   CS: 'Customer support',
   MARKETING: 'Marketing',
 };
+
+type BranchTeamMemberRow = BranchTeamWithMembers['members'][number];
+
+function buildBranchTeamMemberColumns(
+  team: BranchTeamWithMembers,
+  canManage: boolean,
+  squadFetcher: ReturnType<typeof useFetcher<{ success?: boolean; error?: string }>>,
+): CompactTableColumn<BranchTeamMemberRow>[] {
+  return [
+    {
+      key: 'member',
+      header: 'Member',
+      render: (m) => <span className="font-medium text-app-fg">{m.name}</span>,
+    },
+    {
+      key: 'role',
+      header: 'Role',
+      render: (m) => <RoleBadge role={m.role} size="sm" />,
+    },
+    {
+      key: 'supervisor',
+      header: 'Supervisor',
+      render: (m) =>
+        canManage ? (
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <Checkbox
+              key={`${team.id}-${m.userId}-${String(m.isSupervisor)}`}
+              defaultChecked={m.isSupervisor}
+              onChange={(e) => {
+                squadFetcher.submit(
+                  {
+                    intent: 'setBranchTeamMemberSupervisor',
+                    teamId: team.id,
+                    userId: m.userId,
+                    isSupervisor: e.target.checked ? 'true' : 'false',
+                  },
+                  { method: 'post' },
+                );
+              }}
+            />
+            <span className="text-app-fg-muted text-xs">Supervisor</span>
+          </label>
+        ) : (
+          <span className="text-app-fg-muted text-xs">{m.isSupervisor ? 'Yes' : 'No'}</span>
+        ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      mobileLabel: 'Actions',
+      align: 'right',
+      tight: true,
+      nowrap: true,
+      mobileShowLabel: false,
+      render: (m) =>
+        canManage ? (
+          <CompactTableActionButton
+            tone="danger"
+            disabled={squadFetcher.state !== 'idle'}
+            onClick={() => {
+              if (!confirm(`Remove ${m.name} from this team?`)) return;
+              squadFetcher.submit(
+                { intent: 'removeBranchTeamMember', teamId: team.id, userId: m.userId },
+                { method: 'post' },
+              );
+            }}
+          >
+            Remove
+          </CompactTableActionButton>
+        ) : null,
+    },
+  ];
+}
 
 function BranchSupervisorTeamsPanel({
   teams,
@@ -712,70 +791,13 @@ function BranchSupervisorTeamsPanel({
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th className="table-header">Member</th>
-                        <th className="table-header">Role</th>
-                        <th className="table-header">Supervisor</th>
-                        <th className="table-header w-28 text-right" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {team.members.map((m) => (
-                        <tr key={m.userId} className="border-b border-app-border/80">
-                          <td className="py-2 pr-4 font-medium text-app-fg">{m.name}</td>
-                          <td className="py-2 pr-4">
-                            <RoleBadge role={m.role} size="sm" />
-                          </td>
-                          <td className="py-2 pr-4">
-                            {canManage ? (
-                            <label className="inline-flex items-center gap-2 cursor-pointer">
-                              <Checkbox
-                                key={`${team.id}-${m.userId}-${String(m.isSupervisor)}`}
-                                defaultChecked={m.isSupervisor}
-                                onChange={(e) => {
-                                  squadFetcher.submit(
-                                    {
-                                      intent: 'setBranchTeamMemberSupervisor',
-                                      teamId: team.id,
-                                      userId: m.userId,
-                                      isSupervisor: e.target.checked ? 'true' : 'false',
-                                    },
-                                    { method: 'post' },
-                                  );
-                                }}
-                              />
-                              <span className="text-app-fg-muted text-xs">Supervisor</span>
-                            </label>
-                            ) : (
-                              <span className="text-app-fg-muted text-xs">{m.isSupervisor ? 'Yes' : 'No'}</span>
-                            )}
-                          </td>
-                          <td className="py-2">
-                            {canManage ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="text-danger-600 dark:text-danger-400"
-                                disabled={squadFetcher.state !== 'idle'}
-                                onClick={() => {
-                                  if (!confirm(`Remove ${m.name} from this team?`)) return;
-                                  squadFetcher.submit(
-                                    { intent: 'removeBranchTeamMember', teamId: team.id, userId: m.userId },
-                                    { method: 'post' },
-                                  );
-                                }}
-                              >
-                                Remove
-                              </Button>
-                            ) : null}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <CompactTable
+                    withCard={false}
+                    className="min-w-full text-sm"
+                    columns={buildBranchTeamMemberColumns(team, canManage, squadFetcher)}
+                    rows={team.members}
+                    rowKey={(m) => m.userId}
+                  />
                 </div>
 
                 {canManage ? (
@@ -836,21 +858,12 @@ export default function BranchOverviewRoute() {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
 
-  const wasSubmittingRef = useRef(false);
-  useEffect(() => {
-    if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
-      wasSubmittingRef.current = true;
-      return;
-    }
-    if (fetcher.state === 'idle' && wasSubmittingRef.current) {
-      wasSubmittingRef.current = false;
-      if (fetcher.data?.success) {
-        setEditOpen(false);
-        setAddMemberOpen(false);
-        setIsPrimary(false);
-      }
-    }
-  }, [fetcher.state, fetcher.data]);
+  const handleBranchDetailSuccess = useCallback(() => {
+    setEditOpen(false);
+    setAddMemberOpen(false);
+    setIsPrimary(false);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleBranchDetailSuccess);
 
   const isSubmitting = fetcher.state !== 'idle';
 

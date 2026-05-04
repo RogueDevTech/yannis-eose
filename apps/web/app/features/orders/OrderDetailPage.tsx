@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
@@ -865,80 +866,59 @@ export function OrderDetailPage({
     revalidatedForRecordCallRef.current = false;
   }, [order.id]);
 
-  // Close modals when fetcher returns success
-  const fetcherSuccess = (fetcher.data as { success?: boolean })?.success;
-  const prevFetcherState = useRef(fetcher.state);
-  useEffect(() => {
-    // Detect transition from submitting/loading → idle with success
-    if (prevFetcherState.current !== 'idle' && fetcher.state === 'idle' && fetcherSuccess) {
-      if (confirmModalOpen) {
-        setConfirmModalOpen(false);
-        setDeliveryDate('');
-      }
-      if (cancelModalOpen) {
-        setCancelModalOpen(false);
-        setCancelReason('');
-      }
-      if (allocateModalOpen) {
-        setAllocateModalOpen(false);
-        setAllocateLocationId('');
-      }
-      if (deliverModalOpen) {
-        setDeliverModalOpen(false);
-        setDeliverNote('');
-        setDeliverProofUrl('');
-      }
+  // Close modals when their fetcher returns success — edge-triggered via the
+  // shared `useCloseOnFetcherSuccess` hook so the modal closes the same React
+  // tick as the toast (no waiting for loader revalidation).
+  const handleStateTransitionSuccess = useCallback(() => {
+    if (confirmModalOpen) {
+      setConfirmModalOpen(false);
+      setDeliveryDate('');
     }
-    prevFetcherState.current = fetcher.state;
-  }, [fetcher.state, fetcherSuccess, confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
+    if (cancelModalOpen) {
+      setCancelModalOpen(false);
+      setCancelReason('');
+    }
+    if (allocateModalOpen) {
+      setAllocateModalOpen(false);
+      setAllocateLocationId('');
+    }
+    if (deliverModalOpen) {
+      setDeliverModalOpen(false);
+      setDeliverNote('');
+      setDeliverProofUrl('');
+    }
+  }, [confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
+  useCloseOnFetcherSuccess(fetcher, handleStateTransitionSuccess);
 
-  // Close schedule callback modal and revalidate when schedule succeeds
-  const scheduleData = scheduleFetcher.data as { success?: boolean; scheduled?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (scheduleData?.success && scheduleData?.scheduled && revalidator.state === 'idle') {
+  const handleScheduleSuccess = useCallback(
+    (data: { success: true } & Record<string, unknown>) => {
+      if (!(data as { scheduled?: boolean }).scheduled) return;
       setScheduleCallbackModalOpen(false);
       setScheduleDelayMinutes(120);
       setScheduleNotes('');
-      revalidator.revalidate();
-    }
-  }, [scheduleData?.success, scheduleData?.scheduled, revalidator]);
+    },
+    [],
+  );
+  useCloseOnFetcherSuccess(scheduleFetcher, handleScheduleSuccess);
 
-  // Close adjust items modal and revalidate when update succeeds
+  const handleAdjustItemsSuccess = useCallback(() => {
+    setAdjustItemsModalOpen(false);
+    setPriceApprovalReason('');
+  }, []);
+  useCloseOnFetcherSuccess(adjustItemsFetcher, handleAdjustItemsSuccess);
+  useCloseOnFetcherSuccess(priceRequestFetcher, handleAdjustItemsSuccess);
+  // Inline error accessors — the modal renders these as PageNotification rows.
   const adjustItemsData = adjustItemsFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (adjustItemsData?.success && revalidator.state === 'idle') {
-      setAdjustItemsModalOpen(false);
-      setPriceApprovalReason('');
-      revalidator.revalidate();
-    }
-  }, [adjustItemsData?.success, revalidator]);
-
   const priceRequestData = priceRequestFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (priceRequestData?.success && revalidator.state === 'idle') {
-      setAdjustItemsModalOpen(false);
-      setPriceApprovalReason('');
-      revalidator.revalidate();
-    }
-  }, [priceRequestData?.success, revalidator]);
 
+  const handleArchiveSuccess = useCallback(() => {
+    setArchiveModalOpen(false);
+    setArchiveReason('');
+  }, []);
+  useCloseOnFetcherSuccess(archiveRequestFetcher, handleArchiveSuccess);
+  useCloseOnFetcherSuccess(archiveNowFetcher, handleArchiveSuccess);
   const archiveRequestData = archiveRequestFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (archiveRequestData?.success && revalidator.state === 'idle') {
-      setArchiveModalOpen(false);
-      setArchiveReason('');
-      revalidator.revalidate();
-    }
-  }, [archiveRequestData?.success, revalidator]);
-
   const archiveNowData = archiveNowFetcher.data as { success?: boolean; error?: string } | undefined;
-  useEffect(() => {
-    if (archiveNowData?.success && revalidator.state === 'idle') {
-      setArchiveModalOpen(false);
-      setArchiveReason('');
-      revalidator.revalidate();
-    }
-  }, [archiveNowData?.success, revalidator]);
 
   // Escape to close adjust items modal
   useEffect(() => {
@@ -1261,7 +1241,22 @@ export function OrderDetailPage({
             {canEditOrder && userRole !== 'MEDIA_BUYER' && isCSOrHoS && orderAllowsLineItemEdits && (
               <div className="card">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
-                {!canPerformCSActionsOnOrder && (
+                {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
+                    other than the Assign closer dropdown are suppressed. This forces the
+                    correct lifecycle entry point: someone (HoCS / admin) picks a closer first,
+                    then the order moves to CS_ASSIGNED and the rest of the workflow opens up.
+                    Without this, an admin could engage / confirm an order directly and the
+                    "Closer" column on `/admin/cs/orders` ends up blank because no CS_AGENT
+                    is on the row. */}
+                {order.status === 'UNPROCESSED' && !order.assignedCsId && (
+                  <div className="rounded-lg bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-700/50 px-4 py-3 mb-3">
+                    <p className="text-sm text-info-800 dark:text-info-200">
+                      Assign a closer to begin. Other actions (call, confirm, cancel, archive)
+                      will appear once a closer is assigned.
+                    </p>
+                  </div>
+                )}
+                {!canPerformCSActionsOnOrder && !(order.status === 'UNPROCESSED' && !order.assignedCsId) && (
                   <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700/50 px-4 py-3 mb-3">
                     <p className="text-sm text-warning-800 dark:text-warning-200">
                       This order is not assigned to you. You cannot perform actions until it is assigned to you by Head of CS or the system.
@@ -1269,6 +1264,11 @@ export function OrderDetailPage({
                   </div>
                 )}
                 <div className={`space-y-2 ${!canPerformCSActionsOnOrder ? 'pointer-events-none opacity-60' : ''}`}>
+                  {/* All actions other than the Assign closer dropdown are suppressed while
+                      the order is UNPROCESSED with no closer assigned — see the info banner
+                      above for rationale. */}
+                  {!(order.status === 'UNPROCESSED' && !order.assignedCsId) && (
+                  <>
                   {/* Adjust order items — always first */}
                   <Button
                     type="button"
@@ -1399,38 +1399,48 @@ export function OrderDetailPage({
                       )}
                     </>
                   )}
+                  </>
+                  )}
 
-                  {/* Assign to agent — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED */}
+                  {/* Assign to closer — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED.
+                      The CS agent (closer) drives the order from queue → call → confirm; assignment
+                      happens BEFORE confirmation per the locked Order Lifecycle (CLAUDE.md). */}
                   {(order.status === 'UNPROCESSED' ||
                     order.status === 'CS_ASSIGNED' ||
                     order.status === 'CS_ENGAGED') &&
                     canAssignToCS &&
                     csAgentsForAssign &&
                     csAgentsForAssign.length > 0 && (
-                    <div className="flex gap-2">
-                      <SearchableSelect
-                        id="order-assign-cs"
-                        value={assignToId}
-                        onChange={setAssignToId}
-                        placeholder="Select agent..."
-                        options={csAgentsForAssign.map((a) => ({ value: a.id, label: a.name }))}
-                        wrapperClassName="flex-1 min-w-0"
-                        searchPlaceholder="Search agents..."
-                      />
-                      <fetcher.Form method="post" className="flex-shrink-0">
-                        <input type="hidden" name="intent" value="assignToCS" />
-                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-                        <input type="hidden" name="toCsAgentId" value={assignToId} />
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          disabled={!assignToId || fetcher.state === 'submitting'}
-                          loading={fetcher.state === 'submitting'}
-                          loadingText="Assigning..."
-                        >
-                          Assign
-                        </Button>
-                      </fetcher.Form>
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-app-fg-muted">
+                        {order.assignedCsId ? 'Reassign closer' : 'Assign closer (CS agent)'}
+                      </p>
+                      <div className="flex items-stretch gap-2">
+                        <SearchableSelect
+                          id="order-assign-cs"
+                          value={assignToId}
+                          onChange={setAssignToId}
+                          placeholder="Pick a closer to assign…"
+                          options={csAgentsForAssign.map((a) => ({ value: a.id, label: a.name }))}
+                          wrapperClassName="flex-1 min-w-0"
+                          searchPlaceholder="Search closers..."
+                          controlSize="lg"
+                        />
+                        <fetcher.Form method="post" className="flex-shrink-0">
+                          <input type="hidden" name="intent" value="assignToCS" />
+                          {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                          <input type="hidden" name="toCsAgentId" value={assignToId} />
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            disabled={!assignToId || fetcher.state === 'submitting'}
+                            loading={fetcher.state === 'submitting'}
+                            loadingText="Assigning..."
+                          >
+                            Assign
+                          </Button>
+                        </fetcher.Form>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1971,7 +1981,7 @@ export function OrderDetailPage({
               searchPlaceholder="Search locations..."
               options={allocatableLocations.map((loc) => ({
                 value: loc.id,
-                label: loc.name,
+                label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                 description: describeAllocatableLocation(loc),
                 disabled: !loc.eligible,
               }))}
@@ -2094,7 +2104,10 @@ export function OrderDetailPage({
                   value={shareLocationId}
                   onChange={(e) => setShareLocationId(e.target.value)}
                   placeholder="Select a location..."
-                  options={locationsWithGroup.map((loc) => ({ value: loc.id, label: loc.name }))}
+                  options={locationsWithGroup.map((loc) => ({
+                    value: loc.id,
+                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                  }))}
                 />
                 {locationsWithGroup.length === 0 && (
                   <p className="text-xs text-warning-600 mt-1">

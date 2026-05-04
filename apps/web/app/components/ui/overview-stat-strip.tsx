@@ -14,16 +14,16 @@ export type OverviewStatStripItem = {
 const SCROLL_DELTA = 280;
 
 const labelClass = 'text-xs font-medium text-app-fg-muted uppercase tracking-wider';
-const valueClass = 'text-xl font-bold mt-1';
+const valueClass = 'text-xl font-bold mt-0.5';
 
 export function OverviewStatStripSkeleton({ count }: { count: number }) {
   return (
-    <div className="card animate-pulse">
-      <div className="flex flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
+    <div className="card !p-4 animate-pulse">
+      <div className="flex flex-nowrap gap-2 overflow-x-auto scrollbar-hide pb-0.5">
         {Array.from({ length: count }).map((_, i) => (
-          <div key={i} className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+          <div key={i} className="shrink-0 min-w-[5rem] text-center px-2 py-1.5 rounded-lg bg-app-hover">
             <div className="h-3 w-14 mx-auto rounded bg-app-hover" />
-            <div className="h-6 w-8 mx-auto rounded bg-app-hover mt-2" />
+            <div className="h-6 w-8 mx-auto rounded bg-app-hover mt-1.5" />
           </div>
         ))}
       </div>
@@ -71,7 +71,7 @@ export function OverviewStatStrip({
 
   const hasHorizontalOverflow = useHasHorizontalOverflow(scrollRef, overflowContentKey);
 
-  const tileBase = ['shrink-0', 'text-center', 'p-3', 'rounded-lg', 'bg-app-hover', tileClassName || 'min-w-[5rem]']
+  const tileBase = ['shrink-0', 'text-center', 'px-2', 'py-1.5', 'rounded-lg', 'bg-app-hover', tileClassName || 'min-w-[5rem]']
     .join(' ');
 
   const scrollButtons = showScrollControls && hasHorizontalOverflow ? (
@@ -110,13 +110,13 @@ export function OverviewStatStrip({
   ) : null;
 
   const stripRow = (
-    <div className="flex items-center gap-2 min-w-0">
-      <div ref={scrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
+    <div className="flex items-center gap-1.5 min-w-0">
+      <div ref={scrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-2 overflow-x-auto scrollbar-hide pb-0.5">
         {items.map((item, i) => (
           <div key={i} className={tileBase} title={item.title}>
             <p className={labelClass}>{item.label}</p>
             {item.plainValue ? (
-              <div className="mt-1 flex justify-center">{item.value}</div>
+              <div className="mt-0.5 flex justify-center">{item.value}</div>
             ) : (
               <p className={`${valueClass} ${item.valueClassName ?? 'text-app-fg'}`}>{item.value}</p>
             )}
@@ -131,5 +131,6 @@ export function OverviewStatStrip({
     return <div className={className}>{stripRow}</div>;
   }
 
-  return <div className={className ? `card ${className}` : 'card'}>{stripRow}</div>;
+  const outer = ['card', '!p-4', className].filter(Boolean).join(' ');
+  return <div className={outer}>{stripRow}</div>;
 }

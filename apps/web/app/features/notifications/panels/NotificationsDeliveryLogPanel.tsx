@@ -1,7 +1,8 @@
 import { useFetcher } from '@remix-run/react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
+import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
 
 export interface DeliveryLogEntry {
   id: string;
@@ -138,29 +139,34 @@ export function NotificationsDeliveryLogPanel({
     setSearchParams(next, { preventScrollReset: true });
   }
 
-  function toggleRow(id: string) {
+  const onSelectionToggle = useCallback((id: string, checked: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (checked) next.add(id);
+      else next.delete(id);
       return next;
     });
-  }
+  }, []);
 
-  function toggleAll() {
-    if (selected.size === logs.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(logs.map((l) => l.id)));
-    }
-  }
+  const onSelectionToggleAll = useCallback(
+    (selectAll: boolean) => {
+      if (selectAll) setSelected(new Set(logs.map((l) => l.id)));
+      else setSelected(new Set());
+    },
+    [logs],
+  );
 
-  function handleResend(logId: string) {
-    const fd = new FormData();
-    fd.set('intent', 'resend');
-    fd.set('logId', logId);
-    fetcher.submit(fd, { method: 'post' });
-  }
+  const isSubmitting = fetcher.state !== 'idle';
+
+  const handleResend = useCallback(
+    (logId: string) => {
+      const fd = new FormData();
+      fd.set('intent', 'resend');
+      fd.set('logId', logId);
+      fetcher.submit(fd, { method: 'post' });
+    },
+    [fetcher],
+  );
 
   function handleBulkResend() {
     const fd = new FormData();
@@ -170,7 +176,70 @@ export function NotificationsDeliveryLogPanel({
     setSelected(new Set());
   }
 
-  const isSubmitting = fetcher.state !== 'idle';
+  const logColumns = useMemo((): CompactTableColumn<DeliveryLogEntry>[] => {
+    return [
+      {
+        key: 'userName',
+        header: 'User',
+        nowrap: true,
+        render: (entry) => <span className="font-medium text-app-fg">{entry.userName}</span>,
+      },
+      {
+        key: 'message',
+        header: 'Message',
+        render: (entry) => (
+          <span className="max-w-[200px] inline-block text-app-fg-muted">{truncate(entry.title, 40)}</span>
+        ),
+      },
+      {
+        key: 'trigger',
+        header: 'Trigger',
+        render: (entry) => <TriggerBadge type={entry.triggerType} />,
+      },
+      {
+        key: 'sent',
+        header: 'Sent',
+        nowrap: true,
+        render: (entry) => <span className="text-app-fg-muted">{relativeTime(entry.sentAt)}</span>,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (entry) => <StatusBadge status={entry.status} />,
+      },
+      {
+        key: 'shown',
+        header: 'Shown at',
+        nowrap: true,
+        render: (entry) => <span className="text-app-fg-muted">{formatTime(entry.shownAt)}</span>,
+      },
+      {
+        key: 'clicked',
+        header: 'Clicked at',
+        nowrap: true,
+        render: (entry) => <span className="text-app-fg-muted">{formatTime(entry.clickedAt)}</span>,
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        nowrap: true,
+        mobileShowLabel: false,
+        render: (entry) =>
+          isResendVisible(entry) ? (
+            <CompactTableActionButton
+              tone="brand"
+              onClick={() => handleResend(entry.id)}
+              disabled={isSubmitting}
+            >
+              Resend
+            </CompactTableActionButton>
+          ) : null,
+      },
+    ];
+  }, [handleResend, isSubmitting]);
 
   return (
     <div className="space-y-5">
@@ -256,8 +325,31 @@ export function NotificationsDeliveryLogPanel({
         </p>
       )}
 
-      <div className="card p-0">
-        {logs.length === 0 ? (
+      <CompactTable
+        columns={logColumns}
+        rows={logs}
+        rowKey={(entry) => entry.id}
+        caption="Push delivery log entries"
+        selection={{
+          selectedIds: selected,
+          onToggle: onSelectionToggle,
+          onToggleAll: onSelectionToggleAll,
+          getRowId: (entry) => entry.id,
+        }}
+        pagination={{
+          page: currentPage,
+          totalPages: Math.max(1, pagination.totalPages),
+          onPageChange: goToPage,
+          summary: (
+            <span>
+              Page {currentPage} of {pagination.totalPages} — {pagination.total} total
+            </span>
+          ),
+          showWhenSinglePage: pagination.totalPages > 1,
+          wrapperClassName: 'flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-app-fg-muted',
+          controlsClassName: 'sm:justify-end',
+        }}
+        emptyState={
           <div className="flex flex-col items-center justify-center py-16 text-app-fg-muted">
             <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1.2} stroke="currentColor">
               <path
@@ -269,96 +361,8 @@ export function NotificationsDeliveryLogPanel({
             <p className="text-sm font-medium text-app-fg">No push deliveries found</p>
             <p className="mt-1 text-xs">Try adjusting your filters.</p>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-app-border">
-              <thead>
-                <tr>
-                  <th className="table-header w-12 text-center">
-                    <input
-                      type="checkbox"
-                      checked={selected.size === logs.length && logs.length > 0}
-                      onChange={toggleAll}
-                      className="rounded border-app-border accent-brand-600"
-                    />
-                  </th>
-                  {['User', 'Message', 'Trigger', 'Sent', 'Status', 'Shown at', 'Clicked at', ''].map((h) => (
-                    <th
-                      key={h}
-                      className="table-header"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-app-border">
-                {logs.map((entry) => (
-                  <tr key={entry.id} className="transition-colors hover:bg-app-hover/40">
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(entry.id)}
-                        onChange={() => toggleRow(entry.id)}
-                        className="rounded border-app-border accent-brand-600"
-                      />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-app-fg">{entry.userName}</td>
-                    <td className="max-w-[200px] px-4 py-3 text-sm text-app-fg-muted">{truncate(entry.title, 40)}</td>
-                    <td className="px-4 py-3">
-                      <TriggerBadge type={entry.triggerType} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-sm text-app-fg-muted">{relativeTime(entry.sentAt)}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={entry.status} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-sm text-app-fg-muted">{formatTime(entry.shownAt)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-sm text-app-fg-muted">{formatTime(entry.clickedAt)}</td>
-                    <td className="px-4 py-3">
-                      {isResendVisible(entry) && (
-                        <button
-                          type="button"
-                          onClick={() => handleResend(entry.id)}
-                          disabled={isSubmitting}
-                          className="text-xs font-medium text-brand-600 hover:text-brand-800 disabled:opacity-50 dark:text-brand-400"
-                        >
-                          Resend
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-app-fg-muted">
-          <span>
-            Page {pagination.page} of {pagination.totalPages} — {pagination.total} total
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => goToPage(currentPage - 1)}
-              disabled={currentPage <= 1}
-              className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              ← Prev
-            </button>
-            <button
-              type="button"
-              onClick={() => goToPage(currentPage + 1)}
-              disabled={currentPage >= pagination.totalPages}
-              className="rounded-lg border border-app-border px-3 py-1.5 text-xs font-medium hover:bg-app-hover disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Next →
-            </button>
-          </div>
-        </div>
-      )}
+        }
+      />
     </div>
   );
 }

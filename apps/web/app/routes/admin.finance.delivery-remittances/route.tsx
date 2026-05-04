@@ -22,14 +22,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
   // Phase 21 — capability flags for the page actions. Same gates as the API
   // (`logistics.service.ts` for `createDeliveryRemittance` / `markDeliveryRemittanceReceived`).
-  const userPerms = ((user as { permissions?: string[]; isFinanceOfficer?: boolean }).permissions ?? []).map(
+  const userPerms = ((user as { permissions?: string[] }).permissions ?? []).map(
     (p) => canonicalPermissionCode(p),
   );
   const isFinanceLike =
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
-    user.role === 'FINANCE_OFFICER' ||
-    (user as { isFinanceOfficer?: boolean }).isFinanceOfficer === true;
+    user.role === 'FINANCE_OFFICER';
   const canCreateRemittance =
     isFinanceLike || userPerms.includes(canonicalPermissionCode('finance.cashRemittance.create'));
   const canMarkReceived =
@@ -112,12 +111,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string }> } } })?.result?.data
+    ? (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string; providerName?: string | null }> } } })?.result?.data
     : null;
-  const locations = locationsData?.locations ?? [];
+  const locations = (locationsData?.locations ?? []).map((l) => ({
+    id: l.id,
+    name: l.name,
+    providerName: l.providerName ?? null,
+  }));
 
   // Build user name map for sentBy resolution + accountant filter.
-  type UserRow = { id: string; name: string; role: string; isFinanceOfficer?: boolean };
+  type UserRow = { id: string; name: string; role: string };
   const usersData = usersRes.ok
     ? (usersRes.data as { result?: { data?: { users: UserRow[] } } })?.result?.data?.users
     : null;
@@ -126,12 +129,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (usersData) {
     for (const u of usersData) {
       userMap[u.id] = u.name;
-      // Sent-by filter only lists accountants — primary FINANCE_OFFICER, the
-      // singleton Finance hat holder, and admin-class. Non-finance users
-      // never appear because they cannot create remittances.
+      // Sent-by filter only lists accountants — primary FINANCE_OFFICER and
+      // admin-class. Non-finance users never appear because they cannot
+      // create remittances.
       const isFinance =
         u.role === 'FINANCE_OFFICER' ||
-        u.isFinanceOfficer === true ||
         u.role === 'SUPER_ADMIN' ||
         u.role === 'ADMIN';
       if (isFinance) {
@@ -149,6 +151,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     deliveredAt: string | null;
     logisticsLocationId: string | null;
     logisticsLocationName: string | null;
+    logisticsLocationProviderName: string | null;
   };
   const eligibleData = eligibleRes.ok
     ? (eligibleRes.data as { result?: { data?: { orders: EligibleOrder[]; total: number } } })?.result?.data

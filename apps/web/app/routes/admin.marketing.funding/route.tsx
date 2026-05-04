@@ -27,7 +27,11 @@ import {
 } from '~/lib/marketing-pages.server';
 
 const PER_PAGE = 20;
-const MERGED_FETCH_LIMIT = 500;
+/** Upper bound of `listFunding` / `listFundingRequests` (`limit` zod-capped at 100).
+ * Used when the unified table fetches transfers + requests in one shot for an
+ * `entryType=all` view — we over-fetch a single page and merge client-side.
+ * Anything above 100 is silently rejected by the API validator. */
+const MERGED_FETCH_LIMIT = 100;
 const LEDGER_STATUSES = ['SENT', 'COMPLETED', 'DISPUTED'] as const;
 const REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
@@ -53,9 +57,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const canDistribute = !isMediaBuyer;
 
   // ── URL state with safe defaults ────────────────────────
+  // Default section is `distributing` for users who can distribute (HoM/Admin)
+  // — that's their primary working surface. MBs (no canDistribute) default to
+  // `received`. Explicit `?section=received` always wins.
   const sectionParam = url.searchParams.get('section');
   const activeSection: FundingSection =
-    sectionParam === 'distributing' && canDistribute ? 'distributing' : 'received';
+    sectionParam === 'received'
+      ? 'received'
+      : canDistribute
+        ? 'distributing'
+        : 'received';
 
   const tabParam = url.searchParams.get('tab');
   const activeTab: FundingTab = tabParam === 'requests' ? 'requests' : 'transfers';
@@ -99,49 +110,73 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const outgoingCountsInput = JSON.stringify({ senderId: user.id, ...dateRange });
   const mbRequestsCountsInput = JSON.stringify({ excludeSelfAsRequester: true, ...dateRange });
 
-  // Active slice's records (only the rows the user is currently viewing)
-  let recordsUrl: string;
-  let recordsKind: 'transfers' | 'requests';
+  // When the unified status filter is exclusive to one entry type — e.g.
+  // PENDING / APPROVED / REJECTED only apply to requests; SENT / COMPLETED /
+  // DISPUTED only apply to transfers — skip fetching the other type entirely.
+  // Without this, `entryStatus=PENDING` would still fetch ALL outgoing transfers
+  // (no transfer-status filter applied) and they push the matching request
+  // off page 1. Hoisted out of the `distributing` branch so the records-
+  // hydration block below can also use it for pagination math.
+  const isRequestOnlyStatus =
+    !!entryStatusParam && (REQUEST_STATUSES as readonly string[]).includes(entryStatusParam);
+  const isTransferOnlyStatus =
+    !!entryStatusParam && (LEDGER_STATUSES as readonly string[]).includes(entryStatusParam);
+  const skipTransfersForStatus = entryTypeFilter !== 'transfer' && isRequestOnlyStatus;
+  const skipRequestsForStatus = entryTypeFilter !== 'request' && isTransferOnlyStatus;
+
+  // Both sections render unified tables (transfers + requests merged); both
+  // sides need their record URLs built when the section is active. Legacy
+  // `recordsUrl` is kept as a single-call fallback that the hydration block
+  // ignores — both unified branches use the dual-URL pattern below.
+  let receivedTransfersUrl: string | null = null;
+  let receivedRequestsUrl: string | null = null;
   let distributingTransfersUrl: string | null = null;
   let distributingRequestsUrl: string | null = null;
-  if (activeSection === 'received' && activeTab === 'transfers') {
-    const input = JSON.stringify({
-      page,
-      limit: PER_PAGE,
-      receiverId: user.id,
-      ...dateRange,
-      ...(statusFilter && { status: statusFilter }),
-      ...(searchFilter && { search: searchFilter }),
-    });
-    recordsUrl = `/trpc/marketing.listFunding?input=${encodeURIComponent(input)}`;
-    recordsKind = 'transfers';
-  } else if (activeSection === 'received' && activeTab === 'requests') {
-    const input = JSON.stringify({
-      page,
-      limit: PER_PAGE,
-      requesterId: user.id,
-      ...dateRange,
-      ...(requestStatusFilter && { status: requestStatusFilter }),
-      ...(searchFilter && { search: searchFilter }),
-    });
-    recordsUrl = `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(input)}`;
-    recordsKind = 'requests';
-  } else if (activeSection === 'distributing' && activeTab === 'transfers') {
-    const input = JSON.stringify({
-      page,
-      limit: PER_PAGE,
-      senderId: user.id,
-      ...dateRange,
-      ...(statusFilter && { status: statusFilter }),
-      ...(searchFilter && { search: searchFilter }),
-    });
-    recordsUrl = `/trpc/marketing.listFunding?input=${encodeURIComponent(input)}`;
-    recordsKind = 'transfers';
-  } else if (activeSection === 'distributing') {
-    // Legacy path compatibility (`tab=requests`) for Section 2 now maps into unified
-    // table data fetches (split by type/status filters).
+
+  if (activeSection === 'received') {
+    // Section 1 — "Funds I've Received" unified table. Fetch both incoming
+    // transfers AND my outbound requests so the merged feed has both rows.
+    // `entryTypeFilter` and `entryStatus` filters narrow the fetch the same
+    // way they do for distributing — request-only status skips the transfer
+    // call, transfer-only status skips the request call.
     const transferInput =
-      entryTypeFilter === 'request'
+      entryTypeFilter === 'request' || skipTransfersForStatus
+        ? null
+        : JSON.stringify({
+            page: entryTypeFilter === 'transfer' ? page : 1,
+            limit: entryTypeFilter === 'transfer' ? PER_PAGE : MERGED_FETCH_LIMIT,
+            receiverId: user.id,
+            ...dateRange,
+            ...(transferStatusFilter ? { status: transferStatusFilter } : {}),
+            ...(searchFilter && { search: searchFilter }),
+          });
+    const requestInput =
+      entryTypeFilter === 'transfer' || skipRequestsForStatus
+        ? null
+        : JSON.stringify({
+            page: entryTypeFilter === 'request' ? page : 1,
+            limit: entryTypeFilter === 'request' ? PER_PAGE : MERGED_FETCH_LIMIT,
+            requesterId: user.id,
+            ...dateRange,
+            ...(requestStatusFilterUnified ? { status: requestStatusFilterUnified } : {}),
+            ...(searchFilter && { search: searchFilter }),
+          });
+    receivedTransfersUrl = transferInput
+      ? `/trpc/marketing.listFunding?input=${encodeURIComponent(transferInput)}`
+      : null;
+    receivedRequestsUrl = requestInput
+      ? `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(requestInput)}`
+      : null;
+  } else if (activeSection === 'distributing') {
+    // Distributing section renders one unified table (UnifiedDistributingTable) for
+    // BOTH tabs — `tab=transfers` and `tab=requests` are visual/state hints, not
+    // separate datasets. Both transfers and request URLs must be populated so the
+    // merged-entries builder below can paginate them together.
+    // `entryTypeFilter` (?entryType=transfer|request) is the actual filter knob.
+    // `skipTransfersForStatus` / `skipRequestsForStatus` are computed above so
+    // a request-only status (e.g. PENDING) doesn't pull all transfers.
+    const transferInput =
+      entryTypeFilter === 'request' || skipTransfersForStatus
         ? null
         : JSON.stringify({
             page: entryTypeFilter === 'transfer' ? page : 1,
@@ -152,7 +187,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
             ...(searchFilter && { search: searchFilter }),
           });
     const requestInput =
-      entryTypeFilter === 'transfer'
+      entryTypeFilter === 'transfer' || skipRequestsForStatus
         ? null
         : JSON.stringify({
             page: entryTypeFilter === 'request' ? page : 1,
@@ -168,19 +203,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     distributingRequestsUrl = requestInput
       ? `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(requestInput)}`
       : null;
-    recordsUrl = '/trpc/marketing.listFundingRequests?input=%7B%22page%22%3A1%2C%22limit%22%3A1%7D';
-    recordsKind = 'requests';
-  } else {
-    const input = JSON.stringify({
-      page,
-      limit: PER_PAGE,
-      requesterId: user.id,
-      ...dateRange,
-      ...(requestStatusFilter && { status: requestStatusFilter }),
-      ...(searchFilter && { search: searchFilter }),
-    });
-    recordsUrl = `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(input)}`;
-    recordsKind = 'requests';
   }
 
   // ── Supporting fetches ──────────────────────────────────
@@ -218,6 +240,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       )
     : Promise.resolve({ ok: false as const, data: {} });
 
+  // Recipient candidates for the Request Funding modal (migration 0106). Only
+  // fetched when the caller can request funding so we don't pay the cost
+  // for read-only viewers (Finance/Admin etc.).
+  const fundingRequestRecipientsP = canRequestFunding
+    ? apiRequest<unknown>('/trpc/marketing.listFundingRequestRecipients', { method: 'GET', cookie })
+    : Promise.resolve({ ok: false as const, data: {} });
+
   const incomingCountsP = apiRequest<unknown>(
     `/trpc/marketing.fundingStatusCounts?input=${encodeURIComponent(incomingCountsInput)}`,
     { method: 'GET', cookie },
@@ -239,10 +268,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       )
     : Promise.resolve({ ok: false as const, data: {} });
 
-  const recordsP =
-    activeSection === 'distributing'
-      ? Promise.resolve({ ok: true as const, data: {} })
-      : apiRequest<unknown>(recordsUrl, { method: 'GET', cookie });
+  const receivedTransfersP =
+    activeSection === 'received' && receivedTransfersUrl
+      ? apiRequest<unknown>(receivedTransfersUrl, { method: 'GET', cookie })
+      : Promise.resolve({ ok: true as const, data: {} });
+  const receivedRequestsP =
+    activeSection === 'received' && receivedRequestsUrl
+      ? apiRequest<unknown>(receivedRequestsUrl, { method: 'GET', cookie })
+      : Promise.resolve({ ok: true as const, data: {} });
   const distributingTransfersP =
     activeSection === 'distributing' && distributingTransfersUrl
       ? apiRequest<unknown>(distributingTransfersUrl, { method: 'GET', cookie })
@@ -253,7 +286,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : Promise.resolve({ ok: true as const, data: {} });
 
   const [
-    recordsRes,
+    receivedTransfersRes,
+    receivedRequestsRes,
     incomingCountsRes,
     myRequestsCountsRes,
     outgoingCountsRes,
@@ -265,8 +299,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     distributingTransfersRes,
     distributingRequestsRes,
     branchesRes,
+    fundingRequestRecipientsRes,
   ] = await Promise.all([
-    recordsP,
+    receivedTransfersP,
+    receivedRequestsP,
     incomingCountsP,
     myRequestsCountsP,
     outgoingCountsP,
@@ -278,6 +314,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     distributingTransfersP,
     distributingRequestsP,
     branchesP,
+    fundingRequestRecipientsP,
   ]);
 
   // ── Parse counts ────────────────────────────────────────
@@ -315,7 +352,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
     | undefined = undefined;
 
   // ── Hydrate the active slice with the records we fetched ──
-  if (activeSection === 'distributing') {
+  if (activeSection === 'received') {
+    // Section 1 unified table: hydrate BOTH receivedTransfers and myRequests
+    // record arrays. Counts come from the standalone `fundingStatusCounts` /
+    // `fundingRequestStatusCounts` queries — they're authoritative across the
+    // full period regardless of entryType/entryStatus filters. The merge +
+    // filter logic on the frontend handles the rest.
+    const transferData = parseFunding(receivedTransfersRes);
+    const requestData = parseFundingRequestsPage(receivedRequestsRes);
+    const transferRecords = transferData?.records ?? [];
+    const requestRecords = requestData?.records ?? [];
+
+    receivedTransfers = {
+      records: transferRecords,
+      total: transferData?.pagination?.total ?? incomingCounts.ALL,
+      page,
+      totalPages: Math.max(1, Math.ceil((transferData?.pagination?.total ?? incomingCounts.ALL) / PER_PAGE)),
+      statusCounts: incomingCounts,
+      statusFilter,
+      searchFilter,
+    };
+    myRequests = {
+      records: requestRecords,
+      total: requestData?.pagination?.total ?? myRequestsCounts.ALL,
+      page,
+      totalPages: Math.max(1, Math.ceil((requestData?.pagination?.total ?? myRequestsCounts.ALL) / PER_PAGE)),
+      statusCounts: myRequestsCounts,
+      statusFilter: requestStatusFilter,
+      searchFilter,
+    };
+  } else if (activeSection === 'distributing') {
     const transferData = parseFunding(distributingTransfersRes);
     const requestData = parseFundingRequestsPage(distributingRequestsRes);
     const transferRows = transferData?.records ?? [];
@@ -323,12 +389,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const merged = toDistributingFundingEntries(transferRows, requestRows);
     const startIndex = (page - 1) * PER_PAGE;
     const paged = entryTypeFilter === 'all' ? merged.slice(startIndex, startIndex + PER_PAGE) : merged;
+    // Pagination total accounts for the entry-type filter AND the entry-status
+    // filter — when status is request-only (PENDING/APPROVED/REJECTED) the
+    // transfer side of the merged list is empty, so total is just the matching
+    // request count; same logic in reverse for transfer-only statuses.
+    const transferStatusCount = transferStatusFilter
+      ? (outgoingCounts[transferStatusFilter as keyof typeof outgoingCounts] ?? 0)
+      : outgoingCounts.ALL;
+    const requestStatusCount = requestStatusFilterUnified
+      ? (mbRequestsCounts[requestStatusFilterUnified as keyof typeof mbRequestsCounts] ?? 0)
+      : mbRequestsCounts.ALL;
     const totalMergedCount =
       entryTypeFilter === 'transfer'
-        ? outgoingCounts.ALL
+        ? transferStatusCount
         : entryTypeFilter === 'request'
-          ? mbRequestsCounts.ALL
-          : outgoingCounts.ALL + mbRequestsCounts.ALL;
+          ? requestStatusCount
+          : skipTransfersForStatus
+            ? requestStatusCount
+            : skipRequestsForStatus
+              ? transferStatusCount
+              : transferStatusCount + requestStatusCount;
 
     distributingEntries = {
       records: paged,
@@ -353,39 +433,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
         ALL: outgoingCounts.ALL + mbRequestsCounts.ALL,
       },
     };
-  } else if (recordsKind === 'transfers') {
-    const fundingData = parseFunding(recordsRes);
-    const total = fundingData?.pagination?.total ?? 0;
-    const slice: FundingSliceData = {
-      records: fundingData?.records ?? [],
-      total,
-      page,
-      totalPages: Math.max(1, Math.ceil(total / PER_PAGE)),
-      statusCounts: activeSection === 'received' ? incomingCounts : outgoingCounts,
-      statusFilter,
-      searchFilter,
-    };
-    if (activeSection === 'received') receivedTransfers = slice;
-    else outgoingTransfers = slice;
-  } else {
-    const requestsData = parseFundingRequestsPage(recordsRes);
-    const total = requestsData?.pagination?.total ?? 0;
-    const slice: FundingRequestsSliceData = {
-      records: requestsData?.records ?? [],
-      total,
-      page,
-      totalPages: Math.max(1, Math.ceil(total / PER_PAGE)),
-      statusCounts: activeSection === 'received' ? myRequestsCounts : mbRequestsCounts,
-      statusFilter: requestStatusFilter,
-      searchFilter,
-    };
-    if (activeSection === 'received') myRequests = slice;
-    else mbRequests = slice;
   }
 
   const directionSummary = parseFundingDirectionSummary(directionSummaryRes);
   const fundingBalance = showFundingBalance ? parseFundingBalance(fundingBalanceRes) : undefined;
   const usersList = parseUsers(usersRes);
+
+  // Funding request recipient candidates (migration 0106 — empty array when the
+  // current user can't request funding, since the list isn't fetched in that
+  // case).
+  const fundingRequestRecipients: Array<{
+    id: string;
+    name: string;
+    role: string;
+    isFinance: boolean;
+    isPreferred: boolean;
+    branchId: string | null;
+  }> = canRequestFunding && fundingRequestRecipientsRes.ok
+    ? ((fundingRequestRecipientsRes.data as {
+        result?: {
+          data?: Array<{
+            id: string;
+            name: string;
+            role: string;
+            isFinance: boolean;
+            isPreferred: boolean;
+            branchId: string | null;
+          }>;
+        };
+      }).result?.data ?? [])
+    : [];
 
   // Resolve active branch name from the branches.list payload — null if the user has
   // no active branch (admin in global view) or the branch can't be found in the response.
@@ -419,6 +496,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     users: usersList,
     balancesList,
     activeBranchName,
+    fundingRequestRecipients,
   };
 
   return data;

@@ -110,7 +110,6 @@ export class AuthService {
         logisticsLocationId: schema.users.logisticsLocationId,
         appTheme: schema.users.appTheme,
         fontScale: schema.users.fontScale,
-        isFinanceOfficer: schema.users.isFinanceOfficer,
         roleTemplateId: schema.users.roleTemplateId,
         scopeGlobal: schema.users.scopeGlobal,
         scopeOrgWideHead: schema.users.scopeOrgWideHead,
@@ -179,6 +178,16 @@ export class AuthService {
       currentBranchId = memberships[0]!.branchId as string;
     }
 
+    // Resolve effective permissions at sign-in time so the very first request after the
+    // login redirect (e.g. `requirePermission(...)` on `/admin/logistics/...`) sees the
+    // user's role-template grants. Without this the session lands in Redis with
+    // `permissions: undefined` and any caller that reads the session BEFORE `/auth/me`
+    // refreshes (or that doesn't refresh at all) thinks the user has zero permissions.
+    // The trpc middleware + /auth/me both refresh on every call, so this is mostly a
+    // belt-and-braces guarantee — but it also fixes "first login lands on Permission
+    // required" for newly-invited users.
+    const initialPermissions = await this.permissions.getEffectivePermissions(user.id);
+
     const sessionUser: SessionUser = {
       id: user.id,
       email: user.email,
@@ -188,11 +197,11 @@ export class AuthService {
       scopeGlobal: user.scopeGlobal === true,
       scopeOrgWideHead: user.scopeOrgWideHead === true,
       scopeTeamSupervisor: user.scopeTeamSupervisor === true,
+      permissions: Array.from(initialPermissions),
       logisticsLocationId: user.logisticsLocationId,
       currentBranchId,
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
-      isFinanceOfficer: user.isFinanceOfficer === true,
     };
 
     // CEO directive: sessions ALWAYS expire at 23:59 local time on the calendar day
@@ -282,7 +291,6 @@ export class AuthService {
         logisticsLocationId: schema.users.logisticsLocationId,
         appTheme: schema.users.appTheme,
         fontScale: schema.users.fontScale,
-        isFinanceOfficer: schema.users.isFinanceOfficer,
         primaryBranchId: schema.users.primaryBranchId,
         roleTemplateId: schema.users.roleTemplateId,
         scopeGlobal: schema.users.scopeGlobal,
@@ -372,7 +380,6 @@ export class AuthService {
       // of the read-only "live walkthrough".
       appTheme: target.appTheme ?? null,
       fontScale: target.fontScale ?? null,
-      isFinanceOfficer: target.isFinanceOfficer === true,
       mirroredBy: { id: actor.id, name: actor.name, role: actor.role },
       mirrorSessionId,
     };
@@ -429,7 +436,6 @@ export class AuthService {
         logisticsLocationId: schema.users.logisticsLocationId,
         appTheme: schema.users.appTheme,
         fontScale: schema.users.fontScale,
-        isFinanceOfficer: schema.users.isFinanceOfficer,
         primaryBranchId: schema.users.primaryBranchId,
         roleTemplateId: schema.users.roleTemplateId,
         scopeGlobal: schema.users.scopeGlobal,
@@ -474,7 +480,6 @@ export class AuthService {
       currentBranchId,
       appTheme: currentSession.appTheme ?? null,
       fontScale: currentSession.fontScale ?? null,
-      isFinanceOfficer: actor.isFinanceOfficer === true,
       mirroredBy: null,
       mirrorSessionId: null,
     };
@@ -543,7 +548,7 @@ export class AuthService {
 
     const text = `Hi ${user.name},\n\nWe received a request to reset your password.\n\nReset your password: ${resetUrl}\n\nThis link expires in 30 minutes.\n\nIf you didn't request this, you can safely ignore this email.`;
 
-    await this.notifications.sendEmail({
+    const sent = await this.notifications.sendEmail({
       to: user.email,
       subject: 'Yannis EOSE — Password Reset',
       html,
@@ -551,6 +556,12 @@ export class AuthService {
     });
 
     this.logger.log(`Password reset token generated for user ${user.id}`);
+    if (!sent && process.env.NODE_ENV !== 'production') {
+      // Email is best-effort; local DNS/offline often breaks SendGrid. Surface link only in dev.
+      this.logger.warn(
+        `[dev] Password reset email was not delivered — use this link once: ${resetUrl}`,
+      );
+    }
   }
 
   /**

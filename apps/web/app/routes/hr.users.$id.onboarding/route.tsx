@@ -4,7 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
-  requirePermissionOrRoles,
+  requireOnboardingHrPagesAccess,
   safeStatus,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -15,16 +15,8 @@ import {
 
 export const meta: MetaFunction = () => [{ title: 'Staff Onboarding — Yannis EOSE' }];
 
-const HR_ACCESS = {
-  roles: ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'],
-  permission: ['hr.onboarding.read', 'hr.onboarding.write'],
-} as const;
-
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  await requirePermissionOrRoles(request, {
-    roles: [...HR_ACCESS.roles],
-    permission: [...HR_ACCESS.permission],
-  });
+  await requireOnboardingHrPagesAccess(request);
   const userId = params['id'];
   if (!userId) throw new Response('Missing user id', { status: 400 });
   const cookie = getSessionCookie(request);
@@ -82,57 +74,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  await requirePermissionOrRoles(request, {
-    roles: [...HR_ACCESS.roles],
-    permission: [...HR_ACCESS.permission],
-  });
+  await requireOnboardingHrPagesAccess(request);
   const userId = params['id'];
   if (!userId) return json({ error: 'Missing user id' }, { status: 400 });
   const cookie = getSessionCookie(request);
   const fd = await request.formData();
   const intent = fd.get('intent')?.toString();
 
-  if (intent === 'updateOnboarding') {
-    const supportingDocsRaw = fd.get('supportingDocuments')?.toString() ?? '[]';
-    let supportingDocuments: Array<{ label: string; url: string }>;
-    try {
-      const parsed = JSON.parse(supportingDocsRaw);
-      supportingDocuments = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return json({ error: 'Invalid supporting documents payload' }, { status: 400 });
-    }
-    const body = {
-      userId,
-      gender: emptyToNull(fd.get('gender')),
-      dateOfBirth: emptyToNull(fd.get('dateOfBirth')),
-      residentialAddress: emptyToNull(fd.get('residentialAddress')),
-      proofOfAddressUrl: emptyToNull(fd.get('proofOfAddressUrl')),
-      supportingDocuments,
-      guarantor1Name: emptyToNull(fd.get('guarantor1Name')),
-      guarantor1Phone: emptyToNull(fd.get('guarantor1Phone')),
-      guarantor1Email: emptyToNull(fd.get('guarantor1Email')),
-      guarantor1Address: emptyToNull(fd.get('guarantor1Address')),
-      guarantor1Relationship: emptyToNull(fd.get('guarantor1Relationship')),
-      guarantor1LetterUrl: emptyToNull(fd.get('guarantor1LetterUrl')),
-      guarantor2Name: emptyToNull(fd.get('guarantor2Name')),
-      guarantor2Phone: emptyToNull(fd.get('guarantor2Phone')),
-      guarantor2Email: emptyToNull(fd.get('guarantor2Email')),
-      guarantor2Address: emptyToNull(fd.get('guarantor2Address')),
-      guarantor2Relationship: emptyToNull(fd.get('guarantor2Relationship')),
-      guarantor2LetterUrl: emptyToNull(fd.get('guarantor2LetterUrl')),
-    };
-    const res = await apiRequest<unknown>('/trpc/onboarding.hrUpdate', {
-      method: 'POST',
-      cookie,
-      body,
-    });
-    if (!res.ok) {
-      return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to save onboarding') },
-        { status: safeStatus(res.status) },
-      );
-    }
-    return json({ success: true });
+  if (intent === 'updateOnboarding' || intent === 'submitOnboarding') {
+    return json(
+      {
+        error:
+          'Onboarding can only be edited or submitted by the staff member from their own page under Admin → Your onboarding (/admin/onboarding).',
+      },
+      { status: 403 },
+    );
   }
 
   if (intent === 'approveOnboarding') {
@@ -150,28 +106,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
-  if (intent === 'submitOnboarding') {
-    const res = await apiRequest<unknown>('/trpc/onboarding.submit', {
-      method: 'POST',
-      cookie,
-      body: { userId },
-    });
-    if (!res.ok) {
-      return json(
-        { error: extractApiErrorMessage(res.data, 'Failed to submit onboarding') },
-        { status: safeStatus(res.status) },
-      );
-    }
-    return json({ success: true });
-  }
-
   return json({ error: 'Unknown intent' }, { status: 400 });
-}
-
-function emptyToNull(v: FormDataEntryValue | null): string | null {
-  if (v === null) return null;
-  const s = v.toString().trim();
-  return s.length === 0 ? null : s;
 }
 
 export default function HrOnboardingRoute() {

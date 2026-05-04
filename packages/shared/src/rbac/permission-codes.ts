@@ -113,3 +113,19 @@ export function canonicalPermissionCodes(codes: Iterable<string>): string[] {
 export function legacyAliasesForCanonical(code: string): string[] {
   return LEGACY_BY_CANONICAL.get(code) ?? [];
 }
+
+/**
+ * Split a dotted canonical permission code into resource + action for UX copy.
+ * Uses the last dot as the boundary (e.g. `team.cs.supervise` → resource `team.cs`, action `supervise`).
+ */
+export function permissionCodeDisplaySplit(code: string): { resource: string; action: string } {
+  const trimmed = code.trim();
+  const lastDot = trimmed.lastIndexOf('.');
+  if (lastDot <= 0) {
+    return { resource: trimmed, action: '' };
+  }
+  return {
+    resource: trimmed.slice(0, lastDot),
+    action: trimmed.slice(lastDot + 1),
+  };
+}

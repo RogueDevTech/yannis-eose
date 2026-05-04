@@ -36,9 +36,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (transfersRes.data as { result?: { data?: Transfer[] } })?.result?.data
     : null;
 
-  const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
-    : null;
+  const locationsRaw = locationsRes.ok
+    ? (locationsRes.data as {
+        result?: { data?: { locations: { id: string; providerId: string; name: string; address: string; status: string; providerName?: string | null }[] } };
+      })?.result?.data?.locations ?? []
+    : [];
+  const locationsData = {
+    locations: locationsRaw.map((l) => ({
+      id: l.id,
+      providerId: l.providerId,
+      name: l.name,
+      address: l.address,
+      status: l.status,
+      providerName: l.providerName ?? null,
+    })) as Location[],
+  };
 
   // Return products, levels as un-awaited promises with .catch() fallback
   const products = productsPromise.then((res) => {
@@ -53,7 +65,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     transfers: transfersData ?? [],
-    locations: locationsData?.locations ?? [],
+    locations: locationsData.locations,
     products,
     levels,
   };

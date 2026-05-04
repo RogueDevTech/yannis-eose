@@ -1,5 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { eq, and, desc, count, inArray, or, gte, lte } from 'drizzle-orm';
+import { Cron } from '@nestjs/schedule';
+import { eq, and, desc, count, inArray, or, gte, lte, lt } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import sgMail from '@sendgrid/mail';
 import { db as schema } from '@yannis/shared';
@@ -124,7 +125,12 @@ export class NotificationsService {
       this.logger.log(`Email sent: ${opts.subject} → ${opts.to}`);
       return true;
     } catch (error) {
-      this.logger.error(`Failed to send email to ${opts.to}: ${error}`);
+      const msg = error instanceof Error ? error.message : String(error);
+      const hint =
+        msg.includes('ENOTFOUND') || msg.includes('getaddrinfo')
+          ? ' (DNS could not resolve api.sendgrid.com — check network/VPN/DNS; axios respects HTTPS_PROXY if set)'
+          : '';
+      this.logger.error(`Failed to send email to ${opts.to}: ${error}${hint}`);
       return false;
     }
   }
@@ -146,7 +152,7 @@ export class NotificationsService {
 
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 0;">
-        <div style="background: #6366f1; padding: 24px 32px; border-radius: 12px 12px 0 0;">
+        <div style="background: #1565C0; padding: 24px 32px; border-radius: 12px 12px 0 0;">
           <h1 style="color: #fff; margin: 0; font-size: 22px;">Welcome to Yannis EOSE</h1>
         </div>
         <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
@@ -168,7 +174,7 @@ export class NotificationsService {
               </tr>
             </table>
           </div>
-          <a href="${opts.loginUrl}" style="display: block; text-align: center; background: #6366f1; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+          <a href="${opts.loginUrl}" style="display: block; text-align: center; background: #1565C0; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
             Sign In Now
           </a>
           <p style="color: #9ca3af; font-size: 12px; line-height: 1.5; margin: 24px 0 0; text-align: center;">
@@ -283,7 +289,7 @@ export class NotificationsService {
 
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 0;">
-        <div style="background: #6366f1; padding: 24px 32px; border-radius: 12px 12px 0 0;">
+        <div style="background: #1565C0; padding: 24px 32px; border-radius: 12px 12px 0 0;">
           <h1 style="color: #fff; margin: 0; font-size: 22px;">Yannis EOSE</h1>
         </div>
         <div style="background: #ffffff; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
@@ -294,7 +300,7 @@ export class NotificationsService {
             <strong>${title}</strong>
           </p>
           ${body ? `<p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">${body}</p>` : ''}
-          <a href="${link}" style="display: inline-block; background: #6366f1; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+          <a href="${link}" style="display: inline-block; background: #1565C0; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
             View in Dashboard
           </a>
         </div>
@@ -546,6 +552,55 @@ export class NotificationsService {
 
     this.cache.delPattern(`cache:notif:${userId}:*`).catch(() => undefined);
     return { success: true };
+  }
+
+  /**
+   * Daily retention sweep — deletes:
+   *   - Read notifications older than 30 days (the user already saw them)
+   *   - Unread notifications older than 90 days (hard cap; ancient unread is
+   *     unlikely to be acted on and the bell shouldn't surface stale items)
+   *
+   * Push delivery rows are NOT touched — they live on `push_delivery_log` for
+   * its own retention. Audit / temporal data is unaffected.
+   *
+   * Runs at 03:15 server-local time. The 15-minute offset stays clear of the
+   * top-of-hour cron rush (mat-view refresh + push automations).
+   */
+  @Cron('0 15 3 * * *')
+  async cleanupOldNotifications(): Promise<void> {
+    try {
+      const now = Date.now();
+      const READ_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+      const UNREAD_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+      const readCutoff = new Date(now - READ_RETENTION_MS);
+      const unreadCutoff = new Date(now - UNREAD_RETENTION_MS);
+
+      const readDeleted = await this.db
+        .delete(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.read, true),
+            lt(schema.notifications.createdAt, readCutoff),
+          ),
+        )
+        .returning({ id: schema.notifications.id });
+
+      const unreadDeleted = await this.db
+        .delete(schema.notifications)
+        .where(lt(schema.notifications.createdAt, unreadCutoff))
+        .returning({ id: schema.notifications.id });
+
+      this.logger.log(
+        `Notification cleanup: removed ${readDeleted.length} read (>30d) + ${unreadDeleted.length} stale (>90d) notifications`,
+      );
+
+      // The unread-count cache is keyed per-user; invalidate broadly so any
+      // affected users see fresh counts on next bell open. delPattern covers
+      // every key matching `cache:notif:*`.
+      await this.cache.delPattern('cache:notif:*').catch(() => undefined);
+    } catch (err) {
+      this.logger.error('Notification cleanup failed', err);
+    }
   }
 
   // ============================================================

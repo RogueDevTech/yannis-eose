@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
@@ -7,8 +7,10 @@ import { TextInput } from '~/components/ui/text-input';
 import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upload';
 import { Checkbox } from '~/components/ui/checkbox';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
 export interface EligibleOrder {
   id: string;
@@ -17,6 +19,7 @@ export interface EligibleOrder {
   deliveredAt: string | null;
   logisticsLocationId: string | null;
   logisticsLocationName: string | null;
+  logisticsLocationProviderName: string | null;
 }
 
 interface CashRemittanceCreateModalProps {
@@ -77,18 +80,16 @@ export function CashRemittanceCreateModal({
   }, [open]);
 
   // Close + toast on success — failed submits stay open with the error.
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data?.success) {
-      toast.success(
-        markReceivedNow
-          ? `Remittance created and ${selectedIds.size} order(s) marked Completed`
-          : `Remittance recorded with ${selectedIds.size} order(s)`,
-      );
-      onSuccess?.();
-      onClose();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetcher.state, fetcher.data]);
+  const handleRemittanceSuccess = useCallback(() => {
+    toast.success(
+      markReceivedNow
+        ? `Remittance created and ${selectedIds.size} order(s) marked Completed`
+        : `Remittance recorded with ${selectedIds.size} order(s)`,
+    );
+    onSuccess?.();
+    onClose();
+  }, [markReceivedNow, selectedIds.size, onSuccess, onClose, toast]);
+  useCloseOnFetcherSuccess(fetcher, handleRemittanceSuccess);
 
   // Server returns ALL orders' single-location requirement — pre-validate
   // client-side so the user gets feedback before submit.
@@ -113,7 +114,10 @@ export function CashRemittanceCreateModal({
     const map = new Map<string, string>();
     for (const o of eligibleOrders) {
       if (o.logisticsLocationId && o.logisticsLocationName) {
-        map.set(o.logisticsLocationId, o.logisticsLocationName);
+        const label = o.logisticsLocationProviderName
+          ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+          : o.logisticsLocationName;
+        map.set(o.logisticsLocationId, label);
       }
     }
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
@@ -132,25 +136,63 @@ export function CashRemittanceCreateModal({
     });
   }, [eligibleOrders, search, locationFilter]);
 
-  const toggle = (id: string) => {
+  const onOrderSelectionToggle = useCallback((id: string, checked: boolean) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (checked) next.add(id);
+      else next.delete(id);
       return next;
     });
-  };
+  }, []);
 
-  const toggleAll = (checked: boolean) => {
-    if (!checked) {
-      setSelectedIds(new Set());
-      return;
-    }
-    setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
-  };
+  const onOrderSelectionToggleAll = useCallback(
+    (selectAll: boolean) => {
+      if (!selectAll) {
+        setSelectedIds(new Set());
+        return;
+      }
+      setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
+    },
+    [filteredOrders],
+  );
 
-  const allFilteredSelected =
-    filteredOrders.length > 0 && filteredOrders.every((o) => selectedIds.has(o.id));
+  const orderColumns = useMemo((): CompactTableColumn<EligibleOrder>[] => {
+    return [
+      {
+        key: 'customer',
+        header: 'Customer',
+        render: (o) => (
+          <div>
+            <div className="font-medium truncate max-w-[14rem]">{o.customerName}</div>
+            <div className="text-[11px] font-mono text-app-fg-muted">{o.id.slice(0, 8)}…</div>
+          </div>
+        ),
+      },
+      {
+        key: 'location',
+        header: 'Location',
+        render: (o) =>
+          o.logisticsLocationName
+            ? o.logisticsLocationProviderName
+              ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+              : o.logisticsLocationName
+            : '—',
+      },
+      {
+        key: 'delivered',
+        header: 'Delivered',
+        nowrap: true,
+        render: (o) => <span className="text-app-fg-muted">{formatDate(o.deliveredAt)}</span>,
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        nowrap: true,
+        render: (o) => (o.totalAmount ? <NairaPrice amount={Number(o.totalAmount)} /> : '—'),
+      },
+    ];
+  }, []);
 
   const submitting = fetcher.state !== 'idle';
   const fetcherError = fetcher.data?.error ?? null;
@@ -243,65 +285,24 @@ export function CashRemittanceCreateModal({
 
           <div className="rounded-lg border border-app-border overflow-hidden">
             <div className="max-h-72 overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-app-hover sticky top-0">
-                  <tr>
-                    <th className="px-3 py-2 text-left">
-                      <Checkbox
-                        checked={allFilteredSelected}
-                        onChange={(e) => toggleAll(e.target.checked)}
-                        aria-label="Select all visible"
-                      />
-                    </th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-app-fg-muted">
-                      Customer
-                    </th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-app-fg-muted">
-                      Location
-                    </th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-app-fg-muted">
-                      Delivered
-                    </th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-app-fg-muted">
-                      Amount
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredOrders.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="px-3 py-6 text-center text-sm text-app-fg-muted">
-                        {eligibleTotal === 0
-                          ? 'No delivered orders awaiting remittance.'
-                          : 'No orders match the current filter.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredOrders.map((o) => (
-                      <tr key={o.id} className="border-t border-app-border hover:bg-app-hover/40">
-                        <td className="px-3 py-2">
-                          <Checkbox
-                            checked={selectedIds.has(o.id)}
-                            onChange={() => toggle(o.id)}
-                            aria-label={`Select ${o.customerName}`}
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-app-fg">
-                          <div className="font-medium truncate max-w-[14rem]">{o.customerName}</div>
-                          <div className="text-[11px] font-mono text-app-fg-muted">
-                            {o.id.slice(0, 8)}…
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-app-fg-muted">{o.logisticsLocationName ?? '—'}</td>
-                        <td className="px-3 py-2 text-app-fg-muted">{formatDate(o.deliveredAt)}</td>
-                        <td className="px-3 py-2 text-right">
-                          {o.totalAmount ? <NairaPrice amount={Number(o.totalAmount)} /> : '—'}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+              <CompactTable
+                withCard={false}
+                className="[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
+                columns={orderColumns}
+                rows={filteredOrders}
+                rowKey={(o) => o.id}
+                selection={{
+                  selectedIds: selectedIds,
+                  onToggle: onOrderSelectionToggle,
+                  onToggleAll: onOrderSelectionToggleAll,
+                  getRowId: (o) => o.id,
+                }}
+                emptyTitle={
+                  eligibleTotal === 0
+                    ? 'No delivered orders awaiting remittance.'
+                    : 'No orders match the current filter.'
+                }
+              />
             </div>
           </div>
 

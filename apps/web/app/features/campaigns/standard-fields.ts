@@ -6,6 +6,7 @@ export const STANDARD_FIELD_LABELS: Record<StandardFieldKey, string> = {
   deliveryState: 'Delivery State',
   gender: 'Gender',
   preferredDeliveryDate: 'Preferred Delivery Date',
+  customerEmail: 'Email',
   paymentMethod: 'Payment Method',
 };
 
@@ -15,8 +16,158 @@ export const STANDARD_FIELD_ORDER: StandardFieldKey[] = [
   'deliveryAddress',
   'deliveryNotes',
   'preferredDeliveryDate',
+  'customerEmail',
   'paymentMethod',
 ];
+
+/** Additional fields whose dropdown choices can be edited (defaults match the Edge Worker). */
+export const ADDITIONAL_FIELD_OPTION_KEYS: readonly StandardFieldKey[] = ['gender', 'deliveryState', 'preferredDeliveryDate'];
+
+/** Nigerian states + FCT — same default list as `apps/edge-worker` hosted form. */
+export const DEFAULT_DELIVERY_STATE_OPTIONS: string[] = [
+  'Lagos',
+  'Abuja (FCT)',
+  'Rivers',
+  'Oyo',
+  'Kano',
+  'Delta',
+  'Edo',
+  'Ogun',
+  'Anambra',
+  'Enugu',
+  'Kaduna',
+  'Imo',
+  'Abia',
+  'Kwara',
+  'Osun',
+  'Ondo',
+  'Ekiti',
+  'Bayelsa',
+  'Cross River',
+  'Akwa Ibom',
+  'Plateau',
+  'Benue',
+  'Nasarawa',
+  'Niger',
+  'Kogi',
+  'Taraba',
+  'Adamawa',
+  'Bauchi',
+  'Gombe',
+  'Borno',
+  'Yobe',
+  'Jigawa',
+  'Zamfara',
+  'Sokoto',
+  'Kebbi',
+  'Katsina',
+  'Ebonyi',
+];
+
+export const DEFAULT_PREFERRED_DELIVERY_DATE_OPTIONS: string[] = [
+  'As soon as possible',
+  'Within 1-2 days',
+  'Within 3-5 days',
+  'Next week',
+  'Specific date (mention in notes)',
+];
+
+export const DEFAULT_GENDER_OPTIONS: string[] = ['Male', 'Female'];
+
+export interface AdditionalFieldSelectOptionsState {
+  deliveryStateOptions: string[];
+  preferredDeliveryDateOptions: string[];
+  genderOptions: string[];
+}
+
+export function cloneDefaultAdditionalFieldSelectOptions(): AdditionalFieldSelectOptionsState {
+  return {
+    deliveryStateOptions: [...DEFAULT_DELIVERY_STATE_OPTIONS],
+    preferredDeliveryDateOptions: [...DEFAULT_PREFERRED_DELIVERY_DATE_OPTIONS],
+    genderOptions: [...DEFAULT_GENDER_OPTIONS],
+  };
+}
+
+/** Load saved lists when present; otherwise show defaults in the builder (matches Edge fallbacks when arrays are empty). */
+export function additionalFieldSelectOptionsFromConfig(
+  config: CampaignFormConfig | null | undefined,
+): AdditionalFieldSelectOptionsState {
+  const base = cloneDefaultAdditionalFieldSelectOptions();
+  if (!config) return base;
+  if (config.deliveryStateOptions && config.deliveryStateOptions.length > 0) {
+    base.deliveryStateOptions = [...config.deliveryStateOptions];
+  }
+  if (config.preferredDeliveryDateOptions && config.preferredDeliveryDateOptions.length > 0) {
+    base.preferredDeliveryDateOptions = [...config.preferredDeliveryDateOptions];
+  }
+  if (config.genderOptions && config.genderOptions.length > 0) {
+    base.genderOptions = [...config.genderOptions];
+  }
+  return base;
+}
+
+export function parseOptionLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+export function joinOptionLines(opts: string[]): string {
+  return opts.join('\n');
+}
+
+const MAX_OPT_LEN = 100;
+const MAX_STATE_OPTS = 50;
+const MAX_SHORT_OPTS = 20;
+
+function readOptionArray(raw: unknown, maxItems: number): string[] | null {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) return null;
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') return null;
+    const t = item.trim();
+    if (!t) continue;
+    if (t.length > MAX_OPT_LEN) return null;
+    out.push(t);
+    if (out.length > maxItems) return null;
+  }
+  return out;
+}
+
+export function parseAdditionalFieldSelectOptionsPayload(
+  json: string | undefined,
+): { ok: true; options: AdditionalFieldSelectOptionsState } | { ok: false; error: string } {
+  const raw = json?.trim();
+  if (!raw) {
+    return { ok: true, options: cloneDefaultAdditionalFieldSelectOptions() };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: 'Invalid additional field options JSON' };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: 'additionalFieldSelectOptions must be a JSON object' };
+  }
+  const o = parsed as Record<string, unknown>;
+  const states = readOptionArray(o.deliveryStateOptions, MAX_STATE_OPTS);
+  const dates = readOptionArray(o.preferredDeliveryDateOptions, MAX_SHORT_OPTS);
+  const genders = readOptionArray(o.genderOptions, MAX_SHORT_OPTS);
+  if (states === null || dates === null || genders === null) {
+    return { ok: false, error: 'Invalid option lists (strings only, within size limits)' };
+  }
+  return {
+    ok: true,
+    options: {
+      deliveryStateOptions: states,
+      preferredDeliveryDateOptions: dates,
+      genderOptions: genders,
+    },
+  };
+}
 
 function isOptionOn(value: boolean | string | undefined): boolean {
   return value === true || value === 'true';
@@ -38,6 +189,8 @@ function readLegacyEnabled(config: CampaignFormConfig, key: StandardFieldKey): b
       return isOptionOn(config.showGender);
     case 'preferredDeliveryDate':
       return isOptionOn(config.showPreferredDeliveryDate);
+    case 'customerEmail':
+      return isOptionOn(config.showCustomerEmail);
     case 'paymentMethod':
       return isOptionOn(config.showPaymentMethod);
   }
@@ -55,6 +208,8 @@ function readLegacyRequired(config: CampaignFormConfig, key: StandardFieldKey): 
       return isOptionOn(config.requireGender);
     case 'preferredDeliveryDate':
       return isOptionOn(config.requirePreferredDeliveryDate);
+    case 'customerEmail':
+      return isOptionOn(config.requireCustomerEmail);
     case 'paymentMethod':
       return isOptionOn(config.requirePaymentMethod);
   }
@@ -89,12 +244,14 @@ export function toLegacyStandardFieldFlags(fields: StandardFieldConfig[]): Pick<
   | 'showDeliveryState'
   | 'showGender'
   | 'showPreferredDeliveryDate'
+  | 'showCustomerEmail'
   | 'showPaymentMethod'
   | 'requireDeliveryAddress'
   | 'requireDeliveryNotes'
   | 'requireDeliveryState'
   | 'requireGender'
   | 'requirePreferredDeliveryDate'
+  | 'requireCustomerEmail'
   | 'requirePaymentMethod'
 > {
   const has = new Set(fields.map((f) => f.key));
@@ -106,12 +263,14 @@ export function toLegacyStandardFieldFlags(fields: StandardFieldConfig[]): Pick<
     showDeliveryState: has.has('deliveryState'),
     showGender: has.has('gender'),
     showPreferredDeliveryDate: has.has('preferredDeliveryDate'),
+    showCustomerEmail: has.has('customerEmail'),
     showPaymentMethod: has.has('paymentMethod'),
     requireDeliveryAddress: required.has('deliveryAddress'),
     requireDeliveryNotes: required.has('deliveryNotes'),
     requireDeliveryState: required.has('deliveryState'),
     requireGender: required.has('gender'),
     requirePreferredDeliveryDate: required.has('preferredDeliveryDate'),
+    requireCustomerEmail: required.has('customerEmail'),
     requirePaymentMethod: required.has('paymentMethod'),
   };
 }
@@ -124,18 +283,18 @@ export function parseStandardFieldsPayload(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { ok: false, error: 'Invalid standardFields JSON' };
+    return { ok: false, error: 'Invalid additional fields JSON (standardFields)' };
   }
 
   if (!Array.isArray(parsed)) {
-    return { ok: false, error: 'standardFields must be a JSON array' };
+    return { ok: false, error: 'additionalFields payload (standardFields) must be a JSON array' };
   }
 
   const dedup = new Map<StandardFieldKey, StandardFieldConfig>();
   for (let i = 0; i < parsed.length; i++) {
     const row = parsed[i] as { key?: unknown; required?: unknown } | null;
     if (!row || !isStandardFieldKey(row.key)) {
-      return { ok: false, error: `Standard field ${i + 1} has an invalid key` };
+      return { ok: false, error: `Additional field ${i + 1} has an invalid key` };
     }
     dedup.set(row.key, { key: row.key, required: row.required === true });
   }

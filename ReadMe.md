@@ -3,9 +3,16 @@
 START APP
 cd apps/api && pnpm dev
 cd apps/web && pnpm dev
+cd apps/edge-worker && pnpm dev
+
 pnpm --filter @yannis/api dev
 
+START NEW DB
+
+pnpm db:migrate:app
 pnpm db:seed-permissions
+pnpm --filter @yannis/shared db:seed
+
 
 LOCAL REDIS
 brew services list           # see status

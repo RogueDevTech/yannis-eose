@@ -29,16 +29,17 @@ export function PageHeader({ title, description, breadcrumb, actions, children, 
     <div className={['flex flex-col gap-2', className].filter(Boolean).join(' ')}>
       {breadcrumb && <div className="text-xs text-app-fg-muted">{breadcrumb}</div>}
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+      {/* Single row: title/description shrink/truncate; actions stay right (never wrap under title). */}
+      <div className="flex flex-nowrap items-start gap-3">
+        <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-bold text-app-fg">{title}</h1>
           {description && (
-            <div className="mt-0.5 text-sm text-app-fg-muted">{description}</div>
+            <div className="mt-0.5 min-w-0 break-words text-sm text-app-fg-muted">{description}</div>
           )}
         </div>
 
         {actions && (
-          <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>
         )}
       </div>
 

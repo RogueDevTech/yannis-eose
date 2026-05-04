@@ -20,6 +20,7 @@ export interface Location {
   name: string;
   address: string;
   status: string;
+  providerName: string | null;
 }
 
 export interface Product {

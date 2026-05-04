@@ -196,13 +196,13 @@
     @apply bg-brand-700/20 text-brand-400;
   }
 
-  /* Button variants */
+  /* Button variants — Ghost-style rim: soft app-border + brand hover (filled variants keep a light keyed edge) */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-app-border hover:border-brand-500/40 dark:hover:border-brand-400/45;
   }
 
   .btn-primary {
-    @apply btn bg-brand-500 text-white hover:bg-brand-600 focus:ring-brand-500;
+    @apply btn bg-brand-500 text-white hover:bg-brand-600 focus:ring-brand-500 border-white/25 hover:border-white/40 dark:border-brand-300/45 dark:hover:border-brand-200/60;
   }
 
   .btn-secondary {
@@ -210,15 +210,15 @@
   }
 
   .btn-danger {
-    @apply btn bg-danger-500 text-white hover:bg-danger-600 focus:ring-danger-500;
+    @apply btn bg-danger-500 text-white hover:bg-danger-600 focus:ring-danger-500 border-red-950/25 hover:border-red-300/45 dark:border-red-400/35 dark:hover:border-red-200/55;
   }
 
   .btn-success {
-    @apply btn bg-success-500 text-white hover:bg-success-600 focus:ring-success-500;
+    @apply btn bg-success-500 text-white hover:bg-success-600 focus:ring-success-500 border-emerald-950/25 hover:border-emerald-300/45 dark:border-emerald-400/35 dark:hover:border-emerald-200/55;
   }
 
   .btn-warning {
-    @apply btn bg-warning-500 text-white hover:bg-warning-600 focus:ring-warning-500;
+    @apply btn bg-warning-500 text-white hover:bg-warning-600 focus:ring-warning-500 border-orange-950/30 hover:border-orange-200/45 dark:border-orange-300/35 dark:hover:border-orange-100/55;
   }
 
   .btn-ghost {

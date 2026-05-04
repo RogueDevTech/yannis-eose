@@ -24,11 +24,6 @@ export interface SessionUser {
   /** Saved font scale id; undefined/null = base. */
   fontScale?: string | null;
   /**
-   * True when this user currently wears the "Finance hat" — grants Finance Officer powers
-   * on top of their primary role. Exactly one user in the org has this at any time.
-   */
-  isFinanceOfficer?: boolean;
-  /**
    * Set when the session is in Mirror Mode — the API treats requests as the target user
    * (RLS, branch, role, permissions all switch) but ALL mutations are blocked at the
    * tRPC root middleware. The original admin who started the mirror is recorded here so
@@ -41,6 +36,11 @@ export interface SessionUser {
   } | null;
   /** mirror_sessions row id — used by stopMirror to close out the active row. */
   mirrorSessionId?: string | null;
+  /**
+   * Staff HR onboarding packet status — set on `/auth/me` for non–admin-class users only.
+   * Web uses this for the login onboarding nudge (suppress after `APPROVED`). Omitted for SUPER_ADMIN / ADMIN.
+   */
+  staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
 }
 
 /**

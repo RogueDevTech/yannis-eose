@@ -144,6 +144,52 @@ export function parseCampaigns(res: { ok: boolean; data: unknown }): Campaign[] 
   return data?.campaigns ?? [];
 }
 
+/** Campaigns + products for `/admin/marketing/ad-spend/new` (shared with ad-spend list filtering). */
+export async function loadAdSpendExpenseFormData(
+  cookie: string,
+  opts: { mediaBuyerId?: string },
+): Promise<{ campaigns: Campaign[]; products: Product[] }> {
+  const campaignsInput = JSON.stringify(
+    opts.mediaBuyerId ? { mediaBuyerId: opts.mediaBuyerId, page: 1, limit: 50 } : { page: 1, limit: 50 },
+  );
+  // Explicit input keeps us aligned with the form-page loader (page=1, limit=100,
+  // ACTIVE only, sorted by name) and gives `products.list` enough headroom to
+  // return all the catalog items the dropdown needs. Default `limit` is 20, which
+  // truncates the list and confuses MBs with several products.
+  const productsInput = JSON.stringify({
+    page: 1,
+    limit: 100,
+    status: 'ACTIVE',
+    sortBy: 'name',
+    sortOrder: 'asc',
+  });
+  // `products.list` is the slow side of this fetch on a remote DB (per-viewer
+  // scope queries + list + count + inventory aggregate). Bump the timeout to
+  // 15s so the form doesn't render with empty dropdowns when the default 4.5s
+  // ceiling is exceeded — same pattern the forms list page now uses.
+  const [campaignsRes, productsRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`, {
+      method: 'GET',
+      cookie,
+    }),
+    apiRequest<unknown>(`/trpc/products.list?input=${encodeURIComponent(productsInput)}`, {
+      method: 'GET',
+      cookie,
+      timeoutMs: 15_000,
+    }),
+  ]);
+  if (!campaignsRes.ok) {
+    console.error('[loadAdSpendExpenseFormData] listCampaigns failed', campaignsRes.status, campaignsRes.data);
+  }
+  if (!productsRes.ok) {
+    console.error('[loadAdSpendExpenseFormData] products.list failed', productsRes.status, productsRes.data);
+  }
+  return {
+    campaigns: parseCampaigns(campaignsRes),
+    products: parseProducts(productsRes),
+  };
+}
+
 export function parseLeaderboard(res: { ok: boolean; data: unknown }): LeaderboardEntry[] {
   const data = res.ok ? (res.data as { result?: { data?: LeaderboardEntry[] } })?.result?.data : null;
   return data ?? [];
@@ -176,6 +222,10 @@ export function toDistributingFundingEntries(
   transfers: FundingRecord[],
   requests: FundingRequestRecord[],
 ): DistributingFundingEntry[] {
+  // Build a quick lookup from request id → requester name so the resulting
+  // "from request" chip on a transfer can show who originally asked.
+  const requestById = new Map(requests.map((r) => [r.id, r] as const));
+
   const transferEntries: DistributingFundingEntry[] = transfers.map((record) => ({
     id: record.id,
     entryType: 'transfer',
@@ -187,21 +237,36 @@ export function toDistributingFundingEntries(
     receiverId: record.receiverId,
     receiverName: record.receiverName ?? null,
     receiptUrl: record.receiptUrl ?? null,
+    sourceFundingRequestId: record.sourceFundingRequestId ?? null,
+    sourceRequesterName: record.sourceFundingRequestId
+      ? requestById.get(record.sourceFundingRequestId)?.requesterName ?? null
+      : null,
   }));
 
-  const requestEntries: DistributingFundingEntry[] = requests.map((record) => ({
-    id: record.id,
-    entryType: 'request',
-    status: (record.status as 'PENDING' | 'APPROVED' | 'REJECTED') ?? 'PENDING',
-    amount: record.amount,
-    createdAt: record.createdAt,
-    requesterId: record.requesterId,
-    requesterName: record.requesterName ?? null,
-    reason: record.reason ?? null,
-    resolvedAt: record.resolvedAt ?? null,
-    resolvedBy: record.resolvedBy ?? null,
-    receiptUrl: record.receiptUrl ?? null,
-  }));
+  // Deduplicate: any request that already has a matching transfer (via
+  // `sourceFundingRequestId`) is now represented by that transfer in this feed,
+  // so skip the request row. Pending / rejected requests still pass through.
+  const linkedRequestIds = new Set(
+    transfers
+      .map((t) => t.sourceFundingRequestId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  const requestEntries: DistributingFundingEntry[] = requests
+    .filter((record) => !linkedRequestIds.has(record.id))
+    .map((record) => ({
+      id: record.id,
+      entryType: 'request',
+      status: (record.status as 'PENDING' | 'APPROVED' | 'REJECTED') ?? 'PENDING',
+      amount: record.amount,
+      createdAt: record.createdAt,
+      requesterId: record.requesterId,
+      requesterName: record.requesterName ?? null,
+      reason: record.reason ?? null,
+      resolvedAt: record.resolvedAt ?? null,
+      resolvedBy: record.resolvedBy ?? null,
+      receiptUrl: record.receiptUrl ?? null,
+    }));
 
   return [...transferEntries, ...requestEntries].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
@@ -360,12 +425,14 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
     if (!amount || Number.isNaN(Number(amount)) || Number(amount) < 0) {
       return json({ error: 'Valid amount is required' }, { status: 400 });
     }
+    const targetUserId = formData.get('targetUserId')?.toString().trim() || undefined;
     const res = await apiRequest<unknown>('/trpc/marketing.requestFunding', {
       method: 'POST',
       cookie,
       body: {
         amount: Number(amount),
         reason: formData.get('reason')?.toString() ?? '',
+        ...(targetUserId ? { targetUserId } : {}),
       },
     });
     if (!res.ok) {
@@ -377,13 +444,18 @@ export async function runMarketingFundingAction(cookie: string, formData: FormDa
   if (intent === 'approveFundingRequest') {
     const requestId = formData.get('requestId')?.toString() ?? '';
     const receiptUrl = formData.get('receiptUrl')?.toString() ?? '';
+    const amountRaw = formData.get('amount')?.toString() ?? '';
+    const amount = Number(amountRaw);
     if (!requestId || !receiptUrl) {
       return json({ error: 'Request ID and receipt image are required' }, { status: 400 });
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return json({ error: 'Valid approved amount is required' }, { status: 400 });
     }
     const res = await apiRequest<unknown>('/trpc/marketing.approveFundingRequest', {
       method: 'POST',
       cookie,
-      body: { requestId, receiptUrl },
+      body: { requestId, receiptUrl, amount },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to approve funding request') }, { status: safeStatus(res.status) });
@@ -431,6 +503,7 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
         screenshotUrl,
         spendDate: formData.get('spendDate')?.toString() ?? '',
         platform: formData.get('platform')?.toString() || undefined,
+        platformCustomLabel: formData.get('platformCustomLabel')?.toString() || undefined,
         adUrl: formData.get('adUrl')?.toString() || undefined,
       },
     });

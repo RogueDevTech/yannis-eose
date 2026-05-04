@@ -2,6 +2,7 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useSearchParams } from '@remix-run/react';
@@ -15,13 +16,17 @@ interface MarketingLeaderboardPageProps {
   mediaBuyerLeaderboard: LeaderboardEntry[];
   leaderboardPeriod: 'this_month' | 'all_time';
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  /** Org-wide profitability thresholds — colors the ROAS pill (green ≥ threshold, red below). */
+  profitabilityConfig?: { targetRoas: number; greenThreshold: number };
 }
 
 export function MarketingLeaderboardPage({
   mediaBuyerLeaderboard,
   leaderboardPeriod,
   filters = { startDate: '', endDate: '', periodAllTime: false },
+  profitabilityConfig = { targetRoas: 3, greenThreshold: 2.5 },
 }: MarketingLeaderboardPageProps) {
+  const greenThreshold = profitabilityConfig.greenThreshold;
   const periodLabel = leaderboardPeriod === 'all_time' ? 'all time' : (filters.startDate && filters.endDate ? `${filters.startDate} – ${filters.endDate}` : 'this month');
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const isFilterLoading = useLoaderRefetchBusy();
@@ -43,6 +48,7 @@ export function MarketingLeaderboardPage({
                 periodAllTime={dateFilters.periodAllTime}
               />
             </div>
+            <PageRefreshButton />
           </>
         }
       />
@@ -103,12 +109,11 @@ export function MarketingLeaderboardPage({
                         <div className="flex shrink-0 justify-end sm:order-last">
                           <span
                             className={`inline-block rounded-full px-3 py-1.5 text-sm font-bold ${
-                              b.trueRoas >= 2
+                              b.trueRoas >= greenThreshold
                                 ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400'
-                                : b.trueRoas >= 1
-                                  ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400'
-                                  : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'
+                                : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400'
                             }`}
+                            title={`Green at ≥ ${greenThreshold}x ROAS · target ${profitabilityConfig.targetRoas}x`}
                           >
                             {b.trueRoas.toFixed(2)}x ROAS
                           </span>

@@ -1,8 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '~/components/ui/button';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { Modal } from '~/components/ui/modal';
-import { useFetcher, useRevalidator } from '@remix-run/react';
+import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import {
+  applyOptimisticPatches,
+  isOptimisticPatched,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
+import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -15,7 +28,6 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { EmptyState } from '~/components/ui/empty-state';
 import type {
   Provider,
   Location,
@@ -128,7 +140,6 @@ function AddProviderForm({
 
 export function LogisticsPage({ providers, totalProviders, locations, totalLocations }: LogisticsPageProps) {
   const fetcher = useFetcher();
-  const { revalidate, state: revalidatorState } = useRevalidator();
   const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('providers');
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
@@ -138,29 +149,236 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [viewingLocation, setViewingLocation] = useState<Location | null>(null);
 
   const actionError = (fetcher.data as { error?: string })?.error;
-  const actionSuccess = (fetcher.data as { success?: boolean })?.success;
   const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, { successMessage: 'Logistics action completed' });
+
+  // Optimistic-row derivation — see the canonical pattern in
+  // `~/hooks/useOptimisticListMerge`. We extract synthetic Provider /
+  // Location rows from the in-flight `fetcher.formData` so the table shows
+  // the new entry the instant the user submits.
+  const buildOptimisticProviders = useCallback(
+    (fd: FormData, intent: string): Provider[] | null => {
+      const now = new Date().toISOString();
+      if (intent === 'createProvider') {
+        const name = fd.get('name')?.toString().trim();
+        if (!name) return null;
+        return [
+          {
+            id: optimisticId(),
+            name,
+            contactInfo: fd.get('contactInfo')?.toString().trim() || null,
+            coverageArea: fd.get('coverageArea')?.toString().trim() || null,
+            status: 'ACTIVE',
+            createdAt: now,
+          },
+        ];
+      }
+      if (intent === 'createProviders') {
+        const out: Provider[] = [];
+        for (let i = 0; i < 50; i++) {
+          const name = fd.get(`provider_${i}_name`)?.toString().trim();
+          if (!name) continue;
+          out.push({
+            id: optimisticId(i),
+            name,
+            contactInfo: fd.get(`provider_${i}_contactInfo`)?.toString().trim() || null,
+            coverageArea: fd.get(`provider_${i}_coverageArea`)?.toString().trim() || null,
+            status: 'ACTIVE',
+            createdAt: now,
+          });
+        }
+        return out.length === 0 ? null : out;
+      }
+      return null;
+    },
+    [],
+  );
+  const optimisticProviders = useOptimisticListMerge<Provider>(fetcher, buildOptimisticProviders);
+
+  const buildOptimisticLocations = useCallback(
+    (fd: FormData, intent: string): Location[] | null => {
+      if (intent !== 'createLocation') return null;
+      const name = fd.get('name')?.toString().trim();
+      const providerId = fd.get('providerId')?.toString().trim();
+      if (!name || !providerId) return null;
+      const providerName = providers.find((p) => p.id === providerId)?.name ?? null;
+      return [
+        {
+          id: optimisticId(),
+          providerId,
+          name,
+          address: fd.get('address')?.toString().trim() ?? '',
+          coordinates: fd.get('coordinates')?.toString().trim() || null,
+          whatsappGroupLink: fd.get('whatsappGroupLink')?.toString().trim() || null,
+          status: 'ACTIVE',
+          createdAt: new Date().toISOString(),
+          providerName,
+        },
+      ];
+    },
+    [providers],
+  );
+  const optimisticLocations = useOptimisticListMerge<Location>(fetcher, buildOptimisticLocations);
+
+  /** Optimistic-edit overlay for `updateProvider` — overlay the new field values
+   *  on the matching server row by id so the table updates the same tick the
+   *  toast fires. Snaps back if the action fails. */
+  const buildProviderPatches = useCallback<
+    (fd: FormData, intent: string) => { id: string; patch: Partial<Provider> }[] | null
+  >((fd, intent) => {
+    if (intent !== 'updateProvider') return null;
+    const id = fd.get('providerId')?.toString();
+    if (!id) return null;
+    const patch: Partial<Provider> = {};
+    const name = fd.get('name')?.toString().trim();
+    if (name) patch.name = name;
+    const contactInfo = fd.get('contactInfo')?.toString().trim();
+    if (contactInfo !== undefined) patch.contactInfo = contactInfo || null;
+    const coverageArea = fd.get('coverageArea')?.toString().trim();
+    if (coverageArea !== undefined) patch.coverageArea = coverageArea || null;
+    const status = fd.get('status')?.toString();
+    if (status) patch.status = status;
+    return [{ id, patch }];
+  }, []);
+  const providerPatches = useOptimisticListPatches<Provider>(fetcher, buildProviderPatches);
+
+  /** Server data + any in-flight optimistic rows (adds + edits). Loader
+   * revalidation replaces these synthetic rows with canonical data once it
+   * lands. */
+  const displayProviders = useMemo(
+    () => [...optimisticProviders, ...applyOptimisticPatches(providers, providerPatches)],
+    [providers, optimisticProviders, providerPatches],
+  );
+  const displayLocations = useMemo(
+    () => [...optimisticLocations, ...locations],
+    [locations, optimisticLocations],
+  );
+  const displayTotalProviders = totalProviders + optimisticProviders.length;
+  const displayTotalLocations = totalLocations + optimisticLocations.length;
+
+  const providerTableColumns: CompactTableColumn<Provider>[] = useMemo(
+    () => [
+      {
+        key: 'name',
+        header: 'Name',
+        render: (p) => (
+          <>
+            <span className="font-medium text-app-fg">{p.name}</span>
+            {isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id) ? (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">Saving…</span>
+            ) : null}
+          </>
+        ),
+      },
+      {
+        key: 'contact',
+        header: 'Contact',
+        render: (p) => <span className="text-app-fg-muted">{p.contactInfo ?? '—'}</span>,
+      },
+      {
+        key: 'coverage',
+        header: 'Coverage',
+        render: (p) => <span className="text-app-fg-muted">{p.coverageArea ?? '—'}</span>,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (p) => <StatusBadge status={p.status} />,
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (p) => {
+          const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
+          return (
+            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+              <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingProvider(p)}>
+                View
+              </CompactTableActionButton>
+              <CompactTableActionButton
+                className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+                disabled={isOptimistic}
+                onClick={() => setEditingProvider(p)}
+              >
+                Edit
+              </CompactTableActionButton>
+            </div>
+          );
+        },
+      },
+    ],
+    [providerPatches],
+  );
+
+  const locationTableColumns: CompactTableColumn<Location>[] = useMemo(
+    () => [
+      {
+        key: 'name',
+        header: 'Location',
+        render: (l) => (
+          <>
+            <span className="font-medium text-app-fg">{l.name}</span>
+            {isOptimisticId(l.id) ? (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">Saving…</span>
+            ) : null}
+          </>
+        ),
+      },
+      {
+        key: 'address',
+        header: 'Address',
+        render: (l) => <span className="text-app-fg-muted">{l.address}</span>,
+      },
+      {
+        key: 'provider',
+        header: 'Logistics company',
+        render: (l) => {
+          const provider = displayProviders.find((p: Provider) => p.id === l.providerId);
+          return <span className="text-app-fg-muted">{provider?.name ?? 'Unknown logistics company'}</span>;
+        },
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (l) => <StatusBadge status={l.status} />,
+      },
+      {
+        key: 'actions',
+        header: '',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (l) => {
+          const isOptimistic = isOptimisticId(l.id);
+          return (
+            <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingLocation(l)}>
+              View
+            </CompactTableActionButton>
+          );
+        },
+      },
+    ],
+    [displayProviders],
+  );
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
   }, [actionError]);
 
-  // Revalidate loader data when action succeeds so new providers/locations appear
-  useEffect(() => {
-    if (actionSuccess && revalidatorState === 'idle') {
-      revalidate();
-    }
-  }, [actionSuccess, revalidatorState, revalidate]);
-
-  // Close forms on success
-  useEffect(() => {
-    if (actionSuccess) {
-      setShowAddProvider(false);
-      setShowAddLocation(false);
-      setEditingProvider(null);
-    }
-  }, [actionSuccess]);
+  // Close-on-success — see `~/hooks/useCloseOnFetcherSuccess`. Fires the
+  // instant `fetcher.data` flips to a success payload, the same tick the
+  // toast appears. Reads fetcher.data by reference (not a derived boolean,
+  // not fetcher.state === 'idle') so every fresh response fires once and
+  // there's no loader-revalidation lag.
+  const handleFetcherSuccess = useCallback(() => {
+    setShowAddProvider(false);
+    setShowAddLocation(false);
+    setEditingProvider(null);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleFetcherSuccess);
 
   return (
     <div className="space-y-4">
@@ -199,8 +417,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       <OverviewStatStrip
         showScrollControls={false}
         items={[
-          { label: 'Logistics companies', value: totalProviders, valueClassName: 'text-app-fg' },
-          { label: 'Locations', value: totalLocations, valueClassName: 'text-app-fg' },
+          { label: 'Logistics companies', value: displayTotalProviders, valueClassName: 'text-app-fg' },
+          { label: 'Locations', value: displayTotalLocations, valueClassName: 'text-app-fg' },
         ]}
       />
 
@@ -569,174 +787,33 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
         tabs={[
-          { value: 'providers', label: `Companies (${totalProviders})` },
-          { value: 'locations', label: `Locations (${totalLocations})` },
+          { value: 'providers', label: `Companies (${displayTotalProviders})` },
+          { value: 'locations', label: `Locations (${displayTotalLocations})` },
         ]}
       />
 
       {/* Content */}
       {activeTab === 'providers' && (
-        <div className="card p-0">
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Name</th>
-                  <th className="table-header">Contact</th>
-                  <th className="table-header">Coverage</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {providers.map((p: Provider) => (
-                  <tr key={p.id} className="table-row">
-                    <td className="table-cell font-medium text-app-fg">{p.name}</td>
-                    <td className="table-cell text-app-fg-muted">{p.contactInfo ?? '—'}</td>
-                    <td className="table-cell text-app-fg-muted">{p.coverageArea ?? '—'}</td>
-                    <td className="table-cell">
-                      <StatusBadge status={p.status} />
-                    </td>
-                    <td className="table-cell text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setViewingProvider(p)}
-                        >
-                          View
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditingProvider(p)}
-                        >
-                          Edit
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {providers.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>
-                      <EmptyState title="No logistics companies yet" />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="md:hidden space-y-3 px-1">
-            {providers.length === 0 ? (
-              <EmptyState title="No logistics companies yet" />
-            ) : (
-              providers.map((p: Provider) => (
-                <div key={p.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <p className="font-medium text-app-fg">{p.name}</p>
-                    <StatusBadge status={p.status} />
-                  </div>
-                  <div className="text-sm text-app-fg-muted space-y-0.5 mb-2">
-                    {p.contactInfo && <div>Contact: {p.contactInfo}</div>}
-                    {p.coverageArea && <div>Coverage: {p.coverageArea}</div>}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setViewingProvider(p)}
-                    >
-                      View
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setEditingProvider(p)}
-                    >
-                      Edit
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        <CompactTable<Provider>
+          columns={providerTableColumns}
+          rows={displayProviders}
+          rowKey={(p) => p.id}
+          rowClassName={(p) =>
+            isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id) ? 'opacity-60' : ''
+          }
+          emptyTitle="No logistics companies yet"
+        />
       )}
 
       {activeTab === 'locations' && (
-        <div className="card p-0">
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Location</th>
-                  <th className="table-header">Address</th>
-                  <th className="table-header">Logistics company</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {locations.map((l: Location) => {
-                  const provider = providers.find((p: Provider) => p.id === l.providerId);
-                  return (
-                    <tr key={l.id} className="table-row">
-                      <td className="table-cell font-medium text-app-fg">{l.name}</td>
-                      <td className="table-cell text-app-fg-muted">{l.address}</td>
-                      <td className="table-cell text-app-fg-muted">{provider?.name ?? 'Unknown logistics company'}</td>
-                      <td className="table-cell">
-                        <StatusBadge status={l.status} />
-                      </td>
-                      <td className="table-cell text-right">
-                        <Button type="button" variant="ghost" size="sm" onClick={() => setViewingLocation(l)}>
-                          View
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {locations.length === 0 && (
-                  <tr>
-                    <td colSpan={5}>
-                      <EmptyState title="No locations yet" description="Add a logistics company first, then add locations." />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="md:hidden space-y-3 px-1">
-            {locations.length === 0 ? (
-              <EmptyState title="No locations yet" description="Add a logistics company first, then add locations." />
-            ) : (
-              locations.map((l: Location) => {
-                const provider = providers.find((p: Provider) => p.id === l.providerId);
-                return (
-                  <div key={l.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <p className="font-medium text-app-fg">{l.name}</p>
-                      <StatusBadge status={l.status} />
-                    </div>
-                    <div className="text-sm text-app-fg-muted space-y-0.5">
-                      <div>Address: {l.address}</div>
-                      <div>Logistics company: {provider?.name ?? 'Unknown logistics company'}</div>
-                    </div>
-                    <div className="flex gap-2 pt-1">
-                      <Button type="button" variant="ghost" size="sm" onClick={() => setViewingLocation(l)}>
-                        View
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
+        <CompactTable<Location>
+          columns={locationTableColumns}
+          rows={displayLocations}
+          rowKey={(l) => l.id}
+          rowClassName={(l) => (isOptimisticId(l.id) ? 'opacity-60' : '')}
+          emptyTitle="No locations yet"
+          emptyDescription="Add a logistics company first, then add locations."
+        />
       )}
 
     </div>

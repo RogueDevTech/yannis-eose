@@ -56,7 +56,7 @@ export const orders = pgTable('orders', {
   duplicateOfId: uuid('duplicate_of_id'), // links to the original order if flagged
   // 15-min order lock: when an agent clicks Call, order is locked to them
   lockedUntil: timestamp('locked_until', { withTimezone: true }),
-  lockedBy: text('locked_by').references(() => users.id),
+  lockedBy: uuid('locked_by').references(() => users.id),
   /** Order source for reporting: 'edge-form' (sales form) or 'offline' (CS manual entry) */
   orderSource: text('order_source'),
   /**

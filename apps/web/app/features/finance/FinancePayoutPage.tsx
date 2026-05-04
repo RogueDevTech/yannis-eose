@@ -1,11 +1,16 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
 import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { EmptyState } from '~/components/ui/empty-state';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { Button } from '~/components/ui/button';
 import type { PayrollBatch, PayrollBatchStatus } from '~/features/hr/types';
@@ -48,6 +53,55 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
     [batches],
   );
 
+  const batchColumns: CompactTableColumn<PayrollBatch>[] = useMemo(
+    () => [
+      {
+        key: 'month',
+        header: 'Month',
+        render: (batch) => (
+          <span className="text-app-fg-muted">
+            {new Date(batch.periodMonth).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}
+          </span>
+        ),
+      },
+      {
+        key: 'department',
+        header: 'Department',
+        render: (batch) => <span className="text-app-fg">{batch.department}</span>,
+      },
+      {
+        key: 'staff',
+        header: 'Staff',
+        align: 'right',
+        render: (batch) => <span className="text-app-fg-muted">{batch.staffCount}</span>,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (batch) => <StatusBadge status={batch.status} />,
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        render: (batch) => <NairaPrice amount={Number(batch.totalAmount)} />,
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        mobileLabel: 'Actions',
+        align: 'right',
+        tight: true,
+        render: (batch) => (
+          <CompactTableActionButton to={`?status=${encodeURIComponent(status)}&batchId=${batch.id}`}>
+            Review
+          </CompactTableActionButton>
+        ),
+      },
+    ],
+    [status],
+  );
+
   const setStatus = (nextStatus: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
@@ -64,11 +118,14 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         title="Payout"
         description="Finance review queue for payroll disbursement and payout document exports."
         actions={
-          selectedBatch ? (
-            <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-              Export payout document
-            </Button>
-          ) : null
+          <>
+            <PageRefreshButton />
+            {selectedBatch && (
+              <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                Export payout document
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -90,41 +147,15 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-4">
-        <div className="card p-0">
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr>
-                  <th className="table-header">Month</th>
-                  <th className="table-header">Department</th>
-                  <th className="table-header">Staff</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header text-right">Amount</th>
-                  <th className="table-header">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.map((batch) => (
-                  <tr key={batch.id} className="table-row">
-                    <td className="table-cell text-app-fg-muted">{new Date(batch.periodMonth).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}</td>
-                    <td className="table-cell text-app-fg">{batch.department}</td>
-                    <td className="table-cell text-app-fg-muted">{batch.staffCount}</td>
-                    <td className="table-cell"><StatusBadge status={batch.status} /></td>
-                    <td className="table-cell text-right"><NairaPrice amount={Number(batch.totalAmount)} /></td>
-                    <td className="table-cell">
-                      <Link to={`?status=${encodeURIComponent(status)}&batchId=${batch.id}`} className="btn-secondary btn-sm inline-flex">Review</Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {batches.length === 0 && (
-            <EmptyState
-              title="No payroll batches in this queue"
-              description="When HR forwards payroll to finance, batches appear here for payout processing."
-            />
-          )}
+        <div className="card p-0 overflow-hidden">
+          <CompactTable<PayrollBatch>
+            columns={batchColumns}
+            rows={batches}
+            rowKey={(b) => b.id}
+            withCard={false}
+            emptyTitle="No payroll batches in this queue"
+            emptyDescription="When HR forwards payroll to finance, batches appear here for payout processing."
+          />
         </div>
 
         <div className="card">

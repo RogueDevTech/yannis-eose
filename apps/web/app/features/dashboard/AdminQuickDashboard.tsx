@@ -1,5 +1,6 @@
 import { Link } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 
 /**
@@ -57,20 +58,15 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div className="space-y-3">
-        <div>
-          <h1 className="text-2xl font-bold text-app-fg">
-            {getGreeting()}, {firstName}
-          </h1>
-          <p className="text-sm text-app-fg-muted font-medium mt-1">
-            {role === 'SUPER_ADMIN' ? 'Quick snapshot — open the Executive Overview for the full picture.' : 'Quick snapshot of today.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-        </div>
-      </div>
+      <PageHeader
+        title={`${getGreeting()}, ${firstName}`}
+        description={
+          role === 'SUPER_ADMIN'
+            ? 'Quick snapshot — open the Executive Overview for the full picture.'
+            : 'Quick snapshot of today.'
+        }
+        actions={<PageRefreshButton />}
+      />
 
       {/* Marketing — today's order pulse. Click header to jump into the marketing module. */}
       <div className="card">

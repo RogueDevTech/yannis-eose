@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
+import { useLoginModalGate } from '~/contexts/login-modal-gate';
 
 const SKIP_KEY = 'yannis-onboarding-nudge-skipped';
 
@@ -16,16 +17,19 @@ interface OnboardingNudgeProps {
  * Behaviour:
  *   • On mount, fetches the caller's onboarding status from `/trpc/onboarding.get`.
  *   • If status is NOT_STARTED or IN_PROGRESS, opens a modal with two CTAs:
- *       - "Start" → navigates to `/onboarding`
+ *       - "Start" → navigates to `/admin/onboarding`
  *       - "Skip"  → dismisses the popup AND writes `yannis-onboarding-nudge-skipped`
  *                  to sessionStorage so the user isn't pestered every page-nav.
  *   • Suppressed entirely when the caller is mirroring another user (we read the
  *     `data-mirror` attribute on `<html>` set by `DashboardLayout`).
  *   • The popup never blocks anything — accounts stay ACTIVE regardless of
  *     onboarding state. This is purely an encouragement.
+ *   • Uses `LoginModalGate` so the dismissible push prompt in the layout never
+ *     stacks on top of this modal — push waits until this flow is clear.
  */
 export function OnboardingNudge({ enabled }: OnboardingNudgeProps) {
   const [open, setOpen] = useState(false);
+  const { setOnboardingGate } = useLoginModalGate();
 
   useEffect(() => {
     if (!enabled) return;
@@ -33,35 +37,49 @@ export function OnboardingNudge({ enabled }: OnboardingNudgeProps) {
     // Don't pester admins while they're impersonating someone else.
     if (document.documentElement.dataset['mirror'] === '1') return;
     // User chose Skip earlier this session — respect that until next login.
-    if (window.sessionStorage.getItem(SKIP_KEY) === '1') return;
+    if (window.sessionStorage.getItem(SKIP_KEY) === '1') {
+      setOnboardingGate('clear');
+      return;
+    }
 
     let cancelled = false;
-    fetch('/trpc/onboarding.get', { credentials: 'include' })
+    // Resource route on the web app — the API lives on a different origin in
+    // both dev and prod, so the browser can't hit `/trpc/...` directly.
+    // `/api/onboarding-status` proxies server-side via apiRequest.
+    fetch('/api/onboarding-status', { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) return null;
-        const body = (await res.json()) as { result?: { data?: { status?: string } } };
-        return body?.result?.data?.status ?? null;
+        const body = (await res.json()) as { status?: string | null };
+        return body?.status ?? null;
       })
       .then((status) => {
         if (cancelled) return;
         if (status === 'NOT_STARTED' || status === 'IN_PROGRESS') {
           setOpen(true);
+          setOnboardingGate('blocking');
+        } else {
+          setOnboardingGate('clear');
         }
       })
       .catch(() => {
-        // Silent — onboarding nudge is best-effort UX.
+        if (!cancelled) setOnboardingGate('clear');
       });
 
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, setOnboardingGate]);
+
+  const releaseGate = () => {
+    setOpen(false);
+    setOnboardingGate('clear');
+  };
 
   const handleSkip = () => {
     if (typeof window !== 'undefined') {
       window.sessionStorage.setItem(SKIP_KEY, '1');
     }
-    setOpen(false);
+    releaseGate();
   };
 
   return (
@@ -107,7 +125,7 @@ export function OnboardingNudge({ enabled }: OnboardingNudgeProps) {
         <Button type="button" variant="ghost" size="sm" onClick={handleSkip}>
           Skip for now
         </Button>
-        <Link to="/onboarding" className="btn-primary btn-sm" onClick={() => setOpen(false)}>
+        <Link to="/admin/onboarding" className="btn-primary btn-sm" onClick={releaseGate}>
           Start
         </Link>
       </div>

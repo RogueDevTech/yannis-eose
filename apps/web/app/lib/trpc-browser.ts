@@ -1,19 +1,8 @@
 import type { AppThemeId } from '~/lib/theme';
 import type { FontScaleId } from '~/lib/font-scale';
+import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 
 type TrpcEnvelope<T> = { result?: { data?: T } };
-
-function getApiBaseUrl(): string {
-  if (typeof window === 'undefined') return '';
-  const raw = window.__ENV?.API_URL ?? '';
-  if (raw) {
-    if (window.location.protocol === 'https:' && raw.startsWith('http://')) {
-      return raw.replace(/^http:\/\//, 'https://');
-    }
-    return raw;
-  }
-  return window.location.origin;
-}
 
 export type ClientConfigPayload = {
   defaultAppTheme: string;
@@ -24,37 +13,49 @@ export type ClientConfigPayload = {
 };
 
 export async function fetchClientConfig(): Promise<ClientConfigPayload | null> {
-  const base = getApiBaseUrl();
+  const base = getBrowserApiBaseUrl();
   if (!base) return null;
   const url = `${base}/trpc/settings.getClientConfig?input=${encodeURIComponent(JSON.stringify({}))}`;
-  const res = await fetch(url, { credentials: 'include' });
-  if (!res.ok) return null;
-  const json = (await res.json()) as TrpcEnvelope<ClientConfigPayload>;
-  return json?.result?.data ?? null;
+  try {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) return null;
+    const json = (await res.json()) as TrpcEnvelope<ClientConfigPayload>;
+    return json?.result?.data ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Persists theme for the logged-in user; no-op on failure (e.g. logged out). */
 export async function postUpdateMyAppTheme(appTheme: AppThemeId): Promise<void> {
-  const base = getApiBaseUrl();
+  const base = getBrowserApiBaseUrl();
   if (!base) return;
-  await fetch(`${base}/trpc/users.updateMyAppTheme`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ appTheme }),
-  });
+  try {
+    await fetch(`${base}/trpc/users.updateMyAppTheme`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appTheme }),
+    });
+  } catch {
+    /* no-op */
+  }
 }
 
 /** Persists font scale for the logged-in user; no-op on failure (e.g. logged out). */
 export async function postUpdateMyFontScale(fontScale: FontScaleId): Promise<void> {
-  const base = getApiBaseUrl();
+  const base = getBrowserApiBaseUrl();
   if (!base) return;
-  await fetch(`${base}/trpc/users.updateMyFontScale`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fontScale }),
-  });
+  try {
+    await fetch(`${base}/trpc/users.updateMyFontScale`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fontScale }),
+    });
+  } catch {
+    /* no-op */
+  }
 }
 
 export type ShareToLogisticsResult = {
@@ -75,13 +76,19 @@ export async function shareOrderToLogistics(input: {
   locationId: string;
   templateId: string;
 }): Promise<ShareToLogisticsResult> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base || ''}/trpc/messaging.shareToLogistics`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('Share to logistics company failed');
+  let res: Response;
+  try {
+    res = await fetch(`${base}/trpc/messaging.shareToLogistics`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  } catch {
+    throw new Error('Share to logistics company failed');
+  }
   const json = (await res.json()) as TrpcEnvelope<ShareToLogisticsResult> & {
     error?: { message?: string };
   };
@@ -111,7 +118,7 @@ export type AdSpendIntervalPreviewResult = {
 export async function fetchAdSpendIntervalPreview(
   input: AdSpendIntervalPreviewInput
 ): Promise<AdSpendIntervalPreviewResult | null> {
-  const base = getApiBaseUrl();
+  const base = getBrowserApiBaseUrl();
   if (!base) return null;
   const payload: Record<string, unknown> = {
     campaignId: input.campaignId,
@@ -122,8 +129,12 @@ export async function fetchAdSpendIntervalPreview(
     payload.spendAmount = input.spendAmount;
   }
   const url = `${base}/trpc/marketing.previewAdSpendInterval?input=${encodeURIComponent(JSON.stringify(payload))}`;
-  const res = await fetch(url, { credentials: 'include' });
-  if (!res.ok) return null;
-  const json = (await res.json()) as TrpcEnvelope<AdSpendIntervalPreviewResult>;
-  return json?.result?.data ?? null;
+  try {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) return null;
+    const json = (await res.json()) as TrpcEnvelope<AdSpendIntervalPreviewResult>;
+    return json?.result?.data ?? null;
+  } catch {
+    return null;
+  }
 }

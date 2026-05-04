@@ -8,14 +8,16 @@ alwaysApply: true
 ## Non-negotiables
 
 - **Authorization is permission-first.** Do not reintroduce **ADMIN** (or other role) as an unconditional bypass beside **`SUPER_ADMIN`** at the tRPC `permissionProcedure` layer.
-- **Effective permissions** for non–SuperAdmin users = **role template ∪ legacy `role_permissions` ∪ `user_permissions` grants − revokes** (`PermissionsService.getEffectivePermissions`).
+- **Effective permissions** for non–SuperAdmin users are **stamped on save**: runtime reads **`user_permissions` grants − revokes only** (`PermissionsService.getEffectivePermissions`). Role templates and legacy `role_permissions` seed **defaults at create/update** and feed the one-time backfill (`PermissionSnapshotBackfillService`); they are **not** re-unioned on every login.
 - **SUPER_ADMIN** is the only role that may be treated as full-catalog / immutable template semantics; keep **system templates `locked`** except documented emergencies.
 
 ## Canonical files (do not drift)
 
 | Area | Path |
 |------|------|
-| Effective perms + sensitive list | `apps/api/src/permissions/permissions.service.ts` |
+| Effective perms + sensitive list | `apps/api/src/permissions/permissions.service.ts` (`getEffectivePermissionsLegacyUnion` is **backfill-only**) |
+| Snapshot backfill (bootstrap) | `apps/api/src/permissions/permission-snapshot-backfill.service.ts`, `packages/shared/drizzle/0103_permission_snapshot_marker.sql` |
+| Merge helper (stamp) | `packages/shared/src/rbac/permission-snapshot-merge.ts` |
 | tRPC gates | `apps/api/src/trpc/trpc.ts`, `apps/api/src/trpc/trpc.middleware.ts` |
 | Scope / mirror / branch helpers | `apps/api/src/common/authz.ts` |
 | Finance strip gate | `apps/api/src/common/utils/strip-finance-fields.ts` |

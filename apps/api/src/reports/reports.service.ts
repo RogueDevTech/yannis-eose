@@ -13,7 +13,6 @@ import { MarketingService } from '../marketing/marketing.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { FinanceService } from '../finance/finance.service';
 import { UsersService } from '../users/users.service';
-import { isAdminLevel } from '../common/authz';
 
 type CsvRow = Record<string, string | number | boolean | null | undefined>;
 
@@ -118,7 +117,7 @@ export class ReportsService {
   }
 
   private ensurePermission(user: SessionUser, permission: string): void {
-    if (isAdminLevel(user)) return;
+    if (user.role === 'SUPER_ADMIN') return;
     if ((user.permissions ?? []).includes(permission)) return;
     throw new TRPCError({ code: 'FORBIDDEN', message: `Missing ${permission}` });
   }
@@ -454,8 +453,8 @@ export class ReportsService {
 
   private async exportInventory(input: Extract<ExportReportInput, { reportKey: 'inventory' }>, user: SessionUser, date: string) {
     this.ensurePermission(user, 'inventory.read');
-    if (!isAdminLevel(user) && user.role !== 'STOCK_MANAGER') {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Inventory export is restricted to admin-level and stock manager' });
+    if (user.role !== 'SUPER_ADMIN' && !(user.permissions ?? []).includes('inventory.intake')) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Inventory export requires inventory.intake permission' });
     }
     const all: Awaited<ReturnType<InventoryService['listLevels']>>['levels'] = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {

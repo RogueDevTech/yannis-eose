@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
-import { Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { createAdSpendLogFormSchema, updateAdSpendSchema } from '@yannis/shared/validators';
 import { PageNotification } from '~/components/ui/page-notification';
 import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
@@ -17,6 +18,9 @@ import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Tabs } from '~/components/ui/tabs';
@@ -25,12 +29,15 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
+import { FormSelect } from '~/components/ui/form-select';
 import { Textarea } from '~/components/ui/textarea';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { fetchAdSpendIntervalPreview } from '~/lib/trpc-browser';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
+  AdPlatform,
   AdSpendIntervalPreview,
   AdSpendRecord,
   AdSpendGroupLine,
@@ -40,7 +47,7 @@ import type {
   Product,
   User,
 } from './types';
-import { AddExpenseModal } from './AddExpenseModal';
+import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
 import { AdSpendDayAccordion } from './AdSpendDayAccordion';
 
 const AD_SPEND_STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -87,13 +94,13 @@ export function MarketingAdSpendPage({
   groups,
   groupsPage,
   groupsTotalPages,
+  currentUserId,
 }: MarketingAdSpendLoaderData) {
   const dateFilters = filters;
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
-  const revalidator = useRevalidator();
   const isFilterLoading = useLoaderRefetchBusy();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
@@ -101,7 +108,6 @@ export function MarketingAdSpendPage({
   const [selectedCampaignId, setSelectedCampaignId] = useState(campaignIdFilter || 'ALL');
   const [selectedMediaBuyerId, setSelectedMediaBuyerId] = useState(mediaBuyerIdFilter || 'ALL');
   const [showAdSpendForm, setShowAdSpendForm] = useState(false);
-  const [showAddExpense, setShowAddExpense] = useState(false);
   const [showLegacyTable, setShowLegacyTable] = useState(false);
   const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendRecord | null>(null);
   const [rejectStep, setRejectStep] = useState(false);
@@ -118,6 +124,8 @@ export function MarketingAdSpendPage({
   const [formProductId, setFormProductId] = useState('');
   const [formSpendDate, setFormSpendDate] = useState('');
   const [formSpendAmount, setFormSpendAmount] = useState('');
+  const [formPlatform, setFormPlatform] = useState<AdPlatform>('FACEBOOK');
+  const [formPlatformCustomLabel, setFormPlatformCustomLabel] = useState('');
   const [adSpendPreview, setAdSpendPreview] = useState<AdSpendIntervalPreview | null>(null);
   const [adSpendPreviewLoading, setAdSpendPreviewLoading] = useState(false);
   const adSpendPreviewGen = useRef(0);
@@ -138,6 +146,8 @@ export function MarketingAdSpendPage({
       setFormProductId('');
       setFormSpendDate('');
       setFormSpendAmount('');
+      setFormPlatform('FACEBOOK');
+      setFormPlatformCustomLabel('');
       setAdSpendScreenshotUrl('');
       setAdSpendFileUploadState('idle');
       setAdSpendPreview(null);
@@ -276,6 +286,9 @@ export function MarketingAdSpendPage({
       spendAmount: spendRaw,
       spendDate: formSpendDate,
       screenshotUrl: adSpendScreenshotUrl.trim(),
+      platform: formPlatform,
+      platformCustomLabel:
+        formPlatform === 'OTHER' ? formPlatformCustomLabel.trim() : undefined,
     });
     if (!parsed.success) {
       const first = parsed.error.issues[0]?.message ?? 'Check the form and try again.';
@@ -285,6 +298,10 @@ export function MarketingAdSpendPage({
     const fd = new FormData(e.currentTarget);
     fd.set('screenshotUrl', parsed.data.screenshotUrl);
     fd.set('spendAmount', spendRaw);
+    fd.set('platform', parsed.data.platform);
+    if (parsed.data.platformCustomLabel) {
+      fd.set('platformCustomLabel', parsed.data.platformCustomLabel);
+    }
     ensureBranchForAction({
       actionLabel: 'logging ad spend',
       onProceed: () => fetcher.submit(fd, { method: 'post' }),
@@ -327,7 +344,8 @@ export function MarketingAdSpendPage({
     !formProductId ||
     !formSpendDate.trim() ||
     !hasPositiveSpendAmountInput(formSpendAmount) ||
-    !adSpendScreenshotUrl.trim();
+    !adSpendScreenshotUrl.trim() ||
+    (formPlatform === 'OTHER' && !formPlatformCustomLabel.trim());
 
   const editAdSpendSubmitDisabled =
     editFileUploadState === 'uploading' ||
@@ -338,7 +356,6 @@ export function MarketingAdSpendPage({
     !editScreenshotUrl.trim();
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
-  const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
   useFetcherToast(fetcher.data, { successMessage: 'Action completed' });
 
   useEffect(() => {
@@ -351,22 +368,16 @@ export function MarketingAdSpendPage({
     ensureBranchForAction({ actionLabel: 'this ad spend action' });
   }, [actionError, requiresBranchSelection, ensureBranchForAction]);
 
-  useEffect(() => {
-    if (actionSuccess && showAdSpendForm) setShowAdSpendForm(false);
-  }, [actionSuccess, showAdSpendForm]);
-
-  useEffect(() => {
-    if (actionSuccess && adSpendDetailModal) {
-      setAdSpendDetailModal(null);
-      setRejectStep(false);
-    }
-  }, [actionSuccess, adSpendDetailModal]);
-
-  useEffect(() => {
-    if (actionSuccess && editTarget) {
-      setEditTarget(null);
-    }
-  }, [actionSuccess, editTarget]);
+  // Edge-triggered close-on-success — see CLAUDE.md → "Modal + Optimistic UI Pattern".
+  // Replaces three separate `useEffect([actionSuccess, ...])` close paths and
+  // the manual revalidate trigger; the hook handles both.
+  const handleAdSpendFetcherSuccess = useCallback(() => {
+    setShowAdSpendForm(false);
+    setAdSpendDetailModal(null);
+    setRejectStep(false);
+    setEditTarget(null);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleAdSpendFetcherSuccess);
 
   useEffect(() => {
     if (!editTarget) return;
@@ -379,18 +390,177 @@ export function MarketingAdSpendPage({
     setEditFileUploadState('idle');
   }, [editTarget]);
 
-  useEffect(() => {
-    if (actionSuccess && revalidator.state === 'idle') {
-      revalidator.revalidate();
-    }
-  }, [actionSuccess, revalidator.state, revalidator]);
-
   const getProductName = (productId: string, resolvedProducts: Product[]): string =>
     resolvedProducts.find((p) => p.id === productId)?.name ?? 'Unknown product';
   const getCampaignName = (campaignId: string): string =>
     campaigns.find((c: Campaign) => c.id === campaignId)?.name ?? 'Unknown campaign';
   const getUserName = (userId: string, resolvedUsers: User[]): string =>
     resolvedUsers.find((u) => u.id === userId)?.name ?? 'Unknown user';
+
+  const legacyAdSpendColumns = useMemo((): CompactTableColumn<AdSpendRecord>[] => {
+    const cols: CompactTableColumn<AdSpendRecord>[] = [
+      {
+        key: 'date',
+        header: 'Date',
+        nowrap: true,
+        render: (s) =>
+          new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' }),
+      },
+    ];
+    if (viewMode !== 'media_buyer') {
+      cols.push({
+        key: 'mediaBuyer',
+        header: 'Media Buyer',
+        render: (s) => (
+          <DeferredSection resolve={users} skeleton="inline">
+            {(resolvedUsers: User[]) => <span className="text-sm text-app-fg">{getUserName(s.mediaBuyerId, resolvedUsers)}</span>}
+          </DeferredSection>
+        ),
+      });
+    }
+    cols.push(
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        nowrap: true,
+        render: (s) => <NairaPrice amount={Number(s.spendAmount)} />,
+      },
+      {
+        key: 'product',
+        header: 'Product',
+        render: (s) => (
+          <span className="text-sm text-app-fg-muted">
+            {s.productId ? (
+              <DeferredSection resolve={products} skeleton="inline">
+                {(resolvedProducts: Product[]) => (
+                  <Link
+                    to={`/admin/products/${s.productId}`}
+                    className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                  >
+                    {getProductName(s.productId, resolvedProducts)}
+                  </Link>
+                )}
+              </DeferredSection>
+            ) : (
+              '\u2014'
+            )}
+          </span>
+        ),
+      },
+      {
+        key: 'campaign',
+        header: 'Campaign',
+        render: (s) => (
+          <span className="text-sm text-app-fg-muted">
+            {s.campaignId ? (
+              <Link
+                to={`/admin/marketing/forms?search=${encodeURIComponent(getCampaignName(s.campaignId))}`}
+                className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+              >
+                {getCampaignName(s.campaignId)}
+              </Link>
+            ) : (
+              '\u2014'
+            )}
+          </span>
+        ),
+      },
+      {
+        key: 'orders',
+        header: 'Orders',
+        align: 'right',
+        render: (s) => (
+          <span className="text-sm text-app-fg-muted">{(s.orderCount ?? 0).toLocaleString()}</span>
+        ),
+      },
+      {
+        key: 'cpa',
+        header: 'CPA',
+        align: 'right',
+        render: (s) =>
+          s.indicativeCpa != null ? (
+            <NairaPrice amount={s.indicativeCpa} />
+          ) : (
+            <span className="text-sm text-app-fg-muted">{'\u2014'}</span>
+          ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (s) => <StatusBadge status={s.status ?? 'PENDING'} />,
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'right',
+        tight: true,
+        nowrap: true,
+        minWidth: 'min-w-[14rem]',
+        mobileShowLabel: false,
+        render: (s) => (
+          <div className="inline-flex flex-nowrap items-center justify-end gap-2 shrink-0">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setAdSpendDetailModal(s);
+                setRejectStep(false);
+              }}
+            >
+              Preview
+            </Button>
+            {canApproveAdSpend && (s.status ?? 'PENDING') === 'PENDING' && (
+              <>
+                <fetcher.Form method="post" className="inline">
+                  <input type="hidden" name="intent" value="approveAdSpend" />
+                  <input type="hidden" name="adSpendId" value={s.id} />
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    loading={
+                      fetcher.state === 'submitting' &&
+                      fetcher.formData?.get('intent') === 'approveAdSpend' &&
+                      fetcher.formData?.get('adSpendId') === s.id
+                    }
+                  >
+                    Approve
+                  </Button>
+                </fetcher.Form>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setAdSpendDetailModal(s);
+                    setRejectStep(true);
+                  }}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+            {adSpendRowCanEdit(s) && (
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditTarget(s)}>
+                Edit
+              </Button>
+            )}
+          </div>
+        ),
+      },
+    );
+    return cols;
+  }, [viewMode, users, products, campaigns, canApproveAdSpend, fetcher.state, fetcher.formData]);
+
+  const adSpendToolbarFilterBadge = useMemo(() => {
+    let n = 0;
+    if (selectedProductId !== 'ALL') n += 1;
+    if (selectedCampaignId !== 'ALL') n += 1;
+    if (viewMode !== 'media_buyer' && mediaBuyersForFilter.length > 0 && selectedMediaBuyerId !== 'ALL') n += 1;
+    return n;
+  }, [selectedProductId, selectedCampaignId, selectedMediaBuyerId, viewMode, mediaBuyersForFilter.length]);
 
   const openGroupLineReceiptModal = (line: AdSpendGroupLine) => {
     setAdSpendDetailModal({
@@ -429,18 +599,48 @@ export function MarketingAdSpendPage({
           </>
         }
         actions={
-          <>
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-              <DateFilterBar
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-            </div>
-            <Button variant="primary" size="sm" onClick={() => setShowAddExpense(true)}>
-              + Add Expense
-            </Button>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Ads Expense tools"
+            sheetSubtitle={<span>Date range and new expense entry</span>}
+            triggerAriaLabel="Date, add expense, and more"
+            desktop={
+              <>
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                  />
+                </div>
+                <Link
+                  to="/admin/marketing/ad-spend/new"
+                  className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
+                >
+                  + Add Expense
+                </Link>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Link
+                  to="/admin/marketing/ad-spend/new"
+                  onClick={() => closeSheet()}
+                  className="btn-primary btn-sm w-full justify-center inline-flex items-center"
+                >
+                  + Add Expense
+                </Link>
+              </>
+            )}
+          />
         }
       />
 
@@ -557,6 +757,32 @@ export function MarketingAdSpendPage({
                 onChange={(e) => setFormSpendDate(e.target.value)}
               />
             </div>
+            <div>
+              <FormSelect
+                label="Platform"
+                id="marketing-adspend-create-platform"
+                value={formPlatform}
+                onChange={(e) => {
+                  const v = e.target.value as AdPlatform;
+                  setFormPlatform(v);
+                  if (v !== 'OTHER') setFormPlatformCustomLabel('');
+                }}
+                options={AD_EXPENSE_PLATFORM_OPTIONS}
+              />
+            </div>
+            {formPlatform === 'OTHER' && (
+              <div className="sm:col-span-2">
+                <TextInput
+                  label="Platform name"
+                  id="marketing-adspend-create-platform-custom"
+                  value={formPlatformCustomLabel}
+                  onChange={(e) => setFormPlatformCustomLabel(e.target.value)}
+                  placeholder="e.g. Snapchat, Taboola"
+                  maxLength={80}
+                  required
+                />
+              </div>
+            )}
             <div className="sm:col-span-2">
               <FileUpload
                 folder={S3_FOLDERS.SCREENSHOTS}
@@ -789,66 +1015,145 @@ export function MarketingAdSpendPage({
             }))}
           />
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-stretch sm:items-center px-4 py-3 border-b border-app-border">
-          <form onSubmit={handleAdSpendSearchSubmit} className="flex gap-2 flex-1 min-w-0">
-            <SearchInput
-              value={searchQuery}
-              onChange={(val) => setSearchQuery(val)}
-              placeholder="Search buyer, product, campaign, or entry ID..."
-              wrapperClassName="flex-1 min-w-0"
-            />
-            <Button type="submit" variant="secondary" size="sm">
-              Search
-            </Button>
-          </form>
-          <SearchableSelect
-            id="marketing-adspend-product-filter-main"
-            value={selectedProductId}
-            onChange={handleAdSpendProductChange}
-            options={[
-              { value: 'ALL', label: 'All products' },
-              ...products.map((p: Product) => ({ value: p.id, label: p.name })),
-            ]}
-            wrapperClassName="w-auto min-w-[12rem]"
-            searchPlaceholder="Search products..."
-          />
-          <SearchableSelect
-            id="marketing-adspend-campaign-filter"
-            value={selectedCampaignId}
-            onChange={handleAdSpendCampaignChange}
-            options={[
-              { value: 'ALL', label: 'All campaigns' },
-              ...campaigns
-                .filter((c: Campaign) => c.status === 'ACTIVE')
-                .map((c: Campaign) => ({ value: c.id, label: c.name })),
-            ]}
-            wrapperClassName="w-auto min-w-[12rem]"
-            searchPlaceholder="Search campaigns..."
-          />
-          {viewMode !== 'media_buyer' && mediaBuyersForFilter.length > 0 && (
-            <SearchableSelect
-              id="marketing-adspend-media-buyer-filter"
-              value={selectedMediaBuyerId}
-              onChange={handleAdSpendMediaBuyerChange}
-              options={[
-                { value: 'ALL', label: 'All media buyers' },
-                ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
-              ]}
-              wrapperClassName="w-auto min-w-[12rem]"
-              searchPlaceholder="Search media buyers..."
-            />
-          )}
-        </div>
+        <ToolbarFiltersCollapsible
+          badgeCount={adSpendToolbarFilterBadge}
+          sheetSubtitle={<span>Product, campaign, and buyer filters apply immediately</span>}
+          searchRow={
+            <form onSubmit={handleAdSpendSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+              <SearchInput
+                value={searchQuery}
+                onChange={(val) => setSearchQuery(val)}
+                placeholder="Search buyer, product, campaign, or entry ID..."
+                wrapperClassName="min-w-0 flex-1"
+              />
+              <Button type="submit" variant="secondary" size="sm">
+                Search
+              </Button>
+            </form>
+          }
+          desktopInlineFilters={
+            <>
+              <SearchableSelect
+                id="marketing-adspend-product-filter-main"
+                value={selectedProductId}
+                onChange={handleAdSpendProductChange}
+                options={[
+                  { value: 'ALL', label: 'All products' },
+                  ...products.map((p: Product) => ({ value: p.id, label: p.name })),
+                ]}
+                wrapperClassName="w-auto min-w-[12rem]"
+                searchPlaceholder="Search products..."
+              />
+              <SearchableSelect
+                id="marketing-adspend-campaign-filter"
+                value={selectedCampaignId}
+                onChange={handleAdSpendCampaignChange}
+                options={[
+                  { value: 'ALL', label: 'All campaigns' },
+                  ...campaigns
+                    .filter((c: Campaign) => c.status === 'ACTIVE')
+                    .map((c: Campaign) => ({ value: c.id, label: c.name })),
+                ]}
+                wrapperClassName="w-auto min-w-[12rem]"
+                searchPlaceholder="Search campaigns..."
+              />
+              {viewMode !== 'media_buyer' && mediaBuyersForFilter.length > 0 ? (
+                <SearchableSelect
+                  id="marketing-adspend-media-buyer-filter"
+                  value={selectedMediaBuyerId}
+                  onChange={handleAdSpendMediaBuyerChange}
+                  options={[
+                    { value: 'ALL', label: 'All media buyers' },
+                    ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                  ]}
+                  wrapperClassName="w-auto min-w-[12rem]"
+                  searchPlaceholder="Search media buyers..."
+                />
+              ) : null}
+            </>
+          }
+          sheetFilterBody={
+            <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                <SearchableSelect
+                  id="marketing-adspend-product-filter-sheet"
+                  value={selectedProductId}
+                  onChange={handleAdSpendProductChange}
+                  options={[
+                    { value: 'ALL', label: 'All products' },
+                    ...products.map((p: Product) => ({ value: p.id, label: p.name })),
+                  ]}
+                  wrapperClassName="w-full"
+                  searchPlaceholder="Search products..."
+                />
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Campaign</span>
+                <SearchableSelect
+                  id="marketing-adspend-campaign-filter-sheet"
+                  value={selectedCampaignId}
+                  onChange={handleAdSpendCampaignChange}
+                  options={[
+                    { value: 'ALL', label: 'All campaigns' },
+                    ...campaigns
+                      .filter((c: Campaign) => c.status === 'ACTIVE')
+                      .map((c: Campaign) => ({ value: c.id, label: c.name })),
+                  ]}
+                  wrapperClassName="w-full"
+                  searchPlaceholder="Search campaigns..."
+                />
+              </div>
+              {viewMode !== 'media_buyer' && mediaBuyersForFilter.length > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                  <SearchableSelect
+                    id="marketing-adspend-media-buyer-filter-sheet"
+                    value={selectedMediaBuyerId}
+                    onChange={handleAdSpendMediaBuyerChange}
+                    options={[
+                      { value: 'ALL', label: 'All media buyers' },
+                      ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                    ]}
+                    wrapperClassName="w-full"
+                    searchPlaceholder="Search media buyers..."
+                  />
+                </div>
+              ) : null}
+            </>
+          }
+        />
         <TableLoadingOverlay show={isFilterLoading}>
           <div className="p-4">
             <AdSpendDayAccordion
               groups={groups}
               showMediaBuyerColumn={viewMode !== 'media_buyer'}
               canModerate={canApproveAdSpend}
+              currentUserId={currentUserId}
               page={groupsPage}
               totalPages={groupsTotalPages}
               actionUrl="/admin/marketing/ad-spend"
               onPreviewReceipt={openGroupLineReceiptModal}
+              onEdit={(line) =>
+                setEditTarget({
+                  id: line.id,
+                  mediaBuyerId: line.mediaBuyerId,
+                  productId: line.productId,
+                  campaignId: line.campaignId,
+                  spendAmount: line.spendAmount,
+                  screenshotUrl: line.screenshotUrl,
+                  adUrl: line.adUrl,
+                  platform: line.platform,
+                  platformCustomLabel: line.platformCustomLabel ?? null,
+                  spendDate: line.spendDate,
+                  status: line.status,
+                  approvedAt: line.approvedAt,
+                  approvedBy: null,
+                  rejectionReason: line.rejectionReason,
+                  rejectedAt: line.rejectedAt,
+                  rejectedBy: null,
+                })
+              }
             />
           </div>
         </TableLoadingOverlay>
@@ -862,135 +1167,14 @@ export function MarketingAdSpendPage({
         </div>
         <TableLoadingOverlay show={isFilterLoading}>
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Date</th>
-                {viewMode !== 'media_buyer' && <th className="table-header">Media Buyer</th>}
-                <th className="table-header text-right">Amount</th>
-                <th className="table-header">Product</th>
-                <th className="table-header">Campaign</th>
-                <th className="table-header text-right">Orders</th>
-                <th className="table-header text-right">CPA</th>
-                <th className="table-header">Status</th>
-                <th className="table-header">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {adSpend.map((s: AdSpendRecord) => (
-                <tr key={s.id} className="table-row">
-                  <td className="table-cell text-app-fg-muted">
-                    {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </td>
-                  {viewMode !== 'media_buyer' && (
-                    <td className="table-cell text-sm text-app-fg">
-                      <DeferredSection resolve={users} skeleton="inline">
-                        {(resolvedUsers: User[]) => <>{getUserName(s.mediaBuyerId, resolvedUsers)}</>}
-                      </DeferredSection>
-                    </td>
-                  )}
-                  <td className="table-cell text-right font-medium"><NairaPrice amount={Number(s.spendAmount)} /></td>
-                  <td className="table-cell text-sm text-app-fg-muted">
-                    {s.productId ? (
-                      <DeferredSection resolve={products} skeleton="inline">
-                        {(resolvedProducts: Product[]) => (
-                          <Link
-                            to={`/admin/products/${s.productId}`}
-                            className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-                          >
-                            {getProductName(s.productId, resolvedProducts)}
-                          </Link>
-                        )}
-                      </DeferredSection>
-                    ) : (
-                      '\u2014'
-                    )}
-                  </td>
-                  <td className="table-cell text-sm text-app-fg-muted">
-                    {s.campaignId ? (
-                      <Link
-                        to={`/admin/marketing/forms?search=${encodeURIComponent(getCampaignName(s.campaignId))}`}
-                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-                      >
-                        {getCampaignName(s.campaignId)}
-                      </Link>
-                    ) : '\u2014'}
-                  </td>
-                  <td className="table-cell text-right text-sm text-app-fg-muted">
-                    {(s.orderCount ?? 0).toLocaleString()}
-                  </td>
-                  <td className="table-cell text-right text-sm">
-                    {s.indicativeCpa != null ? (
-                      <NairaPrice amount={s.indicativeCpa} />
-                    ) : (
-                      <span className="text-app-fg-muted">{'\u2014'}</span>
-                    )}
-                  </td>
-                  <td className="table-cell">
-                    <StatusBadge status={s.status ?? 'PENDING'} />
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          setAdSpendDetailModal(s);
-                          setRejectStep(false);
-                        }}
-                      >
-                        Preview
-                      </Button>
-                      {canApproveAdSpend && (s.status ?? 'PENDING') === 'PENDING' && (
-                        <>
-                          <fetcher.Form method="post" className="inline">
-                            <input type="hidden" name="intent" value="approveAdSpend" />
-                            <input type="hidden" name="adSpendId" value={s.id} />
-                            <Button
-                              type="submit"
-                              variant="primary"
-                              size="sm"
-                              loading={
-                                fetcher.state === 'submitting' &&
-                                fetcher.formData?.get('intent') === 'approveAdSpend' &&
-                                fetcher.formData?.get('adSpendId') === s.id
-                              }
-                            >
-                              Approve
-                            </Button>
-                          </fetcher.Form>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => {
-                              setAdSpendDetailModal(s);
-                              setRejectStep(true);
-                            }}
-                          >
-                            Reject
-                          </Button>
-                        </>
-                      )}
-                      {adSpendRowCanEdit(s) && (
-                        <Button type="button" variant="secondary" size="sm" onClick={() => setEditTarget(s)}>
-                          Edit
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {adSpend.length === 0 && (
-                <tr>
-                  <td colSpan={viewMode !== 'media_buyer' ? 9 : 8}>
-                    <EmptyState title="No ad spend records yet" />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <CompactTable
+            withCard={false}
+            className="min-w-[920px]"
+            columns={legacyAdSpendColumns}
+            rows={adSpend}
+            rowKey={(s) => s.id}
+            emptyTitle="No ad spend records yet"
+          />
         </div>
 
         <div className="md:hidden space-y-3 px-1 py-3">
@@ -1052,7 +1236,7 @@ export function MarketingAdSpendPage({
                   '\u2014'
                 )}
               </p>
-              <div className="flex flex-wrap gap-2 mt-2">
+              <div className="inline-flex flex-nowrap items-center gap-2 mt-2 overflow-x-auto max-w-full">
                 <Button
                   type="button"
                   variant="secondary"
@@ -1115,15 +1299,6 @@ export function MarketingAdSpendPage({
       </div>
       )}
 
-      <AddExpenseModal
-        open={showAddExpense}
-        onClose={() => setShowAddExpense(false)}
-        campaigns={campaigns}
-        products={products}
-        actionUrl="/admin/marketing/ad-spend"
-        onSuccess={() => revalidator.revalidate()}
-      />
-
       {adSpendDetailModal?.screenshotUrl && (
         <Modal
           open
@@ -1156,6 +1331,15 @@ export function MarketingAdSpendPage({
                   year: 'numeric',
                 })}
               </p>
+              {adSpendDetailModal.platform && (
+                <p className="text-sm text-brand-600 dark:text-brand-400">
+                  Platform:{' '}
+                  {adSpendDetailModal.platform === 'OTHER'
+                    ? adSpendDetailModal.platformCustomLabel?.trim() || 'Other'
+                    : AD_EXPENSE_PLATFORM_OPTIONS.find((o) => o.value === adSpendDetailModal.platform)?.label ??
+                      adSpendDetailModal.platform}
+                </p>
+              )}
               <DeferredSection resolve={users} skeleton="inline">
                 {(resolvedUsers: User[]) => (
                   <p className="text-xs text-brand-500 dark:text-brand-400">

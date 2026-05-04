@@ -50,8 +50,6 @@ export const CONFIGURABLE_EMAIL_TYPES = [
   'delivery_remittance:received',
   'account:updated',
   'account:security',
-  'account:finance_hat_assigned',
-  'account:finance_hat_revoked',
   'approval:permission_request',
 ] as const;
 
@@ -337,20 +335,6 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     mandatory: false,
     category: 'account',
   },
-  'account:finance_hat_assigned': {
-    type: 'account:finance_hat_assigned',
-    label: 'Finance hat assigned',
-    description: 'User — you now hold the org-wide Finance hat and can act as Finance Officer',
-    mandatory: false,
-    category: 'account',
-  },
-  'account:finance_hat_revoked': {
-    type: 'account:finance_hat_revoked',
-    label: 'Finance hat revoked',
-    description: 'User — the Finance hat has been reassigned; you no longer hold Finance Officer powers',
-    mandatory: false,
-    category: 'account',
-  },
   'approval:permission_request': {
     type: 'approval:permission_request',
     label: 'Permission request',
@@ -378,8 +362,6 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
 const COMMON_ACCOUNT_TYPES: NotificationType[] = [
   'account:updated',
   'account:security',
-  'account:finance_hat_assigned',
-  'account:finance_hat_revoked',
 ];
 
 const ALL_CONFIGURABLE: NotificationType[] = [...CONFIGURABLE_EMAIL_TYPES];
@@ -496,17 +478,9 @@ export const RELEVANT_NOTIFICATION_TYPES_BY_ROLE: Record<string, NotificationTyp
 };
 
 /**
- * Returns the notification types this user can opt out of, given their role and Finance hat.
- * The result is a deduped union — Finance hat carries Finance Officer types on top of role types.
+ * Returns the notification types this user can opt out of, given their role.
  */
-export function getRelevantNotificationTypesForRole(
-  role: string,
-  isFinanceOfficer: boolean = false,
-): NotificationType[] {
+export function getRelevantNotificationTypesForRole(role: string): NotificationType[] {
   const base = RELEVANT_NOTIFICATION_TYPES_BY_ROLE[role] ?? COMMON_ACCOUNT_TYPES;
-  if (!isFinanceOfficer || role === 'FINANCE_OFFICER') {
-    return [...new Set(base)];
-  }
-  const financeTypes = RELEVANT_NOTIFICATION_TYPES_BY_ROLE['FINANCE_OFFICER'] ?? [];
-  return [...new Set([...base, ...financeTypes])];
+  return [...new Set(base)];
 }

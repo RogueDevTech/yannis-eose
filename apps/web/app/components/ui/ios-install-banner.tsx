@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react';
-
-const DISMISS_COUNT_KEY = 'ios_banner_dismissed_count';
-const MAX_DISMISSALS = 3;
+import { dismissInstallPromotion, isInstallPromotionDismissed } from '~/lib/install-promotion-dismiss';
 
 function isIOS(): boolean {
   if (typeof window === 'undefined') return false;
@@ -17,36 +15,20 @@ function isStandalone(): boolean {
   );
 }
 
-function getDismissCount(): number {
-  try {
-    return parseInt(localStorage.getItem(DISMISS_COUNT_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-function incrementDismissCount(): void {
-  try {
-    localStorage.setItem(DISMISS_COUNT_KEY, String(getDismissCount() + 1));
-  } catch {
-    // localStorage unavailable — ignore
-  }
-}
-
 export function IosInstallBanner() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     if (!isIOS()) return;
     if (isStandalone()) return;
-    if (getDismissCount() >= MAX_DISMISSALS) return;
+    if (isInstallPromotionDismissed()) return;
     setVisible(true);
   }, []);
 
   if (!visible) return null;
 
   const handleDismiss = () => {
-    incrementDismissCount();
+    dismissInstallPromotion();
     setVisible(false);
   };
 

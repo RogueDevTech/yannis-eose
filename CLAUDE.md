@@ -103,6 +103,24 @@ yannis-eose/
 
 ## Database Principles
 
+### Go-to-prod runbook (auto + manual)
+
+Three layers stay in sync between source and the live DB. The first two run **automatically on every API boot** (no manual step required); the third is one-shot.
+
+| What | Trigger | Command (manual fallback) | Purpose |
+|---|---|---|---|
+| **SQL migrations** | API boot — `MigrationRunnerService` ([apps/api/src/database/migration-runner.service.ts](apps/api/src/database/migration-runner.service.ts)). Failure aborts startup. | `pnpm --filter @yannis/shared db:migrate:app` | Applies every unapplied file in [packages/shared/drizzle/](packages/shared/drizzle/). |
+| **RBAC permission catalog** | API boot — `PermissionSeedService` ([apps/api/src/database/permission-seed.service.ts](apps/api/src/database/permission-seed.service.ts)). Soft-fail. | `pnpm --filter @yannis/shared db:seed-permissions` | Reconciles `permissions`, `role_permissions`, SYSTEM `role_templates`, and `role_template_permissions` against the catalog in [permission-catalog.ts](packages/shared/src/rbac/permission-catalog.ts). |
+| **Default CS message templates** | API boot — `MessageTemplateSeedService` ([apps/api/src/database/message-template-seed.service.ts](apps/api/src/database/message-template-seed.service.ts)). Soft-fail. No-ops until first SuperAdmin exists. | `pnpm --filter @yannis/shared db:seed-message-templates` | Inserts the 5 default templates from [template-catalog.ts](packages/shared/src/messaging/template-catalog.ts) (org-wide, `branch_id = NULL`). Idempotent — keys off `name`. Existing rows are NEVER touched, so HoCS-edited copy survives every redeploy. |
+| **User-permission stamp backfill** | One-shot per major catalog change. | `pnpm --filter @yannis/api run run-permission-backfill:standalone -- --force` | Re-stamps every staff user's `user_permissions` rows from the latest template + role-permissions union. Run after adding new permission codes that pre-existing users need to pick up (e.g. when adding a code to an existing template — fresh users get it via stamp, but stamped users from before don't). |
+
+**Order on first deploy after a release that adds permissions or templates:**
+1. Deploy the API. Migrations + permission catalog + template defaults all auto-apply on boot.
+2. If the release added new permission codes that existing users should inherit (e.g. `logistics.teamOverview` granted to `HEAD_OF_LOGISTICS` template), run the standalone backfill once: `pnpm --filter @yannis/api run run-permission-backfill:standalone -- --force`. SuperAdmin always sees new codes (catalog walk); ADMIN and others need the backfill.
+3. Validate with `pnpm --filter @yannis/shared db:audit-permission-coverage`.
+
+**Adding a 6th default message template** is a one-line edit to [template-catalog.ts](packages/shared/src/messaging/template-catalog.ts) — next API boot picks it up. Edits to existing template `body` won't propagate (intentional: HoCS may have customised it). To ship a new copy with the same name, increment the name (e.g. `Order confirmation reminder (SMS) v2`).
+
 ### Migrations auto-run on app startup (Phase 19, 2026-04-29)
 The API runs every pending SQL migration in [packages/shared/drizzle/*.sql](packages/shared/drizzle/) on `OnApplicationBootstrap` before NestJS starts accepting requests. If any migration fails, the app **aborts boot** → docker health check fails → the deploy pipeline catches the failed health check and rolls back. Successful deploys are by definition migrated deploys.
 
@@ -114,6 +132,14 @@ The API runs every pending SQL migration in [packages/shared/drizzle/*.sql](pack
 
 ### UUIDv7 Everywhere
 All primary keys use UUIDv7 (timestamp-ordered). This improves B-tree index performance and gives a free creation timestamp embedded in every ID. Never use auto-incrementing integers or UUIDv4.
+
+### Native `uuid` columns — identifiers are never `text` (locked)
+
+**PostgreSQL:** Every primary key and every foreign-key / pointer column (`id`, `user_id`, `created_by`, `approved_by`, `*_id` referencing entities, etc.) MUST use the **`uuid`** type — **never `text`** (even when values look like `"018c…"` strings). Migration **`0062_uuid_column_type.sql`** normalized legacy `text` UUID columns to native `uuid`; new migrations must stay aligned.
+
+**Drizzle (`packages/shared/src/db/schema/`):** Use **`uuid('column_name')`** (and **`uuidv7Pk()`** for PKs) for all identifiers and user/entity FKs. **`text()`** is only for human-readable strings (names, emails, hashed phones, URLs, free-form notes, enum-like labels stored as strings where appropriate).
+
+**Temporal audit:** `modified_by` may still be typed as legacy text on some historical rows — prefer **`uuid`** when adding new actor-pointer columns; do not introduce **new** identifier columns as `text`.
 
 ### Temporal Tables (System-Versioned)
 Every table that stores business data (orders, inventory, products, users, funding, ad_spend) must use PostgreSQL 18 system-versioned temporal logic. Every row has a `valid_period` (tstzrange) that records when that version of the row was true. When a row is updated, the old version is preserved with its time range. You can query the state of any record at any point in history.
@@ -407,6 +433,8 @@ The push system has four layers — all must be consistent:
 - Rider views live inside `apps/web` at the `/rider/` route group — NOT a separate app. Mobile-optimized layouts with PWA offline sync
 - Rider Offline Sync: the rider PWA routes store delivery confirmations (with GPS + timestamp) in IndexedDB and syncs when back online. Use last-write-wins with GPS verification to prevent fraudulent timestamping
 
+**Logistics Team Analysis (`/admin/logistics/team`):** Provider-company rollup of order-level outcomes — delivery rate, delinquency rate (returned + partially delivered + written off / assigned), and a per-status stacked-bar breakdown ranked by deliveryRate desc. Audience: `SUPER_ADMIN`, `ADMIN`, `HEAD_OF_LOGISTICS`, gated by the `logistics.teamOverview` permission code (granted to `HEAD_OF_LOGISTICS` in [packages/shared/src/rbac/permission-catalog.ts](packages/shared/src/rbac/permission-catalog.ts); ADMIN inherits via `ALL_PERMISSION_CODES`). Filters orders by `orders.allocated_at` so providers are scored only on what they've actually been responsible for. Branch scoping uses `ctx.currentBranchId` server-side; SuperAdmin/Admin and org-wide HoLogistics see all branches. Backend lives in `LogisticsService.getLogisticsProviderPerformance` exposed via `logistics.teamOverview` tRPC. After editing `permission-catalog.ts`, run `pnpm --filter @yannis/shared db:seed-permissions` to land the role-template grant. Files: [apps/api/src/logistics/logistics.service.ts](apps/api/src/logistics/logistics.service.ts), [apps/api/src/trpc/routers/logistics.router.ts](apps/api/src/trpc/routers/logistics.router.ts), [apps/web/app/routes/admin.logistics.team/route.tsx](apps/web/app/routes/admin.logistics.team/route.tsx), [apps/web/app/features/logistics/LogisticsTeamPage.tsx](apps/web/app/features/logistics/LogisticsTeamPage.tsx).
+
 ### When Building the Marketing Module
 - Funding Ledger: HoM creates a funding record with amount + receipt image upload. Status starts as SENT. Media Buyer receives a PWA push notification and must click Mark Received (status becomes COMPLETED) or Not Received (status becomes DISPUTED, triggers alert to CEO)
 - **Approve funding request = ledger row:** When HoM/Finance/SuperAdmin/Admin approves a `marketing_funding_requests` row (`approveFundingRequest`), the API **must** insert a matching `marketing_funding` row in the **same transaction** (status `SENT`, optional `source_funding_request_id` FK) so **Total Received**, the **Transfers** tab, and **getFundingBalance** stay aligned with **My Requests**. `createFunding` (Send Funding) remains the other path into the same ledger.
@@ -606,7 +634,7 @@ Files to know: [apps/api/src/hr/payroll-batch.service.ts](apps/api/src/hr/payrol
 **Implementation source of truth (do NOT inline `role === 'SUPER_ADMIN'` for admin-class checks):**
 - Backend: `apps/api/src/common/authz.ts` → `isAdminLevel(user)`, `isSuperAdminOnly(user)`, `ADMIN_LEVEL_ROLES`.
 - Frontend: `apps/web/app/lib/rbac.ts` → same helpers mirrored.
-- Permission bypass: `PermissionsService.getEffectivePermissions` and `permissionProcedure` short-circuit for BOTH `SUPER_ADMIN` and `ADMIN` (they carry `permissions: []` in the session).
+- Permission bypass: ONLY `SUPER_ADMIN` short-circuits in `PermissionsService.getEffectivePermissions` and `permissionProcedure`. `ADMIN` does NOT bypass — they go through the standard permission check just like every other role. The `ROLE_PERMISSIONS.ADMIN` entry in [packages/shared/src/rbac/permission-catalog.ts](packages/shared/src/rbac/permission-catalog.ts) is `ALL_PERMISSION_CODES` (every code in the catalog), so an ADMIN's session loads with the full set of 107 codes via the snapshot model, and every `permissionProcedure` check passes by membership rather than by short-circuit. Do not change this — admin-class privilege should be auditable in `user_permissions`, not invisible via a runtime bypass.
 - Finance field stripping: `hasFinanceAccess` returns true for both.
 - Branch visibility: `canViewAllBranches` returns true for admin-class **and** for org-wide department heads (`HEAD_OF_CS`, `HEAD_OF_MARKETING`, `HEAD_OF_LOGISTICS`).
 - `SENSITIVE_ROLES` includes both `SUPER_ADMIN` and `ADMIN` — creating/promoting anyone into an admin-level role generates a `permission_request` for SuperAdmin approval.
@@ -649,12 +677,16 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Confirmation dialog | `<ConfirmActionModal />` |
 | Tab navigation | `<Tabs />` |
 | Page header (title + actions) | `<PageHeader />` |
+| Crowded header on small screens (date + several buttons + refresh) | `<PageHeaderMobileTools />` — below `md`: `PageRefreshButton` `iconOnly` + kebab → bottom sheet; `md+`: `desktop` slot only. Put `DateFilterBar` with `triggerLayout="blockCenter"` in the sheet when the pill would crowd. Optional `mobileLeading` (e.g. live indicator). See `apps/web/app/components/ui/page-header-mobile-tools.tsx`. |
+| Search row + inline selects that crowd on mobile | `<ToolbarFiltersCollapsible />` — below `breakpoint` (default `md`): full-width **Filters** button above `searchRow`; filter controls in a sheet with **Done**. At `breakpoint+`: one row (`searchRow` + `desktopInlineFilters`). Optional `badgeCount`. See `apps/web/app/components/ui/toolbar-filters-collapsible.tsx`. |
 | Stat card (KPI) | `<StatCard />` from `card.tsx` |
 | Card / panel surface | `<Card />`, `<CardHeader />`, `<CardBody />`, `<CardFooter />` |
 | Financial P&L rows | `<StatRow />`, `<StatRowGroup />` |
-| Table with sticky header | `<DataTable />` |
+| List tables (default — incl. loader refetch overlay, mobile card rows) | `<CompactTable />` |
+| Compact dense table for detail / tabbed views (typed columns, action column, optional `pagination`, `selection`, `renderMobileCard`, `footer`) | `<CompactTable />` |
 | Table/list URL refetch (blur overlay; keep stale rows mounted) | `<TableLoadingOverlay show={…} />` with `useLoaderRefetchBusy()` (`apps/web/app/hooks/use-loader-refetch-busy.ts`) — `navigation.state === 'loading'`, same-pathname guard on by default; additive with `<NavProgressBar />` |
-| DataTable while loader refetches (no row swap) | `<DataTable loading loadingVariant="overlay" />` — default `loadingVariant` is `replace` |
+| CompactTable while loader refetches (no row swap) | `<CompactTable loading loadingVariant="overlay" />` — default `loadingVariant` is `replace` |
+| Row actions: mobile kebab → slide-up sheet (reuse with `CompactTable` action column) | `<TableRowActionsSheet />` (`apps/web/app/components/ui/table-row-actions-sheet.tsx`) |
 | Empty list state | `<EmptyState />` |
 | Pagination | `<Pagination />` |
 | Status badge (generic) | `<StatusBadge />` |
@@ -671,6 +703,7 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | File upload | `<FileUpload />` |
 | Date range filter | `<DateFilterBar />` |
 | Dropdown actions menu | `<ActionDropdown />` |
+| **In-table action button (View / Edit / Approve / Remove etc.)** | `<TableActionButton variant="primary | neutral | danger" />` — locked variant rule, see "Table Action Buttons (Non-Negotiable)" |
 | Loading spinner | `<Spinner />` |
 | Global page-loading indicator | `<NavProgressBar />` (mounted once per layout — do not add per-page) |
 
@@ -687,6 +720,143 @@ If you need a UI pattern that isn't in the list above **and** it will appear in 
 - Manual `<div className="flex justify-between"><span>Label</span><span>Value</span></div>` rows — use `<StatRow />`
 - Manual empty state divs with dashed borders — use `<EmptyState />`
 - Manual pagination controls — use `<Pagination />`
+
+---
+
+## Table Action Buttons (Non-Negotiable)
+
+In-table action columns must use the shared `<TableActionButton>` component at [apps/web/app/components/ui/table-action-button.tsx](apps/web/app/components/ui/table-action-button.tsx) — never `<Button size="sm">` (the 2px `btn-*` border + `btn-sm` padding inflates row height past the text-only cells in the same row, breaking the compact table density the CEO has explicitly asked for).
+
+### Variant rule
+
+| Variant | Color | Use for |
+|---|---|---|
+| `primary` | Brand blue | The row's main affordance — `View`, `Open`, `Edit`, `Approve`, `Confirm`. **When a row has only one action button, it must always be `primary`** so the cell has clear weight. |
+| `neutral` | Muted grey | Secondary actions paired with a `primary` (e.g. `Add stock` next to `View`). Quieter visual rank. |
+| `danger` | Red | Destructive / negative actions: `Remove`, `Delete`, `Cancel`, `Reject`, `Dispute`, `Deactivate`, `Archive`. |
+
+### Examples
+
+```tsx
+// One action → primary
+<TableActionButton to={`/admin/orders/${o.id}`} variant="primary">View</TableActionButton>
+
+// Two actions: View + Edit → primary + neutral
+<TableActionButton to={`/admin/products/${p.id}`} variant="primary">View</TableActionButton>
+<TableActionButton onClick={() => setEditing(p)} variant="neutral">Edit</TableActionButton>
+
+// View + destructive Remove → primary + danger
+<TableActionButton to={`/admin/inventory/${l.id}`} variant="primary">View</TableActionButton>
+<TableActionButton onClick={() => openAdjust(l, 'decrease')} variant="danger">Remove</TableActionButton>
+
+// Three actions: View (primary) + Add (neutral) + Remove (danger)
+<TableActionButton to={`/admin/inventory/${l.id}`} variant="primary">View</TableActionButton>
+<TableActionButton onClick={() => openAdjust(l, 'increase')} variant="neutral">Add</TableActionButton>
+<TableActionButton onClick={() => openAdjust(l, 'decrease')} variant="danger">Remove</TableActionButton>
+
+// Optimistic-row View placeholder — non-interactive but styled as primary at 50% opacity
+<TableActionButton inert variant="primary">View</TableActionButton>
+```
+
+### Sizing — locked
+
+The component renders at:
+- `border` (1px), `px-2 py-0.5`, `text-xs font-medium leading-none`
+- Total button height ≈ 22px → fits inside the table's `py-3` cell padding without forcing the row to grow
+- Renders as `<button>` (default), `<Link>` (when `to` is set), or `<span aria-disabled>` (when `inert: true`) via a discriminated union
+
+### Do NOT
+
+- Do NOT use `<Button size="sm" variant="primary|secondary|ghost">` in table action columns — those have a 2px border + `px-3 py-1.5` that pushes row height taller than text-only cells.
+- Do NOT add `text-xs`, `text-sm`, or `border-0` className overrides — `<TableActionButton>` already sets the right typography and border weight; overriding breaks the across-the-app uniformity.
+- Do NOT colour the View button neutral when it's the row's only action — it must be `primary` so the cell reads as actionable. The single-action-blue rule is the visual contract users read; breaking it makes some rows look disabled.
+- Do NOT wrap a View `<Link>` in `<Button>` chrome — pass `to` directly to `<TableActionButton>`; the component handles the Link↔button switch internally.
+
+---
+
+## Modal + Optimistic UI Pattern (Non-Negotiable)
+
+Every modal-form-driven list page in the app follows this pattern. CEO directive: when a user submits a modal form, the new/edited row appears in the table **immediately**, and the modal closes the **same React tick** the success toast appears. No 100–500 ms lag while the loader revalidates.
+
+### The five ingredients
+
+1. **Optimistic ADD** — derive synthetic rows from `fetcher.formData` (the in-flight payload) and prepend them to the loader-data list. Use `useOptimisticListMerge<T>(fetcher, build)` from [apps/web/app/hooks/useOptimisticListMerge.ts](apps/web/app/hooks/useOptimisticListMerge.ts). Synthetic IDs come from `optimisticId(suffix?)` in [apps/web/app/lib/optimistic.ts](apps/web/app/lib/optimistic.ts) so consumers can detect them later.
+2. **Optimistic EDIT** — when the form submission contains the new field values for an existing row (text edits, status flips), overlay them on the matching server row by `id`. Use `useOptimisticListPatches<T>(fetcher, build)` + `applyOptimisticPatches(rows, patches)` + `isOptimisticPatched(patches, id)` from [apps/web/app/hooks/useOptimisticListPatches.ts](apps/web/app/hooks/useOptimisticListPatches.ts). Patched rows keep their REAL id (no `__optimistic_` prefix) so action buttons remain meaningful — disable them via `isOptimisticPatched(...)` while in flight.
+3. **Edge-trigger close** — close the modal the instant `fetcher.data` flips to `{ success: true }` (NOT when `fetcher.state === 'idle'`). Use `useCloseOnFetcherSuccess(fetcher, onSuccess)` from [apps/web/app/hooks/useCloseOnFetcherSuccess.ts](apps/web/app/hooks/useCloseOnFetcherSuccess.ts).
+4. **Toast on the same tick** — keep the existing `useFetcherToast(fetcher.data, ...)` import. All three hooks watch `fetcher.data` reference, so the toast appears and the modal closes together with no lag.
+5. **Visual marker on in-flight rows** — render with `opacity-60` + an inline "Saving…" chip, and `disabled={isOptimistic}` on row action buttons (View / Edit / Delete on a synthetic ID would 404 the API; on a patched id it would race against the in-flight write). Detect via `isOptimisticId(row.id)` (adds) or `isOptimisticPatched(patches, row.id)` (edits).
+
+### Canonical reference
+
+[apps/web/app/features/logistics/LogisticsPage.tsx](apps/web/app/features/logistics/LogisticsPage.tsx) is the reference implementation. New modal+list pages should copy its shape; existing pages migrate onto the shared hooks rather than hand-rolling a fourth variant.
+
+### Wired example — ADD
+
+```tsx
+import { useFetcher } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import { isOptimisticId, optimisticId } from '~/lib/optimistic';
+import { useFetcherToast } from '~/components/ui/toast';
+
+const fetcher = useFetcher();
+useFetcherToast(fetcher.data, { successMessage: 'Widget created' });
+
+const optimisticWidgets = useOptimisticListMerge<Widget>(fetcher, (fd, intent) => {
+  if (intent !== 'createWidget') return null;
+  const name = fd.get('name')?.toString().trim();
+  if (!name) return null;
+  return [{ id: optimisticId(), name, status: 'ACTIVE', createdAt: new Date().toISOString() }];
+});
+
+useCloseOnFetcherSuccess(fetcher, () => setShowAdd(false));
+
+const display = [...optimisticWidgets, ...widgets];
+// …in the row: className={isOptimisticId(w.id) ? 'opacity-60' : ''}
+```
+
+### Wired example — EDIT (text or status overlay)
+
+```tsx
+import {
+  applyOptimisticPatches,
+  isOptimisticPatched,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
+
+const widgetPatches = useOptimisticListPatches<Widget>(fetcher, (fd, intent) => {
+  if (intent === 'updateWidget') {
+    const id = fd.get('widgetId')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { name: fd.get('name')?.toString() ?? '', status: fd.get('status')?.toString() ?? '' } }];
+  }
+  if (intent === 'approveWidget') {
+    const id = fd.get('widgetId')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { status: 'APPROVED' } }];   // status badge flips instantly
+  }
+  return null;
+});
+
+const display = applyOptimisticPatches(widgets, widgetPatches);
+// …in the row: className={isOptimisticPatched(widgetPatches, row.id) ? 'opacity-60' : ''}
+// …on action buttons: disabled={isOptimisticPatched(widgetPatches, row.id)}
+```
+
+If the server rejects the patch, the row visibly snaps back to its server state and `useFetcherToast` surfaces the error — that UX is correct: the user knows their change didn't take.
+
+### Do NOT
+
+- Do NOT trigger close from a derived boolean (`useEffect([actionSuccess])`). The boolean stays `true` across consecutive submits, React skips the effect on submission #2, and the modal stays open. **The reference comparison inside `useCloseOnFetcherSuccess` is exactly what avoids this**.
+- Do NOT wait for `fetcher.state === 'idle'`. The post-action loader revalidation holds state at `'loading'` for 100–500 ms; the modal lingers visibly after the toast.
+- Do NOT close the modal in the form's `onSubmit` handler. It closes BEFORE the action validates, hiding server errors. We tried it; reverted.
+- Do NOT close the modal imperatively from the action route callback. Actions return data, they don't own client UI state.
+- Do NOT skip the `__optimistic` ID prefix on optimistic ADD rows. Action buttons (View / Edit / Delete) on a synthetic ID would 404 against the API.
+- Do NOT add the `__optimistic_` prefix on optimistic EDIT rows. They keep their REAL id so action buttons stay meaningful (a stale-form race during the in-flight window is prevented by `disabled={isOptimisticPatched(...)}`, not by changing the id).
+- Do NOT detect optimistic-edit by deep-equality of fields against the canonical row. Trust the `patches` array — that's the canonical "is this row mid-flight" signal. Field-equality detection misses cases where the patch matches the existing value (e.g. clicking Approve on a row already locally APPROVED in another tab).
+- Do NOT reuse one fetcher across two unrelated modals without the `intent` discriminator. Returning `null` from `build` for non-matching intents in `useOptimisticListMerge` / `useOptimisticListPatches` is the canonical way to scope per-modal/per-intent.
+- Do NOT hand-roll new variants of close-on-success / optimistic-list-merge / optimistic-list-patches. Use the hooks. New variants always reintroduce one of the bugs above.
+- Do NOT use `applyOptimisticPatches` to deep-merge nested objects. The helper is shallow merge by design — if a patch needs to update a nested object, the caller spreads inside `patch` (e.g. `{ recipientInfo: { ...row.recipientInfo, name: newName } }`). Deep-merging silently masks bugs where a partial nested update overwrites unrelated sibling fields.
 
 ---
 
@@ -751,6 +921,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT use localStorage or sessionStorage for anything security-sensitive. Sessions live in Redis
 - Do NOT expose raw **customer** phone numbers in any API response, log, or error message — ever. The Lead Fortress pillar applies to `orders.customer_phone`, `cart_submissions.phone`, and any other PII column tied to leads. **Staff** phone numbers (`users.phone`) are different: they are contact info for HR/admins/heads to reach their team. The mask helper in `apps/api/src/users/users.service.ts::resolveStaffPhone` returns the raw phone to authorized viewers (self, admin-class, HR, heads viewing their direct-report role; or anyone with `users.read` / `hr.read` permission) and the masked form to other authenticated users — do not blanket-mask `users.phone`.
 - Do NOT use auto-incrementing IDs — use UUIDv7
+- Do NOT declare PKs or FKs / actor pointers (`*_id`, `created_by`, `approved_by`, etc.) as PostgreSQL **`text`** or Drizzle **`text('…')`** — use native **`uuid`** / Drizzle **`uuid('…')`** (see **Native `uuid` columns — identifiers are never `text`** above)
 - Do NOT skip the actor injection (`SET LOCAL yannis.current_user_id` AND `SET LOCAL yannis.current_branch_id`) on any write operation
 - Do NOT allow state skipping in the order lifecycle — enforce the state machine
 - Do NOT use TypeORM — use Drizzle. TypeORM reflection-based types are unreliable for this level of data integrity
@@ -807,7 +978,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT collapse `/hr/payroll` and `/hr/plans` back into one tabbed page. They are intentionally split: Monthly Payrolls (the workflow heads + HR + Finance live in) is one page; Commission Plans (the rule-config tool heads + HR own) is another. Same role gating, different concerns. CEO directive 2026-04-26.
 - Do NOT inline `permissionProcedure('hr.write')` on the commission plan tRPC procedures. Heads of Department need to create + edit plans for their own dept's roles without holding the org-wide `hr.write` permission — the service layer (`HrService.createCommissionPlan` / `updateCommissionPlan` / `listCommissionPlans`) is the canonical gate via `getManageableRolesForViewer`. If you tighten the procedure to `permissionProcedure(...)`, every Head loses access silently.
 - Do NOT skip the "edit-against-existing-role" check in `updateCommissionPlan`. Reading the existing plan's role and verifying it's in the actor's `manageable` set is what stops a Head from taking over a plan in another department by knowing its planId. The check looks redundant alongside `createCommissionPlan`'s gate but covers a different attack surface.
-- Do NOT close Generate Monthly Payroll Batch (or any submit-driven modal) before the fetcher round-trip completes. The pattern in [apps/web/app/features/hr/MonthlyPayrolls.tsx](apps/web/app/features/hr/MonthlyPayrolls.tsx) — a `generateInFlightRef` + `useEffect` that closes only when `fetcher.state === 'idle' && fetcher.data?.success` — is the canonical setup for any modal whose action talks to a server: it surfaces server errors inline (e.g. `CONFLICT` for an already-submitted batch) instead of silently dropping them, and the backdrop dismissal is blocked while the request is in flight. Replicate this for any new "submit + maybe-fail" modal; do NOT regress to `onSubmit={() => setOpen(false)}`.
+- Do NOT hand-roll close-on-success effects on submit-driven modals. **Use the shared hooks** documented in `## Modal + Optimistic UI Pattern (Non-Negotiable)` above (`useCloseOnFetcherSuccess`, `useOptimisticListMerge`, `useOptimisticListPatches`, `applyOptimisticPatches`, `isOptimisticId`, `isOptimisticPatched`). The `MonthlyPayrolls.tsx` `generateInFlightRef` + `fetcher.state === 'idle'` variant is **superseded** by the shared hooks — it waits for loader revalidation and lags the close 100–500 ms behind the toast. Two non-negotiables carry over from the old directive: server errors must still surface inline (the action returns `{ error }`, the page renders it via `PageNotification` and `useFetcherToast` shows the error toast — both keep working unchanged); and modal backdrop dismissal must still be blocked while the request is in flight (the existing `mousedown+mouseup` rule on `<Modal>` already covers this — do not regress to `onSubmit={() => setOpen(false)}`, which closes BEFORE the action validates).
 - Do NOT leave the Month picker on the Generate batch modal blank. Always default `<input type="month">` to the current `YYYY-MM` so HoDs in the common case (running this month's payroll) just hit Generate. The default is computed inside a `useMemo([showGenerate])` so the value refreshes if the modal is reopened in a long-lived tab that has crossed midnight on the 1st.
 - Do NOT use `LIKE … INCLUDING ALL` to clone a table that has UNIQUE indexes if the clone is meant to hold multiple rows per the unique tuple. INCLUDING ALL copies UNIQUE INDEXES too — and unique indexes are NOT constraints, so the constraint-stripping loop in audit migrations doesn't catch them. Either use `INCLUDING DEFAULTS` (skip indexes) and recreate the lookup indexes you actually want, OR follow up with `DROP INDEX IF EXISTS …_unique_idx` like migration 0068 had to. The `payroll_batches_history` UPDATE-blowup was caused by exactly this oversight.
 - Do NOT skip a payout row for a staff member when generating a batch — even if their commission plan is missing or computes to zero. CEO directive 2026-04-26: every active staff member in (branch × dept) MUST appear in the batch with a default-zero payout so HR has a complete roster to review and adjust manually. The previous "if (!computed) continue;" left people invisible in the batch; replace any future similar shortcut with the always-insert default-zero pattern in `payroll-batch.service.ts::generateBatch`.

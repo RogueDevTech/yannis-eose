@@ -1,14 +1,19 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { DescriptionList } from '~/components/ui/description-list';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -23,8 +28,13 @@ import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
-import { DataTable, type TableColumn } from '~/components/ui/data-table';
-import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import {
+  CompactTable,
+  CompactTableActions,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type {
   InventoryLevel, InventoryStreamData, ProductOption, LocationOption, StockMovement,
@@ -94,9 +104,15 @@ export function InventoryPage({
   const isLoadingLevels = useLoaderRefetchBusy();
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
-  const locationName = (id: string | null) => id ? (locations.find((l) => l.id === id)?.name ?? 'Unknown location') : '—';
+  const locationName = (id: string | null) => {
+    if (!id) return '—';
+    const loc = locations.find((l) => l.id === id);
+    if (!loc) return 'Unknown location';
+    return loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name;
+  };
 
-  const displayedLevels = levels;
+  // displayedLevels is computed below — after the optimisticLevels hook fires
+  // (it depends on `fetcher` which isn't declared yet here).
   const currentProductFilter = serverProductFilter || 'ALL';
   const currentLocationFilter = serverLocationFilter || 'ALL';
   const currentSort: LevelsSort = serverSort;
@@ -182,13 +198,80 @@ export function InventoryPage({
     }
   }, [intakeError]);
 
-  useEffect(() => {
-    if (!showIntakeForm) return;
-    if (!(fetcher.data as { success?: boolean } | undefined)?.success) return;
+  /**
+   * Edge-trigger close + reset on successful intake. Replaces the old
+   * `useEffect([fetcher.data, showIntakeForm])` variant per CLAUDE.md →
+   * "Modal + Optimistic UI Pattern". Intent-filtered so the same `fetcher`
+   * (which also handles `adjustStock`, `markIntakeReceipt`, etc.) doesn't
+   * tear down the intake modal on unrelated success.
+   */
+  const handleIntakeSuccess = useCallback(() => {
     setShowIntakeForm(false);
     setIntakeProductId('');
     setIntakeLocationId('');
-  }, [fetcher.data, showIntakeForm]);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleIntakeSuccess, { intent: 'stockIntake' });
+
+  /**
+   * Optimistic-add: derive a synthetic InventoryLevel row from the in-flight
+   * `stockIntake` payload so the new row appears in the table the same React
+   * tick the toast fires. Sticks through revalidation; canonical row replaces
+   * it cleanly when the loader returns. The render path below dims the row
+   * with `opacity-60`, shows a "Saving…" chip, and disables row actions while
+   * the synthetic id is in flight (`__optimistic_…` would 404 the API).
+   *
+   * We only synthesize when the (productId, locationId) pair isn't already in
+   * the levels list — when it IS already there, the server does an UPDATE
+   * (stockCount += quantity) and the existing row is sufficient. This avoids
+   * showing a duplicate row while the actual UPDATE is in flight.
+   */
+  const buildOptimisticLevels = useCallback<
+    (fd: FormData, intent: string) => InventoryLevel[] | null
+  >(
+    (fd, intent) => {
+      if (intent !== 'stockIntake') return null;
+      const productId = fd.get('productId')?.toString().trim();
+      const locationId = fd.get('locationId')?.toString().trim();
+      const qty = parseInt(fd.get('quantity')?.toString() ?? '0', 10);
+      if (!productId || !locationId || !Number.isFinite(qty) || qty < 1) return null;
+      // If a row for this (product, location) already exists, server UPDATEs it
+      // — don't synthesize a duplicate. Optimistic visual feedback for the
+      // increment isn't worth the duplicate-row confusion.
+      const existing = levels.some((l) => l.productId === productId && l.locationId === locationId);
+      if (existing) return null;
+      return [
+        {
+          id: optimisticId(`${productId}_${locationId}`),
+          productId,
+          locationId,
+          stockCount: qty,
+          reservedCount: 0,
+          status: 'AVAILABLE',
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+    },
+    [levels],
+  );
+  // `awaitSuccess: true` — only render the synthetic row AFTER the action
+  // returns success (during the loader-revalidation window). The intake
+  // modal blocks the table during submit so an optimistic-during-submit row
+  // would be invisible; this also avoids a brief "row appears, then
+  // disappears" flash if the intake fails server-side.
+  const optimisticLevels = useOptimisticListMerge<InventoryLevel>(
+    fetcher,
+    buildOptimisticLevels,
+    { awaitSuccess: true },
+  );
+
+  /** Prepend in-flight optimistic rows so the user sees their addition the
+   * same React tick the toast appears. Server's default sort is
+   * `updatedAt DESC` so prepending matches the canonical order — the
+   * synthetic row stays at top until it's replaced by the canonical row. */
+  const displayedLevels = useMemo(
+    () => [...optimisticLevels, ...levels],
+    [levels, optimisticLevels],
+  );
 
   // Low-stock threshold editor (admin-only)
   const [showThresholdModal, setShowThresholdModal] = useState(false);
@@ -206,6 +289,103 @@ export function InventoryPage({
   const totalStock = levels.reduce((sum, l) => sum + l.stockCount, 0);
   const totalReserved = levels.reduce((sum, l) => sum + l.reservedCount, 0);
 
+  /** CompactTable columns for stock levels — `hideOnMobile` drops Reserved + Status
+   *  on narrow desktop table columns; mobile uses card rows from the same component. */
+  const levelColumns: CompactTableColumn<InventoryLevel>[] = [
+    {
+      key: 'product',
+      header: 'Product',
+      render: (level) => {
+        const isOptimistic = isOptimisticId(level.id);
+        return (
+          <span className="font-medium text-app-fg">
+            {productName(level.productId)}
+            {isOptimistic && (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted italic">Saving…</span>
+            )}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'location',
+      header: 'Location',
+      render: (level) => <span className="text-app-fg-muted">{locationName(level.locationId)}</span>,
+    },
+    {
+      key: 'stock',
+      header: 'Stock',
+      align: 'right',
+      render: (level) => <span className="font-medium tabular-nums">{level.stockCount}</span>,
+    },
+    {
+      key: 'reserved',
+      header: 'Reserved',
+      align: 'right',
+      hideOnMobile: true,
+      render: (level) => (
+        <span className="text-warning-600 dark:text-warning-400 tabular-nums">{level.reservedCount}</span>
+      ),
+    },
+    {
+      key: 'available',
+      header: 'Available',
+      align: 'right',
+      render: (level) => (
+        <span className="font-medium text-success-600 dark:text-success-400 tabular-nums">
+          {level.stockCount - level.reservedCount}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      hideOnMobile: true,
+      render: (level) => <StatusBadge status={level.status} />,
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      tight: true,
+      render: (level) => {
+        const isOptimistic = isOptimisticId(level.id);
+        // Variant rule (CLAUDE.md → "Table Action Buttons"): one action →
+        // primary; two-or-more → primary (View) + neutral (secondary) + danger
+        // (destructive). When optimistic, View becomes inert.
+        return (
+          <div className="inline-flex items-center justify-end gap-1.5">
+            {isOptimistic ? (
+              <TableActionButton inert variant="primary">View</TableActionButton>
+            ) : (
+              <TableActionButton to={`/admin/inventory/${level.id}`} prefetch="intent" variant="primary">
+                View
+              </TableActionButton>
+            )}
+            {canAdjust && (
+              <>
+                <TableActionButton
+                  variant="danger"
+                  disabled={isOptimistic}
+                  onClick={() => openAdjustModal(level, 'decrease')}
+                >
+                  Remove
+                </TableActionButton>
+                <TableActionButton
+                  variant="neutral"
+                  disabled={isOptimistic}
+                  onClick={() => openAdjustModal(level, 'increase')}
+                >
+                  Add
+                </TableActionButton>
+              </>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="space-y-4">
       {/* Page header */}
@@ -213,58 +393,131 @@ export function InventoryPage({
         title="Inventory"
         description="Track stock levels, transfers, and reconciliations across all locations"
         actions={
-          <>
-            <PageRefreshButton />
-            <button
-              type="button"
-              onClick={() => canEditLowStock && setShowThresholdModal(true)}
-              disabled={!canEditLowStock}
-              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-app-border bg-app-elevated transition-colors ${
-                canEditLowStock ? 'text-app-fg-muted hover:text-app-fg hover:border-app-border-strong cursor-pointer' : 'text-app-fg-muted cursor-default'
-              }`}
-              title={canEditLowStock ? 'Click to change low-stock alert threshold' : 'Low-stock alert threshold (read-only)'}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-              </svg>
-              <span>
-                Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units
-              </span>
-            </button>
-            {canIntake && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  if (showIntakeForm) {
-                    setShowIntakeForm(false);
-                    setIntakeProductId('');
-                    setIntakeLocationId('');
-                  } else {
-                    openIntakeModal(null);
-                  }
-                }}
-              >
-                {showIntakeForm ? 'Close' : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    Stock Intake
-                  </>
+          <PageHeaderMobileTools
+            sheetTitle="Inventory tools"
+            sheetSubtitle={<span>Threshold, stock intake, and export</span>}
+            triggerAriaLabel="Inventory toolbar"
+            desktop={
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                <PageRefreshButton />
+                <button
+                  type="button"
+                  onClick={() => canEditLowStock && setShowThresholdModal(true)}
+                  disabled={!canEditLowStock}
+                  className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-app-border bg-app-elevated transition-colors whitespace-nowrap ${
+                    canEditLowStock
+                      ? 'text-app-fg-muted hover:text-app-fg hover:border-app-border-strong cursor-pointer'
+                      : 'text-app-fg-muted cursor-default'
+                  }`}
+                  title={canEditLowStock ? 'Click to change low-stock alert threshold' : 'Low-stock alert threshold (read-only)'}
+                >
+                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+                    />
+                  </svg>
+                  <span>
+                    <span className="sm:hidden">&lt; <strong className="text-app-fg">{lowStockThreshold}</strong></span>
+                    <span className="hidden sm:inline">Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units</span>
+                  </span>
+                </button>
+                {canIntake && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="flex-1 sm:flex-initial whitespace-nowrap"
+                    onClick={() => {
+                      if (showIntakeForm) {
+                        setShowIntakeForm(false);
+                        setIntakeProductId('');
+                        setIntakeLocationId('');
+                      } else {
+                        openIntakeModal(null);
+                      }
+                    }}
+                  >
+                    {showIntakeForm ? (
+                      'Close'
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                        </svg>
+                        <span className="sm:hidden">Intake</span>
+                        <span className="hidden sm:inline">Stock Intake</span>
+                      </>
+                    )}
+                  </Button>
                 )}
-              </Button>
+                {canExport && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="flex-1 sm:flex-initial whitespace-nowrap"
+                    onClick={() => setShowExportModal(true)}
+                  >
+                    <span className="sm:hidden">Report</span>
+                    <span className="hidden sm:inline">Generate report</span>
+                  </Button>
+                )}
+              </div>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (canEditLowStock) {
+                      closeSheet();
+                      setShowThresholdModal(true);
+                    }
+                  }}
+                  disabled={!canEditLowStock}
+                  className={`inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-app-border bg-app-elevated px-3 py-2 text-sm ${
+                    canEditLowStock
+                      ? 'text-app-fg-muted hover:text-app-fg hover:border-app-border-strong'
+                      : 'cursor-default text-app-fg-muted opacity-60'
+                  }`}
+                >
+                  Alert &lt; <strong className="text-app-fg">{lowStockThreshold}</strong> units
+                </button>
+                {canIntake && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      if (showIntakeForm) {
+                        setShowIntakeForm(false);
+                        setIntakeProductId('');
+                        setIntakeLocationId('');
+                      } else {
+                        openIntakeModal(null);
+                      }
+                    }}
+                  >
+                    {showIntakeForm ? 'Close stock intake' : 'Stock Intake'}
+                  </Button>
+                )}
+                {canExport && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExportModal(true);
+                    }}
+                  >
+                    Generate report
+                  </Button>
+                )}
+              </>
             )}
-            {canExport && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowExportModal(true)}
-              >
-                Generate report
-              </Button>
-            )}
-          </>
+          />
         }
       />
       <ExportModal
@@ -328,20 +581,20 @@ export function InventoryPage({
               variant="warning"
               message={
                 products.length === 0 && locations.length === 0
-                  ? 'Create products and logistics locations first.'
+                  ? 'You need at least one product and one logistics location before you can receive stock.'
                   : products.length === 0
-                    ? 'Create products first via Products → Add Product.'
-                    : 'Create logistics locations first via Logistics.'
+                    ? 'You need at least one product before you can receive stock.'
+                    : 'You need at least one logistics location before you can receive stock.'
               }
               actions={
                 products.length === 0 && locations.length === 0
                   ? [
-                      { label: 'Add Product', href: '/admin/products/new' },
-                      { label: 'Go to Logistics', href: '/admin/logistics' },
+                      { label: 'New product', href: '/admin/products/new' },
+                      { label: 'Logistics partners', href: '/admin/logistics/partners' },
                     ]
                   : products.length === 0
-                    ? [{ label: 'Add Product', href: '/admin/products/new' }]
-                    : [{ label: 'Go to Logistics', href: '/admin/logistics' }]
+                    ? [{ label: 'New product', href: '/admin/products/new' }]
+                    : [{ label: 'Logistics partners', href: '/admin/logistics/partners' }]
               }
             />
           ) : (
@@ -372,7 +625,10 @@ export function InventoryPage({
                 onChange={setIntakeLocationId}
                 placeholder="Select location..."
                 searchPlaceholder="Search locations..."
-                options={locations.map((l: LocationOption) => ({ value: l.id, label: l.name }))}
+                options={locations.map((l: LocationOption) => ({
+                  value: l.id,
+                  label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+                }))}
                 wrapperClassName="sm:col-span-2"
               />
               <TextInput
@@ -732,7 +988,10 @@ export function InventoryPage({
               searchPlaceholder="Search locations..."
               options={[
                 { value: 'ALL', label: 'All locations' },
-                ...locations.map((l: LocationOption) => ({ value: l.id, label: l.name })),
+                ...locations.map((l: LocationOption) => ({
+                  value: l.id,
+                  label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+                })),
               ]}
             />
             <form
@@ -780,154 +1039,24 @@ export function InventoryPage({
             )}
           </div>
         )}
-        <TableLoadingOverlay show={isLoadingLevels}>
-          <div className="card p-0">
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header">Product</th>
-                    <th className="table-header">Location</th>
-                    <th className="table-header text-right">Stock</th>
-                    <th className="table-header text-right">Reserved</th>
-                    <th className="table-header text-right">Available</th>
-                    <th className="table-header">Status</th>
-                    <th className="table-header text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedLevels.map((level) => (
-                    <tr key={level.id} className="table-row">
-                      <td className="table-cell font-medium text-app-fg">{productName(level.productId)}</td>
-                      <td className="table-cell text-app-fg-muted">{locationName(level.locationId)}</td>
-                      <td className="table-cell text-right font-medium">{level.stockCount}</td>
-                      <td className="table-cell text-right text-warning-600 dark:text-warning-400">{level.reservedCount}</td>
-                      <td className="table-cell text-right font-medium text-success-600 dark:text-success-400">
-                        {level.stockCount - level.reservedCount}
-                      </td>
-                      <td className="table-cell">
-                        <StatusBadge status={level.status} />
-                      </td>
-                      <td className="table-cell text-right">
-                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
-                          <Link
-                            to={`/admin/inventory/${level.id}`}
-                            prefetch="intent"
-                            className="btn-primary btn-sm text-xs inline-flex items-center justify-center"
-                          >
-                            View
-                          </Link>
-                          {canAdjust && (
-                            <>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => openAdjustModal(level, 'decrease')}
-                              >
-                                Remove stock
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => openAdjustModal(level, 'increase')}
-                              >
-                                Add units
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {displayedLevels.length === 0 && (
-                    <tr>
-                      <td colSpan={7}>
-                        <EmptyState
-                          title={levels.length === 0 ? 'No inventory data yet' : 'No inventory matches your filter'}
-                          description={levels.length === 0 ? 'Add products and receive stock to get started.' : 'Try changing the product filter or sort.'}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile */}
-            <div className="md:hidden space-y-3 px-1">
-              {displayedLevels.map((level) => (
-                <div
-                  key={level.id}
-                  className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className="font-medium text-sm text-app-fg">{productName(level.productId)}</p>
-                      <p className="text-sm text-app-fg-muted">{locationName(level.locationId)}</p>
-                    </div>
-                    <StatusBadge status={level.status} />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-sm">
-                    <div>
-                      <p className="text-xs text-app-fg-muted">Stock</p>
-                      <p className="font-medium text-app-fg">{level.stockCount}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-app-fg-muted">Reserved</p>
-                      <p className="font-medium text-warning-600 dark:text-warning-400">{level.reservedCount}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-app-fg-muted">Available</p>
-                      <p className="font-medium text-success-600 dark:text-success-400">{level.stockCount - level.reservedCount}</p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-app-border">
-                    <Link
-                      to={`/admin/inventory/${level.id}`}
-                      prefetch="intent"
-                      className="btn-primary btn-sm"
-                    >
-                      View
-                    </Link>
-                    {canAdjust && (
-                      <>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => openAdjustModal(level, 'decrease')}
-                        >
-                          Remove stock
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => openAdjustModal(level, 'increase')}
-                        >
-                          Add units
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {displayedLevels.length === 0 && (
-                <EmptyState
-                  title={
-                    totalLevels === 0 && currentProductFilter === 'ALL' && currentLocationFilter === 'ALL' && !serverSearch && currentSort === 'default'
-                      ? 'No inventory data yet'
-                      : 'No inventory matches your filter'
-                  }
-                />
-              )}
-            </div>
-          </div>
-        </TableLoadingOverlay>
+        <CompactTable<InventoryLevel>
+          columns={levelColumns}
+          rows={displayedLevels}
+          rowKey={(r) => r.id}
+          rowClassName={(level) => (isOptimisticId(level.id) ? 'opacity-60' : '')}
+          loading={isLoadingLevels}
+          loadingVariant="overlay"
+          emptyTitle={
+            levels.length === 0
+              ? 'No inventory data yet'
+              : 'No inventory matches your filter'
+          }
+          emptyDescription={
+            levels.length === 0
+              ? 'Add products and receive stock to get started.'
+              : 'Try changing the product filter or sort.'
+          }
+        />
 
         {/* Pagination — server-side, drives `page` URL param. */}
         {levelsTotalPages > 1 && (
@@ -998,72 +1127,105 @@ function DeliveryDeductionsTab({
       ? selectedMovement.referenceId
       : null;
 
+  const deductionColumns = useMemo((): CompactTableColumn<StockMovement>[] => [
+    {
+      key: 'type',
+      header: 'Type',
+      render: (m) => (
+        <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
+          {formatMovementType(m.movementType)}
+        </span>
+      ),
+    },
+    {
+      key: 'product',
+      header: 'Product',
+      render: (m) => <span className="font-medium text-app-fg">{productName(m.productId)}</span>,
+      minWidth: 'min-w-[140px]',
+    },
+    {
+      key: 'customer',
+      header: 'Customer',
+      render: (m) => <span className="text-app-fg">{m.referenceCustomerName ?? '—'}</span>,
+    },
+    {
+      key: 'qty',
+      header: 'Qty',
+      align: 'right',
+      nowrap: true,
+      render: (m) => (
+        <span className="font-medium text-danger-600 dark:text-danger-400 tabular-nums">
+          -{Math.abs(m.quantity)}
+        </span>
+      ),
+    },
+    {
+      key: 'from',
+      header: 'From',
+      hideOnMobile: true,
+      render: (m) => <span className="text-app-fg-muted">{locationName(m.fromLocationId)}</span>,
+    },
+    {
+      key: 'to',
+      header: 'To',
+      hideOnMobile: true,
+      render: (m) => <span className="text-app-fg-muted">{locationName(m.toLocationId)}</span>,
+    },
+    {
+      key: 'route',
+      header: 'Route',
+      className: 'sm:hidden',
+      render: (m) => (
+        <span className="text-xs text-app-fg-muted">
+          {locationName(m.fromLocationId)} → {locationName(m.toLocationId)}
+        </span>
+      ),
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      nowrap: true,
+      render: (m) => (
+        <span className="text-app-fg-muted whitespace-nowrap text-xs sm:text-sm">
+          {new Date(m.createdAt).toLocaleDateString('en-NG', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      tight: true,
+      nowrap: true,
+      minWidth: 'min-w-[4.5rem]',
+      mobileShowLabel: false,
+      render: (m) => (
+        <CompactTableActions className="justify-end shrink-0">
+          <CompactTableActionButton onClick={() => setSelectedMovement(m)}>View</CompactTableActionButton>
+        </CompactTableActions>
+      ),
+    },
+  ], [productName, locationName]);
+
   return (
     <>
       <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Type</th>
-                <th className="table-header">Product</th>
-                <th className="table-header">Customer</th>
-                <th className="table-header text-right">Qty</th>
-                <th className="table-header">From</th>
-                <th className="table-header">To</th>
-                <th className="table-header">Date</th>
-                <th className="table-header text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movements.map((m) => (
-                <tr key={m.id} className="table-row">
-                  <td className="table-cell">
-                    <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
-                      {formatMovementType(m.movementType)}
-                    </span>
-                  </td>
-                  <td className="table-cell font-medium text-app-fg">{productName(m.productId)}</td>
-                  <td className="table-cell text-app-fg">
-                    {m.referenceCustomerName ?? '—'}
-                  </td>
-                  <td className="table-cell text-right font-medium text-danger-600 dark:text-danger-400 tabular-nums">
-                    -{Math.abs(m.quantity)}
-                  </td>
-                  <td className="table-cell text-app-fg-muted">{locationName(m.fromLocationId)}</td>
-                  <td className="table-cell text-app-fg-muted">{locationName(m.toLocationId)}</td>
-                  <td className="table-cell text-app-fg-muted whitespace-nowrap text-xs sm:text-sm">
-                    {new Date(m.createdAt).toLocaleDateString('en-NG', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </td>
-                  <td className="table-cell text-right">
-                    <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedMovement(m)}>
-                      View
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-              {movements.length === 0 && (
-                <tr>
-                  <td colSpan={8}>
-                    <EmptyState
-                      title="No delivery deductions yet"
-                      description="Stock reductions from delivered orders will appear here."
-                    />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="md:hidden space-y-3 px-1">
-          {movements.map((m) => (
-            <div key={m.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+        <CompactTable<StockMovement>
+          caption="Delivery deductions"
+          columns={deductionColumns}
+          rows={movements}
+          rowKey={(m) => m.id}
+          withCard={false}
+          className="min-w-[720px]"
+          emptyTitle="No delivery deductions yet"
+          emptyDescription="Stock reductions from delivered orders will appear here."
+          renderMobileCard={(m) => (
+            <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
               <div className="flex items-center justify-between mb-2">
                 <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
                   {formatMovementType(m.movementType)}
@@ -1091,14 +1253,8 @@ function DeliveryDeductionsTab({
                 </Button>
               </div>
             </div>
-          ))}
-          {movements.length === 0 && (
-            <EmptyState
-              title="No delivery deductions yet"
-              description="Stock reductions from delivered orders will appear here."
-            />
           )}
-        </div>
+        />
       </div>
 
       <Modal
@@ -1186,7 +1342,11 @@ function TransfersTab({
   routeLoaderBusy?: boolean;
 }) {
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
-  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
+  const locationName = (id: string) => {
+    const loc = locations.find((l) => l.id === id);
+    if (!loc) return 'Unknown location';
+    return loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name;
+  };
   const formatRecordedAt = (dateIso: string) =>
     new Date(dateIso).toLocaleDateString('en-NG', {
       month: 'short',
@@ -1195,7 +1355,7 @@ function TransfersTab({
       minute: '2-digit',
     });
 
-  const columns: TableColumn<Transfer>[] = [
+  const columns: CompactTableColumn<Transfer>[] = [
     {
       key: 'product',
       header: 'Product',
@@ -1246,15 +1406,17 @@ function TransfersTab({
 
   return (
     <div className="card p-4 sm:p-6">
-      <DataTable
+      <CompactTable<Transfer>
         caption="Stock transfers"
         columns={columns}
-        data={transfers}
-        keyField="id"
+        rows={transfers}
+        rowKey={(t) => t.id}
         loading={routeLoaderBusy}
         loadingVariant="overlay"
         emptyTitle="No transfers yet"
         emptyDescription="Record and manage transfers from Admin → Transfers."
+        withCard={false}
+        className="overflow-hidden rounded-xl border border-app-border"
       />
     </div>
   );
@@ -1273,13 +1435,91 @@ function ReturnsTab({
 }) {
   const [writeOffOrderId, setWriteOffOrderId] = useState<string | null>(null);
 
-  const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
-  if (actionSuccess && writeOffOrderId) setWriteOffOrderId(null);
+  // Close write-off modal on success — edge-triggered via the shared hook.
+  // Replaces the prior in-render `if (actionSuccess) setWriteOffOrderId(null)`
+  // (a setState-during-render anti-pattern). See CLAUDE.md → "Modal +
+  // Optimistic UI Pattern".
+  const handleWriteOffSuccess = useCallback(() => {
+    setWriteOffOrderId(null);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleWriteOffSuccess);
 
-  const locationName = (id: string | null) => {
+  const locationName = useCallback((id: string | null) => {
     if (!id) return '\u2014';
     return locationsWithLock.find((l) => l.id === id)?.name ?? 'Unknown location';
-  };
+  }, [locationsWithLock]);
+
+  const returnsColumns = useMemo((): CompactTableColumn<ReturnedOrder>[] => [
+    {
+      key: 'orderId',
+      header: 'Order ID',
+      render: (order) => <OrderIdBadge id={order.id} textClassName="font-mono text-sm text-app-fg-muted" />,
+      minWidth: 'min-w-[120px]',
+    },
+    {
+      key: 'customer',
+      header: 'Customer',
+      render: (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+    },
+    {
+      key: 'location',
+      header: 'Location',
+      hideOnMobile: true,
+      render: (order) => <span className="text-app-fg-muted">{locationName(order.logisticsLocationId)}</span>,
+    },
+    {
+      key: 'notes',
+      header: 'Notes',
+      render: (order) => (
+        <span className="text-sm text-app-fg-muted max-w-[200px] truncate" title={order.deliveryNotes ?? undefined}>
+          {order.deliveryNotes ?? '\u2014'}
+        </span>
+      ),
+      cellTitle: (order) => order.deliveryNotes ?? undefined,
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      nowrap: true,
+      render: (order) => (
+        <span className="text-app-fg-muted text-sm">
+          {new Date(order.updatedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      tight: true,
+      nowrap: true,
+      minWidth: 'min-w-[11rem]',
+      mobileShowLabel: false,
+      render: (order) => (
+        <CompactTableActions className="justify-end shrink-0">
+          <fetcher.Form method="post" className="inline">
+            <input type="hidden" name="intent" value="restock" />
+            <input type="hidden" name="orderId" value={order.id} />
+            <Button
+              type="submit"
+              variant="success"
+              size="sm"
+              className="text-xs"
+              disabled={fetcher.state === 'submitting'}
+              loading={fetcher.state === 'submitting'}
+              loadingText="Restocking..."
+              title="Mark as sellable — add to local 3PL stock"
+            >
+              Sellable
+            </Button>
+          </fetcher.Form>
+          <TableActionButton variant="danger" onClick={() => setWriteOffOrderId(order.id)} title="Mark as damaged — write off as operational loss">
+            Damaged
+          </TableActionButton>
+        </CompactTableActions>
+      ),
+    },
+  ], [fetcher.state, locationName]);
 
   const lockedLocations = locationsWithLock.filter((l) => l.dispatchLocked);
 
@@ -1327,51 +1567,16 @@ function ReturnsTab({
 
       {/* Returns table */}
       <div className="card p-0">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr>
-                <th className="table-header">Order ID</th>
-                <th className="table-header">Customer</th>
-                <th className="table-header">Location</th>
-                <th className="table-header">Notes</th>
-                <th className="table-header">Date</th>
-                <th className="table-header">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {returnedOrders.map((order) => (
-                <tr key={order.id} className="table-row">
-                  <td className="table-cell"><OrderIdBadge id={order.id} textClassName="font-mono text-sm text-app-fg-muted" /></td>
-                  <td className="table-cell font-medium text-app-fg">{order.customerName}</td>
-                  <td className="table-cell text-app-fg-muted">{locationName(order.logisticsLocationId)}</td>
-                  <td className="table-cell text-sm text-app-fg-muted max-w-[200px] truncate">{order.deliveryNotes ?? '\u2014'}</td>
-                  <td className="table-cell text-app-fg-muted text-sm">
-                    {new Date(order.updatedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex gap-1.5">
-                      <fetcher.Form method="post" className="inline">
-                        <input type="hidden" name="intent" value="restock" />
-                        <input type="hidden" name="orderId" value={order.id} />
-                        <Button type="submit" variant="success" size="sm" className="text-xs" disabled={fetcher.state === 'submitting'} loading={fetcher.state === 'submitting'} loadingText="Restocking..." title="Mark as sellable — add to local 3PL stock">Sellable</Button>
-                      </fetcher.Form>
-                      <Button variant="danger" size="sm" className="text-xs" onClick={() => setWriteOffOrderId(order.id)} title="Mark as damaged — write off as operational loss">Damaged</Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {returnedOrders.length === 0 && (
-                <tr><td colSpan={6}><EmptyState title="No returned items pending assessment" /></td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile */}
-        <div className="md:hidden space-y-3 px-1">
-          {returnedOrders.map((order) => (
-            <div key={order.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+        <CompactTable<ReturnedOrder>
+          caption="Returned orders"
+          columns={returnsColumns}
+          rows={returnedOrders}
+          rowKey={(order) => order.id}
+          withCard={false}
+          className="min-w-[860px]"
+          emptyTitle="No returned items pending assessment"
+          renderMobileCard={(order) => (
+            <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-app-fg text-sm">{order.customerName}</span>
                 <StatusBadge status="RETURNED" />
@@ -1379,18 +1584,17 @@ function ReturnsTab({
               <p className="text-sm text-app-fg-muted">
                 {locationName(order.logisticsLocationId)} · {new Date(order.updatedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
               </p>
-              <div className="flex gap-2 pt-1">
-                <fetcher.Form method="post" className="inline">
+              <div className="flex flex-nowrap items-center gap-2 pt-1 overflow-x-auto">
+                <fetcher.Form method="post" className="inline shrink-0">
                   <input type="hidden" name="intent" value="restock" />
                   <input type="hidden" name="orderId" value={order.id} />
                   <Button type="submit" variant="success" size="sm" className="text-xs" loading={fetcher.state === 'submitting'} loadingText="Updating...">Sellable</Button>
                 </fetcher.Form>
-                <Button variant="danger" size="sm" className="text-xs" onClick={() => setWriteOffOrderId(order.id)}>Damaged</Button>
+                <Button variant="danger" size="sm" className="text-xs shrink-0" onClick={() => setWriteOffOrderId(order.id)}>Damaged</Button>
               </div>
             </div>
-          ))}
-          {returnedOrders.length === 0 && <EmptyState title="No returned items pending assessment" />}
-        </div>
+          )}
+        />
       </div>
     </>
   );
@@ -1415,12 +1619,81 @@ function ReconciliationTab({
   const [reconciliationLocationId, setReconciliationLocationId] = useState('');
   const [reconciliationProductId, setReconciliationProductId] = useState('');
 
-  const actionSuccess = (fetcher.data as { success?: boolean } | undefined)?.success;
-  if (actionSuccess && showForm) setShowForm(false);
+  // Close reconciliation modal on success — edge-triggered, replaces the
+  // prior in-render `if (actionSuccess) setShowForm(false)` anti-pattern.
+  const handleReconciliationSuccess = useCallback(() => {
+    setShowForm(false);
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, handleReconciliationSuccess);
 
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
   const activeLocations = locationsWithLock.filter((l) => l.status === 'ACTIVE');
+
+  const reconciliationColumns = useMemo((): CompactTableColumn<Reconciliation>[] => [
+    {
+      key: 'location',
+      header: 'Location',
+      render: (r) => <span className="font-medium text-app-fg">{locationName(r.locationId)}</span>,
+      minWidth: 'min-w-[140px]',
+    },
+    {
+      key: 'product',
+      header: 'Product',
+      render: (r) => <span className="text-app-fg-muted">{productName(r.productId)}</span>,
+    },
+    {
+      key: 'digital',
+      header: 'Digital',
+      align: 'right',
+      render: (r) => <span className="font-medium">{r.digitalCount}</span>,
+    },
+    {
+      key: 'physical',
+      header: 'Physical',
+      align: 'right',
+      render: (r) => <span className="font-medium">{r.physicalCount}</span>,
+    },
+    {
+      key: 'discrepancy',
+      header: 'Discrepancy',
+      align: 'right',
+      render: (r) => (
+        <span
+          className={
+            r.discrepancy < 0
+              ? 'font-bold text-danger-600 dark:text-danger-400'
+              : r.discrepancy > 0
+                ? 'font-bold text-success-600 dark:text-success-400'
+                : 'font-bold'
+          }
+        >
+          {r.discrepancy > 0 ? '+' : ''}
+          {r.discrepancy}
+        </span>
+      ),
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      render: (r) => <span className="text-sm">{REASON_LABELS[r.reasonCode] ?? r.reasonCode}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (r) => <StatusBadge status={r.reconciliationStatus} />,
+    },
+    {
+      key: 'date',
+      header: 'Date',
+      nowrap: true,
+      render: (r) => (
+        <span className="text-app-fg-muted text-sm">
+          {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+        </span>
+      ),
+    },
+  ], [locations, products]);
 
   return (
     <>
@@ -1562,72 +1835,39 @@ function ReconciliationTab({
 
       {/* Reconciliation Table */}
       <DeferredSection resolve={reconciliations} skeleton="table">
-        {(resolved) => (
-          <div className="card p-0">
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="table-header">Location</th>
-                    <th className="table-header">Product</th>
-                    <th className="table-header text-right">Digital</th>
-                    <th className="table-header text-right">Physical</th>
-                    <th className="table-header text-right">Discrepancy</th>
-                    <th className="table-header">Reason</th>
-                    <th className="table-header">Status</th>
-                    <th className="table-header">Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(resolved as Reconciliation[]).map((r) => (
-                    <tr key={r.id} className="table-row">
-                      <td className="table-cell font-medium text-app-fg">{locationName(r.locationId)}</td>
-                      <td className="table-cell text-app-fg-muted">{productName(r.productId)}</td>
-                      <td className="table-cell text-right font-medium">{r.digitalCount}</td>
-                      <td className="table-cell text-right font-medium">{r.physicalCount}</td>
-                      <td className="table-cell text-right font-bold">
-                        <span className={r.discrepancy < 0 ? 'text-danger-600 dark:text-danger-400' : r.discrepancy > 0 ? 'text-success-600 dark:text-success-400' : ''}>
-                          {r.discrepancy > 0 ? '+' : ''}{r.discrepancy}
-                        </span>
-                      </td>
-                      <td className="table-cell text-sm">{REASON_LABELS[r.reasonCode] ?? r.reasonCode}</td>
-                      <td className="table-cell"><StatusBadge status={r.reconciliationStatus} /></td>
-                      <td className="table-cell text-app-fg-muted text-sm">
-                        {new Date(r.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </td>
-                    </tr>
-                  ))}
-                  {(resolved as Reconciliation[]).length === 0 && (
-                    <tr><td colSpan={8}><EmptyState title="No reconciliation records" description="Submit a report when physical stock differs from system records." /></td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile */}
-            <div className="md:hidden space-y-3 px-1">
-              {(resolved as Reconciliation[]).map((r) => (
-                <div key={r.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-app-fg text-sm">{locationName(r.locationId)}</span>
-                    <StatusBadge status={r.reconciliationStatus} />
+        {(resolved) => {
+          const rows = resolved as Reconciliation[];
+          return (
+            <div className="card p-0">
+              <CompactTable<Reconciliation>
+                caption="Stock reconciliations"
+                columns={reconciliationColumns}
+                rows={rows}
+                rowKey={(r) => r.id}
+                withCard={false}
+                className="min-w-[960px]"
+                emptyTitle="No reconciliation records"
+                emptyDescription="Submit a report when physical stock differs from system records."
+                renderMobileCard={(r) => (
+                  <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-app-fg text-sm">{locationName(r.locationId)}</span>
+                      <StatusBadge status={r.reconciliationStatus} />
+                    </div>
+                    <p className="text-sm text-app-fg-muted">{productName(r.productId)} · {REASON_LABELS[r.reasonCode] ?? r.reasonCode}</p>
+                    <div className="flex gap-4 text-sm">
+                      <span>Digital: <strong>{r.digitalCount}</strong></span>
+                      <span>Physical: <strong>{r.physicalCount}</strong></span>
+                      <span className={r.discrepancy < 0 ? 'text-danger-600 dark:text-danger-400 font-bold' : 'text-success-600 dark:text-success-400 font-bold'}>
+                        {r.discrepancy > 0 ? '+' : ''}{r.discrepancy}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-sm text-app-fg-muted">{productName(r.productId)} · {REASON_LABELS[r.reasonCode] ?? r.reasonCode}</p>
-                  <div className="flex gap-4 text-sm">
-                    <span>Digital: <strong>{r.digitalCount}</strong></span>
-                    <span>Physical: <strong>{r.physicalCount}</strong></span>
-                    <span className={r.discrepancy < 0 ? 'text-danger-600 dark:text-danger-400 font-bold' : 'text-success-600 dark:text-success-400 font-bold'}>
-                      {r.discrepancy > 0 ? '+' : ''}{r.discrepancy}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {(resolved as Reconciliation[]).length === 0 && (
-                <EmptyState title="No reconciliation records" />
-              )}
+                )}
+              />
             </div>
-          </div>
-        )}
+          );
+        }}
       </DeferredSection>
     </>
   );

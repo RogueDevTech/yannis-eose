@@ -35,6 +35,7 @@ export type StandardFieldKey =
   | 'deliveryState'
   | 'gender'
   | 'preferredDeliveryDate'
+  | 'customerEmail'
   | 'paymentMethod';
 
 export interface StandardFieldConfig {
@@ -53,6 +54,7 @@ export interface CampaignFormConfig {
   showDeliveryState?: boolean | string;
   showGender?: boolean | string;
   showPreferredDeliveryDate?: boolean | string;
+  showCustomerEmail?: boolean | string;
   showPaymentMethod?: boolean | string;
   showProductImages?: boolean | string;
   requireDeliveryAddress?: boolean | string;
@@ -60,9 +62,12 @@ export interface CampaignFormConfig {
   requireDeliveryState?: boolean | string;
   requireGender?: boolean | string;
   requirePreferredDeliveryDate?: boolean | string;
+  requireCustomerEmail?: boolean | string;
   requirePaymentMethod?: boolean | string;
   deliveryStateOptions?: string[];
   preferredDeliveryDateOptions?: string[];
+  /** Dropdown choices for the Gender additional field (defaults: Male, Female). */
+  genderOptions?: string[];
   standardFields?: StandardFieldConfig[];
   /** Custom fields the Media Buyer adds to their public form (create / edit). */
   customFields?: CustomFormField[];
@@ -83,10 +88,19 @@ export interface Campaign {
   mediaBuyerName?: string | null;
 }
 
+/** Offer tier from `products.offers` (matches Edge / `products.list`). */
+export interface ProductOfferRow {
+  label: string;
+  qty: number;
+  price: string | number;
+}
+
 export interface Product {
   id: string;
   name: string;
   baseSalePrice: string;
+  /** When omitted or empty, the hosted preview hides the offer picker until product data loads. */
+  offers?: ProductOfferRow[];
 }
 
 export interface FormsPageProps {

@@ -1,0 +1,208 @@
+import { Link, useSearchParams } from '@remix-run/react';
+import { TableActionButton } from '~/components/ui/table-action-button';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { SearchInput } from '~/components/ui/search-input';
+import { FormSelect } from '~/components/ui/form-select';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+
+export type StaffOnboardingDocumentRow = {
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  primaryBranchId: string | null;
+  primaryBranchName: string | null;
+  onboardingStatus: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
+  submittedAt: string | null;
+  approvedAt: string | null;
+  onboardingUpdatedAt: string | null;
+};
+
+interface StaffOnboardingDocumentsPageProps {
+  rows: StaffOnboardingDocumentRow[];
+  page: number;
+  totalPages: number;
+  totalCount: number;
+  pageSize: number;
+  onboardingParam: string;
+  sortByParam: string;
+  sortOrderParam: string;
+  searchParam: string;
+}
+
+const ONBOARDING_OPTIONS = [
+  { value: 'ALL', label: 'All onboarding statuses' },
+  { value: 'NOT_STARTED', label: 'Not started' },
+  { value: 'IN_PROGRESS', label: 'In progress' },
+  { value: 'SUBMITTED', label: 'Submitted' },
+  { value: 'APPROVED', label: 'Approved' },
+] as const;
+
+const SORT_OPTIONS = [
+  { value: 'name', label: 'Name (A–Z default)' },
+  { value: 'onboardingUpdatedAt', label: 'Last onboarding activity' },
+] as const;
+
+function formatTs(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+export function StaffOnboardingDocumentsPage({
+  rows,
+  page,
+  totalPages,
+  totalCount,
+  pageSize,
+  onboardingParam,
+  sortByParam,
+  sortOrderParam,
+  searchParam,
+}: StaffOnboardingDocumentsPageProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isFilterLoading = useLoaderRefetchBusy();
+
+  const patchParams = (patch: Record<string, string | undefined>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || v === '') next.delete(k);
+      else next.set(k, v);
+    }
+    next.set('page', '1');
+    setSearchParams(next, { replace: true });
+  };
+
+  const columns: CompactTableColumn<StaffOnboardingDocumentRow>[] = [
+    {
+      key: 'name',
+      header: 'Staff',
+      render: (row) => (
+        <div className="min-w-0">
+          <div className="font-medium text-app-fg truncate">{row.name}</div>
+          <div className="text-xs text-app-muted truncate">{row.email}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'onboardingStatus',
+      header: 'Onboarding',
+      render: (row) => (
+        <StatusBadge status={row.onboardingStatus} showDot size="sm" />
+      ),
+    },
+    {
+      key: 'submittedAt',
+      header: 'Submitted',
+      hideOnMobile: true,
+      render: (row) => (
+        <span className="text-xs text-app-muted whitespace-nowrap">{formatTs(row.submittedAt)}</span>
+      ),
+    },
+    {
+      key: 'approvedAt',
+      header: 'Approved',
+      hideOnMobile: true,
+      render: (row) => (
+        <span className="text-xs text-app-muted whitespace-nowrap">{formatTs(row.approvedAt)}</span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      className: 'w-[1%]',
+      render: (row) => (
+        <TableActionButton to={`/hr/users/${row.userId}/onboarding`} variant="primary">
+          Open
+        </TableActionButton>
+      ),
+    },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Staff onboarding documents"
+        description="Status of staff HR documents — open a row to review or edit in the full onboarding flow."
+        actions={<PageRefreshButton />}
+      />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="flex-1 min-w-[12rem]">
+          <label className="block text-xs font-medium text-app-muted mb-1">Search</label>
+          <SearchInput
+            placeholder="Name or email…"
+            defaultValue={searchParam}
+            debounceMs={350}
+            onChange={(q) => patchParams({ search: q.trim() || undefined })}
+          />
+        </div>
+        <div className="w-full sm:w-52">
+          <label className="block text-xs font-medium text-app-muted mb-1">Onboarding</label>
+          <FormSelect
+            value={onboardingParam}
+            onChange={(e) =>
+              patchParams({ onboarding: e.target.value === 'ALL' ? undefined : e.target.value })
+            }
+            options={[...ONBOARDING_OPTIONS]}
+          />
+        </div>
+        <div className="w-full sm:w-52">
+          <label className="block text-xs font-medium text-app-muted mb-1">Sort</label>
+          <FormSelect
+            value={sortByParam}
+            onChange={(e) => patchParams({ sortBy: e.target.value })}
+            options={[...SORT_OPTIONS]}
+          />
+        </div>
+        <div className="w-full sm:w-36">
+          <label className="block text-xs font-medium text-app-muted mb-1">Order</label>
+          <FormSelect
+            value={sortOrderParam}
+            onChange={(e) => patchParams({ sortOrder: e.target.value })}
+            options={[
+              { value: 'asc', label: 'Ascending' },
+              { value: 'desc', label: 'Descending' },
+            ]}
+          />
+        </div>
+      </div>
+
+      <CompactTable<StaffOnboardingDocumentRow>
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.userId}
+        loading={isFilterLoading}
+        loadingVariant="overlay"
+        caption="Staff onboarding document status"
+        emptyTitle="No staff match these filters"
+        emptyDescription="Try clearing search or widening the onboarding status filter."
+        withCard={false}
+        pagination={
+          totalCount > 0
+            ? {
+                page,
+                totalPages,
+                showWhenSinglePage: true,
+                summary: (
+                  <p className="text-sm text-app-fg-muted">
+                    Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount}
+                    <span className="text-app-fg-muted/90"> · {pageSize} per page</span>
+                  </p>
+                ),
+                wrapperClassName:
+                  'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4',
+                controlsClassName: 'sm:justify-end',
+              }
+            : undefined
+        }
+      />
+    </div>
+  );
+}

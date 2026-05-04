@@ -24,7 +24,12 @@ import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
 import { OnboardingNudge } from './onboarding-nudge';
-import { canAccessGlobalAuditLog } from '~/lib/rbac';
+import { canAccessGlobalAuditLog, isAdminLevel } from '~/lib/rbac';
+import {
+  LoginModalGateProvider,
+  type OnboardingModalGate,
+  useLoginModalGate,
+} from '~/contexts/login-modal-gate';
 
 interface Notification {
   id: string;
@@ -44,7 +49,6 @@ interface DashboardLayoutProps {
     role: string;
     email: string;
     permissions?: string[];
-    isFinanceOfficer?: boolean;
     currentBranchId?: string | null;
     /**
      * When set, the layout renders the Mirror Mode chrome (green border + Exit pill in the
@@ -52,6 +56,8 @@ interface DashboardLayoutProps {
      * of the session impersonates the target user.
      */
     mirroredBy?: { id: string; name: string; role: string } | null;
+    /** From `/auth/me` — login onboarding nudge skips users HR has approved. */
+    staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
   } | null;
   notificationsPromise: NotificationsPromise;
   /** Route action URL for notification mark-read (e.g. /admin or /hr). */
@@ -202,6 +208,13 @@ const navStructure: NavGroupDef[] = [
         permission: 'logistics.read',
       },
       {
+        label: 'Team Analysis',
+        href: '/admin/logistics/team',
+        icon: SidebarIcons.leaderboards,
+        permission: 'logistics.teamOverview',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'],
+      },
+      {
         label: 'Delivery confirmations',
         href: '/admin/logistics/delivery-confirmations',
         icon: SidebarIcons.orders,
@@ -314,6 +327,14 @@ const navStructure: NavGroupDef[] = [
       // Head of Marketing / Head of CS hold `users.read` for other features but must not see
       // this link — they manage their team from the Marketing / CS team pages instead.
       { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
+      // Permission-first: link appears only with hr.onboarding.* on the session (or admin-class).
+      // Do not add HR_MANAGER (or any role) as a sidebar bypass — grant the caps via template / overrides.
+      {
+        label: 'Staff onboarding documents',
+        href: '/hr/staff-onboarding-documents',
+        icon: SidebarIcons.orders,
+        permission: 'hr.onboarding.read',
+      },
     ],
   },
   {
@@ -344,11 +365,12 @@ const navStructure: NavGroupDef[] = [
         label: 'Permission Requests',
         href: '/admin/permission-requests',
         icon: SidebarIcons.audit,
-        // Admins (SuperAdmin, Admin) bypass via roles; HR_MANAGER also explicitly allowed
-        // since they manage staff; otherwise gate by audit.read. CS / Marketing / Logistics /
-        // Stock have no business reading the queue of pending role grants.
-        permission: 'audit.read',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'],
+        // Visible to anyone holding at least one approve code. SuperAdmin / ADMIN
+        // bypass via the standard permission middleware. Submitters (CS Agents
+        // tracking their own price-change requests) reach the page via direct URL
+        // — we don't surface the sidebar link unless they can approve something.
+        permission: 'permission_requests.user_creation.approve',
+        roles: ['SUPER_ADMIN', 'ADMIN'],
       },
     ],
   },
@@ -365,14 +387,25 @@ const navStructure: NavGroupDef[] = [
   },
 ];
 
-/** Capability-based nav label overrides (UI only). CS/Media agents see "My Orders" etc. */
+/**
+ * Role-shaped nav label overrides (UI only).
+ *
+ * The label MUST mirror the data-scope rule, not the permission. The orders
+ * router only narrows the result set to the actor's own orders when:
+ *   - role === 'CS_AGENT'     (assignedCsId = self)
+ *   - role === 'MEDIA_BUYER'  (mediaBuyerId = self)
+ *
+ * Heads / admins / SuperAdmin all carry the relevant permissions but see ALL
+ * orders, so calling it "My Orders" for them is misleading. Keep the override
+ * keyed on the rank-and-file role specifically.
+ */
 function getDisplayLabel(
   item: NavItemDef,
   user: { role: string; permissions?: string[] } | null,
 ): string {
-  const perms = user?.permissions ?? [];
-  if (item.href === '/admin/cs/orders' && perms.includes('cs.leaderboard')) return 'My Orders';
-  if (item.href === '/admin/marketing/orders' && perms.includes('marketing.orders')) return 'My Orders';
+  const role = user?.role ?? '';
+  if (item.href === '/admin/cs/orders' && role === 'CS_AGENT') return 'My Orders';
+  if (item.href === '/admin/marketing/orders' && role === 'MEDIA_BUYER') return 'My Orders';
   return item.label;
 }
 
@@ -384,8 +417,16 @@ function getDisplayLabelMobile(
   return item.labelShort ?? getDisplayLabel(item, user);
 }
 
+/** Login-time onboarding modal — until HR approves (see `/auth/me` `staffOnboardingStatus`). */
+function showLoginOnboardingNudge(user: {
+  role: string;
+  staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
+} | null): boolean {
+  return !!user && !isAdminLevel(user) && user.staffOnboardingStatus !== 'APPROVED';
+}
+
 function getNavGroupsForUser(
-  user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean; currentBranchId?: string | null } | null,
+  user: { role: string; permissions?: string[]; currentBranchId?: string | null } | null,
   options?: { forMobile?: boolean },
 ): SidebarGroup[] {
   const result: SidebarGroup[] = [];
@@ -415,8 +456,28 @@ function getNavGroupsForUser(
         if (item.href === '/admin/analytics/audit') {
           return canAccessGlobalAuditLog(user);
         }
-        if (item.href === '/admin/finance/staff-accounts') {
-          if ((user?.isFinanceOfficer ?? false) === true) return true;
+        if (item.href === '/hr/staff-onboarding-documents') {
+          if (user?.role === 'SUPER_ADMIN') return true;
+          return (
+            perms.includes('hr.onboarding.read') ||
+            perms.includes('hr.onboarding.write') ||
+            perms.includes('hr.onboarding.approve')
+          );
+        }
+        // Permission Requests: any of the 6 approve codes → see the link. Submitters
+        // (CS Agent / Media Buyer / etc.) can still reach the page by URL — the
+        // server-side scope shows them only their own rows; we just don't surface
+        // the sidebar entry for them.
+        if (item.href === '/admin/permission-requests') {
+          if (user?.role === 'SUPER_ADMIN') return true;
+          return (
+            perms.includes('permission_requests.user_creation.approve') ||
+            perms.includes('permission_requests.role_change.approve') ||
+            perms.includes('permission_requests.permission_grant.approve') ||
+            perms.includes('permission_requests.product_archive.approve') ||
+            perms.includes('permission_requests.order_line_price.approve') ||
+            perms.includes('permission_requests.order_deletion.approve')
+          );
         }
         // Disbursements: Finance → HoM only; HoM must not see this (they use Marketing → Funding).
         if (item.href === '/admin/finance/disbursements' && role === 'HEAD_OF_MARKETING')
@@ -508,7 +569,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
 const FLAT_NAV_ITEMS = navStructure.flatMap((g) => g.items);
 
 function getBottomNavItemsForUser(
-  user: { role: string; permissions?: string[]; isFinanceOfficer?: boolean } | null,
+  user: { role: string; permissions?: string[] } | null,
 ): BottomNavItem[] {
   if (!user) return [];
   const role = user.role ?? '';
@@ -529,7 +590,20 @@ function getBottomNavItemsForUser(
         navBypass ||
         (item.roles?.includes(role) ?? false) ||
         (!!item.permission && perms.includes(item.permission)) ||
-        (item.href === '/admin/analytics/audit' && canAccessGlobalAuditLog(user));
+        (item.href === '/admin/analytics/audit' && canAccessGlobalAuditLog(user)) ||
+        (item.href === '/hr/staff-onboarding-documents' &&
+          (user.role === 'SUPER_ADMIN' ||
+            perms.includes('hr.onboarding.read') ||
+            perms.includes('hr.onboarding.write') ||
+            perms.includes('hr.onboarding.approve'))) ||
+        (item.href === '/admin/permission-requests' &&
+          (user.role === 'SUPER_ADMIN' ||
+            perms.includes('permission_requests.user_creation.approve') ||
+            perms.includes('permission_requests.role_change.approve') ||
+            perms.includes('permission_requests.permission_grant.approve') ||
+            perms.includes('permission_requests.product_archive.approve') ||
+            perms.includes('permission_requests.order_line_price.approve') ||
+            perms.includes('permission_requests.order_deletion.approve')));
       if (allowed) {
         result.push({
           label: getDisplayLabelMobile(item, user),
@@ -567,11 +641,13 @@ function DashboardLayoutInner({
   notificationsActionUrl: _notificationsActionUrl = '/admin',
   branches,
 }: DashboardLayoutProps) {
+  const { onboardingGate } = useLoginModalGate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showPushBanner, setShowPushBanner] = useState(false);
   const [pushEnabling, setPushEnabling] = useState(false);
   const { subscribe: subscribePush, permissionState, isSupported } = usePushSubscription();
+  const pushPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isInstalled } = usePwaInstall();
 
   const dismissPushPrompt = () => {
@@ -628,19 +704,36 @@ function DashboardLayoutInner({
     }
   }, []);
 
-  // Show a dismissible push prompt banner if push is supported but not yet granted
+  // Push prompt: only after onboarding nudge has finished (gate === 'clear'), so both never stack.
   useEffect(() => {
-    if (
-      isSupported &&
-      typeof window !== 'undefined' &&
-      'Notification' in window &&
-      Notification.permission === 'default' &&
-      !localStorage.getItem('yannis_push_banner_dismissed')
-    ) {
-      const t = setTimeout(() => setShowPushBanner(true), 2000);
-      return () => clearTimeout(t);
+    if (pushPromptTimerRef.current) {
+      clearTimeout(pushPromptTimerRef.current);
+      pushPromptTimerRef.current = null;
     }
-  }, [isSupported]);
+    if (onboardingGate !== 'clear') {
+      setShowPushBanner(false);
+      return;
+    }
+    if (
+      !isSupported ||
+      typeof window === 'undefined' ||
+      !('Notification' in window) ||
+      Notification.permission !== 'default' ||
+      localStorage.getItem('yannis_push_banner_dismissed')
+    ) {
+      return;
+    }
+    pushPromptTimerRef.current = setTimeout(() => {
+      pushPromptTimerRef.current = null;
+      setShowPushBanner(true);
+    }, 2000);
+    return () => {
+      if (pushPromptTimerRef.current) {
+        clearTimeout(pushPromptTimerRef.current);
+        pushPromptTimerRef.current = null;
+      }
+    };
+  }, [isSupported, onboardingGate]);
 
   // If permission was already granted (e.g. returning user), sync the subscription to the DB once.
   // Guarded by a ref so it only fires once per mount even if subscribePush identity changes.
@@ -792,7 +885,14 @@ function DashboardLayoutInner({
         onToggle={handleToggleCollapse}
         onMobileClose={() => setMobileOpen(false)}
         activePathname={
-          isRouteLoading && navigation.location ? navigation.location.pathname : undefined
+          // While a loader is in flight, point at the destination URL so the
+          // sidebar marks the target as active before the page renders. When
+          // idle, fall back to the current location — passing it explicitly
+          // (rather than letting NavLink's built-in isActive run) lets the
+          // sidebar do longest-prefix-match across siblings, so deep routes
+          // like `/admin/settings/role-templates` only highlight their own
+          // entry, not the `/admin/settings` parent.
+          isRouteLoading && navigation.location ? navigation.location.pathname : location.pathname
         }
         notificationCount={notificationCount}
         isDarkTheme={isDarkTheme}
@@ -1081,6 +1181,15 @@ export function DashboardLayout(props: DashboardLayoutProps) {
   // Mirror Mode is view-only: tell the notifications context to no-op every mark-read so
   // the admin's clicks don't bleed into the target user's data.
   const isMirroring = !!props.user?.mirroredBy;
+  const onboardingNudgeEnabled = !isMirroring && showLoginOnboardingNudge(props.user);
+  const [onboardingGate, setOnboardingGate] = useState<OnboardingModalGate>(() =>
+    onboardingNudgeEnabled ? 'pending' : 'clear',
+  );
+
+  useEffect(() => {
+    if (!onboardingNudgeEnabled) setOnboardingGate('clear');
+  }, [onboardingNudgeEnabled]);
+
   return (
     <ToastProvider>
       <NotificationsStateProvider
@@ -1092,11 +1201,16 @@ export function DashboardLayout(props: DashboardLayoutProps) {
           currentBranchId={props.user?.currentBranchId ?? null}
           branches={props.branches ?? []}
         >
-          <DashboardLayoutInner {...props} />
-          {/* Phase 22 — login-time onboarding nudge. Suppressed during mirroring
-              (the inner component sets data-mirror on <html>). Skip persists
-              for the session via sessionStorage. */}
-          <OnboardingNudge enabled={!isMirroring && !!props.user} />
+          <LoginModalGateProvider value={{ onboardingGate, setOnboardingGate }}>
+            <DashboardLayoutInner {...props} />
+            {/* Phase 22 — login-time onboarding nudge. Suppressed for:
+                - Mirror Mode (inner component sets data-mirror on <html>)
+                - Admin-class users (SuperAdmin / Admin) — they don't have a
+                  personal HR record to fill in; this is for staff members.
+                Skip persists for the session via sessionStorage.
+                Gate coordinates with the push prompt so only one modal shows at a time. */}
+            <OnboardingNudge enabled={onboardingNudgeEnabled} />
+          </LoginModalGateProvider>
         </BranchScopeGuardProvider>
       </NotificationsStateProvider>
     </ToastProvider>

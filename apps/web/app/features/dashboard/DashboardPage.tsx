@@ -2,6 +2,7 @@ import { Link } from '@remix-run/react';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
@@ -31,21 +32,22 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-bold text-app-fg">
-            {getGreeting()}, {firstName}
-          </h1>
-          <p className="text-sm text-app-fg-muted font-medium mt-1">
-            {getRoleDescription(role)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <DateFilterBar startDate={dateFilters.startDate} endDate={dateFilters.endDate} periodAllTime={dateFilters.periodAllTime ?? false} />
-        </div>
-      </div>
+      <PageHeader
+        title={`${getGreeting()}, ${firstName}`}
+        description={getRoleDescription(role)}
+        actions={
+          <>
+            <PageRefreshButton />
+            <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+              <DateFilterBar
+                startDate={dateFilters.startDate}
+                endDate={dateFilters.endDate}
+                periodAllTime={dateFilters.periodAllTime ?? false}
+              />
+            </div>
+          </>
+        }
+      />
 
       {/* Missing role: minimal welcome (safer than defaulting to SuperAdmin) */}
       {!role && <GenericFallbackDashboard />}
@@ -213,14 +215,15 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
 
 function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   const counts = data.orderCounts as Record<string, number>;
+  // `pendingQueue` rolls UNPROCESSED + CS_ASSIGNED into one waiting-on-engagement
+  // bucket for the top stat strip. The legacy per-status pipeline (Allocated /
+  // In Transit / Delivered / Cancelled) was retired 2026-05-03 — those counts
+  // still exist on `/admin/cs/orders` via the status filter, but Head of CS
+  // doesn't need them on the landing.
   const unprocessed = counts['UNPROCESSED'] ?? 0;
   const csAssigned = counts['CS_ASSIGNED'] ?? 0;
   const engaged = counts['CS_ENGAGED'] ?? 0;
   const confirmed = counts['CONFIRMED'] ?? 0;
-  const allocated = counts['ALLOCATED'] ?? 0;
-  const inTransit = counts['IN_TRANSIT'] ?? 0;
-  const delivered = counts['DELIVERED'] ?? 0;
-  const cancelled = counts['CANCELLED'] ?? 0;
   const pendingQueue = unprocessed + csAssigned;
 
   // CS Agents get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
@@ -305,38 +308,54 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
         )}
       </DeferredSection>
 
-      <div className="card">
-        <h2 className="text-lg font-semibold text-app-fg mb-4">Order Pipeline</h2>
-        <OverviewStatStrip
-          embedded
-          tileClassName="min-w-[5.5rem]"
-          items={[
-            { label: 'Unprocessed', value: unprocessed, valueClassName: 'text-warning-600 dark:text-warning-400' },
-            { label: 'CS Assigned', value: csAssigned, valueClassName: 'text-info-600 dark:text-info-400' },
-            { label: 'CS Engaged', value: engaged, valueClassName: 'text-info-600 dark:text-info-400' },
-            { label: 'Confirmed', value: confirmed, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Allocated', value: allocated, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'In Transit', value: inTransit, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Delivered', value: delivered, valueClassName: 'text-success-600 dark:text-success-400' },
-            { label: 'Cancelled', value: cancelled, valueClassName: 'text-danger-600 dark:text-danger-400' },
-          ]}
-        />
-      </div>
+      {/* Order Pipeline strip retired 2026-05-03 — the 4-tile summary above
+          (Pending Queue / Currently Engaged / Confirmed / Delivery Rate) is the
+          only KPI row Head of CS needs at-a-glance. Per-status counts are still
+          available on `/admin/cs/orders` via the status filter pills, so deep
+          dives don't lose anything. */}
 
       {role === 'HEAD_OF_CS' && (
-        <div className="card">
-          <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
-          <p className="text-sm text-app-fg-muted mb-4">
-            Manage agent assignments and monitor queue health.
-          </p>
-          <div className="flex gap-2">
-            <Link to="/admin/cs/queue" prefetch="intent" className="btn-primary btn-sm">CS Dashboard</Link>
-            <Link to="/admin/cs/orders" prefetch="intent" className="btn-secondary btn-sm">View All Orders</Link>
+        <>
+          <div className="card">
+            <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
+            <p className="text-sm text-app-fg-muted mb-4">
+              Manage agent assignments and monitor queue health.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <Link to="/admin/cs/queue" prefetch="intent" className="btn-primary btn-sm">CS Dashboard</Link>
+              <Link to="/admin/cs/orders" prefetch="intent" className="btn-secondary btn-sm">View All Orders</Link>
+            </div>
           </div>
-        </div>
-      )}
 
-      <RecentOrdersCard orders={data.recentOrders} />
+          {/* Quick links to other CS-facing tools — replaces the previous Recent
+              Orders feed (which duplicated /admin/cs/orders) with surfaces the
+              Head of CS actually needs at a glance. */}
+          <div className="card">
+            <h2 className="text-lg font-semibold text-app-fg mb-2">Quick links</h2>
+            <p className="text-sm text-app-fg-muted mb-4">
+              Jump to the surfaces you use day-to-day.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <Link to="/admin/cs/team" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+                <p className="text-sm font-semibold text-app-fg">Team performance</p>
+                <p className="text-xs text-app-fg-muted mt-0.5">Confirm + delivery rates per agent</p>
+              </Link>
+              <Link to="/admin/cs/leaderboard" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+                <p className="text-sm font-semibold text-app-fg">Leaderboard</p>
+                <p className="text-xs text-app-fg-muted mt-0.5">Top closers this period</p>
+              </Link>
+              <Link to="/admin/permission-requests" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+                <p className="text-sm font-semibold text-app-fg">Approvals</p>
+                <p className="text-xs text-app-fg-muted mt-0.5">Price changes, deletions, etc.</p>
+              </Link>
+              <Link to="/admin/notifications" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+                <p className="text-sm font-semibold text-app-fg">Notifications</p>
+                <p className="text-xs text-app-fg-muted mt-0.5">Broadcasts, automations, log</p>
+              </Link>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

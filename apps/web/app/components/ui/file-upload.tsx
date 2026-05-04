@@ -48,21 +48,30 @@ export function FileUpload({
   const [previewUrl, setPreviewUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const stateRef = useRef<UploadState>('idle');
+  // Pin the callback in a ref so we can fire it from effects WITHOUT putting it
+  // in the dependency array. Inline arrows from parents (`(s) => updateLine(...)`)
+  // change identity on every render — including them in deps creates an
+  // infinite loop because the effect refires → parent re-renders → new arrow →
+  // effect refires. The ref always points at the latest callback.
+  const onUploadStateChangeRef = useRef(onUploadStateChange);
+  useEffect(() => {
+    onUploadStateChangeRef.current = onUploadStateChange;
+  });
 
   useEffect(() => {
     stateRef.current = state;
-    onUploadStateChange?.(state);
-  }, [state, onUploadStateChange]);
+    onUploadStateChangeRef.current?.(state);
+  }, [state]);
 
   useEffect(
     () => () => {
       // If the component unmounts mid-upload (e.g. picker hidden after max images),
       // ensure parents relying on upload state don't stay stuck in "uploading".
       if (stateRef.current === 'uploading') {
-        onUploadStateChange?.('idle');
+        onUploadStateChangeRef.current?.('idle');
       }
     },
-    [onUploadStateChange],
+    [],
   );
 
   const formatSize = (bytes: number): string => {
@@ -149,7 +158,10 @@ export function FileUpload({
           onDragOver={(e) => e.preventDefault()}
           className={
             variant === 'minimal'
-              ? 'flex items-center gap-2 min-h-[2.75rem] px-2 py-1.5 border-2 border-dashed border-app-border rounded-lg cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors text-left'
+              ? // Match TextInput md (`h-9` ≈ 2.25rem) so this dropzone aligns with sibling
+                // form controls in dense grids. Single dashed border (vs solid input border)
+                // keeps the "drop target" affordance without bumping height.
+                'flex items-center gap-2 h-9 px-3 border border-dashed border-app-border rounded-lg cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors text-left'
               : `border-2 border-dashed border-app-border rounded-lg text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors ${
                   size === 'sm' ? 'p-2.5' : 'p-4'
                 }`

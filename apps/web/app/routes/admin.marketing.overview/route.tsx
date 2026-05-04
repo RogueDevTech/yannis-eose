@@ -1,6 +1,8 @@
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { canViewAllBranches } from '~/lib/rbac';
 import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { MarketingOverviewPage } from '~/features/marketing/MarketingOverviewPage';
 import type {
@@ -9,6 +11,7 @@ import type {
   FundingBalanceRow,
   MarketingOverviewRecentOrder,
 } from '~/features/marketing/types';
+import type { LiveActivityItem } from '~/features/cs/types';
 
 // order:status_changed is handled in-place by MarketingOverviewPage (hybrid — no DB round-trip).
 // Only order:new triggers revalidation since it adds a row the client doesn't have yet.
@@ -58,11 +61,17 @@ function parseRecentOrders(res: { ok: boolean; data: unknown }): MarketingOvervi
 const defaultToday = defaultTodayRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermissionOrRoles(request, {
+  const viewer = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
     permission: 'marketing.teamOverview',
   });
   const cookie = getSessionCookie(request);
+  // Re-narrow viewer for currentBranchId / scope helpers (the helper return type is intentionally
+  // minimal — getCurrentUser actually returns the wider session shape).
+  const viewerSession = viewer as typeof viewer & {
+    currentBranchId?: string | null;
+    scopeOrgWideHead?: boolean;
+  };
 
   const url = new URL(request.url);
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -95,6 +104,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
   };
 
+  // Live activity scope — same logic as `routes/admin.marketing.overview.activity`. Media Buyers
+  // see their own funnel; admin-class / org-wide HoM (with marketing.scope.global) see org-wide;
+  // everyone else is scoped to their active branch.
+  const liveActivityScope: { limit: number; mediaBuyerId?: string; branchId?: string } = (() => {
+    const limit = 60;
+    if (viewer.role === 'MEDIA_BUYER') return { limit, mediaBuyerId: viewer.id };
+    if (canViewAllBranches(viewerSession)) return { limit };
+    if (viewer.role === 'HEAD_OF_MARKETING' || viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN') return { limit };
+    if (viewerSession.currentBranchId) return { limit, branchId: viewerSession.currentBranchId };
+    return { limit };
+  })();
+
+  // Permission gate: cart.listActivity accepts `cart.read` OR `marketing.read`. The page-level
+  // permission `marketing.teamOverview` doesn't grant either — but in practice every viewer who
+  // gets past the page guard above ALSO has `marketing.read` (HoM / Marketing template) or is
+  // admin-class (bypass). Leave the canonical check here for safety; if it ever fails we degrade
+  // to an empty feed rather than block the page.
+  const viewerPerms = (viewer.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  const canQueryLiveActivity =
+    viewer.role === 'SUPER_ADMIN' ||
+    viewer.role === 'ADMIN' ||
+    viewerPerms.includes(canonicalPermissionCode('cart.read')) ||
+    viewerPerms.includes(canonicalPermissionCode('marketing.read'));
+
   const metricsP = apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(JSON.stringify(metricsInput))}`, { method: 'GET', cookie });
   const leaderboardP = apiRequest<unknown>(
     `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
@@ -105,17 +138,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(recentOrdersListInput))}`,
     { method: 'GET', cookie },
   );
-  const [metricsRes, leaderboardRes, balancesRes, recentOrdersRes] = await Promise.all([
+  const liveActivityP = canQueryLiveActivity
+    ? apiRequest<unknown>(
+        `/trpc/cart.listActivity?input=${encodeURIComponent(JSON.stringify(liveActivityScope))}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false, status: 0, data: null } as { ok: false; status: number; data: null });
+  const [metricsRes, leaderboardRes, balancesRes, recentOrdersRes, liveActivityRes] = await Promise.all([
     metricsP,
     leaderboardP,
     balancesP,
     recentOrdersP,
+    liveActivityP,
   ]);
 
   const metrics = parseMetrics(metricsRes);
   const leaderboard = parseLeaderboard(leaderboardRes);
   const balancesList = parseBalancesList(balancesRes);
   const recentOrders = parseRecentOrders(recentOrdersRes);
+  const liveActivity: LiveActivityItem[] = liveActivityRes.ok
+    ? (liveActivityRes.data as { result?: { data?: LiveActivityItem[] } })?.result?.data ?? []
+    : [];
 
   return {
     metrics,
@@ -123,6 +166,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     balancesList,
     leaderboardPeriod,
     recentOrders,
+    liveActivity,
     liveEvents: [...MARKETING_OVERVIEW_LIVE_EVENTS],
     filters: {
       startDate: startDate ?? '',
