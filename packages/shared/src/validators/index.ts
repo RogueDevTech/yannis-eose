@@ -20,6 +20,8 @@ export {
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
+  listOrdersScheduleKindSchema,
+  scheduleCalendarHeatSchema,
 } from './orders';
 
 export { saveCartSchema } from './cart';
@@ -37,6 +39,8 @@ export type {
   AssignOrderInput,
   BulkReassignInput,
   ListOrdersInput,
+  ListOrdersScheduleKind,
+  ScheduleCalendarHeatInput,
 } from './orders';
 
 // User validators

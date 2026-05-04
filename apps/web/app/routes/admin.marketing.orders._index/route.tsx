@@ -7,6 +7,8 @@ import { MarketingOrdersPage } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import type { ExportModalPicklists } from '~/components/ui/export-modal';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_MARKETING_ORDERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 
 export const meta: MetaFunction = () => [
   { title: 'Marketing Orders — Yannis EOSE' },
@@ -171,10 +173,13 @@ export default function MarketingOrdersRoute() {
   const { filters, ...pageData } = data;
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.marketingOrders} allowlist={ALLOWLIST_MARKETING_ORDERS} />
     <MarketingOrdersPage
       {...pageData}
       filters={filters}
       liveEvents={[...MARKETING_ORDERS_LIVE_EVENTS]}
     />
+    </>
   );
 }

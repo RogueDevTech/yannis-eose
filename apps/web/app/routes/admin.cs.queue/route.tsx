@@ -5,6 +5,8 @@ import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultTod
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_CS_DASHBOARD, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import {
   type AgentWorkload,
   type InactiveAgent,
@@ -533,6 +535,8 @@ export default function CSQueueRoute() {
   const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...CS_QUEUE_LIVE_EVENTS]);
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.csDashboard} allowlist={ALLOWLIST_CS_DASHBOARD} />
     <CSDashboardPage
       {...data.criticalData}
       liveEvents={[...CS_QUEUE_LIVE_EVENTS]}
@@ -547,5 +551,6 @@ export default function CSQueueRoute() {
       canDeleteCart={data.canDeleteCart}
       productsForOfflineOrder={data.productsForOfflineOrder}
     />
+    </>
   );
 }

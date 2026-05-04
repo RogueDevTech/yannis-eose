@@ -1,4 +1,6 @@
 import jsPDF from 'jspdf';
+import type { Invoice } from '~/features/finance/types';
+import type { OrderInvoice } from '~/features/orders/types';
 import { formatNaira as formatNairaAmount } from './format-amount';
 
 interface LineItem {
@@ -7,7 +9,8 @@ interface LineItem {
   unitPrice: string;
 }
 
-interface InvoicePdfData {
+/** Normalized payload for jsPDF rendering (API rows should pass through `toInvoicePdfData` first). */
+export interface InvoicePdfData {
   referenceFormatted: string;
   recipientInfo: {
     name: string;
@@ -21,6 +24,36 @@ interface InvoicePdfData {
   status: string;
   dueDate: string | null;
   createdAt: string;
+}
+
+/** Order-detail or Finance list rows — single choke point if API shapes diverge later. */
+export type InvoicePdfRowSource = OrderInvoice | Invoice;
+
+/**
+ * Maps finance/order invoice API rows into the PDF renderer input.
+ * Call from any surface that triggers `generateInvoicePdf` / `previewInvoicePdf`.
+ */
+export function toInvoicePdfData(row: InvoicePdfRowSource): InvoicePdfData {
+  const ri = row.recipientInfo;
+  return {
+    referenceFormatted: row.referenceFormatted,
+    recipientInfo: {
+      name: typeof ri?.name === 'string' ? ri.name : '',
+      address: ri?.address,
+      email: ri?.email,
+      phone: ri?.phone,
+    },
+    lineItems: row.lineItems.map((li) => ({
+      description: li.description,
+      quantity: li.quantity,
+      unitPrice: String(li.unitPrice),
+    })),
+    taxRate: row.taxRate,
+    totalAmount: row.totalAmount,
+    status: row.status,
+    dueDate: row.dueDate,
+    createdAt: row.createdAt,
+  };
 }
 
 type PdfMode = 'download' | 'preview';
@@ -195,8 +228,8 @@ function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
  * @param invoice — invoice data to render
  * @param mode — `'download'` triggers a save; `'preview'` opens the PDF in a new tab
  */
-export function generateInvoicePdf(invoice: InvoicePdfData, mode: PdfMode = 'download') {
-  const doc = buildInvoicePdf(invoice);
+export function generateInvoicePdf(invoice: InvoicePdfRowSource, mode: PdfMode = 'download') {
+  const doc = buildInvoicePdf(toInvoicePdfData(invoice));
   if (mode === 'preview') {
     const url = doc.output('bloburl');
     window.open(url.toString(), '_blank', 'noopener,noreferrer');
@@ -206,7 +239,7 @@ export function generateInvoicePdf(invoice: InvoicePdfData, mode: PdfMode = 'dow
 }
 
 /** Open the invoice PDF in a new tab without downloading. */
-export function previewInvoicePdf(invoice: InvoicePdfData) {
+export function previewInvoicePdf(invoice: InvoicePdfRowSource) {
   generateInvoicePdf(invoice, 'preview');
 }
 

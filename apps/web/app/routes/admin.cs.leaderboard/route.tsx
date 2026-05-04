@@ -2,6 +2,8 @@ import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { CSLeaderboardPage } from '~/features/leaderboards/CSLeaderboardPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_CS_LEADERBOARD, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { CSLeaderboardEntry } from '~/features/cs/types';
 
 export const meta: MetaFunction = () => [
@@ -56,10 +58,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function CSLeaderboardRoute() {
   const data = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.csLeaderboard} allowlist={ALLOWLIST_CS_LEADERBOARD} />
     <CSLeaderboardPage
       csLeaderboard={data.csLeaderboard}
       leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
       filters={data.filters}
     />
+    </>
   );
 }

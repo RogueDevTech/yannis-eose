@@ -7,6 +7,8 @@ import { redirect } from '@remix-run/node';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PermissionRequestsPage } from '~/features/permission-requests/PermissionRequestsPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_PERMISSION_REQUESTS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { PermissionRequest } from '~/features/permission-requests/types';
 
 export const meta: MetaFunction = () => [
@@ -163,6 +165,11 @@ export default function PermissionRequestsRoute() {
     status,
   } = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence
+        scope={LIST_FILTER_SCOPES.permissionRequests}
+        allowlist={ALLOWLIST_PERMISSION_REQUESTS}
+      />
     <PermissionRequestsPage
       requests={requests}
       canApprove={canApprove}
@@ -171,5 +178,6 @@ export default function PermissionRequestsRoute() {
       viewerId={viewerId}
       activeStatus={status}
     />
+    </>
   );
 }

@@ -5,6 +5,8 @@ import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThi
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_LOGISTICS_ORDERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { Order } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
 
@@ -332,5 +334,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function LogisticsOrdersRoute() {
   const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
-  return <LogisticsOrdersPage {...data} />;
+  return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.logisticsOrdersAdmin} allowlist={ALLOWLIST_LOGISTICS_ORDERS} />
+      <LogisticsOrdersPage {...data} />
+    </>
+  );
 }

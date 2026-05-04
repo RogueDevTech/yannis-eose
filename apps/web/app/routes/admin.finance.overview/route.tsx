@@ -4,6 +4,8 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { FinancePage } from '~/features/finance/FinancePage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_FINANCE, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { Invoice, ProfitReport, ApprovalRequest, BudgetWithUtilization, FinanceStreamData } from '~/features/finance/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
 
@@ -205,5 +207,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function FinanceRoute() {
   const data = useLoaderData<typeof loader>() as unknown as FinanceStreamData;
-  return <FinancePage data={data} />;
+  return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.finance} allowlist={ALLOWLIST_FINANCE} />
+      <FinancePage data={data} />
+    </>
+  );
 }

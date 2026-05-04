@@ -4,6 +4,8 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { RemittancesAdminPage } from '~/features/remittances/RemittancesAdminPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_REMITTANCES_ADMIN, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { TransferConfirmationRecord } from '~/features/remittances/RemittancesAdminPage';
 
 export const meta: MetaFunction = () => [
@@ -169,11 +171,14 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminLogisticsRemittancesRoute() {
   const data = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.remittancesAdmin} allowlist={ALLOWLIST_REMITTANCES_ADMIN} />
     <RemittancesAdminPage
       remittances={data.remittances}
       locations={data.locations ?? []}
       senderOptions={data.senderOptions ?? []}
       filters={data.filters}
     />
+    </>
   );
 }

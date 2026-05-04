@@ -1,7 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { eq, and, desc, asc, ilike, or, count, ne, inArray, sql, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
@@ -18,6 +18,7 @@ import { AuthService } from '../auth/auth.service';
 import { withActor } from '../common/db/with-actor';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PermissionsService } from '../permissions/permissions.service';
+import { EventsService } from '../events/events.service';
 import { resolveRoleTemplateBaselineCodes } from '../permissions/role-template-baseline';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevelRole } from '../common/authz';
@@ -33,6 +34,7 @@ export class UsersService {
     private readonly authService: AuthService,
     private readonly notificationsService: NotificationsService,
     private readonly permissionsService: PermissionsService,
+    private readonly eventsService: EventsService,
   ) {}
 
   private defaultScopeForRole(role: string): { scopeGlobal: boolean; scopeOrgWideHead: boolean } {
@@ -90,45 +92,58 @@ export class UsersService {
     const allCodes = [...new Set([...granted, ...revoked])];
     if (allCodes.length === 0) return;
 
-    const permRows = await tx
-      .select({ id: schema.permissions.id, code: schema.permissions.code })
-      .from(schema.permissions)
-      .where(inArray(schema.permissions.code, allCodes));
+    // Single-round-trip stamp. Replaces the prior 2-step "SELECT permissions WHERE
+    // code IN (...)" + "INSERT VALUES" pattern, which spent an extra RTT just to
+    // resolve permission_id. On Aiven (high latency to the DB region) this shaves
+    // ~150-500ms off the create path. UUIDs are generated client-side to match
+    // the `uuidv7Pk` schema default — `user_permissions.id` has no DB-level
+    // `DEFAULT gen_random_uuid()`.
+    const grantedSet = new Set(granted);
+    const codeFlagPairs = allCodes.map((code) => ({
+      // crypto.randomUUID() (v4) is fine here — the v7-ness in `uuidv7Pk` is for
+      // insert locality, but stamps go in one batch so locality is irrelevant.
+      // Avoids pulling the `uuidv7` package into apps/api.
+      id: randomUUID(),
+      code,
+      granted: grantedSet.has(code),
+    }));
+    const valuesSql = sql.join(
+      codeFlagPairs.map(
+        (pair) => sql`(${pair.id}::uuid, ${pair.code}::text, ${pair.granted}::boolean)`,
+      ),
+      sql`, `,
+    );
+    const inserted = await tx.execute<{ id: string }>(sql`
+      INSERT INTO user_permissions (id, user_id, permission_id, granted, granted_by)
+      SELECT
+        v.id,
+        ${params.userId}::uuid,
+        p.id,
+        v.granted,
+        ${params.actorId}::uuid
+      FROM (VALUES ${valuesSql}) AS v(id, code, granted)
+      INNER JOIN permissions p
+        ON p.code = v.code
+        AND p.valid_to IS NULL
+      RETURNING id
+    `);
 
-    const byCode = new Map(permRows.map((p) => [canonicalPermissionCode(p.code), p.id]));
-    const values: Array<{
-      userId: string;
-      permissionId: string;
-      granted: boolean;
-      grantedBy: string;
-    }> = [];
-
-    for (const code of granted) {
-      const permId = byCode.get(code);
-      if (!permId) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: `Unknown permission code: ${code}` });
+    if (inserted.length !== codeFlagPairs.length) {
+      // Some codes didn't resolve to a permission row — typically a stale catalog.
+      // Identify the gap so the error names the bad codes (matches prior behaviour).
+      const knownCodes = await tx
+        .select({ code: schema.permissions.code })
+        .from(schema.permissions)
+        .where(inArray(schema.permissions.code, allCodes));
+      const known = new Set(knownCodes.map((r) => canonicalPermissionCode(r.code)));
+      const missing = allCodes.filter((c) => !known.has(c));
+      if (missing.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Unknown permission code(s): ${missing.join(', ')}`,
+        });
       }
-      values.push({
-        userId: params.userId,
-        permissionId: permId,
-        granted: true,
-        grantedBy: params.actorId,
-      });
     }
-    for (const code of revoked) {
-      const permId = byCode.get(code);
-      if (!permId) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: `Unknown permission code: ${code}` });
-      }
-      values.push({
-        userId: params.userId,
-        permissionId: permId,
-        granted: false,
-        grantedBy: params.actorId,
-      });
-    }
-
-    await tx.insert(schema.userPermissions).values(values);
   }
 
   /**
@@ -369,88 +384,15 @@ export class UsersService {
       }
     }
 
-    // Check for duplicate email
-    const existingRows = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.email, input.email.toLowerCase()))
-      .limit(1);
-
-    if (existingRows[0]) {
-      throw new TRPCError({
-        code: 'CONFLICT',
-        message: 'A user with this email already exists',
-      });
-    }
-
-    // Org-wide singletons: at most one ACTIVE/PENDING HEAD_OF_CS, HEAD_OF_MARKETING, or
-    // HEAD_OF_LOGISTICS for the whole org. HR_MANAGER remains one per branch (below).
-    const ORG_WIDE_HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
-    if (ORG_WIDE_HEAD_ROLES.includes(input.role as (typeof ORG_WIDE_HEAD_ROLES)[number])) {
-      const existingHead = await this.db
-        .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
-        .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.role, input.role as typeof schema.users.role._.data),
-            inArray(schema.users.status, ['ACTIVE', 'PENDING']),
-          ),
-        )
-        .limit(1);
-
-      if (existingHead[0]) {
-        const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: `The organization already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${input.role.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
-        });
-      }
-    }
-
-    if (input.role === 'HR_MANAGER' && input.primaryBranchId) {
-      const existingHead = await this.db
-        .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
-        .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.role, 'HR_MANAGER'),
-            eq(schema.users.primaryBranchId, input.primaryBranchId),
-            inArray(schema.users.status, ['ACTIVE', 'PENDING']),
-          ),
-        )
-        .limit(1);
-
-      if (existingHead[0]) {
-        const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} hr manager (${existingHead[0].name}). Deactivate them first.`,
-        });
-      }
-    }
-
-    // Phone is required on create (CEO directive 2026-04-24) and must be unique across all users.
-    // The DB-level partial unique index `users_phone_unique_not_null` is the safety net; this
-    // service check returns a friendlier error that names the conflicting user.
+    // Phone + branch payload are validated synchronously (no DB) so we can short-circuit
+    // before the round-trip pre-flight queries below. This trims ~1 RTT off the timeout
+    // budget when the user submits an obviously-invalid form.
     if (!input.phone) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'Phone number is required.',
       });
     }
-    const phoneRows = await this.db
-      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
-      .from(schema.users)
-      .where(eq(schema.users.phone, input.phone))
-      .limit(1);
-
-    if (phoneRows[0]) {
-      throw new TRPCError({
-        code: 'CONFLICT',
-        message: `Phone number already in use by ${phoneRows[0].name} (${phoneRows[0].email}). Each user must have a unique number.`,
-      });
-    }
-
     const requestedBranchIds = [...new Set(input.branchIds ?? [])];
     if (input.primaryBranchId && !requestedBranchIds.includes(input.primaryBranchId)) {
       requestedBranchIds.push(input.primaryBranchId);
@@ -468,15 +410,51 @@ export class UsersService {
       });
     }
 
-    const activeBranchRows = await this.db
-      .select({ id: schema.branches.id })
-      .from(schema.branches)
-      .where(
-        and(
-          inArray(schema.branches.id, requestedBranchIds),
-          eq(schema.branches.status, 'ACTIVE'),
+    // Run the pre-flight DB checks in parallel — they're independent, and on
+    // a high-latency Aiven link the sequential version cost extra RTTs
+    // before the transaction even opened. Promise.all collapses to ~1 RTT total.
+    //
+    // CEO directive 2026-05-03: org-wide head roles (HEAD_OF_CS / HEAD_OF_MARKETING
+    // / HEAD_OF_LOGISTICS) and per-branch HR_MANAGER are NO LONGER singletons.
+    // Permissions gate capability; multiple holders are allowed (e.g. handover
+    // periods, co-heads, regional heads). The DB unique indexes were dropped in
+    // migration 0108. The frontend still surfaces a soft warning so admins can
+    // see existing holders and confirm intent — see UserCreatePage / users.router.
+    const [existingRows, phoneRows, activeBranchRows] = await Promise.all([
+      this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.email, input.email.toLowerCase()))
+        .limit(1),
+      this.db
+        .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.phone, input.phone))
+        .limit(1),
+      this.db
+        .select({ id: schema.branches.id })
+        .from(schema.branches)
+        .where(
+          and(
+            inArray(schema.branches.id, requestedBranchIds),
+            eq(schema.branches.status, 'ACTIVE'),
+          ),
         ),
-      );
+    ]);
+
+    if (existingRows[0]) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: 'A user with this email already exists',
+      });
+    }
+
+    if (phoneRows[0]) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `Phone number already in use by ${phoneRows[0].name} (${phoneRows[0].email}). Each user must have a unique number.`,
+      });
+    }
 
     if (activeBranchRows.length !== requestedBranchIds.length) {
       throw new TRPCError({
@@ -938,10 +916,13 @@ export class UsersService {
   }
 
   /**
-   * List active users holding a HEAD_OF_* role.
-   * Used by the user create/edit forms to warn admins about duplicate heads
-   * per branch before submit (the service already blocks the write, this is
-   * a proactive UI hint).
+   * List active users holding a HEAD_OF_* role or HR_MANAGER.
+   *
+   * CEO directive 2026-05-03: these roles are NO LONGER singletons. Permissions
+   * gate capability and multiple holders are allowed (handovers, co-heads,
+   * regional splits). This endpoint now powers the soft warning + confirm-to-
+   * proceed flow on the user create/edit forms — admins still see existing
+   * holders so the choice to add another is intentional, not accidental.
    */
   async listActiveHeads(): Promise<Array<{
     id: string;
@@ -950,9 +931,8 @@ export class UsersService {
     primaryBranchId: string | null;
     status: string;
   }>> {
-    // Returns BOTH active and pending holders so the UI inline warning + blocking modal
-    // catch invited-but-not-yet-logged-in heads too (otherwise admins can stack pending
-    // duplicates on the same branch — see CLAUDE.md "One active holder per branch").
+    // Returns BOTH active and pending holders so admins can see invited-but-
+    // not-yet-logged-in heads in the conflict warning too.
     return this.db
       .select({
         id: schema.users.id,
@@ -1203,58 +1183,12 @@ export class UsersService {
       }
     }
 
-    // Enforce org-wide singleton heads + per-branch HR_MANAGER when the role field is in the payload.
-    const ORG_WIDE_HEAD_ROLES_UPDATE = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'] as const;
-    const roleBeingSet = input.role ?? beforeRow.role;
-    const mergedPrimary = nextPrimaryBranchId;
-    if (input.role) {
-      if (
-        ORG_WIDE_HEAD_ROLES_UPDATE.includes(
-          roleBeingSet as (typeof ORG_WIDE_HEAD_ROLES_UPDATE)[number],
-        )
-      ) {
-        const existingHead = await this.db
-          .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
-          .from(schema.users)
-          .where(
-            and(
-              eq(schema.users.role, roleBeingSet as typeof schema.users.role._.data),
-              inArray(schema.users.status, ['ACTIVE', 'PENDING']),
-              sql`${schema.users.id} != ${input.userId}`,
-            ),
-          )
-          .limit(1);
-
-        if (existingHead[0]) {
-          const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: `The organization already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} ${roleBeingSet.replace(/_/g, ' ').toLowerCase()} (${existingHead[0].name}). Deactivate them first.`,
-          });
-        }
-      } else if (roleBeingSet === 'HR_MANAGER' && mergedPrimary) {
-        const existingHead = await this.db
-          .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
-          .from(schema.users)
-          .where(
-            and(
-              eq(schema.users.role, 'HR_MANAGER'),
-              eq(schema.users.primaryBranchId, mergedPrimary),
-              inArray(schema.users.status, ['ACTIVE', 'PENDING']),
-              sql`${schema.users.id} != ${input.userId}`,
-            ),
-          )
-          .limit(1);
-
-        if (existingHead[0]) {
-          const statusLabel = existingHead[0].status === 'PENDING' ? 'pending' : 'active';
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: `Branch already has ${statusLabel === 'pending' ? 'a' : 'an'} ${statusLabel} hr manager (${existingHead[0].name}). Deactivate them first.`,
-          });
-        }
-      }
-    }
+    // CEO directive 2026-05-03: org-wide head roles and per-branch HR_MANAGER
+    // are no longer singletons — multiple holders are allowed. The previous
+    // CONFLICT throws on this update path are removed alongside the matching
+    // create-path check + the DB indexes (migration 0108). The frontend
+    // surfaces a soft warning (existing holders shown to the admin) so role
+    // collisions stay visible without blocking the save.
 
     let emailChangePending = false;
 
@@ -1674,15 +1608,19 @@ export class UsersService {
 
     await this.authService.killUserSessions(userId);
 
-    this.notificationsService
-      .create({
-        userId,
-        type: 'account:security',
-        title: 'Your account was deactivated',
-        body: 'Your account has been deactivated. You can no longer sign in. Contact your administrator if you believe this is an error.',
-        data: { userId, event: 'deactivated' },
-      })
-      .catch(() => {});
+    // Tell any open browser tabs the user has to log out immediately. The
+    // session is already revoked server-side (above) — Remix loaders + tRPC
+    // mutations on the next call would 401, but the user can still click
+    // around within their already-rendered UI without triggering a server
+    // call. The socket event forces the browser to clear local state and
+    // redirect to /auth even when the tab is idle.
+    //
+    // We deliberately do NOT create an in-app notification — the user can't
+    // act on it (they're being logged out), it just clutters the bell + push
+    // logs for an account that's no longer using the system.
+    this.eventsService.emitToUser(userId, 'auth:session_revoked', {
+      reason: 'deactivated',
+    });
 
     return updated;
   }
@@ -1969,20 +1907,25 @@ export class UsersService {
     }
 
     const becameDeactivated = before.status !== 'DEACTIVATED' && after.status === 'DEACTIVATED';
-    const type = becameDeactivated ? 'account:security' : 'account:updated';
-    const title = becameDeactivated ? 'Your account was deactivated' : 'Your account was updated';
+
+    // Deactivation is a "session revoke + browser-side logout" event, not a
+    // notification. The user can't act on a notification while being signed
+    // out, and it just clutters the bell of an account that's no longer
+    // using the system. Force-log out their open tabs via socket + return.
+    if (becameDeactivated) {
+      this.eventsService.emitToUser(targetUserId, 'auth:session_revoked', {
+        reason: 'deactivated',
+      });
+      return;
+    }
 
     this.notificationsService
       .create({
         userId: targetUserId,
-        type,
-        title,
+        type: 'account:updated',
+        title: 'Your account was updated',
         body: lines.join(' '),
-        data: {
-          userId: targetUserId,
-          changedKeys,
-          ...(becameDeactivated ? { event: 'deactivated' as const } : {}),
-        },
+        data: { userId: targetUserId, changedKeys },
       })
       .catch(() => {});
   }

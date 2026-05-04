@@ -284,6 +284,40 @@ export function useAgentStateBroadcast(state: {
 }
 
 /**
+ * Force-logout on `auth:session_revoked` server event. The server emits this
+ * to the user's room when their account is deactivated (or when an admin
+ * kills their sessions explicitly). The session is already revoked server-
+ * side — this hook handles the browser-side cleanup so the user can't keep
+ * clicking around in already-rendered UI:
+ *   1. Best-effort POST `/auth/logout` so the cookie is cleared via Set-Cookie
+ *      (the server session is already dead, but this drops the client cookie
+ *      so future tab opens don't reuse it).
+ *   2. Hard navigation to `/auth?reason=deactivated` which ends the SPA
+ *      session entirely (Remix loaders re-run from scratch).
+ *
+ * Fired exactly once per mount so a hot socket reconnect that replays the
+ * event doesn't cause an infinite redirect loop.
+ */
+export function useForceLogoutOnRevoke(): void {
+  const handledRef = useRef(false);
+  useSocketEvent<{ reason?: string }>('auth:session_revoked', (data) => {
+    if (handledRef.current) return;
+    handledRef.current = true;
+    const reason = data?.reason ?? 'revoked';
+    // Fire-and-forget logout POST to clear the cookie. We don't await — the
+    // hard navigation below races it, but the server has already revoked the
+    // session row + Redis key, so cookie cleanup is the only remaining step
+    // and it's idempotent.
+    if (typeof window !== 'undefined' && window.fetch) {
+      window.fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(`/auth?reason=${encodeURIComponent(reason)}`);
+    }
+  });
+}
+
+/**
  * Team Live View — listens for agent:state_update events from all CS agents.
  * Used by HoCS to see who's doing what in real-time.
  */

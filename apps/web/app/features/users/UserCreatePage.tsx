@@ -168,6 +168,13 @@ export function UserCreatePage({
   );
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  // CEO directive 2026-05-03: head roles + HR Manager are no longer singletons.
+  // The form still surfaces a conflict warning so admins see existing holders,
+  // but they can confirm and proceed. `confirmedConflict` flips after the user
+  // clicks Continue in the modal so the next form submission goes through
+  // unblocked. Reset whenever the role / branch changes — different conflict
+  // = re-confirm.
+  const [confirmedConflict, setConfirmedConflict] = useState(false);
   const [logisticsLocationId, setLogisticsLocationId] = useState(
     editingUser?.logisticsLocationId ?? '',
   );
@@ -225,6 +232,12 @@ export function UserCreatePage({
   useEffect(() => {
     if (!showLogisticsLocation) setLogisticsLocationId('');
   }, [showLogisticsLocation]);
+
+  // Reset the conflict-confirmation flag whenever the role or branch changes —
+  // any of those changes the conflict, so the admin should re-acknowledge.
+  useEffect(() => {
+    setConfirmedConflict(false);
+  }, [selectedRole, selectedBranchId]);
 
   useEffect(() => {
     if (compensationMode !== 'existing') setCommissionPlanId('');
@@ -352,7 +365,7 @@ export function UserCreatePage({
         data-branch-scoped-action="true"
         className="space-y-6"
         onSubmit={(e) => {
-          if (conflictingHead) {
+          if (conflictingHead && !confirmedConflict) {
             e.preventDefault();
             setConflictModalOpen(true);
           }
@@ -499,8 +512,8 @@ export function UserCreatePage({
             {conflictingHead && (
               <div className="sm:col-span-2">
                 <InlineNotification
-                  variant="warning"
-                  message={`${conflictScopeLabel} already has an active ${formatRole(selectedRole)} (${conflictingHead.name}). Creating another will be rejected — deactivate them first.`}
+                  variant="info"
+                  message={`${conflictScopeLabel} already has an active ${formatRole(selectedRole)} (${conflictingHead.name}). Yannis allows multiple holders — continue if intended.`}
                 />
               </div>
             )}
@@ -830,39 +843,58 @@ export function UserCreatePage({
           contentClassName="p-6"
         >
           <h3 className="text-lg font-semibold text-app-fg mb-2">
-            {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole)
-              ? 'Role already taken (organization-wide)'
-              : 'Role already taken in this branch'}
+            Confirm a second {formatRole(selectedRole)}?
           </h3>
           <p className="text-sm text-app-fg-muted mb-3">
             {ORG_WIDE_DEPARTMENT_HEAD_ROLES.has(selectedRole) ? (
               <>
-                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed in the
-                organization. <strong>{conflictingHead.name}</strong> already holds that role.
+                <strong>{conflictingHead.name}</strong> already holds{' '}
+                <strong>{formatRole(selectedRole)}</strong> across the organization.
               </>
             ) : (
               <>
-                Only one active <strong>{formatRole(selectedRole)}</strong> is allowed per branch.{' '}
-                <strong>{conflictingBranch ? conflictingBranch.name : 'This branch'}</strong>{' '}
-                already has <strong>{conflictingHead.name}</strong> in that role.
+                <strong>{conflictingHead.name}</strong> already holds{' '}
+                <strong>{formatRole(selectedRole)}</strong> at{' '}
+                <strong>{conflictingBranch ? conflictingBranch.name : 'this branch'}</strong>.
               </>
             )}
           </p>
           <p className="text-sm text-app-fg-muted mb-4">
-            To add a new {formatRole(selectedRole)}, first change {conflictingHead.name}&apos;s role
-            (or deactivate them) from their profile page.
+            Yannis allows multiple holders — both will get the role&apos;s notifications and
+            visibility. Permissions still control what each person can do. Continue if this is
+            intended (e.g. handover, co-heads, regional split). You can also{' '}
+            <Link
+              to={`${usersBasePath}/${conflictingHead.id}`}
+              className="text-brand-500 hover:text-brand-600 underline"
+              onClick={() => setConflictModalOpen(false)}
+            >
+              review {conflictingHead.name}
+            </Link>{' '}
+            first.
           </p>
           <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setConflictModalOpen(false)}>
-              Back
+              Cancel
             </Button>
-            <Link
-              to={`${usersBasePath}/${conflictingHead.id}`}
-              className="btn-primary"
-              onClick={() => setConflictModalOpen(false)}
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                setConfirmedConflict(true);
+                setConflictModalOpen(false);
+                // Resubmit the form now that the conflict is acknowledged.
+                // The next render's onSubmit lets it through because
+                // confirmedConflict === true.
+                requestAnimationFrame(() => {
+                  if (typeof document !== 'undefined') {
+                    const form = document.querySelector<HTMLFormElement>('form[data-branch-scoped-action="true"]');
+                    form?.requestSubmit();
+                  }
+                });
+              }}
             >
-              Go to {conflictingHead.name}
-            </Link>
+              Continue anyway
+            </Button>
           </div>
         </Modal>
       )}

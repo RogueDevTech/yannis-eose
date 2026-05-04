@@ -9,6 +9,7 @@ import {
   assignOrderSchema,
   bulkReassignSchema,
   listOrdersSchema,
+  scheduleCalendarHeatSchema,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -30,7 +31,8 @@ export function setVoipService(service: VoipService) {
   voipServiceInstance = service;
 }
 
-function getOrdersService(): OrdersService {
+/** Exported for cross-router reads that must share the same `OrdersService` singleton (e.g. finance invoice gates). */
+export function getOrdersService(): OrdersService {
   if (!ordersServiceInstance) {
     throw new Error('OrdersService not initialized. Call setOrdersService() first.');
   }
@@ -112,25 +114,7 @@ export const ordersRouter = router({
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       const order = await getOrdersService().getById(input.orderId);
-      if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
-        const perms = ctx.user.permissions ?? [];
-        const hasOrdersRead = perms.includes('orders.read');
-        const hasMarketingOrders = perms.includes('marketing.orders');
-        if (!hasOrdersRead) {
-          if (!hasMarketingOrders) {
-            throw new TRPCError({
-              code: 'FORBIDDEN',
-              message: 'Not authorized to view this order',
-            });
-          }
-          if (ctx.user.role !== 'HEAD_OF_MARKETING' && order.mediaBuyerId !== ctx.user.id) {
-            throw new TRPCError({
-              code: 'FORBIDDEN',
-              message: 'Not authorized to view this order',
-            });
-          }
-        }
-      }
+      getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
       const ob = order.branchId ?? null;
       const as = order.assignedCsId ?? null;
       const cb = ctx.user.currentBranchId ?? null;
@@ -191,6 +175,44 @@ export const ordersRouter = router({
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
       return getOrdersService().list(effectiveInput, branchId);
+    }),
+
+  /**
+   * CS schedule calendar: per-day callback + ISO delivery-date counts (Africa/Lagos for callbacks).
+   * Same auth / branch / CS_AGENT / Media Buyer scoping as `orders.list`.
+   */
+  scheduleCalendarHeat: authedProcedure
+    .input(scheduleCalendarHeatSchema)
+    .query(async ({ input, ctx }) => {
+      const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      if (ctx.user.role === 'SUPER_ADMIN') {
+        return getOrdersService().scheduleCalendarHeat(input, branchId);
+      }
+      const perms = ctx.user.permissions ?? [];
+      const hasOrdersRead = perms.includes('orders.read');
+      const hasMarketingOrders = perms.includes('marketing.orders');
+      const hasLogisticsRead = perms.includes('logistics.read');
+      const hasOrgWideScope =
+        perms.includes('cs.scope.global') ||
+        perms.includes('marketing.scope.global') ||
+        perms.includes('logistics.scope.global');
+      if (!hasOrdersRead && !hasMarketingOrders && !hasLogisticsRead && !hasOrgWideScope) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Missing orders.read, marketing.orders, or logistics.read permission',
+        });
+      }
+      if (hasOrgWideScope) {
+        return getOrdersService().scheduleCalendarHeat(input, branchId);
+      }
+      let effectiveInput = input;
+      if (!hasOrdersRead && hasMarketingOrders && ctx.user.role === 'MEDIA_BUYER') {
+        effectiveInput = { ...input, mediaBuyerId: ctx.user.id };
+      }
+      if (hasOrdersRead && ctx.user.role === 'CS_AGENT') {
+        effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
+      }
+      return getOrdersService().scheduleCalendarHeat(effectiveInput, branchId);
     }),
 
   /**

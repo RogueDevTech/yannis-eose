@@ -3,6 +3,8 @@ import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { FinancePayoutPage } from '~/features/finance/FinancePayoutPage';
+import { ListFilterPersistence } from '~/components/list-filter-persistence';
+import { ALLOWLIST_FINANCE_PAYOUT, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { MonthlyPayrollGroup, PayrollBatch, PayrollBatchStatus } from '~/features/hr/types';
 
 export const meta: MetaFunction = () => [{ title: 'Payout — Finance — Yannis EOSE' }];
@@ -46,10 +48,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function AdminFinancePayoutRoute() {
   const data = useLoaderData<typeof loader>();
   return (
+    <>
+      <ListFilterPersistence scope={LIST_FILTER_SCOPES.financePayout} allowlist={ALLOWLIST_FINANCE_PAYOUT} />
     <FinancePayoutPage
       batches={data.batches}
       selectedBatch={data.selectedBatch as Parameters<typeof FinancePayoutPage>[0]['selectedBatch']}
-      status={data.status}
+      status={data.status as '' | PayrollBatchStatus}
     />
+    </>
   );
 }

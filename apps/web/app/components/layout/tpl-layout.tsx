@@ -6,6 +6,7 @@ import { RouteLoader } from '~/components/ui/route-loader';
 import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { SidebarIcons } from './sidebar';
 import { useAppTheme } from '~/hooks/useAppTheme';
+import { useSocket, useForceLogoutOnRevoke } from '~/hooks/useSocket';
 import { APP_THEMES } from '~/lib/theme';
 
 const TPL_NAV = [
@@ -64,6 +65,12 @@ export function TplLayout({
   const { themeId, setTheme, isDarkTheme } = useAppTheme();
   const menuRef = useRef<HTMLDivElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
+  // Initialise the socket + listen for forced-logout events from the server.
+  // Same flow as DashboardLayout — when an admin deactivates this 3PL user,
+  // the browser hard-redirects to /auth instead of letting them keep
+  // clicking around in already-rendered UI.
+  useSocket();
+  useForceLogoutOnRevoke();
 
   const isNavigatingWithinTpl =
     navigation.state !== 'idle' &&

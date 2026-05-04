@@ -3378,3 +3378,132 @@ The `deploy-dev.yml` health-check loop already fails the deploy if the API doesn
 **Acceptance Criteria:**
 - [x] Existing `deploy-dev.yml` health-check loop now also gates on migration success (transitively, via boot failure).
 - [x] CLAUDE.md notes the rule: passing health = migrated DB.
+
+---
+
+## Phase 20: Staff Attendance / Check-in (CEO directive 2026-05-03)
+
+**Why:** Login ≠ "I came to work." HR needs a separate signal — staff physically present at their branch, time of arrival, time of departure — so we can stop relying on the honor system and roll attendance into the monthly payroll batch later.
+
+**Locked decisions (pre-design):**
+- **One session per day.** Lunch breaks / errands don't matter for attendance — keep the data clean. Latest check-in / check-out wins for the day.
+- **Forgotten checkout = session EXPIRES, NOT auto-checked-out.** A nightly cron flags any open session past `branch.shiftEndTime + grace` as `EXPIRED` (not `CLOSED`). The user must come back and explicitly check out — even if that closes a yesterday session. HR sees the flag in the daily roster and can follow up.
+- **Late threshold is configurable per branch via the HR page.** Two fields on `branches`: `shift_start_time` and `late_threshold_minutes`. HR Manager / Branch Admin can edit; everyone else read-only.
+- **Off days / leave / sick are out of scope for v1.** Future module — link `attendance_sessions` to a leave-request row when it lands.
+
+**Open questions (need CEO sign-off before Task 20.1):**
+1. **Audience** — all staff, or office-only roles? My default split:
+   - **REQUIRED:** CS_AGENT, FINANCE_OFFICER, HR_MANAGER, BRANCH_ADMIN, STOCK_MANAGER, LOGISTICS_MANAGER (on-site)
+   - **REMOTE_OK** (can check in but no late flag): MEDIA_BUYER, HEAD_OF_MARKETING, HEAD_OF_LOGISTICS, HEAD_OF_CS — they travel between branches
+   - **EXEMPT:** SUPER_ADMIN, ADMIN, TPL_MANAGER, TPL_RIDER (riders tracked via deliveries instead)
+   - Captured per-user via `users.attendance_mode` enum so individual exceptions are easy.
+2. **Presence-only or hourly accountability?** Drives whether hours-worked rolls into payroll. Default: presence-only for v1; hours show in the report but don't compute pay.
+3. **Trust target.** v1 ships GPS + radius (spoofable but raises friction). Add rotating-QR or Wi-Fi BSSID (Task 20.6) only if abuse is observed.
+4. **Multi-branch flexibility.** Default v1: a user can check in at any branch they belong to (`user_branches`). Most relevant for org-wide heads.
+
+### Task 20.1 — Schema + migration
+
+- Migration `0107_attendance_sessions.sql`:
+  - New table `attendance_sessions`: `id (uuidv7)`, `user_id`, `branch_id`, `checked_in_at`, `checked_out_at` (nullable), `check_in_lat`, `check_in_lng`, `check_in_distance_m`, `check_out_lat`, `check_out_lng`, `check_out_distance_m`, `late` (boolean, computed at check-in time), `expired_at` (nullable — set when nightly sweep flags an open session past shift end), `notes`, plus `temporal_columns`.
+  - Partial unique index `attendance_sessions_one_open_per_user`: one row per `user_id` where `checked_out_at IS NULL AND expired_at IS NULL`. Enforces one-session-per-day at the DB layer.
+  - Index `attendance_sessions_branch_date_idx` on `(branch_id, DATE(checked_in_at))` for the daily roster query.
+- Add columns to `branches`: `check_in_lat numeric(10,7)`, `check_in_lng numeric(10,7)`, `check_in_radius_m int default 150`, `shift_start_time time`, `shift_end_time time`, `late_threshold_minutes int default 15`. Sync `branches_history`.
+- Add column to `users`: `attendance_mode attendance_mode_enum default 'REQUIRED'` with values `REQUIRED | REMOTE_OK | EXEMPT`. Sync `users_history`.
+- New temporal trigger for the new table (modeled after existing capture-history triggers).
+
+**Acceptance Criteria:**
+- [ ] Migration applies cleanly + history mirrors the schema.
+- [ ] One open session per user enforced at the DB layer.
+- [ ] Drizzle schema (`packages/shared/src/db/schema/attendance.ts` + branches + users) updated.
+- [ ] Validators in `packages/shared/src/validators/attendance.ts`.
+
+### Task 20.2 — Backend service + tRPC
+
+- New module `apps/api/src/attendance/`. Service methods:
+  - `checkIn({ branchId, lat, lng, deviceMeta })` — validates user is `REQUIRED` or `REMOTE_OK`, validates the chosen branch is in `user_branches`, validates lat/lng within `branch.check_in_radius_m` (Haversine), rejects if there's an open session, computes `late` from `branch.shift_start_time` + `late_threshold_minutes`, inserts row via `withActor`. Notifies branch HR on late check-in.
+  - `checkOut({ lat, lng })` — finds the user's open session, sets `checked_out_at` + `check_out_lat/lng/distance_m`. Idempotent — re-clicking does nothing if already closed.
+  - `getMyToday()` — returns the caller's session (if any) for today + branch shift config so the profile button can render the right state.
+  - `getRoster({ branchId, date })` — HR / admin / Branch Admin. Returns one row per `attendance_mode != EXEMPT` user on that branch with their session (if any), late flag, expired flag.
+  - `listMyHistory({ startDate, endDate, page, limit })` — for the user's profile page.
+  - `expireOpenSessions()` — `@Cron('0 0 23 * * *')` daily sweep. Looks for sessions where `checked_out_at IS NULL AND created_at < (today - 1 day)` (or some buffer past shift end), sets `expired_at = now()`. Notifies the staff member: "You forgot to check out yesterday — please come back and close the session." Notifies their branch HR with the same.
+- tRPC router `attendance.router.ts`:
+  - `attendance.checkIn` — `permissionProcedure('attendance.write')` (new code) — staff with `REQUIRED` / `REMOTE_OK` get this in their templates.
+  - `attendance.checkOut` — same.
+  - `attendance.getMyToday` — `authedProcedure`.
+  - `attendance.getRoster` — `permissionProcedure('attendance.read')` — HR / admin / Branch Admin templates.
+  - `attendance.listMyHistory` — `authedProcedure` (always self).
+  - `attendance.listUserHistory({ userId })` — `permissionProcedure('attendance.read')` — for HR viewing a specific user's history on their detail page.
+- Add new permission codes `attendance.write`, `attendance.read` to the catalog. Run `pnpm db:seed-permissions`.
+
+**Acceptance Criteria:**
+- [ ] All five service methods covered by integration tests (DB-backed, hits temporal triggers).
+- [ ] Permission gates align with the role matrix above.
+- [ ] Geofence math verified with a small fixture (5 known lat/lng pairs).
+- [ ] `expireOpenSessions` cron tested via fake-timer integration test.
+
+### Task 20.3 — HR config UI: branch shift + radius
+
+- New section on the HR Settings page (or extend `/admin/branches`): per branch, edit `shift_start_time`, `shift_end_time`, `late_threshold_minutes`, `check_in_lat/lng/radius_m`.
+- "Set from current location" helper button — uses browser geolocation to drop the lat/lng for HR convenience.
+- Permission: `branches.write` OR `hr.write` to edit; everyone else read-only.
+
+**Acceptance Criteria:**
+- [ ] Form validates lat/lng range, radius 50–500m, late threshold 0–60 min.
+- [ ] Saving runs through `withActorAndBranch`.
+- [ ] Branch detail page shows the configured values.
+
+### Task 20.4 — User-side check-in / check-out UI
+
+- New card on the user's profile page (`/admin/profile` or wherever the staff lands): big "Check in" button when no open session, switches to "Check out" + elapsed time when checked in.
+- Branch picker visible only when user belongs to multiple branches; pre-selects `currentBranchId`.
+- Geolocation prompt on click; on grant, fetch + submit. On deny, show the friendly error + a "Why we ask" tooltip.
+- Mobile-first: PWA already installed. Make this card the most prominent thing on the profile.
+- Toast on success: "Checked in at HQ Lagos · 9:08am · 2 min late" / "Checked in at HQ Lagos · 8:55am".
+- Push notification reminder at `shift_end_time + 30min` if the user is still checked in: "Don't forget to check out before you leave."
+
+**Acceptance Criteria:**
+- [ ] Works in PWA standalone mode + browser.
+- [ ] Geolocation denial path tested.
+- [ ] Out-of-radius shows a clear "You're {N}m from {Branch}, get closer to check in." message.
+- [ ] Already-open-session state correctly resumes on refresh.
+
+### Task 20.5 — HR daily roster + per-user history
+
+- New page `/admin/hr/attendance` (HR Manager / admin / Branch Admin):
+  - **Today** view: one row per active staff on the branch, columns Name · Role · Status (checked in / late / not yet / on leave) · Check-in · Check-out · Hours · Flags.
+  - **Date picker** to look at past days.
+  - Filter by branch (admin sees all; Branch Admin scoped to their branch).
+  - Late + expired-session rows pop with a danger / warning chip.
+  - CSV export reuses `csv-export.ts`.
+- User detail page (`/hr/users/:id`) gets a new "Attendance" tab — last 30 / 60 / 90 days of sessions, total hours, late count.
+
+**Acceptance Criteria:**
+- [ ] Today's roster renders < 500ms for a branch with 50 staff.
+- [ ] Historical date picker uses the `attendance_sessions_branch_date_idx`.
+- [ ] CSV export includes lat/lng + distance for audit.
+
+### Task 20.6 — Anti-spoof hardening (deferred)
+
+Trigger: HR / CEO observes obvious abuse on v1 GPS-only.
+
+Pick ONE of:
+- Rotating QR at the office door (TOTP-style; staff scans with phone). Add a `branch.check_in_qr_secret` column + a small admin page that shows the live QR.
+- Wi-Fi BSSID match (browser `NetworkInformation` API where available).
+- Server-side IP allowlist for the branch's office router.
+
+Out of scope for v1. Capture as a follow-up so we don't forget the trade-off.
+
+**Acceptance Criteria (when triggered):**
+- [ ] Whichever method ships, GPS check stays as the fallback for users on cellular.
+- [ ] Method rolls out per-branch (some offices may want it, others not).
+
+### Task 20.7 — Docs + memory
+
+- CLAUDE.md: new section "Staff Attendance" — captures the locked decisions (one session per day, expired ≠ checked out, branch-configurable late threshold, audience matrix, GPS+radius trust model).
+- Memory entry: `project_attendance_check_in.md` covering the locked decisions + open questions resolution.
+
+**Acceptance Criteria:**
+- [ ] CLAUDE.md updated; memory indexed.
+- [ ] Role matrix table in CLAUDE.md includes the new `attendance_mode` field.
+
+**Phase 20 build order:** 20.1 (schema) → 20.2 (backend) → 20.3 (HR config) → 20.4 (user UI) → 20.5 (HR roster) → 20.7 (docs). 20.6 deferred. Don't start 20.4 before 20.3 ships, otherwise users can check in at branches with no shift config and the late flag gets garbage data.
