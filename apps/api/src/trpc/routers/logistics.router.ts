@@ -18,10 +18,13 @@ import {
   listDeliveryConfirmationRequestsSchema,
   approveDeliveryConfirmationSchema,
   rejectDeliveryConfirmationSchema,
+  canonicalPermissionCode,
 } from '@yannis/shared';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { router, authedProcedure, permissionProcedure } from '../trpc';
+import { router, authedProcedure, permissionProcedure, middleware } from '../trpc';
 import { LogisticsService } from '../../logistics/logistics.service';
+import { isAdminLevel } from '../../common/authz';
 
 let logisticsServiceInstance: LogisticsService | null = null;
 
@@ -35,6 +38,25 @@ function getLogisticsService(): LogisticsService {
   }
   return logisticsServiceInstance;
 }
+
+/**
+ * Matches Remix `requirePermissionOrRoles` on `/admin/logistics/team`: admin-class
+ * and Head of Logistics may load the page by role; others need the stamped
+ * `logistics.teamOverview` code. `permissionProcedure` alone 403s HoL/Admin when
+ * the snapshot predates that permission — the loader then shows an empty table.
+ */
+const logisticsTeamOverviewGate = middleware(async ({ ctx, next }) => {
+  const user = ctx.user!;
+  if (isAdminLevel(user)) return next();
+  if (user.role === 'HEAD_OF_LOGISTICS') return next();
+  const required = canonicalPermissionCode('logistics.teamOverview');
+  const perms = new Set((user.permissions ?? []).map((c) => canonicalPermissionCode(c)));
+  if (perms.has(required)) return next();
+  throw new TRPCError({
+    code: 'FORBIDDEN',
+    message: 'Missing required permission: logistics.teamOverview',
+  });
+});
 
 export const logisticsRouter = router({
   // Providers
@@ -203,7 +225,8 @@ export const logisticsRouter = router({
 
   // Logistics Team Analysis (provider performance rollup) — gates the
   // /admin/logistics/team page. Branch scoping flows through ctx.currentBranchId.
-  teamOverview: permissionProcedure('logistics.teamOverview')
+  teamOverview: authedProcedure
+    .use(logisticsTeamOverviewGate)
     .input(
       z.object({
         startDate: z.string().date().optional(),

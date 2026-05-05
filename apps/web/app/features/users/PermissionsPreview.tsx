@@ -206,18 +206,22 @@ export function PermissionsPreview({
             </>
           ) : null}
         </div>
-        <div className="space-y-2">
+        <div className="space-y-3">
           {fallbackGrouped.map(([groupKey, codes]) => (
-            <div key={groupKey}>
-              <p className="text-[11px] uppercase tracking-wide text-app-fg-muted font-semibold mb-1">
-                {formatPermissionGroup(groupKey)} <span className="text-app-fg-muted/70">({codes.length})</span>
+            <div
+              key={groupKey}
+              className="flex flex-col gap-1.5 border-b border-app-border/50 pb-3 last:border-0 last:pb-0 sm:flex-row sm:items-baseline sm:gap-4"
+            >
+              <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted sm:min-w-[9.5rem]">
+                {formatPermissionGroup(groupKey)}{' '}
+                <span className="text-app-fg-muted/70">({codes.length})</span>
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
                 {codes.map((code) => (
                   <span
                     key={code}
                     title={code}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-medium bg-app-hover text-app-fg ring-1 ring-app-border"
+                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[12px] font-medium bg-app-hover text-app-fg ring-1 ring-app-border"
                   >
                     {formatPermissionCode(code)}
                   </span>
@@ -226,16 +230,16 @@ export function PermissionsPreview({
             </div>
           ))}
           {orphanRevokesOnly.length > 0 ? (
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-app-fg-muted font-semibold mb-1">
+            <div className="flex flex-col gap-1.5 border-t border-app-border/50 pt-3 sm:flex-row sm:items-baseline sm:gap-4">
+              <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted sm:min-w-[9.5rem]">
                 Revoked <span className="text-app-fg-muted/70">({orphanRevokesOnly.length})</span>
               </p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
                 {orphanRevokesOnly.map(({ code }) => (
                   <span
                     key={code}
                     title={`${code} — explicitly revoked`}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/20"
+                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[12px] font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/20"
                   >
                     {formatPermissionCode(code)}
                   </span>
@@ -284,26 +288,29 @@ export function PermissionsPreview({
         )}
       </div>
 
-      {/* Grouped chips — sections only; outer profile card is the single container. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-x-4 gap-y-2">
+      {/* One row per domain: label (fixed column) + chips flowing horizontally */}
+      <div className="space-y-3">
         {grouped.map(([groupKey, rows]) => {
           const grantedRows = rows.filter((r) => r.effective);
           const revokedRows = rows.filter((r) => r.state === 'explicitRevoke');
           if (grantedRows.length === 0 && revokedRows.length === 0) return null;
           return (
-            <div key={groupKey} className="min-w-0 space-y-1">
-              <div className="flex items-center justify-between gap-2">
+            <div
+              key={groupKey}
+              className="flex flex-col gap-1.5 border-b border-app-border/50 pb-3 last:border-0 last:pb-0 sm:flex-row sm:items-baseline sm:gap-4"
+            >
+              <div className="flex shrink-0 items-baseline gap-2 sm:min-w-[10rem]">
                 <h3 className="text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted">
                   {formatPermissionGroup(groupKey)}
                 </h3>
-                <span className="text-[11px] text-app-fg-muted tabular-nums shrink-0">
+                <span className="text-[11px] text-app-fg-muted tabular-nums">
                   {grantedRows.length}
                   {revokedRows.length > 0 ? (
-                    <span className="text-danger-600 dark:text-danger-400 ml-1">−{revokedRows.length}</span>
+                    <span className="ml-1 text-danger-600 dark:text-danger-400">−{revokedRows.length}</span>
                   ) : null}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1">
                 {grantedRows.map(({ perm, state }) => {
                   const detail = stripGroupPrefix(perm.code);
                   return (
@@ -312,8 +319,8 @@ export function PermissionsPreview({
                       title={`${perm.code}${perm.description ? ` — ${perm.description}` : ''}`}
                       className={
                         state === 'explicitGrant'
-                          ? 'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-brand-50 text-brand-700 ring-1 ring-brand-500/30 dark:bg-brand-900/30 dark:text-brand-200'
-                          : 'inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-app-hover/70 text-app-fg-muted ring-1 ring-app-border/60 hover:text-app-fg hover:ring-app-border transition-colors'
+                          ? 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-brand-50 text-brand-700 ring-1 ring-brand-500/30 dark:bg-brand-900/30 dark:text-brand-200'
+                          : 'inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium bg-app-hover/70 text-app-fg-muted ring-1 ring-app-border/60 transition-colors hover:text-app-fg hover:ring-app-border'
                       }
                     >
                       {state === 'explicitGrant' && (
@@ -327,7 +334,7 @@ export function PermissionsPreview({
                   <span
                     key={perm.code}
                     title={`${perm.code} — explicitly revoked from this user`}
-                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/30"
+                    className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/30"
                   >
                     {stripGroupPrefix(perm.code)}
                   </span>

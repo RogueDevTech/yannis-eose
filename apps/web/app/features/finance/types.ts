@@ -12,6 +12,21 @@ export interface Invoice {
   createdAt: string;
 }
 
+export interface ProductProfitBreakdownRow {
+  productId: string;
+  productName: string;
+  revenue: number;
+  landedCost: number;
+  deliveryFee: number;
+  adSpend: number;
+  allocatedCommission: number;
+  allocatedFulfillment: number;
+  allocatedOperationalLoss: number;
+  contribution: number;
+  marginPct: number;
+  orderCount: number;
+}
+
 export interface ProfitReport {
   revenue: number;
   landedCost: number;
@@ -23,6 +38,19 @@ export interface ProfitReport {
   trueProfit: number;
   orderCount: number;
   margin: number;
+  /** Present when `groupBy: 'product'` on `finance.profitReport`. */
+  byProduct?: ProductProfitBreakdownRow[];
+}
+
+/** Live ops counts for the finance overview rail (not tied to profit date range). */
+export interface FinanceOverviewPulse {
+  awaitingCash: number;
+  awaitingOrderCount: number;
+  pendingRemittanceAmount: number;
+  pendingRemittanceBatchCount: number;
+  disputedRemittanceBatchCount: number;
+  payrollPendingFinanceCount: number;
+  approvalsPendingCount: number;
 }
 
 export interface ApprovalRequest {
@@ -57,36 +85,13 @@ export interface BudgetWithUtilization extends Budget {
   isActive: boolean;
 }
 
-export interface FinancePageData {
-  invoices: Invoice[];
-  totalInvoices: number;
+/** `/admin/finance/overview` loader shape */
+export interface FinanceOverviewLoaderData {
   profit: ProfitReport;
-  invoiceSummary: Record<string, { count: number; total: string }>;
-  approvals: ApprovalRequest[];
-  totalApprovals: number;
-  pendingApprovals: number;
-  budgets: Budget[];
+  pulse: FinanceOverviewPulse;
   filters: {
     startDate: string;
     endDate: string;
     periodAllTime?: boolean;
-    invoiceStatus: string;
-    approvalStatus: string;
   };
-}
-
-/** What the loader returns — mix of resolved data + streaming promises */
-export interface FinanceStreamData {
-  // Critical (resolved immediately)
-  invoices: Invoice[];
-  totalInvoices: number;
-  profit: ProfitReport;
-  filters: FinancePageData['filters'];
-  // Deferred (streamed)
-  invoiceSummary: Promise<Record<string, { count: number; total: string }>> | Record<string, { count: number; total: string }>;
-  approvals: Promise<ApprovalRequest[]> | ApprovalRequest[];
-  totalApprovals: Promise<number> | number;
-  pendingApprovals: Promise<number> | number;
-  pendingApprovalsValue: Promise<number> | number;
-  budgets: Promise<BudgetWithUtilization[]> | BudgetWithUtilization[];
 }

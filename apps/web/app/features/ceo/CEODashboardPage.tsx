@@ -594,7 +594,7 @@ export function CEODashboardPage({
                   data={
                     orderPipeline.total > 0
                       ? Object.entries(orderPipeline.statusCounts)
-                          .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
+                          .filter(([status, count]) => status !== 'REMITTED' && count > 0)
                           .sort(([, a], [, b]) => b - a)
                           .map(([status, value]) => ({
                             name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
@@ -613,7 +613,7 @@ export function CEODashboardPage({
                 >
                   {orderPipeline.total > 0
                     ? Object.entries(orderPipeline.statusCounts)
-                        .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
+                        .filter(([status, count]) => status !== 'REMITTED' && count > 0)
                         .sort(([, a], [, b]) => b - a)
                         .map(([status]) => (
                           <Cell key={status} fill={STATUS_HEX[status] ?? '#64748b'} />
@@ -634,11 +634,11 @@ export function CEODashboardPage({
           <OverviewStatStrip
             embedded
             showScrollControls={
-              Object.entries(orderPipeline.statusCounts).filter(([s, c]) => s !== 'COMPLETED' && c > 0).length > 4
+              Object.entries(orderPipeline.statusCounts).filter(([s, c]) => s !== 'REMITTED' && c > 0).length > 4
             }
             tileClassName="min-w-[5.5rem]"
             items={Object.entries(orderPipeline.statusCounts)
-              .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
+              .filter(([status, count]) => status !== 'REMITTED' && count > 0)
               .sort(([, a], [, b]) => b - a)
               .map(([status, count]) => ({
                 label: STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status.replace(/_/g, ' '),
@@ -855,7 +855,7 @@ export function CEODashboardPage({
                     data={
                       orderPipeline.total > 0
                         ? Object.entries(orderPipeline.statusCounts)
-                            .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
+                            .filter(([status, count]) => status !== 'REMITTED' && count > 0)
                             .sort(([, a], [, b]) => b - a)
                             .map(([status, value]) => ({
                               name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
@@ -874,7 +874,7 @@ export function CEODashboardPage({
                   >
                     {orderPipeline.total > 0
                       ? Object.entries(orderPipeline.statusCounts)
-                          .filter(([status, count]) => status !== 'COMPLETED' && count > 0)
+                          .filter(([status, count]) => status !== 'REMITTED' && count > 0)
                           .sort(([, a], [, b]) => b - a)
                           .map(([status]) => (
                             <Cell key={status} fill={STATUS_HEX[status] ?? '#64748b'} />

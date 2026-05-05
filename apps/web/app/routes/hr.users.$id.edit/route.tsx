@@ -6,6 +6,7 @@ import {
   getSessionCookie,
   requireStaffAccountsAccess,
   safeStatus,
+  USER_WRITE_ACTION_TIMEOUT_MS,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { extractTrpc } from '~/lib/trpc-extract.server';
@@ -390,6 +391,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     method: 'POST',
     cookie,
     body,
+    timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
   });
 
   if (!res.ok) {

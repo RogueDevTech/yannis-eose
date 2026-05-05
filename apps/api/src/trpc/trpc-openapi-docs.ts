@@ -172,7 +172,6 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'marketing.getPublic', method: 'GET', summary: 'Public marketing data (for Edge)', tag: 'Marketing' },
 
   // Finance
-  { procedure: 'finance.createInvoice', method: 'POST', summary: 'Create invoice', tag: 'Finance' },
   { procedure: 'finance.updateInvoiceStatus', method: 'POST', summary: 'Update invoice status', tag: 'Finance' },
   { procedure: 'finance.getInvoice', method: 'GET', summary: 'Get invoice', tag: 'Finance' },
   { procedure: 'finance.listInvoices', method: 'GET', summary: 'List invoices', tag: 'Finance' },
@@ -249,6 +248,7 @@ const ENDPOINTS: TrpcEndpoint[] = [
 
   // Permission Requests
   { procedure: 'permissionRequests.listPending', method: 'GET', summary: 'List pending permission requests', tag: 'Permission Requests' },
+  { procedure: 'permissionRequests.statusCounts', method: 'GET', summary: 'Permission request counts by status (viewer-scoped)', tag: 'Permission Requests' },
   { procedure: 'permissionRequests.approve', method: 'POST', summary: 'Approve permission request', tag: 'Permission Requests' },
   { procedure: 'permissionRequests.reject', method: 'POST', summary: 'Reject permission request', tag: 'Permission Requests' },
 ];

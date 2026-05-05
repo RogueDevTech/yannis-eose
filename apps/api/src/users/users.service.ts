@@ -22,6 +22,7 @@ import { EventsService } from '../events/events.service';
 import { resolveRoleTemplateBaselineCodes } from '../permissions/role-template-baseline';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevelRole } from '../common/authz';
+import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 
 type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
@@ -784,6 +785,10 @@ export class UsersService {
 
     const orderDirection = input.sortOrder === 'asc' ? asc : desc;
     const offset = (input.page - 1) * input.limit;
+    const perms = (actor?.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const includePayoutFields =
+      !!actor &&
+      (hasFinanceAccess(actor) || perms.includes(canonicalPermissionCode('finance.read')));
 
     const [users, totalRows] = await Promise.all([
       this.db
@@ -797,6 +802,9 @@ export class UsersService {
           logisticsLocationId: schema.users.logisticsLocationId,
           phone: schema.users.phone,
           createdAt: schema.users.createdAt,
+          payoutBankName: schema.users.payoutBankName,
+          payoutAccountName: schema.users.payoutAccountName,
+          payoutAccountNumber: schema.users.payoutAccountNumber,
         })
         .from(schema.users)
         .where(whereClause)
@@ -813,11 +821,21 @@ export class UsersService {
     const membershipsByUser = await this.getUserBranchMemberships(users.map((u) => u.id));
 
     return {
-      users: users.map((u) => ({
-        ...u,
-        phone: this.resolveStaffPhone(actor, { id: u.id, role: u.role, phone: u.phone }),
-        branchMemberships: membershipsByUser.get(u.id) ?? [],
-      })),
+      users: users.map((u) => {
+        const { payoutBankName, payoutAccountName, payoutAccountNumber, ...rest } = u;
+        return {
+          ...rest,
+          phone: this.resolveStaffPhone(actor, { id: u.id, role: u.role, phone: u.phone }),
+          branchMemberships: membershipsByUser.get(u.id) ?? [],
+          ...(includePayoutFields
+            ? {
+                payoutBankName: payoutBankName ?? null,
+                payoutAccountName: payoutAccountName ?? null,
+                payoutAccountNumber: payoutAccountNumber ?? null,
+              }
+            : {}),
+        };
+      }),
       pagination: {
         page: input.page,
         limit: input.limit,

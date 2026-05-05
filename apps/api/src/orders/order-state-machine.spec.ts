@@ -21,20 +21,21 @@ describe('isTransitionAllowed — valid transitions', () => {
     ['CS_ASSIGNED', 'CANCELLED'],
     ['CS_ENGAGED', 'CONFIRMED'],
     ['CS_ENGAGED', 'CANCELLED'],
-    ['CONFIRMED', 'ALLOCATED'],
-    ['ALLOCATED', 'DISPATCHED'],
+    ['CONFIRMED', 'AGENT_ASSIGNED'],
+    ['AGENT_ASSIGNED', 'AGENT_ASSIGNED'],
+    ['AGENT_ASSIGNED', 'DISPATCHED'],
     // CS rider-proxy path: CS / HoLogistics can mark delivered or returned directly from
     // ALLOCATED while 3PL isn't in-app (DISPATCHED + IN_TRANSIT happen offline).
-    ['ALLOCATED', 'DELIVERED'],
-    ['ALLOCATED', 'RETURNED'],
+    ['AGENT_ASSIGNED', 'DELIVERED'],
+    ['AGENT_ASSIGNED', 'RETURNED'],
     ['DISPATCHED', 'IN_TRANSIT'],
     ['IN_TRANSIT', 'DELIVERED'],
     ['IN_TRANSIT', 'PARTIALLY_DELIVERED'],
     ['IN_TRANSIT', 'RETURNED'],
-    ['DELIVERED', 'COMPLETED'],
+    ['DELIVERED', 'REMITTED'],
     ['RETURNED', 'RESTOCKED'],
     ['RETURNED', 'WRITTEN_OFF'],
-    ['PARTIALLY_DELIVERED', 'COMPLETED'],
+    ['PARTIALLY_DELIVERED', 'REMITTED'],
   ];
 
   it.each(validTransitions)('%s → %s should be allowed', (from, to) => {
@@ -50,35 +51,35 @@ describe('isTransitionAllowed — forbidden skips', () => {
   const forbiddenTransitions: [OrderStatus, OrderStatus][] = [
     // Skip states forward
     ['UNPROCESSED', 'CONFIRMED'],
-    ['UNPROCESSED', 'ALLOCATED'],
+    ['UNPROCESSED', 'AGENT_ASSIGNED'],
     ['UNPROCESSED', 'DISPATCHED'],
     ['UNPROCESSED', 'IN_TRANSIT'],
     ['UNPROCESSED', 'DELIVERED'],
-    ['UNPROCESSED', 'COMPLETED'],
+    ['UNPROCESSED', 'REMITTED'],
     ['CS_ASSIGNED', 'CONFIRMED'],
-    ['CS_ASSIGNED', 'ALLOCATED'],
-    ['CS_ENGAGED', 'ALLOCATED'],
+    ['CS_ASSIGNED', 'AGENT_ASSIGNED'],
+    ['CS_ENGAGED', 'AGENT_ASSIGNED'],
     ['CS_ENGAGED', 'DISPATCHED'],
     ['CONFIRMED', 'DISPATCHED'],
     ['CONFIRMED', 'IN_TRANSIT'],
     ['CONFIRMED', 'DELIVERED'],
-    ['ALLOCATED', 'IN_TRANSIT'],
+    ['AGENT_ASSIGNED', 'IN_TRANSIT'],
     ['DISPATCHED', 'DELIVERED'],
     // Backward transitions
     ['DELIVERED', 'UNPROCESSED'],
-    ['COMPLETED', 'UNPROCESSED'],
+    ['REMITTED', 'UNPROCESSED'],
     ['CONFIRMED', 'CS_ENGAGED'],
-    ['ALLOCATED', 'CONFIRMED'],
-    ['DISPATCHED', 'ALLOCATED'],
+    ['AGENT_ASSIGNED', 'CONFIRMED'],
+    ['DISPATCHED', 'AGENT_ASSIGNED'],
     ['IN_TRANSIT', 'DISPATCHED'],
     // Terminal → anything
-    ['COMPLETED', 'ALLOCATED'],
-    ['COMPLETED', 'DISPATCHED'],
+    ['REMITTED', 'AGENT_ASSIGNED'],
+    ['REMITTED', 'DISPATCHED'],
     ['WRITTEN_OFF', 'RETURNED'],
     ['RESTOCKED', 'DISPATCHED'],
     // Cross-branch invalid
     ['CANCELLED', 'CONFIRMED'],
-    ['CANCELLED', 'ALLOCATED'],
+    ['CANCELLED', 'AGENT_ASSIGNED'],
     ['RETURNED', 'DELIVERED'],
   ];
 
@@ -94,7 +95,7 @@ describe('isTransitionAllowed — forbidden skips', () => {
 describe('TERMINAL_STATUSES', () => {
   it('contains exactly COMPLETED, WRITTEN_OFF, RESTOCKED', () => {
     expect(TERMINAL_STATUSES).toHaveLength(3);
-    expect(TERMINAL_STATUSES).toContain('COMPLETED');
+    expect(TERMINAL_STATUSES).toContain('REMITTED');
     expect(TERMINAL_STATUSES).toContain('WRITTEN_OFF');
     expect(TERMINAL_STATUSES).toContain('RESTOCKED');
   });
@@ -124,7 +125,7 @@ describe('getAllowedNextStatuses', () => {
     const result = getAllowedNextStatuses('CS_ENGAGED');
     expect(result).toContain('CONFIRMED');
     expect(result).toContain('CANCELLED');
-    expect(result).not.toContain('ALLOCATED');
+    expect(result).not.toContain('AGENT_ASSIGNED');
   });
 
   it('returns correct options from IN_TRANSIT', () => {
@@ -144,6 +145,11 @@ describe('getAllowedNextStatuses', () => {
 
   it('returns empty array for CANCELLED (no forward path)', () => {
     expect(getAllowedNextStatuses('CANCELLED')).toHaveLength(0);
+  });
+
+  it('returns ALLOCATED from ALLOCATED (reallocate to another 3PL)', () => {
+    const result = getAllowedNextStatuses('AGENT_ASSIGNED');
+    expect(result).toContain('AGENT_ASSIGNED');
   });
 });
 
@@ -186,7 +192,7 @@ describe('TRANSITION_TIMESTAMPS', () => {
   });
 
   it('maps ALLOCATED to allocatedAt', () => {
-    expect(TRANSITION_TIMESTAMPS['ALLOCATED']).toBe('allocatedAt');
+    expect(TRANSITION_TIMESTAMPS['AGENT_ASSIGNED']).toBe('allocatedAt');
   });
 
   it('maps DISPATCHED to dispatchedAt', () => {

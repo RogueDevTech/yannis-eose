@@ -17,6 +17,10 @@ export interface User {
   /** Staff contact — returned by `users.list`; masked per backend policy when unauthorized. */
   phone?: string | null;
   branchMemberships?: UserBranchMembership[];
+  /** Payout beneficiary fields — only present when the caller has finance access (`users.list`). */
+  payoutBankName?: string | null;
+  payoutAccountName?: string | null;
+  payoutAccountNumber?: string | null;
 }
 
 export const ROLE_COLORS: Record<string, string> = {

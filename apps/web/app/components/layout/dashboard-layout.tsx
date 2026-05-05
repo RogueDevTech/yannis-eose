@@ -215,12 +215,6 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'],
       },
       {
-        label: 'Delivery confirmations',
-        href: '/admin/logistics/delivery-confirmations',
-        icon: SidebarIcons.orders,
-        permission: 'logistics.read',
-      },
-      {
         label: 'Stock Transfer Confirmations',
         href: '/admin/logistics/remittances',
         icon: SidebarIcons.logistics,
@@ -546,14 +540,12 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin',
     '/admin/logistics/orders',
     '/admin/logistics/partners',
-    '/admin/logistics/delivery-confirmations',
     '/admin/logistics/remittances',
   ],
   TPL_MANAGER: [
     '/admin',
     '/admin/logistics/orders',
     '/admin/logistics/partners',
-    '/admin/logistics/delivery-confirmations',
     '/admin/logistics/remittances',
   ],
   FINANCE_OFFICER: [

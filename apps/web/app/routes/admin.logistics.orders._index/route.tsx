@@ -1,12 +1,17 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import {
+  apiRequest,
+  BULK_ORDER_MUTATION_TIMEOUT_MS,
+  getSessionCookie,
+  requirePermission,
+  safeStatus,
+  defaultThisMonthRange,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_LOGISTICS_ORDERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { Order } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
 
@@ -17,7 +22,7 @@ export const meta: MetaFunction = () => [
 const ORDERS_PER_PAGE = 40;
 const LOGISTICS_STATUS_SCOPE = [
   'CONFIRMED',
-  'ALLOCATED',
+  'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
   'DELIVERED',
@@ -25,7 +30,7 @@ const LOGISTICS_STATUS_SCOPE = [
   'RETURNED',
   'RESTOCKED',
   'WRITTEN_OFF',
-  'COMPLETED',
+  'REMITTED',
 ] as const;
 
 const defaultThisMonth = defaultThisMonthRange;
@@ -106,14 +111,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (endDate) trendInput.endDate = endDate;
   const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));
 
-  const [ordersRes, countsRes, locationsRes, ridersRes, trendRes] = await Promise.all([
+  const [ordersRes, countsRes, locationsRes, trendRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
       { method: 'GET', cookie },
     ),
-    apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
   ]);
 
@@ -136,11 +140,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationsData = locationsRes.ok
     ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
     : null;
-  const ridersData = ridersRes.ok
-    ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })
-        ?.result?.data ?? []
-    : [];
-
   const orders = ordersData?.orders ?? [];
   const total = ordersData?.pagination?.total ?? 0;
   const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
@@ -148,13 +147,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
   const locationProviderById = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
-  const riderById = new Map(ridersData.map((r) => [r.id, r]));
 
   const enrichedOrders: Array<LogisticsOrder & { locationName: string; locationProviderName: string | null; riderName: string }> = orders.map((o) => ({
     ...o,
     locationName: o.logisticsLocationId ? locationNameById.get(o.logisticsLocationId) ?? '—' : '—',
     locationProviderName: o.logisticsLocationId ? locationProviderById.get(o.logisticsLocationId) ?? null : null,
-    riderName: o.riderId ? riderById.get(o.riderId)?.name ?? '—' : '—',
+    riderName: '—',
   }));
 
   return {
@@ -168,7 +166,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     searchFilter: search ?? '',
     listErrorMessage,
     locations,
-    riders: ridersData,
+    riders: [],
     dailyCounts,
     filters: {
       startDate: startDate ?? '',
@@ -177,6 +175,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     },
     isTplManagerScoped: !!effectiveLogisticsLocationId,
     canEditDeliveryDate: false,
+    allocationOnDetailOnly: true,
+    orderDetailBasePath: '/admin/orders',
+    pageDescription: 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
   };
 }
 
@@ -201,7 +202,7 @@ export async function action({ request }: ActionFunctionArgs) {
       cookie,
       body: {
         orderId,
-        newStatus: 'ALLOCATED',
+        newStatus: 'AGENT_ASSIGNED',
         metadata: { logisticsLocationId },
       },
     });
@@ -225,13 +226,23 @@ export async function action({ request }: ActionFunctionArgs) {
         cookie,
         body: {
           orderIds,
-          newStatus: 'ALLOCATED',
+          newStatus: 'AGENT_ASSIGNED',
           metadata: { logisticsLocationId },
         },
+        timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },
     );
     if (!res.ok) {
-      return json({ success: false, error: 'Bulk allocation failed', succeeded: 0, failed: orderIds.length, results: [] }, { status: safeStatus(res.status) });
+      return json(
+        {
+          success: false,
+          error: extractApiErrorMessage(res.data, 'Bulk allocation failed'),
+          succeeded: 0,
+          failed: orderIds.length,
+          results: [],
+        },
+        { status: safeStatus(res.status) },
+      );
     }
     const data = res.data?.result?.data;
     return json({
@@ -314,10 +325,20 @@ export async function action({ request }: ActionFunctionArgs) {
           newStatus: 'DISPATCHED',
           metadata: { riderId },
         },
+        timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },
     );
     if (!res.ok) {
-      return json({ success: false, error: 'Bulk dispatch failed', succeeded: 0, failed: orderIds.length, results: [] }, { status: safeStatus(res.status) });
+      return json(
+        {
+          success: false,
+          error: extractApiErrorMessage(res.data, 'Bulk dispatch failed'),
+          succeeded: 0,
+          failed: orderIds.length,
+          results: [],
+        },
+        { status: safeStatus(res.status) },
+      );
     }
     const data = res.data?.result?.data;
     return json({
@@ -336,7 +357,6 @@ export default function LogisticsOrdersRoute() {
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.logisticsOrdersAdmin} allowlist={ALLOWLIST_LOGISTICS_ORDERS} />
       <LogisticsOrdersPage {...data} />
     </>
   );

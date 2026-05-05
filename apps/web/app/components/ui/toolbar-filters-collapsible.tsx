@@ -14,8 +14,8 @@ export function ToolbarFiltersFunnelIcon({ className = 'h-4 w-4 shrink-0' }: { c
 export type ToolbarFiltersBreakpoint = 'md' | 'lg';
 
 export interface ToolbarFiltersCollapsibleProps {
-  /** Search row — typically `<form>` + `SearchInput` + submit (single instance in DOM). */
-  searchRow: ReactNode;
+  /** Search row — typically `<form>` + `SearchInput` + submit (single instance in DOM). Omit or pass `null` when only inline/sheet filters apply. */
+  searchRow?: ReactNode;
   /** Selects / chips shown inline at `breakpoint` and up (same row as search). */
   desktopInlineFilters: ReactNode;
   /** Stacked controls inside the mobile sheet (full-width selects, etc.). */
@@ -94,7 +94,9 @@ export function ToolbarFiltersCollapsible({
             ) : null}
           </Button>
 
-          <div className="min-w-0 flex-1">{searchRow}</div>
+          {searchRow != null && searchRow !== false ? (
+            <div className="min-w-0 flex-1">{searchRow}</div>
+          ) : null}
 
           <div className={showInlineFilters(bp)}>{desktopInlineFilters}</div>
         </div>

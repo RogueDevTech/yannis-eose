@@ -88,11 +88,11 @@ const DEFAULT_BACK_LINK = '/admin/logistics/orders';
 // ── Status pipeline for 3PL flow ────────────────────────────────
 const TPL_PIPELINE = [
   'CONFIRMED',
-  'ALLOCATED',
+  'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
   'DELIVERED',
-  'COMPLETED',
+  'REMITTED',
 ] as const;
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -133,11 +133,11 @@ function timeAgo(iso: string): string {
 function getStatusTimestamp(order: OrderDetail, status: string): string | null {
   switch (status) {
     case 'CONFIRMED': return order.confirmedAt ?? order.createdAt;
-    case 'ALLOCATED': return order.allocatedAt ?? null;
+    case 'AGENT_ASSIGNED': return order.allocatedAt ?? null;
     case 'DISPATCHED': return order.dispatchedAt ?? null;
     case 'IN_TRANSIT': return order.dispatchedAt ?? null; // approximation
     case 'DELIVERED': return order.deliveredAt ?? null;
-    case 'COMPLETED': return order.deliveredAt ?? null;
+    case 'REMITTED': return order.deliveredAt ?? null;
     default: return null;
   }
 }
@@ -592,7 +592,7 @@ export function LogisticsOrderDetailPage({
 
   const allowed = order.allowedTransitions ?? [];
   const ridersForOrder =
-    order.logisticsLocationId && order.status === 'ALLOCATED'
+    order.logisticsLocationId && order.status === 'AGENT_ASSIGNED'
       ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
       : riders;
   const allocatableLocations = allocatableLocationsProp ?? locations.filter((l) => l.status === 'ACTIVE');
@@ -606,7 +606,7 @@ export function LogisticsOrderDetailPage({
         )
       : undefined;
   const showLogisticsWhatsAppActions =
-    (order.status === 'ALLOCATED' ||
+    (order.status === 'AGENT_ASSIGNED' ||
       order.status === 'DISPATCHED' ||
       order.status === 'IN_TRANSIT') &&
     !!logisticsLocationWithGroupLink;
@@ -617,10 +617,10 @@ export function LogisticsOrderDetailPage({
   // Delivery urgency: days since creation or since preferred date
   const daysSinceCreated = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 86400000);
   const isOverdue = order.preferredDeliveryDate && new Date(order.preferredDeliveryDate + 'T23:59:59') < new Date() &&
-    !['DELIVERED', 'COMPLETED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'].includes(order.status);
+    !['DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'].includes(order.status);
 
   // Has any active action?
-  const hasAction = ['CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT', 'RETURNED'].includes(order.status);
+  const hasAction = ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'RETURNED'].includes(order.status);
 
   const tabs = [
     { value: 'overview', label: 'Overview' },
@@ -808,7 +808,7 @@ export function LogisticsOrderDetailPage({
             </div>
 
             {(showLogisticsWhatsAppActions ||
-              ((order.status === 'ALLOCATED' ||
+              ((order.status === 'AGENT_ASSIGNED' ||
                 order.status === 'DISPATCHED' ||
                 order.status === 'IN_TRANSIT') &&
                 !logisticsLocationWithGroupLink)) && (
@@ -842,7 +842,7 @@ export function LogisticsOrderDetailPage({
                   </>
                 ) : (
                   <p className="text-xs text-warning-600 dark:text-warning-400">
-                    Add a WhatsApp group link on this allocated logistics location to enable manual share actions.
+                    Add a WhatsApp group link on this logistics location to enable manual share actions.
                   </p>
                 )}
               </div>
@@ -853,7 +853,7 @@ export function LogisticsOrderDetailPage({
               <div className="grid grid-cols-2 gap-2">
                 {order.allocatedAt && (
                   <div className="text-center py-1.5 bg-app-hover rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Allocated</p>
+                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Agent assigned</p>
                     <p className="text-xs font-medium text-app-fg-muted tabular-nums">{formatDateShort(order.allocatedAt)}</p>
                   </div>
                 )}
@@ -966,15 +966,15 @@ export function LogisticsOrderDetailPage({
       {activeTab === 'actions' && (
         <div className="space-y-4">
           {/* Allocate */}
-          {order.status === 'CONFIRMED' && allowed.includes('ALLOCATED') && (
+          {order.status === 'CONFIRMED' && allowed.includes('AGENT_ASSIGNED') && (
             <div className="card p-4">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                   <MapPinIcon />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-app-fg">Allocate to Location</h3>
-                  <p className="text-[11px] text-app-fg-muted">Assign this order to a 3PL hub for dispatch</p>
+                  <h3 className="text-sm font-semibold text-app-fg">Assign for delivery</h3>
+                  <p className="text-[11px] text-app-fg-muted">Pick a 3PL hub — order becomes agent assigned for dispatch</p>
                 </div>
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
@@ -1008,14 +1008,76 @@ export function LogisticsOrderDetailPage({
                   />
                 </div>
                 <Button type="submit" variant="primary" size="sm" loading={isSubmitting} disabled={isSubmitting}>
-                  Allocate Order
+                  Assign order
+                </Button>
+              </fetcher.Form>
+            </div>
+          )}
+
+          {/* Reallocate — change 3PL hub while still ALLOCATED */}
+          {order.status === 'AGENT_ASSIGNED' && allowed.includes('AGENT_ASSIGNED') && (
+            <div className="card p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <MapPinIcon />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-app-fg">Reassign to another location</h3>
+                  <p className="text-[11px] text-app-fg-muted">
+                    Switch delivery assignment to a different 3PL. Reservation at the current location is released; the
+                    new one must have stock.
+                  </p>
+                </div>
+              </div>
+              <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
+                <input type="hidden" name="intent" value="allocate" />
+                <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
+                <div className="flex-1 min-w-[200px]">
+                  <SearchableSelect
+                    id="logistics-reallocate-location"
+                    label="New location"
+                    required
+                    value={allocateLocationId}
+                    onChange={setAllocateLocationId}
+                    disabled={isSubmitting}
+                    placeholder="Select location..."
+                    searchPlaceholder="Search locations..."
+                    options={
+                      richAllocatableLocations && richAllocatableLocations.length > 0
+                        ? richAllocatableLocations.map((loc) => ({
+                            value: loc.id,
+                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            disabled: !loc.eligible || loc.id === order.logisticsLocationId,
+                            description: describeRichAllocatableLocation(loc),
+                          }))
+                        : allocatableLocations.map((loc) => ({
+                            value: loc.id,
+                            label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                            disabled: Boolean(loc.dispatchLocked) || loc.id === order.logisticsLocationId,
+                            description: loc.dispatchLocked ? 'Dispatch locked for reconciliation' : undefined,
+                          }))
+                    }
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  loading={isSubmitting}
+                  disabled={
+                    isSubmitting ||
+                    !allocateLocationId ||
+                    allocateLocationId === order.logisticsLocationId
+                  }
+                >
+                  Reassign
                 </Button>
               </fetcher.Form>
             </div>
           )}
 
           {/* Dispatch */}
-          {order.status === 'ALLOCATED' && allowed.includes('DISPATCHED') && (
+          {order.status === 'AGENT_ASSIGNED' && allowed.includes('DISPATCHED') && (
             <div className="card p-4">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 dark:text-violet-400">

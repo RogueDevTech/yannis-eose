@@ -5,8 +5,6 @@ import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRol
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_LOGISTICS_ORDERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { Location } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
@@ -16,7 +14,7 @@ export const meta: MetaFunction = () => [
 const ORDERS_PER_PAGE = 40;
 const LOGISTICS_STATUS_SCOPE = [
   'CONFIRMED',
-  'ALLOCATED',
+  'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
   'DELIVERED',
@@ -24,7 +22,7 @@ const LOGISTICS_STATUS_SCOPE = [
   'RETURNED',
   'RESTOCKED',
   'WRITTEN_OFF',
-  'COMPLETED',
+  'REMITTED',
 ] as const;
 
 const defaultThisMonth = defaultThisMonthRange;
@@ -156,6 +154,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     allocationOnDetailOnly: true,
     canEditDeliveryDate: true,
     markInTransitLabel: 'Mark In Transit',
+    pageDescription:
+      'Use View to open an order at your hub, or Resolve order on a confirmed row for the fast path (delivery date, receipt, and handoff).',
   };
 }
 
@@ -180,7 +180,7 @@ export async function action({ request }: ActionFunctionArgs) {
       cookie,
       body: {
         orderId,
-        newStatus: 'ALLOCATED',
+        newStatus: 'AGENT_ASSIGNED',
         metadata: { logisticsLocationId },
       },
     });
@@ -392,7 +392,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     let current = updateRes.data?.result?.data;
     let status = current?.status;
-    const terminal = ['DELIVERED', 'COMPLETED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'];
+    const terminal = ['DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'];
     if (status && terminal.includes(status)) {
       return json({ success: true, intent: 'updateDeliveryDate' });
     }
@@ -421,7 +421,7 @@ export async function action({ request }: ActionFunctionArgs) {
         const tr = await apiRequest<{ result?: { data?: OrderSnapshot } }>('/trpc/orders.transition', {
           method: 'POST',
           cookie,
-          body: { orderId, newStatus: 'ALLOCATED', metadata: { logisticsLocationId: locationId } },
+          body: { orderId, newStatus: 'AGENT_ASSIGNED', metadata: { logisticsLocationId: locationId } },
         });
         if (!tr.ok) {
           const errMsg = transitionError(tr, 'Allocation failed');
@@ -431,7 +431,7 @@ export async function action({ request }: ActionFunctionArgs) {
         status = current?.status;
         continue;
       }
-      if (status === 'ALLOCATED') {
+      if (status === 'AGENT_ASSIGNED') {
         let riderId = current?.riderId;
         if (!riderId) {
           const ridersRes = await apiRequest<{ result?: { data?: Array<{ id: string; logisticsLocationId: string | null }> } }>(
@@ -498,7 +498,6 @@ export default function TplOrdersRoute() {
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.logisticsOrdersTpl} allowlist={ALLOWLIST_LOGISTICS_ORDERS} />
       <LogisticsOrdersPage {...data} orders={data.orders as LogisticsOrderRow[]} />
     </>
   );

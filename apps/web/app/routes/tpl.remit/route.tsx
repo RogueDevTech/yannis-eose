@@ -38,8 +38,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const deliveryRemittancesData = deliveryRemittancesRes.ok
     ? (deliveryRemittancesRes.data as { result?: { data?: { records: DeliveryRemittanceRecord[] } } })?.result?.data
     : null;
-  const eligibleOrdersData = eligibleOrdersRes.ok
-    ? (eligibleOrdersRes.data as { result?: { data?: DeliveryRemittanceEligibleOrder[] } })?.result?.data
+  const eligibleOrdersPayload = eligibleOrdersRes.ok
+    ? (eligibleOrdersRes.data as { result?: { data?: { orders: DeliveryRemittanceEligibleOrder[] } } })?.result
+        ?.data
     : null;
 
   return {
@@ -52,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })),
     userLocationId: user.logisticsLocationId ?? null,
     deliveryRemittances: deliveryRemittancesData?.records ?? [],
-    eligibleOrders: eligibleOrdersData ?? [],
+    eligibleOrders: eligibleOrdersPayload?.orders ?? [],
   };
 }
 

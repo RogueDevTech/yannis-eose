@@ -1,14 +1,14 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, gte, lte, count, sum, sql, inArray, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, gte, lte, count, sum, sql, inArray, isNotNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type postgres from 'postgres';
 import { db as schema } from '@yannis/shared';
 import type {
-  CreateInvoiceInput,
   UpdateInvoiceStatusInput,
   ListInvoicesInput,
   ProfitReportInput,
+  ProductProfitBreakdownRow,
   CreateApprovalRequestInput,
   ProcessApprovalInput,
   ListApprovalRequestsInput,
@@ -75,41 +75,6 @@ export class FinanceService {
   // ============================================
   // Invoices
   // ============================================
-
-  async createInvoice(input: CreateInvoiceInput, actorId: string) {
-    // Calculate total from line items + tax
-    const subtotal = input.lineItems.reduce(
-      (sum, item) => sum + item.quantity * item.unitPrice,
-      0,
-    );
-    const taxRate = input.taxRate ?? 0;
-    const totalAmount = subtotal * (1 + taxRate);
-
-    return withActor(this.db, { id: actorId }, async (tx) => {
-      const rows = await tx
-        .insert(schema.invoices)
-        .values({
-          orderId: input.orderId ?? null,
-          recipientInfo: input.recipientInfo,
-          lineItems: input.lineItems,
-          taxRate: input.taxRate != null ? String(input.taxRate) : null,
-          totalAmount: totalAmount.toFixed(2),
-          dueDate: input.dueDate ? new Date(input.dueDate) : null,
-          status: 'DRAFT',
-        })
-        .returning();
-
-      const invoice = rows[0];
-      if (!invoice) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create invoice' });
-      }
-
-      return {
-        ...invoice,
-        referenceFormatted: this.formatReference(invoice.referenceNumber),
-      };
-    });
-  }
 
   async updateInvoiceStatus(input: UpdateInvoiceStatusInput, actorId: string) {
     return withActor(this.db, { id: actorId }, async (tx) => {
@@ -380,6 +345,21 @@ export class FinanceService {
     // True Profit = Revenue - ALL 6 cost layers
     const trueProfit = revenue - landedCost - deliveryFee - adSpend - commission - fulfillmentCost - operationalLoss;
 
+    let byProduct: ProductProfitBreakdownRow[] | undefined;
+    if (
+      input.groupBy === 'product' &&
+      input.includeProductBreakdown === true &&
+      orderWhere &&
+      adSpendWhere
+    ) {
+      byProduct = await this.computeProductProfitBreakdown(orderWhere, adSpendWhere, {
+        revenue,
+        commission,
+        fulfillmentCost,
+        operationalLoss,
+      });
+    }
+
     return {
       revenue,
       landedCost,
@@ -391,7 +371,134 @@ export class FinanceService {
       trueProfit,
       orderCount,
       margin: revenue > 0 ? (trueProfit / revenue) * 100 : 0,
+      byProduct,
     };
+  }
+
+  /**
+   * Per-product contribution for delivered orders in the report window: line revenue + allocated
+   * order-level landed/delivery, product ad spend, and proportional commission / fulfillment / ops.
+   */
+  private async computeProductProfitBreakdown(
+    orderWhere: SQL,
+    adSpendWhere: SQL,
+    pools: {
+      revenue: number;
+      commission: number;
+      fulfillmentCost: number;
+      operationalLoss: number;
+    },
+  ): Promise<ProductProfitBreakdownRow[]> {
+    const lineRows = await this.db
+      .select({
+        orderId: schema.orderItems.orderId,
+        productId: schema.orderItems.productId,
+        productName: schema.products.name,
+        quantity: schema.orderItems.quantity,
+        unitPrice: schema.orderItems.unitPrice,
+        orderLanded: schema.orders.landedCost,
+        orderDelivery: schema.orders.deliveryFee,
+      })
+      .from(schema.orderItems)
+      .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+      .innerJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+      .where(orderWhere);
+
+    if (lineRows.length === 0) {
+      return [];
+    }
+
+    type LineEntry = { productId: string; productName: string; lineRev: number };
+    type OrderAgg = { lines: LineEntry[]; landed: number; delivery: number };
+    const byOrder = new Map<string, OrderAgg>();
+
+    for (const row of lineRows) {
+      const lineRev = Number(row.quantity) * Number(row.unitPrice);
+      let agg = byOrder.get(row.orderId);
+      if (!agg) {
+        agg = {
+          lines: [],
+          landed: Number(row.orderLanded ?? 0),
+          delivery: Number(row.orderDelivery ?? 0),
+        };
+        byOrder.set(row.orderId, agg);
+      }
+      agg.lines.push({
+        productId: row.productId,
+        productName: row.productName,
+        lineRev,
+      });
+    }
+
+    type Prod = { name: string; revenue: number; landed: number; delivery: number; orderIds: Set<string> };
+    const productMap = new Map<string, Prod>();
+
+    const ensureProd = (id: string, name: string): Prod => {
+      let p = productMap.get(id);
+      if (!p) {
+        p = { name, revenue: 0, landed: 0, delivery: 0, orderIds: new Set() };
+        productMap.set(id, p);
+      }
+      return p;
+    };
+
+    for (const [orderId, agg] of byOrder) {
+      const sumLines = agg.lines.reduce((s, l) => s + l.lineRev, 0);
+      const n = agg.lines.length;
+      for (const line of agg.lines) {
+        const share = sumLines > 0 ? line.lineRev / sumLines : n > 0 ? 1 / n : 0;
+        const p = ensureProd(line.productId, line.productName);
+        p.revenue += line.lineRev;
+        p.landed += agg.landed * share;
+        p.delivery += agg.delivery * share;
+        p.orderIds.add(orderId);
+      }
+    }
+
+    const adRows = await this.db
+      .select({
+        productId: schema.adSpendLogs.productId,
+        total: sum(schema.adSpendLogs.spendAmount),
+      })
+      .from(schema.adSpendLogs)
+      .where(adSpendWhere)
+      .groupBy(schema.adSpendLogs.productId);
+
+    const adByProduct = new Map<string, number>();
+    for (const r of adRows) {
+      adByProduct.set(r.productId, Number(r.total ?? 0));
+    }
+
+    const revTotal = pools.revenue;
+    const rows: ProductProfitBreakdownRow[] = [];
+
+    for (const [productId, p] of productMap) {
+      const share = revTotal > 0 ? p.revenue / revTotal : 0;
+      const allocComm = pools.commission * share;
+      const allocFulfill = pools.fulfillmentCost * share;
+      const allocOps = pools.operationalLoss * share;
+      const productAd = adByProduct.get(productId) ?? 0;
+      const contribution =
+        p.revenue - p.landed - p.delivery - productAd - allocComm - allocFulfill - allocOps;
+      const marginPct = p.revenue > 0 ? (contribution / p.revenue) * 100 : 0;
+      rows.push({
+        productId,
+        productName: p.name,
+        revenue: p.revenue,
+        landedCost: p.landed,
+        deliveryFee: p.delivery,
+        adSpend: productAd,
+        allocatedCommission: allocComm,
+        allocatedFulfillment: allocFulfill,
+        allocatedOperationalLoss: allocOps,
+        contribution,
+        marginPct,
+        orderCount: p.orderIds.size,
+      });
+    }
+
+    rows.sort((a, b) => b.contribution - a.contribution);
+    return rows;
   }
 
   async getFinancialOverview() {

@@ -13,8 +13,6 @@ import { canAccessGlobalAuditLog } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_CEO_DASHBOARD, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { CEODashboardData } from '~/features/ceo/types';
 
 interface BranchBreakdownRow {
@@ -121,8 +119,6 @@ export default function CEODashboardRoute() {
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   return (
-    <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.ceoDashboard} allowlist={ALLOWLIST_CEO_DASHBOARD} />
     <CEODashboardPage
       data={data as CEODashboardData}
       filters={filters}
@@ -130,6 +126,5 @@ export default function CEODashboardRoute() {
       showBackToDashboard
       canViewAuditLink={canViewAuditLink}
     />
-    </>
   );
 }

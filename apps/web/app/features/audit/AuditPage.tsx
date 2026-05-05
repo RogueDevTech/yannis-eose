@@ -300,7 +300,7 @@ const STATUS_LABELS: Record<string, string> = {
   CS_ENGAGED: 'CS Engaged',
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
-  ALLOCATED: 'Allocated',
+  AGENT_ASSIGNED: 'Agent assigned',
   DISPATCHED: 'Dispatched',
   IN_TRANSIT: 'In Transit',
   DELIVERED: 'Delivered',
@@ -308,7 +308,7 @@ const STATUS_LABELS: Record<string, string> = {
   RETURNED: 'Returned',
   RESTOCKED: 'Restocked',
   WRITTEN_OFF: 'Written Off',
-  COMPLETED: 'Completed',
+  REMITTED: 'Remitted',
   PENDING: 'Pending',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
@@ -648,7 +648,8 @@ function getDescriptionParts(
       const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
       return { prefix: `${actor} cancelled order `, entityLabel, suffix: reason };
     }
-    if (status === 'ALLOCATED') return { prefix: `${actor} allocated order `, entityLabel, suffix: ' to 3PL' };
+    if (status === 'AGENT_ASSIGNED')
+      return { prefix: `${actor} assigned order `, entityLabel, suffix: ' for delivery (logistics company)' };
     if (status === 'DISPATCHED') return { prefix: `${actor} dispatched order `, entityLabel, suffix: '' };
     if (status === 'IN_TRANSIT') return { prefix: 'Order', entityLabel: customer ? customer.slice(1) : null, suffix: ' is in transit' };
     if (status === 'DELIVERED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as delivered' };
@@ -656,7 +657,7 @@ function getDescriptionParts(
     if (status === 'RETURNED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as returned' };
     if (status === 'RESTOCKED') return { prefix: `${actor} restocked returned order `, entityLabel, suffix: '' };
     if (status === 'WRITTEN_OFF') return { prefix: `${actor} wrote off order `, entityLabel, suffix: '' };
-    if (status === 'COMPLETED') return { prefix: 'Order', entityLabel: customer ? customer.slice(1) : null, suffix: ' marked as completed' };
+    if (status === 'REMITTED') return { prefix: 'Order', entityLabel: customer ? customer.slice(1) : null, suffix: ' marked as remitted' };
     if (statusLabel) return { prefix: `${actor} updated order `, entityLabel, suffix: ` to ${statusLabel}` };
     return { prefix: `${actor} updated order `, entityLabel, suffix: '' };
   }

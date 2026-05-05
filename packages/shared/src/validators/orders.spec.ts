@@ -235,7 +235,7 @@ describe('listOrdersSchema', () => {
 
   it('accepts multiple valid statuses', () => {
     expect(() =>
-      listOrdersSchema.parse({ statuses: ['CONFIRMED', 'ALLOCATED', 'IN_TRANSIT'] }),
+      listOrdersSchema.parse({ statuses: ['CONFIRMED', 'AGENT_ASSIGNED', 'IN_TRANSIT'] }),
     ).not.toThrow();
   });
 

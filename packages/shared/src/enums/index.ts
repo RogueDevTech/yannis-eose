@@ -8,7 +8,8 @@ export const ORDER_STATUS = {
   CS_ENGAGED: 'CS_ENGAGED',
   CONFIRMED: 'CONFIRMED',
   CANCELLED: 'CANCELLED',
-  ALLOCATED: 'ALLOCATED',
+  // Renamed from ALLOCATED — CEO directive 2026-05-04, migration 0110.
+  AGENT_ASSIGNED: 'AGENT_ASSIGNED',
   DISPATCHED: 'DISPATCHED',
   IN_TRANSIT: 'IN_TRANSIT',
   DELIVERED: 'DELIVERED',
@@ -16,7 +17,8 @@ export const ORDER_STATUS = {
   RETURNED: 'RETURNED',
   RESTOCKED: 'RESTOCKED',
   WRITTEN_OFF: 'WRITTEN_OFF',
-  COMPLETED: 'COMPLETED',
+  // Renamed from COMPLETED — CEO directive 2026-05-04, migration 0110.
+  REMITTED: 'REMITTED',
 } as const;
 
 export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];

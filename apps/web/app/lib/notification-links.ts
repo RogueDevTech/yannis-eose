@@ -25,7 +25,8 @@ export function getNotificationAction(notif: NotificationForLink): { link: strin
     if (data.fundingId) return { link: '/admin/marketing/funding', label: 'View funding' };
     if (data.payoutId) return { link: '/hr/payroll', label: 'View payroll' };
     if (data.requestId) {
-      if (notif.type === 'finance:approval_required') return { link: '/admin/finance/overview', label: 'Review approval' };
+      if (notif.type === 'finance:approval_required')
+        return { link: '/admin/finance/overview', label: 'Finance overview' };
       if (notif.type.includes('approval')) return { link: '/admin/permission-requests', label: 'Review permission request' };
       if (notif.type === 'funding:approved') return { link: '/admin/marketing/funding', label: 'View receipt' };
       if (notif.type === 'funding:rejected') return { link: '/admin/marketing/funding', label: 'View funding' };

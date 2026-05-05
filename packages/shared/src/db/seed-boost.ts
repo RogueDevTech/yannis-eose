@@ -212,7 +212,7 @@ async function boostSeed() {
     // Status — heavily skewed towards DELIVERED (finance counts DELIVERED only)
     const status = faker.helpers.weightedArrayElement([
       { weight: 90, value: 'DELIVERED' },
-      { weight: 8, value: 'COMPLETED' },
+      { weight: 8, value: 'REMITTED' },
       { weight: 2, value: 'IN_TRANSIT' },
     ]);
 

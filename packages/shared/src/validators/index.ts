@@ -240,7 +240,6 @@ export type {
 
 // Finance validators
 export {
-  createInvoiceSchema,
   updateInvoiceStatusSchema,
   listInvoicesSchema,
   createApprovalRequestSchema,
@@ -251,7 +250,6 @@ export {
 } from './finance';
 
 export type {
-  CreateInvoiceInput,
   UpdateInvoiceStatusInput,
   ListInvoicesInput,
   CreateApprovalRequestInput,
@@ -259,6 +257,7 @@ export type {
   ListApprovalRequestsInput,
   SetBudgetInput,
   ProfitReportInput,
+  ProductProfitBreakdownRow,
 } from './finance';
 
 // Notification validators

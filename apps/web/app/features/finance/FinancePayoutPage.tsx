@@ -1,19 +1,19 @@
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from '@remix-run/react';
+import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import {
-  CompactTable,
-  CompactTableActionButton,
-  type CompactTableColumn,
-} from '~/components/ui/compact-table';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { Button } from '~/components/ui/button';
-import type { PayrollBatch, PayrollBatchStatus } from '~/features/hr/types';
+import { EmptyState } from '~/components/ui/empty-state';
+import { RoleBadge } from '~/components/ui/role-badge';
+import { TableActionButton } from '~/components/ui/table-action-button';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import type { PayrollBatch, PayrollBatchStatus, PayrollDepartment } from '~/features/hr/types';
 
 interface BatchDetail {
   batch: PayrollBatch;
@@ -34,6 +34,19 @@ interface FinancePayoutPageProps {
   status: '' | PayrollBatchStatus;
 }
 
+type PayoutLine = BatchDetail['payouts'][number];
+
+const DEPT_LABEL: Record<PayrollDepartment, string> = {
+  CS: 'Customer Service',
+  MARKETING: 'Marketing',
+  LOGISTICS: 'Logistics',
+  HR: 'HR & Admin',
+};
+
+function formatBatchMonth(periodMonth: string): string {
+  return new Date(periodMonth).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' });
+}
+
 const STATUS_TABS: Array<{ value: '' | PayrollBatchStatus; label: string }> = [
   { value: '', label: 'All' },
   { value: 'PENDING_FINANCE', label: 'Pending Finance' },
@@ -41,8 +54,9 @@ const STATUS_TABS: Array<{ value: '' | PayrollBatchStatus; label: string }> = [
 ];
 
 export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePayoutPageProps) {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const [showExportModal, setShowExportModal] = useState(false);
+  const isLoaderRefetchBusy = useLoaderRefetchBusy();
 
   const totalPending = useMemo(
     () => batches.filter((b) => b.status === 'PENDING_FINANCE').reduce((acc, b) => acc + Number(b.totalAmount), 0),
@@ -58,16 +72,12 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
       {
         key: 'month',
         header: 'Month',
-        render: (batch) => (
-          <span className="text-app-fg-muted">
-            {new Date(batch.periodMonth).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}
-          </span>
-        ),
+        render: (batch) => <span className="text-app-fg-muted">{formatBatchMonth(batch.periodMonth)}</span>,
       },
       {
         key: 'department',
         header: 'Department',
-        render: (batch) => <span className="text-app-fg">{batch.department}</span>,
+        render: (batch) => <span className="text-app-fg">{DEPT_LABEL[batch.department]}</span>,
       },
       {
         key: 'staff',
@@ -93,13 +103,57 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         align: 'right',
         tight: true,
         render: (batch) => (
-          <CompactTableActionButton to={`?status=${encodeURIComponent(status)}&batchId=${batch.id}`}>
+          <TableActionButton to={`?status=${encodeURIComponent(status)}&batchId=${batch.id}`} variant="primary">
             Review
-          </CompactTableActionButton>
+          </TableActionButton>
         ),
       },
     ],
     [status],
+  );
+
+  const payoutLineColumns: CompactTableColumn<PayoutLine>[] = useMemo(
+    () => [
+      {
+        key: 'staff',
+        header: 'Staff',
+        render: (p) => <span className="font-medium text-app-fg">{p.staffName}</span>,
+      },
+      {
+        key: 'role',
+        header: 'Role',
+        render: (p) =>
+          p.staffRole ? <RoleBadge role={p.staffRole} size="sm" /> : <span className="text-app-fg-muted">—</span>,
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        nowrap: true,
+        render: (p) => (
+          <span className="font-semibold">
+            <NairaPrice amount={Number(p.totalPayout)} />
+          </span>
+        ),
+      },
+      {
+        key: 'bank',
+        header: 'Bank',
+        render: (p) => <span className="text-app-fg-muted">{p.payoutBankName ?? '—'}</span>,
+      },
+      {
+        key: 'accountName',
+        header: 'Account name',
+        render: (p) => <span className="text-app-fg-muted">{p.payoutAccountName ?? '—'}</span>,
+      },
+      {
+        key: 'accountNumber',
+        header: 'Account no.',
+        nowrap: true,
+        render: (p) => <span className="text-app-fg-muted tabular-nums">{p.payoutAccountNumber ?? '—'}</span>,
+      },
+    ],
+    [],
   );
 
   const setStatus = (nextStatus: string) => {
@@ -137,45 +191,68 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         ]}
       />
 
-      <div className="card space-y-3">
-        <Tabs
-          value={status}
-          onChange={setStatus}
-          tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
-          variant="pill"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-4">
-        <div className="card p-0 overflow-hidden">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] gap-4">
+        <div className="card p-0 overflow-hidden flex flex-col">
+          <div className="px-4 pt-3 pb-0 border-b border-app-border shrink-0">
+            <Tabs
+              value={status}
+              onChange={setStatus}
+              tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
+              variant="underline"
+            />
+          </div>
           <CompactTable<PayrollBatch>
             columns={batchColumns}
             rows={batches}
             rowKey={(b) => b.id}
             withCard={false}
+            loading={isLoaderRefetchBusy}
+            loadingVariant="overlay"
             emptyTitle="No payroll batches in this queue"
             emptyDescription="When HR forwards payroll to finance, batches appear here for payout processing."
           />
         </div>
 
-        <div className="card">
-          <h2 className="text-sm font-semibold text-app-fg mb-3">Selected batch</h2>
-          {!selectedBatch ? (
-            <p className="text-sm text-app-fg-muted">Pick a batch to review payout lines and export a document.</p>
-          ) : (
-            <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
-              {selectedBatch.payouts.map((payout) => (
-                <div key={payout.id} className="rounded-lg border border-app-border bg-app-hover p-3 text-xs">
-                  <p className="font-medium text-app-fg">{payout.staffName}</p>
-                  <p className="text-app-fg-muted">{payout.staffRole?.replace(/_/g, ' ') ?? '—'}</p>
-                  <p className="text-app-fg mt-1"><NairaPrice amount={Number(payout.totalPayout)} /></p>
-                  <p className="text-app-fg-muted mt-1">Bank: {payout.payoutBankName ?? '—'}</p>
-                  <p className="text-app-fg-muted">Acct Name: {payout.payoutAccountName ?? '—'}</p>
-                  <p className="text-app-fg-muted">Acct No: {payout.payoutAccountNumber ?? '—'}</p>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="card p-0 overflow-hidden flex flex-col min-h-[16rem] xl:max-h-[min(36rem,70vh)]">
+          <div className="px-4 py-3 border-b border-app-border shrink-0">
+            <h2 className="text-sm font-semibold text-app-fg">Payout lines</h2>
+            {selectedBatch ? (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-app-fg-muted">
+                <span>{DEPT_LABEL[selectedBatch.batch.department]}</span>
+                <span aria-hidden>·</span>
+                <span>{formatBatchMonth(selectedBatch.batch.periodMonth)}</span>
+                <StatusBadge status={selectedBatch.batch.status} />
+              </div>
+            ) : (
+              <p className="text-xs text-app-fg-muted mt-1">
+                Pick a batch on the left to review staff rows and export a document.
+              </p>
+            )}
+          </div>
+          <div className="flex-1 min-h-0 overflow-auto">
+            {!selectedBatch ? (
+              <div className="p-4">
+                <EmptyState
+                  variant="inline"
+                  title="No batch selected"
+                  description="Choose Review on a payroll batch to load bank details and amounts for disbursement."
+                />
+              </div>
+            ) : selectedBatch.payouts.length === 0 ? (
+              <div className="p-4">
+                <EmptyState variant="inline" title="No payout rows" description="This batch has no staff payout lines yet." />
+              </div>
+            ) : (
+              <CompactTable<PayoutLine>
+                columns={payoutLineColumns}
+                rows={selectedBatch.payouts}
+                rowKey={(p) => p.id}
+                withCard={false}
+                loading={isLoaderRefetchBusy}
+                loadingVariant="overlay"
+              />
+            )}
+          </div>
         </div>
       </div>
 

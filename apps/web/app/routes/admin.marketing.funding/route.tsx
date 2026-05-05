@@ -1,6 +1,4 @@
 import { useLoaderData } from '@remix-run/react';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_MARKETING_FUNDING, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
@@ -517,7 +515,6 @@ export default function MarketingFundingRoute() {
   const data = useLoaderData<typeof loader>();
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.marketingFunding} allowlist={ALLOWLIST_MARKETING_FUNDING} />
       <MarketingFundingPage {...data} />
     </>
   );

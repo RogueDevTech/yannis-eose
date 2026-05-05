@@ -39,7 +39,7 @@ const ORDER_STATUS_THEMES: Record<
     text: 'text-rose-600 dark:text-rose-400',
     hex: '#f43f5e',
   },
-  ALLOCATED: {
+  AGENT_ASSIGNED: {
     badge: 'badge bg-blue-50 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300',
     dot: 'bg-blue-500',
     text: 'text-blue-600 dark:text-blue-400',
@@ -91,7 +91,7 @@ const ORDER_STATUS_THEMES: Record<
     text: 'text-zinc-600 dark:text-zinc-400',
     hex: '#71717a',
   },
-  COMPLETED: {
+  REMITTED: {
     badge:
       'badge bg-green-50 text-green-800 dark:bg-green-900/20 dark:text-green-300',
     dot: 'bg-green-500',
@@ -127,7 +127,7 @@ export const STATUS_LABELS: Record<string, string> = {
   CS_ENGAGED: 'CS Engaged',
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
-  ALLOCATED: 'Allocated',
+  AGENT_ASSIGNED: 'Agent assigned',
   DISPATCHED: 'Dispatched',
   IN_TRANSIT: 'In Transit',
   DELIVERED: 'Delivered',
@@ -135,7 +135,7 @@ export const STATUS_LABELS: Record<string, string> = {
   RETURNED: 'Returned',
   RESTOCKED: 'Restocked',
   WRITTEN_OFF: 'Written Off',
-  COMPLETED: 'Completed',
+  REMITTED: 'Remitted',
 };
 
 export const STATUS_OPTIONS = [
@@ -145,13 +145,13 @@ export const STATUS_OPTIONS = [
   'CS_ENGAGED',
   'CONFIRMED',
   'CANCELLED',
-  'ALLOCATED',
+  'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
   'DELIVERED',
   'PARTIALLY_DELIVERED',
   'RETURNED',
-  'COMPLETED',
+  'REMITTED',
 ];
 
 /** Omitted from CS Orders status dropdown — logistics stages + accounting closure. */
@@ -159,7 +159,7 @@ export const CS_ORDERS_STATUS_DROPDOWN_EXCLUDE = new Set([
   'DISPATCHED',
   'IN_TRANSIT',
   'PARTIALLY_DELIVERED',
-  'COMPLETED',
+  'REMITTED',
 ]);
 
 export const CS_ORDERS_STATUS_DROPDOWN_OPTIONS = STATUS_OPTIONS.filter(
@@ -167,5 +167,5 @@ export const CS_ORDERS_STATUS_DROPDOWN_OPTIONS = STATUS_OPTIONS.filter(
 );
 
 export function formatStatus(status: string): string {
-  return status.replace(/_/g, ' ');
+  return STATUS_LABELS[status] ?? status.replace(/_/g, ' ');
 }

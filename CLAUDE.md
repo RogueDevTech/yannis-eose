@@ -208,7 +208,7 @@ The fix is ALWAYS to put `SET LOCAL` inside the same drizzle transaction as the 
 This is the heartbeat of the entire system. Every module connects to this flow. Get this wrong and everything breaks.
 
 ```
-UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
+UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED → REMITTED
        |            |              |
        |            |              PARTIALLY_DELIVERED
        |            |              RETURNED
@@ -231,10 +231,10 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPA
 | CS_ASSIGNED | CANCELLED | CS/HoS cancels | Mandatory reason note (min 10 chars) | None — stock was never reserved |
 | CS_ENGAGED | CONFIRMED | CS clicks Confirm | VOIP call_duration > 15 seconds | Stock: Available → Reserved |
 | CS_ENGAGED | CANCELLED | CS clicks Cancel | Mandatory reason note (min 10 chars) | None — stock was never reserved |
-| CONFIRMED | ALLOCATED | **Assigned CS agent**, Logistics, or admin assigns to 3PL | 3PL location must have available stock | Stock: Reserved → Allocated_to_3PL |
-| ALLOCATED | DISPATCHED | 3PL rider picks up | Rider must be assigned | Stock: Allocated → In_Transit |
+| CONFIRMED | AGENT_ASSIGNED | **Assigned CS agent**, Logistics, or admin assigns to 3PL | 3PL location must have available stock | Stock: Reserved → Allocated_to_3PL |
+| AGENT_ASSIGNED | DISPATCHED | 3PL rider picks up | Rider must be assigned | Stock: Allocated → In_Transit |
 | DISPATCHED | IN_TRANSIT | Rider confirms departure | GPS ping logged | Delivery timer starts |
-| ALLOCATED / DISPATCHED / IN_TRANSIT | DELIVERED | Rider confirms delivery **OR** assigned CS agent / HoLogistics confirms via follow-up call | Rider path: OTP/signature/GPS; CS/HoLogistics path: delivery note + screenshot both optional. 3PL not in-app yet — CS is the de facto rider-proxy and normally marks from ALLOCATED directly. | Stock: Deducted. Commission: Triggered. Revenue: Recognized |
+| AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT | DELIVERED | Rider confirms delivery **OR** assigned CS agent / HoLogistics confirms via follow-up call | Rider path: OTP/signature/GPS; CS/HoLogistics path: delivery note + screenshot both optional. 3PL not in-app yet — CS is the de facto rider-proxy and normally marks from AGENT_ASSIGNED directly. | Stock: Deducted. Commission: Triggered. Revenue: Recognized |
 | IN_TRANSIT | PARTIALLY_DELIVERED | Rider marks partial | Must specify delivered qty vs returned qty | Split: delivered portion completes, returned portion enters return flow |
 | IN_TRANSIT | RETURNED | Rider marks rejected | Mandatory return reason | Return flow begins |
 | RETURNED | RESTOCKED | 3PL marks sellable | Quality check by 3PL manager | Stock: +1 at 3PL local inventory |
@@ -286,15 +286,15 @@ The 6-hour `(phone + product)` dedup key in Cloudflare KV is scoped by `mediaBuy
 
 **CS owns the order end-to-end (rider-proxy model):**
 Because the 3PL partners are not in-app yet, the assigned CS agent is the de facto operator through delivery. They:
-- Allocate to a 3PL (`CONFIRMED → ALLOCATED`) themselves — see "Share to 3PL" below. Authorized: assigned CS agent, HoCS, HoLogistics, LogisticsManager, SuperAdmin, Admin. (CS-only **confirm/cancel** also allows **Branch Admin** same-branch — see confirm gate above.)
-- Confirm delivery via follow-up call (`ALLOCATED → DELIVERED`, or from DISPATCHED / IN_TRANSIT if the order passed through those). Authorized: assigned CS agent, HoLogistics, SuperAdmin, Admin (plus TPL_MANAGER with resolveReceiptUrl). Both `deliveryNote` and `deliveryProofUrl` are optional (CEO directive 2026-04-24 reversed the prior mandatory-note rule). When provided, they're stored on the order (`delivery_notes`, `delivery_proof_url`).
-- COMPLETED stays with the accountant — set only when remittance is received/reconciled. CS never marks COMPLETED. Do not shortcut this.
+- Allocate to a 3PL (`CONFIRMED → AGENT_ASSIGNED`) themselves — see "Share to 3PL" below. Authorized: assigned CS agent, HoCS, HoLogistics, LogisticsManager, SuperAdmin, Admin. (CS-only **confirm/cancel** also allows **Branch Admin** same-branch — see confirm gate above.)
+- Confirm delivery via follow-up call (`AGENT_ASSIGNED → DELIVERED`, or from DISPATCHED / IN_TRANSIT if the order passed through those). Authorized: assigned CS agent, HoLogistics, SuperAdmin, Admin (plus TPL_MANAGER with resolveReceiptUrl). Both `deliveryNote` and `deliveryProofUrl` are optional (CEO directive 2026-04-24 reversed the prior mandatory-note rule). When provided, they're stored on the order (`delivery_notes`, `delivery_proof_url`).
+- REMITTED stays with the accountant — set only when remittance is received/reconciled. CS never marks REMITTED. Do not shortcut this. (Renamed from `COMPLETED` per CEO directive 2026-05-04, migration 0110.)
 
 **Share to 3PL (WhatsApp group flow):**
 - 3PL locations carry an optional `whatsapp_group_link` (added in migration 0058). Logistics partners page form accepts it at creation time. Only `chat.whatsapp.com/...` or `wa.me/...` URLs are valid.
 - `message_channel` enum gained `WHATSAPP_GROUP` so `message_templates` and `outbound_messages` can carry dispatch-to-3PL messages without conflating them with customer-facing SMS/WhatsApp DMs.
 - tRPC: `messaging.shareToLogistics({ orderId, locationId, templateId })` renders the template, writes `outbound_messages` + `order_timeline_events` in one transaction, returns `{ renderedBody, groupLink, locationName }`.
-- UI flow ("Share to 3PL" on Order detail, visible when order is `CONFIRMED` or `ALLOCATED` AND at least one location has a group link AND at least one `WHATSAPP_GROUP` template exists): user picks location + template, hits "Copy & open group". Client copies rendered body to clipboard, then `window.open(groupLink)`. User pastes + sends manually in the group.
+- UI flow ("Share to 3PL" on Order detail, visible when order is `CONFIRMED` or `AGENT_ASSIGNED` AND at least one location has a group link AND at least one `WHATSAPP_GROUP` template exists): user picks location + template, hits "Copy & open group". Client copies rendered body to clipboard, then `window.open(groupLink)`. User pastes + sends manually in the group.
 - WhatsApp platform limit: group invite links (`chat.whatsapp.com/...`) **cannot** carry a pre-filled `?text=` payload. Do NOT try to deep-link with text — it's silently ignored. The two-step (copy + open) is the best one-click UX available and is intentional.
 - Placeholders supported in WHATSAPP_GROUP templates: all the CS ones (`{{customer_name}}`, `{{order_id}}`, `{{product_name}}`, `{{delivery_address}}`, `{{estimated_date}}`) plus `{{quantity}}`, `{{total_amount}}`, `{{payment_status}}`. Server-side allowlist in `messaging.router.ts::ALLOWED_TEMPLATE_PLACEHOLDERS` is the source of truth.
 - Double-entry is expected for the first 6 months while 3PL managers learn to trust in-app notifications — the Share button exists to make that copy/paste step take 2 seconds instead of 30, not to replace the group chat. HoCS / HoLogistics own the template content via the existing template admin UI.
@@ -369,7 +369,7 @@ The admin temporarily renders the entire app *as* another user — their role, b
 | Transition | Server enforcement | Implementation |
 |---|---|---|
 | `CONFIRMED` | Before status write: sum of `(stock_count − reserved_count)` across **all** locations plus sum of batch `remaining_quantity` must cover each product line (`assertGlobalAvailabilityForOrder`). | `apps/api/src/inventory/inventory.service.ts` from `orders.service.ts::validateTransitionGates` |
-| `ALLOCATED` | After dispatch-lock check: same coverage **at the chosen `logistics_location_id`** (`assertLocationCanFulfillOrder`). Side effect: **one transaction** — increment `reserved_count` at that location + insert `ALLOCATION` movements per product aggregate (`reserveForAllocateWithMovements`). | Same files; `executeTransitionSideEffects` must receive **post-update** order + metadata so `logisticsLocationId` is never read from a stale row |
+| `AGENT_ASSIGNED` | After dispatch-lock check: same coverage **at the chosen `logistics_location_id`** (`assertLocationCanFulfillOrder`). Side effect: **one transaction** — increment `reserved_count` at that location + insert `ALLOCATION` movements per product aggregate (`reserveForAllocateWithMovements`). | Same files; `executeTransitionSideEffects` must receive **post-update** order + metadata so `logisticsLocationId` is never read from a stale row |
 | `DELIVERED` | Requires `orders.logistics_location_id`. **One `withActor` transaction:** FIFO decrement `stock_batches`, insert `DELIVERY` movement, decrement `stock_count` and up to `min(reserved_count, qty)` at that location (`completeDeliveryInventory`). Then low-stock notify. | `inventory.service.ts` |
 
 **3PL off-platform — verify warehouse transfers:** `inventory.verifyTransfer` is granted to `TPL_MANAGER`, **`HEAD_OF_LOGISTICS`**, and **`STOCK_MANAGER`** in `packages/shared/scripts/seed-permissions.ts` so internal staff can post receipt when the partner never logs in. After changing role matrices, run `pnpm db:seed-permissions` so `role_permissions` stays synced.
@@ -487,13 +487,13 @@ Do NOT regress the page back to a single-tabbed feed. The split is the whole poi
 The 3PL partners aren't on-platform yet, so the **accountant** records cash remittances directly from `/admin/finance/delivery-remittances`. Flow:
 1. Accountant clicks **Create cash remittance** → modal lists every `DELIVERED` order not yet on a remittance (`logistics.listDeliveryRemittanceEligibleOrders` — open to FINANCE / Finance hat / admin-class).
 2. Multi-select orders sharing the SAME logistics location (server validates one-location-per-remittance — "one cash drop = one source"), upload receipt(s), optional notes.
-3. **Mark received now** checkbox: when ticked, `logistics.createDeliveryRemittance` writes the remittance with `status = RECEIVED` AND bulk-transitions every linked order from `DELIVERED → COMPLETED` in the same transaction. When unticked, status stays `SENT` and the accountant marks Received later from the detail page (`logistics.markDeliveryRemittanceReceived` cascades the same COMPLETED transition).
+3. **Mark received now** checkbox: when ticked, `logistics.createDeliveryRemittance` writes the remittance with `status = RECEIVED` AND bulk-transitions every linked order from `DELIVERED → REMITTED` in the same transaction. When unticked, status stays `SENT` and the accountant marks Received later from the detail page (`logistics.markDeliveryRemittanceReceived` cascades the same REMITTED transition).
 4. Tabs: **All / Pending (SENT) / Received (RECEIVED) / Disputed (DISPUTED)** using the shared `<Tabs>` component. Filters: location, **Sent by** (accountant who recorded; populated from FINANCE_OFFICER + Finance hat + admin-class roles), date range.
-5. Order detail surfaces a "Cash remittance: <id> · <Pending/Settled/Disputed>" badge linking to the remittance — explains why a `DELIVERED` order isn't yet `COMPLETED`, or where the receipt that closed it lives.
+5. Order detail surfaces a "Cash remittance: <id> · <Pending/Settled/Disputed>" badge linking to the remittance — explains why a `DELIVERED` order isn't yet `REMITTED`, or where the receipt that closed it lives.
 
 **Server gates** ([apps/api/src/logistics/logistics.service.ts](apps/api/src/logistics/logistics.service.ts) — yes, the methods live in LogisticsService for historical reasons):
 - `createDeliveryRemittance` — TPL_MANAGER (legacy, when 3PL onboards) OR `hasFinanceAccess(actor) || isAdminLevel(actor)`. Validates: orders are DELIVERED, share one logistics location, none are already on a remittance.
-- `markDeliveryRemittanceReceived` — Finance / admin / Finance hat. Cascade `DELIVERED → COMPLETED` on every linked order in the same `withActorAndBranch` transaction. Status guard (`AND status = 'DELIVERED'`) so a manually reverted order doesn't get stamped COMPLETED.
+- `markDeliveryRemittanceReceived` — Finance / admin / Finance hat. Cascade `DELIVERED → REMITTED` on every linked order in the same `withActorAndBranch` transaction. Status guard (`AND status = 'DELIVERED'`) so a manually reverted order doesn't get stamped REMITTED.
 - `disputeDeliveryRemittance` — same gate. Does NOT touch order status.
 
 **Do NOT** route remittance creation through `permissionProcedure('logistics.remit')` — that grant is for the legacy 3PL→warehouse stock transfer flow (`transferRemittances`, different table), not delivery cash remittances. The Phase 18 procedure is `authedProcedure` with role-gating in the service. The `logistics.remit` permission stays with TPL_MANAGER for the stock-transfer use case.
@@ -939,7 +939,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT alter a main table without syncing its `*_history` table in the same migration (ADD/DROP columns)
 - Do NOT create a new business-data table without a `branch_id` column (exception: products, stock_batches — global catalog)
 - Do NOT allow CS agents to initiate order transfers between themselves — only HoCS and SuperAdmin can reassign orders
-- Do NOT bypass or reorder the **order ↔ inventory** gates: `InventoryService.assertGlobalAvailabilityForOrder` on `CONFIRMED`, `assertLocationCanFulfillOrder` on `ALLOCATED`, then `reserveForAllocateWithMovements` and `completeDeliveryInventory` in side effects. Do NOT read `logistics_location_id` from a stale pre-update order row in `executeTransitionSideEffects` — pass the post-update order + metadata. Locked spec: `CLAUDE.md` → "When Building the Inventory Module" → "Order ↔ shelf integrity".
+- Do NOT bypass or reorder the **order ↔ inventory** gates: `InventoryService.assertGlobalAvailabilityForOrder` on `CONFIRMED`, `assertLocationCanFulfillOrder` on `AGENT_ASSIGNED`, then `reserveForAllocateWithMovements` and `completeDeliveryInventory` in side effects. Do NOT read `logistics_location_id` from a stale pre-update order row in `executeTransitionSideEffects` — pass the post-update order + metadata. Locked spec: `CLAUDE.md` → "When Building the Inventory Module" → "Order ↔ shelf integrity".
 - Do NOT shrink `inventory.verifyTransfer` in `packages/shared/scripts/seed-permissions.ts` to **only** `TPL_MANAGER` — `HEAD_OF_LOGISTICS` and `STOCK_MANAGER` must retain verify when partners are off-platform; re-run `pnpm db:seed-permissions` after edits.
 - Do NOT change the **confirm call-gate overrides** (admin-class via `isAdminLevel`, same-branch `BRANCH_ADMIN`, org-wide `HEAD_OF_CS` any-call-on-order) without updating **both** `apps/api/src/orders/orders.service.ts::validateTransitionGates` **and** `apps/web/app/features/orders/OrderDetailPage.tsx` in the same change — server and UI must stay aligned.
 - Do NOT send raw phone numbers via SMS or WhatsApp — always route through the platform bridge
@@ -963,7 +963,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT let an `ADMIN` directly create or deactivate another `ADMIN`/`SUPER_ADMIN`. The service layer (`users.service.ts`) funnels such attempts through the `permission_requests` approval flow so the SuperAdmin retains unique authority over who holds admin-level access. Do not add shortcut code paths around this.
 - Do NOT set `font-size` directly on any element when you mean "scale the app" — the root font-size is controlled by `applyFontScale()` / the inline boot script and every Tailwind utility is rem-based. Per-element `font-size` will break the scale.
 - Do NOT change the default dispatch mode from `manual` without an explicit product decision. CEO wants HoCS in full control of distribution; `manual` is the default and must be listed first in the Settings UI.
-- Do NOT let CS mark orders as `COMPLETED`. COMPLETED is the accountant's signal that remittance was received + reconciled. CS's last action in the lifecycle is `DELIVERED`.
+- Do NOT let CS mark orders as `REMITTED`. REMITTED is the accountant's signal that remittance was received + reconciled. CS's last action in the lifecycle is `DELIVERED`. (Renamed from `COMPLETED` per CEO directive 2026-05-04, migration 0110.)
 - The `deliveryNote` and `deliveryProofUrl` fields on CS/HoLogistics Mark Delivered are both optional (CEO directive 2026-04-24 reversed the prior "min 10 chars note" mandatory rule). If they supply either, persist it; never block the transition on them. Do NOT reintroduce the length gate without a new CEO directive.
 - Do NOT attempt to pre-fill a WhatsApp **group** invite link with `?text=` — WhatsApp ignores it for groups. Only `wa.me/<number>` links support pre-fill. The Share-to-3PL flow intentionally copies to clipboard + opens the group; do not try to "fix" this with a deep-link.
 - Do NOT use `message_channel = 'WHATSAPP'` for 3PL dispatch messages. `WHATSAPP` is customer-facing DMs; use `WHATSAPP_GROUP` for 3PL coordination so outbound_messages analytics stay meaningful.

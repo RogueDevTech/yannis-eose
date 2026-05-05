@@ -3,7 +3,15 @@ import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
-import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, getCurrentUser, requirePermission, safeStatus } from '~/lib/api.server';
+import {
+  apiRequest,
+  DEFERRED_LOADER_TIMEOUT_MS,
+  getSessionCookie,
+  getCurrentUser,
+  ORDER_VOIP_ACTION_TIMEOUT_MS,
+  requirePermission,
+  safeStatus,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
@@ -309,6 +317,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderId },
+      timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -330,6 +339,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderId, ...branchIdFromForm(formData) },
+      timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -351,6 +361,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderId, ...branchIdFromForm(formData) },
+      timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -372,6 +383,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderId, ...branchIdFromForm(formData) },
+      timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -402,6 +414,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderId, ...branchIdFromForm(formData) },
+      timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -431,6 +444,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderId, ...branchIdFromForm(formData) },
+      timeoutMs: ORDER_VOIP_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -706,6 +720,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
       if (!Number.isNaN(discount) && discount >= 0) metadata['deliveryDiscountAmount'] = discount;
     }
 
+    // Status transitions do real work: validate gates, run the inventory
+    // geofence + reservation, write the timeline event + status, generate
+    // an invoice on first CONFIRM, fan out notifications, emit a socket
+    // event. On a remote Aiven DB these add up well past the default 4.5s.
+    // Bump the timeout — the user is actively waiting on this single click,
+    // and timing out leaves the order in a half-confirmed state from the UI's
+    // perspective even when the server transaction succeeds.
     const res = await apiRequest<unknown>('/trpc/orders.transition', {
       method: 'POST',
       cookie,
@@ -715,6 +736,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
         ...branchIdFromForm(formData),
       },
+      timeoutMs: 20_000,
     });
 
     if (!res.ok) {

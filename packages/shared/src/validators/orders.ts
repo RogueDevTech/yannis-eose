@@ -13,7 +13,8 @@ export const orderStatusSchema = z.enum([
   'CS_ENGAGED',
   'CONFIRMED',
   'CANCELLED',
-  'ALLOCATED',
+  // Renamed from ALLOCATED — CEO directive 2026-05-04, migration 0110.
+  'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
   'DELIVERED',
@@ -21,7 +22,8 @@ export const orderStatusSchema = z.enum([
   'RETURNED',
   'RESTOCKED',
   'WRITTEN_OFF',
-  'COMPLETED',
+  // Renamed from COMPLETED — CEO directive 2026-05-04, migration 0110.
+  'REMITTED',
 ]);
 
 export type OrderStatusInput = z.infer<typeof orderStatusSchema>;
@@ -140,6 +142,11 @@ export const transitionOrderSchema = z.object({
     preferredDeliveryDate: z.string().optional(),
     /** Mandatory note when CS marks an order DELIVERED (e.g. "Customer confirmed receipt on call at 3:42pm"). */
     deliveryNote: z.string().min(10).max(500).optional(),
+    /** What action triggered a CS_ENGAGED transition. Server uses this to write a precise
+     *  timeline line ("revealed phone for manual call" vs "started VOIP call" vs generic). */
+    engagementMethod: z
+      .enum(['phone_revealed', 'voip_call_started', 'manual_call_logged'])
+      .optional(),
   }).optional(),
 });
 

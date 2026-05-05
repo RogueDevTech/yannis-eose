@@ -155,8 +155,8 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
   },
   'order:allocated': {
     type: 'order:allocated',
-    label: 'Order allocated to location',
-    description: 'TPL Manager — order allocated to their 3PL location',
+    label: 'Agent-assigned order at location',
+    description: 'TPL Manager — order assigned for delivery at their 3PL location',
     mandatory: false,
     category: 'orders',
   },

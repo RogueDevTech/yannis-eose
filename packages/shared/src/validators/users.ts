@@ -30,7 +30,8 @@ export const visibleOrderStatusSchema = z.enum([
   'CS_ENGAGED',
   'CONFIRMED',
   'CANCELLED',
-  'ALLOCATED',
+  // Renamed from ALLOCATED — CEO directive 2026-05-04, migration 0110.
+  'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
   'DELIVERED',
@@ -38,7 +39,8 @@ export const visibleOrderStatusSchema = z.enum([
   'RETURNED',
   'RESTOCKED',
   'WRITTEN_OFF',
-  'COMPLETED',
+  // Renamed from COMPLETED — CEO directive 2026-05-04, migration 0110.
+  'REMITTED',
 ]);
 
 // ============================================

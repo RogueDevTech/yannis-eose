@@ -4,9 +4,6 @@ import { useLoaderData, useActionData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { CategoriesPage } from '~/features/categories/CategoriesPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_CATEGORIES, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
-
 export const meta: MetaFunction = () => [
   { title: 'Product Categories — Yannis EOSE' },
 ];
@@ -128,7 +125,6 @@ export default function CategoriesRoute() {
 
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.categories} allowlist={ALLOWLIST_CATEGORIES} />
     <CategoriesPage
       categories={categories}
       total={total}

@@ -5,9 +5,11 @@ import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMont
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_DELIVERY_REMITTANCES, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
+import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
+
+const REMITTANCES_PAGE_SIZE = 20;
+const ELIGIBLE_PAGE_SIZE = 20;
 
 export const meta: MetaFunction = () => [
   { title: 'Cash Remittances — Finance — Yannis EOSE' },
@@ -60,7 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const listInput: Record<string, unknown> = {
     page,
-    limit: 20,
+    limit: REMITTANCES_PAGE_SIZE,
   };
   if (statusFilter && ['SENT', 'RECEIVED', 'DISPUTED'].includes(statusFilter)) {
     listInput.status = statusFilter;
@@ -74,13 +76,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) listInput.startDate = startDate;
   if (endDate) listInput.endDate = endDate;
 
-  // Eligible delivered orders for the "Create cash remittance" picker. We pull
-  // a generous page (max 500) so the modal can render without a second
-  // round-trip. If the eligibility list grows past that, the modal will need
-  // its own pagination — track via the `eligibleTotal` count.
-  const eligibleInput = JSON.stringify({ page: 1, limit: 500 });
+  const eligiblePageParam = parseInt(url.searchParams.get('eligiblePage') ?? '1', 10);
+  const eligiblePage =
+    isNaN(eligiblePageParam) || eligiblePageParam < 1 ? 1 : eligiblePageParam;
+  const eligibleQ = url.searchParams.get('q')?.trim() ?? undefined;
 
-  const [listRes, locationsRes, usersRes, eligibleRes] = await Promise.all([
+  const eligibleListBase: Record<string, unknown> = {
+    page: eligiblePage,
+    limit: ELIGIBLE_PAGE_SIZE,
+  };
+  if (locationFilter) eligibleListBase.logisticsLocationId = locationFilter;
+  if (eligibleQ) eligibleListBase.search = eligibleQ;
+  if (startDate && !periodAllTime) eligibleListBase.startDate = startDate;
+  if (endDate && !periodAllTime) eligibleListBase.endDate = endDate;
+
+  const eligibleListInput = JSON.stringify(eligibleListBase);
+
+  const [listRes, locationsRes, usersRes, eligibleListRes] = await Promise.all([
     apiRequest<unknown>(
       '/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify(listInput)),
       { method: 'GET', cookie },
@@ -95,19 +107,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      '/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' + encodeURIComponent(eligibleInput),
+      '/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' +
+        encodeURIComponent(eligibleListInput),
       { method: 'GET', cookie },
     ),
   ]);
 
-  type SummaryData = { totalRemitted: string; pendingAmount: string; receivedAmount: string; disputedAmount: string; totalCount: string; pendingCount: string; receivedCount: string; disputedCount: string };
+  type SummaryData = {
+    awaitingAmount: string;
+    awaitingCount: string;
+    totalRemitted: string;
+    pendingAmount: string;
+    receivedAmount: string;
+    disputedAmount: string;
+    totalCount: string;
+    pendingCount: string;
+    receivedCount: string;
+    disputedCount: string;
+  };
   const listData = listRes.ok
     ? (listRes.data as { result?: { data?: { records: DeliveryRemittanceListItem[]; pagination: { total: number; totalPages?: number }; summary?: SummaryData } } })?.result?.data
     : null;
   const remittances = listData?.records ?? [];
   const total = listData?.pagination?.total ?? 0;
-  const totalPages = listData?.pagination?.totalPages ?? (Math.ceil(total / 20) || 1);
+  const totalPages =
+    listData?.pagination?.totalPages ?? (Math.ceil(total / REMITTANCES_PAGE_SIZE) || 1);
   const summary = listData?.summary ?? {
+    awaitingAmount: '0',
+    awaitingCount: '0',
     totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
     totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
   };
@@ -145,25 +172,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   sentByOptions.sort((a, b) => a.name.localeCompare(b.name));
 
-  // Eligible delivered-orders for the Create modal.
-  type EligibleOrder = {
-    id: string;
-    customerName: string;
-    totalAmount: string | null;
-    deliveredAt: string | null;
-    logisticsLocationId: string | null;
-    logisticsLocationName: string | null;
-    logisticsLocationProviderName: string | null;
-  };
-  const eligibleData = eligibleRes.ok
-    ? (eligibleRes.data as { result?: { data?: { orders: EligibleOrder[]; total: number } } })?.result?.data
+  const eligibleListData = eligibleListRes.ok
+    ? (eligibleListRes.data as { result?: { data?: { orders: EligibleOrder[]; total: number } } })?.result
+        ?.data
     : null;
-  const eligibleOrders = eligibleData?.orders ?? [];
-  const eligibleTotal = eligibleData?.total ?? 0;
+  const eligibleOrders = eligibleListData?.orders ?? [];
+  const eligibleTotal = eligibleListData?.total ?? 0;
+  const eligibleTotalPages =
+    Math.ceil(eligibleTotal / ELIGIBLE_PAGE_SIZE) || 1;
 
   return {
     remittances,
-    pagination: { total, totalPages, page },
+    pagination: { total, totalPages, page, pageSize: REMITTANCES_PAGE_SIZE },
     locations,
     filters: {
       status: statusFilter ?? '',
@@ -172,10 +192,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
       periodAllTime,
+      eligibleQ: eligibleQ ?? '',
     },
     userMap,
     sentByOptions,
     eligibleOrders,
+    eligiblePagination: {
+      total: eligibleTotal,
+      totalPages: eligibleTotalPages,
+      page: eligiblePage,
+      pageSize: ELIGIBLE_PAGE_SIZE,
+    },
     eligibleTotal,
     summary,
     canCreateRemittance,
@@ -234,11 +261,7 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
   const data = useLoaderData<typeof loader>();
   return (
     <>
-      <ListFilterPersistence
-        scope={LIST_FILTER_SCOPES.deliveryRemittances}
-        allowlist={ALLOWLIST_DELIVERY_REMITTANCES}
-      />
-    <DeliveryRemittancesPage
+      <DeliveryRemittancesPage
       remittances={data.remittances}
       pagination={data.pagination}
       locations={data.locations}
@@ -246,6 +269,7 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
       userMap={data.userMap}
       sentByOptions={data.sentByOptions}
       eligibleOrders={data.eligibleOrders}
+      eligiblePagination={data.eligiblePagination}
       eligibleTotal={data.eligibleTotal}
       summary={data.summary}
       canCreateRemittance={data.canCreateRemittance}

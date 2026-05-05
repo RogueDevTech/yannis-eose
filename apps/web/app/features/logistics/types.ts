@@ -65,39 +65,6 @@ export interface HealthDashboard {
   totalEscalations: number;
 }
 
-/** Order summary for delivery confirmation request list */
-export interface DeliveryConfirmationOrderSummary {
-  id: string;
-  status: string;
-  customerName: string;
-  deliveryAddress: string | null;
-  riderId: string | null;
-  logisticsLocationId: string | null;
-}
-
-/** Delivery confirmation request (rider/3PL submit → HOL approve/reject) */
-export interface DeliveryConfirmationRequest {
-  id: string;
-  orderId: string;
-  requestedBy: string;
-  requestedAt: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  approvedBy: string | null;
-  approvedAt: string | null;
-  rejectionReason: string | null;
-  payload: { newStatus: string; otp?: string; gpsLat?: number; gpsLng?: number; [k: string]: unknown };
-  order?: DeliveryConfirmationOrderSummary | null;
-  requesterName?: string | null;
-}
-
-/** Orders already in ALLOCATED and eligible for direct delivery confirmation. */
-export interface AllocatedDeliveryOrder {
-  id: string;
-  status: string;
-  customerName: string;
-  deliveryAddress: string | null;
-}
-
 /** Streaming-aware loader shape for the logistics route */
 export interface LogisticsStreamData {
   providers: Provider[];

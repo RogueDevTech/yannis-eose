@@ -27,6 +27,7 @@
 
 import { Fragment, type ReactNode } from 'react';
 import { Link } from '@remix-run/react';
+import type { LinkProps } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -225,6 +226,8 @@ export interface CompactTableActionButtonProps {
   children: ReactNode;
   onClick?: () => void;
   to?: string;
+  /** Passed through to Remix `<Link state>` when `to` is set (e.g. return URL for detail pages). */
+  state?: LinkProps['state'];
   disabled?: boolean;
   tone?: 'brand' | 'danger' | 'success';
   className?: string;
@@ -243,6 +246,7 @@ export function CompactTableActionButton({
   children,
   onClick,
   to,
+  state,
   disabled = false,
   tone = 'brand',
   className = '',
@@ -252,7 +256,7 @@ export function CompactTableActionButton({
 
   if (to && !disabled) {
     return (
-      <Link to={to} className={`btn-ghost btn-sm ${sharedClass}`}>
+      <Link to={to} state={state} className={`btn-ghost btn-sm ${sharedClass}`}>
         {children}
       </Link>
     );

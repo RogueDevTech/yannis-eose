@@ -262,7 +262,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
                 { value: 'CS_ASSIGNED', label: 'CS assigned' },
                 { value: 'CS_ENGAGED', label: 'CS engaged' },
                 { value: 'CONFIRMED', label: 'Confirmed' },
-                { value: 'ALLOCATED', label: 'Allocated' },
+                { value: 'AGENT_ASSIGNED', label: 'Agent assigned' },
                 { value: 'DELIVERED', label: 'Delivered' },
                 { value: 'CANCELLED', label: 'Cancelled' },
               ]}
@@ -454,7 +454,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
                 { value: '', label: 'Any status' },
                 { value: 'AVAILABLE', label: 'Available' },
                 { value: 'RESERVED', label: 'Reserved' },
-                { value: 'ALLOCATED_TO_3PL', label: 'Allocated to 3PL' },
+                { value: 'ALLOCATED_TO_3PL', label: 'Allocated to logistics company' },
                 { value: 'IN_TRANSIT', label: 'In transit' },
                 { value: 'DELIVERED', label: 'Delivered' },
                 { value: 'RETURNED', label: 'Returned' },

@@ -9,6 +9,7 @@ import {
   getCurrentUser,
   safeStatus,
   DEFERRED_LOADER_TIMEOUT_MS,
+  USER_WRITE_ACTION_TIMEOUT_MS,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { extractTrpc } from '~/lib/trpc-extract.server';
@@ -765,7 +766,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const res = await apiRequest<unknown>('/trpc/users.update', {
-      method: 'POST', cookie, body,
+      method: 'POST',
+      cookie,
+      body,
+      timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -834,7 +838,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
 
     const res = await apiRequest<unknown>('/trpc/users.update', {
-      method: 'POST', cookie, body: { userId, status: 'ACTIVE' },
+      method: 'POST',
+      cookie,
+      body: { userId, status: 'ACTIVE' },
+      timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
     });
 
     if (!res.ok) {

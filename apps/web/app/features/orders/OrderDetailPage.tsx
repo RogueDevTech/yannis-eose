@@ -14,7 +14,9 @@ import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
-import { generateInvoicePdf, previewInvoicePdf } from '~/lib/invoice-pdf';
+import { generateInvoicePdf } from '~/lib/invoice-pdf';
+import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
+import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
@@ -26,6 +28,7 @@ import { S3_FOLDERS } from '~/lib/s3-upload';
 import { shareOrderToLogistics } from '~/lib/trpc-browser';
 import { isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
+import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
 import { buildOrderSummaryClipboardText } from './build-order-summary-clipboard';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
 
@@ -47,6 +50,16 @@ function canCopyOrderSummaryForChat(
     order.branchId === currentBranchId
   );
 }
+
+/** After allocation: roles that can copy may still need the summary on delivered / settled orders. */
+const ORDER_STATUSES_LOGISTICS_SUMMARY_COPY = new Set<string>([
+  'AGENT_ASSIGNED',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'PARTIALLY_DELIVERED',
+  'REMITTED',
+]);
 
 type AllocatableLocationDescriptor = {
   address: string | null;
@@ -79,18 +92,16 @@ function describeAllocatableLocation(loc: AllocatableLocationDescriptor): string
 // ── Constants ────────────────────────────────────────────────────
 
 const STATUS_FLOW = [
-  'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED',
-  'DELIVERED', 'COMPLETED',
+  'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED',
+  'DELIVERED', 'REMITTED',
 ] as const;
-
-const STATUS_DISPLAY_LABELS: Partial<Record<(typeof STATUS_FLOW)[number], string>> = {};
 
 // Everything between ALLOCATED and DELIVERED happens offline (rider with the parcel).
 // DISPATCHED + IN_TRANSIT therefore collapse back into the ALLOCATED step — the order is
 // still with the logistics company from the CS perspective until someone marks it delivered.
 function getProgressIndex(status: string): number {
   if (status === 'DISPATCHED' || status === 'IN_TRANSIT') {
-    return STATUS_FLOW.indexOf('ALLOCATED');
+    return STATUS_FLOW.indexOf('AGENT_ASSIGNED');
   }
   return STATUS_FLOW.indexOf(status as (typeof STATUS_FLOW)[number]);
 }
@@ -164,7 +175,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
-    label: 'Allocated',
+    label: 'Agent assigned',
     getValue: (o) => o.allocatedAt,
     format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
     ddClassName: DETAIL_DATE_CLASS,
@@ -624,11 +635,18 @@ export function OrderDetailPage({
   const [deliverModalOpen, setDeliverModalOpen] = useState(false);
   const [deliverNote, setDeliverNote] = useState('');
   const [deliverProofUrl, setDeliverProofUrl] = useState('');
+  /** Logistics location selected at delivery time. Pre-filled with the order's
+   *  current allocation (`order.logisticsLocationId`) so the common case (same provider
+   *  delivered) is one click. Editable because a different provider may have stepped
+   *  in to actually deliver. Server releases the original reserve and decrements the
+   *  chosen location's stock when this differs from the allocation. */
+  const [deliverLocationId, setDeliverLocationId] = useState('');
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareLocationId, setShareLocationId] = useState('');
   const [shareTemplateId, setShareTemplateId] = useState('');
   const [sharePending, setSharePending] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
   const selectedAllocatableLocation = allocatableLocations.find((l) => l.id === allocateLocationId);
   const eligibleAllocatableCount = allocatableLocations.filter((l) => l.eligible).length;
 
@@ -661,12 +679,10 @@ export function OrderDetailPage({
             !!location.whatsappGroupLink,
         )
       : undefined;
+  const showLogisticsOrderSummaryCopy =
+    showCopyOrderSummary && ORDER_STATUSES_LOGISTICS_SUMMARY_COPY.has(order.status);
   const showPostAllocationWhatsAppActions =
-    showCopyOrderSummary &&
-    (order.status === 'ALLOCATED' ||
-      order.status === 'DISPATCHED' ||
-      order.status === 'IN_TRANSIT') &&
-    !!logisticsLocationWithGroupLink;
+    showLogisticsOrderSummaryCopy && !!logisticsLocationWithGroupLink;
 
   const handleCopyOrderSummary = useCallback(async () => {
     const text = buildOrderSummaryClipboardText(order);
@@ -761,7 +777,7 @@ export function OrderDetailPage({
     order.status === 'CS_ASSIGNED' ||
     order.status === 'CS_ENGAGED' ||
     order.status === 'CONFIRMED' ||
-    order.status === 'ALLOCATED' ||
+    order.status === 'AGENT_ASSIGNED' ||
     order.status === 'DISPATCHED' ||
     order.status === 'IN_TRANSIT';
 
@@ -913,16 +929,39 @@ export function OrderDetailPage({
 
   return (
     <div className="space-y-4 overflow-x-hidden min-w-0">
-      {/* Breadcrumb */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <Link to="/admin/cs/orders" className="text-app-fg-muted hover:text-brand-500">
-          Orders
-        </Link>
-        <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-        </svg>
-        <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
-      </div>
+      {/* Breadcrumb — back-link routes to the user's home orders list so logistics
+          users land back on /admin/logistics/orders, marketing on /admin/marketing/orders,
+          etc. Previously hardcoded to /admin/cs/orders, which leaked CS as the default. */}
+      {(() => {
+        const ordersHref = (() => {
+          if (
+            userRole === 'HEAD_OF_LOGISTICS' ||
+            userRole === 'LOGISTICS_MANAGER' ||
+            userRole === 'TPL_MANAGER' ||
+            userRole === 'TPL_RIDER' ||
+            userRole === 'STOCK_MANAGER'
+          ) {
+            return '/admin/logistics/orders';
+          }
+          if (userRole === 'HEAD_OF_MARKETING' || userRole === 'MEDIA_BUYER') {
+            return '/admin/marketing/orders';
+          }
+          // CS_AGENT, HEAD_OF_CS, SUPER_ADMIN, ADMIN, BRANCH_ADMIN, FINANCE_OFFICER,
+          // HR_MANAGER → CS orders is the canonical "orders" list.
+          return '/admin/cs/orders';
+        })();
+        return (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <Link to={ordersHref} className="text-app-fg-muted hover:text-brand-500">
+              Orders
+            </Link>
+            <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+            <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
+          </div>
+        );
+      })()}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 min-w-0">
@@ -1040,7 +1079,7 @@ export function OrderDetailPage({
                         <span className={`text-2xs mt-1 whitespace-nowrap lg:whitespace-normal lg:text-center lg:leading-tight ${
                           isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-app-fg-muted'
                         }`}>
-                          {STATUS_DISPLAY_LABELS[status] ?? status.replace(/_/g, ' ')}
+                          {STATUS_LABELS[status] ?? formatStatus(status)}
                         </span>
                       </div>
                       {idx < STATUS_FLOW.length - 1 && (
@@ -1069,10 +1108,13 @@ export function OrderDetailPage({
                       </p>
                       <div className="mt-2 flex items-center justify-between text-sm text-app-fg-muted">
                         <span>Qty: {item.quantity}</span>
-                        <span>&#8358;{Number(item.unitPrice).toLocaleString()} each</span>
+                        <span className="tabular-nums">
+                          <NairaPrice amount={Number(item.unitPrice)} /> each
+                        </span>
                       </div>
-                      <p className="mt-1.5 text-sm font-semibold text-app-fg">
-                        Subtotal: &#8358;{subtotal.toLocaleString()}
+                      <p className="mt-1.5 text-sm font-semibold text-app-fg flex items-center gap-1">
+                        <span>Subtotal:</span>
+                        <NairaPrice amount={subtotal} />
                       </p>
                       <Link
                         to={`/admin/products/${item.productId}`}
@@ -1089,10 +1131,9 @@ export function OrderDetailPage({
                 })}
               </div>
               {order.totalAmount && (
-                <div className="mt-3 pt-3 border-t border-app-border flex justify-end">
-                  <p className="text-base font-bold text-app-fg">
-                    Total: &#8358;{Number(order.totalAmount).toLocaleString()}
-                  </p>
+                <div className="mt-3 pt-3 border-t border-app-border flex justify-end items-baseline gap-2">
+                  <span className="text-base font-bold text-app-fg">Total:</span>
+                  <NairaPrice amount={Number(order.totalAmount)} className="text-base font-bold text-app-fg" />
                 </div>
               )}
             </div>
@@ -1105,40 +1146,66 @@ export function OrderDetailPage({
                   const i = inv as OrderInvoice | null;
                   if (!i) return null;
                   return (
-                    <div className="card">
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div className="min-w-0">
-                          <h2 className="text-lg font-semibold text-app-fg">Invoice</h2>
+                    <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm">
+                      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0 space-y-2">
+                          <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
+                            Yannis · Invoice
+                          </p>
+                          <h2 className="text-xl font-semibold tracking-tight text-app-fg font-mono">
+                            {i.referenceFormatted}
+                          </h2>
                           <p className="text-sm text-app-fg-muted">
-                            <span className="font-mono">{i.referenceFormatted}</span>
+                            <span className="font-medium text-app-fg">Bill to</span>{' '}
+                            {i.recipientInfo?.name?.trim() || '—'}
+                          </p>
+                          <p className="text-xs text-app-fg-muted">
+                            {i.lineItems.length} line item{i.lineItems.length === 1 ? '' : 's'}
                             <span className="mx-1.5">·</span>
-                            <span className="font-medium text-app-fg">{formatNaira(Number(i.totalAmount))}</span>
-                            <span className="mx-1.5">·</span>
-                            <span className="capitalize">{i.status.toLowerCase()}</span>
+                            Issued{' '}
+                            {new Date(i.createdAt).toLocaleDateString('en-NG', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                            })}
+                            {i.dueDate ? (
+                              <>
+                                <span className="mx-1.5">·</span>
+                                Due{' '}
+                                {new Date(i.dueDate).toLocaleDateString('en-NG', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  year: 'numeric',
+                                })}
+                              </>
+                            ) : null}
                           </p>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => generateInvoicePdf(i, 'download')}
-                          >
-                            Download PDF
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="primary"
-                            size="sm"
-                            onClick={() => previewInvoicePdf(i)}
-                          >
-                            Preview PDF
-                          </Button>
+                        <div className="flex flex-col gap-3 lg:items-end shrink-0 w-full lg:w-auto">
+                          <div className="lg:text-right">
+                            <p className="text-2xs font-semibold uppercase tracking-wide text-app-fg-muted">Total</p>
+                            <NairaPrice
+                              amount={Number(i.totalAmount)}
+                              className="text-2xl font-bold text-app-fg tabular-nums"
+                            />
+                          </div>
+                          <div className="flex flex-wrap gap-2 w-full lg:justify-end">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => {
+                                void generateInvoicePdf(i);
+                              }}
+                            >
+                              Download
+                            </Button>
+                            <Button type="button" variant="primary" size="sm" onClick={() => setInvoicePreview(i)}>
+                              View
+                            </Button>
+                          </div>
                         </div>
                       </div>
-                      <p className="text-xs text-app-fg-muted">
-                        Auto-generated when this order was confirmed. Edit the recipient, line items, tax, or due date from the Finance page before sending.
-                      </p>
                     </div>
                   );
                 }}
@@ -1296,7 +1363,7 @@ export function OrderDetailPage({
                       delivery-coordination / follow-up calls without changing order state. */}
                   {!voipEnabled ? (
                     <div className="space-y-2">
-                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && order.status !== 'CS_ENGAGED' && !(order.status === 'CONFIRMED' || order.status === 'ALLOCATED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
+                      {(order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED' || !canConfirm) && order.status !== 'CS_ENGAGED' && !(order.status === 'CONFIRMED' || order.status === 'AGENT_ASSIGNED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') && (
                         <p className="text-xs text-warning-600 dark:text-warning-400 text-center">
                           Call the customer manually, then confirm the order.
                         </p>
@@ -1418,22 +1485,28 @@ export function OrderDetailPage({
               if (!canEditOrder || userRole === 'MEDIA_BUYER') return null;
               const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
               const canShareToWhatsApp =
-                (order.status === 'CONFIRMED' || order.status === 'ALLOCATED') &&
+                (order.status === 'CONFIRMED' || order.status === 'AGENT_ASSIGNED') &&
                 locationsWithGroup.length > 0 &&
                 logisticsDispatchTemplates.length > 0;
               const canMarkDelivered =
-                (order.status === 'ALLOCATED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') &&
+                (order.status === 'AGENT_ASSIGNED' || order.status === 'DISPATCHED' || order.status === 'IN_TRANSIT') &&
                 canTransitionTo('DELIVERED');
+              const canReallocate =
+                order.status === 'AGENT_ASSIGNED' &&
+                canTransitionTo('AGENT_ASSIGNED') &&
+                logisticsLocations.length > 0;
               const showCard =
-                (order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0) ||
+                (order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0) ||
+                canReallocate ||
                 canMarkDelivered ||
-                canShareToWhatsApp;
+                canShareToWhatsApp ||
+                showLogisticsOrderSummaryCopy;
               if (!showCard) return null;
               return (
                 <div className="card">
                   <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
                   <div className="space-y-2">
-                    {order.status === 'CONFIRMED' && canTransitionTo('ALLOCATED') && logisticsLocations.length > 0 && (
+                    {order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
                       <Button
                         type="button"
                         variant="primary"
@@ -1444,7 +1517,21 @@ export function OrderDetailPage({
                         }}
                         disabled={fetcher.state === 'submitting'}
                       >
-                        Allocate to logistics company
+                        Assign for delivery (Logistics)
+                      </Button>
+                    )}
+                    {canReallocate && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        className="w-full"
+                        onClick={() => {
+                          setAllocateLocationId('');
+                          setAllocateModalOpen(true);
+                        }}
+                        disabled={fetcher.state === 'submitting'}
+                      >
+                        Reassign to another location
                       </Button>
                     )}
                     {canShareToWhatsApp && (
@@ -1484,7 +1571,7 @@ export function OrderDetailPage({
                           className="w-full"
                           onClick={() =>
                             window.open(
-                              logisticsLocationWithGroupLink.whatsappGroupLink as string,
+                              logisticsLocationWithGroupLink!.whatsappGroupLink as string,
                               '_blank',
                               'noopener,noreferrer',
                             )
@@ -1494,8 +1581,18 @@ export function OrderDetailPage({
                         </Button>
                       </>
                     )}
+                    {showLogisticsOrderSummaryCopy && !showPostAllocationWhatsAppActions && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="w-full"
+                        onClick={() => void handleCopyOrderSummary()}
+                      >
+                        Copy for WhatsApp
+                      </Button>
+                    )}
                     {showCopyOrderSummary &&
-                      (order.status === 'ALLOCATED' ||
+                      (order.status === 'AGENT_ASSIGNED' ||
                         order.status === 'DISPATCHED' ||
                         order.status === 'IN_TRANSIT') &&
                       !logisticsLocationWithGroupLink && (
@@ -1511,11 +1608,14 @@ export function OrderDetailPage({
                     {canMarkDelivered && (
                       <Button
                         type="button"
-                        variant="primary"
+                        variant="success"
                         className="w-full"
                         onClick={() => {
                           setDeliverNote('');
                           setDeliverProofUrl('');
+                          // Pre-fill with the original allocation so the common path
+                          // (same provider delivered) is a single click.
+                          setDeliverLocationId(order.logisticsLocationId ?? '');
                           setDeliverModalOpen(true);
                         }}
                         disabled={fetcher.state === 'submitting'}
@@ -1528,8 +1628,20 @@ export function OrderDetailPage({
               );
             })()}
 
-            {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS agents */}
-            {canEditOrder && canPerformCSActionsOnOrder && (
+            {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS agents.
+                Hidden once the order leaves the CS lifecycle (DELIVERED / COMPLETED /
+                CANCELLED / RETURNED / WRITTEN_OFF / RESTOCKED / PARTIALLY_DELIVERED) —
+                customer engagement is already done at that point and the panel
+                just clutters the post-delivery view. */}
+            {canEditOrder &&
+              canPerformCSActionsOnOrder &&
+              order.status !== 'DELIVERED' &&
+              order.status !== 'REMITTED' &&
+              order.status !== 'CANCELLED' &&
+              order.status !== 'RETURNED' &&
+              order.status !== 'WRITTEN_OFF' &&
+              order.status !== 'RESTOCKED' &&
+              order.status !== 'PARTIALLY_DELIVERED' && (
               <CSMessagingPanel
                 orderId={order.id}
                 orderBranchId={order.branchId ?? null}
@@ -1803,17 +1915,23 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      {/* Allocate to logistics company modal — CONFIRMED → ALLOCATED */}
+      {/* Assign / move assignment — CONFIRMED → ALLOCATED or ALLOCATED → ALLOCATED */}
       {allocateModalOpen && (
         <Modal open onClose={() => setAllocateModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-app-fg mb-1">Allocate to logistics company</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-1">
+            {order.status === 'AGENT_ASSIGNED'
+              ? 'Reassign to another logistics location'
+              : 'Assign to a logistics location'}
+          </h3>
           <p className="text-sm text-app-fg-muted mb-3">
-            Select the logistics company location that will fulfil this order. Stock must be available at that location.
+            {order.status === 'AGENT_ASSIGNED'
+              ? 'Pick a different 3PL location. Shelf reservation at the current location is released and stock is reserved at the new one (both must have enough free units).'
+              : 'Select the logistics company location that will fulfil this order. Stock must be available at that location.'}
           </p>
           {eligibleAllocatableCount === 0 ? (
             <EmptyState
-              title="No allocatable locations"
-              description="No logistics company location currently has enough stock for this order. Receive stock (intake or verified transfer) and try again."
+              title="No locations with enough stock"
+              description="No logistics hub currently has enough stock for this order. Receive stock (intake or verified transfer) and try again."
               variant="card"
             />
           ) : (
@@ -1828,7 +1946,9 @@ export function OrderDetailPage({
                 value: loc.id,
                 label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                 description: describeAllocatableLocation(loc),
-                disabled: !loc.eligible,
+                disabled:
+                  !loc.eligible ||
+                  (order.status === 'AGENT_ASSIGNED' && loc.id === order.logisticsLocationId),
               }))}
             />
           )}
@@ -1839,17 +1959,24 @@ export function OrderDetailPage({
             {eligibleAllocatableCount > 0 && (
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
-              <input type="hidden" name="newStatus" value="ALLOCATED" />
+              <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
               {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
               <Button
                 type="submit"
                 variant="primary"
-                disabled={!allocateLocationId || !selectedAllocatableLocation?.eligible || fetcher.state === 'submitting'}
+                disabled={
+                  !allocateLocationId ||
+                  !selectedAllocatableLocation?.eligible ||
+                  fetcher.state === 'submitting' ||
+                  (order.status === 'AGENT_ASSIGNED' &&
+                    !!order.logisticsLocationId &&
+                    allocateLocationId === order.logisticsLocationId)
+                }
                 loading={fetcher.state === 'submitting'}
-                loadingText="Allocating..."
+                loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
               >
-                Allocate
+                {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
               </Button>
             </fetcher.Form>
             )}
@@ -1869,6 +1996,34 @@ export function OrderDetailPage({
           <p className="text-sm text-app-fg-muted mb-3">
             Confirm that the customer received the order. A note and screenshot are optional.
           </p>
+          {/* Logistics provider that actually delivered. Pre-filled with the original
+              allocation; can be changed if a different provider stepped in. */}
+          {logisticsLocations.length > 0 && (
+            <div className="mb-4">
+              <SearchableSelect
+                id="deliver-logistics-location"
+                label="Logistics provider"
+                value={deliverLocationId}
+                onChange={setDeliverLocationId}
+                placeholder="Select the provider that delivered…"
+                options={logisticsLocations.map((loc) => ({
+                  value: loc.id,
+                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                  description:
+                    loc.id === order.logisticsLocationId ? 'Originally allocated' : undefined,
+                }))}
+                searchPlaceholder="Search providers / locations…"
+              />
+              {order.logisticsLocationId &&
+                deliverLocationId &&
+                deliverLocationId !== order.logisticsLocationId && (
+                  <p className="mt-1.5 text-xs text-warning-700 dark:text-warning-400">
+                    Different provider from the original allocation — the original reserve will
+                    be released and stock will be deducted at the chosen provider.
+                  </p>
+                )}
+            </div>
+          )}
           <Textarea
             id="delivery-note"
             label="Delivery note (optional)"
@@ -1896,12 +2051,18 @@ export function OrderDetailPage({
               <input type="hidden" name="intent" value="transition" />
               <input type="hidden" name="newStatus" value="DELIVERED" />
               {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+              {deliverLocationId && (
+                <input type="hidden" name="logisticsLocationId" value={deliverLocationId} />
+              )}
               {deliverNote.trim() && <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />}
               {deliverProofUrl && <input type="hidden" name="deliveryProofUrl" value={deliverProofUrl} />}
               <Button
                 type="submit"
-                variant="primary"
-                disabled={fetcher.state === 'submitting'}
+                variant="success"
+                disabled={
+                  fetcher.state === 'submitting' ||
+                  (logisticsLocations.length > 0 && !deliverLocationId)
+                }
                 loading={fetcher.state === 'submitting'}
                 loadingText="Marking..."
               >
@@ -2182,14 +2343,6 @@ export function OrderDetailPage({
               </>
             ) : (
               <>
-                <p className="text-sm text-app-fg-muted mb-3">
-                  Click &quot;Copy number&quot; or &quot;Call on my phone&quot; to record the call, then use the number to contact the customer.
-                </p>
-                <div className="rounded-lg bg-app-hover p-4 mb-4">
-                  <p className="text-sm text-app-fg-muted">
-                    Number is loaded. Click &quot;Copy number&quot; or &quot;Call on my phone&quot; to use it — the number is not shown in the app.
-                  </p>
-                </div>
                 <div className="flex flex-wrap gap-2 mb-4">
                   <Button
                     type="button"
@@ -2451,6 +2604,8 @@ export function OrderDetailPage({
             </div>
         </Modal>
       )}
+
+      <InvoicePreviewModal invoice={invoicePreview} onClose={() => setInvoicePreview(null)} />
     </div>
   );
 }

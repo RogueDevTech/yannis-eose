@@ -24,3 +24,16 @@ export interface LogisticsProviderRow {
   /** Per-status percentage breakdown for the stacked-bar mix column. Sums to ~100. */
   statusBreakdown: { status: string; count: number; pct: number }[];
 }
+
+/** Single logistics company from `logistics.getProvider` (loader detail page). */
+export type LogisticsProviderDetailRecord = {
+  id: string;
+  name: string;
+  contactInfo: string | null;
+  coverageArea: string | null;
+  rateCard: unknown;
+  status: string;
+  createdAt: string;
+  updatedAt: string | null;
+  locationCount: number;
+};

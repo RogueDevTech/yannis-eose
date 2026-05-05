@@ -17,6 +17,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
+import type { OrderInvoice } from '~/features/orders/types';
 
 export interface RemittanceRecord {
   id: string;
@@ -52,6 +53,10 @@ export interface DeliveryRemittanceEligibleOrder {
   customerName: string;
   totalAmount: string | null;
   deliveredAt: string | null;
+  logisticsLocationId?: string | null;
+  logisticsLocationName?: string | null;
+  logisticsLocationProviderName?: string | null;
+  invoice?: OrderInvoice | null;
 }
 
 export interface RemitPageProps {

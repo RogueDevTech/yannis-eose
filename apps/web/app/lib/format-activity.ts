@@ -43,7 +43,7 @@ const STATUS_LABELS: Record<string, string> = {
   CS_ENGAGED: 'CS Engaged',
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
-  ALLOCATED: 'Allocated',
+  AGENT_ASSIGNED: 'Agent assigned',
   DISPATCHED: 'Dispatched',
   IN_TRANSIT: 'In Transit',
   DELIVERED: 'Delivered',
@@ -51,7 +51,7 @@ const STATUS_LABELS: Record<string, string> = {
   RETURNED: 'Returned',
   RESTOCKED: 'Restocked',
   WRITTEN_OFF: 'Written Off',
-  COMPLETED: 'Completed',
+  REMITTED: 'Remitted',
   PENDING: 'Pending',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
@@ -127,7 +127,7 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
       const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
       return `Cancelled order${customer}${reason}`;
     }
-    if (status === 'ALLOCATED') return `Allocated order${customer} to 3PL`;
+    if (status === 'AGENT_ASSIGNED') return `Order${customer} assigned for delivery (logistics company)`;
     if (status === 'DISPATCHED') return `Dispatched order${customer}`;
     if (status === 'IN_TRANSIT') return `Order${customer} in transit`;
     if (status === 'DELIVERED') return `Marked order${customer} as delivered`;
@@ -135,7 +135,7 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     if (status === 'RETURNED') return `Marked order${customer} as returned`;
     if (status === 'RESTOCKED') return `Restocked returned order${customer}`;
     if (status === 'WRITTEN_OFF') return `Wrote off order${customer}`;
-    if (status === 'COMPLETED') return `Order${customer} marked as completed`;
+    if (status === 'REMITTED') return `Order${customer} marked as remitted`;
     if (statusLabel) return `Updated order${customer} to ${statusLabel}`;
     return `Updated order${customer}`;
   }
@@ -185,7 +185,11 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     return `Updated inventory level${qty ? ` — ${qty} units` : ''}`;
   }
 
-  if (table === 'logistics_providers') return `Updated logistics company${label}`;
+  if (table === 'logistics_providers') {
+    if (entry.action === 'INSERT') return `Created logistics company${label}`;
+    if (entry.action === 'DELETE') return `Removed logistics company${label}`;
+    return `Updated logistics company${label}`;
+  }
   if (table === 'logistics_locations') return `Updated logistics location${label}`;
 
   if (table === 'invoices') {

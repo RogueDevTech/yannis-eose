@@ -21,7 +21,7 @@ interface TplDashboardPageProps {
 export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
   const firstName = userName?.split(' ')[0] ?? 'User';
   const counts = data.orderCounts;
-  const allocated = counts['ALLOCATED'] ?? 0;
+  const allocated = counts['AGENT_ASSIGNED'] ?? 0;
   const dispatched = counts['DISPATCHED'] ?? 0;
   const inTransit = counts['IN_TRANSIT'] ?? 0;
   const delivered = counts['DELIVERED'] ?? 0;
@@ -53,7 +53,7 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
       {/* KPI Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
-          label="Allocated"
+          label="Agent assigned"
           value={allocated.toString()}
           icon={<TplStatIcon type="allocated" />}
           accent={allocated > 10 ? 'warning' : 'brand'}
@@ -158,7 +158,7 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
           <h2 className="text-lg font-semibold text-app-fg mb-4">Delivery Pipeline</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
-              { label: 'Allocated', value: allocated, color: 'text-brand-600 dark:text-brand-400' },
+              { label: 'Agent assigned', value: allocated, color: 'text-brand-600 dark:text-brand-400' },
               { label: 'Dispatched', value: dispatched, color: 'text-brand-600 dark:text-brand-400' },
               { label: 'In Transit', value: inTransit, color: 'text-warning-600 dark:text-warning-400' },
               { label: 'Delivered', value: delivered, color: 'text-success-600 dark:text-success-400' },

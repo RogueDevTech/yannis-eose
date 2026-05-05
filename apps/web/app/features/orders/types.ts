@@ -5,6 +5,8 @@ export interface Order {
   status: string;
   totalAmount: string | null;
   createdAt: string;
+  /** ISO `YYYY-MM-DD` when set (CS confirm / logistics); list API includes full row. */
+  preferredDeliveryDate?: string | null;
   assignedCsId: string | null;
   /** Set in list when available (e.g. CS orders for HoS/SuperAdmin) */
   assignedCsName?: string | null;

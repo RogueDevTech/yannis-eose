@@ -2,7 +2,13 @@ import { useMemo } from 'react';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 
-export type ScheduleHeatDay = { date: string; callbackCount: number; deliveryCount: number };
+export type ScheduleHeatDay = {
+  date: string;
+  callbackCount: number;
+  deliveryCount: number;
+  /** Orders on this preferred date already delivered (or remitted / partial). */
+  deliveredCount: number;
+};
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
@@ -22,6 +28,16 @@ const HEAT_STEPS = [
   'bg-brand-500/30 dark:bg-brand-400/35',
   'bg-brand-500/45 dark:bg-brand-400/45',
   'bg-brand-500/60 dark:bg-brand-400/55',
+] as const;
+
+/** Preferred-date days with at least one completed delivery — distinct from in-flight load (brand). */
+const DELIVERED_HEAT_STEPS = [
+  '',
+  'bg-success-500/12 dark:bg-success-400/18',
+  'bg-success-500/22 dark:bg-success-400/28',
+  'bg-success-500/32 dark:bg-success-400/38',
+  'bg-success-500/45 dark:bg-success-400/48',
+  'bg-success-500/58 dark:bg-success-400/55',
 ] as const;
 
 export interface ScheduleHeatCalendarProps {
@@ -50,9 +66,16 @@ export function ScheduleHeatCalendar({
 }: ScheduleHeatCalendarProps) {
   const { year, month } = parseYearMonth(yearMonth);
   const heatMap = useMemo(() => {
-    const m = new Map<string, { callbackCount: number; deliveryCount: number }>();
+    const m = new Map<
+      string,
+      { callbackCount: number; deliveryCount: number; deliveredCount: number }
+    >();
     for (const row of heat) {
-      m.set(row.date, { callbackCount: row.callbackCount, deliveryCount: row.deliveryCount });
+      m.set(row.date, {
+        callbackCount: row.callbackCount,
+        deliveryCount: row.deliveryCount,
+        deliveredCount: row.deliveredCount ?? 0,
+      });
     }
     return m;
   }, [heat]);
@@ -60,6 +83,12 @@ export function ScheduleHeatCalendar({
   const maxTotal = useMemo(() => {
     let mx = 0;
     for (const row of heat) mx = Math.max(mx, row.callbackCount + row.deliveryCount);
+    return mx > 0 ? mx : 1;
+  }, [heat]);
+
+  const maxDeliveredOnPreferred = useMemo(() => {
+    let mx = 0;
+    for (const row of heat) mx = Math.max(mx, row.deliveredCount ?? 0);
     return mx > 0 ? mx : 1;
   }, [heat]);
 
@@ -118,11 +147,22 @@ export function ScheduleHeatCalendar({
           const counts = heatMap.get(iso);
           const cb = counts?.callbackCount ?? 0;
           const del = counts?.deliveryCount ?? 0;
+          const deliveredOnPreferred = counts?.deliveredCount ?? 0;
           const total = cb + del;
           const step = total <= 0 ? 0 : Math.min(5, Math.ceil((total / maxTotal) * 5));
-          const heatClass = HEAT_STEPS[step];
+          const deliveredStep =
+            deliveredOnPreferred <= 0
+              ? 0
+              : Math.min(5, Math.ceil((deliveredOnPreferred / maxDeliveredOnPreferred) * 5));
+          const heatClass =
+            deliveredOnPreferred > 0 ? DELIVERED_HEAT_STEPS[deliveredStep] : HEAT_STEPS[step];
           const isSelected = selectedDate === iso;
-          const title = `Callbacks: ${cb} · Deliveries: ${del}${total ? '' : ' (no scheduled load)'}`;
+          const title =
+            deliveredOnPreferred > 0
+              ? `Callbacks: ${cb} · Deliveries: ${del} (${deliveredOnPreferred} delivered on preferred date)${
+                  total ? '' : ' (no scheduled load)'
+                }`
+              : `Callbacks: ${cb} · Deliveries: ${del}${total ? '' : ' (no scheduled load)'}`;
           return (
             <button
               key={iso}
@@ -147,10 +187,6 @@ export function ScheduleHeatCalendar({
           );
         })}
       </div>
-      <p className="mt-2 text-xs text-app-fg-muted">
-        Heat shows scheduled callbacks (Lagos date) plus orders with an ISO preferred delivery date. Tooltip per day
-        has the split.
-      </p>
     </div>
   );
 }

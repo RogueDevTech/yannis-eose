@@ -1,5 +1,8 @@
-import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from '@remix-run/react';
+import { useCallback, useMemo, useState } from 'react';
+import { generateInvoicePdf } from '~/lib/invoice-pdf';
+import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
+import type { OrderInvoice } from '~/features/orders/types';
+import { useLocation, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -18,12 +21,17 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
-import { CashRemittanceCreateModal } from './CashRemittanceCreateModal';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
+import { TableActionButton } from '~/components/ui/table-action-button';
+import { CashRemittanceCreateModal, type EligibleOrder } from './CashRemittanceCreateModal';
 
 export interface DeliveryRemittanceListItem {
   id: string;
   logisticsLocationId: string;
   sentBy: string;
+  /** Resolved on the server — avoids "Unknown user" when the accountant is outside the first page of `users.list`. */
+  sentByName?: string | null;
   receiptUrls: string[];
   status: string;
   sentAt: string;
@@ -38,15 +46,23 @@ export interface DeliveryRemittanceListItem {
 }
 
 export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
+  notes?: string | null;
+  receivedAt?: string | null;
+  receivedBy?: string | null;
+  receivedByName?: string | null;
   orders: Array<{
     id: string;
     customerName: string;
     totalAmount: string | null;
     deliveredAt: string | null;
+    status: string;
   }>;
 }
 
 export interface DeliveryRemittanceSummary {
+  /** Delivered orders not yet on a cash remittance batch (same scope as Awaiting tab, ignores batch date filter). */
+  awaitingAmount: string;
+  awaitingCount: string;
   totalRemitted: string;
   pendingAmount: string;
   receivedAmount: string;
@@ -59,7 +75,7 @@ export interface DeliveryRemittanceSummary {
 
 export interface DeliveryRemittancesPageProps {
   remittances: DeliveryRemittanceListItem[];
-  pagination: { total: number; totalPages: number; page: number };
+  pagination: { total: number; totalPages: number; page: number; pageSize: number };
   locations: Array<{ id: string; name: string; providerName?: string | null }>;
   filters: {
     status: string;
@@ -69,19 +85,40 @@ export interface DeliveryRemittancesPageProps {
     startDate: string;
     endDate: string;
     periodAllTime: boolean;
+    /** Server-side search for the Awaiting remittance tab (`q` query param). */
+    eligibleQ: string;
   };
   userMap: Record<string, string>;
   /** Phase 18 — accountants (Finance / admin / Finance hat) for the Sent by select. */
   sentByOptions: Array<{ id: string; name: string }>;
-  /** Phase 18 — delivered orders not yet on a remittance, for the Create modal. */
-  eligibleOrders: import('./CashRemittanceCreateModal').EligibleOrder[];
+  /** Delivered orders not yet on a remittance — current page (server-paginated). */
+  eligibleOrders: EligibleOrder[];
+  eligiblePagination: { total: number; totalPages: number; page: number; pageSize: number };
   /** Phase 18 — total eligible on server (modal shows this when only a slice is fetched). */
   eligibleTotal: number;
   summary: DeliveryRemittanceSummary;
   /** Phase 21 — true when the actor can record a new cash remittance. */
   canCreateRemittance: boolean;
-  /** Phase 21 — true when the actor can mark a remittance Received (cascades DELIVERED→COMPLETED). */
+  /** Phase 21 — true when the actor can mark a remittance Received (cascades DELIVERED→REMITTED). */
   canMarkReceived: boolean;
+}
+
+function formatDeliveredAt(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-NG', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function eligibleLineAmount(o: EligibleOrder): number {
+  const raw = o.invoice?.totalAmount ?? o.totalAmount;
+  return raw != null && raw !== '' ? Number(raw) : 0;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -89,13 +126,6 @@ const STATUS_LABEL: Record<string, string> = {
   RECEIVED: 'Received',
   DISPUTED: 'Disputed',
 };
-
-const STATUS_TABS = [
-  { value: '', label: 'All' },
-  { value: 'SENT', label: 'Pending' },
-  { value: 'RECEIVED', label: 'Received' },
-  { value: 'DISPUTED', label: 'Disputed' },
-] as const;
 
 export function DeliveryRemittancesPage({
   remittances,
@@ -105,32 +135,65 @@ export function DeliveryRemittancesPage({
   userMap,
   sentByOptions,
   eligibleOrders,
+  eligiblePagination,
   eligibleTotal,
   summary,
   canCreateRemittance,
 }: DeliveryRemittancesPageProps) {
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
-  const { totalPages, page } = pagination;
+  const { totalPages, page, pageSize } = pagination;
+  const {
+    totalPages: eligibleTotalPages,
+    page: eligiblePage,
+    pageSize: eligiblePageSize,
+  } = eligiblePagination;
   const [showExportModal, setShowExportModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [eligibleInvoicePreview, setEligibleInvoicePreview] = useState<OrderInvoice | null>(null);
+  const [eligibleSelectedIds, setEligibleSelectedIds] = useState<Set<string>>(() => new Set());
+  const [selectedEligibleById, setSelectedEligibleById] = useState<Map<string, EligibleOrder>>(
+    () => new Map(),
+  );
 
-  const handleStatusChange = (status: string) => {
-    setSearchParams((p) => {
-      const next = new URLSearchParams(p);
-      next.set('page', '1');
-      if (!status) next.delete('status');
-      else next.set('status', status);
-      return next;
-    });
-  };
+  /** Default view is Awaiting remittance; `?tab=remittances` selects the batch list. URL is the source of truth (no useOptimistic — it could revert when navigation + shouldRevalidate interact). */
+  const viewTab = searchParams.get('tab') === 'remittances' ? 'remittances' : 'eligible';
+
+  const setViewTab = useCallback(
+    (tab: 'remittances' | 'eligible') => {
+      setSearchParams(
+        (p) => {
+          const next = new URLSearchParams(p);
+          next.set('page', '1');
+          if (tab === 'remittances') next.set('tab', 'remittances');
+          else next.delete('tab');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const handleLocationChange = (locationId: string) => {
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
+      next.set('eligiblePage', '1');
       if (!locationId) next.delete('location');
       else next.set('location', locationId);
+      return next;
+    });
+  };
+
+  const handleEligibleSearchChange = (value: string) => {
+    const trimmed = value.trim();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('eligiblePage', '1');
+      if (!trimmed) next.delete('q');
+      else next.set('q', trimmed);
       return next;
     });
   };
@@ -145,15 +208,21 @@ export function DeliveryRemittancesPage({
     });
   };
 
-  const hasFilters = !!filters.status || !!filters.location || !!filters.sentBy;
+  const hasFilters = !!filters.location || !!filters.sentBy;
+  const hasEligibleFilters = !!filters.location || !!filters.eligibleQ;
+
+  /** So the detail page can link “Back” / breadcrumb to the same list URL (tab, page, filters). */
+  const remittanceDetailLinkState = useMemo(
+    () => ({ from: `${location.pathname}${location.search}` }),
+    [location.pathname, location.search],
+  );
 
   const remittanceToolbarFilterBadge = useMemo(() => {
     let n = 0;
-    if (filters.status) n += 1;
     if (filters.location) n += 1;
     if (filters.sentBy) n += 1;
     return n;
-  }, [filters.status, filters.location, filters.sentBy]);
+  }, [filters.location, filters.sentBy]);
 
   const remittanceColumns: CompactTableColumn<DeliveryRemittanceListItem>[] = useMemo(
     () => [
@@ -179,13 +248,29 @@ export function DeliveryRemittancesPage({
       {
         key: 'sentBy',
         header: 'Sent by',
-        render: (r) => <span className="text-sm text-app-fg-muted">{userMap[r.sentBy] ?? 'Unknown user'}</span>,
+        render: (r) => (
+          <span className="text-sm text-app-fg-muted">
+            {r.sentByName?.trim() || userMap[r.sentBy] || `${r.sentBy.slice(0, 8)}…`}
+          </span>
+        ),
       },
       {
         key: 'orderCount',
         header: 'Orders',
         align: 'right',
         render: (r) => <span className="tabular-nums">{r.orderCount}</span>,
+      },
+      {
+        key: 'amount',
+        header: 'Batch total',
+        align: 'right',
+        nowrap: true,
+        render: (r) => (
+          <NairaPrice
+            amount={Number(r.outcomeAmount ?? 0)}
+            className="text-sm font-medium text-app-fg tabular-nums"
+          />
+        ),
       },
       {
         key: 'status',
@@ -218,24 +303,182 @@ export function DeliveryRemittancesPage({
         align: 'right',
         tight: true,
         render: (r) => (
-          <CompactTableActionButton to={`/admin/finance/delivery-remittances/${r.id}`}>
+          <CompactTableActionButton
+            to={`/admin/finance/delivery-remittances/${r.id}`}
+            state={remittanceDetailLinkState}
+          >
             {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
           </CompactTableActionButton>
         ),
       },
     ],
-    [userMap],
+    [userMap, remittanceDetailLinkState],
   );
+
+  const remittanceSelectedOrders = useMemo(() => {
+    return [...eligibleSelectedIds]
+      .map((id) => selectedEligibleById.get(id) ?? eligibleOrders.find((o) => o.id === id))
+      .filter((o): o is EligibleOrder => !!o);
+  }, [eligibleSelectedIds, selectedEligibleById, eligibleOrders]);
+
+  const remittanceSelectionComplete =
+    eligibleSelectedIds.size > 0 && remittanceSelectedOrders.length === eligibleSelectedIds.size;
+
+  const eligibleMultiLocation =
+    new Set(remittanceSelectedOrders.map((o) => o.logisticsLocationId ?? '')).size > 1;
+
+  const eligibleSelectedTotal = useMemo(
+    () => remittanceSelectedOrders.reduce((acc, o) => acc + eligibleLineAmount(o), 0),
+    [remittanceSelectedOrders],
+  );
+
+  const eligibleColumns: CompactTableColumn<EligibleOrder>[] = useMemo(
+    () => [
+      {
+        key: 'invoiceRef',
+        header: 'Invoice',
+        render: (o) =>
+          o.invoice ? (
+            <span className="font-mono text-sm font-medium text-app-fg whitespace-nowrap">
+              {o.invoice.referenceFormatted}
+            </span>
+          ) : (
+            <span className="text-xs text-app-fg-muted">No invoice</span>
+          ),
+      },
+      {
+        key: 'billTo',
+        header: 'Bill to',
+        render: (o) => (
+          <span className="text-sm text-app-fg truncate max-w-[12rem] inline-block align-bottom">
+            {o.invoice?.recipientInfo?.name ?? o.customerName}
+          </span>
+        ),
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        nowrap: true,
+        render: (o) => {
+          const raw = o.invoice?.totalAmount ?? o.totalAmount;
+          return raw != null && raw !== '' ? <NairaPrice amount={Number(raw)} /> : '—';
+        },
+      },
+      {
+        key: 'invoiceStatus',
+        header: 'Status',
+        render: (o) =>
+          o.invoice ? <StatusBadge status={o.invoice.status} /> : <span className="text-app-fg-muted">—</span>,
+      },
+      {
+        key: 'location',
+        header: 'Location',
+        render: (o) =>
+          o.logisticsLocationName
+            ? o.logisticsLocationProviderName
+              ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+              : o.logisticsLocationName
+            : '—',
+      },
+      {
+        key: 'delivered',
+        header: 'Delivered',
+        nowrap: true,
+        render: (o) => <span className="text-app-fg-muted">{formatDeliveredAt(o.deliveredAt)}</span>,
+      },
+      {
+        key: 'invoiceActions',
+        header: '',
+        align: 'right',
+        nowrap: true,
+        render: (o) => (
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <TableActionButton
+              variant="primary"
+              disabled={!o.invoice}
+              title={o.invoice ? 'View' : 'No invoice yet'}
+              onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
+            >
+              View
+            </TableActionButton>
+            <TableActionButton
+              variant="neutral"
+              disabled={!o.invoice}
+              title={o.invoice ? 'Download' : 'No invoice yet'}
+              onClick={() => {
+                if (o.invoice) void generateInvoicePdf(o.invoice);
+              }}
+            >
+              Download
+            </TableActionButton>
+          </div>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const onEligibleToggle = useCallback((id: string, checked: boolean) => {
+    setEligibleSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    setSelectedEligibleById((prev) => {
+      const next = new Map(prev);
+      if (checked) {
+        const row = eligibleOrders.find((o) => o.id === id);
+        if (row) next.set(id, row);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }, [eligibleOrders]);
+
+  const onEligibleToggleAll = useCallback(
+    (selectAll: boolean) => {
+      if (!selectAll) {
+        setEligibleSelectedIds(new Set());
+        setSelectedEligibleById(new Map());
+        return;
+      }
+      setEligibleSelectedIds(new Set(eligibleOrders.map((o) => o.id)));
+      setSelectedEligibleById(new Map(eligibleOrders.map((o) => [o.id, o])));
+    },
+    [eligibleOrders],
+  );
+
+  const openCreateFromEligibleTab = useCallback(() => {
+    if (
+      eligibleSelectedIds.size === 0 ||
+      eligibleMultiLocation ||
+      !remittanceSelectionComplete
+    ) {
+      return;
+    }
+    setShowCreateModal(true);
+  }, [eligibleSelectedIds, eligibleMultiLocation, remittanceSelectionComplete]);
+
+  const closeCreateModal = useCallback(() => {
+    setShowCreateModal(false);
+  }, []);
+
+  const goToEligibleTab = useCallback(() => {
+    setViewTab('eligible');
+  }, [setViewTab]);
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Cash Remittances"
-        description="Record cash received against delivered orders. Marking a remittance Received closes out its orders (DELIVERED → COMPLETED)."
+        description="Use Remittances for batches you already recorded, or Awaiting remittance to pick delivered orders and record cash against one logistics location."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Cash remittances tools"
-            sheetSubtitle={<span>Date range, export, and create</span>}
+            sheetSubtitle={<span>Date range, export, and pick orders</span>}
             triggerAriaLabel="Cash remittances toolbar and date range"
             desktop={
               <>
@@ -254,11 +497,11 @@ export function DeliveryRemittancesPage({
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={() => setShowCreateModal(true)}
+                    onClick={goToEligibleTab}
                     disabled={eligibleTotal === 0}
                     title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
                   >
-                    + Create cash remittance
+                    Pick orders to remit
                   </Button>
                 )}
               </>
@@ -293,10 +536,10 @@ export function DeliveryRemittancesPage({
                     title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
                     onClick={() => {
                       closeSheet();
-                      setShowCreateModal(true);
+                      goToEligibleTab();
                     }}
                   >
-                    + Create cash remittance
+                    Pick orders to remit
                   </Button>
                 )}
               </>
@@ -307,10 +550,17 @@ export function DeliveryRemittancesPage({
 
       <CashRemittanceCreateModal
         open={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        eligibleOrders={eligibleOrders}
-        eligibleTotal={eligibleTotal}
+        onClose={closeCreateModal}
+        selectedOrders={remittanceSelectedOrders}
         actionUrl="/admin/finance/delivery-remittances"
+        onSuccess={() => {
+          setEligibleSelectedIds(new Set());
+          setSelectedEligibleById(new Map());
+        }}
+      />
+      <InvoicePreviewModal
+        invoice={eligibleInvoicePreview}
+        onClose={() => setEligibleInvoicePreview(null)}
       />
       <LocalExportModal
         open={showExportModal}
@@ -321,8 +571,9 @@ export function DeliveryRemittancesPage({
         rows={remittances.map((r) => ({
           id: r.id,
           location: r.locationName ?? '',
-          sentBy: userMap[r.sentBy] ?? 'Unknown user',
+          sentBy: r.sentByName?.trim() || userMap[r.sentBy] || r.sentBy,
           orderCount: r.orderCount,
+          batchTotal: Number(r.outcomeAmount ?? 0),
           status:
             STATUS_LABEL[r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status)] ??
             (r.outcomeStatus ?? r.status),
@@ -333,145 +584,368 @@ export function DeliveryRemittancesPage({
           { key: 'location', label: 'Location' },
           { key: 'sentBy', label: 'Sent by' },
           { key: 'orderCount', label: 'Orders' },
+          { key: 'batchTotal', label: 'Batch total (₦)' },
           { key: 'status', label: 'Status' },
           { key: 'sentAt', label: 'Sent at' },
         ]}
-        defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'status', 'sentAt']}
+        defaultColumns={['id', 'location', 'sentBy', 'orderCount', 'batchTotal', 'status', 'sentAt']}
       />
 
       <OverviewStatStrip
         items={[
           {
-            label: 'Total remitted',
+            label: 'Expected (awaiting)',
+            value: <NairaPrice amount={summary.awaitingAmount} />,
+            valueClassName: 'text-info-600 dark:text-info-400 tabular-nums',
+            title: `${Number(summary.awaitingCount)} delivered order(s) not yet on a cash batch · scoped by location filter only`,
+          },
+          {
+            label: 'Total on batches',
             value: <NairaPrice amount={summary.totalRemitted} />,
             valueClassName: 'text-app-fg tabular-nums',
-            title: `${Number(summary.totalCount)} remittance(s)`,
+            title: `${Number(summary.totalCount)} batch(es) · sum of linked order totals (includes settled REMITTED orders)`,
           },
           {
             label: 'Pending',
             value: <NairaPrice amount={summary.pendingAmount} />,
             valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums',
-            title: `${Number(summary.pendingCount)} remittance(s)`,
+            title: `${Number(summary.pendingCount)} batch(es) still SENT`,
           },
           {
             label: 'Received',
             value: <NairaPrice amount={summary.receivedAmount} />,
             valueClassName: 'text-success-600 dark:text-success-400 tabular-nums',
-            title: `${Number(summary.receivedCount)} remittance(s)`,
+            title: `${Number(summary.receivedCount)} batch outcome(s) approved`,
           },
           {
             label: 'Disputed',
             value: <NairaPrice amount={summary.disputedAmount} />,
             valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums',
-            title: `${Number(summary.disputedCount)} remittance(s)`,
+            title: `${Number(summary.disputedCount)} batch outcome(s) disputed`,
           },
         ]}
       />
 
-      <div className="card p-0 overflow-hidden">
-        <ToolbarFiltersCollapsible
-          className="!border-0"
-          badgeCount={remittanceToolbarFilterBadge}
-          sheetSubtitle={<span>Location and sent-by apply immediately</span>}
-          searchRow={
-            <div className="min-w-0 shrink-0 md:min-w-0 md:flex-1">
-              <Tabs
-                value={filters.status}
-                onChange={handleStatusChange}
-                tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
-                variant="pill"
-              />
-            </div>
-          }
-          desktopInlineFilters={
-            <>
-              <SearchableSelect
-                id="delivery-remittance-location-filter"
-                value={filters.location}
-                onChange={handleLocationChange}
-                wrapperClassName="w-full min-w-0 sm:w-52"
-                placeholder="All locations"
-                searchPlaceholder="Search locations..."
-                options={[
-                  { value: '', label: 'All locations' },
-                  ...locations.map((loc) => ({
-                    value: loc.id,
-                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                  })),
-                ]}
-              />
-              <SearchableSelect
-                id="delivery-remittance-sent-by-filter"
-                value={filters.sentBy}
-                onChange={handleSentByChange}
-                wrapperClassName="w-full min-w-0 sm:w-56"
-                placeholder="Sent by anyone"
-                searchPlaceholder="Search accountants..."
-                options={[
-                  { value: '', label: 'Sent by anyone' },
-                  ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                ]}
-              />
-            </>
-          }
-          sheetFilterBody={
-            <>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Location</span>
-                <SearchableSelect
-                  id="delivery-remittance-location-filter-sheet"
-                  value={filters.location}
-                  onChange={handleLocationChange}
-                  wrapperClassName="w-full"
-                  placeholder="All locations"
-                  searchPlaceholder="Search locations..."
-                  options={[
-                    { value: '', label: 'All locations' },
-                    ...locations.map((loc) => ({
-                      value: loc.id,
-                      label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                    })),
-                  ]}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
-                <SearchableSelect
-                  id="delivery-remittance-sent-by-filter-sheet"
-                  value={filters.sentBy}
-                  onChange={handleSentByChange}
-                  wrapperClassName="w-full"
-                  placeholder="Sent by anyone"
-                  searchPlaceholder="Search accountants..."
-                  options={[
-                    { value: '', label: 'Sent by anyone' },
-                    ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
-                  ]}
-                />
-              </div>
-            </>
-          }
-        />
-      </div>
-
-      <CompactTable<DeliveryRemittanceListItem>
-        columns={remittanceColumns}
-        rows={remittances}
-        rowKey={(r) => r.id}
-        loading={isLoaderRefetchBusy}
-        loadingVariant="overlay"
-        emptyTitle="No cash remittances found"
-        emptyDescription={
-          hasFilters
-            ? 'Try adjusting your filters'
-            : 'Cash remittances will appear here once Finance records them'
-        }
-        pagination={{
-          page,
-          totalPages,
-          pageParam: 'page',
-        }}
+      <Tabs
+        variant="underline"
+        value={viewTab}
+        onChange={(v) => setViewTab(v as 'remittances' | 'eligible')}
+        tabs={[
+          {
+            value: 'eligible',
+            label: 'Awaiting remittance',
+            badge:
+              eligibleTotal > 0 ? (
+                <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border border-app-border bg-app-hover px-1.5 text-[10px] font-semibold tabular-nums text-app-fg-muted">
+                  {eligibleTotal > 99 ? '99+' : eligibleTotal}
+                </span>
+              ) : null,
+          },
+          { value: 'remittances', label: `Remittances (${pagination.total})` },
+        ]}
       />
+
+      {viewTab === 'remittances' && (
+        <>
+          <div className="card p-0 overflow-hidden">
+            <ToolbarFiltersCollapsible
+              className="!border-0"
+              badgeCount={remittanceToolbarFilterBadge}
+              sheetSubtitle={<span>Location and sent-by apply immediately</span>}
+              desktopInlineFilters={
+                <>
+                  <SearchableSelect
+                    id="delivery-remittance-location-filter"
+                    value={filters.location}
+                    onChange={handleLocationChange}
+                    wrapperClassName="w-full min-w-0 sm:w-52"
+                    placeholder="All locations"
+                    searchPlaceholder="Search locations..."
+                    options={[
+                      { value: '', label: 'All locations' },
+                      ...locations.map((loc) => ({
+                        value: loc.id,
+                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                      })),
+                    ]}
+                  />
+                  <SearchableSelect
+                    id="delivery-remittance-sent-by-filter"
+                    value={filters.sentBy}
+                    onChange={handleSentByChange}
+                    wrapperClassName="w-full min-w-0 sm:w-56"
+                    placeholder="Sent by anyone"
+                    searchPlaceholder="Search accountants..."
+                    options={[
+                      { value: '', label: 'Sent by anyone' },
+                      ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                    ]}
+                  />
+                </>
+              }
+              sheetFilterBody={
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Location</span>
+                    <SearchableSelect
+                      id="delivery-remittance-location-filter-sheet"
+                      value={filters.location}
+                      onChange={handleLocationChange}
+                      wrapperClassName="w-full"
+                      placeholder="All locations"
+                      searchPlaceholder="Search locations..."
+                      options={[
+                        { value: '', label: 'All locations' },
+                        ...locations.map((loc) => ({
+                          value: loc.id,
+                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                        })),
+                      ]}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
+                    <SearchableSelect
+                      id="delivery-remittance-sent-by-filter-sheet"
+                      value={filters.sentBy}
+                      onChange={handleSentByChange}
+                      wrapperClassName="w-full"
+                      placeholder="Sent by anyone"
+                      searchPlaceholder="Search accountants..."
+                      options={[
+                        { value: '', label: 'Sent by anyone' },
+                        ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                    />
+                  </div>
+                </>
+              }
+            />
+          </div>
+
+          <CompactTable<DeliveryRemittanceListItem>
+            columns={remittanceColumns}
+            rows={remittances}
+            rowKey={(r) => r.id}
+            loading={isLoaderRefetchBusy}
+            loadingVariant="overlay"
+            emptyTitle="No cash remittances found"
+            emptyDescription={
+              hasFilters
+                ? 'Try adjusting your filters'
+                : 'Cash remittances will appear here once Finance records them'
+            }
+            pagination={{
+              page,
+              totalPages,
+              pageParam: 'page',
+              showWhenSinglePage: true,
+              summary: (
+                <span className="text-app-fg-muted">
+                  {pagination.total === 0
+                    ? `0 remittances · ${pageSize} per page`
+                    : `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, pagination.total)} of ${pagination.total} · ${pageSize} per page`}
+                </span>
+              ),
+            }}
+          />
+        </>
+      )}
+
+      {viewTab === 'eligible' && (
+        <div className="card p-4 space-y-4">
+          {eligibleTotal > eligibleOrders.length ? (
+            <p className="text-xs text-warning-600 dark:text-warning-400">
+              Showing {eligibleOrders.length} of {eligibleTotal} matching orders — use search, location, or pages to find
+              more.
+            </p>
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <SearchInput
+              value={filters.eligibleQ}
+              onChange={handleEligibleSearchChange}
+              debounceMs={300}
+              placeholder="Search customer, order ID, invoice ref, or bill-to name"
+              controlSize="md"
+            />
+            <FormSelect
+              id="eligible-remittance-location"
+              aria-label="Filter by logistics location"
+              value={filters.location}
+              onChange={(e) => handleLocationChange(e.target.value)}
+              placeholder="All locations"
+              options={[
+                { value: '', label: 'All locations' },
+                ...locations.map((loc) => ({
+                  value: loc.id,
+                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                })),
+              ]}
+              controlSize="md"
+            />
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-app-border bg-app-hover px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-app-fg-muted">
+              <span className="font-medium text-app-fg">{eligibleSelectedIds.size}</span> selected
+              {eligibleOrders.length > 0 ? (
+                <>
+                  {' '}
+                  · <span className="font-medium text-app-fg">{eligibleOrders.length}</span> on this page
+                </>
+              ) : null}
+              {eligibleTotal > 0 ? (
+                <>
+                  {' '}
+                  · <span className="font-medium text-app-fg">{eligibleTotal}</span> matching filters
+                </>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-semibold text-app-fg">
+                Selected total: <NairaPrice amount={eligibleSelectedTotal} />
+              </span>
+              {canCreateRemittance && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={openCreateFromEligibleTab}
+                  disabled={
+                    eligibleSelectedIds.size === 0 ||
+                    eligibleMultiLocation ||
+                    eligibleTotal === 0 ||
+                    !remittanceSelectionComplete
+                  }
+                  title={
+                    eligibleMultiLocation
+                      ? 'All selected orders must share the same logistics location'
+                      : eligibleSelectedIds.size === 0
+                        ? 'Select at least one order'
+                        : !remittanceSelectionComplete
+                          ? 'Could not resolve every selected order — clear selection and select again'
+                          : undefined
+                  }
+                >
+                  Continue to receipts…
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {eligibleMultiLocation && eligibleSelectedIds.size > 0 && (
+            <p className="text-xs text-warning-700 dark:text-warning-300">
+              All selected orders must share the same logistics location. Clear the selection or remove orders from
+              other locations.
+            </p>
+          )}
+
+          <div className="overflow-x-auto rounded-lg border border-app-border">
+            <CompactTable<EligibleOrder>
+              caption="Delivered orders awaiting remittance"
+              withCard={false}
+              className="min-w-[980px] [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
+              columns={eligibleColumns}
+              rows={eligibleOrders}
+              rowKey={(o) => o.id}
+              loading={isLoaderRefetchBusy}
+              loadingVariant="overlay"
+              selection={{
+                selectedIds: eligibleSelectedIds,
+                onToggle: onEligibleToggle,
+                onToggleAll: onEligibleToggleAll,
+                getRowId: (o) => o.id,
+              }}
+              emptyTitle={
+                eligibleTotal === 0
+                  ? 'No delivered orders awaiting remittance'
+                  : 'No orders match the current filter'
+              }
+              emptyDescription={
+                eligibleTotal === 0
+                  ? 'When riders or CS mark orders delivered, they appear here until Finance records cash against them.'
+                  : hasEligibleFilters
+                    ? 'Try clearing search or the location filter.'
+                    : 'Adjust filters or date range in the header.'
+              }
+              pagination={{
+                page: eligiblePage,
+                totalPages: eligibleTotalPages,
+                pageParam: 'eligiblePage',
+                showWhenSinglePage: true,
+                summary: (
+                  <span className="text-app-fg-muted">
+                    {eligibleTotal === 0
+                      ? `0 orders · ${eligiblePageSize} per page`
+                      : `Showing ${(eligiblePage - 1) * eligiblePageSize + 1}–${Math.min(eligiblePage * eligiblePageSize, eligibleTotal)} of ${eligibleTotal} · ${eligiblePageSize} per page`}
+                  </span>
+                ),
+              }}
+              renderMobileCard={(o, _i, { rowSelection }) => (
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2 border-b border-app-border/80 pb-2">
+                    {rowSelection}
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                      <TableActionButton
+                        variant="primary"
+                        disabled={!o.invoice}
+                        title={o.invoice ? 'View' : 'No invoice yet'}
+                        onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
+                      >
+                        View
+                      </TableActionButton>
+                      <TableActionButton
+                        variant="neutral"
+                        disabled={!o.invoice}
+                        title={o.invoice ? 'Download' : 'No invoice yet'}
+                        onClick={() => {
+                          if (o.invoice) void generateInvoicePdf(o.invoice);
+                        }}
+                      >
+                        Download
+                      </TableActionButton>
+                    </div>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-mono text-sm font-medium text-app-fg">
+                        {o.invoice?.referenceFormatted ?? 'No invoice'}
+                      </p>
+                      <p className="text-sm text-app-fg-muted truncate">
+                        {o.invoice?.recipientInfo?.name ?? o.customerName}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      {o.invoice?.totalAmount != null || o.totalAmount != null ? (
+                        <NairaPrice
+                          amount={Number(o.invoice?.totalAmount ?? o.totalAmount)}
+                          className="font-medium text-app-fg"
+                        />
+                      ) : (
+                        '—'
+                      )}
+                    </div>
+                  </div>
+                  {o.invoice ? (
+                    <div className="flex items-center gap-2">
+                      <StatusBadge status={o.invoice.status} />
+                    </div>
+                  ) : null}
+                  <p className="text-xs text-app-fg-muted">
+                    {o.logisticsLocationName
+                      ? o.logisticsLocationProviderName
+                        ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
+                        : o.logisticsLocationName
+                      : '—'}
+                  </p>
+                  <p className="text-xs text-app-fg-muted">Delivered {formatDeliveredAt(o.deliveredAt)}</p>
+                </div>
+              )}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

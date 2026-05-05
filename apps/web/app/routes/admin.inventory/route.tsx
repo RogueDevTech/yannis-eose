@@ -6,8 +6,6 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_INVENTORY, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption } from '~/features/inventory/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
 
@@ -270,7 +268,6 @@ export default function InventoryRoute() {
   usePageRefreshOnEvent(['stock:updated', 'transfer:created']);
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.inventory} allowlist={ALLOWLIST_INVENTORY} />
       <InventoryPage {...data} />
     </>
   );

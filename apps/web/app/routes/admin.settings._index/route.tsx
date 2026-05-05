@@ -5,8 +5,6 @@ import { APP_THEME_IDS } from '@yannis/shared';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { SettingsPage } from '~/features/settings/SettingsPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_SETTINGS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 
 export const meta: MetaFunction = () => [
   { title: 'Settings — Yannis EOSE' },
@@ -388,7 +386,6 @@ export default function SettingsIndexRoute() {
     useLoaderData<typeof loader>();
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.settings} allowlist={ALLOWLIST_SETTINGS} />
     <SettingsPage
       user={user}
       systemSettings={systemSettings}

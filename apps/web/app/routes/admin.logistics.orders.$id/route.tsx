@@ -55,7 +55,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
       cookie,
       body: {
         orderId,
-        newStatus: 'ALLOCATED',
+        newStatus: 'AGENT_ASSIGNED',
         metadata: { logisticsLocationId },
       },
     });

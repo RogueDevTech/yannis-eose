@@ -1,5 +1,4 @@
 import {
-  createInvoiceSchema,
   updateInvoiceStatusSchema,
   listInvoicesSchema,
   profitReportSchema,
@@ -31,12 +30,6 @@ function getFinanceService(): FinanceService {
 
 export const financeRouter = router({
   // Invoices
-  createInvoice: permissionProcedure('finance.read')
-    .input(createInvoiceSchema)
-    .mutation(async ({ input, ctx }) => {
-      return getFinanceService().createInvoice(input, ctx.user.id);
-    }),
-
   updateInvoiceStatus: permissionProcedure('finance.read')
     .input(updateInvoiceStatusSchema)
     .mutation(async ({ input, ctx }) => {

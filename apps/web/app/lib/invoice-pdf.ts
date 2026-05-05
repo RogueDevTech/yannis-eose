@@ -3,6 +3,69 @@ import type { Invoice } from '~/features/finance/types';
 import type { OrderInvoice } from '~/features/orders/types';
 import { formatNaira as formatNairaAmount } from './format-amount';
 
+/** jsPDF built-ins (Helvetica) omit U+20A6 (₦); register Noto Sans so currency renders correctly. */
+const INVOICE_PDF_FONT_FAMILY = 'NotoSans';
+const INVOICE_PDF_FONT_REGULAR = '/fonts/NotoSans-Regular.ttf';
+const INVOICE_PDF_FONT_BOLD = '/fonts/NotoSans-Bold.ttf';
+
+let invoicePdfFontBase64: { regular: string; bold: string } | null = null;
+let invoicePdfFontLoadFailed = false;
+let invoicePdfFontInflight: Promise<{ regular: string; bold: string } | null> | null = null;
+
+function uint8ToBase64(u8: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < u8.length; i += chunk) {
+    binary += String.fromCharCode.apply(
+      null,
+      u8.subarray(i, Math.min(i + chunk, u8.length)) as unknown as number[],
+    );
+  }
+  return btoa(binary);
+}
+
+async function getInvoicePdfFontBase64s(): Promise<{ regular: string; bold: string } | null> {
+  if (invoicePdfFontBase64) return invoicePdfFontBase64;
+  if (invoicePdfFontLoadFailed) return null;
+  if (typeof fetch === 'undefined') {
+    invoicePdfFontLoadFailed = true;
+    return null;
+  }
+  if (!invoicePdfFontInflight) {
+    invoicePdfFontInflight = (async () => {
+      try {
+        const [rReg, rBold] = await Promise.all([
+          fetch(INVOICE_PDF_FONT_REGULAR),
+          fetch(INVOICE_PDF_FONT_BOLD),
+        ]);
+        if (!rReg.ok || !rBold.ok) {
+          invoicePdfFontLoadFailed = true;
+          return null;
+        }
+        const [bufReg, bufBold] = await Promise.all([rReg.arrayBuffer(), rBold.arrayBuffer()]);
+        const regular = uint8ToBase64(new Uint8Array(bufReg));
+        const bold = uint8ToBase64(new Uint8Array(bufBold));
+        invoicePdfFontBase64 = { regular, bold };
+        return invoicePdfFontBase64;
+      } catch {
+        invoicePdfFontLoadFailed = true;
+        return null;
+      }
+    })();
+  }
+  return invoicePdfFontInflight;
+}
+
+async function ensureInvoicePdfEmbeddedFonts(doc: jsPDF): Promise<boolean> {
+  const b64 = await getInvoicePdfFontBase64s();
+  if (!b64) return false;
+  doc.addFileToVFS('NotoSans-Regular.ttf', b64.regular);
+  doc.addFont('NotoSans-Regular.ttf', INVOICE_PDF_FONT_FAMILY, 'normal');
+  doc.addFileToVFS('NotoSans-Bold.ttf', b64.bold);
+  doc.addFont('NotoSans-Bold.ttf', INVOICE_PDF_FONT_FAMILY, 'bold');
+  return true;
+}
+
 interface LineItem {
   description: string;
   quantity: number;
@@ -29,9 +92,55 @@ export interface InvoicePdfData {
 /** Order-detail or Finance list rows — single choke point if API shapes diverge later. */
 export type InvoicePdfRowSource = OrderInvoice | Invoice;
 
+/** Public path to invoice header logo — white-friendly asset for PDF / preview paper. */
+export const INVOICE_LOGO_SRC = '/assets/yannis-logo-white-bg.png';
+
+interface LogoForPdf {
+  dataUrl: string;
+  aspect: number;
+}
+
+/**
+ * Loads the PNG logo in the browser for embedding in jsPDF. Returns null on
+ * failure or when not in a browser (SSR).
+ */
+function loadInvoiceLogoForPdf(): Promise<LogoForPdf | null> {
+  if (typeof window === 'undefined' || typeof Image === 'undefined') {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        if (!w || !h) {
+          resolve(null);
+          return;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        resolve({ dataUrl: canvas.toDataURL('image/png'), aspect: w / h });
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = INVOICE_LOGO_SRC;
+  });
+}
+
 /**
  * Maps finance/order invoice API rows into the PDF renderer input.
- * Call from any surface that triggers `generateInvoicePdf` / `previewInvoicePdf`.
+ * Call from any surface that triggers `generateInvoicePdf` or the HTML preview (`InvoiceDocumentPreview`).
  */
 export function toInvoicePdfData(row: InvoicePdfRowSource): InvoicePdfData {
   const ri = row.recipientInfo;
@@ -56,56 +165,49 @@ export function toInvoicePdfData(row: InvoicePdfRowSource): InvoicePdfData {
   };
 }
 
-type PdfMode = 'download' | 'preview';
-
-function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
+async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   const doc = new jsPDF();
+  const fontsOk = await ensureInvoicePdfEmbeddedFonts(doc);
+  const ff = fontsOk ? INVOICE_PDF_FONT_FAMILY : 'helvetica';
+  const naira = (amount: number) => formatNairaPdf(amount, fontsOk);
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 20;
   let y = margin;
 
-  // ── Header ────────────────────────────────
-  doc.setFontSize(24);
-  doc.setFont('helvetica', 'bold');
-  doc.text('INVOICE', margin, y);
+  // ── Header: INVOICE left; logo right (replaces “Yannis” wordmark when loaded) ──
+  const logo = await loadInvoiceLogoForPdf();
+  const headerBaseline = margin;
 
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 100, 100);
-  doc.text('Yannis EOSE', pageWidth - margin, y, { align: 'right' });
-  y += 6;
-  doc.text('Enterprise Operations & Sales Engine', pageWidth - margin, y, { align: 'right' });
+  doc.setFontSize(24);
+  doc.setFont(ff, 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text('INVOICE', margin, headerBaseline);
+
+  if (logo) {
+    const logoH = 9;
+    const logoW = logoH * logo.aspect;
+    const logoTop = headerBaseline - logoH + 1.5;
+    const logoX = pageWidth - margin - logoW;
+    doc.addImage(logo.dataUrl, 'PNG', logoX, logoTop, logoW, logoH);
+  } else {
+    doc.setFontSize(11);
+    doc.setFont(ff, 'bold');
+    doc.setTextColor(55, 65, 81);
+    doc.text('Yannis', pageWidth - margin, headerBaseline, { align: 'right' });
+  }
   y += 12;
 
   // ── Reference & Status ────────────────────
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(ff, 'bold');
   doc.text(invoice.referenceFormatted, margin, y);
-
-  // Status badge
-  const statusColors: Record<string, [number, number, number]> = {
-    DRAFT: [234, 179, 8],
-    SENT: [59, 130, 246],
-    PAID: [34, 197, 94],
-    OVERDUE: [239, 68, 68],
-    CANCELLED: [107, 114, 128],
-  };
-  const statusColor = statusColors[invoice.status] ?? [107, 114, 128];
-  doc.setFillColor(...statusColor);
-  const statusText = invoice.status;
-  const statusWidth = doc.getTextWidth(statusText) + 8;
-  doc.roundedRect(pageWidth - margin - statusWidth, y - 5, statusWidth, 7, 1, 1, 'F');
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(255, 255, 255);
-  doc.text(statusText, pageWidth - margin - statusWidth + 4, y - 0.5);
-
   y += 8;
 
   // ── Dates ─────────────────────────────────
   doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(ff, 'normal');
   doc.setTextColor(100, 100, 100);
   doc.text(`Date: ${new Date(invoice.createdAt).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}`, margin, y);
   if (invoice.dueDate) {
@@ -116,11 +218,11 @@ function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
 
   // ── Recipient ─────────────────────────────
   doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(ff, 'bold');
   doc.setTextColor(100, 100, 100);
   doc.text('BILL TO', margin, y);
   y += 5;
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(ff, 'normal');
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(10);
   doc.text(invoice.recipientInfo.name, margin, y);
@@ -153,7 +255,7 @@ function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
   doc.setFillColor(245, 245, 245);
   doc.rect(margin, y - 4, pageWidth - 2 * margin, 8, 'F');
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(ff, 'bold');
   doc.setTextColor(80, 80, 80);
   doc.text('Description', colX.desc + 3, y);
   doc.text('Qty', colX.qty, y, { align: 'right' });
@@ -162,7 +264,7 @@ function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
   y += 7;
 
   // Table rows
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(ff, 'normal');
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(9);
 
@@ -173,8 +275,8 @@ function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
 
     doc.text(item.description, colX.desc + 3, y);
     doc.text(String(item.quantity), colX.qty, y, { align: 'right' });
-    doc.text(formatNaira(Number(item.unitPrice)), colX.unitPrice, y, { align: 'right' });
-    doc.text(formatNaira(lineTotal), colX.total, y, { align: 'right' });
+    doc.text(naira(Number(item.unitPrice)), colX.unitPrice, y, { align: 'right' });
+    doc.text(naira(lineTotal), colX.total, y, { align: 'right' });
     y += 6;
 
     // Add page break if needed
@@ -192,9 +294,9 @@ function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
 
   // ── Subtotal ──────────────────────────────
   doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(ff, 'normal');
   doc.text('Subtotal:', pageWidth - margin - 55, y);
-  doc.text(formatNaira(subtotal), pageWidth - margin, y, { align: 'right' });
+  doc.text(naira(subtotal), pageWidth - margin, y, { align: 'right' });
   y += 6;
 
   // Tax
@@ -202,47 +304,40 @@ function buildInvoicePdf(invoice: InvoicePdfData): jsPDF {
   if (taxRate > 0) {
     const taxAmount = subtotal * taxRate;
     doc.text(`Tax (${(taxRate * 100).toFixed(1)}%):`, pageWidth - margin - 55, y);
-    doc.text(formatNaira(taxAmount), pageWidth - margin, y, { align: 'right' });
+    doc.text(naira(taxAmount), pageWidth - margin, y, { align: 'right' });
     y += 6;
   }
 
   // Total
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(ff, 'bold');
   doc.setFontSize(11);
   doc.text('TOTAL:', pageWidth - margin - 55, y);
-  doc.text(formatNaira(Number(invoice.totalAmount)), pageWidth - margin, y, { align: 'right' });
+  doc.text(naira(Number(invoice.totalAmount)), pageWidth - margin, y, { align: 'right' });
   y += 14;
 
   // ── Footer ────────────────────────────────
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(ff, 'normal');
   doc.setTextColor(150, 150, 150);
-  doc.text('Generated by Yannis EOSE', margin, 280);
+  doc.text('Generated by Yannis', margin, 280);
   doc.text(`Page 1 of ${doc.getNumberOfPages()}`, pageWidth - margin, 280, { align: 'right' });
 
   return doc;
 }
 
 /**
- * Build an invoice PDF and either download it or open it in a new tab for preview.
- * @param invoice — invoice data to render
- * @param mode — `'download'` triggers a save; `'preview'` opens the PDF in a new tab
+ * Build an invoice PDF and download it to disk.
+ * For in-app preview use the `InvoiceDocumentPreview` React component.
  */
-export function generateInvoicePdf(invoice: InvoicePdfRowSource, mode: PdfMode = 'download') {
-  const doc = buildInvoicePdf(toInvoicePdfData(invoice));
-  if (mode === 'preview') {
-    const url = doc.output('bloburl');
-    window.open(url.toString(), '_blank', 'noopener,noreferrer');
-    return;
-  }
+export async function generateInvoicePdf(invoice: InvoicePdfRowSource): Promise<void> {
+  const doc = await buildInvoicePdf(toInvoicePdfData(invoice));
   doc.save(`${invoice.referenceFormatted}.pdf`);
 }
 
-/** Open the invoice PDF in a new tab without downloading. */
-export function previewInvoicePdf(invoice: InvoicePdfRowSource) {
-  generateInvoicePdf(invoice, 'preview');
-}
+const NAIRA_CHAR = '\u20A6';
 
-function formatNaira(amount: number): string {
-  return formatNairaAmount(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function formatNairaPdf(amount: number, useUnicodeNaira: boolean): string {
+  const s = formatNairaAmount(amount, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (useUnicodeNaira) return s;
+  return s.replaceAll(NAIRA_CHAR, 'NGN ');
 }

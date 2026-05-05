@@ -40,12 +40,15 @@ export function NairaPrice({
     return <Tag className={['tabular-nums text-app-fg-muted', className].filter(Boolean).join(' ')}>—</Tag>;
   }
 
-  const formatted = Math.abs(numeric).toLocaleString('en-NG', {
+  // Use en-US digit grouping to avoid narrow no-break spaces (U+202F) and other
+  // locale-specific separators that read as "garbage" before the amount.
+  const formatted = Math.abs(numeric).toLocaleString('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
 
   const sign = numeric < 0 ? '-' : '';
+  const naira = '\u20A6';
 
   const colorClass = colorize
     ? numeric > 0
@@ -57,7 +60,9 @@ export function NairaPrice({
 
   return (
     <Tag className={['tabular-nums', colorClass, className].filter(Boolean).join(' ')}>
-      {sign}&#8358;{formatted}
+      {sign}
+      {naira}
+      {formatted}
     </Tag>
   );
 }

@@ -17,6 +17,7 @@ import {
 } from '~/lib/rate-color';
 import type { LogisticsProviderRow } from './team-types';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
 
 export interface LogisticsTeamPageProps {
   providers: LogisticsProviderRow[];
@@ -29,6 +30,9 @@ export interface LogisticsTeamPageProps {
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
 }
+
+const STATUS_SPLIT_HELP =
+  'Assigned orders in this period, shown as a share by current order status (delivered, agent assigned, in transit, returned, etc.). Bar segments add up to 100% of assigned count.';
 
 const SORT_BY_OPTIONS = [
   { value: 'name', label: 'Provider' },
@@ -44,7 +48,7 @@ const SORT_BY_OPTIONS = [
 function statusBgClass(status: string): string {
   switch (status) {
     case 'DELIVERED':
-    case 'COMPLETED':
+    case 'REMITTED':
       return 'bg-success-500';
     case 'PARTIALLY_DELIVERED':
       return 'bg-warning-500';
@@ -54,7 +58,7 @@ function statusBgClass(status: string): string {
     case 'IN_TRANSIT':
     case 'DISPATCHED':
       return 'bg-brand-500';
-    case 'ALLOCATED':
+    case 'AGENT_ASSIGNED':
       return 'bg-app-fg-muted';
     case 'CANCELLED':
       return 'bg-app-border';
@@ -66,6 +70,7 @@ function statusBgClass(status: string): string {
 }
 
 function humanStatus(status: string): string {
+  if (status === 'AGENT_ASSIGNED') return 'Agent assigned';
   return status.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -81,7 +86,7 @@ function StatusMixBar({
     return (
       <div
         className="h-1.5 w-full rounded-full bg-app-hover"
-        title="No orders allocated in this period"
+        title="No agent-assigned orders in this period"
       />
     );
   }
@@ -115,7 +120,7 @@ function providerInitials(name: string): string {
 }
 
 /** Mobile card row — kept inline since it's not reused elsewhere. */
-function ProviderCard({ row }: { row: LogisticsProviderRow }) {
+function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: string }) {
   return (
     <div className="card p-4">
       <div className="flex items-center gap-2.5 min-w-0 mb-3">
@@ -162,9 +167,15 @@ function ProviderCard({ row }: { row: LogisticsProviderRow }) {
         </div>
       </div>
 
-      <div className="space-y-1">
-        <div className="text-xs text-app-fg-muted">Status mix</div>
+      <div className="space-y-1" title={STATUS_SPLIT_HELP}>
+        <div className="text-xs text-app-fg-muted">Order status split</div>
         <StatusMixBar breakdown={row.statusBreakdown} totalAssigned={row.totalAssigned} />
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-app-border flex justify-end">
+        <TableActionButton to={detailTo} variant="primary">
+          View
+        </TableActionButton>
       </div>
     </div>
   );
@@ -182,6 +193,10 @@ export function LogisticsTeamPage({
   sortDir: sortDirFromLoader = 'desc',
 }: LogisticsTeamPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const listQuerySuffix = useMemo(() => {
+    const qs = searchParams.toString();
+    return qs ? `?${qs}` : '';
+  }, [searchParams]);
   const [searchQuery, setSearchQuery] = useState(q);
 
   useEffect(() => {
@@ -304,21 +319,28 @@ export function LogisticsTeamPage({
         render: (p) => p.returned,
       },
       {
-        key: 'inTransit',
-        header: 'In transit',
-        align: 'right',
-        nowrap: true,
-        cellClassName: 'tabular-nums text-app-fg-muted',
-        render: (p) => p.inTransit,
-      },
-      {
         key: 'statusMix',
-        header: 'Status mix',
+        header: (
+          <span title={STATUS_SPLIT_HELP} className="cursor-help border-b border-dotted border-app-fg-muted/60">
+            Order status split
+          </span>
+        ),
         minWidth: 'min-w-[180px]',
         render: (p) => <StatusMixBar breakdown={p.statusBreakdown} totalAssigned={p.totalAssigned} />,
       },
+      {
+        key: 'actions',
+        header: '',
+        tight: true,
+        nowrap: true,
+        render: (p) => (
+          <TableActionButton to={`/admin/logistics/team/${p.providerId}${listQuerySuffix}`} variant="primary">
+            View
+          </TableActionButton>
+        ),
+      },
     ];
-  }, []);
+  }, [listQuerySuffix]);
 
   return (
     <div className="space-y-6">
@@ -500,7 +522,11 @@ export function LogisticsTeamPage({
             {/* Mobile: card layout */}
             <div className="md:hidden grid grid-cols-1 gap-3">
               {providers.map((p) => (
-                <ProviderCard key={p.providerId} row={p} />
+                <ProviderCard
+                  key={p.providerId}
+                  row={p}
+                  detailTo={`/admin/logistics/team/${p.providerId}${listQuerySuffix}`}
+                />
               ))}
             </div>
 

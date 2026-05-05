@@ -2504,7 +2504,7 @@ export class MarketingService {
     // Orders that CS have scheduled (reached CONFIRMED or beyond)
     const confirmedStatuses = [
       'CONFIRMED',
-      'ALLOCATED',
+      'AGENT_ASSIGNED',
       'DISPATCHED',
       'IN_TRANSIT',
       'DELIVERED',
@@ -2512,7 +2512,7 @@ export class MarketingService {
       'RETURNED',
       'RESTOCKED',
       'WRITTEN_OFF',
-      'COMPLETED',
+      'REMITTED',
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [inArray(schema.orders.status, [...confirmedStatuses])];
     if (mediaBuyerId) confirmedConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));

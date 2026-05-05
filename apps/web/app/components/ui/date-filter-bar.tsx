@@ -174,6 +174,8 @@ export function DateFilterBar({
       else params.delete('endDate');
       pendingSignatureRef.current = `range:${draftStart}:${draftEnd}`;
     }
+    params.set('page', '1');
+    params.set('eligiblePage', '1');
     setSearchParams(params);
     setIsSubmitting(true);
   };
