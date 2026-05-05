@@ -1,10 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams, useFetcher } from '@remix-run/react';
-import {
-  CompactTable,
-  CompactTableActionButton,
-  type CompactTableColumn,
-} from '~/components/ui/compact-table';
+import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -20,6 +16,7 @@ import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { TableActionButton } from '~/components/ui/table-action-button';
 
 interface UsersListPageProps {
   users: User[];
@@ -79,13 +76,12 @@ export function UsersListPage({
     setSearchParams(next, { replace: true });
   };
 
-  const usersToolbarFilterBadge = useMemo(() => {
-    if (staffAccounts) return 0;
+  const filtersToolbarBadge = useMemo(() => {
     let n = 0;
     if (statusParam !== 'ALL') n += 1;
     if (roleParam !== 'ALL') n += 1;
     return n;
-  }, [staffAccounts, statusParam, roleParam]);
+  }, [statusParam, roleParam]);
 
   const q = searchQuery.trim().toLowerCase();
   const filteredUsers = users.filter((user) => {
@@ -105,29 +101,40 @@ export function UsersListPage({
         key: 'name',
         header: 'Name',
         render: (user) => (
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center shrink-0">
               <span className="text-xs font-semibold text-white">{user.name.charAt(0).toUpperCase()}</span>
             </div>
-            <span className="font-medium text-app-fg">{user.name}</span>
+            <span className="font-medium text-app-fg truncate">{user.name}</span>
           </div>
         ),
       },
       {
-        key: 'payment',
-        header: 'Payment details',
-        minWidth: 'min-w-[200px]',
+        key: 'accountName',
+        header: 'Account name',
+        minWidth: 'min-w-[8rem]',
         render: (user) => (
-          <div className="space-y-2 text-sm">
-            <div>
-              <p className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">Email</p>
-              <p className="font-mono text-app-fg break-all">{user.email}</p>
-            </div>
-            <div>
-              <p className="text-[0.65rem] font-medium uppercase tracking-wider text-app-fg-muted">Phone</p>
-              <p className="text-app-fg">{user.phone?.trim() ? user.phone : '—'}</p>
-            </div>
-          </div>
+          <span className="text-sm text-app-fg-muted">{user.payoutAccountName?.trim() ? user.payoutAccountName : '—'}</span>
+        ),
+      },
+      {
+        key: 'accountNumber',
+        header: 'Account number',
+        nowrap: true,
+        render: (user) => (
+          <span className="font-mono text-sm text-app-fg tabular-nums">
+            {user.payoutAccountNumber?.trim() ? user.payoutAccountNumber : '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'bank',
+        header: 'Bank code',
+        minWidth: 'min-w-[7rem]',
+        render: (user) => (
+          <span className="text-sm text-app-fg-muted" title={user.payoutBankName ?? undefined}>
+            {user.payoutBankName?.trim() ? user.payoutBankName : '—'}
+          </span>
         ),
       },
       {
@@ -137,7 +144,9 @@ export function UsersListPage({
         align: 'right',
         tight: true,
         render: (user) => (
-          <CompactTableActionButton to={`${usersBasePath}/${user.id}`}>View</CompactTableActionButton>
+          <TableActionButton to={`${usersBasePath}/${user.id}`} variant="primary">
+            View
+          </TableActionButton>
         ),
       },
     ],
@@ -223,90 +232,91 @@ export function UsersListPage({
         title={staffAccounts ? 'Staff accounts' : 'Users'}
         description={
           staffAccounts
-            ? 'Staff names and payment contact details for payroll and transfers.'
+            ? 'Staff names and payout bank details (account name, number, bank code) for disbursement.'
             : 'Manage team members and their roles'
         }
         actions={
-          staffAccounts ? (
-            <PageRefreshButton />
-          ) : (
-            <PageHeaderMobileTools
-              sheetTitle="Users tools"
-              sheetSubtitle={<span>Refresh and add user</span>}
-              triggerAriaLabel="Users toolbar"
-              desktop={
-                <>
-                  <PageRefreshButton />
-                  <Link to={`${usersBasePath}/new`} className="btn-primary">
-                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    Add User
-                  </Link>
-                </>
-              }
-              sheet={({ closeSheet }) => (
-                <Link
-                  to={`${usersBasePath}/new`}
-                  className="btn-primary inline-flex w-full items-center justify-center gap-2"
-                  onClick={() => closeSheet()}
-                >
-                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <PageHeaderMobileTools
+            sheetTitle={staffAccounts ? 'Staff accounts' : 'Users tools'}
+            sheetSubtitle={<span>Refresh and add user</span>}
+            triggerAriaLabel={staffAccounts ? 'Staff accounts toolbar' : 'Users toolbar'}
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Link to={`${usersBasePath}/new`} className="btn-primary">
+                  <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
-                  Add User
+                  {staffAccounts ? 'Add staff' : 'Add User'}
                 </Link>
-              )}
-            />
-          )
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <Link
+                to={`${usersBasePath}/new`}
+                className="btn-primary inline-flex w-full items-center justify-center gap-2"
+                onClick={() => closeSheet()}
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                {staffAccounts ? 'Add staff' : 'Add User'}
+              </Link>
+            )}
+          />
         }
       />
 
       {!staffAccounts && (
-      <OverviewStatStrip
-        tileClassName="min-w-[6.5rem]"
-        items={[
-          { label: 'Total Users', value: total, valueClassName: 'text-app-fg' },
-          {
-            label: 'Active',
-            value: users.filter((u) => u.status === 'ACTIVE').length,
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Pending',
-            value: users.filter((u) => u.status === 'PENDING').length,
-            valueClassName: 'text-info-600 dark:text-info-400',
-          },
-          {
-            label: 'Inactive / Archived',
-            value: users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length,
-            valueClassName: 'text-app-fg',
-          },
-          { label: 'Roles', value: new Set(users.map((u) => u.role)).size, valueClassName: 'text-app-fg' },
-        ]}
-      />
+        <OverviewStatStrip
+          tileClassName="min-w-[6.5rem]"
+          items={[
+            { label: 'Total Users', value: total, valueClassName: 'text-app-fg' },
+            {
+              label: 'Active',
+              value: users.filter((u) => u.status === 'ACTIVE').length,
+              valueClassName: 'text-success-600 dark:text-success-400',
+            },
+            {
+              label: 'Pending',
+              value: users.filter((u) => u.status === 'PENDING').length,
+              valueClassName: 'text-info-600 dark:text-info-400',
+            },
+            {
+              label: 'Inactive / Archived',
+              value: users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length,
+              valueClassName: 'text-app-fg',
+            },
+            { label: 'Roles', value: new Set(users.map((u) => u.role)).size, valueClassName: 'text-app-fg' },
+          ]}
+        />
+      )}
+
+      {staffAccounts && (
+        <OverviewStatStrip
+          tileClassName="min-w-[6.5rem]"
+          items={[
+            { label: 'Total matching', value: total, valueClassName: 'text-app-fg tabular-nums' },
+            {
+              label: 'Page',
+              value: `${page} / ${safeTotalPages}`,
+              valueClassName: 'text-app-fg-muted tabular-nums',
+            },
+          ]}
+        />
       )}
 
       {staffAccounts ? (
-        <div className="card">
-          <SearchInput
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder="Search by name, email, or phone…"
-            wrapperClassName="w-full"
-          />
-        </div>
-      ) : (
-        <div className="card p-0 overflow-hidden">
+        <div className="card p-0 overflow-hidden flex flex-col">
           <ToolbarFiltersCollapsible
             className="!border-0"
-            badgeCount={usersToolbarFilterBadge}
-            sheetSubtitle={<span>Status and role apply immediately</span>}
+            badgeCount={filtersToolbarBadge}
+            sheetSubtitle={<span>Status and role reload the list from the server. Search narrows the current page.</span>}
             searchRow={
               <SearchInput
                 value={searchQuery}
                 onChange={setSearchQuery}
-                placeholder="Search by name or email..."
+                placeholder="Search by name, email, or phone…"
                 wrapperClassName="min-w-0 flex-1 md:min-w-0"
               />
             }
@@ -363,46 +373,132 @@ export function UsersListPage({
               </>
             }
           />
+          <CompactTable<User>
+            key="staff"
+            columns={staffAccountsColumns}
+            rows={filteredUsers}
+            rowKey={(u) => u.id}
+            withCard={false}
+            loading={isFilterLoading}
+            loadingVariant="overlay"
+            emptyTitle={
+              users.length === 0 ? 'No staff found' : 'No matching staff'
+            }
+            emptyDescription={
+              users.length === 0
+                ? 'Staff records will appear here once added in HR.'
+                : 'Try a different search or filters.'
+            }
+            pagination={{
+              page,
+              totalPages: safeTotalPages,
+              onPageChange: goToPage,
+              summary: (
+                <span>
+                  Showing {filteredUsers.length} of {total} staff
+                </span>
+              ),
+              wrapperClassName: 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
+            }}
+          />
         </div>
-      )}
+      ) : (
+        <>
+          <div className="card p-0 overflow-hidden">
+            <ToolbarFiltersCollapsible
+              className="!border-0"
+              badgeCount={filtersToolbarBadge}
+              sheetSubtitle={<span>Status and role apply immediately</span>}
+              searchRow={
+                <SearchInput
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Search by name or email..."
+                  wrapperClassName="min-w-0 flex-1 md:min-w-0"
+                />
+              }
+              desktopInlineFilters={
+                <>
+                  <FormSelect
+                    value={statusParam}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={[
+                      { value: 'ALL', label: 'All Status' },
+                      { value: 'PENDING', label: 'Pending' },
+                      { value: 'ACTIVE', label: 'Active' },
+                      { value: 'INACTIVE', label: 'Inactive' },
+                      { value: 'ARCHIVED', label: 'Archived' },
+                      { value: 'DEACTIVATED', label: 'Deactivated' },
+                    ]}
+                    wrapperClassName="w-full min-w-0 sm:w-40"
+                  />
+                  <FormSelect
+                    value={roleParam}
+                    onChange={(e) => handleRoleChange(e.target.value)}
+                    options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                  />
+                </>
+              }
+              sheetFilterBody={
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                    <FormSelect
+                      value={statusParam}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={[
+                        { value: 'ALL', label: 'All Status' },
+                        { value: 'PENDING', label: 'Pending' },
+                        { value: 'ACTIVE', label: 'Active' },
+                        { value: 'INACTIVE', label: 'Inactive' },
+                        { value: 'ARCHIVED', label: 'Archived' },
+                        { value: 'DEACTIVATED', label: 'Deactivated' },
+                      ]}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Role</span>
+                    <FormSelect
+                      value={roleParam}
+                      onChange={(e) => handleRoleChange(e.target.value)}
+                      options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                </>
+              }
+            />
+          </div>
 
-      <CompactTable<User>
-        key={staffAccounts ? 'staff' : 'hr'}
-        columns={staffAccounts ? staffAccountsColumns : hrUserColumns}
-        rows={filteredUsers}
-        rowKey={(u) => u.id}
-        loading={isFilterLoading}
-        loadingVariant="overlay"
-        emptyTitle={
-          staffAccounts
-            ? users.length === 0
-              ? 'No staff found'
-              : 'No matching staff'
-            : users.length === 0
-              ? 'No users yet'
-              : 'No matching users found'
-        }
-        emptyDescription={
-          staffAccounts
-            ? users.length === 0
-              ? 'Staff records will appear here once added in HR.'
-              : 'Try a different search.'
-            : users.length === 0
-              ? 'Add your first team member.'
-              : 'Try adjusting your search or filters.'
-        }
-        pagination={{
-          page,
-          totalPages: safeTotalPages,
-          onPageChange: goToPage,
-          summary: (
-            <span>
-              Showing {filteredUsers.length} of {total} {staffAccounts ? 'staff' : 'users'}
-            </span>
-          ),
-          wrapperClassName: 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
-        }}
-      />
+          <CompactTable<User>
+            key="hr"
+            columns={hrUserColumns}
+            rows={filteredUsers}
+            rowKey={(u) => u.id}
+            loading={isFilterLoading}
+            loadingVariant="overlay"
+            emptyTitle={
+              users.length === 0 ? 'No users yet' : 'No matching users found'
+            }
+            emptyDescription={
+              users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'
+            }
+            pagination={{
+              page,
+              totalPages: safeTotalPages,
+              onPageChange: goToPage,
+              summary: (
+                <span>
+                  Showing {filteredUsers.length} of {total} users
+                </span>
+              ),
+              wrapperClassName: 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
+            }}
+          />
+        </>
+      )}
 
       {/* Resend invite confirmation — guards against fat-finger sends from a long table.
           Resending generates a fresh temporary password and invalidates any prior link. */}

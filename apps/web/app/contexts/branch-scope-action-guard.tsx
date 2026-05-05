@@ -62,10 +62,15 @@ export function BranchScopeGuardProvider({
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [actionLabel, setActionLabel] = useState<string>('this action');
 
+  // Only prompt when there's an actual choice to make — an org-wide head
+  // viewing All Branches with MULTIPLE branches in their roster. If they
+  // only belong to a single branch, the popup is useless (no alternative
+  // to pick) and `ensureBranchForAction`'s fallback below auto-uses that
+  // sole branch on every mutation.
   const needsOrgWideBranchPick =
     isOrgWideDepartmentHead({ role: role ?? '' }) &&
     currentBranchId == null &&
-    branches.length > 0;
+    branches.length > 1;
   const requiresBranchSelection = needsOrgWideBranchPick;
 
   const ensureBranchForAction = useCallback<BranchScopeGuardContextValue['ensureBranchForAction']>(

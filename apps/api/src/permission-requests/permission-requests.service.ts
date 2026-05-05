@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, count, and, or, inArray, type SQL } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
@@ -35,6 +35,8 @@ function viewerHasPermission(viewer: SessionUser, code: string): boolean {
     .map((p) => canonicalPermissionCode(p))
     .includes(target);
 }
+
+type PermissionRequestRowType = InferSelectModel<typeof schema.permissionRequests>['type'];
 
 @Injectable()
 export class PermissionRequestsService {
@@ -138,6 +140,51 @@ export class PermissionRequestsService {
       if (viewerHasPermission(viewer, code)) types.add(type);
     }
     return types;
+  }
+
+  /**
+   * Same row visibility as {@link list}: SuperAdmin sees all; everyone else sees
+   * requests they submitted or whose type they may approve.
+   */
+  private viewerScopeWhere(viewer: SessionUser): SQL | undefined {
+    if (viewer.role === 'SUPER_ADMIN') return undefined;
+    const viewableTypes = this.viewableTypesForViewer(viewer);
+    const typeList = [...viewableTypes] as PermissionRequestRowType[];
+    if (typeList.length === 0) {
+      return eq(schema.permissionRequests.requesterId, viewer.id);
+    }
+    return or(
+      eq(schema.permissionRequests.requesterId, viewer.id),
+      inArray(schema.permissionRequests.type, typeList),
+    );
+  }
+
+  /** Per-status totals for tab badges — scoped identically to {@link list}. */
+  async statusCounts(viewer: SessionUser): Promise<{
+    pending: number;
+    approved: number;
+    rejected: number;
+    all: number;
+  }> {
+    const scope = this.viewerScopeWhere(viewer);
+
+    const countWhere = async (status: 'PENDING' | 'APPROVED' | 'REJECTED') => {
+      const cond = scope
+        ? and(eq(schema.permissionRequests.status, status), scope)
+        : eq(schema.permissionRequests.status, status);
+      const [row] = await this.db
+        .select({ c: count() })
+        .from(schema.permissionRequests)
+        .where(cond);
+      return Number(row?.c ?? 0);
+    };
+
+    const [pending, approved, rejected] = await Promise.all([
+      countWhere('PENDING'),
+      countWhere('APPROVED'),
+      countWhere('REJECTED'),
+    ]);
+    return { pending, approved, rejected, all: pending + approved + rejected };
   }
 
   /**

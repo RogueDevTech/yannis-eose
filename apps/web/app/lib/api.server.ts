@@ -85,6 +85,25 @@ const DEFAULT_API_TIMEOUT_MS = 4_500;
 /** `/auth/me` can run on layout revalidation after tab resume — slightly longer than default to reduce false timeouts. */
 const AUTH_ME_TIMEOUT_MS = 15_000;
 
+/**
+ * Order detail actions that hit VOIP providers or audited phone reveal (DB + optional state
+ * transition). Default 4.5s aborts before Twilio/Africa's Talking cold starts finish — use this
+ * for `orders.initiateCall` and `orders.revealPhoneForManualCall` from Remix actions only.
+ */
+export const ORDER_VOIP_ACTION_TIMEOUT_MS = 30_000;
+
+/**
+ * `orders.bulkAssignToCS` / `orders.bulkTransition` run sequential per-order work server-side.
+ * The default 4.5s client abort fires while Nest may still complete — users see "failed" with DB updated.
+ */
+export const BULK_ORDER_MUTATION_TIMEOUT_MS = 30_000;
+
+/**
+ * `users.create` / `users.update` — permission snapshot, templates, notifications, finance-hat swap.
+ * Default 4.5s aborts while Nest still completes; users see a false "timed out" and HTTP 422 via `safeStatus(504)`.
+ */
+export const USER_WRITE_ACTION_TIMEOUT_MS = 30_000;
+
 /** Timeout used for deferred loader requests — stay below Remix single-fetch turbo-stream cap (~4950ms). */
 export const DEFERRED_LOADER_TIMEOUT_MS = 4_700;
 

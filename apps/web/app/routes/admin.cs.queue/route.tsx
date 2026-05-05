@@ -1,12 +1,17 @@
 import { useLoaderData } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus, defaultTodayRange } from '~/lib/api.server';
+import {
+  apiRequest,
+  BULK_ORDER_MUTATION_TIMEOUT_MS,
+  getSessionCookie,
+  requirePermission,
+  safeStatus,
+  defaultTodayRange,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_CS_DASHBOARD, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import {
   type AgentWorkload,
   type InactiveAgent,
@@ -296,6 +301,7 @@ export async function action({ request }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderIds, csAgentId, ...(branchId ? { branchId } : {}) },
+      timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Bulk assignment failed') }, { status: safeStatus(res.status) });
@@ -330,6 +336,7 @@ export async function action({ request }: ActionFunctionArgs) {
       method: 'POST',
       cookie,
       body: { orderIds, fromAgentId, toAgentId, ...(branchId ? { branchId } : {}) },
+      timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -536,7 +543,6 @@ export default function CSQueueRoute() {
   usePageRefreshOnEvent([...CS_QUEUE_LIVE_EVENTS]);
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.csDashboard} allowlist={ALLOWLIST_CS_DASHBOARD} />
     <CSDashboardPage
       {...data.criticalData}
       liveEvents={[...CS_QUEUE_LIVE_EVENTS]}

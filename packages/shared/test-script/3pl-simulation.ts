@@ -67,7 +67,7 @@ async function main() {
   const ordersRes = await trpcGet<{ orders: Order[]; total: number }>(
     API_URL,
     'orders.list',
-    { status: 'ALLOCATED', limit: 100, page: 1 },
+    { status: 'AGENT_ASSIGNED', limit: 100, page: 1 },
     cookie,
   );
 
@@ -236,7 +236,7 @@ async function main() {
     const completeRes = await trpcPost(
       API_URL,
       'orders.transition',
-      { orderId: order.id, newStatus: 'COMPLETED' },
+      { orderId: order.id, newStatus: 'REMITTED' },
       cookie,
     );
 

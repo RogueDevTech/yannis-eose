@@ -42,6 +42,18 @@ import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
+import { isPreferredDeliveryDueToday } from '~/lib/order-delivery-today';
+
+function DueTodayTag() {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full border border-success-300/80 bg-success-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success-800 shadow-sm animate-due-today-breathe dark:border-success-600/50 dark:bg-success-900/35 dark:text-success-100"
+      title="Preferred delivery date is today (Africa/Lagos calendar)"
+    >
+      Due today
+    </span>
+  );
+}
 
 function addMonthsYm(ym: string, delta: number): string {
   const [ys, ms] = ym.split('-');
@@ -55,8 +67,8 @@ function addMonthsYm(ym: string, delta: number): string {
 const BULK_TRANSITIONS: Record<string, string[]> = {
   UNPROCESSED: ['CANCELLED'],
   CS_ASSIGNED: ['CANCELLED'],
-  CONFIRMED: ['ALLOCATED'],
-  ALLOCATED: ['DISPATCHED'],
+  CONFIRMED: ['AGENT_ASSIGNED'],
+  AGENT_ASSIGNED: ['DISPATCHED'],
   DISPATCHED: ['IN_TRANSIT'],
 };
 
@@ -66,8 +78,8 @@ function bulkTransitionLabel(targetStatus: string): string {
   switch (targetStatus) {
     case 'CANCELLED':
       return 'Cancel orders';
-    case 'ALLOCATED':
-      return 'Mark allocated';
+    case 'AGENT_ASSIGNED':
+      return 'Assign for delivery';
     case 'DISPATCHED':
       return 'Mark dispatched';
     case 'IN_TRANSIT':
@@ -238,7 +250,7 @@ export function OrdersListPage({
   const [allocateLocationId, setAllocateLocationId] = useState('');
   const allocateFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
   const isAllocating = allocateFetcher.state !== 'idle';
-  useFetcherToast(allocateFetcher.data, { successMessage: 'Orders allocated to 3PL' });
+  useFetcherToast(allocateFetcher.data, { successMessage: 'Orders assigned for delivery (Logistics)' });
   useCloseOnFetcherSuccess(allocateFetcher, () => {
     setAllocateModalOpen(false);
     setAllocateLocationId('');
@@ -423,13 +435,13 @@ export function OrdersListPage({
   const submitBulkAllocate = () => {
     setBulkResult(null);
     ensureBranchForAction({
-      actionLabel: 'allocating selected orders to a 3PL location',
+      actionLabel: 'assigning selected orders for delivery at a 3PL location',
       onProceed: () =>
         allocateFetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
-            newStatus: 'ALLOCATED',
+            newStatus: 'AGENT_ASSIGNED',
             logisticsLocationId: allocateLocationId,
           },
           { method: 'post' },
@@ -467,7 +479,12 @@ export function OrdersListPage({
       {
         key: 'customer',
         header: 'Customer',
-        render: (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+        render: (order) => (
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="font-medium text-app-fg">{order.customerName}</span>
+            {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
+          </div>
+        ),
       },
     ];
     if (showCSAgentColumn) {
@@ -580,9 +597,7 @@ export function OrdersListPage({
           />
         </div>
         {(scheduleSelectValue === 'delivery_on_day' || scheduleSelectValue === 'callback_on_day') && (
-          <div className="flex flex-col gap-1 w-full min-w-0 sm:w-auto">
-            <span className="text-xs font-medium text-app-fg-muted">On date</span>
-            <div className="inline-flex items-stretch gap-1">
+          <div className="inline-flex w-full min-w-0 sm:w-auto items-stretch gap-1">
               <button
                 type="button"
                 onClick={() => {
@@ -625,7 +640,6 @@ export function OrdersListPage({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-            </div>
           </div>
         )}
       </div>
@@ -836,7 +850,7 @@ export function OrdersListPage({
                   }}
                   disabled={isSubmitting || isAssigning || isAllocating}
                 >
-                  Allocate to 3PL
+                  Assign to Logistics
                 </Button>
               )}
               {/* Bulk Transition buttons */}
@@ -1197,8 +1211,11 @@ export function OrdersListPage({
                     .join(' ')}
                 >
                   <Link to={`/admin/orders/${order.id}`} className="block rounded-md p-3 transition-opacity hover:opacity-90">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="font-medium text-app-fg">{order.customerName}</span>
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="font-medium text-app-fg">{order.customerName}</span>
+                        {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
+                      </div>
                       <OrderStatusBadge status={order.status} />
                     </div>
                     {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) ? (
@@ -1401,16 +1418,16 @@ export function OrdersListPage({
           contentClassName="p-6"
         >
           <h3 className="text-lg font-semibold text-app-fg mb-1">
-            Allocate {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} to a 3PL location
+            Assign {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} for delivery at a Logistics location
           </h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            Pick the 3PL location that will fulfill these orders.
+            Pick the Logistics location that will fulfill these orders.
           </p>
           <div data-branch-scoped-action="true">
             <div className="mb-4">
               <SearchableSelect
                 id="bulk-allocate-location"
-                label="3PL location"
+                label="Logistics location"
                 value={allocateLocationId}
                 onChange={setAllocateLocationId}
                 options={allocateLocationOptions}
@@ -1440,10 +1457,10 @@ export function OrdersListPage({
                 variant="primary"
                 disabled={!allocateLocationId || isAllocating}
                 loading={isAllocating}
-                loadingText="Allocating..."
+                loadingText="Assigning…"
                 onClick={submitBulkAllocate}
               >
-                Allocate
+                Assign
               </Button>
             </div>
           </div>

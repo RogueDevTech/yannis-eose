@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { Button } from '~/components/ui/button';
 import {
   CompactTable,
@@ -30,10 +31,10 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
 };
 
 const STATUS_TABS: Array<{ value: PermissionRequestStatusFilter; label: string }> = [
+  { value: 'ALL', label: 'All' },
   { value: 'PENDING', label: 'Pending' },
   { value: 'APPROVED', label: 'Approved' },
   { value: 'REJECTED', label: 'Rejected' },
-  { value: 'ALL', label: 'All' },
 ];
 
 function formatDateTime(iso: string | null): string {
@@ -78,13 +79,15 @@ function targetSummary(req: PermissionRequest): string {
 
 export function PermissionRequestsPage({
   requests,
+  statusCounts,
   canApprove = false,
   canApproveProductArchive = false,
   canApproveOrderLinePriceChange = false,
   viewerId = '',
-  activeStatus = 'PENDING',
+  activeStatus = 'ALL',
 }: {
   requests: PermissionRequest[];
+  statusCounts: { pending: number; approved: number; rejected: number; all: number };
   canApprove?: boolean;
   /** Only Super Admin may approve/reject product archive requests (even if user has audit.read). */
   canApproveProductArchive?: boolean;
@@ -104,19 +107,51 @@ export function PermissionRequestsPage({
 
   useFetcherToast(fetcher.data, { successMessage: 'Request processed' });
 
+  const onApproveRejectSuccess = useCallback(() => {
+    setModal(null);
+    setReason('');
+  }, []);
+  useCloseOnFetcherSuccess(fetcher, onApproveRejectSuccess, {
+    intent: ['approve', 'reject'],
+  });
+
   useEffect(() => {
     if (fetcherError) setDismissedError(false);
   }, [fetcherError]);
 
   const handleStatusChange = (next: string) => {
     const params = new URLSearchParams(searchParams);
-    if (next === 'PENDING') {
+    if (next === 'ALL') {
       params.delete('status');
     } else {
       params.set('status', next);
     }
     setSearchParams(params, { replace: true });
   };
+
+  const statusTabItems = useMemo(
+    () =>
+      STATUS_TABS.map((t) => {
+        const n =
+          t.value === 'PENDING'
+            ? statusCounts.pending
+            : t.value === 'APPROVED'
+              ? statusCounts.approved
+              : t.value === 'REJECTED'
+                ? statusCounts.rejected
+                : statusCounts.all;
+        return {
+          value: t.value,
+          label: t.label,
+          badge: (
+            <span className="tabular-nums rounded-full bg-app-hover px-1.5 py-px text-[0.6875rem] font-semibold leading-tight text-app-fg-muted">
+              {n}
+            </span>
+          ),
+        };
+      }),
+    [statusCounts],
+  );
 
   const requestColumns: CompactTableColumn<PermissionRequest>[] = useMemo(
     () => [
@@ -184,11 +219,17 @@ export function PermissionRequestsPage({
   );
 
   const emptyTitle =
-    activeStatus === 'PENDING' ? 'No pending permission requests' : `No ${activeStatus.toLowerCase()} permission requests`;
+    activeStatus === 'PENDING'
+      ? 'No pending permission requests'
+      : activeStatus === 'ALL'
+        ? 'No permission requests'
+        : `No ${activeStatus.toLowerCase()} permission requests`;
   const emptyDescription =
     activeStatus === 'PENDING'
       ? 'New requests from HR will appear here for your review.'
-      : 'Try switching the tab to see requests in other states.';
+      : activeStatus === 'ALL'
+        ? 'When requests are submitted, they will appear here for your review.'
+        : 'Try switching the tab to see requests in other states.';
 
   return (
     <div className="space-y-4">
@@ -207,11 +248,7 @@ export function PermissionRequestsPage({
         />
       )}
 
-      <Tabs
-        value={activeStatus}
-        onChange={handleStatusChange}
-        tabs={STATUS_TABS.map((t) => ({ value: t.value, label: t.label }))}
-      />
+      <Tabs value={activeStatus} onChange={handleStatusChange} tabs={statusTabItems} />
 
       <div className="card p-0 flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] overflow-y-auto overscroll-contain min-h-0">
         <CompactTable<PermissionRequest>
@@ -390,14 +427,23 @@ export function PermissionRequestsPage({
 
       {/* Approve/Reject Modal */}
       {modal && (
-        <Modal open onClose={() => setModal(null)} maxWidth="max-w-md" backdropBlur contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-app-border bg-app-elevated">
+        <Modal
+          open
+          onClose={() => {
+            if (fetcher.state === 'submitting' || fetcher.state === 'loading') return;
+            setModal(null);
+          }}
+          maxWidth="max-w-md"
+          backdropBlur
+          contentClassName="p-6 flex flex-col max-h-[80dvh] overflow-hidden border border-app-border bg-app-elevated"
+        >
               <h3 className="text-lg font-semibold text-app-fg shrink-0">
                 {modal.action === 'APPROVED' ? 'Approve Request' : 'Reject Request'}
               </h3>
               <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
                 <Textarea
                   label="Reason"
-                  hint="Minimum 10 characters"
+                  hint="Minimum 5 characters"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   rows={3}
@@ -407,10 +453,16 @@ export function PermissionRequestsPage({
                 />
               </div>
               <div className="flex gap-2 justify-end shrink-0 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                <Button type="button" variant="secondary" size="sm" onClick={() => setModal(null)}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={fetcher.state === 'submitting' || fetcher.state === 'loading'}
+                  onClick={() => setModal(null)}
+                >
                   Cancel
                 </Button>
-                <fetcher.Form method="post" onSubmit={() => setModal(null)}>
+                <fetcher.Form method="post">
                   <input type="hidden" name="intent" value={modal.action === 'APPROVED' ? 'approve' : 'reject'} />
                   <input type="hidden" name="requestId" value={modal.requestId} />
                   <input type="hidden" name="reason" value={reason} />
@@ -418,8 +470,12 @@ export function PermissionRequestsPage({
                     type="submit"
                     variant={modal.action === 'APPROVED' ? 'success' : 'danger'}
                     size="sm"
-                    disabled={reason.length < 10 || fetcher.state === 'submitting'}
-                    loading={fetcher.state === 'submitting'}
+                    disabled={
+                      reason.trim().length < 5 ||
+                      fetcher.state === 'submitting' ||
+                      fetcher.state === 'loading'
+                    }
+                    loading={fetcher.state === 'submitting' || fetcher.state === 'loading'}
                     loadingText="Processing..."
                   >
                     Confirm

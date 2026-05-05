@@ -31,27 +31,29 @@ const ALLOWED_TRANSITIONS: TransitionRule[] = [
   { from: 'UNPROCESSED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
 
   // Logistics flow
-  { from: 'CONFIRMED', to: 'ALLOCATED', gate: '3PL location must have available stock' },
-  { from: 'ALLOCATED', to: 'DISPATCHED', gate: 'Rider must be assigned' },
+  { from: 'CONFIRMED', to: 'AGENT_ASSIGNED', gate: '3PL location must have available stock' },
+  // Change 3PL while still ALLOCATED (releases shelf reservation at prior hub, reserves at new hub)
+  { from: 'AGENT_ASSIGNED', to: 'AGENT_ASSIGNED', gate: 'Must pick a different logistics location with stock' },
+  { from: 'AGENT_ASSIGNED', to: 'DISPATCHED', gate: 'Rider must be assigned' },
   { from: 'DISPATCHED', to: 'IN_TRANSIT', gate: 'Rider confirms departure' },
 
   // Delivery outcomes
   // ALLOCATED → DELIVERED is the CS rider-proxy path: once the 3PL is in-app this step will be
   // the rider's, but for now CS / HoLogistics confirms delivery via follow-up call from the
   // ALLOCATED state directly (DISPATCHED + IN_TRANSIT happen offline and are skipped).
-  { from: 'ALLOCATED', to: 'DELIVERED', gate: 'Mandatory delivery note (min 10 chars)' },
-  { from: 'ALLOCATED', to: 'RETURNED', gate: 'Mandatory return reason' },
+  { from: 'AGENT_ASSIGNED', to: 'DELIVERED', gate: 'Mandatory delivery note (min 10 chars)' },
+  { from: 'AGENT_ASSIGNED', to: 'RETURNED', gate: 'Mandatory return reason' },
   { from: 'IN_TRANSIT', to: 'DELIVERED', gate: 'OTP match required (SuperAdmin override allowed)' },
   { from: 'IN_TRANSIT', to: 'PARTIALLY_DELIVERED', gate: 'Must specify delivered qty vs returned qty' },
   { from: 'IN_TRANSIT', to: 'RETURNED', gate: 'Mandatory return reason' },
 
   // Post-delivery
-  { from: 'DELIVERED', to: 'COMPLETED' },
+  { from: 'DELIVERED', to: 'REMITTED' },
   { from: 'RETURNED', to: 'RESTOCKED', gate: 'Quality check by 3PL manager' },
   { from: 'RETURNED', to: 'WRITTEN_OFF', gate: 'Mandatory damage note' },
 
   // Partial delivery flows
-  { from: 'PARTIALLY_DELIVERED', to: 'COMPLETED' },
+  { from: 'PARTIALLY_DELIVERED', to: 'REMITTED' },
 ];
 
 /**
@@ -80,7 +82,7 @@ export function getTransitionRule(from: OrderStatus, to: OrderStatus): Transitio
 /**
  * Statuses that represent terminal states (no further transitions).
  */
-export const TERMINAL_STATUSES: OrderStatus[] = ['COMPLETED', 'WRITTEN_OFF', 'RESTOCKED'];
+export const TERMINAL_STATUSES: OrderStatus[] = ['REMITTED', 'WRITTEN_OFF', 'RESTOCKED'];
 
 /**
  * Statuses where stock reservation should be triggered.
@@ -97,7 +99,7 @@ export const STOCK_DEDUCTION_STATUS: OrderStatus = 'DELIVERED';
  */
 export const TRANSITION_TIMESTAMPS: Partial<Record<OrderStatus, string>> = {
   CONFIRMED: 'confirmedAt',
-  ALLOCATED: 'allocatedAt',
+  AGENT_ASSIGNED: 'allocatedAt',
   DISPATCHED: 'dispatchedAt',
   DELIVERED: 'deliveredAt',
 };

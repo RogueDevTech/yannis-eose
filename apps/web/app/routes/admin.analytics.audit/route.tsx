@@ -3,8 +3,6 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
 import { AuditPage } from '~/features/audit/AuditPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_AUDIT, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { AuditEntry, AuditStreamData, ActorMap } from '~/features/audit/types';
 
 export const meta: MetaFunction = () => [
@@ -150,7 +148,6 @@ export default function AuditRoute() {
 
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.audit} allowlist={ALLOWLIST_AUDIT} />
     <AuditPage
       rows={data.rows}
       total={data.total}

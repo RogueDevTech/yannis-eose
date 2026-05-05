@@ -3,8 +3,6 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_MARKETING_AD_SPEND, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { AdSpendStatusFilter, MarketingAdSpendLoaderData } from '~/features/marketing/types';
 import {
   buildLeaderboardInput,
@@ -279,7 +277,6 @@ export default function AdminMarketingAdSpendRoute() {
   const data = useLoaderData<typeof loader>();
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.marketingAdSpend} allowlist={ALLOWLIST_MARKETING_AD_SPEND} />
       <MarketingAdSpendPage {...data} />
     </>
   );

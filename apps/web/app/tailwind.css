@@ -451,6 +451,22 @@
     animation: arc 1.5s ease-in-out infinite;
   }
 
+  /* CS orders — preferred delivery “Due today” pill (subtle scale breathe) */
+  .animate-due-today-breathe {
+    animation: dueTodayBreathe 1.65s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  @keyframes dueTodayBreathe {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.07);
+    }
+  }
+
   /* Dismissible alert progress bar (countdown) */
   @keyframes dismissible-alert-shrink {
     from { transform: scaleX(1); }

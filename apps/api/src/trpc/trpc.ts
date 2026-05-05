@@ -137,6 +137,18 @@ const requireBranchScopeForGlobalAdminMutations = t.middleware(async ({ ctx, typ
   ) {
     return next();
   }
+  // Single-branch org-wide head (most orgs while they're still single-branch):
+  // there's no choice to make — auto-fall back to the user's sole branch and
+  // proceed instead of throwing "Branch context required". The branchIds are
+  // captured at login (see auth.service.ts). Multi-branch holders still hit
+  // the throw below so they're forced to switch branch or pass branchId.
+  const branchIds = ctx.user.branchIds ?? [];
+  if (branchIds.length === 1) {
+    const fallbackBranchId = branchIds[0]!;
+    return next({
+      ctx: { ...ctx, currentBranchId: fallbackBranchId },
+    });
+  }
   throw new TRPCError({ code: 'BAD_REQUEST', message: BRANCH_CONTEXT_REQUIRED_MESSAGE });
 });
 

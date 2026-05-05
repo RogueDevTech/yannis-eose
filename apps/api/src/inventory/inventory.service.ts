@@ -1492,24 +1492,47 @@ export class InventoryService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to confirm against inventory.' });
     }
 
-    for (const [productId, need] of byProduct) {
-      const levels = await this.db
-        .select()
+    // Previously this iterated `byProduct` and ran two queries PER product
+    // (`inventoryLevels` + `stockBatches`) sequentially — N×2 round-trips
+    // dominate the CONFIRM latency on a remote DB. Two batched aggregate
+    // queries (one per scope) drop it to a constant 2 round-trips that run
+    // in parallel. We `GROUP BY product_id` and `SUM(...)` server-side so
+    // we only pull one row per product, regardless of how many locations
+    // / batches each one has.
+    const productIds = [...byProduct.keys()];
+    const [shelfRows, batchRows] = await Promise.all([
+      this.db
+        .select({
+          productId: schema.inventoryLevels.productId,
+          available: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::int`,
+        })
         .from(schema.inventoryLevels)
-        .where(eq(schema.inventoryLevels.productId, productId));
-      const shelfAvailable = levels.reduce((sum, l) => sum + (l.stockCount - l.reservedCount), 0);
+        .where(inArray(schema.inventoryLevels.productId, productIds))
+        .groupBy(schema.inventoryLevels.productId),
+      this.db
+        .select({
+          productId: schema.stockBatches.productId,
+          remaining: sql<number>`COALESCE(SUM(${schema.stockBatches.remainingQuantity}), 0)::int`,
+        })
+        .from(schema.stockBatches)
+        .where(inArray(schema.stockBatches.productId, productIds))
+        .groupBy(schema.stockBatches.productId),
+    ]);
+
+    const shelfByProduct = new Map<string, number>();
+    for (const row of shelfRows) shelfByProduct.set(row.productId, Number(row.available) || 0);
+    const fifoByProduct = new Map<string, number>();
+    for (const row of batchRows) fifoByProduct.set(row.productId, Number(row.remaining) || 0);
+
+    for (const [productId, need] of byProduct) {
+      const shelfAvailable = shelfByProduct.get(productId) ?? 0;
       if (shelfAvailable < need) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: `Cannot confirm: insufficient sellable shelf stock for this order (need ${need}, have ${shelfAvailable} across locations).`,
         });
       }
-
-      const batches = await this.db
-        .select({ remaining: schema.stockBatches.remainingQuantity })
-        .from(schema.stockBatches)
-        .where(eq(schema.stockBatches.productId, productId));
-      const fifoAvailable = batches.reduce((sum, b) => sum + (b.remaining ?? 0), 0);
+      const fifoAvailable = fifoByProduct.get(productId) ?? 0;
       if (fifoAvailable < need) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -1544,7 +1567,7 @@ export class InventoryService {
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message:
-            'This 3PL location has no inventory row for a product on the order. Receive stock (intake or verified transfer) before allocating.',
+            'This logistics company location has no inventory row for a product on the order. Receive stock (intake or verified transfer) before allocating.',
         });
       }
       const avail = level.stockCount - level.reservedCount;
@@ -1604,7 +1627,61 @@ export class InventoryService {
           quantity: qty,
           toLocationId: locationId,
           referenceId: orderId,
-          reason: `Allocated to 3PL for order ${orderId}`,
+          reason: `Allocated to logistics company for order ${orderId}`,
+          actorId: actor.id,
+        });
+      }
+    });
+  }
+
+  /**
+   * Reverse {@link reserveForAllocateWithMovements} at a prior 3PL when reallocating ALLOCATED → ALLOCATED.
+   */
+  async releaseAllocationReserveAtLocation(orderId: string, locationId: string, actor: SessionUser): Promise<void> {
+    const byProduct = await this.loadAggregatedOrderLineQuantities(orderId);
+    if (byProduct.size === 0) return;
+
+    await withActor(this.db, actor, async (tx) => {
+      for (const [productId, qty] of byProduct) {
+        const rows = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, productId),
+              eq(schema.inventoryLevels.locationId, locationId),
+            ),
+          )
+          .limit(1);
+        const level = rows[0];
+        if (!level) {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Inventory row missing at prior allocation location during reallocation.',
+          });
+        }
+        if (level.reservedCount < qty) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message:
+              'Cannot reallocate: reserved quantity at the prior location is below this order (inventory may have been adjusted).',
+          });
+        }
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${qty}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.inventoryLevels.id, level.id));
+
+        await tx.insert(schema.stockMovements).values({
+          productId,
+          movementType: 'ADJUSTMENT',
+          quantity: qty,
+          fromLocationId: locationId,
+          referenceId: orderId,
+          reason: `Reallocation: released logistics company reservation for order ${orderId}`,
           actorId: actor.id,
         });
       }

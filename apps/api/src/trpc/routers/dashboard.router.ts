@@ -130,7 +130,7 @@ async function _ceoOverviewFetch(params: {
     (statusCounts['CS_ASSIGNED'] ?? 0) +
     (statusCounts['CS_ENGAGED'] ?? 0) +
     (statusCounts['CONFIRMED'] ?? 0) +
-    (statusCounts['ALLOCATED'] ?? 0) +
+    (statusCounts['AGENT_ASSIGNED'] ?? 0) +
     (statusCounts['DISPATCHED'] ?? 0) +
     (statusCounts['IN_TRANSIT'] ?? 0);
 

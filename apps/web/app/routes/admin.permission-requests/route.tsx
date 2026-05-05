@@ -7,8 +7,6 @@ import { redirect } from '@remix-run/node';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PermissionRequestsPage } from '~/features/permission-requests/PermissionRequestsPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_PERMISSION_REQUESTS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { PermissionRequest } from '~/features/permission-requests/types';
 
 export const meta: MetaFunction = () => [
@@ -72,16 +70,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const rawStatus = url.searchParams.get('status')?.toUpperCase();
   const status: StatusFilter = ALLOWED_STATUSES.includes(rawStatus as StatusFilter)
     ? (rawStatus as StatusFilter)
-    : 'PENDING';
+    : 'ALL';
 
-  const res = await apiRequest<unknown>(
-    `/trpc/permissionRequests.list?input=${encodeURIComponent(JSON.stringify({ status }))}`,
-    { method: 'GET', cookie },
-  );
+  const listInput = encodeURIComponent(JSON.stringify({ status }));
+  const [listRes, countsRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/permissionRequests.list?input=${listInput}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/permissionRequests.statusCounts`, { method: 'GET', cookie }),
+  ]);
 
-  const requests: PermissionRequest[] = res.ok
-    ? ((res.data as { result?: { data?: PermissionRequest[] } })?.result?.data ?? [])
+  const requests: PermissionRequest[] = listRes.ok
+    ? ((listRes.data as { result?: { data?: PermissionRequest[] } })?.result?.data ?? [])
     : [];
+
+  type StatusCounts = { pending: number; approved: number; rejected: number; all: number };
+  const statusCounts: StatusCounts = countsRes.ok
+    ? ((countsRes.data as { result?: { data?: StatusCounts } })?.result?.data ?? {
+        pending: 0,
+        approved: 0,
+        rejected: 0,
+        all: 0,
+      })
+    : { pending: 0, approved: 0, rejected: 0, all: 0 };
 
   // UI affordance flags — drive button visibility on each row. The actual gate is
   // enforced server-side in `assertApproverMayProcessRequest`, so these checks just
@@ -107,6 +116,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     requests,
+    statusCounts,
     canApprove,
     canApproveProductArchive,
     canApproveOrderLinePriceChange,
@@ -122,10 +132,11 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
   const requestId = formData.get('requestId')?.toString() ?? '';
-  const reason = formData.get('reason')?.toString() ?? '';
+  const reasonRaw = formData.get('reason')?.toString() ?? '';
+  const reason = reasonRaw.trim();
 
-  if (!requestId || !reason || reason.length < 10) {
-    return json({ error: 'A reason of at least 10 characters is required' }, { status: 400 });
+  if (!requestId || reason.length < 5) {
+    return json({ error: 'A reason of at least 5 characters is required' }, { status: 400 });
   }
 
   if (intent === 'approve') {
@@ -158,6 +169,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function PermissionRequestsRoute() {
   const {
     requests,
+    statusCounts,
     canApprove,
     canApproveProductArchive,
     canApproveOrderLinePriceChange,
@@ -165,19 +177,14 @@ export default function PermissionRequestsRoute() {
     status,
   } = useLoaderData<typeof loader>();
   return (
-    <>
-      <ListFilterPersistence
-        scope={LIST_FILTER_SCOPES.permissionRequests}
-        allowlist={ALLOWLIST_PERMISSION_REQUESTS}
-      />
     <PermissionRequestsPage
       requests={requests}
+      statusCounts={statusCounts}
       canApprove={canApprove}
       canApproveProductArchive={canApproveProductArchive}
       canApproveOrderLinePriceChange={canApproveOrderLinePriceChange}
       viewerId={viewerId}
       activeStatus={status}
     />
-    </>
   );
 }

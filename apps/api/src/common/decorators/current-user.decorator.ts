@@ -19,6 +19,14 @@ export interface SessionUser {
   permissions?: string[];
   /** Active branch for multi-branch context. NULL = cross-branch (SuperAdmin). */
   currentBranchId?: string | null;
+  /**
+   * The user's branch memberships, captured at login. Used by
+   * `requireBranchScopeForGlobalAdminMutations` so a single-branch org-wide
+   * head doesn't get blocked with "Branch context required" — we auto-fall
+   * back to their sole branch when no explicit branchId is in the input.
+   * Multi-branch holders get the existing strict gate.
+   */
+  branchIds?: string[];
   /** Saved appearance id; undefined/null = use org default (`client_ui_config`). */
   appTheme?: string | null;
   /** Saved font scale id; undefined/null = base. */

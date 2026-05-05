@@ -107,14 +107,27 @@ export async function applyPermissionCatalog(
   }
   let rolePermsRevoked = 0;
   if (rolePermRevocations.length > 0) {
-    const deleted = await sql`
-      DELETE FROM role_permissions
-      WHERE (role::text, permission_id) IN (
-        ${sql(rolePermRevocations.map((r) => [r.role, r.permissionId]))}
-      )
-      RETURNING role::text AS role
-    `;
-    rolePermsRevoked = deleted.length;
+    // postgres.js doesn't accept a 2D array directly inside a tuple `IN`
+    // clause (it tries to escape it as identifiers and crashes with
+    // `str.replace is not a function`). Group revocations by role and run
+    // one DELETE per role with a flat permission-id list — that's a clean
+    // `WHERE role = $1 AND permission_id IN ($2, $3, ...)` which postgres.js
+    // renders correctly. Revocations are rare so the per-role loop is fine.
+    const byRole = new Map<string, string[]>();
+    for (const rev of rolePermRevocations) {
+      const list = byRole.get(rev.role) ?? [];
+      list.push(rev.permissionId);
+      byRole.set(rev.role, list);
+    }
+    for (const [role, permIds] of byRole) {
+      const deleted = await sql`
+        DELETE FROM role_permissions
+        WHERE role::text = ${role}
+          AND permission_id IN ${sql(permIds)}
+        RETURNING role::text AS role
+      `;
+      rolePermsRevoked += deleted.length;
+    }
   }
 
   // Bulk-insert: build the full target set of (role, permission_id) tuples,
@@ -215,14 +228,25 @@ export async function applyPermissionCatalog(
 
   let templatePermsRevoked = 0;
   if (templatePermRevocations.length > 0) {
-    const deleted = await sql`
-      DELETE FROM role_template_permissions
-      WHERE (role_template_id, permission_id) IN (
-        ${sql(templatePermRevocations.map((r) => [r.role_template_id, r.permission_id]))}
-      )
-      RETURNING role_template_id
-    `;
-    templatePermsRevoked = deleted.length;
+    // Same postgres.js gotcha as the role_permissions revoke above — pass a
+    // 2D array to a tuple `IN` and it tries to escape it as identifiers,
+    // crashing with `str.replace is not a function`. Group by template id
+    // and run one DELETE per template with a flat permission-id list.
+    const byTemplate = new Map<string, string[]>();
+    for (const rev of templatePermRevocations) {
+      const list = byTemplate.get(rev.role_template_id) ?? [];
+      list.push(rev.permission_id);
+      byTemplate.set(rev.role_template_id, list);
+    }
+    for (const [templateId, permIds] of byTemplate) {
+      const deleted = await sql`
+        DELETE FROM role_template_permissions
+        WHERE role_template_id = ${templateId}
+          AND permission_id IN ${sql(permIds)}
+        RETURNING role_template_id
+      `;
+      templatePermsRevoked += deleted.length;
+    }
   }
 
   let templatePermsInserted = 0;

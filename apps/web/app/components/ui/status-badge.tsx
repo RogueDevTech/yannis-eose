@@ -5,6 +5,8 @@
  * For order-specific statuses use <OrderStatusBadge> which has richer dot styling.
  */
 
+import { STATUS_LABELS as ORDER_STATUS_LABELS } from '~/features/shared/order-status';
+
 type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'brand';
 type BadgeSize = 'sm' | 'md' | 'lg';
 
@@ -106,7 +108,7 @@ export function StatusBadge({
   className = '',
 }: StatusBadgeProps) {
   const resolvedVariant = variant ?? STATUS_VARIANT_MAP[status.toLowerCase()] ?? 'neutral';
-  const displayLabel = label ?? formatStatusLabel(status);
+  const displayLabel = label ?? ORDER_STATUS_LABELS[status] ?? formatStatusLabel(status);
 
   return (
     <span

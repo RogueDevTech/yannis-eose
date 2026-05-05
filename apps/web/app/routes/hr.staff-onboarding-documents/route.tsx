@@ -11,8 +11,6 @@ import {
   StaffOnboardingDocumentsPage,
   type StaffOnboardingDocumentRow,
 } from '~/features/hr/StaffOnboardingDocumentsPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_STAFF_ONBOARDING_DOCS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 
 export const meta: MetaFunction = () => [{ title: 'Staff onboarding documents — Yannis EOSE' }];
 
@@ -83,11 +81,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function StaffOnboardingDocumentsRoute() {
   const data = useLoaderData<typeof loader>();
   return (
-    <>
-      <ListFilterPersistence
-        scope={LIST_FILTER_SCOPES.staffOnboardingDocs}
-        allowlist={ALLOWLIST_STAFF_ONBOARDING_DOCS}
-      />
     <StaffOnboardingDocumentsPage
       rows={data.rows}
       page={data.page}
@@ -99,6 +92,5 @@ export default function StaffOnboardingDocumentsRoute() {
       sortOrderParam={data.sortOrderParam}
       searchParam={data.searchParam}
     />
-    </>
   );
 }

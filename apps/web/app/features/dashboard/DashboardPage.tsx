@@ -154,7 +154,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
         )}
       </DeferredSection>
 
-      {/* Awaiting Allocation alert */}
+      {/* Awaiting logistics assignment alert */}
       {confirmed > 0 && (
         <div className="card border-warning-200 dark:border-warning-700/50">
           <div className="flex items-center justify-between">
@@ -166,15 +166,15 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-app-fg">
-                  {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting allocation
+                  {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting logistics assignment
                 </h3>
                 <p className="text-sm text-app-fg-muted">
-                  Confirmed orders need to be allocated to a logistics location for dispatch.
+                  Confirmed orders need a logistics location assignment before dispatch.
                 </p>
               </div>
             </div>
             <Link to="/admin/logistics/orders" prefetch="intent" className="btn-primary btn-sm shrink-0">
-              Allocate
+              Assign
             </Link>
           </div>
         </div>
@@ -190,7 +190,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
             { label: 'CS Assigned', value: counts['CS_ASSIGNED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
             { label: 'CS Engaged', value: counts['CS_ENGAGED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
             { label: 'Confirmed', value: counts['CONFIRMED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Allocated', value: counts['ALLOCATED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Agent assigned', value: counts['AGENT_ASSIGNED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
             { label: 'Dispatched', value: counts['DISPATCHED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
             { label: 'In Transit', value: counts['IN_TRANSIT'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
             { label: 'Delivered', value: counts['DELIVERED'] ?? 0, valueClassName: 'text-success-600 dark:text-success-400' },
@@ -216,7 +216,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
 function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   const counts = data.orderCounts as Record<string, number>;
   // `pendingQueue` rolls UNPROCESSED + CS_ASSIGNED into one waiting-on-engagement
-  // bucket for the top stat strip. The legacy per-status pipeline (Allocated /
+  // bucket for the top stat strip. The legacy per-status pipeline (Agent assigned /
   // In Transit / Delivered / Cancelled) was retired 2026-05-03 — those counts
   // still exist on `/admin/cs/orders` via the status filter, but Head of CS
   // doesn't need them on the landing.
@@ -497,7 +497,7 @@ function FinanceDashboard({ data, naira }: { data: DashboardPageData; naira: (am
 function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: string }) {
   const counts = data.orderCounts as Record<string, number>;
   const confirmed = counts['CONFIRMED'] ?? 0;
-  const allocated = counts['ALLOCATED'] ?? 0;
+  const allocated = counts['AGENT_ASSIGNED'] ?? 0;
   const dispatched = counts['DISPATCHED'] ?? 0;
   const inTransit = counts['IN_TRANSIT'] ?? 0;
   const delivered = counts['DELIVERED'] ?? 0;
@@ -508,11 +508,11 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
         tileClassName="min-w-[6rem]"
         items={[
           {
-            label: 'Awaiting Allocation',
+            label: 'Awaiting logistics assignment',
             value: confirmed.toString(),
             valueClassName: confirmed > 10 ? 'text-danger-600 dark:text-danger-400' : confirmed > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
           },
-          { label: 'Allocated', value: allocated.toString(), valueClassName: 'text-app-fg' },
+          { label: 'Agent assigned', value: allocated.toString(), valueClassName: 'text-app-fg' },
           { label: 'Dispatched', value: dispatched.toString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
           { label: 'In Transit', value: inTransit.toString(), valueClassName: 'text-app-fg' },
           { label: 'Delivered', value: delivered.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
@@ -530,15 +530,15 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-app-fg">
-                  {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting allocation
+                  {confirmed} {confirmed === 1 ? 'order' : 'orders'} awaiting logistics assignment
                 </h3>
                 <p className="text-sm text-app-fg-muted">
-                  Confirmed orders need to be allocated to a logistics location for dispatch.
+                  Confirmed orders need a logistics location assignment before dispatch.
                 </p>
               </div>
             </div>
             <Link to="/admin/logistics/orders" prefetch="intent" className="btn-primary btn-sm shrink-0">
-              Allocate
+              Assign
             </Link>
           </div>
         </div>
@@ -548,8 +548,8 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
         <div className="card">
           <h2 className="text-lg font-semibold text-app-fg mb-4">Delivery Pipeline</h2>
           <div className="space-y-3">
-            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Awaiting Allocation</span><span className={`text-sm font-medium ${confirmed > 0 ? 'text-warning-600 dark:text-warning-400' : ''}`}>{confirmed}</span></div>
-            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Ready for Dispatch</span><span className="text-sm font-medium">{allocated}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Awaiting logistics assignment</span><span className={`text-sm font-medium ${confirmed > 0 ? 'text-warning-600 dark:text-warning-400' : ''}`}>{confirmed}</span></div>
+            <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Ready for dispatch</span><span className="text-sm font-medium">{allocated}</span></div>
             <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Active Deliveries</span><span className="text-sm font-medium">{inTransit}</span></div>
             <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Returns Queue</span><span className="text-sm font-medium text-danger-600 dark:text-danger-400">{counts['RETURNED'] ?? 0}</span></div>
           </div>

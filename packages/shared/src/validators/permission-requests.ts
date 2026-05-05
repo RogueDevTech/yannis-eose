@@ -16,7 +16,7 @@ export const createPermissionRequestSchema = z.object({
   targetUserId: z.string().uuid().optional(),
   requestedRole: z.string().optional(),
   permissionCode: z.string().optional(),
-  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+  reason: z.string().trim().min(5, 'Reason must be at least 5 characters'),
   payload: z.record(z.unknown()).optional(),
 });
 
@@ -25,7 +25,7 @@ export type CreatePermissionRequestInput = z.infer<typeof createPermissionReques
 export const processPermissionRequestSchema = z.object({
   requestId: z.string().uuid(),
   action: z.enum(['APPROVED', 'REJECTED']),
-  reason: z.string().min(10, 'Reason must be at least 10 characters'),
+  reason: z.string().trim().min(5, 'Reason must be at least 5 characters'),
 });
 
 export type ProcessPermissionRequestInput = z.infer<typeof processPermissionRequestSchema>;

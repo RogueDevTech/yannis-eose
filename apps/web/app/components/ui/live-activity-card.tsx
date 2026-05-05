@@ -20,9 +20,9 @@ export function resolveStage(item: LiveActivityItem): ActivityStage {
   if (item.cartStatus === 'PENDING') return 'browsing';
   // CONVERTED cart or direct order — check order status
   const s = item.orderStatus ?? '';
-  if (s === 'DELIVERED' || s === 'COMPLETED') return 'delivered';
+  if (s === 'DELIVERED' || s === 'REMITTED') return 'delivered';
   if (s === 'RETURNED' || s === 'PARTIALLY_DELIVERED' || s === 'WRITTEN_OFF') return 'returned';
-  if (s === 'ALLOCATED' || s === 'DISPATCHED' || s === 'IN_TRANSIT') return 'in_delivery';
+  if (s === 'AGENT_ASSIGNED' || s === 'DISPATCHED' || s === 'IN_TRANSIT') return 'in_delivery';
   if (s === 'CONFIRMED') return 'confirmed';
   if (s === 'CS_ENGAGED') return 'with_cs';
   return 'order_placed';

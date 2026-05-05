@@ -3,8 +3,6 @@ import { json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_USERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { User } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -92,10 +90,5 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function UsersRoute() {
   const data = useLoaderData<typeof loader>();
-  return (
-    <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.hrUsers} allowlist={ALLOWLIST_USERS} />
-      <UsersListPage {...data} />
-    </>
-  );
+  return <UsersListPage {...data} />;
 }

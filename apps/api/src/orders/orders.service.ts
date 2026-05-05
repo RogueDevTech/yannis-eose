@@ -52,7 +52,7 @@ const CALLBACK_PRECONFIRM_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'
 /** Undelivered vs preferred date: exclude terminal / returned rows (OrdersService.list delivery_overdue). */
 const DELIVERY_OVERDUE_EXCLUDED_STATUSES = [
   'DELIVERED',
-  'COMPLETED',
+  'REMITTED',
   'CANCELLED',
   'RETURNED',
   'RESTOCKED',
@@ -420,7 +420,7 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED'];
+    const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED'];
     if (!allowedStatuses.includes(order.status)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -1563,8 +1563,15 @@ export class OrdersService {
     }
 
     if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
+      // Pass `engagementMethod: 'phone_revealed'` so the timeline records the EXACT
+      // action the CS rep took (revealed + copied the customer's phone for a manual
+      // dial) instead of the generic "started customer engagement" line.
       await this.transition(
-        { orderId, newStatus: 'CS_ENGAGED' },
+        {
+          orderId,
+          newStatus: 'CS_ENGAGED',
+          metadata: { engagementMethod: 'phone_revealed' },
+        },
         actor,
       );
 
@@ -1583,7 +1590,7 @@ export class OrdersService {
     // CS can call the customer at any pre-delivery stage: initial engagement, post-confirm
     // upsell/adjustment, or delivery-coordination follow-up after allocation/dispatch.
     // Blocked only once the order is closed out (DELIVERED / RETURNED / CANCELLED / etc.).
-    const callableStatuses = ['CS_ENGAGED', 'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT'];
+    const callableStatuses = ['CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT'];
     if (!callableStatuses.includes(order.status)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -1782,7 +1789,9 @@ export class OrdersService {
   async scheduleCalendarHeat(
     input: ScheduleCalendarHeatInput,
     branchId?: string | null,
-  ): Promise<Array<{ date: string; callbackCount: number; deliveryCount: number }>> {
+  ): Promise<
+    Array<{ date: string; callbackCount: number; deliveryCount: number; deliveredCount: number }>
+  > {
     const [yearStr, monthStr] = input.yearMonth.split('-');
     const year = parseInt(yearStr!, 10);
     const month = parseInt(monthStr!, 10);
@@ -1808,6 +1817,7 @@ export class OrdersService {
       .select({
         date: schema.orders.preferredDeliveryDate,
         deliveryCount: count(),
+        deliveredCount: sql<number>`sum(case when ${schema.orders.status} in ('DELIVERED', 'REMITTED', 'PARTIALLY_DELIVERED') then 1 else 0 end)::int`,
       })
       .from(schema.orders)
       .where(deliveryWhere)
@@ -1839,11 +1849,19 @@ export class OrdersService {
       return String(d);
     };
 
-    const map = new Map<string, { date: string; callbackCount: number; deliveryCount: number }>();
+    const map = new Map<
+      string,
+      { date: string; callbackCount: number; deliveryCount: number; deliveredCount: number }
+    >();
     for (const row of deliveryRows) {
       if (!row.date) continue;
       const date = row.date;
-      map.set(date, { date, deliveryCount: Number(row.deliveryCount ?? 0), callbackCount: 0 });
+      map.set(date, {
+        date,
+        deliveryCount: Number(row.deliveryCount ?? 0),
+        deliveredCount: Number(row.deliveredCount ?? 0),
+        callbackCount: 0,
+      });
     }
     for (const row of callbackRows) {
       const date = normalizeDate(row.date);
@@ -1851,7 +1869,12 @@ export class OrdersService {
       if (existing) {
         existing.callbackCount = Number(row.callbackCount ?? 0);
       } else {
-        map.set(date, { date, callbackCount: Number(row.callbackCount ?? 0), deliveryCount: 0 });
+        map.set(date, {
+          date,
+          callbackCount: Number(row.callbackCount ?? 0),
+          deliveryCount: 0,
+          deliveredCount: 0,
+        });
       }
     }
 
@@ -1980,7 +2003,7 @@ export class OrdersService {
 
     // CONFIRMED → ALLOCATED: assigned CS agent (CS-as-rider-proxy), anyone with logistics
     // capability (`logistics.read` covers HoLogistics + LogisticsManager), or org-wide CS scope.
-    if (currentStatus === 'CONFIRMED' && newStatus === 'ALLOCATED') {
+    if (currentStatus === 'CONFIRMED' && newStatus === 'AGENT_ASSIGNED') {
       const isAssignedCs = order.assignedCsId === actor.id;
       const isAuthorized =
         actor.role === 'SUPER_ADMIN' ||
@@ -1996,13 +2019,30 @@ export class OrdersService {
       }
     }
 
+    // ALLOCATED → ALLOCATED: reassign to a different 3PL hub (same actor rules as first allocation).
+    if (currentStatus === 'AGENT_ASSIGNED' && newStatus === 'AGENT_ASSIGNED') {
+      const isAssignedCs = order.assignedCsId === actor.id;
+      const isAuthorized =
+        actor.role === 'SUPER_ADMIN' ||
+        hasPerm('cs.scope.global') ||
+        hasPerm('logistics.scope.global') ||
+        hasPerm('logistics.read') ||
+        isAssignedCs;
+      if (!isAuthorized) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only the assigned CS agent, Logistics, or an Admin can reallocate this order to another 3PL location.',
+        });
+      }
+    }
+
     // {ALLOCATED|DISPATCHED|IN_TRANSIT} → DELIVERED/PARTIALLY_DELIVERED:
     //   - anyone holding `orders.delivery.confirm` (HoLogistics, CS, TPL_MANAGER w/ receipt, Admin via ALL),
     //   - assigned CS agent (rider-proxy follow-up call),
     //   - TPL_MANAGER specifically requires the receipt to be present (resolveReceiptUrl).
     //   3PL isn't in-app yet, so CS / HoLogistics marks delivered directly after ALLOCATED.
     if (
-      (currentStatus === 'ALLOCATED' || currentStatus === 'DISPATCHED' || currentStatus === 'IN_TRANSIT') &&
+      (currentStatus === 'AGENT_ASSIGNED' || currentStatus === 'DISPATCHED' || currentStatus === 'IN_TRANSIT') &&
       (newStatus === 'DELIVERED' || newStatus === 'PARTIALLY_DELIVERED')
     ) {
       const hasResolveReceipt = !!order.resolveReceiptUrl?.trim();
@@ -2028,6 +2068,16 @@ export class OrdersService {
 
     // Validate gates based on the transition
     await this.validateTransitionGates(order, newStatus, input.metadata, actor);
+
+    let allocationProviderId: string | undefined;
+    if (newStatus === 'AGENT_ASSIGNED' && typeof input.metadata?.logisticsLocationId === 'string') {
+      const locRow = await this.db
+        .select({ providerId: schema.logisticsLocations.providerId })
+        .from(schema.logisticsLocations)
+        .where(eq(schema.logisticsLocations.id, input.metadata.logisticsLocationId))
+        .limit(1);
+      allocationProviderId = locRow[0]?.providerId ?? undefined;
+    }
 
     // Build update fields
     const updateFields: Record<string, unknown> = {
@@ -2138,8 +2188,14 @@ export class OrdersService {
     }
     if (input.metadata?.logisticsProviderId) {
       updateFields['logisticsProviderId'] = input.metadata.logisticsProviderId;
+    } else if (allocationProviderId) {
+      updateFields['logisticsProviderId'] = allocationProviderId;
     }
-    if (input.metadata?.riderId) {
+    if (currentStatus === 'AGENT_ASSIGNED' && newStatus === 'AGENT_ASSIGNED') {
+      updateFields['riderId'] = null;
+      updateFields['deliveryOtp'] = null;
+    }
+    if (input.metadata?.riderId && !(currentStatus === 'AGENT_ASSIGNED' && newStatus === 'AGENT_ASSIGNED')) {
       updateFields['riderId'] = input.metadata.riderId;
     }
 
@@ -2165,7 +2221,9 @@ export class OrdersService {
     // status transition — they're logged so an admin can manually create the invoice.
     if (newStatus === 'CONFIRMED') {
       try {
-        await this.autoCreateInvoiceForOrder(order.id, actor);
+        // Pass the already-loaded order through so the helper doesn't
+        // re-fetch it on the hot CONFIRM path.
+        await this.autoCreateInvoiceForOrder(order.id, actor, updated);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Auto-invoice for order ${order.id} failed: ${message}`);
@@ -2173,11 +2231,19 @@ export class OrdersService {
     }
 
     // Timeline event for this status transition
+    // Maps `order_status` (the new value after the transition) to the
+    // `event_type` enum value persisted on `order_timeline_events`. The
+    // event_type enum still uses the legacy `ORDER_ALLOCATED` label so
+    // existing audit rows stay valid; only the lookup key was renamed in
+    // step with the status enum (`ALLOCATED` → `AGENT_ASSIGNED` per
+    // CEO directive 2026-05-04, migration 0110). Without this rename the
+    // map lookup returned `undefined` for re-allocations and we silently
+    // dropped the timeline event for "Reassign to another location".
     const timelineEventMap: Partial<Record<string, string>> = {
       CS_ENGAGED: 'CALL_INITIATED',
       CONFIRMED: 'ORDER_CONFIRMED',
       CANCELLED: 'ORDER_CANCELLED',
-      ALLOCATED: 'ORDER_ALLOCATED',
+      AGENT_ASSIGNED: 'ORDER_ALLOCATED',
       DISPATCHED: 'ORDER_DISPATCHED',
       IN_TRANSIT: 'ORDER_IN_TRANSIT',
       DELIVERED: 'ORDER_DELIVERED',
@@ -2190,15 +2256,28 @@ export class OrdersService {
     if (timelineType) {
       const reason = typeof input.metadata?.reason === 'string' ? input.metadata.reason : undefined;
       // Resolve the 3PL location name so the timeline reads
-      // "Order allocated to <Location>" instead of the generic "…logistics".
+      // "Agent assigned for delivery at <Location>" instead of the generic logistics line.
       let logisticsLocationName: string | undefined;
-      if (newStatus === 'ALLOCATED' && typeof input.metadata?.logisticsLocationId === 'string') {
+      let reallocatedFromName: string | undefined;
+      if (newStatus === 'AGENT_ASSIGNED' && typeof input.metadata?.logisticsLocationId === 'string') {
         const locRows = await this.db
           .select({ name: schema.logisticsLocations.name })
           .from(schema.logisticsLocations)
           .where(eq(schema.logisticsLocations.id, input.metadata.logisticsLocationId))
           .limit(1);
         logisticsLocationName = locRows[0]?.name ?? undefined;
+      }
+      if (
+        currentStatus === 'AGENT_ASSIGNED' &&
+        newStatus === 'AGENT_ASSIGNED' &&
+        order.logisticsLocationId
+      ) {
+        const prevRows = await this.db
+          .select({ name: schema.logisticsLocations.name })
+          .from(schema.logisticsLocations)
+          .where(eq(schema.logisticsLocations.id, order.logisticsLocationId))
+          .limit(1);
+        reallocatedFromName = prevRows[0]?.name ?? undefined;
       }
       this.writeTimelineEvent({
         orderId: input.orderId,
@@ -2212,6 +2291,11 @@ export class OrdersService {
               ? input.metadata.preferredDeliveryDate
               : undefined,
           logisticsLocationName,
+          reallocatedFromName,
+          engagementMethod:
+            typeof input.metadata?.engagementMethod === 'string'
+              ? input.metadata.engagementMethod
+              : undefined,
         }),
         metadata: input.metadata as Record<string, unknown> | undefined,
       });
@@ -2230,12 +2314,12 @@ export class OrdersService {
     });
 
     // Persistent notifications for logistics flow
-    if (newStatus === 'ALLOCATED' && updated.logisticsLocationId) {
+    if (newStatus === 'AGENT_ASSIGNED' && updated.logisticsLocationId) {
       this.notifications
         .createForLocation(updated.logisticsLocationId, {
           type: 'order:allocated',
-          title: 'Order allocated to your location',
-          body: 'An order has been allocated to your 3PL location. Please assign a rider.',
+          title: 'Agent-assigned order at your location',
+          body: 'An order was assigned for delivery here. Please assign a rider.',
           data: { orderId: order.id },
         })
         .catch(() => {});
@@ -2278,7 +2362,7 @@ export class OrdersService {
     if (input.items !== undefined) {
       // Items may be adjusted any time before the goods physically leave the 3PL (DISPATCHED+).
       // Post-dispatch adjustments would conflict with the rider's pick list / stock already in-transit.
-      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED'];
+      const allowedStatuses = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED'];
       if (!allowedStatuses.includes(order.status)) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -3152,7 +3236,7 @@ export class OrdersService {
       volume,
       csEngaged: counts['CS_ENGAGED'] ?? 0,
       confirmed: counts['CONFIRMED'] ?? 0,
-      logisticsDistributed: (counts['ALLOCATED'] ?? 0) + (counts['DISPATCHED'] ?? 0),
+      logisticsDistributed: (counts['AGENT_ASSIGNED'] ?? 0) + (counts['DISPATCHED'] ?? 0),
       delivered: counts['DELIVERED'] ?? 0,
     };
   }
@@ -3622,7 +3706,7 @@ export class OrdersService {
           ? and(eq(schema.orders.assignedCsId, agentId), orderDateFilter)
           : eq(schema.orders.assignedCsId, agentId);
 
-        const deliveredOrCompleted = or(eq(schema.orders.status, 'DELIVERED'), eq(schema.orders.status, 'COMPLETED'));
+        const deliveredOrCompleted = or(eq(schema.orders.status, 'DELIVERED'), eq(schema.orders.status, 'REMITTED'));
         const deliveredWhere = deliveredDateFilter
           ? and(
               eq(schema.orders.assignedCsId, agentId),
@@ -3655,12 +3739,12 @@ export class OrdersService {
         // CANCELLED orders are counted separately.
         const confirmedOrBeyond = or(
           eq(schema.orders.status, 'CONFIRMED'),
-          eq(schema.orders.status, 'ALLOCATED'),
+          eq(schema.orders.status, 'AGENT_ASSIGNED'),
           eq(schema.orders.status, 'DISPATCHED'),
           eq(schema.orders.status, 'IN_TRANSIT'),
           eq(schema.orders.status, 'DELIVERED'),
           eq(schema.orders.status, 'PARTIALLY_DELIVERED'),
-          eq(schema.orders.status, 'COMPLETED'),
+          eq(schema.orders.status, 'REMITTED'),
           eq(schema.orders.status, 'RETURNED'),
           eq(schema.orders.status, 'RESTOCKED'),
           eq(schema.orders.status, 'WRITTEN_OFF'),
@@ -4055,9 +4139,6 @@ export class OrdersService {
       }
 
       case 'CONFIRMED': {
-        const voipSetting = await this.settingsService.get('VOIP_ENABLED');
-        const isVoipEnabled = voipSetting?.['enabled'] === true;
-
         const confirmPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
         const hasConfirmPerm = (code: string) =>
           actor.role === 'SUPER_ADMIN' ||
@@ -4068,80 +4149,92 @@ export class OrdersService {
           actor.role === 'SUPER_ADMIN' ||
           hasConfirmPerm('orders.confirm.bypass_call_gate') ||
           (hasConfirmPerm('branches.manage') && sameBranch);
-
-        // Org-wide CS scope (e.g. HoCS) may confirm using any rep's qualifying call on the order.
         const hoCsOversightPath = hasConfirmPerm('cs.scope.global') && !!order.branchId;
 
-        if (!bypassCallGate) {
-          if (hoCsOversightPath) {
-            // Head of CS may confirm using any rep's qualifying call on this order (oversight path).
-            if (isVoipEnabled) {
-              const qualifying = await this.db
-                .select()
+        // Run all the CONFIRMED-gate queries in parallel:
+        //   - VOIP setting (Redis-cached, ~free on hit)
+        //   - Call-log lookup (only when call gate not bypassed)
+        //   - Inventory availability across locations + FIFO batches
+        // Each is independent of the others. Previously these ran sequentially
+        // and added 2-3 round-trips on a remote DB — combined they now cost a
+        // single round-trip wall-time. The result-error checks below run AFTER
+        // the parallel fetch, so we still throw the right message.
+        const voipPromise = this.settingsService.get('VOIP_ENABLED');
+        const inventoryPromise = this.inventoryService.assertGlobalAvailabilityForOrder(order.id);
+        const callPromise = bypassCallGate
+          ? Promise.resolve(null)
+          : hoCsOversightPath
+            ? // VOIP-or-not check is settled below — fetch BOTH a 15s+ row and a
+              //  any-row in one query (LIMIT 1, ordered by duration desc breaks ties
+              //  on startedAt). Cheaper than two separate queries.
+              this.db
+                .select({
+                  startedAt: schema.callLogs.startedAt,
+                  durationSeconds: schema.callLogs.durationSeconds,
+                })
+                .from(schema.callLogs)
+                .where(eq(schema.callLogs.orderId, order.id))
+                .orderBy(desc(schema.callLogs.startedAt))
+                .limit(1)
+                .then((rows) => rows[0] ?? null)
+            : this.db
+                .select({
+                  startedAt: schema.callLogs.startedAt,
+                  durationSeconds: schema.callLogs.durationSeconds,
+                })
                 .from(schema.callLogs)
                 .where(
                   and(
                     eq(schema.callLogs.orderId, order.id),
-                    gte(schema.callLogs.durationSeconds, 15),
+                    eq(schema.callLogs.agentId, actor.id),
                   ),
                 )
                 .orderBy(desc(schema.callLogs.startedAt))
-                .limit(1);
-              if (!qualifying[0]) {
+                .limit(1)
+                .then((rows) => rows[0] ?? null);
+
+        // Capture inventory rejection reason without throwing immediately so
+        // we can report the right error in priority (call gate first).
+        const [voipSetting, callRow, inventoryError] = await Promise.all([
+          voipPromise,
+          callPromise,
+          inventoryPromise.then(() => null).catch((err: unknown) => err),
+        ]);
+        const isVoipEnabled = voipSetting?.['enabled'] === true;
+
+        if (!bypassCallGate) {
+          if (hoCsOversightPath) {
+            if (isVoipEnabled) {
+              if (!callRow || (callRow.durationSeconds ?? 0) < 15) {
                 throw new TRPCError({
                   code: 'BAD_REQUEST',
                   message:
                     'Cannot confirm: no qualifying VOIP call (≥ 15 seconds) on this order yet. Have a rep complete a call first.',
                 });
               }
-            } else {
-              const anyCall = await this.db
-                .select()
-                .from(schema.callLogs)
-                .where(eq(schema.callLogs.orderId, order.id))
-                .orderBy(desc(schema.callLogs.startedAt))
-                .limit(1);
-              if (!anyCall[0]) {
-                throw new TRPCError({
-                  code: 'BAD_REQUEST',
-                  message: 'Cannot confirm: no call has been logged on this order yet.',
-                });
-              }
+            } else if (!callRow) {
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: 'Cannot confirm: no call has been logged on this order yet.',
+              });
             }
-          } else {
-            const callRows = await this.db
-              .select()
-              .from(schema.callLogs)
-              .where(
-                and(
-                  eq(schema.callLogs.orderId, order.id),
-                  eq(schema.callLogs.agentId, actor.id),
-                ),
-              )
-              .orderBy(desc(schema.callLogs.startedAt))
-              .limit(1);
-
-            const lastCall = callRows[0];
-
-            if (isVoipEnabled) {
-              if (!lastCall || (lastCall.durationSeconds ?? 0) < 15) {
-                throw new TRPCError({
-                  code: 'BAD_REQUEST',
-                  message: 'Cannot confirm: VOIP call duration must be at least 15 seconds',
-                });
-              }
-            } else {
-              if (!lastCall) {
-                throw new TRPCError({
-                  code: 'BAD_REQUEST',
-                  message: 'Cannot confirm: you must click Call before confirming',
-                });
-              }
+          } else if (isVoipEnabled) {
+            if (!callRow || (callRow.durationSeconds ?? 0) < 15) {
+              throw new TRPCError({
+                code: 'BAD_REQUEST',
+                message: 'Cannot confirm: VOIP call duration must be at least 15 seconds',
+              });
             }
+          } else if (!callRow) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'Cannot confirm: you must click Call before confirming',
+            });
           }
         }
 
-        await this.inventoryService.assertGlobalAvailabilityForOrder(order.id);
+        // Re-throw the inventory error after the call gate has cleared.
+        if (inventoryError) throw inventoryError;
         break;
       }
 
@@ -4155,7 +4248,7 @@ export class OrdersService {
         break;
       }
 
-      case 'ALLOCATED': {
+      case 'AGENT_ASSIGNED': {
         if (!metadata?.logisticsLocationId) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -4163,6 +4256,21 @@ export class OrdersService {
           });
         }
         const locationId = metadata.logisticsLocationId as string;
+        if (order.status === 'AGENT_ASSIGNED') {
+          if (!order.logisticsLocationId) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'Order is marked allocated but has no logistics location — contact support.',
+            });
+          }
+          if (order.logisticsLocationId === locationId) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message:
+                'Order is already allocated to this logistics location. Pick a different location to reallocate.',
+            });
+          }
+        }
         const isLocked = await this.inventoryService.isDispatchLocked(locationId);
         if (isLocked) {
           throw new TRPCError({
@@ -4276,34 +4384,46 @@ export class OrdersService {
   private async autoCreateInvoiceForOrder(
     orderId: string,
     actor: SessionUser,
+    preloadedOrder?: typeof schema.orders.$inferSelect,
   ): Promise<void> {
-    // Idempotency check
-    const existingRows = await this.db
-      .select({ id: schema.invoices.id })
-      .from(schema.invoices)
-      .where(eq(schema.invoices.orderId, orderId))
-      .limit(1);
+    // Run the idempotency check + items+products fetch in parallel. The
+    // caller passes `preloadedOrder` so we skip a re-fetch entirely on the
+    // CONFIRM hot path. Worst case (no invoice yet) we pay one RTT for both
+    // queries instead of four sequential.
+    const [existingRows, items] = await Promise.all([
+      this.db
+        .select({ id: schema.invoices.id })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.orderId, orderId))
+        .limit(1),
+      this.db
+        .select({
+          quantity: schema.orderItems.quantity,
+          unitPrice: schema.orderItems.unitPrice,
+          offerLabel: schema.orderItems.offerLabel,
+          productName: schema.products.name,
+        })
+        .from(schema.orderItems)
+        .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+        .where(eq(schema.orderItems.orderId, orderId)),
+    ]);
+
+    // Idempotent — skip if an invoice already exists. The items fetch above is
+    // wasted in this case but it's cheap and only fires on every CONFIRM, and
+    // running it in parallel saves a round-trip in the common (first-confirm)
+    // path which is the perf-sensitive one.
     if (existingRows[0]) return;
 
-    // Hydrate the order + items + product names for descriptive line items.
-    const orderRows = await this.db
-      .select()
-      .from(schema.orders)
-      .where(eq(schema.orders.id, orderId))
-      .limit(1);
-    const ord = orderRows[0];
-    if (!ord) return;
-
-    const items = await this.db
-      .select({
-        quantity: schema.orderItems.quantity,
-        unitPrice: schema.orderItems.unitPrice,
-        offerLabel: schema.orderItems.offerLabel,
-        productName: schema.products.name,
-      })
-      .from(schema.orderItems)
-      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
-      .where(eq(schema.orderItems.orderId, orderId));
+    let ord = preloadedOrder;
+    if (!ord) {
+      const orderRows = await this.db
+        .select()
+        .from(schema.orders)
+        .where(eq(schema.orders.id, orderId))
+        .limit(1);
+      ord = orderRows[0];
+      if (!ord) return;
+    }
 
     if (items.length === 0) {
       this.logger.warn(`autoCreateInvoiceForOrder: order ${orderId} has no items, skipping`);
@@ -4351,31 +4471,51 @@ export class OrdersService {
 
     switch (newStatus) {
       case 'CONFIRMED': {
-        let totalLandedCost = 0;
+        // Previously this looped per item with two queries each (INSERT
+        // stockMovement + SELECT batches) — N×2 sequential round-trips that
+        // dominated the CONFIRMED transaction on a remote DB. Batched into:
+        //   1. One bulk-INSERT for all stockMovements rows
+        //   2. One IN-list SELECT for all batches across all products,
+        //      grouped client-side for the FIFO landed-cost calc
+        // Constant 2 round-trips inside the tx regardless of line-item count.
+        const productIds = [...new Set(orderItems.map((item) => item.productId))];
 
         await withActor(this.db, actor, async (tx) => {
+          const movementValues = orderItems.map((item) => ({
+            productId: item.productId,
+            movementType: 'RESERVATION' as const,
+            quantity: item.quantity,
+            referenceId: updatedOrder.id,
+            reason: `Stock reserved for order ${updatedOrder.id}`,
+            actorId: actor.id,
+          }));
+          if (movementValues.length > 0) {
+            await tx.insert(schema.stockMovements).values(movementValues);
+          }
+
+          const allBatches =
+            productIds.length > 0
+              ? await tx
+                  .select()
+                  .from(schema.stockBatches)
+                  .where(inArray(schema.stockBatches.productId, productIds))
+                  .orderBy(asc(schema.stockBatches.receivedAt))
+              : [];
+          const batchesByProduct = new Map<string, typeof allBatches>();
+          for (const batch of allBatches) {
+            const list = batchesByProduct.get(batch.productId) ?? [];
+            list.push(batch);
+            batchesByProduct.set(batch.productId, list);
+          }
+
+          let totalLandedCost = 0;
           for (const item of orderItems) {
-            await tx.insert(schema.stockMovements).values({
-              productId: item.productId,
-              movementType: 'RESERVATION',
-              quantity: item.quantity,
-              referenceId: updatedOrder.id,
-              reason: `Stock reserved for order ${updatedOrder.id}`,
-              actorId: actor.id,
-            });
-
-            const batches = await tx
-              .select()
-              .from(schema.stockBatches)
-              .where(eq(schema.stockBatches.productId, item.productId))
-              .orderBy(asc(schema.stockBatches.receivedAt));
-
+            const batches = batchesByProduct.get(item.productId) ?? [];
             let remaining = item.quantity;
             for (const batch of batches) {
               if (remaining <= 0) break;
               const batchRemaining = batch.remainingQuantity ?? 0;
               if (batchRemaining <= 0) continue;
-
               const units = Math.min(remaining, batchRemaining);
               const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
               totalLandedCost += units * costPerUnit;
@@ -4391,11 +4531,21 @@ export class OrdersService {
         break;
       }
 
-      case 'ALLOCATED': {
+      case 'AGENT_ASSIGNED': {
         const locationId =
           updatedOrder.logisticsLocationId ??
           (typeof metadata?.logisticsLocationId === 'string' ? metadata.logisticsLocationId : undefined);
         if (locationId) {
+          const prevLoc = previousOrder.logisticsLocationId;
+          const isReallocate =
+            previousOrder.status === 'AGENT_ASSIGNED' && !!prevLoc && prevLoc !== locationId;
+          if (isReallocate) {
+            await this.inventoryService.releaseAllocationReserveAtLocation(
+              previousOrder.id,
+              prevLoc,
+              actor,
+            );
+          }
           await this.inventoryService.reserveForAllocateWithMovements(updatedOrder.id, locationId, actor);
 
           const locationRows = await this.db
@@ -4443,8 +4593,24 @@ export class OrdersService {
         if (!fulfillmentLocationId) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: 'Cannot record delivery: order has no fulfillment location (allocate to a 3PL first).',
+            message: 'Cannot record delivery: order has no fulfillment location (allocate to a Logistics provider first).',
           });
+        }
+        // The CS rep can pick a different logistics provider at delivery time (because
+        // a different provider may have actually delivered). When that happens, the
+        // ALLOCATED reserve still sits at the original location — release it before
+        // depleting stock at the actual delivering location, otherwise we'd silently
+        // double-count the reserved units (one stuck reserve + one delivery decrement).
+        const previouslyAllocatedLocationId = previousOrder.logisticsLocationId;
+        if (
+          previouslyAllocatedLocationId &&
+          previouslyAllocatedLocationId !== fulfillmentLocationId
+        ) {
+          await this.inventoryService.releaseAllocationReserveAtLocation(
+            updatedOrder.id,
+            previouslyAllocatedLocationId,
+            actor,
+          );
         }
         await this.inventoryService.completeDeliveryInventory(
           updatedOrder.id,
@@ -4493,7 +4659,7 @@ export class OrdersService {
             quantity: item.quantity,
             toLocationId: updatedOrder.logisticsLocationId ?? undefined,
             referenceId: updatedOrder.id,
-            reason: `Restocked at 3PL: order ${updatedOrder.id}`,
+            reason: `Restocked at logistics company: order ${updatedOrder.id}`,
             actorId: actor.id,
           });
         }
@@ -5198,22 +5364,45 @@ export class OrdersService {
 
   private buildTransitionActivityDescription(
     newStatus: string,
-    options?: { reason?: string; preferredDeliveryDate?: string; logisticsLocationName?: string },
+    options?: {
+      reason?: string;
+      preferredDeliveryDate?: string;
+      logisticsLocationName?: string;
+      reallocatedFromName?: string;
+      /** What action triggered the CS_ENGAGED transition — drives a precise timeline line
+       *  ("revealed phone for manual call" vs "started VOIP call" vs generic). */
+      engagementMethod?: string;
+    },
   ): string {
     const reasonSuffix = options?.reason ? ` (${options.reason})` : '';
     switch (newStatus) {
       case 'CS_ENGAGED':
-        return 'CS started customer engagement';
+        switch (options?.engagementMethod) {
+          case 'phone_revealed':
+            return 'CS revealed and copied the customer phone for a manual call';
+          case 'voip_call_started':
+            return 'CS started a VOIP call to the customer';
+          case 'manual_call_logged':
+            return 'CS logged a manual call to the customer';
+          default:
+            return 'CS started customer engagement';
+        }
       case 'CONFIRMED':
         return options?.preferredDeliveryDate
           ? `Order confirmed for delivery on ${options.preferredDeliveryDate}`
           : 'Order confirmed';
       case 'CANCELLED':
         return `Order cancelled${reasonSuffix}`;
-      case 'ALLOCATED':
+      case 'AGENT_ASSIGNED':
+        if (
+          options?.reallocatedFromName &&
+          options?.logisticsLocationName
+        ) {
+          return `Delivery assignment moved from ${options.reallocatedFromName} to ${options.logisticsLocationName}`;
+        }
         return options?.logisticsLocationName
-          ? `Order allocated to ${options.logisticsLocationName}`
-          : 'Order allocated to logistics';
+          ? `Agent assigned for delivery at ${options.logisticsLocationName}`
+          : 'Agent assigned for delivery (logistics)';
       case 'DISPATCHED':
         return 'Order dispatched to rider';
       case 'IN_TRANSIT':
@@ -5279,7 +5468,7 @@ export class OrdersService {
       activeOrders: number;
     }>();
 
-    const ACTIVE_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT']);
+    const ACTIVE_STATUSES = new Set(['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT']);
 
     for (const row of rows) {
       let entry = byBranch.get(row.branchId);

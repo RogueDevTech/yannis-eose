@@ -17,7 +17,7 @@ import { RoleBadge } from '~/components/ui/role-badge';
 import { DescriptionList } from '~/components/ui/description-list';
 import { Button } from '~/components/ui/button';
 import type { StockMovement } from '~/features/inventory/types';
-import { MOVEMENT_COLORS, formatMovementType } from '~/features/inventory/types';
+import { MOVEMENT_COLORS, formatMovementReasonForDisplay, formatMovementType } from '~/features/inventory/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Inventory — Level Detail — Yannis EOSE' },
@@ -229,8 +229,11 @@ function auditTrailColumns(
       key: 'reason',
       header: 'Reason',
       cellClassName: 'text-app-fg-muted italic truncate max-w-xs',
-      cellTitle: (m) => m.reason ?? undefined,
-      render: (m) => m.reason ?? '—',
+      cellTitle: (m) => {
+        const r = formatMovementReasonForDisplay(m.reason);
+        return r || undefined;
+      },
+      render: (m) => formatMovementReasonForDisplay(m.reason) || '—',
     },
     {
       key: 'action',
@@ -512,6 +515,7 @@ function AuditMovementDetailModal({
   onClose: () => void;
 }) {
   if (!movement) return null;
+  const reasonDisplay = formatMovementReasonForDisplay(movement.reason);
   const dir = classifyMovement(movement);
   const qtyColor =
     dir === 'in'
@@ -594,8 +598,8 @@ function AuditMovementDetailModal({
               : []),
             {
               label: 'Reason',
-              value: movement.reason ? (
-                <span className="italic">{movement.reason}</span>
+              value: reasonDisplay ? (
+                <span className="italic">{reasonDisplay}</span>
               ) : (
                 <span className="text-app-fg-muted">—</span>
               ),

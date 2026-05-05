@@ -160,21 +160,33 @@ export class AuthService {
 
     // Resolve primary branch for multi-branch context.
     // Non-global users MUST have at least one user_branches row — no membership = login denied.
+    //
+    // Org-wide heads (HEAD_OF_CS / HEAD_OF_MARKETING / HEAD_OF_LOGISTICS) and
+    // admin-class normally land with `currentBranchId = null` so they see
+    // every branch by default. BUT when they only belong to ONE branch (the
+    // common case while the org is single-branch), defaulting to that branch
+    // saves them the "Pick a branch" popup on every mutation. They still have
+    // org-wide visibility on reads — `canViewAllBranches` is unchanged — and
+    // they can switch back to "All branches" via the branch switcher.
     let currentBranchId: string | null = null;
-    if (!canViewAllBranches(user)) {
-      const memberships = await this.db
-        .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
-        .from(schema.userBranches)
-        .where(eq(schema.userBranches.userId, user.id))
-        .orderBy(desc(schema.userBranches.isPrimary)) // isPrimary=true sorts first
-        .limit(10);
+    const memberships = await this.db
+      .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, user.id))
+      .orderBy(desc(schema.userBranches.isPrimary)) // isPrimary=true sorts first
+      .limit(10);
 
+    if (!canViewAllBranches(user)) {
       if (memberships.length === 0) {
         throw new UnauthorizedException(
           'Your account has not been assigned to a branch. Contact your administrator.',
         );
       }
-
+      currentBranchId = memberships[0]!.branchId as string;
+    } else if (memberships.length === 1) {
+      // Single-branch org-wide head / admin: default to their one branch so
+      // mutations don't have to prompt. Multi-branch holders (handover,
+      // regional split) keep the All-branches default.
       currentBranchId = memberships[0]!.branchId as string;
     }
 
@@ -200,6 +212,9 @@ export class AuthService {
       permissions: Array.from(initialPermissions),
       logisticsLocationId: user.logisticsLocationId,
       currentBranchId,
+      // Captured here so the tRPC branch-scope guard can fall back to the
+      // sole branch for single-branch org-wide heads instead of throwing.
+      branchIds: memberships.map((m) => m.branchId as string),
       appTheme: user.appTheme ?? null,
       fontScale: user.fontScale ?? null,
     };
@@ -330,24 +345,29 @@ export class AuthService {
     }
 
     // Resolve the target user's branch context the same way login does.
+    // Single-branch global users (org-wide heads / admin-class) default to
+    // their one branch so mirrored sessions don't have to prompt for it on
+    // every mutation.
     let currentBranchId: string | null = null;
     const targetPermSet = await this.permissions.getEffectivePermissions(target.id);
-    if (
-      !canViewAllBranches({
-        role: target.role,
-        permissions: Array.from(targetPermSet),
-      })
-    ) {
-      const memberships = await this.db
-        .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
-        .from(schema.userBranches)
-        .where(eq(schema.userBranches.userId, target.id))
-        .orderBy(desc(schema.userBranches.isPrimary))
-        .limit(10);
-      currentBranchId = memberships[0]?.branchId ?? target.primaryBranchId ?? null;
+    const targetIsGlobal = canViewAllBranches({
+      role: target.role,
+      permissions: Array.from(targetPermSet),
+    });
+    const targetMemberships = await this.db
+      .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, target.id))
+      .orderBy(desc(schema.userBranches.isPrimary))
+      .limit(10);
+
+    if (!targetIsGlobal) {
+      currentBranchId = targetMemberships[0]?.branchId ?? target.primaryBranchId ?? null;
       if (!currentBranchId) {
         throw new BadRequestException('Target user has no branch — cannot mirror.');
       }
+    } else if (targetMemberships.length === 1) {
+      currentBranchId = targetMemberships[0]!.branchId as string;
     }
 
     const insertedRows = await this.db
@@ -375,6 +395,7 @@ export class AuthService {
       scopeTeamSupervisor: target.scopeTeamSupervisor === true,
       logisticsLocationId: target.logisticsLocationId,
       currentBranchId,
+      branchIds: targetMemberships.map((m) => m.branchId as string),
       // Surface the target's appearance so the admin sees the app exactly as the
       // user would. The green border makes Mirror Mode obvious; the theme is part
       // of the read-only "live walkthrough".

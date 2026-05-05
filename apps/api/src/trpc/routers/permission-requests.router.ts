@@ -41,11 +41,15 @@ export const permissionRequestsRouter = router({
       return getService().list({ status: input?.status }, ctx.user);
     }),
 
+  statusCounts: authedProcedure.query(async ({ ctx }) => {
+    return getService().statusCounts(ctx.user);
+  }),
+
   approve: authedProcedure
     .input(
       z.object({
         requestId: z.string().uuid(),
-        reason: z.string().min(10, 'Reason must be at least 10 characters'),
+        reason: z.string().trim().min(5, 'Reason must be at least 5 characters'),
       }),
     )
     .mutation(async ({ input, ctx }) => {
@@ -56,7 +60,7 @@ export const permissionRequestsRouter = router({
     .input(
       z.object({
         requestId: z.string().uuid(),
-        reason: z.string().min(10, 'Reason must be at least 10 characters'),
+        reason: z.string().trim().min(5, 'Reason must be at least 5 characters'),
       }),
     )
     .mutation(async ({ input, ctx }) => {

@@ -8,8 +8,6 @@ import {
 } from '~/lib/api.server';
 import { resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 import { LogisticsTeamPage } from '~/features/logistics/LogisticsTeamPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_LOGISTICS_TEAM, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { LogisticsProviderRow } from '~/features/logistics/team-types';
 
 export const meta: MetaFunction = () => [
@@ -34,8 +32,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (!cookie) throw new Response('Session cookie missing', { status: 401 });
 
   const url = new URL(request.url);
-  // `resolveMarketingDateFilters` is generic despite the name — it just reads
-  // startDate / endDate / period from the URL and defaults to month-to-date.
   const { startDate, endDate, periodAllTime, filters } = resolveMarketingDateFilters(url);
 
   const teamInput = {
@@ -52,7 +48,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   redirectIfUnauthorized(teamRes, url.pathname);
   const allProviders = parseProvidersList(teamRes);
 
-  // Sort + search + paginate client-side over the full provider list.
   const SORT_BY_VALUES = new Set([
     'name',
     'assigned',
@@ -130,11 +125,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
-export default function LogisticsTeamRoute() {
+export default function LogisticsTeamIndexRoute() {
   const data = useLoaderData<typeof loader>();
   return (
-    <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.logisticsTeam} allowlist={ALLOWLIST_LOGISTICS_TEAM} />
     <LogisticsTeamPage
       providers={data.providers}
       dateFilters={data.dateFilters}
@@ -146,6 +139,5 @@ export default function LogisticsTeamRoute() {
       sortBy={data.sortBy}
       sortDir={data.sortDir}
     />
-    </>
   );
 }

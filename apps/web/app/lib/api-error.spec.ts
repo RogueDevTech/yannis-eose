@@ -7,8 +7,8 @@ describe('extractApiErrorMessage', () => {
   });
 
   it('handles tokenized array payloads', () => {
-    const payload = [{ _1: 2 }, 'data', { _3: 4 }, 'error', 'This 3PL location has no inventory row'];
-    expect(extractApiErrorMessage(payload, 'Fallback')).toBe('This 3PL location has no inventory row');
+    const payload = [{ _1: 2 }, 'data', { _3: 4 }, 'error', 'This logistics company location has no inventory row'];
+    expect(extractApiErrorMessage(payload, 'Fallback')).toBe('This logistics company location has no inventory row');
   });
 
   it('falls back when payload has no useful text', () => {

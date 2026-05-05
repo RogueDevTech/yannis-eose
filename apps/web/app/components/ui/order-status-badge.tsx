@@ -1,4 +1,4 @@
-import { STATUS_COLORS, STATUS_DOT_CLASS, formatStatus } from '~/features/shared/order-status';
+import { STATUS_COLORS, STATUS_DOT_CLASS, STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
 
 export interface OrderStatusBadgeProps {
   status: string;
@@ -9,7 +9,7 @@ export interface OrderStatusBadgeProps {
 export function OrderStatusBadge({ status, showDot = true, className }: OrderStatusBadgeProps) {
   const badgeClass = STATUS_COLORS[status] ?? 'badge';
   const dotClass = STATUS_DOT_CLASS[status] ?? 'bg-surface-400';
-  const label = formatStatus(status);
+  const label = STATUS_LABELS[status] ?? formatStatus(status);
 
   return (
     <span className={[badgeClass, className].filter(Boolean).join(' ')}>

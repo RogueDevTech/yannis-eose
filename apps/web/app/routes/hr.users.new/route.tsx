@@ -1,7 +1,13 @@
 import { useLoaderData } from '@remix-run/react';
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requireStaffAccountsAccess, safeStatus } from '~/lib/api.server';
+import {
+  apiRequest,
+  getSessionCookie,
+  requireStaffAccountsAccess,
+  safeStatus,
+  USER_WRITE_ACTION_TIMEOUT_MS,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
 import type {
@@ -204,7 +210,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const cookie = getSessionCookie(request);
   const res = await apiRequest<unknown>('/trpc/users.create', {
-    method: 'POST', cookie, body,
+    method: 'POST',
+    cookie,
+    body,
+    timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
   });
 
   if (!res.ok) {

@@ -4,8 +4,6 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { TransfersPage } from '~/features/transfers/TransfersPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_TRANSFERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from '~/features/transfers/types';
 
 export const meta: MetaFunction = () => [
@@ -128,7 +126,6 @@ export default function TransfersRoute() {
   const data = useLoaderData<typeof loader>() as TransfersStreamData;
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.transfers} allowlist={ALLOWLIST_TRANSFERS} />
       <TransfersPage {...data} />
     </>
   );

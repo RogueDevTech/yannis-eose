@@ -2,8 +2,6 @@ import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_MARKETING_TEAM, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
 import type { FundingBalanceRow } from '~/features/marketing/types';
 import { buildLeaderboardInput, resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 
@@ -238,7 +236,6 @@ export default function MarketingTeamRoute() {
   const data = useLoaderData<typeof loader>();
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.marketingTeam} allowlist={ALLOWLIST_MARKETING_TEAM} />
     <MarketingTeamPage
       teamMembers={data.teamMembers}
       fundingSummary={data.fundingSummary}

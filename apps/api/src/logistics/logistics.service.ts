@@ -1,6 +1,20 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, desc, ilike, count, lt, gte, lte, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  desc,
+  ilike,
+  count,
+  lt,
+  gte,
+  lte,
+  inArray,
+  isNotNull,
+  notExists,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
@@ -801,10 +815,10 @@ export class LogisticsService {
         })),
       );
 
-      // Cascade DELIVERED → COMPLETED in the same transaction when the
+      // Cascade DELIVERED → REMITTED in the same transaction when the
       // accountant is marking received now. This is the canonical "remittance
       // received and reconciled" signal that CLAUDE.md → Order Lifecycle ties
-      // to COMPLETED. We bulk-update with status guard ('DELIVERED') so we
+      // to REMITTED. We bulk-update with status guard ('DELIVERED') so we
       // never accidentally bump a CANCELLED order.
       let completedAmountTotal = 0;
       if (markReceivedNow) {
@@ -813,7 +827,7 @@ export class LogisticsService {
         }
         await tx
           .update(schema.orders)
-          .set({ status: 'COMPLETED', updatedAt: now })
+          .set({ status: 'REMITTED', updatedAt: now })
           .where(
             and(
               inArray(schema.orders.id, input.orderIds),
@@ -928,6 +942,8 @@ export class LogisticsService {
     const locationMap = new Map(locations.map((l) => [l.id, l.name]));
     const locationProviderMap = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
 
+    // Count every order linked to the batch. After Finance marks received, rows move
+    // DELIVERED → REMITTED — they must still count (do not filter on DELIVERED only).
     const orderSummaries = await Promise.all(
       records.map((r) =>
         this.db
@@ -936,16 +952,20 @@ export class LogisticsService {
             amount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
           })
           .from(schema.deliveryRemittanceOrders)
-          .innerJoin(
-            schema.orders,
-            and(
-              eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId),
-              eq(schema.orders.status, 'DELIVERED'),
-            ),
-          )
+          .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
           .where(eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, r.id)),
       ),
     );
+
+    const sentByIds = [...new Set(records.map((r) => r.sentBy))];
+    const senders =
+      sentByIds.length > 0
+        ? await this.db
+            .select({ id: schema.users.id, name: schema.users.name })
+            .from(schema.users)
+            .where(inArray(schema.users.id, sentByIds))
+        : [];
+    const sentByNameMap = new Map(senders.map((u) => [u.id, u.name]));
 
     const remittanceIds = records.map((r) => r.id);
     const outcomes =
@@ -984,13 +1004,14 @@ export class LogisticsService {
     if (input.endDate) {
       summaryConditions.push(lte(schema.deliveryRemittances.sentAt, new Date(input.endDate + 'T23:59:59')));
     }
+    if (input.sentBy) {
+      summaryConditions.push(eq(schema.deliveryRemittances.sentBy, input.sentBy));
+    }
     const summaryWhere = summaryConditions.length > 0 ? and(...summaryConditions) : undefined;
 
-    const deliveredSummaryWhere = summaryWhere
-      ? and(summaryWhere, eq(schema.orders.status, 'DELIVERED'))
-      : eq(schema.orders.status, 'DELIVERED');
-
-    const baseSummaryRows = await this.db
+    // Sum order value on remittance batches. Do NOT require orders.status = DELIVERED — after
+    // Finance marks received, orders move to REMITTED and must still count toward batch totals.
+    const baseSummaryQuery = this.db
       .select({
         totalRemitted: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
         pendingAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
@@ -998,11 +1019,13 @@ export class LogisticsService {
         pendingCount: sql<string>`COUNT(DISTINCT CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.deliveryRemittances.id} END)::text`,
       })
       .from(schema.deliveryRemittances)
-      .innerJoin(schema.deliveryRemittanceOrders, eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id))
-      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
-      .where(deliveredSummaryWhere);
+      .innerJoin(
+        schema.deliveryRemittanceOrders,
+        eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id),
+      )
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId));
 
-    const outcomeSummaryRows = await this.db
+    const outcomeSummaryQuery = this.db
       .select({
         receivedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'APPROVED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
         disputedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittanceOutcomes.status} = 'DISPUTED' THEN ${schema.deliveryRemittanceOutcomes.amount} ELSE 0 END), 0)::text`,
@@ -1013,11 +1036,40 @@ export class LogisticsService {
       .innerJoin(
         schema.deliveryRemittances,
         eq(schema.deliveryRemittanceOutcomes.deliveryRemittanceId, schema.deliveryRemittances.id),
-      )
-      .where(summaryWhere);
+      );
+
+    const awaitingConditions: SQL[] = [
+      eq(schema.orders.status, 'DELIVERED'),
+      notExists(
+        this.db
+          .select({ one: sql`1` })
+          .from(schema.deliveryRemittanceOrders)
+          .where(eq(schema.deliveryRemittanceOrders.orderId, schema.orders.id)),
+      ),
+    ];
+    if (isTplCaller && !canListGlobal) {
+      awaitingConditions.push(eq(schema.orders.logisticsLocationId, actor.logisticsLocationId!));
+    } else if (input.logisticsLocationId) {
+      awaitingConditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
+    }
+
+    const awaitingSummaryQuery = this.db
+      .select({
+        awaitingAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        awaitingCount: sql<string>`COUNT(*)::text`,
+      })
+      .from(schema.orders)
+      .where(and(...awaitingConditions));
+
+    const [baseSummaryRows, outcomeSummaryRows, awaitingSummaryRows] = await Promise.all([
+      summaryWhere ? baseSummaryQuery.where(summaryWhere) : baseSummaryQuery,
+      summaryWhere ? outcomeSummaryQuery.where(summaryWhere) : outcomeSummaryQuery,
+      awaitingSummaryQuery,
+    ]);
 
     const baseSummary = baseSummaryRows[0];
     const outcomeSummary = outcomeSummaryRows[0];
+    const awaitingSummary = awaitingSummaryRows[0];
     const summary = {
       totalRemitted: baseSummary?.totalRemitted ?? '0',
       pendingAmount: baseSummary?.pendingAmount ?? '0',
@@ -1027,11 +1079,14 @@ export class LogisticsService {
       pendingCount: baseSummary?.pendingCount ?? '0',
       receivedCount: outcomeSummary?.receivedCount ?? '0',
       disputedCount: outcomeSummary?.disputedCount ?? '0',
+      awaitingAmount: awaitingSummary?.awaitingAmount ?? '0',
+      awaitingCount: awaitingSummary?.awaitingCount ?? '0',
     };
 
     const fallbackSummary = {
       totalRemitted: '0', pendingAmount: '0', receivedAmount: '0', disputedAmount: '0',
       totalCount: '0', pendingCount: '0', receivedCount: '0', disputedCount: '0',
+      awaitingAmount: '0', awaitingCount: '0',
     };
 
     return {
@@ -1043,6 +1098,7 @@ export class LogisticsService {
             ...r,
             locationName: locationMap.get(r.logisticsLocationId) ?? null,
             locationProviderName: locationProviderMap.get(r.logisticsLocationId) ?? null,
+            sentByName: sentByNameMap.get(r.sentBy) ?? null,
             orderCount,
             outcomeAmount: orderAmount,
             outcomeOrderCount: orderCount,
@@ -1144,7 +1200,7 @@ export class LogisticsService {
         recordedBy: actor.id,
       });
 
-      // Cascade DELIVERED → COMPLETED on every linked order. Bulk-update with
+      // Cascade DELIVERED → REMITTED on every linked order. Bulk-update with
       // the status guard so we never accidentally bump an order that drifted
       // (e.g. a manual revert before remittance was confirmed).
       const linkedOrderIds = (
@@ -1157,7 +1213,7 @@ export class LogisticsService {
       if (linkedOrderIds.length > 0) {
         await tx
           .update(schema.orders)
-          .set({ status: 'COMPLETED', updatedAt: now })
+          .set({ status: 'REMITTED', updatedAt: now })
           .where(
             and(
               inArray(schema.orders.id, linkedOrderIds),
@@ -1293,13 +1349,6 @@ export class LogisticsService {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
 
-    if (input.search && input.search.trim()) {
-      const term = `%${input.search.trim()}%`;
-      conditions.push(
-        sql`(${schema.orders.customerName} ILIKE ${term} OR ${schema.orders.id}::text ILIKE ${term})`,
-      );
-    }
-
     if (input.startDate) {
       conditions.push(gte(schema.orders.deliveredAt, new Date(input.startDate + 'T00:00:00')));
     }
@@ -1319,11 +1368,18 @@ export class LogisticsService {
       conditions.push(sql`${schema.orders.id} NOT IN ${remittedOrderIds}`);
     }
 
-    const whereClause = and(...conditions);
-    const offset = (input.page - 1) * input.limit;
-
     const locAlias = alias(schema.logisticsLocations, 'eligible_loc');
     const provAlias = alias(schema.logisticsProviders, 'eligible_loc_provider');
+
+    if (input.search && input.search.trim()) {
+      const term = `%${input.search.trim()}%`;
+      conditions.push(
+        sql`(${schema.orders.customerName} ILIKE ${term} OR ${schema.orders.id}::text ILIKE ${term} OR (${schema.invoices.id} IS NOT NULL AND ${schema.invoices.referenceNumber}::text ILIKE ${term}) OR (${schema.invoices.recipientInfo} IS NOT NULL AND ${schema.invoices.recipientInfo}->>'name' ILIKE ${term}) OR ${locAlias.name} ILIKE ${term} OR ${provAlias.name} ILIKE ${term})`,
+      );
+    }
+
+    const whereClause = and(...conditions);
+    const offset = (input.page - 1) * input.limit;
 
     const [orders, totalRows] = await Promise.all([
       this.db
@@ -1335,15 +1391,31 @@ export class LogisticsService {
           logisticsLocationId: schema.orders.logisticsLocationId,
           logisticsLocationName: locAlias.name,
           logisticsLocationProviderName: provAlias.name,
+          invoiceId: schema.invoices.id,
+          invoiceReferenceNumber: schema.invoices.referenceNumber,
+          invoiceRecipientInfo: schema.invoices.recipientInfo,
+          invoiceLineItems: schema.invoices.lineItems,
+          invoiceTaxRate: schema.invoices.taxRate,
+          invoiceTotalAmount: schema.invoices.totalAmount,
+          invoiceStatus: schema.invoices.status,
+          invoiceDueDate: schema.invoices.dueDate,
+          invoiceCreatedAt: schema.invoices.createdAt,
         })
         .from(schema.orders)
         .leftJoin(locAlias, eq(schema.orders.logisticsLocationId, locAlias.id))
         .leftJoin(provAlias, eq(locAlias.providerId, provAlias.id))
+        .leftJoin(schema.invoices, eq(schema.invoices.orderId, schema.orders.id))
         .where(whereClause)
         .orderBy(desc(schema.orders.deliveredAt))
         .limit(input.limit)
         .offset(offset),
-      this.db.select({ count: count() }).from(schema.orders).where(whereClause),
+      this.db
+        .select({ count: sql<number>`count(distinct ${schema.orders.id})` })
+        .from(schema.orders)
+        .leftJoin(locAlias, eq(schema.orders.logisticsLocationId, locAlias.id))
+        .leftJoin(provAlias, eq(locAlias.providerId, provAlias.id))
+        .leftJoin(schema.invoices, eq(schema.invoices.orderId, schema.orders.id))
+        .where(whereClause),
     ]);
 
     return {
@@ -1355,9 +1427,69 @@ export class LogisticsService {
         logisticsLocationId: o.logisticsLocationId ?? null,
         logisticsLocationName: o.logisticsLocationName ?? null,
         logisticsLocationProviderName: o.logisticsLocationProviderName ?? null,
+        invoice:
+          o.invoiceId != null && o.invoiceReferenceNumber != null && o.invoiceCreatedAt
+            ? {
+                id: o.invoiceId,
+                orderId: o.id,
+                referenceNumber: o.invoiceReferenceNumber,
+                referenceFormatted: this.formatInvoiceReference(o.invoiceReferenceNumber),
+                recipientInfo: this.parseInvoiceRecipient(o.invoiceRecipientInfo),
+                lineItems: this.parseInvoiceLineItems(o.invoiceLineItems),
+                totalAmount:
+                  o.invoiceTotalAmount != null ? String(o.invoiceTotalAmount) : '0',
+                taxRate: o.invoiceTaxRate != null ? String(o.invoiceTaxRate) : null,
+                status: o.invoiceStatus ?? 'DRAFT',
+                dueDate: o.invoiceDueDate?.toISOString() ?? null,
+                createdAt: o.invoiceCreatedAt.toISOString(),
+              }
+            : null,
       })),
       total: totalRows[0]?.count ?? 0,
     };
+  }
+
+  /** Matches `FinanceService.formatReference` — invoice display string. */
+  private formatInvoiceReference(refNumber: number): string {
+    const year = new Date().getFullYear();
+    return `INV-${year}-${String(refNumber).padStart(4, '0')}`;
+  }
+
+  private parseInvoiceRecipient(raw: unknown): {
+    name: string;
+    address?: string;
+    email?: string;
+    phone?: string;
+  } {
+    if (!raw || typeof raw !== 'object') return { name: '' };
+    const o = raw as Record<string, unknown>;
+    return {
+      name: typeof o.name === 'string' ? o.name : String(o.name ?? ''),
+      address: typeof o.address === 'string' ? o.address : undefined,
+      email: typeof o.email === 'string' ? o.email : undefined,
+      phone: typeof o.phone === 'string' ? o.phone : undefined,
+    };
+  }
+
+  private parseInvoiceLineItems(raw: unknown): Array<{
+    description: string;
+    quantity: number;
+    unitPrice: string;
+  }> {
+    if (!Array.isArray(raw)) return [];
+    const out: Array<{ description: string; quantity: number; unitPrice: string }> = [];
+    for (const li of raw) {
+      if (!li || typeof li !== 'object') continue;
+      const x = li as Record<string, unknown>;
+      const qty = typeof x.quantity === 'number' ? x.quantity : Number(x.quantity);
+      out.push({
+        description:
+          typeof x.description === 'string' ? x.description : String(x.description ?? ''),
+        quantity: Number.isFinite(qty) ? qty : 0,
+        unitPrice: String(x.unitPrice ?? '0'),
+      });
+    }
+    return out;
   }
 
   /**
@@ -1415,7 +1547,13 @@ export class LogisticsService {
     const locationName = locationLookupRow?.name ?? null;
     const locationProviderName = locationLookupRow?.providerName ?? null;
 
-    let orders: Array<{ id: string; customerName: string; totalAmount: string | null; deliveredAt: string | null }> = [];
+    let orders: Array<{
+      id: string;
+      customerName: string;
+      totalAmount: string | null;
+      deliveredAt: string | null;
+      status: string;
+    }> = [];
     if (orderIds.length > 0) {
       const orderRows = await this.db
         .select({
@@ -1423,21 +1561,40 @@ export class LogisticsService {
           customerName: schema.orders.customerName,
           totalAmount: schema.orders.totalAmount,
           deliveredAt: schema.orders.deliveredAt,
+          status: schema.orders.status,
         })
         .from(schema.orders)
-        .where(and(inArray(schema.orders.id, orderIds), eq(schema.orders.status, 'DELIVERED')));
+        .where(inArray(schema.orders.id, orderIds));
       orders = orderRows.map((o) => ({
         id: o.id,
         customerName: o.customerName,
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
+        status: o.status,
       }));
     }
+
+    const actorIds = [
+      ...new Set(
+        [remittance.sentBy, remittance.receivedBy].filter((id): id is string => id != null && id !== ''),
+      ),
+    ];
+    const actorNames =
+      actorIds.length > 0
+        ? await this.db
+            .select({ id: schema.users.id, name: schema.users.name })
+            .from(schema.users)
+            .where(inArray(schema.users.id, actorIds))
+        : [];
+    const nameById = new Map(actorNames.map((u) => [u.id, u.name]));
 
     return {
       ...remittance,
       locationName,
       locationProviderName,
+      sentByName: nameById.get(remittance.sentBy) ?? null,
+      receivedByName: remittance.receivedBy ? (nameById.get(remittance.receivedBy) ?? null) : null,
+      orderCount: orders.length,
       orders,
     };
   }
@@ -1729,7 +1886,7 @@ export class LogisticsService {
    * - Includes providers with zero allocated orders (left join) so newly added
    *   companies are visible with all-zero metrics.
    * - Filters orders by `allocatedAt` (the canonical "in-flight at provider"
-   *   timestamp). Orders that never reached ALLOCATED are not the provider's
+   *   timestamp). Orders that never reached AGENT_ASSIGNED are not the provider's
    *   responsibility yet.
    * - When `branchId` is given, restricts to that branch. SuperAdmin / org-wide
    *   HoLogistics passes null → no filter (sees all branches).
@@ -1789,7 +1946,7 @@ export class LogisticsService {
     // ── Pass 2: per-(provider, status) order counts ────────────────────────
     // Join orders → logistics_locations to resolve provider_id; the order itself
     // also carries `logistics_provider_id` but the location-derived link is the
-    // canonical one (set during ALLOCATED transition).
+    // canonical one (set during AGENT_ASSIGNED transition).
     const orderConditions: SQL[] = [isNotNull(schema.orders.logisticsLocationId)];
     if (effectiveStart) orderConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
     if (effectiveEnd) orderConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
@@ -1841,9 +1998,9 @@ export class LogisticsService {
       const cancelled = get('CANCELLED');
       const inTransit = get('IN_TRANSIT');
       const dispatched = get('DISPATCHED');
-      const allocated = get('ALLOCATED');
+      const allocated = get('AGENT_ASSIGNED');
       const restocked = get('RESTOCKED');
-      const completed = get('COMPLETED');
+      const completed = get('REMITTED');
 
       const totalAssigned =
         delivered +
@@ -1871,11 +2028,11 @@ export class LogisticsService {
       const statusBreakdown: { status: string; count: number; pct: number }[] = [];
       const statusOrder: string[] = [
         'DELIVERED',
-        'COMPLETED',
+        'REMITTED',
         'PARTIALLY_DELIVERED',
         'IN_TRANSIT',
         'DISPATCHED',
-        'ALLOCATED',
+        'AGENT_ASSIGNED',
         'RETURNED',
         'WRITTEN_OFF',
         'RESTOCKED',

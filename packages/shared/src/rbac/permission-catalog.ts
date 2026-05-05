@@ -280,7 +280,11 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'orders.read',
     'audit.read',
     'users.read',
-    'marketing.funding.approve',
+    // CEO directive 2026-05-05: Finance can VIEW funding requests on
+    // /admin/marketing/funding for awareness, but approve/reject is HoM's
+    // space. Finance acts on their own /admin/finance/disbursements page —
+    // separate flow, separate permission. `marketing.funding.approve`
+    // intentionally removed here; admin-class still bypasses.
     'finance.cashRemittance.create',
     'finance.cashRemittance.markReceived',
   ],

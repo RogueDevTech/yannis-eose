@@ -33,7 +33,7 @@ import { formatStatus } from '~/features/shared/order-status';
 import type { Order } from '~/features/orders/types';
 import type { Location } from './types';
 
-const LOGISTICS_STATUS_OPTIONS = ['ALL', 'CONFIRMED', 'ALLOCATED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED'] as const;
+const LOGISTICS_STATUS_OPTIONS = ['ALL', 'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'DELIVERED'] as const;
 
 export interface LogisticsOrderRow extends Order {
   logisticsLocationId?: string | null;
@@ -71,7 +71,10 @@ interface LogisticsOrdersPageProps {
   pageTitle?: string;
   /** Base path for order detail links (e.g. "/tpl/orders" for TPL, "/admin/logistics/orders" for admin) */
   orderDetailBasePath?: string;
-  /** When true, allocation is only on the order detail page (e.g. 3PL); hide allocate from list and bulk */
+  /**
+   * When true, pipeline actions (allocate, dispatch, in-transit, mark delivered) live on the order
+   * detail page only — the list shows View (and optional TPL-only controls like Resolve order).
+   */
   allocationOnDetailOnly?: boolean;
   /** When true, show Edit button to change preferred delivery date (e.g. TPL orders page) */
   canEditDeliveryDate?: boolean;
@@ -79,6 +82,8 @@ interface LogisticsOrdersPageProps {
   markInTransitLabel?: string;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
   dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+  /** Optional hero description under the page title */
+  pageDescription?: string;
 }
 
 // ── Delivery Date Helpers (above page — used by column memo) ─────────────────
@@ -101,22 +106,32 @@ function isToday(date: string): boolean {
   return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
 }
 
-function DeliveryDateCell({ date }: { date?: string | null }) {
+/** Preferred date vs calendar "overdue" only applies while the order is still in flight. */
+const DELIVERY_DATE_FULFILLED_STATUSES = new Set([
+  'DELIVERED',
+  'REMITTED',
+  'PARTIALLY_DELIVERED',
+]);
+
+function DeliveryDateCell({ date, status }: { date?: string | null; status: string }) {
   if (!date) {
     return <span className="text-app-fg-muted text-sm">Not set</span>;
   }
 
-  const overdue = isOverdue(date);
-  const today = isToday(date);
+  const fulfilled = DELIVERY_DATE_FULFILLED_STATUSES.has(status);
+  const overdue = !fulfilled && isOverdue(date);
+  const today = !fulfilled && isToday(date);
 
   return (
     <span
       className={`text-sm font-medium ${
-        overdue
-          ? 'text-danger-600 dark:text-danger-400'
-          : today
-            ? 'text-warning-600 dark:text-warning-400'
-            : 'text-app-fg'
+        fulfilled
+          ? 'text-success-600 dark:text-success-400'
+          : overdue
+            ? 'text-danger-600 dark:text-danger-400'
+            : today
+              ? 'text-warning-600 dark:text-warning-400'
+              : 'text-app-fg'
       }`}
     >
       {formatDeliveryDate(date)}
@@ -147,6 +162,7 @@ export function LogisticsOrdersPage({
   canEditDeliveryDate = false,
   markInTransitLabel = 'Start Delivery',
   dailyCounts,
+  pageDescription = 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
 }: LogisticsOrdersPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
@@ -227,7 +243,7 @@ export function LogisticsOrdersPage({
   }, [fetcher.data, bulkResult]);
 
   const confirmedCount = statusCounts['CONFIRMED'] ?? 0;
-  const allocatedCount = statusCounts['ALLOCATED'] ?? 0;
+  const allocatedCount = statusCounts['AGENT_ASSIGNED'] ?? 0;
   const dispatchedCount = statusCounts['DISPATCHED'] ?? 0;
   const inTransitCount = statusCounts['IN_TRANSIT'] ?? 0;
   const deliveredCount = statusCounts['DELIVERED'] ?? 0;
@@ -246,27 +262,16 @@ export function LogisticsOrdersPage({
     });
   };
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('page', '1');
-      if (searchQuery) next.set('search', searchQuery);
-      else next.delete('search');
-      return next;
-    });
-  };
-
   const logisticsOrdersToolbarFilterBadge = useMemo(
     () => (selectedStatus !== 'ALL' ? 1 : 0),
     [selectedStatus],
   );
 
   const confirmedOrders = orders.filter((o) => o.status === 'CONFIRMED');
-  const allocatedOrders = orders.filter((o) => o.status === 'ALLOCATED');
+  const allocatedOrders = orders.filter((o) => o.status === 'AGENT_ASSIGNED');
   const selectedOrders = orders.filter((o) => selectedIds.has(o.id));
   const selectedConfirmed = selectedOrders.filter((o) => o.status === 'CONFIRMED');
-  const selectedAllocated = selectedOrders.filter((o) => o.status === 'ALLOCATED');
+  const selectedAllocated = selectedOrders.filter((o) => o.status === 'AGENT_ASSIGNED');
   const selectedInTransit = selectedOrders.filter((o) => o.status === 'IN_TRANSIT');
   const canBulkAllocate = selectedConfirmed.length > 0 && selectedConfirmed.length === selectedIds.size;
   const canBulkDispatch =
@@ -278,6 +283,11 @@ export function LogisticsOrdersPage({
   const ridersForBulkDispatch = bulkDispatchLocationId
     ? riders.filter((r) => r.logisticsLocationId === bulkDispatchLocationId)
     : [];
+
+  const hasVisibleBulkActions =
+    (canBulkAllocate && !allocationOnDetailOnly) ||
+    (canBulkDispatch && !allocationOnDetailOnly && ridersForBulkDispatch.length > 0) ||
+    (canBulkMarkDelivered && !allocationOnDetailOnly);
 
   /** Locations available for allocation; TPL passes only their location */
   const allocatableLocations = allocatableLocationsProp ?? locations.filter((loc) => !loc.dispatchLocked);
@@ -313,21 +323,20 @@ export function LogisticsOrdersPage({
       {
         key: 'deliveryDate',
         header: 'Delivery Date',
-        render: (order) => <DeliveryDateCell date={order.preferredDeliveryDate} />,
-      },
-      {
-        key: 'location',
-        header: '3PL Location',
         render: (order) => (
-          <span className="text-app-fg-muted">
-            {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName}
-          </span>
+          <DeliveryDateCell date={order.preferredDeliveryDate} status={order.status} />
         ),
       },
       {
-        key: 'rider',
-        header: 'Rider',
-        render: (order) => <span className="text-app-fg-muted">{order.riderName}</span>,
+        key: 'location',
+        header: 'Company',
+        render: (order) => (
+          <span className="text-app-fg-muted">
+            {order.locationProviderName
+              ? `${order.locationProviderName} · ${order.locationName}`
+              : order.locationName}
+          </span>
+        ),
       },
       {
         key: 'actions',
@@ -335,14 +344,10 @@ export function LogisticsOrdersPage({
         align: 'right',
         tight: true,
         nowrap: true,
-        minWidth: 'min-w-[220px]',
+        minWidth: allocationOnDetailOnly ? 'min-w-[4.5rem]' : 'min-w-[220px]',
         mobileShowLabel: false,
         headerClassName: 'text-right',
         render: (order) => {
-          const ridersForOrder =
-            order.logisticsLocationId && order.status === 'ALLOCATED'
-              ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
-              : [];
           return (
             <CompactTableActions className="inline-flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
               <TableActionButton to={`${orderDetailBasePath}/${order.id}`} variant="primary">
@@ -362,7 +367,7 @@ export function LogisticsOrdersPage({
                   Resolve order
                 </TableActionButton>
               )}
-              {order.status === 'IN_TRANSIT' && (
+              {order.status === 'IN_TRANSIT' && !allocationOnDetailOnly && (
                 <Button
                   variant="success"
                   size="sm"
@@ -391,11 +396,11 @@ export function LogisticsOrdersPage({
                     controlSize="sm"
                   />
                   <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')} loading={isSubmitting}>
-                    Allocate
+                    Assign
                   </Button>
                 </fetcher.Form>
               )}
-              {order.status === 'ALLOCATED' && (
+              {order.status === 'AGENT_ASSIGNED' && !allocationOnDetailOnly && (
                 <fetcher.Form method="post" className="inline-flex items-center gap-1">
                   <input type="hidden" name="intent" value="dispatch" />
                   <input type="hidden" name="orderId" value={order.id} />
@@ -405,19 +410,43 @@ export function LogisticsOrdersPage({
                     required
                     value={rowDispatchRiderByOrder[order.id] ?? ''}
                     onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                    disabled={ridersForOrder.length === 0}
-                    placeholder={ridersForOrder.length === 0 ? 'No riders' : 'Rider'}
+                    disabled={
+                      !order.logisticsLocationId ||
+                      riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId).length === 0
+                    }
+                    placeholder={
+                      !order.logisticsLocationId ||
+                      riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId).length === 0
+                        ? 'No riders'
+                        : 'Rider'
+                    }
                     searchPlaceholder="Search riders..."
-                    options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                    options={
+                      order.logisticsLocationId
+                        ? riders
+                            .filter((r) => r.logisticsLocationId === order.logisticsLocationId)
+                            .map((r) => ({ value: r.id, label: r.name }))
+                        : []
+                    }
                     wrapperClassName="w-36"
                     controlSize="sm"
                   />
-                  <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || ridersForOrder.length === 0} loading={isSubmitting}>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="sm"
+                    disabled={
+                      isSubmitting ||
+                      !order.logisticsLocationId ||
+                      riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId).length === 0
+                    }
+                    loading={isSubmitting}
+                  >
                     Dispatch
                   </Button>
                 </fetcher.Form>
               )}
-              {order.status === 'DISPATCHED' && (
+              {order.status === 'DISPATCHED' && !allocationOnDetailOnly && (
                 <fetcher.Form method="post" className="inline">
                   <input type="hidden" name="intent" value="transition" />
                   <input type="hidden" name="orderId" value={order.id} />
@@ -451,9 +480,12 @@ export function LogisticsOrdersPage({
     _helpers: CompactTableMobileCardHelpers<LogisticsOrderRow>,
   ) => {
     const ridersForOrder =
-      order.logisticsLocationId && order.status === 'ALLOCATED'
+      order.logisticsLocationId && order.status === 'AGENT_ASSIGNED'
         ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
         : [];
+    const companyLine = order.locationProviderName
+      ? `${order.locationProviderName} · ${order.locationName}`
+      : order.locationName;
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -465,14 +497,12 @@ export function LogisticsOrdersPage({
           <OrderStatusBadge status={order.status} />
         </div>
         <p className="text-sm text-app-fg">{order.customerName}</p>
-        <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-          <span>
-            {order.locationProviderName ? `${order.locationName} — ${order.locationProviderName}` : order.locationName} ·{' '}
-            {order.riderName}
-          </span>
+        <div className="flex flex-col gap-1 text-sm text-app-fg-muted">
+          <span>{companyLine}</span>
           {order.preferredDeliveryDate && (
-            <span className="font-medium text-brand-600 dark:text-brand-400">
-              Delivery: {formatDeliveryDate(order.preferredDeliveryDate)}
+            <span>
+              <span className="text-app-fg-muted">Delivery: </span>
+              <DeliveryDateCell date={order.preferredDeliveryDate} status={order.status} />
             </span>
           )}
         </div>
@@ -494,7 +524,7 @@ export function LogisticsOrdersPage({
               Resolve order
             </TableActionButton>
           )}
-          {order.status === 'IN_TRANSIT' && (
+          {order.status === 'IN_TRANSIT' && !allocationOnDetailOnly && (
             <Button variant="success" size="sm" onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}>
               Mark Delivered
             </Button>
@@ -519,11 +549,11 @@ export function LogisticsOrdersPage({
                 controlSize="sm"
               />
               <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')}>
-                Allocate
+                Assign
               </Button>
             </fetcher.Form>
           )}
-          {order.status === 'ALLOCATED' && ridersForOrder.length > 0 && (
+          {order.status === 'AGENT_ASSIGNED' && !allocationOnDetailOnly && ridersForOrder.length > 0 && (
             <fetcher.Form method="post" className="flex gap-1">
               <input type="hidden" name="intent" value="dispatch" />
               <input type="hidden" name="orderId" value={order.id} />
@@ -543,7 +573,7 @@ export function LogisticsOrdersPage({
               </Button>
             </fetcher.Form>
           )}
-          {order.status === 'DISPATCHED' && (
+          {order.status === 'DISPATCHED' && !allocationOnDetailOnly && (
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="transition" />
               <input type="hidden" name="orderId" value={order.id} />
@@ -563,41 +593,26 @@ export function LogisticsOrdersPage({
       <div className="space-y-4">
         <PageHeader
           title={pageTitle}
-          description="Allocate confirmed orders to 3PL locations and dispatch to riders"
+          description={pageDescription}
           actions={
-            <PageHeaderMobileTools
-              sheetTitle="Logistics orders tools"
-              sheetSubtitle={<span>Date range and chart toggle</span>}
-              triggerAriaLabel="Logistics orders toolbar and date range"
-              desktop={
-                <>
-                  <PageRefreshButton />
-                  <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                    <DateFilterBar
-                      startDate={filters.startDate}
-                      endDate={filters.endDate}
-                      periodAllTime={filters.periodAllTime}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-secondary btn-sm"
-                    onClick={() => setShowChartView((v) => !v)}
-                  >
-                    {showChartView ? 'View as data' : 'View data in chart'}
-                  </button>
-                </>
-              }
-              sheet={({ closeSheet }) => (
-                <>
-                  <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                    <DateFilterBar
-                      startDate={filters.startDate}
-                      endDate={filters.endDate}
-                      periodAllTime={filters.periodAllTime}
-                      triggerLayout="blockCenter"
-                    />
-                  </div>
+            <>
+              <PageHeaderMobileTools
+                sheetTitle="Logistics orders tools"
+                sheetSubtitle={<span>Chart toggle</span>}
+                triggerAriaLabel="Logistics orders toolbar"
+                desktop={
+                  <>
+                    <PageRefreshButton />
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      onClick={() => setShowChartView((v) => !v)}
+                    >
+                      {showChartView ? 'View as data' : 'View data in chart'}
+                    </button>
+                  </>
+                }
+                sheet={({ closeSheet }) => (
                   <button
                     type="button"
                     className="btn-secondary btn-sm w-full justify-center"
@@ -608,9 +623,16 @@ export function LogisticsOrdersPage({
                   >
                     {showChartView ? 'View as data' : 'View data in chart'}
                   </button>
-                </>
-              )}
-            />
+                )}
+              />
+              <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                />
+              </div>
+            </>
           }
         />
       </div>
@@ -619,8 +641,8 @@ export function LogisticsOrdersPage({
         tileClassName="min-w-[6rem]"
         items={[
           { label: 'Total Orders', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
-          { label: 'Awaiting allocation', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-          { label: 'Allocated', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
+          { label: 'Awaiting logistics assignment', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+          { label: 'Agent assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
           { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400' },
           { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
           { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
@@ -659,7 +681,7 @@ export function LogisticsOrdersPage({
                     size="sm"
                     disabled={!allocateLocationId || isSubmitting}
                     loading={isSubmitting}
-                    loadingText="Allocating..."
+                    loadingText="Assigning…"
                     onClick={() => {
                       if (!allocateLocationId) return;
                       fetcher.submit(
@@ -673,11 +695,11 @@ export function LogisticsOrdersPage({
                       setBulkResult(null);
                     }}
                   >
-                    Allocate selected
+                    Assign selected
                   </Button>
                 </>
               )}
-              {canBulkDispatch && ridersForBulkDispatch.length > 0 && (
+              {canBulkDispatch && !allocationOnDetailOnly && ridersForBulkDispatch.length > 0 && (
                 <>
                   <SearchableSelect
                     id="logistics-bulk-dispatch-rider"
@@ -711,7 +733,7 @@ export function LogisticsOrdersPage({
                   </Button>
                 </>
               )}
-              {canBulkMarkDelivered && (
+              {canBulkMarkDelivered && !allocationOnDetailOnly && (
                 <Button
                   variant="success"
                   size="sm"
@@ -732,11 +754,11 @@ export function LogisticsOrdersPage({
                   Mark delivered
                 </Button>
               )}
-              {selectedIds.size > 0 && !canBulkAllocate && !canBulkDispatch && !canBulkMarkDelivered && (
+              {selectedIds.size > 0 && !hasVisibleBulkActions && (
                 <span className="text-xs text-app-fg-muted">
                   {allocationOnDetailOnly
-                    ? 'Open an order to allocate. Select only ALLOCATED orders (same location) to bulk dispatch, or only IN_TRANSIT to mark delivered.'
-                    : 'Select only CONFIRMED orders to bulk allocate, only ALLOCATED orders (same location) to bulk dispatch, or only IN_TRANSIT orders to mark delivered.'}
+                    ? 'Open an order from the list to assign to logistics, dispatch, and confirm delivery on the order detail page.'
+                    : 'Select only CONFIRMED orders to assign for delivery, only agent-assigned orders (same location) to bulk dispatch, or only IN_TRANSIT orders to mark delivered.'}
                 </span>
               )}
             </div>
@@ -770,49 +792,66 @@ export function LogisticsOrdersPage({
         </div>
       )}
 
-      <ToolbarFiltersCollapsible
-        className="!border-0 px-0 py-0"
-        badgeCount={logisticsOrdersToolbarFilterBadge}
-        sheetSubtitle={<span>Status applies immediately</span>}
-        searchRow={
-          <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-            <SearchInput
-              value={searchQuery}
-              onChange={(val) => setSearchQuery(val)}
-              placeholder="Search by customer or order ID..."
-              className="min-w-0 flex-1"
-            />
-            <Button type="submit" variant="secondary" size="sm">
-              Search
-            </Button>
-          </form>
-        }
-        desktopInlineFilters={
-          <FormSelect
-            value={selectedStatus}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-              value: status,
-              label: status === 'ALL' ? 'All statuses' : formatStatus(status),
-            }))}
-            wrapperClassName="w-auto min-w-[11rem]"
-          />
-        }
-        sheetFilterBody={
-          <div className="space-y-1.5">
-            <span className="text-xs font-medium text-app-fg-muted">Status</span>
-            <FormSelect
-              value={selectedStatus}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-                value: status,
-                label: status === 'ALL' ? 'All statuses' : formatStatus(status),
-              }))}
-              wrapperClassName="w-full"
-            />
-          </div>
-        }
-      />
+      <div className="card p-0 overflow-hidden">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          badgeCount={logisticsOrdersToolbarFilterBadge}
+          sheetSubtitle={<span>Status applies immediately</span>}
+          searchRow={
+            <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
+              <form
+                method="get"
+                className="min-w-0 w-full md:flex-1"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setSearchParams((p) => {
+                    const next = new URLSearchParams(p);
+                    next.set('page', '1');
+                    const q = searchQuery.trim();
+                    if (q) next.set('search', q);
+                    else next.delete('search');
+                    return next;
+                  });
+                }}
+              >
+                <SearchInput
+                  name="search"
+                  placeholder="Search by customer name..."
+                  value={searchQuery}
+                  onChange={(val) => setSearchQuery(val)}
+                  wrapperClassName="w-full"
+                />
+              </form>
+              <div className="hidden shrink-0 items-center gap-3 md:flex">
+                <FormSelect
+                  value={selectedStatus}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                    value: status,
+                    label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+                  }))}
+                  wrapperClassName="w-full min-w-0 sm:w-48"
+                />
+              </div>
+            </div>
+          }
+          desktopInlineFilters={null}
+          sheetFilterBody={
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-app-fg-muted">Status</span>
+              <FormSelect
+                value={selectedStatus}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                  value: status,
+                  label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+                }))}
+                wrapperClassName="w-full"
+              />
+            </div>
+          }
+        />
+      </div>
 
       {showChartView ? (
         <OrdersChartView

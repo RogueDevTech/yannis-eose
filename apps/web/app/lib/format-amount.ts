@@ -74,6 +74,8 @@ export function formatNaira(
     maximumFractionDigits: options?.maximumFractionDigits ?? frac,
   };
   const absNum = Math.abs(amount);
-  const formatted = absNum.toLocaleString('en-NG', opts);
+  // en-US avoids narrow no-break space (U+202F) and other locale-specific separators
+  // that appear as odd characters next to amounts in some environments.
+  const formatted = absNum.toLocaleString('en-US', opts);
   return amount < 0 ? `-${NAIRA}${formatted}` : `${NAIRA}${formatted}`;
 }

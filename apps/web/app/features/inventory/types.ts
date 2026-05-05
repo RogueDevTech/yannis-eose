@@ -45,6 +45,20 @@ export function formatMovementType(type: string): string {
   return type.replace(/_/g, ' ');
 }
 
+/**
+ * Movement `reason` strings are persisted verbatim; older rows still say "3PL".
+ * Normalize for UI (modal, audit table) without rewriting history in the DB.
+ */
+export function formatMovementReasonForDisplay(reason: string | null | undefined): string {
+  if (reason == null || reason.trim() === '') return '';
+  return reason
+    .replace(/\bAllocated to 3PL\b/gi, 'Allocated to logistics company')
+    .replace(/\breleased 3PL reservation\b/gi, 'released logistics company reservation')
+    .replace(/\bRestocked at 3PL\b/gi, 'Restocked at logistics company')
+    .replace(/\bThis 3PL location\b/gi, 'This logistics company location')
+    .replace(/\b3PL\b/g, 'logistics company');
+}
+
 /** Product option for Stock Intake */
 export interface ProductOption {
   id: string;

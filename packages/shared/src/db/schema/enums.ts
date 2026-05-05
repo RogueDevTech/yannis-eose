@@ -27,7 +27,9 @@ export const orderStatusEnum = pgEnum('order_status', [
   'CS_ENGAGED',
   'CONFIRMED',
   'CANCELLED',
-  'ALLOCATED',
+  // Renamed from `ALLOCATED` per CEO directive 2026-05-04 (migration 0110).
+  // The 3PL location's agent has been assigned to deliver this order.
+  'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
   'DELIVERED',
@@ -35,7 +37,11 @@ export const orderStatusEnum = pgEnum('order_status', [
   'RETURNED',
   'RESTOCKED',
   'WRITTEN_OFF',
-  'COMPLETED',
+  // Renamed from `COMPLETED` per CEO directive 2026-05-04 (migration 0110).
+  // The order reaches this state when Finance confirms cash remittance for
+  // the corresponding COD batch — distinct from `DELIVERED` (CS / Logistics
+  // confirmation) which only signals the customer has the goods.
+  'REMITTED',
 ]);
 
 export const movementTypeEnum = pgEnum('movement_type', [

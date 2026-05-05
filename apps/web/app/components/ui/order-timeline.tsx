@@ -87,6 +87,7 @@ const RIDER_METADATA_EVENT_TYPES = new Set([
 ]);
 
 function formatEventType(type: string): string {
+  if (type === 'ORDER_ALLOCATED') return 'Agent assigned';
   return type
     .toLowerCase()
     .replace(/_/g, ' ')

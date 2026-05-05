@@ -4,27 +4,6 @@ import { z } from 'zod';
 // Invoice Validators
 // ============================================
 
-export const createInvoiceSchema = z.object({
-  orderId: z.string().uuid().optional(),
-  recipientInfo: z.object({
-    name: z.string().min(1),
-    address: z.string().optional(),
-    email: z.string().email().optional(),
-    phone: z.string().optional(),
-  }),
-  lineItems: z.array(
-    z.object({
-      description: z.string().min(1),
-      quantity: z.number().int().min(1),
-      unitPrice: z.coerce.number().min(0).multipleOf(0.01),
-    }),
-  ).min(1),
-  taxRate: z.coerce.number().min(0).max(1).multipleOf(0.0001).optional(),
-  dueDate: z.string().date().optional(),
-  notes: z.string().max(500).optional(),
-});
-export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>;
-
 export const updateInvoiceStatusSchema = z.object({
   invoiceId: z.string().uuid(),
   status: z.enum(['SENT', 'PAID', 'OVERDUE', 'CANCELLED']),
@@ -89,5 +68,24 @@ export const profitReportSchema = z.object({
   endDate: z.string().date().optional(),
   groupBy: z.enum(['product', 'campaign', 'mediaBuyer', 'day', 'week', 'month']).default('product'),
   branchId: z.string().uuid().nullish(),
+  /** When true with `groupBy: 'product'`, returns `byProduct` rows (extra query — avoid on hot paths like CEO dashboard). */
+  includeProductBreakdown: z.boolean().optional(),
 });
 export type ProfitReportInput = z.infer<typeof profitReportSchema>;
+
+/** Delivered-order lines + product ad spend + proportional shared costs (commission, fulfillment, ops). */
+export interface ProductProfitBreakdownRow {
+  productId: string;
+  productName: string;
+  revenue: number;
+  landedCost: number;
+  deliveryFee: number;
+  adSpend: number;
+  allocatedCommission: number;
+  allocatedFulfillment: number;
+  allocatedOperationalLoss: number;
+  contribution: number;
+  marginPct: number;
+  /** Distinct delivered orders in range that include this product. */
+  orderCount: number;
+}

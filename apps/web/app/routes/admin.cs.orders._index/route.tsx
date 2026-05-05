@@ -1,7 +1,14 @@
 import { json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
+import {
+  apiRequest,
+  BULK_ORDER_MUTATION_TIMEOUT_MS,
+  getSessionCookie,
+  requirePermission,
+  defaultThisMonthRange,
+  safeStatus,
+} from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
@@ -11,9 +18,6 @@ import type { Order } from '~/features/orders/types';
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { CS_ORDERS_STATUS_DROPDOWN_EXCLUDE } from '~/features/shared/order-status';
-import { ListFilterPersistence } from '~/components/list-filter-persistence';
-import { ALLOWLIST_CS_ORDERS, LIST_FILTER_SCOPES } from '~/lib/list-filter-persistence-scopes';
-
 export const meta: MetaFunction = () => [
   { title: 'CS Orders — Yannis EOSE' },
 ];
@@ -99,14 +103,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'CS_AGENT' ||
     userPerms.includes(canonicalPermissionCode('orders.createOffline'));
 
+  // Schedule heat + list both key off callback / preferred delivery dates. The default
+  // "this month" strip filters createdAt — that would hide e.g. an April-created order
+  // whose preferred_delivery_date is in May, so the calendar shows a dot but the table
+  // is empty. Omit creation-period bounds whenever a schedule list filter is active.
+  const hasScheduleListFilter =
+    scheduleKind === 'callback_due' ||
+    scheduleKind === 'delivery_overdue' ||
+    (scheduleKind === 'delivery_on_day' && !!scheduleDate) ||
+    (scheduleKind === 'callback_on_day' && !!scheduleDate);
+
   const listInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
     status: status || undefined,
     search: search || undefined,
     ...(assignedCsId && { assignedCsId }),
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
+    ...(!hasScheduleListFilter && startDate && { startDate }),
+    ...(!hasScheduleListFilter && endDate && { endDate }),
   };
   if (scheduleKind === 'callback_due') {
     listInput.scheduleKind = 'callback_due';
@@ -332,11 +346,18 @@ export async function action({ request }: ActionFunctionArgs) {
         method: 'POST',
         cookie,
         body,
+        timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },
     );
 
     if (!res.ok) {
-      return json({ success: false, error: 'Bulk transition failed', succeeded: 0, failed: orderIds.length, results: [] });
+      return json({
+        success: false,
+        error: extractApiErrorMessage(res.data, 'Bulk transition failed'),
+        succeeded: 0,
+        failed: orderIds.length,
+        results: [],
+      });
     }
 
     const data = res.data?.result?.data;
@@ -359,11 +380,18 @@ export async function action({ request }: ActionFunctionArgs) {
         method: 'POST',
         cookie,
         body: { orderIds, csAgentId },
+        timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },
     );
 
     if (!res.ok) {
-      return json({ success: false, error: 'Bulk assign failed', succeeded: 0, failed: orderIds.length, results: [] });
+      return json({
+        success: false,
+        error: extractApiErrorMessage(res.data, 'Bulk assign failed'),
+        succeeded: 0,
+        failed: orderIds.length,
+        results: [],
+      });
     }
 
     const data = res.data?.result?.data;
@@ -385,7 +413,6 @@ export default function CSOrdersRoute() {
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
   return (
     <>
-      <ListFilterPersistence scope={LIST_FILTER_SCOPES.csOrders} allowlist={ALLOWLIST_CS_ORDERS} />
     <OrdersListPage
       {...data}
       userRole={userRole}

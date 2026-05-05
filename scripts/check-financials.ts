@@ -7,16 +7,16 @@ import postgres from 'postgres';
 async function main() {
   const sql = postgres(process.env['DATABASE_URL']!, { max: 1 });
 
-  const rev = await sql`SELECT COALESCE(SUM(total_amount::numeric), 0) as revenue, COUNT(*) as cnt FROM orders WHERE status IN ('DELIVERED','COMPLETED')`;
+  const rev = await sql`SELECT COALESCE(SUM(total_amount::numeric), 0) as revenue, COUNT(*) as cnt FROM orders WHERE status IN ('DELIVERED','REMITTED')`;
   console.log('Revenue (delivered/completed):', Number(rev[0]!.revenue).toLocaleString(), '|', rev[0]!.cnt, 'orders');
 
   const ads = await sql`SELECT COALESCE(SUM(spend_amount::numeric), 0) as total_ad_spend, COUNT(*) as cnt FROM ad_spend_logs`;
   console.log('Ad Spend:', Number(ads[0]!.total_ad_spend).toLocaleString(), '|', ads[0]!.cnt, 'entries');
 
-  const cogs = await sql`SELECT COALESCE(SUM(landed_cost::numeric), 0) as total_landed_cost FROM orders WHERE status IN ('DELIVERED','COMPLETED')`;
+  const cogs = await sql`SELECT COALESCE(SUM(landed_cost::numeric), 0) as total_landed_cost FROM orders WHERE status IN ('DELIVERED','REMITTED')`;
   console.log('Landed COGS:', Number(cogs[0]!.total_landed_cost).toLocaleString());
 
-  const del = await sql`SELECT COALESCE(SUM(delivery_fee::numeric), 0) as total_delivery_fees FROM orders WHERE status IN ('DELIVERED','COMPLETED')`;
+  const del = await sql`SELECT COALESCE(SUM(delivery_fee::numeric), 0) as total_delivery_fees FROM orders WHERE status IN ('DELIVERED','REMITTED')`;
   console.log('Delivery Fees:', Number(del[0]!.total_delivery_fees).toLocaleString());
 
   const pay = await sql`SELECT COALESCE(SUM(total_payout::numeric), 0) as total_payouts, COUNT(*) as cnt FROM payout_records`;

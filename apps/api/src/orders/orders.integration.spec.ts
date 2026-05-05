@@ -46,7 +46,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
   });
 
   it('rejects CS_ENGAGED → ALLOCATED (state skip)', () => {
-    expect(isTransitionAllowed('CS_ENGAGED', 'ALLOCATED')).toBe(false);
+    expect(isTransitionAllowed('CS_ENGAGED', 'AGENT_ASSIGNED')).toBe(false);
   });
 
   // ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
 
     await createTestOrder(db as any, { status: 'CS_ENGAGED', branchId });
     await createTestOrder(db as any, { status: 'CONFIRMED', branchId });
-    await createTestOrder(db as any, { status: 'ALLOCATED', branchId });
+    await createTestOrder(db as any, { status: 'AGENT_ASSIGNED', branchId });
     await createTestOrder(db as any, { status: 'DELIVERED', branchId });
 
     const ordersService = new OrdersService(
@@ -90,7 +90,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       new BranchTeamsService(db as any),
     );
 
-    const logisticsStatuses = ['CONFIRMED', 'ALLOCATED', 'DELIVERED'] as const;
+    const logisticsStatuses = ['CONFIRMED', 'AGENT_ASSIGNED', 'DELIVERED'] as const;
 
     const listResult = await ordersService.list(
       {
@@ -115,7 +115,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       [...logisticsStatuses],
     );
     expect(counts['CS_ENGAGED'] ?? 0).toBe(0);
-    expect((counts['CONFIRMED'] ?? 0) + (counts['ALLOCATED'] ?? 0) + (counts['DELIVERED'] ?? 0)).toBeGreaterThan(0);
+    expect((counts['CONFIRMED'] ?? 0) + (counts['AGENT_ASSIGNED'] ?? 0) + (counts['DELIVERED'] ?? 0)).toBeGreaterThan(0);
   });
 
   // ---------------------------------------------------------------------------
