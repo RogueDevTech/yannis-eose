@@ -31,6 +31,7 @@ import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderMod
 import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 import {
   parseCSQueueTabFromSearchParam,
@@ -1096,6 +1097,48 @@ export function CSDashboardPage({
   });
 
   const actionError = (fetcher.data as { error?: string })?.error;
+  const fetcherSurface = useFetcherActionSurface(fetcher);
+  const bulkAssignSurface = useFetcherActionSurface(bulkAssignFetcher);
+  const deleteCartSurface = useFetcherActionSurface(deleteCartFetcher);
+
+  type FetcherSubmissionMeta =
+    | { intent: string; orderIdsLen?: number; newStatus?: string }
+    | null;
+  const fetcherSubmissionMetaRef = useRef<FetcherSubmissionMeta>(null);
+  useEffect(() => {
+    if (fetcher.state !== 'submitting' && fetcher.state !== 'loading') return;
+    const fd = fetcher.formData;
+    if (!fd) return;
+    const intentRaw = fd.get('intent');
+    if (typeof intentRaw !== 'string' || !intentRaw) return;
+    const meta: NonNullable<FetcherSubmissionMeta> = { intent: intentRaw };
+    if (intentRaw === 'bulkReassign') {
+      try {
+        const ids = JSON.parse(fd.get('orderIds')?.toString() ?? '[]');
+        meta.orderIdsLen = Array.isArray(ids) ? ids.length : undefined;
+      } catch {
+        meta.orderIdsLen = undefined;
+      }
+    }
+    if (intentRaw === 'transition') {
+      const ns = fd.get('newStatus');
+      meta.newStatus = typeof ns === 'string' ? ns : undefined;
+    }
+    fetcherSubmissionMetaRef.current = meta;
+  }, [fetcher.state, fetcher.formData]);
+
+  function fetcherCsModalError(kind: 'reassign' | 'cancel'): string | null {
+    if (!fetcherSurface.friendlyError) return null;
+    const m = fetcherSubmissionMetaRef.current;
+    if (!m) return null;
+    if (kind === 'cancel')
+      return m.intent === 'transition' && m.newStatus === 'CANCELLED' ? fetcherSurface.friendlyError : null;
+    if (kind === 'reassign')
+      return m.intent === 'bulkReassign' && m.orderIdsLen === 1 ? fetcherSurface.friendlyError : null;
+    return null;
+  }
+
+  const csMainFetcherModalOpen = reassignOrder != null || cancelConfirmOrder != null;
   const [dismissedError, setDismissedError] = useState(false);
   const distributeResult = fetcher.data as { success?: boolean; distributed?: number } | undefined;
   const successMessage =
@@ -1104,10 +1147,16 @@ export function CSDashboardPage({
         ? 'No unassigned orders to distribute'
         : `${distributeResult.distributed} order(s) distributed to closers`
       : 'CS action completed';
-  useFetcherToast(fetcher.data, { successMessage });
+  useFetcherToast(fetcher.data, { successMessage, skipErrorToast: csMainFetcherModalOpen });
   useFetcherToast(claimFetcher.data, { successMessage: claimFetcher.data?.message ?? 'Order claimed' });
-  useFetcherToast(deleteCartFetcher.data, { successMessage: 'Cart deleted' });
-  useFetcherToast(bulkAssignFetcher.data, { successMessage: 'Order(s) assigned to closer' });
+  useFetcherToast(deleteCartFetcher.data, {
+    successMessage: 'Cart deleted',
+    skipErrorToast: deleteCartConfirm != null,
+  });
+  useFetcherToast(bulkAssignFetcher.data, {
+    successMessage: 'Order(s) assigned to closer',
+    skipErrorToast: assignCloserModalOpen,
+  });
 
   // Close delete modal and refresh carts list after successful delete
   useEffect(() => {
@@ -1337,10 +1386,10 @@ export function CSDashboardPage({
         />
       )}
 
-      {actionError && !dismissedError && (
+      {actionError && !dismissedError && !csMainFetcherModalOpen && (
         <PageNotification
           variant="error"
-          message={actionError}
+          message={fetcherSurface.friendlyError || actionError}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -2090,6 +2139,10 @@ export function CSDashboardPage({
             Select one or more closers — selected orders are split among them at random.
           </p>
         </div>
+        <ModalFetcherInlineError
+          message={bulkAssignSurface.errorMatchingIntent('bulkAssignToCS')}
+          className="shrink-0 px-4 pt-3"
+        />
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-1.5">
           {assignableCloserOptions.length === 0 ? (
             <p className="text-sm text-app-fg-muted">
@@ -2126,11 +2179,6 @@ export function CSDashboardPage({
             })
           )}
         </div>
-        {bulkAssignFetcher.data?.error && !bulkAssignFetcher.data?.success && (
-          <div className="shrink-0 px-4 pb-2">
-            <p className="text-xs text-danger-600 dark:text-danger-400">{bulkAssignFetcher.data.error}</p>
-          </div>
-        )}
         <div className="shrink-0 flex items-center justify-end gap-2 border-t border-app-border px-4 py-3">
           <Button
             type="button"
@@ -3171,6 +3219,7 @@ export function CSDashboardPage({
               </p>
             </div>
           </div>
+          <ModalFetcherInlineError message={deleteCartSurface.errorMatchingIntent('deleteAbandoned')} className="mb-4" />
           <deleteCartFetcher.Form method="post" action="/admin/cs/queue/carts" className="flex items-center justify-end gap-2">
             <input type="hidden" name="intent" value="deleteAbandoned" />
             <input type="hidden" name="cartId" value={deleteCartConfirm.id} />
@@ -3199,6 +3248,8 @@ export function CSDashboardPage({
             <p className="text-sm text-app-fg-muted mb-4">
               {reassignOrder.customerName} ({reassignOrder.orderId.slice(0, 8)}...)
             </p>
+
+            <ModalFetcherInlineError message={fetcherCsModalError('reassign')} className="mb-4" />
 
             <div>
               <SearchableSelect
@@ -3258,6 +3309,7 @@ export function CSDashboardPage({
           <p className="text-sm text-app-fg-muted mb-3">
             Please provide a reason (at least 10 characters). The order will be moved to Cancelled.
           </p>
+          <ModalFetcherInlineError message={fetcherCsModalError('cancel')} className="mb-3" />
           {/* Preset reason chips — match the bulk cancel modal on the CS Orders page. */}
           <div className="flex flex-wrap gap-2 mb-3">
             {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {

@@ -27,7 +27,7 @@ import {
   listOfferGroupsSchema,
   getOfferGroupSchema,
   clearLegacyOfferTemplatesSchema,
-  createCampaignSchema,
+  createCampaignProcedureSchema,
   updateCampaignSchema,
   listCampaignsSchema,
 } from '@yannis/shared';
@@ -512,7 +512,7 @@ export const marketingRouter = router({
   // ── Campaigns ────────────────────────────────────
   createCampaign: permissionProcedure('marketing.campaigns')
     .meta({ branchScopedMutation: true })
-    .input(createCampaignSchema.extend({ branchId: z.string().uuid().optional() }))
+    .input(createCampaignProcedureSchema)
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...campaignInput } = input;
       return getMarketingService().createCampaign(campaignInput, ctx.user.id, branchId ?? ctx.currentBranchId);

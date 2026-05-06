@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { createAdSpendLogFormSchema, updateAdSpendSchema } from '@yannis/shared/validators';
 import { PageNotification } from '~/components/ui/page-notification';
 import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
@@ -445,7 +446,12 @@ export function MarketingAdSpendPage({
     !editScreenshotUrl.trim();
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
-  useFetcherToast(fetcher.data, { successMessage: 'Action completed' });
+  const adSpendSurface = useFetcherActionSurface(fetcher);
+  const adSpendDetailFetcherModalOpen = Boolean(adSpendDetailModal?.screenshotUrl);
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Action completed',
+    skipErrorToast: adSpendDetailFetcherModalOpen,
+  });
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
@@ -737,10 +743,10 @@ export function MarketingAdSpendPage({
         }
       />
 
-      {actionError && !dismissedError && (
+      {actionError && !dismissedError && !adSpendDetailFetcherModalOpen && (
         <PageNotification
           variant="error"
-          message={actionError}
+          message={adSpendSurface.friendlyError || actionError}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -1409,6 +1415,9 @@ export function MarketingAdSpendPage({
             </button>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
+            <ModalFetcherInlineError
+              message={adSpendSurface.errorMatchingIntent(['approveAdSpend', 'rejectAdSpend'])}
+            />
             <div className="rounded-lg bg-brand-50 dark:bg-brand-900/20 border border-brand-200 dark:border-brand-800 p-4 space-y-3">
               <div>
                 <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">Amount</p>

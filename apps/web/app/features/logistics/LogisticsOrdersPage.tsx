@@ -10,6 +10,7 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
@@ -193,6 +194,8 @@ export function LogisticsOrdersPage({
   } | null>(null);
 
   const fetcher = useFetcher();
+  const fetcherSurface = useFetcherActionSurface(fetcher);
+  const logisticsMutationsModalOpen = !!deliverConfirm || !!editDeliveryDateOrder;
   const fetcherResult = fetcher.data as {
     success?: boolean;
     deliveryConfirmation?: boolean;
@@ -205,6 +208,7 @@ export function LogisticsOrdersPage({
         : fetcherResult?.deliveryConfirmation
           ? 'Delivery confirmation submitted for approval'
           : 'Logistics action completed',
+    skipErrorToast: logisticsMutationsModalOpen,
   });
 
   // Close deliver confirm modal on success
@@ -938,6 +942,7 @@ export function LogisticsOrdersPage({
             setDeliverConfirmDiscount('');
             setDeliverConfirmDeliveryCost('');
           }}
+          error={fetcherSurface.errorMatchingIntent('transition')}
           title="Mark order as delivered?"
           description={
             <>
@@ -998,6 +1003,7 @@ export function LogisticsOrdersPage({
           orderId={editDeliveryDateOrder.orderId}
           customerName={editDeliveryDateOrder.customerName}
           initialDate={editDeliveryDateOrder.preferredDeliveryDate}
+          submissionError={fetcherSurface.errorMatchingIntent('updateDeliveryDate')}
           onClose={() => setEditDeliveryDateOrder(null)}
           loading={fetcher.state === 'submitting'}
           onSave={(preferredDeliveryDate, deliveryFeeAddOn, deliveryDiscountAmount, resolveReceiptUrl) => {
@@ -1031,6 +1037,7 @@ function EditDeliveryDateModal({
   orderId,
   customerName,
   initialDate,
+  submissionError,
   onClose,
   loading,
   onSave,
@@ -1038,6 +1045,7 @@ function EditDeliveryDateModal({
   orderId: string;
   customerName: string;
   initialDate: string | null;
+  submissionError?: string | null;
   onClose: () => void;
   loading: boolean;
   onSave: (preferredDeliveryDate: string, deliveryFeeAddOn?: number, deliveryDiscountAmount?: number, resolveReceiptUrl?: string) => void;
@@ -1070,6 +1078,7 @@ function EditDeliveryDateModal({
           </h3>
         </div>
         <div className="space-y-4 pt-4 px-4 sm:px-5">
+          <ModalFetcherInlineError message={submissionError} />
           <p className="text-sm text-app-fg-muted">
             Order <strong>{orderId.slice(0, 8)}...</strong> · {customerName}
           </p>

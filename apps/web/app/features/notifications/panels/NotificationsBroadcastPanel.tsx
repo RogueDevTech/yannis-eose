@@ -4,7 +4,9 @@ import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
+import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
+import { humanizeZodIssuesString } from '~/lib/api-error';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -545,26 +547,9 @@ export function NotificationsBroadcastPanel({ actorRole }: NotificationsBroadcas
         />
       )}
 
-      {actionData?.error && (
-        <div
-          className="flex items-start gap-3 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 dark:border-danger-500/60 dark:bg-transparent"
-          role="alert"
-        >
-          <svg
-            className="mt-0.5 h-5 w-5 shrink-0 text-danger-600 dark:text-danger-400"
-            fill="currentColor"
-            viewBox="0 0 20 20"
-            aria-hidden
-          >
-            <path
-              fillRule="evenodd"
-              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-              clipRule="evenodd"
-            />
-          </svg>
-          <p className="text-sm text-danger-800 dark:text-danger-200">{actionData.error}</p>
-        </div>
-      )}
+      {actionData?.error ? (
+        <InlineNotification variant="danger" message={humanizeZodIssuesString(actionData.error)} />
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-12 lg:items-start">
         <div className="space-y-6 lg:col-span-7 min-w-0">

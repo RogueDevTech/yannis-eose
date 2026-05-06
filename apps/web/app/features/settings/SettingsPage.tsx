@@ -3,6 +3,7 @@ import { useFetcher, useLocation, useSearchParams } from '@remix-run/react';
 import { APP_THEME_IDS, CLIENT_UI_CONFIG_KEY } from '@yannis/shared';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
+import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { Tabs } from '~/components/ui/tabs';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
@@ -13,6 +14,8 @@ import { APP_THEMES, previewRgb, THEME_PREVIEW_BRAND_HEX, THEME_PREVIEW_RGB } fr
 import { FONT_SCALES } from '~/lib/font-scale';
 import { SettingsPushPanel } from './SettingsPushPanel';
 import { PageHeader } from '~/components/ui/page-header';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { humanizeZodIssuesString } from '~/lib/api-error';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -410,24 +413,31 @@ export function SettingsPage({
     );
   }, [myNotifEnabled, myNotifSavedMap]);
 
+  const settingsSurface = useFetcherActionSurface(fetcher);
   const actionData = fetcher.data as { error?: string; success?: boolean; message?: string } | undefined;
   const [dismissedError, setDismissedError] = useState(false);
   const [confirmSystemOpen, setConfirmSystemOpen] = useState(false);
   const systemFormRef = useRef<HTMLFormElement | null>(null);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
 
+  const systemSettingsErrorInline =
+    confirmSystemOpen && settingsSurface.errorMatchingIntent('updateSystemSettings');
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Settings saved',
+    skipErrorToast: Boolean(systemSettingsErrorInline),
+  });
+
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
     if (actionData?.success) setDismissedSuccess(false);
   }, [actionData?.error, actionData?.success]);
 
-  // Close the system-settings confirmation modal once the save resolves (success OR error).
-  // Keeping it open on error would just hide the page-level toast/notification underneath it.
   useEffect(() => {
-    if (fetcher.state === 'idle' && (actionData?.success || actionData?.error)) {
+    if (fetcher.state === 'idle' && actionData?.success) {
       setConfirmSystemOpen(false);
     }
-  }, [fetcher.state, actionData?.success, actionData?.error]);
+  }, [fetcher.state, actionData?.success]);
 
   // Derive feature flag states from system settings
   const voipSetting = systemSettings.find((s) => s.key === 'VOIP_ENABLED');
@@ -497,10 +507,12 @@ export function SettingsPage({
         }))}
       />
 
-      {actionData?.error && !dismissedError && (
+      {actionData?.error &&
+        !dismissedError &&
+        !systemSettingsErrorInline && (
         <PageNotification
           variant="error"
-          message={actionData.error}
+          message={humanizeZodIssuesString(actionData.error)}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -1362,6 +1374,10 @@ export function SettingsPage({
             These changes affect everyone in the org — VOIP availability, the CS dispatch strategy,
             and the default app theme. Are you sure you want to apply them now?
           </p>
+          <ModalFetcherInlineError
+            message={settingsSurface.errorMatchingIntent('updateSystemSettings')}
+            className="mb-4"
+          />
           <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
             <Button
               type="button"
@@ -1408,8 +1424,14 @@ function VoipProviderPicker({
   }>;
 }) {
   const switchFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  const voipSwitchSurface = useFetcherActionSurface(switchFetcher);
   const isSubmitting = switchFetcher.state === 'submitting';
   const submittingProvider = (switchFetcher.formData?.get('provider') as string | null) ?? null;
+
+  useFetcherToast(switchFetcher.data, {
+    successMessage: 'VoIP provider updated',
+    skipErrorToast: !!voipSwitchSurface.friendlyError,
+  });
 
   return (
     <div className="border-t border-app-border pt-4">
@@ -1469,11 +1491,10 @@ function VoipProviderPicker({
           );
         })}
       </div>
-      {switchFetcher.data?.error && (
-        <p className="mt-2 text-xs text-danger-600 dark:text-danger-400">
-          {switchFetcher.data.error}
-        </p>
-      )}
+      <ModalFetcherInlineError
+        className="mt-2"
+        message={voipSwitchSurface.errorMatchingIntent('setVoipProvider')}
+      />
       {switchFetcher.data?.success && switchFetcher.data.message && (
         <p className="mt-2 text-xs text-success-700 dark:text-success-400">
           {switchFetcher.data.message}

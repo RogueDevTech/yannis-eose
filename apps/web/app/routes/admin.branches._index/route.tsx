@@ -8,6 +8,7 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -85,10 +86,14 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function BranchManagementRoute() {
   const { branches } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(fetcher.data, { successMessage: 'Branch saved' });
-
+  const branchSurface = useFetcherActionSurface(fetcher);
   const [createOpen, setCreateOpen] = useState(false);
   const [editBranch, setEditBranch] = useState<Branch | null>(null);
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Branch saved',
+    skipErrorToast: createOpen || !!editBranch,
+  });
 
   const handleBranchSuccess = useCallback(() => {
     setCreateOpen(false);
@@ -226,11 +231,7 @@ export default function BranchManagementRoute() {
               className="uppercase"
               placeholder="e.g. LGS"
             />
-            {fetcher.data?.error && (
-              <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
-                <p className="text-sm text-danger-700 dark:text-danger-400">{fetcher.data.error}</p>
-              </div>
-            )}
+            <ModalFetcherInlineError message={branchSurface.errorMatchingIntent('create')} />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
               <Button type="button" variant="secondary" size="sm" onClick={() => setCreateOpen(false)} disabled={isSubmitting}>
                 Cancel
@@ -298,11 +299,7 @@ export default function BranchManagementRoute() {
                 { value: 'INACTIVE', label: 'Inactive' },
               ]}
             />
-            {fetcher.data?.error && (
-              <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
-                <p className="text-sm text-danger-700 dark:text-danger-400">{fetcher.data.error}</p>
-              </div>
-            )}
+            <ModalFetcherInlineError message={branchSurface.errorMatchingIntent('update')} />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
               <Button type="button" variant="secondary" size="sm" onClick={() => setEditBranch(null)} disabled={isSubmitting}>
                 Cancel

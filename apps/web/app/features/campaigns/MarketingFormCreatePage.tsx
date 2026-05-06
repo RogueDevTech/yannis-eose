@@ -1,34 +1,30 @@
 import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
 import { useEffect, useMemo, useState } from 'react';
-import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
+import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
-import type { CustomFormField, OfferGroupRow, Product, StandardFieldConfig } from './types';
+import type { CustomFormField, OfferGroupRow, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
-import { FormFullPreview } from './form-full-preview';
+import { FormFullPreview, type FormFullPreviewPreviewProduct } from './form-full-preview';
 import { cloneDefaultAdditionalFieldSelectOptions } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormCreatePageProps {
-  products: Product[];
   offerGroups: OfferGroupRow[];
-  productsLoadError?: string | null;
-  canManageOfferTemplates?: boolean;
+  offerGroupsLoadError?: string | null;
 }
 
 /**
  * Full-page create flow: basic form settings + custom field builder, single submit to
- * `marketing.createCampaign` with `formConfig.customFields`.
+ * `marketing.createCampaign` with `formConfig.customFields`. Offer group is required; product ids are derived server-side.
  */
 export function MarketingFormCreatePage({
-  products,
   offerGroups,
-  productsLoadError = null,
-  canManageOfferTemplates = false,
+  offerGroupsLoadError = null,
 }: MarketingFormCreatePageProps) {
   const navigation = useNavigation();
   const actionData = useActionData<{ error?: string } | undefined>();
@@ -41,13 +37,12 @@ export function MarketingFormCreatePage({
   const [accentColor, setAccentColor] = useState<string>(DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
   const [fields, setFields] = useState<CustomFormField[]>([]);
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>([]);
-  const [dismissedProductsError, setDismissedProductsError] = useState(false);
+  const [dismissedOffersError, setDismissedOffersError] = useState(false);
   const [dismissedActionError, setDismissedActionError] = useState(false);
   const [formHeading, setFormHeading] = useState('');
   const [formSubtitle, setFormSubtitle] = useState('');
   const [formButtonText, setFormButtonText] = useState('');
   const [successCallbackUrl, setSuccessCallbackUrl] = useState('');
-  const [selectedProductId, setSelectedProductId] = useState('');
   const [showProductImages, setShowProductImages] = useState(true);
   const [additionalSelectOptions, setAdditionalSelectOptions] = useState(cloneDefaultAdditionalFieldSelectOptions);
   const [selectedOfferGroupId, setSelectedOfferGroupId] = useState('');
@@ -66,23 +61,6 @@ export function MarketingFormCreatePage({
     }
   }, [navigation.state, navigation.formData]);
 
-  useEffect(() => {
-    // Reset offer selection when product changes.
-    setSelectedOfferGroupId('');
-  }, [selectedProductId]);
-
-  const productOptions = useMemo(
-    () =>
-      products.map((p) => ({
-        value: p.id,
-        label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
-      })),
-    [products],
-  );
-
-  // CEO directive 2026-05-04: an offer carries its own products. Forms pick from
-  // ANY active, non-empty offer group; the offer's items drive what the form sells.
-  // No longer constrained to the form's currently-selected product.
   const compatibleOfferGroups = useMemo(() => {
     return offerGroups
       .filter((g) => String(g.status).toUpperCase() === 'ACTIVE')
@@ -98,19 +76,64 @@ export function MarketingFormCreatePage({
     [compatibleOfferGroups],
   );
 
-  const previewOffers = useMemo(() => {
-    if (!selectedOfferGroupId) return [];
+  const { previewMultiProduct, previewOffers, previewProducts } = useMemo(() => {
+    if (!selectedOfferGroupId) {
+      return {
+        previewMultiProduct: false,
+        previewOffers: [] as { label: string; qty: number; price: string; imageUrls?: string[] }[],
+        previewProducts: undefined as FormFullPreviewPreviewProduct[] | undefined,
+      };
+    }
     const g = compatibleOfferGroups.find((x) => x.id === selectedOfferGroupId);
-    if (!g) return [];
-    return g.items
+    if (!g) {
+      return {
+        previewMultiProduct: false,
+        previewOffers: [],
+        previewProducts: undefined,
+      };
+    }
+    const items = g.items
       .slice()
-      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-      .map((it) => ({
-        label: it.label,
-        qty: Number(it.quantity ?? 1) || 1,
-        price: typeof it.price === 'number' ? String(it.price) : String(it.price ?? ''),
-        ...(typeof it.imageUrl === 'string' && it.imageUrl.length > 0 ? { imageUrls: [it.imageUrl] } : {}),
-      }));
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+    const orderedProductIds: string[] = [];
+    const seen = new Set<string>();
+    for (const it of items) {
+      if (!seen.has(it.productId)) {
+        seen.add(it.productId);
+        orderedProductIds.push(it.productId);
+      }
+    }
+
+    const rowToOffer = (it: (typeof items)[0]) => ({
+      label: it.label,
+      qty: Number(it.quantity ?? 1) || 1,
+      price: typeof it.price === 'number' ? String(it.price) : String(it.price ?? ''),
+      ...(typeof it.imageUrl === 'string' && it.imageUrl.length > 0 ? { imageUrls: [it.imageUrl] } : {}),
+    });
+
+    if (orderedProductIds.length <= 1) {
+      return {
+        previewMultiProduct: false,
+        previewOffers: items.map(rowToOffer),
+        previewProducts: undefined,
+      };
+    }
+
+    const previewProductsBuilt: FormFullPreviewPreviewProduct[] = orderedProductIds.map((pid) => {
+      const tierItems = items.filter((i) => i.productId === pid);
+      const name = tierItems[0]?.productName ?? 'Product';
+      return {
+        id: pid,
+        name,
+        offers: tierItems.map(rowToOffer),
+      };
+    });
+
+    return {
+      previewMultiProduct: true,
+      previewOffers: [],
+      previewProducts: previewProductsBuilt,
+    };
   }, [compatibleOfferGroups, selectedOfferGroupId]);
 
   return (
@@ -127,12 +150,12 @@ export function MarketingFormCreatePage({
         }
       />
 
-      {productsLoadError && !dismissedProductsError && (
+      {offerGroupsLoadError && !dismissedOffersError && (
         <PageNotification
           variant="error"
-          message={productsLoadError}
+          message={offerGroupsLoadError}
           durationMs={8000}
-          onDismiss={() => setDismissedProductsError(true)}
+          onDismiss={() => setDismissedOffersError(true)}
         />
       )}
 
@@ -153,7 +176,6 @@ export function MarketingFormCreatePage({
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
             <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
-            <input type="hidden" name="productId" value={selectedProductId} readOnly />
             <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
 
@@ -161,35 +183,28 @@ export function MarketingFormCreatePage({
               <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <TextInput name="name" required placeholder="Form name" className="sm:col-span-2" />
-                <SearchableSelect
-                  id="marketing-form-product"
-                  label="Product"
-                  value={selectedProductId}
-                  onChange={setSelectedProductId}
-                  required
-                  options={productOptions}
-                  placeholder="Select product..."
-                  searchPlaceholder="Search products..."
-                />
-                <SearchableSelect
-                  id="marketing-form-offer-group"
-                  label="Offer"
-                  value={selectedOfferGroupId}
-                  onChange={setSelectedOfferGroupId}
-                  options={
-                    compatibleOfferGroups.length > 0
-                      ? [{ value: '', label: 'No offer selected' }, ...offerGroupOptions]
-                      : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
-                  }
-                  disabled={compatibleOfferGroups.length === 0}
-                  placeholder="Select offer…"
-                  searchPlaceholder="Search offers…"
-                  hint={
-                    compatibleOfferGroups.length === 0
-                      ? 'No offers yet — create one on the Offers tab.'
-                      : 'Optional: pick one offer to display as cards on the Edge form.'
-                  }
-                />
+                <div className="sm:col-span-2">
+                  <SearchableSelect
+                    id="marketing-form-offer-group"
+                    label="Offer"
+                    value={selectedOfferGroupId}
+                    onChange={setSelectedOfferGroupId}
+                    required
+                    options={
+                      compatibleOfferGroups.length > 0
+                        ? offerGroupOptions
+                        : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
+                    }
+                    disabled={compatibleOfferGroups.length === 0}
+                    placeholder="Select offer…"
+                    searchPlaceholder="Search offers…"
+                    hint={
+                      compatibleOfferGroups.length === 0
+                        ? 'Create an offer package on the Offers tab first.'
+                        : 'Required. Catalog products and tiers come from this offer.'
+                    }
+                  />
+                </div>
               </div>
 
               <div className="border-t border-app-border pt-3">
@@ -287,11 +302,12 @@ export function MarketingFormCreatePage({
             subtitle={formSubtitle}
             buttonText={formButtonText}
             accentColor={accentColor}
-            multiProduct={false}
+            multiProduct={previewMultiProduct}
             standardFields={standardFields}
             successCallbackUrl={successCallbackUrl}
             customFields={fields}
             previewOffers={previewOffers}
+            previewProducts={previewProducts}
             additionalSelectOptions={additionalSelectOptions}
             showProductImages={showProductImages}
           />

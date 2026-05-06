@@ -44,6 +44,48 @@ function readKnownMessage(payload: unknown): string | null {
   return null;
 }
 
+/** Turn `someField` / `some_field` segments into a short field label. */
+function pathSegmentToLabel(seg: string): string {
+  const withSpaces = seg.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ');
+  return withSpaces.charAt(0).toUpperCase() + withSpaces.slice(1);
+}
+
+/**
+ * If `message` is a stringified Zod issue array (as tRPC sometimes returns), return readable lines.
+ * Otherwise returns `message` unchanged.
+ */
+export function humanizeZodIssuesString(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith('[')) return message;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) return message;
+
+    const lines: string[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const rec = item as Record<string, unknown>;
+      const msg = rec.message;
+      if (typeof msg !== 'string' || !msg.trim()) continue;
+
+      const path = rec.path;
+      let label: string | null = null;
+      if (Array.isArray(path) && path.length > 0) {
+        const last = path[path.length - 1];
+        if (typeof last === 'string' && last.length > 0) label = pathSegmentToLabel(last);
+        else if (typeof last === 'number') label = String(last);
+      }
+
+      lines.push(label ? `${label}: ${msg.trim()}` : msg.trim());
+    }
+
+    if (lines.length > 0) return lines.join('\n');
+    return message;
+  } catch {
+    return message;
+  }
+}
+
 function collectStrings(value: unknown, out: string[]): void {
   if (value == null) return;
   if (typeof value === 'string') {
@@ -89,7 +131,7 @@ function collectStrings(value: unknown, out: string[]): void {
  */
 export function extractApiErrorMessage(payload: unknown, fallback = 'Action failed. Please try again.'): string {
   const known = readKnownMessage(payload);
-  if (known) return known;
+  if (known) return humanizeZodIssuesString(known);
 
   const raw: string[] = [];
   collectStrings(payload, raw);
@@ -101,14 +143,14 @@ export function extractApiErrorMessage(payload: unknown, fallback = 'Action fail
     // Reject very long blobs (stringified payloads) and obvious code/path noise.
     .filter((s) => s.length < 500);
 
-  if (candidates.length === 0) return fallback;
+  if (candidates.length === 0) return humanizeZodIssuesString(fallback);
   // Prefer concise messages over verbose ones.
   candidates.sort((a, b) => a.length - b.length);
   // Skip 1-character noise (boolean-ish) if anything longer is available.
   for (const c of candidates) {
-    if (c.length >= 4) return c;
+    if (c.length >= 4) return humanizeZodIssuesString(c);
   }
-  return candidates[0] ?? fallback;
+  return humanizeZodIssuesString(candidates[0] ?? fallback);
 }
 
 export function isBranchContextRequiredError(payload: unknown): boolean {

@@ -15,6 +15,7 @@ import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ExportModal } from '~/components/ui/export-modal';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { formatRole } from '~/features/users/types';
@@ -238,12 +239,16 @@ function CreateDisbursementModal({
   preselectedReceiverId: string | null;
 }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
   const [receiptUrl, setReceiptUrl] = useState('');
   const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
   const [receiverId, setReceiverId] = useState(preselectedReceiverId ?? '');
 
-  useFetcherToast(fetcher.data, { successMessage: 'Disbursement sent successfully' });
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Disbursement sent successfully',
+    skipErrorToast: open,
+  });
 
   useCloseOnFetcherSuccess(fetcher, onClose);
 
@@ -338,11 +343,7 @@ function CreateDisbursementModal({
             />
           </div>
 
-          {fetcher.data?.error && (
-            <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
-              <p className="text-sm text-danger-700 dark:text-danger-400">{fetcher.data.error}</p>
-            </div>
-          )}
+          <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('createFunding')} />
 
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
             <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={fetcher.state === 'submitting'}>
@@ -422,8 +423,13 @@ export function DisbursementsPage({
   const [approveRequestUploadState, setApproveRequestUploadState] = useState<FileUploadUploadState>('idle');
 
   const requestActionFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const requestActionSurface = useFetcherActionSurface(requestActionFetcher);
   const RequestActionForm = requestActionFetcher.Form;
-  useFetcherToast(requestActionFetcher.data, { successMessage: 'Request updated' });
+  const requestApproveRejectModalOpen = !!approvingRequestId || !!rejectingRequestId;
+  useFetcherToast(requestActionFetcher.data, {
+    successMessage: 'Request updated',
+    skipErrorToast: requestApproveRejectModalOpen,
+  });
 
   // Close approve / reject modal the same tick the toast fires; revalidation
   // is handled inside the close hook.
@@ -1342,6 +1348,7 @@ export function DisbursementsPage({
       {/* Approve funding request modal */}
       {approvingRequestId && approvingRequestRow && (
         <Modal open onClose={() => setApprovingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
+          <ModalFetcherInlineError message={requestActionSurface.errorMatchingIntent('approveFundingRequest')} />
           <h3 className="text-lg font-semibold text-app-fg">Approve funding request</h3>
           <p className="text-sm text-app-fg-muted">
             Send the money to the requester manually (e.g. bank transfer), then attach the receipt image below. They will be notified and can preview the receipt.
@@ -1399,6 +1406,7 @@ export function DisbursementsPage({
       {/* Reject funding request modal */}
       {rejectingRequestId && (
         <Modal open onClose={() => setRejectingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
+          <ModalFetcherInlineError message={requestActionSurface.errorMatchingIntent('rejectFundingRequest')} />
           <h3 className="text-lg font-semibold text-app-fg">Reject funding request</h3>
           <p className="text-sm text-app-fg-muted">
             The requester will be notified that their request was not approved.

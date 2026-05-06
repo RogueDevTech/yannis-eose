@@ -23,6 +23,7 @@ import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
 import { useLiveIndicator } from '~/hooks/useSocket';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { useFetcherToast } from '~/components/ui/toast';
 import {
   STATUS_OPTIONS,
@@ -241,10 +242,11 @@ export function OrdersListPage({
   const [assignModalKind, setAssignModalKind] = useState<'assign' | 'reassign'>('assign');
   const [assignAgentIds, setAssignAgentIds] = useState<Set<string>>(() => new Set());
   const assignFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
+  const assignSurface = useFetcherActionSurface(assignFetcher);
   const isAssigning = assignFetcher.state !== 'idle';
   const assignSuccessMessage =
     assignModalKind === 'reassign' ? 'Orders reassigned to closers' : 'Orders assigned to closers';
-  useFetcherToast(assignFetcher.data, { successMessage: assignSuccessMessage });
+  useFetcherToast(assignFetcher.data, { successMessage: assignSuccessMessage, skipErrorToast: assignModalOpen });
   useCloseOnFetcherSuccess(assignFetcher, () => {
     setAssignModalOpen(false);
     setAssignAgentIds(new Set());
@@ -255,8 +257,12 @@ export function OrdersListPage({
   const [allocateModalOpen, setAllocateModalOpen] = useState(false);
   const [allocateLocationId, setAllocateLocationId] = useState('');
   const allocateFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
+  const allocateSurface = useFetcherActionSurface(allocateFetcher);
   const isAllocating = allocateFetcher.state !== 'idle';
-  useFetcherToast(allocateFetcher.data, { successMessage: 'Orders assigned for delivery (Logistics)' });
+  useFetcherToast(allocateFetcher.data, {
+    successMessage: 'Orders assigned for delivery (Logistics)',
+    skipErrorToast: allocateModalOpen,
+  });
   useCloseOnFetcherSuccess(allocateFetcher, () => {
     setAllocateModalOpen(false);
     setAllocateLocationId('');
@@ -1416,6 +1422,7 @@ export function OrdersListPage({
             </p>
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-1.5">
+            <ModalFetcherInlineError message={assignSurface.errorMatchingIntent('bulkAssign')} className="mb-2" />
             {assignCloserOptions.length === 0 ? (
               <p className="text-sm text-app-fg-muted">No closers available in your scope.</p>
             ) : (
@@ -1450,11 +1457,6 @@ export function OrdersListPage({
             )}
           </div>
           <div data-branch-scoped-action="true">
-            {assignFetcher.data?.error && !assignFetcher.data?.success && (
-              <div className="shrink-0 px-4 pb-2">
-                <p className="text-xs text-danger-600 dark:text-danger-400">{assignFetcher.data.error}</p>
-              </div>
-            )}
             <div className="shrink-0 flex justify-end gap-2 border-t border-app-border px-4 py-3">
               <Button
                 type="button"
@@ -1500,6 +1502,7 @@ export function OrdersListPage({
           <p className="text-sm text-app-fg-muted mb-4">
             Pick the Logistics location that will fulfill these orders.
           </p>
+          <ModalFetcherInlineError message={allocateSurface.errorMatchingIntent('bulkTransition')} className="mb-4" />
           <div data-branch-scoped-action="true">
             <div className="mb-4">
               <SearchableSelect
@@ -1512,11 +1515,6 @@ export function OrdersListPage({
                 searchPlaceholder="Search locations..."
               />
             </div>
-            {allocateFetcher.data?.error && !allocateFetcher.data?.success && (
-              <p className="mb-3 text-xs text-danger-600 dark:text-danger-400">
-                {allocateFetcher.data.error}
-              </p>
-            )}
             <div className="flex justify-end gap-2">
               <Button
                 type="button"

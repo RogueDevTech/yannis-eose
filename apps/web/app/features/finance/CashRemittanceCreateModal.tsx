@@ -9,6 +9,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type { OrderInvoice } from '~/features/orders/types';
 
 export interface EligibleOrder {
@@ -46,6 +47,7 @@ export function CashRemittanceCreateModal({
   onSuccess,
 }: CashRemittanceCreateModalProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
   const [receiptUrls, setReceiptUrls] = useState<string[]>([]);
   const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
@@ -89,7 +91,6 @@ export function CashRemittanceCreateModal({
   );
 
   const submitting = fetcher.state !== 'idle';
-  const fetcherError = fetcher.data?.error ?? null;
 
   const handleSubmit = () => {
     setInlineError(null);
@@ -119,7 +120,7 @@ export function CashRemittanceCreateModal({
     fetcher.submit(fd, { method: 'POST', action: actionUrl });
   };
 
-  const error = inlineError ?? fetcherError;
+  const error = inlineError ?? fetcherSurface.errorMatchingIntent('createRemittance');
   const n = selectedOrders.length;
 
   return (

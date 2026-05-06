@@ -10,6 +10,8 @@ import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { Pagination } from '~/components/ui/pagination';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import { humanizeZodIssuesString } from '~/lib/api-error';
 import { formatActivityDescription } from '~/lib/format-activity';
 import { formatNaira } from '~/lib/format-amount';
 import type {
@@ -31,11 +33,12 @@ import type {
   PermissionCatalogBundle,
   UserOnboardingSummary,
 } from './types';
-import { USER_STATUS_COLORS, ROLE_AVATAR_GRADIENTS, formatRole } from './types';
+import { USER_STATUS_COLORS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { PermissionsPreview } from './PermissionsPreview';
+import { useFetcherToast } from '~/components/ui/toast';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
@@ -111,6 +114,7 @@ export function UserDetailPage({
   // modal stays isolated from the page-level <Form>s — those compete for navigation state and
   // were the source of the crash when the modal-portal Form's actionData reached an unmounted tree.
   const resetFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
+  const resetSurface = useFetcherActionSurface(resetFetcher);
   const isSubmitting = navigation.state === 'submitting';
   const formIntent = navigation.formData?.get('intent')?.toString();
   const isDeactivating = isSubmitting && formIntent === 'deactivate';
@@ -131,6 +135,11 @@ export function UserDetailPage({
   const [emailChangeReason, setEmailChangeReason] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
+
+  useFetcherToast(resetFetcher.data, {
+    successMessage: 'Password updated',
+    skipErrorToast: Boolean(showResetPassword && resetSurface.errorMatchingIntent('resetPassword')),
+  });
   // Settings/edit moved to /hr/users/:id/edit — the edit form's local state
   // (conflictModalOpen, showSaveConfirm, editFormRef, allowSaveSubmitRef, resolvedActiveHeads,
   // resolvedBranches) was deleted with it. The Permissions preview card still needs the
@@ -546,7 +555,7 @@ export function UserDetailPage({
     },
   ], []);
 
-  const gradient = ROLE_AVATAR_GRADIENTS[user.role] ?? 'from-brand-500 to-brand-700';
+  const profileHeaderTone = 'bg-brand-500 dark:bg-brand-600';
   const initials = user.name.split(' ').map((w) => w.charAt(0).toUpperCase()).slice(0, 2).join('');
   const memberSince = new Date(user.createdAt);
   const tenure = getTimeSince(memberSince);
@@ -573,10 +582,13 @@ export function UserDetailPage({
       </div>
 
       {/* Action feedback */}
-      {actionData?.error && !dismissedError && (
+      {actionData?.error &&
+        !dismissedError &&
+        !showDeactivateConfirm &&
+        !showEmailChangeModal && (
         <PageNotification
           variant="error"
-          message={actionData.error}
+          message={humanizeZodIssuesString(actionData.error)}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -599,17 +611,16 @@ export function UserDetailPage({
 
       {/* ─── Profile Header Card ─────────────────────────── */}
       <div className="card p-0">
-        {/* Gradient Banner */}
-        <div className={`h-28 sm:h-32 bg-gradient-to-r ${gradient} relative`}>
-          <div className="absolute inset-0 bg-black/10" />
-          <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.15\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")' }} />
-        </div>
+        {/* Profile banner — single flat tone */}
+        <div className={`h-28 sm:h-32 ${profileHeaderTone}`} />
 
         {/* Profile Info */}
         <div className="px-4 sm:px-6 pb-5 -mt-12 sm:-mt-14 relative">
           <div className="flex flex-col sm:flex-row sm:items-end gap-4">
             {/* Avatar */}
-            <div className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br ${gradient} ring-4 ring-white dark:ring-surface-900 flex items-center justify-center shadow-lg flex-shrink-0`}>
+            <div
+              className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl ${profileHeaderTone} ring-4 ring-white dark:ring-surface-900 flex items-center justify-center shadow-lg flex-shrink-0`}
+            >
               <span className="text-2xl sm:text-3xl font-bold text-white tracking-wide">{initials}</span>
             </div>
 
@@ -1380,9 +1391,7 @@ export function UserDetailPage({
             <p className="text-sm text-app-fg-muted">
               Set a new password for <strong>{user.name}</strong>. This will log them out of all sessions.
             </p>
-            {resetFetcher.data?.error && (
-              <InlineNotification variant="danger" message={resetFetcher.data.error} />
-            )}
+            <ModalFetcherInlineError message={resetSurface.errorMatchingIntent('resetPassword')} />
             <resetFetcher.Form method="post" action="." data-branch-scoped-action="true">
               <input type="hidden" name="intent" value="resetPassword" />
               <div className="space-y-4">
@@ -1419,6 +1428,9 @@ export function UserDetailPage({
                 ? 'This will update the user\'s email address. Please provide a reason for the approval.'
                 : 'This will reject the pending email change. Please provide a reason.'}
             </p>
+            {actionData?.error ? (
+              <InlineNotification variant="danger" message={humanizeZodIssuesString(actionData.error)} />
+            ) : null}
             <Form method="post" data-branch-scoped-action="true">
               <input type="hidden" name="intent" value="processEmailChange" />
               <input type="hidden" name="requestId" value={showEmailChangeModal.requestId} />
@@ -1482,14 +1494,9 @@ export function UserDetailPage({
             <p className="text-xs text-app-fg-muted">
               Only Super Admins can deactivate users. If you need to temporarily disable access, use <strong>Inactive</strong> or <strong>Archived</strong> instead (those can be reactivated).
             </p>
-            {actionData?.error && !dismissedError && (
-              <PageNotification
-                variant="error"
-                message={actionData.error}
-                durationMs={5000}
-                onDismiss={() => setDismissedError(true)}
-              />
-            )}
+            {actionData?.error && !dismissedError ? (
+              <InlineNotification variant="danger" message={humanizeZodIssuesString(actionData.error)} />
+            ) : null}
             <div className="flex items-center justify-end gap-3 pt-2">
               <Button type="button" variant="secondary" onClick={() => setShowDeactivateConfirm(false)} disabled={isDeactivating}>
                 Cancel

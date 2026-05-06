@@ -28,6 +28,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type {
   Provider,
   Location,
@@ -49,9 +50,11 @@ interface ProviderRow {
 function AddProviderForm({
   fetcher,
   onCancel,
+  submissionError,
 }: {
   fetcher: ReturnType<typeof useFetcher>;
   onCancel: () => void;
+  submissionError?: string | null;
 }) {
   const [rows, setRows] = useState<ProviderRow[]>([{ name: '', contactInfo: '', coverageArea: '' }]);
 
@@ -75,6 +78,7 @@ function AddProviderForm({
 
   return (
     <fetcher.Form method="post" className="px-6 py-4 space-y-3">
+      <ModalFetcherInlineError message={submissionError} className="mb-1" />
       <div className="flex items-center justify-end">
         <Button type="button" variant="secondary" size="sm" onClick={addRow}>
           + Add another
@@ -159,9 +163,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [viewingProvider, setViewingProvider] = useState<Provider | null>(null);
   const [viewingLocation, setViewingLocation] = useState<Location | null>(null);
 
-  const actionError = (fetcher.data as { error?: string })?.error;
+  const fetcherSurface = useFetcherActionSurface(fetcher);
+  const actionError = fetcherSurface.rawError;
+  const friendlyError = fetcherSurface.friendlyError;
+  const mutationModalOpen = showAddProvider || showAddLocation || !!editingProvider;
   const [dismissedError, setDismissedError] = useState(false);
-  useFetcherToast(fetcher.data, { successMessage: 'Logistics action completed' });
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Logistics action completed',
+    skipErrorToast: mutationModalOpen,
+  });
 
   // Optimistic-row derivation — see the canonical pattern in
   // `~/hooks/useOptimisticListMerge`. We extract synthetic Provider /
@@ -421,10 +431,10 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         }
       />
 
-      {actionError && !dismissedError && (
+      {actionError && !dismissedError && !mutationModalOpen && (
         <PageNotification
           variant="error"
-          message={actionError}
+          message={friendlyError}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -457,6 +467,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           <AddProviderForm
             fetcher={fetcher}
             onCancel={() => setShowAddProvider(false)}
+            submissionError={fetcherSurface.errorMatchingIntent(['createProvider', 'createProviders'])}
           />
         </Modal>
       )}
@@ -490,6 +501,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             </button>
           </div>
           <fetcher.Form method="post" className="px-6 py-4 space-y-4">
+            <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('createLocation')} />
             <input type="hidden" name="intent" value="createLocation" />
             <input type="hidden" name="providerId" value={addLocationProviderId} />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-4">
@@ -580,6 +592,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               </button>
             </div>
             <fetcher.Form method="post" className="px-6 py-4 space-y-4">
+              <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('updateProvider')} />
               <input type="hidden" name="intent" value="updateProvider" />
               <input type="hidden" name="providerId" value={editingProvider.id} />
               <TextInput

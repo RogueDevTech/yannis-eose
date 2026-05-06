@@ -723,6 +723,7 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Financial P&L rows | `<StatRow />`, `<StatRowGroup />` |
 | List tables (default — incl. loader refetch overlay, mobile card rows) | `<CompactTable />` |
 | Compact dense table for detail / tabbed views (typed columns, action column, optional `pagination`, `selection`, `renderMobileCard`, `footer`) | `<CompactTable />` |
+| Long / variable text in a compact row (ellipsis, no wrap; optional info popover for full value) | `<CompactTableTruncatedValue />` (`apps/web/app/components/ui/compact-table-truncated-value.tsx`) — use inside column `render`; set column `nowrap` / width when needed; do not stack `cellTitle` + popover for the same string |
 | Table/list URL refetch (blur overlay; keep stale rows mounted) | `<TableLoadingOverlay show={…} />` with `useLoaderRefetchBusy()` (`apps/web/app/hooks/use-loader-refetch-busy.ts`) — `navigation.state === 'loading'`, same-pathname guard on by default; additive with `<NavProgressBar />` |
 | CompactTable while loader refetches (no row swap) | `<CompactTable loading loadingVariant="overlay" />` — default `loadingVariant` is `replace` |
 | Row actions: mobile kebab → slide-up sheet (reuse with `CompactTable` action column) | `<TableRowActionsSheet />` (`apps/web/app/components/ui/table-row-actions-sheet.tsx`) |

@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { Link, useLoaderData, useFetcher, useRevalidator } from '@remix-run/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { apiRequest, getCurrentUser, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
@@ -32,7 +33,11 @@ function RemoveModal({
   onClose: () => void;
 }) {
   const removeFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(removeFetcher.data, { successMessage: 'Member removed' });
+  const removeSurface = useFetcherActionSurface(removeFetcher);
+  useFetcherToast(removeFetcher.data, {
+    successMessage: 'Member removed',
+    skipErrorToast: true,
+  });
   const isSubmitting = removeFetcher.state !== 'idle';
 
   useEffect(() => {
@@ -68,11 +73,9 @@ function RemoveModal({
         </div>
       </div>
 
-      {removeFetcher.data?.error && (
-        <div className="mx-5 mb-3 rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
-          <p className="text-sm text-danger-700 dark:text-danger-400">{removeFetcher.data.error}</p>
-        </div>
-      )}
+      <div className="mx-5 mb-3">
+        <ModalFetcherInlineError message={removeSurface.errorMatchingIntent('removeUser')} />
+      </div>
 
       <div className="border-t border-app-border px-5 py-3 flex items-center justify-end gap-2">
         <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={isSubmitting}>
@@ -671,8 +674,12 @@ function BranchSupervisorTeamsPanel({
   canManage: boolean;
 }) {
   const squadFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const squadSurface = useFetcherActionSurface(squadFetcher);
   const revalidate = useRevalidator();
-  useFetcherToast(squadFetcher.data, { successMessage: 'Teams updated' });
+  useFetcherToast(squadFetcher.data, {
+    successMessage: 'Teams updated',
+    skipErrorToast: !!squadSurface.friendlyError,
+  });
 
   useEffect(() => {
     if (squadFetcher.state === 'idle' && squadFetcher.data?.success) {
@@ -692,6 +699,7 @@ function BranchSupervisorTeamsPanel({
 
   return (
     <div className="space-y-6">
+      <ModalFetcherInlineError message={squadSurface.friendlyError || null} />
       {canManage ? (
       <div className="rounded-lg border border-app-border bg-app-elevated/40 p-4 space-y-3">
         <div>
@@ -851,12 +859,16 @@ export default function BranchOverviewRoute() {
   const canManageBranchPage = overview.viewer?.canManageBranchPage ?? false;
 
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(fetcher.data, { successMessage: 'Saved' });
-
+  const branchDetailSurface = useFetcherActionSurface(fetcher);
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [editOpen, setEditOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Saved',
+    skipErrorToast: editOpen || addMemberOpen,
+  });
 
   const handleBranchDetailSuccess = useCallback(() => {
     setEditOpen(false);
@@ -1208,11 +1220,7 @@ export default function BranchOverviewRoute() {
                 { value: 'INACTIVE', label: 'Inactive' },
               ]}
             />
-            {fetcher.data?.error && (
-              <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
-                <p className="text-sm text-danger-700 dark:text-danger-400">{fetcher.data.error}</p>
-              </div>
-            )}
+            <ModalFetcherInlineError message={branchDetailSurface.errorMatchingIntent('update')} />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
               <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(false)} disabled={isSubmitting}>
                 Cancel
@@ -1300,11 +1308,7 @@ export default function BranchOverviewRoute() {
                 Set as primary branch for this user
               </label>
             </div>
-            {fetcher.data?.error && (
-              <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700 px-3 py-2">
-                <p className="text-sm text-danger-700 dark:text-danger-400">{fetcher.data.error}</p>
-              </div>
-            )}
+            <ModalFetcherInlineError message={branchDetailSurface.errorMatchingIntent('assignUser')} />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
               <Button type="button" variant="secondary" size="sm" onClick={() => setAddMemberOpen(false)} disabled={isSubmitting}>
                 Cancel

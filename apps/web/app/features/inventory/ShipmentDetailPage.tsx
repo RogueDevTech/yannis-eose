@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Form, Link, useFetcher, useNavigation } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import {
   applyOptimisticPatches,
   isOptimisticPatched,
@@ -56,8 +57,8 @@ function isStatusReached(current: ShipmentStatus, target: ShipmentStatus): boole
 export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps) {
   const { shipment, lines, allowedTransitions } = data;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const fetcherSurface = useFetcherActionSurface(fetcher);
   const navigation = useNavigation();
-  useFetcherToast(fetcher.data, { successMessage: 'Shipment updated' });
 
   const [confirmInTransit, setConfirmInTransit] = useState(false);
   const [confirmArrived, setConfirmArrived] = useState(false);
@@ -65,6 +66,10 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const shipmentModalOpen =
+    confirmInTransit || confirmArrived || confirmClose || verifyOpen || cancelOpen;
+  useFetcherToast(fetcher.data, { successMessage: 'Shipment updated', skipErrorToast: shipmentModalOpen });
+
   const [verifyDrafts, setVerifyDrafts] = useState<Record<string, LineDraft>>(() => {
     const out: Record<string, LineDraft> = {};
     for (const line of lines) {
@@ -425,15 +430,16 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         </CardBody>
       </Card>
 
-      {fetcher.data?.error ? (
+      {fetcherSurface.rawError && !shipmentModalOpen ? (
         <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">
-          {fetcher.data.error}
+          {fetcherSurface.friendlyError}
         </p>
       ) : null}
 
       <ConfirmActionModal
         open={confirmInTransit}
         onClose={() => setConfirmInTransit(false)}
+        error={fetcherSurface.errorMatchingIntent('shipmentMarkInTransit')}
         title="Mark this shipment as in transit?"
         description="Use this once the supplier has dispatched the goods so ops can see them in the incoming pipeline."
         confirmLabel="Mark in transit"
@@ -445,6 +451,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
       <ConfirmActionModal
         open={confirmArrived}
         onClose={() => setConfirmArrived(false)}
+        error={fetcherSurface.errorMatchingIntent('shipmentMarkArrived')}
         title="Mark this shipment as arrived?"
         description="Confirms the goods are physically at the destination warehouse and ready to verify."
         confirmLabel="Mark arrived"
@@ -456,6 +463,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
       <ConfirmActionModal
         open={confirmClose}
         onClose={() => setConfirmClose(false)}
+        error={fetcherSurface.errorMatchingIntent('closeShipment')}
         title="Close this shipment?"
         description="Locks the shipment from any further edits — final audit point."
         confirmLabel="Close shipment"
@@ -472,6 +480,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
           }}
           className="space-y-4 p-5"
         >
+          <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('verifyShipment')} />
           <div>
             <h3 className="text-base font-semibold text-app-fg">Verify and receive shipment</h3>
             <p className="mt-0.5 text-sm text-app-fg-muted">
@@ -573,6 +582,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         aria-labelledby="cancel-shipment-title"
       >
         <div className="space-y-3 p-5">
+          <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('shipmentCancel')} />
           <h3 id="cancel-shipment-title" className="text-base font-semibold text-app-fg">
             Cancel this shipment?
           </h3>

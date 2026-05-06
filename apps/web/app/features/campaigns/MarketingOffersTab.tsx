@@ -11,6 +11,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useToast } from '~/components/ui/toast';
+import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type { OfferGroupRow, Product } from './types';
 
 export interface MarketingOffersTabProps {
@@ -33,6 +34,7 @@ export function MarketingOffersTab({
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const clearFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const clearSurface = useFetcherActionSurface(clearFetcher);
   const [viewingOffer, setViewingOffer] = useState<OfferGroupRow | null>(null);
 
   const [dismissedOffersError, setDismissedOffersError] = useState(false);
@@ -97,10 +99,10 @@ export function MarketingOffersTab({
       toast.success('Legacy offers cleared');
       setShowClearConfirm(false);
     } else if (clearFetcher.data.error) {
-      toast.error('Clear failed', clearFetcher.data.error);
+      if (!showClearConfirm) toast.error('Clear failed', clearFetcher.data.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- data reference changes only
-  }, [clearFetcher.data]);
+  }, [clearFetcher.data, showClearConfirm]);
 
   return (
     <div className="space-y-4">
@@ -282,6 +284,7 @@ export function MarketingOffersTab({
       <ConfirmActionModal
         open={showClearConfirm}
         onClose={() => setShowClearConfirm(false)}
+        error={clearSurface.errorMatchingIntent('clearLegacyOffers')}
         title="Clear legacy offers?"
         description="This will archive ALL legacy offer tiers and detach forms that still reference them. This does not delete your new Offer Groups."
         confirmLabel="Clear legacy offers"

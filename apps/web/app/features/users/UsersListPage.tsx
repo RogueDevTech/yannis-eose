@@ -190,6 +190,8 @@ export function UsersListPage({
       {
         key: 'branches',
         header: 'Branches',
+        nowrap: true,
+        cellClassName: 'max-w-[16rem] min-w-0 overflow-hidden',
         render: (user) => <UserBranchBadges branches={user.branchMemberships} compact />,
       },
       {

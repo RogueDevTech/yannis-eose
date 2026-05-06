@@ -4,7 +4,6 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
-import { userCanManageOfferTemplates } from '~/lib/marketing-offer-tier.server';
 import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreatePage';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
 import {
@@ -12,61 +11,37 @@ import {
   parseStandardFieldsPayload,
   toLegacyStandardFieldFlags,
 } from '~/features/campaigns/standard-fields';
-import type { OfferGroupRow, Product } from '~/features/campaigns/types';
+import type { OfferGroupRow } from '~/features/campaigns/types';
 
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await requirePermission(request, 'marketing.campaigns');
+  await requirePermission(request, 'marketing.campaigns');
   const cookie = getSessionCookie(request);
 
-  const productsListInput = {
-    page: 1,
-    limit: 100,
-    status: 'ACTIVE' as const,
-    sortBy: 'name' as const,
-    sortOrder: 'asc' as const,
-  };
-  const productsInputStr = encodeURIComponent(JSON.stringify(productsListInput));
-  const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie });
-
   const offerGroupsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 250 }));
-  const offerGroupsPromise = apiRequest<unknown>(`/trpc/marketing.listOfferGroups?input=${offerGroupsInputStr}`, { method: 'GET', cookie });
-
-  let products: Product[] = [];
-  let productsLoadError: string | null = null;
-  try {
-    const productsRes = await productsPromise;
-    if (productsRes.ok) {
-      const productsData = (productsRes.data as { result?: { data?: { products: Product[] } } })?.result?.data;
-      products = productsData?.products ?? [];
-    } else {
-      console.error('[admin.marketing.forms.new] products.list failed', productsRes.status, productsRes.data);
-      productsLoadError = 'Could not load products. Try refreshing the page.';
-    }
-  } catch (err) {
-    console.error('[admin.marketing.forms.new] products.list error', err);
-    productsLoadError = 'Could not load products. Try refreshing the page.';
-  }
-
   let offerGroups: OfferGroupRow[] = [];
+  let offerGroupsLoadError: string | null = null;
   try {
-    const offerGroupsRes = await offerGroupsPromise;
+    const offerGroupsRes = await apiRequest<unknown>(
+      `/trpc/marketing.listOfferGroups?input=${offerGroupsInputStr}`,
+      { method: 'GET', cookie },
+    );
     if (offerGroupsRes.ok) {
       const raw = (offerGroupsRes.data as { result?: { data?: { groups?: unknown[] } } })?.result?.data?.groups ?? [];
       offerGroups = Array.isArray(raw) ? (raw as OfferGroupRow[]) : [];
     } else {
       console.error('[admin.marketing.forms.new] listOfferGroups failed', offerGroupsRes.status, offerGroupsRes.data);
+      offerGroupsLoadError = 'Could not load offers. Try refreshing the page.';
     }
   } catch (err) {
     console.error('[admin.marketing.forms.new] listOfferGroups error', err);
+    offerGroupsLoadError = 'Could not load offers. Try refreshing the page.';
   }
 
   return {
-    products,
     offerGroups,
-    productsLoadError,
-    canManageOfferTemplates: userCanManageOfferTemplates(user),
+    offerGroupsLoadError,
   };
 }
 
@@ -97,8 +72,10 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ error: 'Unknown action' }, { status: 400 });
   }
 
-  const productId = formData.get('productId')?.toString() ?? '';
-  const offerGroupId = formData.get('offerGroupId')?.toString()?.trim() || undefined;
+  const offerGroupId = formData.get('offerGroupId')?.toString()?.trim() ?? '';
+  if (!offerGroupId) {
+    return json({ error: 'Select an offer for this form.' }, { status: 400 });
+  }
   const heading = formData.get('formHeading')?.toString();
   const subtitle = formData.get('formSubtitle')?.toString();
   const buttonText = formData.get('formButtonText')?.toString();
@@ -157,8 +134,7 @@ export async function action({ request }: ActionFunctionArgs) {
     cookie,
     body: {
       name: formData.get('name')?.toString() ?? '',
-      productIds: [productId],
-      ...(offerGroupId ? { offerGroupId } : {}),
+      offerGroupId,
       deploymentType: formData.get('deploymentType')?.toString() ?? 'HOSTED',
       ...(formConfig ? { formConfig } : {}),
     },
@@ -172,11 +148,6 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function MarketingFormNewRoute() {
   const data = useLoaderData<typeof loader>();
   return (
-    <MarketingFormCreatePage
-      products={data.products}
-      offerGroups={data.offerGroups}
-      productsLoadError={data.productsLoadError}
-      canManageOfferTemplates={data.canManageOfferTemplates}
-    />
+    <MarketingFormCreatePage offerGroups={data.offerGroups} offerGroupsLoadError={data.offerGroupsLoadError} />
   );
 }

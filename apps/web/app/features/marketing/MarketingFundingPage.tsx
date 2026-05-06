@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { Link, useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import {
   applyOptimisticPatches,
   useOptimisticListPatches,
@@ -242,8 +243,19 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
   // ── Action results ──────────────────────────────────────
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
+  const fundingSurface = useFetcherActionSurface(fetcher);
+  const fundingFetcherModalOpen =
+    showRequestForm ||
+    showSendForm ||
+    markReceivedTarget != null ||
+    disputingFundingId != null ||
+    approvingRequest != null ||
+    rejectingRequestId != null;
   const [dismissedError, setDismissedError] = useState(false);
-  useFetcherToast(fetcher.data, { successMessage: 'Action completed' });
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Action completed',
+    skipErrorToast: fundingFetcherModalOpen,
+  });
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
@@ -700,10 +712,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         }
       />
 
-      {actionError && !dismissedError && (
+      {actionError && !dismissedError && !fundingFetcherModalOpen && (
         <PageNotification
           variant="error"
-          message={actionError}
+          message={fundingSurface.friendlyError || actionError}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -865,6 +877,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <p className="text-sm text-app-fg-muted">
             Pick the person you want to ask. Only that recipient sees and can act on this request.
           </p>
+          <ModalFetcherInlineError message={fundingSurface.errorMatchingIntent('requestFunding')} />
           <fetcher.Form
             method="post"
             className="space-y-3"
@@ -928,6 +941,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <p className="text-sm text-app-fg-muted">
             Select the recipient, amount, and upload the receipt. The Media Buyer will be notified and can mark as received.
           </p>
+          <ModalFetcherInlineError message={fundingSurface.errorMatchingIntent('createFunding')} />
           <fetcher.Form method="post" className="space-y-4" onSubmit={handleCreateFundingSubmit} noValidate>
             <input type="hidden" name="intent" value="createFunding" />
             <input type="hidden" name="receiverId" value={createFundingReceiverId} />
@@ -994,6 +1008,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <p className="text-sm text-app-fg-muted">
             This confirms the funds arrived. You can only do this once for this transfer.
           </p>
+          <ModalFetcherInlineError message={fundingSurface.errorMatchingIntent('verifyFunding')} />
           <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm">
             <p className="font-medium text-app-fg">
               <NairaPrice amount={Number(markReceivedTarget.amount)} />
@@ -1110,6 +1125,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         <Modal open onClose={() => setDisputingFundingId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
           <h3 className="text-lg font-semibold text-app-fg">Dispute Funding</h3>
           <p className="text-sm text-app-fg-muted">This will alert the CEO and Head of Marketing.</p>
+          <ModalFetcherInlineError message={fundingSurface.errorMatchingIntent('verifyFunding')} />
           <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="verifyFunding" />
             <input type="hidden" name="fundingId" value={disputingFundingId} />
@@ -1134,6 +1150,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           <p className="text-sm text-app-fg-muted">
             Send the money manually (e.g. bank transfer), then attach the receipt below. The requester will be notified and can preview the receipt.
           </p>
+          <ModalFetcherInlineError message={fundingSurface.errorMatchingIntent('approveFundingRequest')} />
           <fetcher.Form method="post" className="space-y-3" onSubmit={handleApproveFundingRequestSubmit} noValidate>
             <input type="hidden" name="intent" value="approveFundingRequest" />
             <input type="hidden" name="requestId" value={approvingRequest.id} />
@@ -1187,6 +1204,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         <Modal open onClose={() => setRejectingRequestId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
           <h3 className="text-lg font-semibold text-app-fg">Reject funding request</h3>
           <p className="text-sm text-app-fg-muted">The requester will be notified that their request was not approved.</p>
+          <ModalFetcherInlineError message={fundingSurface.errorMatchingIntent('rejectFundingRequest')} />
           <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="rejectFundingRequest" />
             <input type="hidden" name="requestId" value={rejectingRequestId} />
