@@ -749,10 +749,62 @@ export class OrdersService {
       .select({
         productIds: schema.campaigns.productIds,
         formConfig: schema.campaigns.formConfig,
+        offerGroupId: schema.campaigns.offerGroupId,
       })
       .from(schema.campaigns)
       .where(eq(schema.campaigns.id, campaignId))
       .limit(1);
+
+    const priceNearlyEq = (a: number, b: number) => Math.abs(a - b) < 0.02;
+
+    if (camp?.offerGroupId) {
+      const rows = await this.db
+        .select({
+          productId: schema.offerGroupItems.productId,
+          label: schema.offerGroupItems.label,
+          price: schema.offerGroupItems.price,
+          quantity: schema.offerGroupItems.quantity,
+        })
+        .from(schema.offerGroupItems)
+        .where(
+          and(
+            eq(schema.offerGroupItems.offerGroupId, camp.offerGroupId),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+          ),
+        );
+
+      if (rows.length === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'This campaign offer has no active items.',
+        });
+      }
+
+      for (const item of orderInput.items) {
+        const tierCandidates = rows.filter(
+          (r) =>
+            r.productId === item.productId &&
+            (r.quantity ?? 1) === item.quantity &&
+            priceNearlyEq(Number(r.price), Number(item.unitPrice)),
+        );
+
+        let ok = false;
+        const labelTrim = (item.offerLabel ?? '').trim();
+        if (labelTrim.length > 0) {
+          ok = tierCandidates.some((t) => t.label.trim() === labelTrim);
+        } else if (tierCandidates.length === 1) {
+          ok = true;
+        }
+
+        if (!ok) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Offer selection does not match this form.',
+          });
+        }
+      }
+      return;
+    }
 
     const campaignProductId = ((camp?.productIds ?? []) as string[])[0];
     if (!campaignProductId) return;
@@ -777,8 +829,6 @@ export class OrdersService {
       })
       .from(schema.offerTemplates)
       .where(and(...tmplConds));
-
-    const priceNearlyEq = (a: number, b: number) => Math.abs(a - b) < 0.02;
 
     let synthetic: typeof allowList = [];
 

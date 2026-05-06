@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
 import {
   CompactTable,
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { CompactTableTruncatedValue } from '~/components/ui/compact-table-truncated-value';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
@@ -113,6 +115,7 @@ export function ProductsListPage({
     requiresApproval?: boolean;
     message?: string | null;
   }>();
+  const archiveSurface = useFetcherActionSurface(archiveFetcher);
 
   // Close-on-success — see CLAUDE.md → "Modal + Optimistic UI Pattern".
   // We can't use the generic `useFetcherToast` here because the toast copy
@@ -133,13 +136,14 @@ export function ProductsListPage({
   );
   useCloseOnFetcherSuccess(archiveFetcher, handleArchiveSuccess);
 
-  // Surface error toasts (success path is handled by the hook above).
+  // Surface error toasts when no archive overlay is visible (dual flow: ConfirmActionModal vs Modal).
   useEffect(() => {
     const d = archiveFetcher.data;
+    if (archiveTarget) return;
     if (archiveFetcher.state === 'idle' && d && !d.success && d.error) {
       toast.error('Archive failed', d.error);
     }
-  }, [archiveFetcher.state, archiveFetcher.data, toast]);
+  }, [archiveFetcher.state, archiveFetcher.data, archiveTarget, toast]);
 
   // Whether to show the cost column — driven by whether the API stripped costPrice
   // from any row. (Column-level security at API; if user lacks finance access, every
@@ -173,13 +177,28 @@ export function ProductsListPage({
         key: 'product',
         header: 'Product',
         minWidth: 'min-w-[200px]',
+        nowrap: true,
         render: (product) => (
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <ProductThumb product={product} />
-            <div className="min-w-0">
-              <div className="font-medium text-app-fg">{product.name}</div>
-              {product.brandName ? <div className="text-xs text-app-fg-muted truncate">{product.brandName}</div> : null}
-            </div>
+            <CompactTableTruncatedValue
+              className="min-w-0 flex-1"
+              popoverLabel="Product details"
+              detailTrigger={product.brandName ? 'always' : 'when-overflow'}
+              fullText={
+                product.brandName
+                  ? `${product.name}\n\nBrand: ${product.brandName}`
+                  : product.name
+              }
+            >
+              <span className="font-medium text-app-fg">{product.name}</span>
+              {product.brandName ? (
+                <>
+                  <span className="font-medium text-app-fg-muted"> · </span>
+                  <span className="font-medium text-app-fg-muted">{product.brandName}</span>
+                </>
+              ) : null}
+            </CompactTableTruncatedValue>
           </div>
         ),
       },
@@ -379,7 +398,7 @@ export function ProductsListPage({
             archiveFetcher.submit(fd, { method: 'post' });
           }}
           loading={archiveFetcher.state === 'submitting'}
-          error={archiveFetcher.data?.error ?? null}
+          error={archiveSurface.errorMatchingIntent('archiveProduct')}
         />
       )}
 
@@ -408,9 +427,7 @@ export function ProductsListPage({
             rows={3}
             placeholder="Why should this product be archived?"
           />
-          {archiveFetcher.data?.error ? (
-            <p className="text-sm text-danger-600 dark:text-danger-400">{archiveFetcher.data.error}</p>
-          ) : null}
+          <ModalFetcherInlineError message={archiveSurface.errorMatchingIntent('archiveProduct')} />
           <div className="flex justify-end gap-2 pt-2">
             <Button
               type="button"

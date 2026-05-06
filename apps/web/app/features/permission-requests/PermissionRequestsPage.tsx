@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
 import {
   CompactTable,
@@ -108,6 +109,7 @@ export function PermissionRequestsPage({
   activeStatus?: PermissionRequestStatusFilter;
 }) {
   const fetcher = useFetcher();
+  const permissionReqSurface = useFetcherActionSurface(fetcher);
   const [viewing, setViewing] = useState<PermissionRequest | null>(null);
   const [modal, setModal] = useState<{ requestId: string; action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [reason, setReason] = useState('');
@@ -115,7 +117,7 @@ export function PermissionRequestsPage({
   const [dismissedError, setDismissedError] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  useFetcherToast(fetcher.data, { successMessage: 'Request processed' });
+  useFetcherToast(fetcher.data, { successMessage: 'Request processed', skipErrorToast: modal != null });
 
   const onApproveRejectSuccess = useCallback(() => {
     setModal(null);
@@ -251,10 +253,10 @@ export function PermissionRequestsPage({
         actions={<PageRefreshButton />}
       />
 
-      {fetcherError && !dismissedError && (
+      {fetcherError && !dismissedError && modal == null && (
         <PageNotification
           variant="error"
-          message={fetcherError}
+          message={permissionReqSurface.friendlyError || fetcherError}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -462,6 +464,7 @@ export function PermissionRequestsPage({
               <h3 className="text-lg font-semibold text-app-fg shrink-0">
                 {modal.action === 'APPROVED' ? 'Approve Request' : 'Reject Request'}
               </h3>
+              <ModalFetcherInlineError message={permissionReqSurface.errorMatchingIntent(['approve', 'reject'])} />
               <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
                 <Textarea
                   label="Reason"

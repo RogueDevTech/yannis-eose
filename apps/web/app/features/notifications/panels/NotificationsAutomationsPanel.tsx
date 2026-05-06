@@ -5,6 +5,8 @@ import {
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { useFetcherToast } from '~/components/ui/toast';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
@@ -128,6 +130,7 @@ export interface NotificationsAutomationsPanelProps {
 
 export function NotificationsAutomationsPanel({ rules }: NotificationsAutomationsPanelProps) {
   const fetcher = useFetcher();
+  const ruleSurface = useFetcherActionSurface(fetcher);
   const toggleFetcher = useFetcher();
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -165,6 +168,18 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
   }
 
   const isSubmitting = fetcher.state !== 'idle';
+  const formIntent = editingRule ? 'update' : 'create';
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Rule saved',
+    skipErrorToast: Boolean(
+      (modalOpen &&
+        (ruleSurface.errorMatchingIntent('create') || ruleSurface.errorMatchingIntent('update'))) ||
+        (ruleSurface.resolverIntent === 'delete' && !!ruleSurface.friendlyError),
+    ),
+  });
+  useFetcherToast(toggleFetcher.data, { successMessage: 'Automation updated' });
+
   useCloseOnFetcherSuccess(fetcher, closeModal);
 
   function handleDelete(rule: AutomationRule) {
@@ -186,8 +201,6 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
   function setField<K extends keyof RuleFormState>(key: K, value: RuleFormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
-
-  const formIntent = editingRule ? 'update' : 'create';
 
   const ruleColumns: CompactTableColumn<AutomationRule>[] = [
     {
@@ -247,6 +260,13 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
 
   return (
     <div className="space-y-6">
+      <ModalFetcherInlineError
+        message={
+          ruleSurface.resolverIntent === 'delete'
+            ? ruleSurface.friendlyError || null
+            : null
+        }
+      />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-xl font-semibold text-app-fg">Push automation rules</h2>
@@ -310,6 +330,10 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
             <fetcher.Form method="post" className="space-y-5 p-6">
               <input type="hidden" name="intent" value={formIntent} />
               {editingRule && <input type="hidden" name="id" value={editingRule.id} />}
+
+              <ModalFetcherInlineError
+                message={ruleSurface.errorMatchingIntent(['create', 'update'])}
+              />
 
               <div>
                 <label className="mb-1 block text-xs font-medium text-app-fg-muted">Rule name</label>

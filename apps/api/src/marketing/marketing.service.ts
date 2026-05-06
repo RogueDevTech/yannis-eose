@@ -3429,6 +3429,41 @@ export class MarketingService {
   // Campaigns
   // ============================================
 
+  /** Ordered distinct product ids from active offer lines (first appearance by sort_order). */
+  private async deriveProductIdsFromOfferGroup(
+    tx: PostgresJsDatabase<typeof schema>,
+    offerGroupId: string,
+  ): Promise<string[]> {
+    const rows = await tx
+      .select({
+        productId: schema.offerGroupItems.productId,
+        sortOrder: schema.offerGroupItems.sortOrder,
+      })
+      .from(schema.offerGroupItems)
+      .where(
+        and(
+          eq(schema.offerGroupItems.offerGroupId, offerGroupId),
+          eq(schema.offerGroupItems.status, 'ACTIVE'),
+        ),
+      )
+      .orderBy(schema.offerGroupItems.sortOrder);
+
+    if (rows.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Selected offer has no active items.' });
+    }
+
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const row of rows) {
+      const id = row.productId;
+      if (!seen.has(id)) {
+        seen.add(id);
+        ordered.push(id);
+      }
+    }
+    return ordered;
+  }
+
   async createCampaign(input: CreateCampaignInput, mediaBuyerId: string, branchId?: string | null) {
     return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
       // Form names are unique org-wide, case-insensitive. Pre-check so callers
@@ -3451,29 +3486,21 @@ export class MarketingService {
         });
       }
 
-      const soleProductId = input.productIds[0]!;
+      let productIdsToStore: string[];
       if (input.offerGroupId) {
-        const items = await tx
-          .select({ productId: schema.offerGroupItems.productId })
-          .from(schema.offerGroupItems)
-          .where(and(
-            eq(schema.offerGroupItems.offerGroupId, input.offerGroupId),
-            eq(schema.offerGroupItems.status, 'ACTIVE'),
-          ))
-          .limit(1);
-        if (items.length === 0) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Selected offer has no active items.' });
-        }
-        if (items[0]!.productId !== soleProductId) {
+        productIdsToStore = await this.deriveProductIdsFromOfferGroup(tx, input.offerGroupId);
+      } else {
+        const raw = input.productIds;
+        if (!raw || raw.length === 0) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: 'Selected offer does not match this form’s product.',
+            message: 'Provide offerGroupId or at least one product id.',
           });
         }
-      } else {
+        productIdsToStore = raw;
         await this.assertCampaignOfferTemplatesAllowed(
           tx,
-          soleProductId,
+          productIdsToStore[0]!,
           input.formConfig?.selectedOfferTemplateIds,
         );
       }
@@ -3483,7 +3510,7 @@ export class MarketingService {
         .values({
           mediaBuyerId,
           name: input.name,
-          productIds: input.productIds,
+          productIds: productIdsToStore,
           offerGroupId: input.offerGroupId ?? null,
           deploymentType: input.deploymentType,
           formConfig: input.formConfig ?? null,
@@ -3536,7 +3563,12 @@ export class MarketingService {
       const updateData: Record<string, unknown> = {};
       if (input.name !== undefined) updateData['name'] = input.name;
       if (input.formConfig !== undefined) updateData['formConfig'] = input.formConfig;
-      if (input.offerGroupId !== undefined) updateData['offerGroupId'] = input.offerGroupId;
+      if (input.offerGroupId !== undefined) {
+        updateData['offerGroupId'] = input.offerGroupId;
+        if (input.offerGroupId !== null) {
+          updateData['productIds'] = await this.deriveProductIdsFromOfferGroup(tx, input.offerGroupId);
+        }
+      }
       if (input.status !== undefined) updateData['status'] = input.status;
 
       if (input.formConfig !== undefined) {
@@ -3544,36 +3576,14 @@ export class MarketingService {
         const prev = (prevRow.formConfig as Record<string, unknown> | null) ?? {};
         const merged = { ...prev, ...input.formConfig };
         const pid = ((prevRow.productIds ?? []) as string[])[0];
-        if (pid && input.offerGroupId == null) {
+        const effectiveOfferGroupId =
+          input.offerGroupId !== undefined ? input.offerGroupId : prevRow.offerGroupId;
+        if (pid && effectiveOfferGroupId == null) {
           await this.assertCampaignOfferTemplatesAllowed(
             tx,
             pid,
             merged.selectedOfferTemplateIds as string[] | undefined,
           );
-        }
-      }
-
-      if (input.offerGroupId) {
-        const prevRow = existing[0]!;
-        const pid = ((prevRow.productIds ?? []) as string[])[0];
-        if (pid) {
-          const items = await tx
-            .select({ productId: schema.offerGroupItems.productId })
-            .from(schema.offerGroupItems)
-            .where(and(
-              eq(schema.offerGroupItems.offerGroupId, input.offerGroupId),
-              eq(schema.offerGroupItems.status, 'ACTIVE'),
-            ))
-            .limit(1);
-          if (items.length === 0) {
-            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Selected offer has no active items.' });
-          }
-          if (items[0]!.productId !== pid) {
-            throw new TRPCError({
-              code: 'BAD_REQUEST',
-              message: 'Selected offer does not match this form’s product.',
-            });
-          }
         }
       }
 
@@ -3630,7 +3640,6 @@ export class MarketingService {
     const products: PublicProduct[] = [];
 
     const pIds = (campaign.productIds ?? []) as string[];
-    const pid = pIds.length > 0 ? pIds[0] : null;
 
     const formConfigRaw = campaign.formConfig as Record<string, unknown> | null;
     const selectedIdsRaw = formConfigRaw?.selectedOfferTemplateIds;
@@ -3644,52 +3653,95 @@ export class MarketingService {
       return raw.filter((x): x is string => typeof x === 'string' && x.length > 0);
     };
 
-    if (pid) {
-      const pRows = await this.db
+    if (campaign.offerGroupId) {
+      const itemRows = await this.db
         .select({
-          id: schema.products.id,
-          name: schema.products.name,
-          baseSalePrice: schema.products.baseSalePrice,
-          offers: schema.products.offers,
-          galleryImageUrls: schema.products.galleryImageUrls,
+          productId: schema.offerGroupItems.productId,
+          label: schema.offerGroupItems.label,
+          quantity: schema.offerGroupItems.quantity,
+          price: schema.offerGroupItems.price,
+          imageUrl: schema.offerGroupItems.imageUrl,
+          sortOrder: schema.offerGroupItems.sortOrder,
         })
-        .from(schema.products)
-        .where(eq(schema.products.id, pid))
-        .limit(1);
+        .from(schema.offerGroupItems)
+        .where(
+          and(
+            eq(schema.offerGroupItems.offerGroupId, campaign.offerGroupId),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+          ),
+        )
+        .orderBy(schema.offerGroupItems.sortOrder);
 
-      const p = pRows[0];
-      if (p) {
+      const orderedProductIds: string[] = [];
+      const seenId = new Set<string>();
+      for (const row of itemRows) {
+        if (!seenId.has(row.productId)) {
+          seenId.add(row.productId);
+          orderedProductIds.push(row.productId);
+        }
+      }
+
+      for (const productId of orderedProductIds) {
+        const pRows = await this.db
+          .select({
+            id: schema.products.id,
+            name: schema.products.name,
+            baseSalePrice: schema.products.baseSalePrice,
+            galleryImageUrls: schema.products.galleryImageUrls,
+          })
+          .from(schema.products)
+          .where(eq(schema.products.id, productId))
+          .limit(1);
+
+        const p = pRows[0];
+        if (!p) {
+          continue;
+        }
+
         const galleryImageUrls = parseGallery(p.galleryImageUrls);
+        const itemsForProduct = itemRows.filter((r) => r.productId === productId);
+        const offerList = itemsForProduct.map((it) => ({
+          label: it.label,
+          qty: it.quantity ?? 1,
+          price: String(it.price),
+          imageUrls:
+            typeof it.imageUrl === 'string' && it.imageUrl.length > 0
+              ? [it.imageUrl]
+              : galleryImageUrls.length > 0
+                ? galleryImageUrls
+                : undefined,
+        }));
 
-        let offerList: Array<{ label: string; qty: number; price: string; imageUrls?: string[] }> = [];
+        products.push({
+          id: p.id,
+          name: p.name,
+          price: String(p.baseSalePrice),
+          galleryImageUrls: galleryImageUrls.length > 0 ? galleryImageUrls : undefined,
+          offers: offerList,
+        });
+      }
+    } else {
+      const pid = pIds.length > 0 ? pIds[0] : null;
 
-        if (campaign.offerGroupId) {
-          const itemRows = await this.db
-            .select({
-              label: schema.offerGroupItems.label,
-              quantity: schema.offerGroupItems.quantity,
-              price: schema.offerGroupItems.price,
-              imageUrl: schema.offerGroupItems.imageUrl,
-            })
-            .from(schema.offerGroupItems)
-            .where(and(
-              eq(schema.offerGroupItems.offerGroupId, campaign.offerGroupId),
-              eq(schema.offerGroupItems.status, 'ACTIVE'),
-            ))
-            .orderBy(schema.offerGroupItems.sortOrder);
+      if (pid) {
+        const pRows = await this.db
+          .select({
+            id: schema.products.id,
+            name: schema.products.name,
+            baseSalePrice: schema.products.baseSalePrice,
+            offers: schema.products.offers,
+            galleryImageUrls: schema.products.galleryImageUrls,
+          })
+          .from(schema.products)
+          .where(eq(schema.products.id, pid))
+          .limit(1);
 
-          offerList = itemRows.map((it) => ({
-            label: it.label,
-            qty: it.quantity ?? 1,
-            price: String(it.price),
-            imageUrls:
-              typeof it.imageUrl === 'string' && it.imageUrl.length > 0
-                ? [it.imageUrl]
-                : galleryImageUrls.length > 0
-                  ? galleryImageUrls
-                  : undefined,
-          }));
-        } else {
+        const p = pRows[0];
+        if (p) {
+          const galleryImageUrls = parseGallery(p.galleryImageUrls);
+
+          let offerList: Array<{ label: string; qty: number; price: string; imageUrls?: string[] }> = [];
+
           const templateConditions = [
             eq(schema.offerTemplates.productId, p.id),
             eq(schema.offerTemplates.status, 'ACTIVE'),
@@ -3719,40 +3771,40 @@ export class MarketingService {
                   ? galleryImageUrls
                   : undefined,
           }));
-        }
 
-        if (offerList.length === 0) {
-          const legacy = (p.offers ?? []) as Array<{
-            label: string;
-            qty: number;
-            price: string;
-            imageUrls?: string[];
-          }>;
-          offerList =
-            legacy.length > 0
-              ? legacy.map((o) => ({
-                  label: o.label,
-                  qty: o.qty,
-                  price: typeof o.price === 'string' ? o.price : String(o.price),
-                  imageUrls: o.imageUrls ?? (galleryImageUrls.length ? galleryImageUrls : undefined),
-                }))
-              : [
-                  {
-                    label: 'Standard',
-                    qty: 1,
-                    price: String(p.baseSalePrice),
-                    imageUrls: galleryImageUrls.length ? galleryImageUrls : undefined,
-                  },
-                ];
-        }
+          if (offerList.length === 0) {
+            const legacy = (p.offers ?? []) as Array<{
+              label: string;
+              qty: number;
+              price: string;
+              imageUrls?: string[];
+            }>;
+            offerList =
+              legacy.length > 0
+                ? legacy.map((o) => ({
+                    label: o.label,
+                    qty: o.qty,
+                    price: typeof o.price === 'string' ? o.price : String(o.price),
+                    imageUrls: o.imageUrls ?? (galleryImageUrls.length ? galleryImageUrls : undefined),
+                  }))
+                : [
+                    {
+                      label: 'Standard',
+                      qty: 1,
+                      price: String(p.baseSalePrice),
+                      imageUrls: galleryImageUrls.length ? galleryImageUrls : undefined,
+                    },
+                  ];
+          }
 
-        products.push({
-          id: p.id,
-          name: p.name,
-          price: String(p.baseSalePrice),
-          galleryImageUrls: galleryImageUrls.length > 0 ? galleryImageUrls : undefined,
-          offers: offerList,
-        });
+          products.push({
+            id: p.id,
+            name: p.name,
+            price: String(p.baseSalePrice),
+            galleryImageUrls: galleryImageUrls.length > 0 ? galleryImageUrls : undefined,
+            offers: offerList,
+          });
+        }
       }
     }
 

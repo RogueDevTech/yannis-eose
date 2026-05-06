@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Form, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
@@ -80,7 +81,7 @@ export function WarehousesPage({
   overview,
 }: WarehousesPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(fetcher.data, { successMessage: 'Warehouse saved' });
+  const fetcherSurface = useFetcherActionSurface(fetcher);
   const isRefetching = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -88,6 +89,11 @@ export function WarehousesPage({
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [coordinates, setCoordinates] = useState('');
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Warehouse saved',
+    skipErrorToast: showCreate,
+  });
 
   const isCreating =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'createWarehouse';
@@ -393,6 +399,7 @@ export function WarehousesPage({
         aria-labelledby="create-warehouse-title"
       >
         <div className="space-y-3 p-5">
+          <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('createWarehouse')} />
           <h3 id="create-warehouse-title" className="text-base font-semibold text-app-fg">
             Add warehouse
           </h3>

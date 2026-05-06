@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -16,6 +16,7 @@ import {
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
@@ -53,13 +54,15 @@ function formatRules(rules: Record<string, unknown>): string {
 
 export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: CommissionPlansPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(fetcher.data, { successMessage: 'Commission plan saved' });
-
+  const planSurface = useFetcherActionSurface(fetcher);
   const [showCreate, setShowCreate] = useState(false);
   const [viewPlan, setViewPlan] = useState<CommissionPlan | null>(null);
   const [editPlan, setEditPlan] = useState<CommissionPlan | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [editError, setEditError] = useState<string | null>(null);
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Commission plan saved',
+    skipErrorToast: showCreate || !!editPlan,
+  });
 
   /** Filters — Role select narrows by exact role; Status narrows by computed Active/Upcoming/Expired. */
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
@@ -118,31 +121,10 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
 
   // Success — close the matching modal. Intent filter scopes the close so
   // submitting createPlan never closes the edit modal and vice versa.
-  const handleCreateSuccess = useCallback(() => {
-    setShowCreate(false);
-    setCreateError(null);
-  }, []);
-  const handleEditSuccess = useCallback(() => {
-    setEditPlan(null);
-    setEditError(null);
-  }, []);
+  const handleCreateSuccess = useCallback(() => setShowCreate(false), []);
+  const handleEditSuccess = useCallback(() => setEditPlan(null), []);
   useCloseOnFetcherSuccess(fetcher, handleCreateSuccess, { intent: 'createPlan' });
   useCloseOnFetcherSuccess(fetcher, handleEditSuccess, { intent: 'updatePlan' });
-
-  // Inline error routing — only one of {create, edit} modal is open at a time,
-  // so we route the error to whichever is. Watching fetcher.data reference
-  // (not state === 'idle') so the same response never fires twice.
-  const lastErrorRef = useRef<unknown>(fetcher.data);
-  useEffect(() => {
-    if (fetcher.data === lastErrorRef.current) return;
-    lastErrorRef.current = fetcher.data;
-    if (!fetcher.data || typeof fetcher.data !== 'object') return;
-    const data = fetcher.data as { success?: boolean; error?: string };
-    if (data.success) return;
-    const message = data.error ?? 'Action failed. Please try again.';
-    if (showCreate) setCreateError(message);
-    else if (editPlan) setEditError(message);
-  }, [fetcher.data, showCreate, editPlan]);
 
   const canCreate = manageableRoles.length > 0;
   const canManage = (planRole: string) => manageableRoles.includes(planRole);
@@ -332,7 +314,6 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           onClose={() => {
             if (fetcher.state !== 'idle') return;
             setShowCreate(false);
-            setCreateError(null);
           }}
           maxWidth="max-w-2xl"
           backdropBlur
@@ -348,16 +329,15 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
             onClose={() => {
               if (fetcher.state !== 'idle') return;
               setShowCreate(false);
-              setCreateError(null);
             }}
           />
+          <ModalFetcherInlineError message={planSurface.errorMatchingIntent('createPlan')} />
           <PlanForm
             mode="create"
             manageableRoles={manageableRoles}
-            error={createError}
             submitting={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'createPlan'}
             fetcher={fetcher}
-            onCancel={() => { setShowCreate(false); setCreateError(null); }}
+            onCancel={() => setShowCreate(false)}
           />
         </Modal>
       )}
@@ -369,7 +349,6 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           onClose={() => {
             if (fetcher.state !== 'idle') return;
             setEditPlan(null);
-            setEditError(null);
           }}
           maxWidth="max-w-2xl"
           backdropBlur
@@ -381,17 +360,16 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
             onClose={() => {
               if (fetcher.state !== 'idle') return;
               setEditPlan(null);
-              setEditError(null);
             }}
           />
+          <ModalFetcherInlineError message={planSurface.errorMatchingIntent('updatePlan')} />
           <PlanForm
             mode="edit"
             plan={editPlan}
             manageableRoles={manageableRoles}
-            error={editError}
             submitting={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'updatePlan'}
             fetcher={fetcher}
-            onCancel={() => { setEditPlan(null); setEditError(null); }}
+            onCancel={() => setEditPlan(null)}
           />
         </Modal>
       )}
@@ -497,7 +475,6 @@ function PlanForm({
   mode,
   plan,
   manageableRoles,
-  error,
   submitting,
   fetcher,
   onCancel,
@@ -505,7 +482,6 @@ function PlanForm({
   mode: 'create' | 'edit';
   plan?: CommissionPlan;
   manageableRoles: string[];
-  error: string | null;
   submitting: boolean;
   fetcher: ReturnType<typeof useFetcher>;
   onCancel: () => void;
@@ -633,12 +609,6 @@ function PlanForm({
             />
             <p className="text-xs text-app-fg-muted mt-0.5">Set to end the plan; leave blank for ongoing.</p>
           </div>
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-md border border-danger-200 dark:border-danger-700/50 bg-danger-50 dark:bg-danger-900/20 px-3 py-2 text-xs text-danger-700 dark:text-danger-300">
-          {error}
         </div>
       )}
 

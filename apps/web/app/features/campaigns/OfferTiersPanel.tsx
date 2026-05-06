@@ -14,6 +14,7 @@ import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import { OfferImagesEditor } from '~/features/products/OfferImagesEditor';
 import type { MinimalOfferTemplateForPreview } from './offer-template-preview';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 
 export interface OfferTiersPanelProps {
   /** Catalog SKU — tiers attach here but are managed from this form, not the product page. */
@@ -45,9 +46,10 @@ export function OfferTiersPanel({
   const { revalidate } = useRevalidator();
   const { toast } = useToast();
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(fetcher.data, { successMessage: 'Offer tier saved' });
+  const fetcherSurface = useFetcherActionSurface(fetcher);
 
   const archiveFetcher = useFetcher<{ success?: boolean; error?: string; archivedCount?: number }>();
+  const archiveSurface = useFetcherActionSurface(archiveFetcher);
   const prevArchiveData = useRef(archiveFetcher.data);
   const [showArchiveAllConfirm, setShowArchiveAllConfirm] = useState(false);
 
@@ -81,9 +83,9 @@ export function OfferTiersPanel({
       setShowArchiveAllConfirm(false);
       bumpTemplates();
     } else if (d.error) {
-      toast.error('Error', d.error);
+      if (!showArchiveAllConfirm) toast.error('Error', d.error);
     }
-  }, [archiveFetcher.data, toast, bumpTemplates]);
+  }, [archiveFetcher.data, toast, bumpTemplates, showArchiveAllConfirm]);
 
   const [showModal, setShowModal] = useState(false);
   const [uploadState, setUploadState] = useState<FileUploadUploadState>('idle');
@@ -94,6 +96,11 @@ export function OfferTiersPanel({
   const [statusDraft, setStatusDraft] = useState<'ACTIVE' | 'INACTIVE' | 'ARCHIVED'>('ACTIVE');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [viewingTier, setViewingTier] = useState<MinimalOfferTemplateForPreview | null>(null);
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Offer tier saved',
+    skipErrorToast: showModal,
+  });
 
   const lastOpenedCreateNonce = useRef(0);
   const lastEditTierNonce = useRef(0);
@@ -212,6 +219,7 @@ export function OfferTiersPanel({
       <ConfirmActionModal
         open={showArchiveAllConfirm}
         onClose={() => setShowArchiveAllConfirm(false)}
+        error={archiveSurface.errorMatchingIntent('archiveAllOfferTemplates')}
         title="Archive all offer tiers?"
         variant="warning"
         description={
@@ -340,6 +348,9 @@ export function OfferTiersPanel({
 
       <Modal open={showModal} onClose={closeModal} maxWidth="max-w-md" aria-labelledby="offer-tier-modal-title">
         <div className="p-5 space-y-4">
+          <ModalFetcherInlineError
+            message={fetcherSurface.errorMatchingIntent(['createOfferTemplate', 'updateOfferTemplate'])}
+          />
           <div>
             <h2 className="text-lg font-semibold text-app-fg" id="offer-tier-modal-title">
               {editingId ? 'Edit offer tier' : 'New offer tier'}

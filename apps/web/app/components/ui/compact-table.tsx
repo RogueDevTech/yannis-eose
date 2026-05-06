@@ -15,6 +15,11 @@
  * **Selection:** Optional **`selection`** adds a leading checkbox column (desktop) and exposes
  * **`rowSelection`** to **`renderMobileCard`** helpers for bespoke card headers.
  *
+ * **Long text:** Use **`CompactTableTruncatedValue`** (`~/components/ui/compact-table-truncated-value`)
+ * inside column `render` for variable-length strings — single line with ellipsis + optional info
+ * popover. Pair with column `nowrap` / `minWidth` / `max-w-*` as needed; avoid duplicate **`cellTitle`**
+ * when the popover already exposes the full value.
+ *
  * Usage:
  *   <CompactTable
  *     columns={[ ... ]}

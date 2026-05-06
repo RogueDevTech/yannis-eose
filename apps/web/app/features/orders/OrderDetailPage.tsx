@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { Button } from '~/components/ui/button';
@@ -695,11 +696,56 @@ export function OrderDetailPage({
   const selectedAllocatableLocation = allocatableLocations.find((l) => l.id === allocateLocationId);
   const eligibleAllocatableCount = allocatableLocations.filter((l) => l.eligible).length;
 
+  const fetcherSurface = useFetcherActionSurface(fetcher);
+  const scheduleSurface = useFetcherActionSurface(scheduleFetcher);
+  const adjustItemsSurface = useFetcherActionSurface(adjustItemsFetcher);
+  const priceRequestSurface = useFetcherActionSurface(priceRequestFetcher);
+
+  /** Disambiguates `intent: transition` (confirm / allocate / cancel / deliver share one intent). */
+  type FetchSubmissionKey = { intent: string; newStatus?: string } | null;
+  const fetcherSubmissionKeyRef = useRef<FetchSubmissionKey>(null);
+  useEffect(() => {
+    if (fetcher.state !== 'submitting' && fetcher.state !== 'loading') return;
+    const fd = fetcher.formData;
+    if (!fd) return;
+    const intentRaw = fd.get('intent');
+    if (typeof intentRaw !== 'string' || !intentRaw) return;
+    if (intentRaw === 'transition') {
+      const ns = fd.get('newStatus');
+      fetcherSubmissionKeyRef.current = {
+        intent: intentRaw,
+        newStatus: typeof ns === 'string' ? ns : undefined,
+      };
+    } else {
+      fetcherSubmissionKeyRef.current = { intent: intentRaw };
+    }
+  }, [fetcher.state, fetcher.formData]);
+
+  function fetcherErrorForTransition(newStatus: string): string | null {
+    if (!fetcherSurface.friendlyError) return null;
+    const key = fetcherSubmissionKeyRef.current;
+    if (!key || key.intent !== 'transition' || key.newStatus !== newStatus) return null;
+    return fetcherSurface.friendlyError;
+  }
+
+  const mainFetcherActionModalOpen =
+    confirmModalOpen ||
+    cancelModalOpen ||
+    allocateModalOpen ||
+    deliverModalOpen ||
+    callCustomerModalOpen;
+
   const currentStatusIndex = getProgressIndex(order.status);
   const actionError = (fetcher.data as { error?: string })?.error;
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
-  useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
-  useFetcherToast(scheduleFetcher.data, { successMessage: 'Callback scheduled' });
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Order updated',
+    skipErrorToast: mainFetcherActionModalOpen,
+  });
+  useFetcherToast(scheduleFetcher.data, {
+    successMessage: 'Callback scheduled',
+    skipErrorToast: scheduleCallbackModalOpen,
+  });
 
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
@@ -729,8 +775,14 @@ export function OrderDetailPage({
     if (!actionError.toLowerCase().includes('branch context required')) return;
     ensureBranchForAction({ actionLabel: 'this action' });
   }, [actionError, requiresBranchSelection, ensureBranchForAction]);
-  useFetcherToast(adjustItemsFetcher.data, { successMessage: 'Order items updated' });
-  useFetcherToast(priceRequestFetcher.data, { successMessage: 'Price change request submitted' });
+  useFetcherToast(adjustItemsFetcher.data, {
+    successMessage: 'Order items updated',
+    skipErrorToast: adjustItemsModalOpen,
+  });
+  useFetcherToast(priceRequestFetcher.data, {
+    successMessage: 'Price change request submitted',
+    skipErrorToast: adjustItemsModalOpen,
+  });
   useFetcherToast(ensureInvoiceFetcher.data, { successMessage: 'Invoice generated' });
   const canGenerateInvoice =
     isAdminLevel({ role: userRole }) || (permissions ?? []).includes('finance.read');
@@ -812,7 +864,7 @@ export function OrderDetailPage({
     prevFetcherStateRef.current = fetcher.state;
   }, [fetcher.state, fetcher.data]);
 
-  const showActionError = actionError && !dismissedError;
+  const showActionError = actionError && !dismissedError && !mainFetcherActionModalOpen;
 
   const isAssignedToMe = order.assignedCsId === userId;
   const branchAdminSameBranch =
@@ -987,9 +1039,6 @@ export function OrderDetailPage({
   }, []);
   useCloseOnFetcherSuccess(adjustItemsFetcher, handleAdjustItemsSuccess);
   useCloseOnFetcherSuccess(priceRequestFetcher, handleAdjustItemsSuccess);
-  // Inline error accessors — the modal renders these as PageNotification rows.
-  const adjustItemsData = adjustItemsFetcher.data as { success?: boolean; error?: string } | undefined;
-  const priceRequestData = priceRequestFetcher.data as { success?: boolean; error?: string } | undefined;
 
   // Escape to close adjust items modal
   useEffect(() => {
@@ -1085,7 +1134,7 @@ export function OrderDetailPage({
       {showActionError && actionError && (
         <PageNotification
           variant="error"
-          message={actionError}
+          message={fetcherSurface.friendlyError || actionError}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -1974,6 +2023,7 @@ export function OrderDetailPage({
           <p className="text-sm text-app-fg-muted mb-4">
             Choose when logistics should deliver, then confirm when the customer is ready.
           </p>
+          <ModalFetcherInlineError message={fetcherErrorForTransition('CONFIRMED')} />
           <fetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="transition" />
             <input type="hidden" name="newStatus" value="CONFIRMED" />
@@ -2036,6 +2086,7 @@ export function OrderDetailPage({
           <p className="text-sm text-app-fg-muted mb-4">
             Move the order back to your queue and set a time to call again (for example when the customer is not picking up).
           </p>
+          <ModalFetcherInlineError message={scheduleSurface.errorMatchingIntent('scheduleCallback')} />
           <scheduleFetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="scheduleCallback" />
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
@@ -2098,6 +2149,7 @@ export function OrderDetailPage({
             <p className="text-sm text-app-fg-muted mb-3">
               Please provide a reason (at least 10 characters). This will move the order to Cancelled.
             </p>
+            <ModalFetcherInlineError message={fetcherErrorForTransition('CANCELLED')} />
             <div className="flex flex-wrap gap-2 mb-3">
               {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {
                 const isOther = preset === 'Other';
@@ -2172,6 +2224,7 @@ export function OrderDetailPage({
               ? 'Pick a different 3PL location. Shelf reservation at the current location is released and stock is reserved at the new one (both must have enough free units).'
               : 'Select the logistics company location that will fulfil this order. Stock must be available at that location.'}
           </p>
+          <ModalFetcherInlineError message={fetcherErrorForTransition('AGENT_ASSIGNED')} />
           {allocatableLocations.length > 0 ? (
             <>
               {eligibleAllocatableCount === 0 ? (
@@ -2327,6 +2380,7 @@ export function OrderDetailPage({
           <p className="text-sm text-app-fg-muted mb-3">
             Confirm that the customer received the order. A note and screenshot are optional.
           </p>
+          <ModalFetcherInlineError message={fetcherErrorForTransition('DELIVERED')} />
           {/* Logistics provider that actually delivered. Pre-filled with the original
               allocation; can be changed if a different provider stepped in. */}
           {logisticsLocations.length > 0 && (
@@ -2533,6 +2587,7 @@ export function OrderDetailPage({
                 <p className="text-sm text-app-fg-muted mb-3">
                   Start the call from here. The modal stays open so you can see status and debug info. Close when done.
                 </p>
+                <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('initiateCall')} />
                 <div className="flex flex-col gap-3 mb-4">
                   <Button
                     type="button"
@@ -2766,12 +2821,10 @@ export function OrderDetailPage({
                 ? 'Update quantities or unit prices. This changes the order details only, not the order status.'
                 : 'You can change quantities anytime. To change unit prices, enter the new prices and submit a request — a Head of CS, Head of Logistics, branch admin, or admin will approve or reject it.'}
             </p>
-            {adjustItemsData?.error && (
-              <p className="text-sm text-danger-600 dark:text-danger-400 mx-6 mb-2">{adjustItemsData.error}</p>
-            )}
-            {priceRequestData?.error && (
-              <p className="text-sm text-danger-600 dark:text-danger-400 mx-6 mb-2">{priceRequestData.error}</p>
-            )}
+            <div className="mx-6 mb-2 space-y-2">
+              <ModalFetcherInlineError message={adjustItemsSurface.errorMatchingIntent('adjustOrderItems')} />
+              <ModalFetcherInlineError message={priceRequestSurface.errorMatchingIntent('requestOrderLinePriceChange')} />
+            </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-6 space-y-4">
               {editedItems.map((item, index) => (
                 <div

@@ -2,6 +2,7 @@ import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useFetcher } from '@remix-run/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
@@ -311,15 +312,13 @@ function BodyEditor({
 export default function MessageTemplatesRoute() {
   const { templates, currentUserId, canEditAnyTemplate } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  const templateSurface = useFetcherActionSurface(fetcher);
   // Heads / Admins / `messaging.templates.update` holders can edit any template.
   // CS agents can only edit ones they authored.
   const canEditTemplate = useCallback(
     (tpl: MessageTemplate) => canEditAnyTemplate || tpl.createdBy === currentUserId,
     [canEditAnyTemplate, currentUserId],
   );
-  useFetcherToast(fetcher.data, { successMessage: 'Template saved' });
-  const fetcherResult = fetcher.data as { success?: boolean; error?: string } | undefined;
-
   const [createOpen, setCreateOpen] = useState(false);
   const [previewAllOpen, setPreviewAllOpen] = useState(false);
   const [viewTemplate, setViewTemplate] = useState<MessageTemplate | null>(null);
@@ -337,6 +336,11 @@ export default function MessageTemplatesRoute() {
   const filtered = filterChannel === 'ALL'
     ? templates
     : templates.filter((t) => t.channel === filterChannel);
+
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Template saved',
+    skipErrorToast: createOpen || !!editTemplate,
+  });
 
   useEffect(() => {
     if (editTemplate) {
@@ -639,9 +643,7 @@ export default function MessageTemplatesRoute() {
                 Only these variables are supported: {ALLOWED_UI_TOKENS.join(', ')}. Remove: {createUnsupported.join(', ')}.
               </p>
             )}
-            {fetcherResult?.error && (
-              <p className="text-sm text-danger-600">{fetcherResult.error}</p>
-            )}
+            <ModalFetcherInlineError message={templateSurface.errorMatchingIntent('create')} />
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>Cancel</Button>
               <Button type="submit" variant="primary" disabled={isSubmitting || createHasUnsupported} loading={isSubmitting} loadingText="Creating…">
@@ -699,9 +701,7 @@ export default function MessageTemplatesRoute() {
                 { value: 'ARCHIVED', label: 'Archived' },
               ]}
             />
-            {fetcherResult?.error && (
-              <p className="text-sm text-danger-600">{fetcherResult.error}</p>
-            )}
+            <ModalFetcherInlineError message={templateSurface.errorMatchingIntent('update')} />
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="secondary" onClick={() => setEditTemplate(null)}>Cancel</Button>
               <Button type="submit" variant="primary" disabled={isSubmitting || editHasUnsupported} loading={isSubmitting} loadingText="Saving…">

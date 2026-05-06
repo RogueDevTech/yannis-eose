@@ -8,6 +8,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 
 export interface ProductOption {
   id: string;
@@ -37,6 +38,7 @@ export function CreateOfflineOrderModal({
   branchId,
 }: CreateOfflineOrderModalProps) {
   const fetcher = useFetcher();
+  const fetcherSurface = useFetcherActionSurface(fetcher);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
@@ -50,9 +52,9 @@ export function CreateOfflineOrderModal({
   const [items, setItems] = useState<Array<{ productId: string; quantity: number; unitPrice: string; offerLabel?: string }>>([{ ...defaultItem }]);
   const [dismissedError, setDismissedError] = useState(false);
 
-  useFetcherToast(fetcher.data, { successMessage: 'Offline order created' });
+  useFetcherToast(fetcher.data, { successMessage: 'Offline order created', skipErrorToast: open });
 
-  const actionError = (fetcher.data as { error?: string })?.error;
+  const actionError = fetcherSurface.rawError;
   useEffect(() => {
     if (actionError) setDismissedError(false);
   }, [actionError]);
@@ -216,7 +218,7 @@ export function CreateOfflineOrderModal({
             {actionError && !dismissedError && (
               <PageNotification
                 variant="error"
-                message={actionError}
+                message={fetcherSurface.friendlyError}
                 durationMs={5000}
                 onDismiss={() => setDismissedError(true)}
               />

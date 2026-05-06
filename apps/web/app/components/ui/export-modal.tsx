@@ -8,6 +8,7 @@ import { Modal } from './modal';
 import { SearchableSelect } from './searchable-select';
 import { TextInput } from './text-input';
 import { useToast } from './toast';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { EXPORT_DATE_PRESET_OPTIONS, type ExportConfig } from '~/lib/export-config';
 import type { ExportReportActionData } from '~/lib/export-report.server';
 
@@ -87,6 +88,7 @@ async function toXlsxFromCsv(filename: string, csvContent: string) {
 
 export function ExportModal({ open, onClose, config, initialFilters = {}, picklists }: Props) {
   const fetcher = useFetcher<ExportReportActionData>();
+  const exportSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
   const [format, setFormat] = useState<'csv' | 'pdf' | 'xlsx'>('csv');
   const [selectedColumns, setSelectedColumns] = useState<string[]>(config.defaultColumns);
@@ -193,10 +195,10 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
         });
       }
       onClose();
-    } else {
+    } else if (!open) {
       toast.error('Export failed', d.error);
     }
-  }, [fetcher.state, fetcher.data, format, onClose, toast]);
+  }, [fetcher.state, fetcher.data, format, onClose, toast, open]);
 
   const mediaBuyerOptions = useMemo(() => {
     if (!picklists?.mediaBuyers) return [];
@@ -229,6 +231,8 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
         <h3 className="text-lg font-semibold text-app-fg">{config.title}</h3>
         <p className="text-sm text-app-fg-muted mt-1">{config.description}</p>
       </div>
+
+      <ModalFetcherInlineError message={exportSurface.errorMatchingIntent('exportReport')} />
 
       <fetcher.Form method="post" className="space-y-4">
         <input type="hidden" name="intent" value="exportReport" />

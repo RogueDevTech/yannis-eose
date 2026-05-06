@@ -531,16 +531,42 @@ export const formConfigSchema = z.object({
 });
 export type FormConfig = z.infer<typeof formConfigSchema>;
 
-export const createCampaignSchema = z.object({
+const createCampaignFieldsSchema = z.object({
   name: z.string().min(1, 'Campaign name is required').max(200),
-  /** Single-product Edge forms (CEO directive — multi-product campaigns deprecated). */
-  productIds: z.array(z.string().uuid()).length(1, 'Select exactly one product'),
-  /** Optional offer group (multi-item offers). When set, legacy offer_template_id/selectedOfferTemplateIds are ignored. */
+  /**
+   * Legacy path when `offerGroupId` is omitted. Minimum one id (often a single product).
+   * When `offerGroupId` is set, the API derives product ids from the offer — client may omit this.
+   */
+  productIds: z.array(z.string().uuid()).max(50).optional(),
+  /** When set, server derives ordered distinct `productIds` from active `offer_group_items`. */
   offerGroupId: z.string().uuid().optional(),
   deploymentType: z.enum(['SNIPPET', 'IFRAME', 'HOSTED']).default('HOSTED'),
   formConfig: formConfigSchema.optional(),
 });
+
+function refineCreateCampaignFields(data: z.infer<typeof createCampaignFieldsSchema>, ctx: z.RefinementCtx) {
+  if (data.offerGroupId) {
+    return;
+  }
+  if (!data.productIds || data.productIds.length < 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Provide offerGroupId or at least one product id.',
+      path: ['productIds'],
+    });
+  }
+}
+
+/** Input for `marketing.createCampaign` (no `branchId`). */
+export const createCampaignSchema = createCampaignFieldsSchema.superRefine(refineCreateCampaignFields);
 export type CreateCampaignInput = z.infer<typeof createCampaignSchema>;
+
+/** tRPC router: same as `createCampaignSchema` plus optional session branch override. */
+export const createCampaignProcedureSchema = createCampaignFieldsSchema
+  .extend({
+    branchId: z.string().uuid().optional(),
+  })
+  .superRefine(refineCreateCampaignFields);
 
 export const updateCampaignSchema = z.object({
   id: z.string().uuid(),

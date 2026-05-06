@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { PageHeader } from '~/components/ui/page-header';
@@ -59,6 +60,7 @@ export function RoleTemplatesPage({
   templatePermissionsById,
 }: LoaderShape) {
   const fetcher = useFetcher<ActionData>();
+  const roleTplSurface = useFetcherActionSurface(fetcher);
 
   const permCodesSorted = useMemo(() => permissions.map((p) => p.code).sort(), [permissions]);
 
@@ -76,6 +78,7 @@ export function RoleTemplatesPage({
   const [mainTab, setMainTab] = useState<'templates' | 'catalog'>('templates');
 
   const busy = fetcher.state !== 'idle';
+  const templateModalOpen = createOpen || editOpen || viewOpen;
 
   // Close-on-success — edge-triggered via the shared hook. Filtered to the
   // create + setPermissions intents; `getTemplate` (which prefills the edit
@@ -266,9 +269,9 @@ export function RoleTemplatesPage({
         }
       />
 
-      {fetcher.data?.error && (
+      {fetcher.data?.error && !templateModalOpen && (
         <div className="rounded-md border border-danger-200 bg-danger-50 dark:bg-danger-900/20 px-3 py-2 text-sm text-danger-700">
-          {fetcher.data.error}
+          {roleTplSurface.friendlyError || fetcher.data.error}
         </div>
       )}
 
@@ -333,6 +336,7 @@ export function RoleTemplatesPage({
         contentClassName="flex max-h-[90vh] flex-col gap-4 bg-app-elevated p-6"
       >
         <h3 className="text-lg font-semibold text-app-fg">Create custom template</h3>
+        <ModalFetcherInlineError message={roleTplSurface.errorMatchingIntent('createTemplate')} />
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           <TextInput
             label="Key"
@@ -434,6 +438,7 @@ export function RoleTemplatesPage({
         <h3 className="text-lg font-semibold text-app-fg">
           {active ? `Edit permissions — ${active.name}` : 'Edit permissions'}
         </h3>
+        <ModalFetcherInlineError message={roleTplSurface.errorMatchingIntent('setTemplatePermissions')} />
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           <div className="space-y-2 border-t border-app-border pt-4">
             <div>
@@ -543,6 +548,7 @@ export function RoleTemplatesPage({
             <p className="font-mono text-xs text-app-fg-muted break-all">{active.key}</p>
           ) : null}
         </div>
+        <ModalFetcherInlineError message={roleTplSurface.errorMatchingIntent('getTemplate')} />
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-app-border pt-4">
           <TemplatePermissionsViewPanel catalog={permissions} grantedCodes={viewCodes} />
         </div>

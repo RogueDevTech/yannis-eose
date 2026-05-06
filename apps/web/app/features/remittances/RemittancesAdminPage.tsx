@@ -5,6 +5,7 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -68,134 +69,33 @@ function formatLocationWithProvider(name: string, providerName: string | null | 
   return providerName ? `${name} • ${providerName}` : name;
 }
 
-const PROCESSED_TRANSFER_COLUMNS: CompactTableColumn<TransferConfirmationRecord>[] = [
-  {
-    key: 'product',
-    header: 'Product',
-    render: (r) => <span className="text-app-fg">{r.productName}</span>,
-  },
-  {
-    key: 'route',
-    header: 'From → To',
-    minWidth: 'min-w-[200px]',
-    render: (r) => (
-      <span
-        className="text-app-fg-muted truncate block max-w-[18rem]"
-        title={`${formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} → ${formatLocationWithProvider(r.toLocationName, r.toProviderName)}`}
-      >
-        {r.fromLocationName} → {r.toLocationName}
-      </span>
-    ),
-  },
-  {
-    key: 'sender',
-    header: 'Sent by',
-    render: (r) => <span className="text-app-fg-muted">{r.senderName ?? 'Unknown user'}</span>,
-  },
-  {
-    key: 'qty',
-    header: 'Qty',
-    align: 'right',
-    render: (r) => <span className="tabular-nums">{r.outcomeQuantity ?? r.quantityReceived ?? '—'}</span>,
-  },
-  {
-    key: 'status',
-    header: 'Status',
-    render: (r) => (
-      <StatusBadge status={r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)} />
-    ),
-  },
-  {
-    key: 'comments',
-    header: 'Comments',
-    minWidth: 'min-w-[200px]',
-    render: (r) =>
-      r.receiverNotes || r.shrinkageReason ? (
-        <div className="space-y-0.5 max-w-[260px] text-sm text-app-fg-muted">
-          {r.receiverNotes ? (
-            <p className="text-app-fg whitespace-pre-line break-words">{r.receiverNotes}</p>
-          ) : null}
-          {(r.outcomeReason ?? r.shrinkageReason) ? (
-            <p className="text-xs text-warning-600 dark:text-warning-400">
-              Shrinkage: {r.outcomeReason ?? r.shrinkageReason}
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <span className="text-app-fg-muted">—</span>
-      ),
-  },
-  {
-    key: 'sent',
-    header: 'Sent',
-    nowrap: true,
-    render: (r) => <span className="text-app-fg-muted">{new Date(r.createdAt).toLocaleDateString()}</span>,
-  },
-];
-
-const PENDING_TRANSFER_COLUMNS: CompactTableColumn<TransferConfirmationRecord>[] = [
-  {
-    key: 'product',
-    header: 'Product',
-    render: (r) => <span className="text-app-fg">{r.productName}</span>,
-  },
-  {
-    key: 'route',
-    header: 'From → To',
-    minWidth: 'min-w-[200px]',
-    render: (r) => (
-      <span
-        className="text-app-fg-muted truncate block max-w-[18rem]"
-        title={`${formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} → ${formatLocationWithProvider(r.toLocationName, r.toProviderName)}`}
-      >
-        {r.fromLocationName} → {r.toLocationName}
-      </span>
-    ),
-  },
-  {
-    key: 'qtySent',
-    header: 'Qty sent',
-    align: 'right',
-    nowrap: true,
-    render: (r) => <span className="tabular-nums">{r.quantitySent}</span>,
-  },
-  {
-    key: 'sender',
-    header: 'Sent by',
-    render: (r) => <span className="text-app-fg-muted">{r.senderName ?? 'Unknown user'}</span>,
-  },
-  {
-    key: 'created',
-    header: 'Created',
-    nowrap: true,
-    render: (r) => <span className="text-app-fg-muted">{new Date(r.createdAt).toLocaleString()}</span>,
-  },
-  {
-    key: 'status',
-    header: 'Status',
-    nowrap: true,
-    render: (r) => <StatusBadge status={r.transferStatus} />,
-  },
-];
+/** In-transit rows need Receive / Not received; received or disputed rows use View. */
+function isPendingTransfer(r: TransferConfirmationRecord): boolean {
+  return r.transferStatus === 'IN_TRANSIT';
+}
 
 export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
+  const fetcherSurface = useFetcherActionSurface(fetcher);
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [quantityReceived, setQuantityReceived] = useState<Record<string, string>>({});
   const [shrinkageReason, setShrinkageReason] = useState<Record<string, string>>({});
   const [receiverNotes, setReceiverNotes] = useState<Record<string, string>>({});
-  const [confirmTarget, setConfirmTarget] = useState<TransferConfirmationRecord | null>(null);
-  const [confirmMode, setConfirmMode] = useState<'receive' | 'reject'>('receive');
+  const [pendingAction, setPendingAction] = useState<{
+    row: TransferConfirmationRecord;
+    mode: 'receive' | 'reject';
+  } | null>(null);
+  const [actionModalFieldError, setActionModalFieldError] = useState<string | null>(null);
   const [viewTarget, setViewTarget] = useState<TransferConfirmationRecord | null>(null);
 
-  useFetcherToast(fetcher.data, { successMessage: 'Transfer recorded' });
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Transfer recorded',
+    skipErrorToast: !!pendingAction,
+  });
 
   const sentRemittances = remittances.filter((r) => r.transferStatus === 'IN_TRANSIT');
-  const receivedOrDisputed = remittances.filter(
-    (r) => r.outcomeStatus === 'APPROVED' || r.outcomeStatus === 'DISPUTED',
-  );
   const receivedCount = remittances.filter((r) => r.outcomeStatus === 'APPROVED').length;
   const disputedCount = remittances.filter((r) => r.outcomeStatus === 'DISPUTED').length;
   const totalQuantitySent = remittances.reduce((sum, r) => sum + r.quantitySent, 0);
@@ -218,14 +118,15 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   );
 
   const handleRemittanceFetcherSuccess = useCallback(() => {
-    setConfirmTarget(null);
+    setPendingAction(null);
+    setActionModalFieldError(null);
     setMarkingId(null);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleRemittanceFetcherSuccess);
 
-  const openConfirm = useCallback((mode: 'receive' | 'reject', remittance: TransferConfirmationRecord) => {
-    setConfirmMode(mode);
-    setConfirmTarget(remittance);
+  const openPendingActionModal = useCallback((row: TransferConfirmationRecord, mode: 'receive' | 'reject') => {
+    setActionModalFieldError(null);
+    setPendingAction({ row, mode });
   }, []);
 
   const handleMarkReceived = (remittance: TransferConfirmationRecord) => {
@@ -258,6 +159,29 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     fetcher.submit(formData, { method: 'post' });
   };
 
+  const submitPendingActionModal = () => {
+    if (!pendingAction) return;
+    const { row: r, mode } = pendingAction;
+    if (mode === 'receive') {
+      const qty = quantityReceived[r.id] ?? String(r.quantitySent);
+      const qtyNum = parseInt(qty, 10);
+      if (Number.isNaN(qtyNum) || qtyNum < 0 || qtyNum > r.quantitySent) {
+        setActionModalFieldError(`Enter a quantity between 0 and ${r.quantitySent}.`);
+        return;
+      }
+      setActionModalFieldError(null);
+      handleMarkReceived(r);
+      return;
+    }
+    const reason = shrinkageReason[r.id]?.trim() ?? '';
+    if (reason.length < 10) {
+      setActionModalFieldError('Dispute reason must be at least 10 characters.');
+      return;
+    }
+    setActionModalFieldError(null);
+    handleMarkNotReceived(r);
+  };
+
   const setFilterParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value.trim().length === 0) next.delete(key);
@@ -279,24 +203,116 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     setSearchParams(next);
   };
 
-  const processedColumnsWithActions = useMemo((): CompactTableColumn<TransferConfirmationRecord>[] => {
+  const unifiedColumnsWithActions = useMemo((): CompactTableColumn<TransferConfirmationRecord>[] => {
     return [
-      ...PROCESSED_TRANSFER_COLUMNS,
       {
-        key: 'actions',
-        header: '',
-        align: 'right',
-        tight: true,
+        key: 'product',
+        header: 'Product',
+        render: (r) => <span className="text-app-fg">{r.productName}</span>,
+      },
+      {
+        key: 'route',
+        header: 'From → To',
+        minWidth: 'min-w-[200px]',
         render: (r) => (
-          <div className="inline-flex items-center justify-end">
-            <TableActionButton variant="primary" onClick={() => setViewTarget(r)}>
-              View
-            </TableActionButton>
-          </div>
+          <span
+            className="text-app-fg-muted truncate block max-w-[18rem]"
+            title={`${formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} → ${formatLocationWithProvider(r.toLocationName, r.toProviderName)}`}
+          >
+            {r.fromLocationName} → {r.toLocationName}
+          </span>
         ),
       },
+      {
+        key: 'sender',
+        header: 'Sent by',
+        render: (r) => <span className="text-app-fg-muted">{r.senderName ?? 'Unknown user'}</span>,
+      },
+      {
+        key: 'qty',
+        header: 'Qty',
+        align: 'right',
+        nowrap: true,
+        render: (r) => (
+          <span className="tabular-nums" title={isPendingTransfer(r) ? 'Quantity sent' : 'Quantity received'}>
+            {isPendingTransfer(r) ? r.quantitySent : (r.outcomeQuantity ?? r.quantityReceived ?? '—')}
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        nowrap: true,
+        render: (r) => (
+          <StatusBadge
+            status={
+              isPendingTransfer(r)
+                ? r.transferStatus
+                : r.outcomeStatus === 'APPROVED'
+                  ? 'RECEIVED'
+                  : (r.outcomeStatus ?? r.transferStatus)
+            }
+          />
+        ),
+      },
+      {
+        key: 'created',
+        header: 'Created',
+        nowrap: true,
+        render: (r) => (
+          <span className="text-app-fg-muted">{new Date(r.createdAt).toLocaleString()}</span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: 'Actions',
+        align: 'right',
+        tight: true,
+        mobileShowLabel: false,
+        minWidth: 'min-w-[200px]',
+        render: (r) => {
+          const isBusy = markingId === r.id || fetcher.state === 'submitting';
+          if (isPendingTransfer(r)) {
+            return (
+              <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
+                <TableActionButton
+                  variant="danger"
+                  disabled={isBusy}
+                  onClick={() => openPendingActionModal(r, 'reject')}
+                >
+                  Not received
+                </TableActionButton>
+                <TableActionButton
+                  variant="primary"
+                  disabled={isBusy}
+                  onClick={() => openPendingActionModal(r, 'receive')}
+                >
+                  Receive
+                </TableActionButton>
+              </div>
+            );
+          }
+          return (
+            <div className="inline-flex items-center justify-end">
+              <TableActionButton variant="primary" onClick={() => setViewTarget(r)}>
+                View
+              </TableActionButton>
+            </div>
+          );
+        },
+      },
     ];
-  }, []);
+  }, [markingId, fetcher.state, openPendingActionModal]);
+
+  const emptyDescription = useMemo(() => {
+    if (statusValue === 'IN_TRANSIT') {
+      return 'All in-transit transfers have been processed.';
+    }
+    if (statusValue === 'RECEIVED' || statusValue === 'DISPUTED') {
+      return 'No records match this status.';
+    }
+    return 'No stock transfers match your filters. Try clearing filters or changing the date range.';
+  }, [statusValue]);
 
   return (
     <div className="space-y-6">
@@ -393,71 +409,55 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       </div>
 
       <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[16rem]">
-      {/* Pending list — visible on All / Pending. Table-first: summary row + receive form sub-row. */}
-      {(statusValue === '' || statusValue === 'IN_TRANSIT') && sentRemittances.length > 0 && (
+      {/* Single table: pending rows get Receive / Not received; completed rows get View. */}
+      {remittances.length === 0 ? (
+        <EmptyState title="No transfers found" description={emptyDescription} variant="inline" />
+      ) : (
         <CompactTable<TransferConfirmationRecord>
-          columns={PENDING_TRANSFER_COLUMNS}
-          rows={sentRemittances}
+          columns={unifiedColumnsWithActions}
+          rows={remittances}
           rowKey={(r) => r.id}
-          renderRowDetail={(r) => {
-            const isBusy = markingId === r.id || fetcher.state === 'submitting';
-            return (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <TextInput
-                    label="Qty received"
-                    type="number"
-                    min={0}
-                    max={r.quantitySent}
-                    value={quantityReceived[r.id] ?? String(r.quantitySent)}
-                    onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    disabled={isBusy}
-                  />
-                  <TextInput
-                    label="Shrinkage reason (if short)"
-                    type="text"
-                    placeholder="Optional"
-                    value={shrinkageReason[r.id] ?? ''}
-                    onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    disabled={isBusy}
-                  />
-                  <Textarea
-                    label="Comments"
-                    placeholder="Optional notes from the receiver…"
-                    rows={2}
-                    value={receiverNotes[r.id] ?? ''}
-                    onChange={(e) => setReceiverNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    disabled={isBusy}
-                    maxLength={500}
-                  />
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => openConfirm('reject', r)}
-                    loading={isBusy}
-                    loadingText="Saving..."
-                  >
-                    Not received
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => openConfirm('receive', r)}
-                    loading={isBusy}
-                    loadingText="Saving..."
-                  >
-                    Mark received
-                  </Button>
-                </div>
-              </div>
-            );
-          }}
+          rowClassName={(r) => (markingId === r.id ? 'opacity-60' : '')}
           renderMobileCard={(r) => {
             const isBusy = markingId === r.id || fetcher.state === 'submitting';
+            if (isPendingTransfer(r)) {
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-medium text-app-fg truncate">{r.productName}</p>
+                      <p className="text-sm text-app-fg-muted">
+                        {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} →{' '}
+                        {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
+                      </p>
+                      <p className="text-sm text-app-fg-muted">
+                        Qty sent: <span className="tabular-nums">{r.quantitySent}</span> ·{' '}
+                        {new Date(r.createdAt).toLocaleString()}
+                      </p>
+                      <p className="text-sm text-app-fg-muted">Sent by: {r.senderName ?? 'Unknown user'}</p>
+                    </div>
+                    <StatusBadge status={r.transferStatus} />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <TableActionButton
+                      variant="danger"
+                      disabled={isBusy}
+                      onClick={() => openPendingActionModal(r, 'reject')}
+                    >
+                      Not received
+                    </TableActionButton>
+                    <TableActionButton
+                      variant="primary"
+                      disabled={isBusy}
+                      onClick={() => openPendingActionModal(r, 'receive')}
+                    >
+                      Receive
+                    </TableActionButton>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
@@ -468,176 +468,151 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                       {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
                     </p>
                     <p className="text-sm text-app-fg-muted">
-                      Qty sent: <span className="tabular-nums">{r.quantitySent}</span> ·{' '}
+                      Qty:{' '}
+                      <span className="tabular-nums">{r.outcomeQuantity ?? r.quantityReceived ?? '—'}</span>
+                      {' · '}
                       {new Date(r.createdAt).toLocaleString()}
                     </p>
                     <p className="text-sm text-app-fg-muted">Sent by: {r.senderName ?? 'Unknown user'}</p>
                   </div>
-                  <StatusBadge status={r.transferStatus} />
-                </div>
-
-                <div className="grid grid-cols-1 gap-2">
-                  <TextInput
-                    label="Qty received"
-                    type="number"
-                    min={0}
-                    max={r.quantitySent}
-                    value={quantityReceived[r.id] ?? String(r.quantitySent)}
-                    onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    disabled={isBusy}
-                  />
-                  <TextInput
-                    label="Shrinkage reason (if short)"
-                    type="text"
-                    placeholder="Optional"
-                    value={shrinkageReason[r.id] ?? ''}
-                    onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    disabled={isBusy}
-                  />
-                  <Textarea
-                    label="Comments"
-                    placeholder="Optional notes from the receiver…"
-                    rows={2}
-                    value={receiverNotes[r.id] ?? ''}
-                    onChange={(e) => setReceiverNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                    disabled={isBusy}
-                    maxLength={500}
+                  <StatusBadge
+                    status={
+                      r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)
+                    }
                   />
                 </div>
 
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => openConfirm('reject', r)}
-                    loading={isBusy}
-                    loadingText="Saving..."
-                  >
-                    Not received
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => openConfirm('receive', r)}
-                    loading={isBusy}
-                    loadingText="Saving..."
-                  >
-                    Mark received
-                  </Button>
+                <div className="flex flex-wrap items-center justify-end">
+                  <TableActionButton variant="primary" onClick={() => setViewTarget(r)}>
+                    View
+                  </TableActionButton>
                 </div>
               </div>
             );
           }}
         />
       )}
-
-      {(statusValue === '' || statusValue === 'IN_TRANSIT') && sentRemittances.length === 0 && (
-        <EmptyState
-          title="No pending transfers"
-          description="All in-transit stock transfers have been processed."
-          variant="inline"
-        />
-      )}
-
-      {/* Processed list (Received / Disputed) — visible on All / Received / Disputed. */}
-      {(statusValue === '' || statusValue === 'RECEIVED' || statusValue === 'DISPUTED') &&
-        receivedOrDisputed.length > 0 && (
-        <CompactTable<TransferConfirmationRecord>
-          columns={processedColumnsWithActions}
-          rows={receivedOrDisputed}
-          rowKey={(r) => r.id}
-        />
-      )}
-
-      {(statusValue === 'RECEIVED' || statusValue === 'DISPUTED') && receivedOrDisputed.length === 0 && (
-        <EmptyState
-          title="No processed transfers yet"
-          description="Received or disputed stock transfers will appear here."
-          variant="inline"
-        />
-      )}
       </TableLoadingOverlay>
 
-      {confirmTarget && (
+      {pendingAction && (
         <Modal
           open
-          onClose={() => setConfirmTarget(null)}
-          maxWidth="max-w-md"
+          onClose={() => {
+            if (fetcher.state === 'submitting' && markingId === pendingAction.row.id) return;
+            setPendingAction(null);
+            setActionModalFieldError(null);
+          }}
+          maxWidth="max-w-lg"
           role="dialog"
           contentClassName="p-6 space-y-4 bg-app-elevated"
         >
-          <h3 className="text-lg font-semibold text-app-fg">
-            {confirmMode === 'reject' ? 'Confirm not received' : 'Confirm mark received'}
-          </h3>
-          <p className="text-sm text-app-fg-muted">
-            {confirmMode === 'reject'
-              ? 'You are about to mark this transfer as not received (disputed).'
-              : 'You are about to confirm this transfer as received.'}
-          </p>
-          <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm space-y-1.5">
-            <p className="font-medium text-app-fg">{confirmTarget.productName}</p>
-            <p className="text-app-fg-muted">
-              {formatLocationWithProvider(confirmTarget.fromLocationName, confirmTarget.fromProviderName)} → {formatLocationWithProvider(confirmTarget.toLocationName, confirmTarget.toProviderName)}
+          <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('markTransferReceived')} />
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-app-fg">
+              {pendingAction.mode === 'reject' ? 'Mark as not received' : 'Mark transfer received'}
+            </h3>
+            <p className="text-sm text-app-fg-muted">
+              {pendingAction.mode === 'reject'
+                ? 'Record a dispute when goods did not arrive as expected. A clear reason is required.'
+                : 'Enter how many units arrived. If fewer than sent, add a shrinkage reason.'}
             </p>
-            <p className="text-app-fg-muted">
-              Quantity sent: {confirmTarget.quantitySent}
-            </p>
-            <p className="text-app-fg-muted">
-              Quantity to mark as received:{' '}
-              <span className="font-medium text-app-fg">
-                {confirmMode === 'reject' ? '0' : (quantityReceived[confirmTarget.id] ?? confirmTarget.quantitySent)}
-              </span>
-            </p>
-            {confirmMode === 'reject' && (
-              <p className="text-app-fg-muted">
-                Provide reason (min 10 chars):
-                <span className="font-medium text-app-fg"> required</span>
-              </p>
-            )}
-            {(shrinkageReason[confirmTarget.id] ?? '').trim() && (
-              <p className="text-app-fg-muted">
-                Shrinkage reason: {(shrinkageReason[confirmTarget.id] ?? '').trim()}
-              </p>
-            )}
-            {(receiverNotes[confirmTarget.id] ?? '').trim() && (
-              <div className="text-app-fg-muted">
-                <p className="text-xs uppercase tracking-wide font-semibold mb-0.5">Comments</p>
-                <p className="text-app-fg whitespace-pre-line break-words">
-                  {(receiverNotes[confirmTarget.id] ?? '').trim()}
-                </p>
-              </div>
-            )}
           </div>
-          <div className="flex items-center justify-end gap-2 pt-2">
+
+          <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm space-y-1.5">
+            <p className="font-medium text-app-fg">{pendingAction.row.productName}</p>
+            <p className="text-app-fg-muted">
+              {formatLocationWithProvider(pendingAction.row.fromLocationName, pendingAction.row.fromProviderName)} →{' '}
+              {formatLocationWithProvider(pendingAction.row.toLocationName, pendingAction.row.toProviderName)}
+            </p>
+            <p className="text-app-fg-muted">
+              Qty sent: <span className="tabular-nums font-medium text-app-fg">{pendingAction.row.quantitySent}</span>
+              {' · '}
+              Sent by {pendingAction.row.senderName ?? 'Unknown user'}
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {pendingAction.mode === 'receive' ? (
+              <>
+                <TextInput
+                  label="Qty received"
+                  type="number"
+                  min={0}
+                  max={pendingAction.row.quantitySent}
+                  value={quantityReceived[pendingAction.row.id] ?? String(pendingAction.row.quantitySent)}
+                  onChange={(e) => {
+                    setActionModalFieldError(null);
+                    setQuantityReceived((prev) => ({ ...prev, [pendingAction.row.id]: e.target.value }));
+                  }}
+                  disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
+                />
+                <TextInput
+                  label="Shrinkage reason (if short)"
+                  type="text"
+                  placeholder="Optional — required if count is below sent qty"
+                  value={shrinkageReason[pendingAction.row.id] ?? ''}
+                  onChange={(e) => {
+                    setActionModalFieldError(null);
+                    setShrinkageReason((prev) => ({ ...prev, [pendingAction.row.id]: e.target.value }));
+                  }}
+                  disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
+                />
+              </>
+            ) : (
+              <TextInput
+                label="Reason for dispute"
+                type="text"
+                placeholder="Minimum 10 characters"
+                value={shrinkageReason[pendingAction.row.id] ?? ''}
+                onChange={(e) => {
+                  setActionModalFieldError(null);
+                  setShrinkageReason((prev) => ({ ...prev, [pendingAction.row.id]: e.target.value }));
+                }}
+                disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
+              />
+            )}
+            <Textarea
+              label="Comments"
+              placeholder="Optional notes from the receiver…"
+              rows={3}
+              value={receiverNotes[pendingAction.row.id] ?? ''}
+              onChange={(e) => {
+                setActionModalFieldError(null);
+                setReceiverNotes((prev) => ({ ...prev, [pendingAction.row.id]: e.target.value }));
+              }}
+              disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
+              maxLength={500}
+            />
+          </div>
+
+          {actionModalFieldError ? (
+            <p className="text-sm text-danger-600 dark:text-danger-400" role="alert">
+              {actionModalFieldError}
+            </p>
+          ) : null}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
             <Button
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => setConfirmTarget(null)}
-              disabled={fetcher.state === 'submitting' && markingId === confirmTarget.id}
+              onClick={() => {
+                setPendingAction(null);
+                setActionModalFieldError(null);
+              }}
+              disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
             >
               Cancel
             </Button>
             <Button
               type="button"
-              variant={confirmMode === 'reject' ? 'danger' : 'primary'}
+              variant={pendingAction.mode === 'reject' ? 'danger' : 'primary'}
               size="sm"
-              onClick={() => {
-                if (confirmMode === 'reject') {
-                  handleMarkNotReceived(confirmTarget);
-                  return;
-                }
-                handleMarkReceived(confirmTarget);
-              }}
-              disabled={
-                confirmMode === 'reject' && (shrinkageReason[confirmTarget.id]?.trim().length ?? 0) < 10
-              }
-              loading={fetcher.state === 'submitting' && markingId === confirmTarget.id}
+              onClick={submitPendingActionModal}
+              loading={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
               loadingText="Saving..."
             >
-              {confirmMode === 'reject' ? 'Confirm not received' : 'Confirm mark received'}
+              {pendingAction.mode === 'reject' ? 'Confirm not received' : 'Confirm received'}
             </Button>
           </div>
         </Modal>

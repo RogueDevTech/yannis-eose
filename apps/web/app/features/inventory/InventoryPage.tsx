@@ -3,6 +3,7 @@ import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { isOptimisticId } from '~/lib/optimistic';
 import { ExportModal } from '~/components/ui/export-modal';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -14,7 +15,6 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
-import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -152,7 +152,7 @@ export function InventoryPage({
   const [adjustReason, setAdjustReason] = useState('');
   const [adjustQty, setAdjustQty] = useState('');
   const adjustFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(adjustFetcher.data, { successMessage: 'Stock adjusted' });
+  const adjustSurface = useFetcherActionSurface(adjustFetcher);
 
   const openAdjustModal = (level: InventoryLevel) => {
     setEditingLevel(level);
@@ -193,12 +193,21 @@ export function InventoryPage({
   const [draftThreshold, setDraftThreshold] = useState<number>(lowStockThreshold);
   useEffect(() => { setDraftThreshold(lowStockThreshold); }, [lowStockThreshold]);
   const thresholdFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  useFetcherToast(thresholdFetcher.data, { successMessage: 'Low-stock threshold updated' });
+  const thresholdSurface = useFetcherActionSurface(thresholdFetcher);
   useEffect(() => {
     if (thresholdFetcher.data?.success) {
       setShowThresholdModal(false);
     }
   }, [thresholdFetcher.data]);
+
+  useFetcherToast(adjustFetcher.data, {
+    successMessage: 'Stock adjusted',
+    skipErrorToast: !!(editingLevel && adjustDirection),
+  });
+  useFetcherToast(thresholdFetcher.data, {
+    successMessage: 'Low-stock threshold updated',
+    skipErrorToast: showThresholdModal,
+  });
 
   const pageStockSum = levels.reduce((sum, l) => sum + l.stockCount, 0);
   const pageReservedSum = levels.reduce((sum, l) => sum + l.reservedCount, 0);
@@ -524,13 +533,7 @@ export function InventoryPage({
               }
             />
           )}
-          {adjustFetcher.data?.error && (
-            <PageNotification
-              variant="error"
-              message={adjustFetcher.data.error}
-              onDismiss={() => { /* transient — dismisses with modal close */ }}
-            />
-          )}
+          <ModalFetcherInlineError message={adjustSurface.errorMatchingIntent('adjustStock')} />
           <adjustFetcher.Form method="post" className="space-y-4">
             <input type="hidden" name="intent" value="adjustStock" />
             <input type="hidden" name="productId" value={editingLevel.productId} />
@@ -618,13 +621,7 @@ export function InventoryPage({
               When a product's available stock at any location drops below this number, SuperAdmins, Admins, and Stock Managers get an in-app + push notification. Rate-limited to one alert per location per 6 hours.
             </p>
           </div>
-          {thresholdFetcher.data?.error && (
-            <PageNotification
-              variant="error"
-              message={thresholdFetcher.data.error}
-              onDismiss={() => { /* transient — clears with modal close */ }}
-            />
-          )}
+          <ModalFetcherInlineError message={thresholdSurface.errorMatchingIntent('updateLowStockThreshold')} />
           <thresholdFetcher.Form method="post" className="space-y-4">
             <input type="hidden" name="intent" value="updateLowStockThreshold" />
             <div className="flex items-center gap-3">
@@ -1061,6 +1058,7 @@ function ReturnsTab({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const [writeOffOrderId, setWriteOffOrderId] = useState<string | null>(null);
+  const returnsSurface = useFetcherActionSurface(fetcher);
 
   // Close write-off modal on success — edge-triggered via the shared hook.
   // Replaces the prior in-render `if (actionSuccess) setWriteOffOrderId(null)`
@@ -1171,6 +1169,7 @@ function ReturnsTab({
       {/* Write-off modal */}
       {writeOffOrderId && (
         <Modal open onClose={() => setWriteOffOrderId(null)} maxWidth="max-w-md" contentClassName="p-6 space-y-4 bg-app-elevated">
+            <ModalFetcherInlineError message={returnsSurface.errorMatchingIntent('writeOff')} />
             <h3 className="text-lg font-semibold text-app-fg">Write Off — Damaged Item</h3>
             <p className="text-sm text-app-fg-muted">This will permanently mark the item as damaged and log it as an Operational Loss.</p>
             <fetcher.Form method="post" className="space-y-3">

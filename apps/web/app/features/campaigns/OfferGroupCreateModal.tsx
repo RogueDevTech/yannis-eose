@@ -7,6 +7,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type { Product } from './types';
 
 type DraftLine = { label: string; quantity: number; imageUrl?: string };
@@ -27,6 +28,7 @@ export function OfferGroupCreateModal({
   onCreated?: () => void;
 }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const fetcherSurface = useFetcherActionSurface(fetcher);
   const { toast } = useToast();
 
   const submitting = fetcher.state !== 'idle';
@@ -81,7 +83,7 @@ export function OfferGroupCreateModal({
   }, [onClose, onCreated, toast]);
   useCloseOnFetcherSuccess(fetcher, handleSuccess, { intent: 'createOfferGroup' });
 
-  const error = inlineError ?? fetcher.data?.error ?? null;
+  const error = inlineError ?? fetcherSurface.errorMatchingIntent('createOfferGroup');
 
   const submit = () => {
     setInlineError(null);

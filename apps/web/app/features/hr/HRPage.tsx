@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import {
   applyOptimisticPatches,
@@ -24,6 +25,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { NairaPrice } from '~/components/ui/naira-price';
 import { TextInput } from '~/components/ui/text-input';
 import type { Adjustment, HRUser, HRStreamData } from './types';
+import { humanizeZodIssuesString } from '~/lib/api-error';
 import { MonthlyPayrolls } from './MonthlyPayrolls';
 
 const ADJ_CATEGORIES = ['BONUS', 'EXTRA_SHIFT', 'PERFORMANCE', 'OTHER'];
@@ -51,13 +53,17 @@ export function HRPage({
   initialBatchId,
 }: HRStreamData) {
   const fetcher = useFetcher();
+  const hrSurface = useFetcherActionSurface(fetcher);
   const [activeTab, setActiveTab] = useState<'monthly' | 'adjustments'>('monthly');
   const [showAddAdjustment, setShowAddAdjustment] = useState(false);
   const [adjustmentStaffId, setAdjustmentStaffId] = useState('');
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const [dismissedError, setDismissedError] = useState(false);
-  useFetcherToast(fetcher.data, { successMessage: 'HR action completed' });
+  useFetcherToast(fetcher.data, {
+    successMessage: 'HR action completed',
+    skipErrorToast: Boolean(showAddAdjustment && hrSurface.errorMatchingIntent('createAdjustment')),
+  });
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
@@ -112,10 +118,12 @@ export function HRPage({
         }
       />
 
-      {actionError && !dismissedError && (
+      {actionError &&
+        !dismissedError &&
+        !(showAddAdjustment && hrSurface.errorMatchingIntent('createAdjustment')) && (
         <PageNotification
           variant="error"
-          message={actionError}
+          message={humanizeZodIssuesString(actionError)}
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
@@ -176,6 +184,7 @@ export function HRPage({
               </svg>
             </button>
           </div>
+          <ModalFetcherInlineError message={hrSurface.errorMatchingIntent('createAdjustment')} />
           <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="createAdjustment" />
             <input type="hidden" name="staffId" value={adjustmentStaffId} />

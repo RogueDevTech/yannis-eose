@@ -226,6 +226,7 @@ export {
   getOfferGroupSchema,
   clearLegacyOfferTemplatesSchema,
   createCampaignSchema,
+  createCampaignProcedureSchema,
   updateCampaignSchema,
   listCampaignsSchema,
   customFormFieldSchema,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -245,15 +246,15 @@ export function MonthlyPayrolls({
 }: MonthlyPayrollsProps) {
   const fetcher = useFetcher();
   const previewFetcher = useFetcher<{ success?: boolean; preview?: PayrollPreview; error?: string }>();
+  const payrollSurface = useFetcherActionSurface(fetcher);
+  const payrollPreviewSurface = useFetcherActionSurface(previewFetcher);
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const [, setSearchParams] = useSearchParams();
-  useFetcherToast(fetcher.data, { successMessage: 'Payroll updated' });
 
   const [showGenerate, setShowGenerate] = useState(false);
   const [openBatchId, setOpenBatchId] = useState<string | null>(initialBatchId);
   const [batchDetail, setBatchDetail] = useState<BatchDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
   const [generateBranchId, setGenerateBranchId] = useState<string>('');
   const [generateDepartment, setGenerateDepartment] = useState<PayrollDepartment>('CS');
   const [generatePeriodMonth, setGeneratePeriodMonth] = useState('');
@@ -306,6 +307,12 @@ export function MonthlyPayrolls({
     }
   }, [showGenerate, generateDepartment, generatableDepartments, generatePeriodMonth, currentMonth]);
 
+  const payrollFetcherModalOpen = showGenerate || openBatchId != null;
+  useFetcherToast(fetcher.data, {
+    successMessage: 'Payroll updated',
+    skipErrorToast: payrollFetcherModalOpen,
+  });
+
   // Open / close detail modal — fetch on open
   useEffect(() => {
     if (!openBatchId) {
@@ -355,21 +362,6 @@ export function MonthlyPayrolls({
     setShowGenerate(false);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleGenerateSuccess, { intent: 'generateBatch' });
-
-  useEffect(() => {
-    if (
-      fetcher.state === 'submitting' &&
-      fetcher.formData?.get('intent') === 'generateBatch'
-    ) {
-      setGenerateError(null);
-    }
-  }, [fetcher.state, fetcher.formData]);
-
-  useEffect(() => {
-    if (!showGenerate || fetcher.state !== 'idle') return;
-    const result = fetcher.data as { success?: boolean; error?: string } | undefined;
-    if (result?.error && !result.success) setGenerateError(result.error);
-  }, [fetcher.state, fetcher.data, showGenerate]);
 
   useEffect(() => {
     if (!showGenerate) return;
@@ -427,7 +419,6 @@ export function MonthlyPayrolls({
             // Block backdrop / Esc dismissal while the request is mid-flight so we don't lose feedback.
             if (fetcher.state !== 'idle') return;
             setShowGenerate(false);
-            setGenerateError(null);
             setPreview(null);
           }}
           maxWidth="max-w-md"
@@ -439,6 +430,8 @@ export function MonthlyPayrolls({
             Auto-derives payouts from delivered orders + commission plans for the selected department and month.
             Existing DRAFT batches in the same slot are refreshed; submitted batches must be rejected first.
           </p>
+          <ModalFetcherInlineError message={payrollSurface.errorMatchingIntent('generateBatch')} />
+          <ModalFetcherInlineError message={payrollPreviewSurface.errorMatchingIntent('previewBatch')} />
           <fetcher.Form method="post" className="space-y-3">
             <input type="hidden" name="intent" value="generateBatch" />
             <input type="hidden" name="branchId" value={generateBranchId} />
@@ -513,11 +506,6 @@ export function MonthlyPayrolls({
                 </div>
               )}
             </div>
-            {generateError && (
-              <div className="rounded-md border border-danger-200 dark:border-danger-700/50 bg-danger-50 dark:bg-danger-900/20 px-3 py-2 text-xs text-danger-700 dark:text-danger-300">
-                {generateError}
-              </div>
-            )}
             <div className="flex gap-2">
               <Button
                 type="submit"
@@ -533,7 +521,7 @@ export function MonthlyPayrolls({
                 variant="secondary"
                 size="sm"
                 disabled={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'generateBatch'}
-                onClick={() => { setShowGenerate(false); setGenerateError(null); setPreview(null); }}
+                onClick={() => { setShowGenerate(false); setPreview(null); }}
               >
                 Cancel
               </Button>
@@ -549,6 +537,7 @@ export function MonthlyPayrolls({
           detail={batchDetail}
           viewer={viewer}
           fetcher={fetcher}
+          payrollSurface={payrollSurface}
           onClose={closeDetail}
         />
       )}
@@ -645,12 +634,14 @@ function BatchDetailModal({
   detail,
   viewer,
   fetcher,
+  payrollSurface,
   onClose,
 }: {
   loading: boolean;
   detail: BatchDetail | null;
   viewer: ViewerInfo;
   fetcher: ReturnType<typeof useFetcher>;
+  payrollSurface: ReturnType<typeof useFetcherActionSurface>;
   onClose: () => void;
 }) {
   const [showAdjust, setShowAdjust] = useState<{ payoutId: string; staffName: string } | null>(null);
@@ -708,6 +699,10 @@ function BatchDetailModal({
 
       {/* Status timeline */}
       <BatchTimeline batch={batch} />
+
+      <ModalFetcherInlineError
+        message={payrollSurface.errorMatchingIntent(['submitBatch', 'generateBatch'])}
+      />
 
       {batch.rejectionReason && (
         <div className="rounded-lg bg-warning-50 dark:bg-warning-700/20 border border-warning-200 dark:border-warning-700/50 px-3 py-2 text-sm">
@@ -805,6 +800,7 @@ function BatchDetailModal({
       {showAdjust && (
         <Modal open onClose={() => setShowAdjust(null)} maxWidth="max-w-sm" backdropBlur contentClassName="p-5 space-y-3">
           <h4 className="text-base font-semibold text-app-fg">Adjust {showAdjust.staffName}</h4>
+          <ModalFetcherInlineError message={payrollSurface.errorMatchingIntent('addBatchAdjustment')} />
           <fetcher.Form method="post" onSubmit={() => setShowAdjust(null)} className="space-y-3">
             <input type="hidden" name="intent" value="addBatchAdjustment" />
             <input type="hidden" name="batchId" value={batch.id} />
@@ -840,6 +836,7 @@ function BatchDetailModal({
       {showApprove && (
         <Modal open onClose={() => setShowApprove(false)} maxWidth="max-w-sm" backdropBlur contentClassName="p-5 space-y-3">
           <h4 className="text-base font-semibold text-app-fg">Approve and send to Finance</h4>
+          <ModalFetcherInlineError message={payrollSurface.errorMatchingIntent('approveBatch')} />
           <fetcher.Form method="post" onSubmit={() => setShowApprove(false)} className="space-y-3">
             <input type="hidden" name="intent" value="approveBatch" />
             <input type="hidden" name="batchId" value={batch.id} />
@@ -860,6 +857,7 @@ function BatchDetailModal({
       {showReject && (
         <Modal open onClose={() => setShowReject(false)} maxWidth="max-w-sm" backdropBlur contentClassName="p-5 space-y-3">
           <h4 className="text-base font-semibold text-app-fg">Reject and send back</h4>
+          <ModalFetcherInlineError message={payrollSurface.errorMatchingIntent('rejectBatch')} />
           <p className="text-xs text-app-fg-muted">
             The batch returns to {batch.status === 'PENDING_HR' ? 'DRAFT for the department head to edit and resubmit' : 'PENDING_HR for HR to revise'}.
           </p>
@@ -886,6 +884,7 @@ function BatchDetailModal({
         <ConfirmActionModal
           open
           onClose={() => setShowMarkPaid(false)}
+          error={payrollSurface.errorMatchingIntent('markBatchPaid')}
           title="Mark batch paid"
           description={
             <>
