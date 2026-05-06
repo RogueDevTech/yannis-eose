@@ -128,6 +128,88 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     orderFilter.riderId = userId;
   }
 
+  {
+    // ── Post-mount heavy bundles ────────────────────────────
+    // Keep the loader lightweight for first paint. All heavy tab bundles load after mount via
+    // `/api/hr-user-detail-overview-bundle/:userId` and `/api/hr-user-detail-activity-bundle/:userId`.
+    const permsSetForOnboarding = new Set(
+      (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
+    );
+    const showOnboardingTab = !isAdminLevel({ role: user.role });
+    const viewerCanManageHrOnboarding =
+      isAdminLevel(currentUser) ||
+      HR_ONBOARDING_PAGE_PERMISSIONS.some((c) =>
+        permsSetForOnboarding.has(canonicalPermissionCode(c)),
+      );
+
+    const mirrorPromise = apiRequest<unknown>(
+      `/trpc/branches.canMirrorToUser?input=${encodeURIComponent(JSON.stringify({ targetUserId: user.id }))}`,
+      { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+    );
+    const mirrorUi: Promise<{ viewerShowsMirror: boolean; mirrorSubmitDisabled: boolean }> =
+      mirrorPromise.then((mirrorRes) => {
+        const mirrorData = mirrorRes.data as
+          | {
+              result?: {
+                data?: {
+                  allowed: boolean;
+                  previewEligible: boolean;
+                  nestedMirrorSession: boolean;
+                };
+              };
+            }
+          | undefined;
+        const m = mirrorData?.result?.data;
+        return {
+          viewerShowsMirror:
+            user.status === 'ACTIVE' &&
+            mirrorRes.ok &&
+            !!m &&
+            (m.allowed === true || m.previewEligible === true),
+          mirrorSubmitDisabled:
+            user.status === 'ACTIVE' &&
+            mirrorRes.ok &&
+            !!m &&
+            m.allowed !== true &&
+            m.previewEligible === true,
+        };
+      });
+
+    return {
+      user,
+      roleTemplates: Promise.resolve([]),
+      products: Promise.resolve([]),
+      locations: Promise.resolve([]),
+      plans: Promise.resolve([]),
+      recentOrders: Promise.resolve({ orders: [], total: 0 }),
+      payouts: Promise.resolve([]),
+      adjustments: Promise.resolve([]),
+      auditLog: Promise.resolve([]),
+      marketingMetrics: Promise.resolve(null),
+      fundingBalance: Promise.resolve(null),
+      pendingEmailChange: Promise.resolve(null),
+      stockMovements: null,
+      financeActivity: null,
+      pushStatus: Promise.resolve(null),
+      permissionCatalog: Promise.resolve({ items: [], requestFailed: false }),
+      templatePermissionsById: Promise.resolve({}),
+      userStampPreview: Promise.resolve({ userOverrides: {}, templateCodes: [], effectiveCodes: [] }),
+      userEditPermissionOverrides: Promise.resolve({}),
+      activeHeads: Promise.resolve([]),
+      branchesList: Promise.resolve([]),
+      canDisburseToThisUser,
+      isSuperAdmin,
+      isViewerHeadOfMarketing,
+      isViewerHeadOfCS,
+      canEditLimited,
+      mirrorUi,
+      isSelfView,
+      showOnboardingTab,
+      viewerCanManageHrOnboarding,
+      onboardingSummary: Promise.resolve(null),
+    } satisfies UserDetailLoaderData;
+  }
+
   // ── Deferred: all secondary data in parallel ───────────
   const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20, sortBy: 'name', sortOrder: 'asc' }));
   const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
@@ -499,7 +581,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       HR_ONBOARDING_PAGE_PERMISSIONS.some((c) => permsSetForOnboarding.has(canonicalPermissionCode(c)));
 
     const mirrorPromise = apiRequest<unknown>(
-      `/trpc/branches.canMirrorToUser?input=${encodeURIComponent(JSON.stringify({ targetUserId: profileUser.id }))}`,
+      `/trpc/branches.canMirrorToUser?input=${encodeURIComponent(JSON.stringify({ targetUserId: user.id }))}`,
       { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
     );
 
@@ -519,12 +601,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         const m = mirrorData?.result?.data;
         return {
           viewerShowsMirror:
-            profileUser.status === 'ACTIVE' &&
+            user.status === 'ACTIVE' &&
             mirrorRes.ok &&
             !!m &&
             (m.allowed === true || m.previewEligible === true),
           mirrorSubmitDisabled:
-            profileUser.status === 'ACTIVE' &&
+            user.status === 'ACTIVE' &&
             mirrorRes.ok &&
             !!m &&
             m.allowed !== true &&

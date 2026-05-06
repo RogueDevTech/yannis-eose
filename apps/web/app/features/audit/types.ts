@@ -46,7 +46,7 @@ export interface AuditPageProps {
   rows: AuditEntry[];
   total: number;
   filters: AuditFilters;
-  actorNames: Promise<ActorMap>;
+  actorIds: string[];
   error?: string;
 }
 
@@ -55,6 +55,6 @@ export interface AuditStreamData {
   rows: AuditEntry[];
   total: number;
   filters: AuditFilters;
-  actorNames: Promise<ActorMap>;
+  actorIds: string[];
   error?: string;
 }

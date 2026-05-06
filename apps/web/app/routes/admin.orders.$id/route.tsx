@@ -89,7 +89,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const voipEnabled = voipPayload?.enabled ?? false;
     const voipProviderDisplayName = voipPayload?.providerDisplayName ?? "Africa's Talking";
 
-    const latestCall: Promise<CallLogEntry | null> = apiRequest<unknown>(
+    // latestCall is still loaded here (small + used for confirm gate UX). Timeline is loaded
+    // client-side after mount (resource route) to keep the main page fast.
+    const latestCallValue = await apiRequest<unknown>(
       `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
       deferredOpt,
     )
@@ -107,28 +109,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         return null;
       });
 
-    const timeline: Promise<TimelineEvent[]> = apiRequest<unknown>(
-      `/trpc/orders.getTimeline?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-      deferredOpt,
-    )
-      .then((tlRes) => {
-        if (!tlRes.ok) {
-          logOrderDetailLoaderWarning(orderId, 'orders.getTimeline', `status ${tlRes.status}`);
-          return [];
-        }
-        const tlData = tlRes.data as { result?: { data?: TimelineEvent[] } };
-        return tlData?.result?.data ?? [];
-      })
-      .catch((err) => {
-        const msg = err instanceof Error ? err.message : 'unknown';
-        logOrderDetailLoaderWarning(orderId, 'orders.getTimeline', msg);
-        return [] as TimelineEvent[];
-      });
-
     return {
       order,
-      latestCall,
-      timeline,
+      // Keep the prop shape stable (OrderDetailPage expects promises), but they're already resolved.
+      latestCall: Promise.resolve(latestCallValue),
+      timeline: undefined,
       voipEnabled,
       voipProviderDisplayName,
     };
@@ -268,23 +253,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     logOrderDetailLoaderWarning(orderId, 'messaging.templates.list', `status ${templatesRes.status}`);
   }
 
-  // Stream the auto-generated invoice (if any) — orders confirmed before this feature
-  // landed have null. Used by the order detail page to render an Invoice card.
-  const invoicePromise: Promise<OrderInvoice | null> = apiRequest<unknown>(
-    `/trpc/finance.getInvoiceByOrder?input=${encodeURIComponent(JSON.stringify({ orderId: params['id'] }))}`,
-    deferredOpt,
-  ).then((res) => {
-    if (!res.ok) {
-      logOrderDetailLoaderWarning(orderId, 'finance.getInvoiceByOrder', `status ${res.status}`);
-      return null;
-    }
-    const data = (res.data as { result?: { data?: OrderInvoice | null } })?.result?.data ?? null;
-    return data;
-  }).catch((err) => {
-    const msg = err instanceof Error ? err.message : 'unknown';
-    logOrderDetailLoaderWarning(orderId, 'finance.getInvoiceByOrder', msg);
-    return null;
-  });
+  // Invoice is loaded client-side after mount (resource route) to keep the main page fast.
 
   return defer({
     orderDetail: orderDetailPromise,
@@ -298,7 +267,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     allocatableLocations,
     allocatableLocationsDeferred,
     logisticsDispatchTemplates,
-    invoice: invoicePromise,
+    invoice: undefined,
   });
 }
 

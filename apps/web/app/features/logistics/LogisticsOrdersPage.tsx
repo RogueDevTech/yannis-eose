@@ -20,6 +20,7 @@ import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
+import { Spinner } from '~/components/ui/spinner';
 import {
   CompactTable,
   CompactTableActions,
@@ -167,6 +168,11 @@ export function LogisticsOrdersPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
   const isFilterLoading = useLoaderRefetchBusy();
+  const trendFetcher = useFetcher<{
+    ok: boolean;
+    dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+    error: string | null;
+  }>();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
 
@@ -227,6 +233,22 @@ export function LogisticsOrdersPage({
     setSelectedStatus(statusFilter || 'ALL');
     setSearchQuery(searchFilter || '');
   }, [statusFilter, searchFilter]);
+
+  const trendQueryString = useMemo(() => {
+    const p = new URLSearchParams();
+    p.set('status', statusFilter || 'ALL');
+    if (filters.startDate) p.set('startDate', filters.startDate);
+    if (filters.endDate) p.set('endDate', filters.endDate);
+    if (filters.periodAllTime) p.set('periodAllTime', 'true');
+    return p.toString();
+  }, [statusFilter, filters.startDate, filters.endDate, filters.periodAllTime]);
+
+  useEffect(() => {
+    void trendFetcher.load(`/api/logistics-orders-trend?${trendQueryString}`);
+  }, [trendQueryString]);
+
+  const trendCounts = trendFetcher.data?.ok ? trendFetcher.data.dailyCounts : dailyCounts;
+  const trendLoading = trendFetcher.state === 'loading' && !trendFetcher.data;
 
   useEffect(() => {
     if (fetcher.data && typeof fetcher.data === 'object' && 'results' in fetcher.data && !bulkResult) {
@@ -854,12 +876,21 @@ export function LogisticsOrdersPage({
       </div>
 
       {showChartView ? (
-        <OrdersChartView
-          statusCounts={statusCounts}
-          total={totalOrdersCount}
-          scopeLabel="Logistics orders"
-          dailyCounts={dailyCounts}
-        />
+        trendLoading && !trendCounts ? (
+          <div className="card !p-4">
+            <div className="flex items-center gap-2 text-sm text-app-fg-muted">
+              <Spinner className="w-4 h-4" />
+              <span>Loading chart…</span>
+            </div>
+          </div>
+        ) : (
+          <OrdersChartView
+            statusCounts={statusCounts}
+            total={totalOrdersCount}
+            scopeLabel="Logistics orders"
+            dailyCounts={trendCounts}
+          />
+        )
       ) : (
       <TableLoadingOverlay show={isFilterLoading}>
         <div className="card p-0">

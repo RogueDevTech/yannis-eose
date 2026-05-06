@@ -165,7 +165,8 @@ export interface OrderDetailStreamData {
   order: OrderDetail;
   // Deferred (streaming promises)
   latestCall: Promise<CallLogEntry | null>;
-  timeline: Promise<TimelineEvent[]>;
+  /** Optional — when omitted, the page loads activity client-side after mount. */
+  timeline?: Promise<TimelineEvent[]>;
   // VOIP feature flag + active provider context. The active provider (Africa's Talking)
   // bridges the agent's physical phone to the customer, so the UI shows
   // "Your phone is ringing" feedback rather than an in-browser softphone overlay.

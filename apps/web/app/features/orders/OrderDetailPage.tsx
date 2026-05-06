@@ -649,6 +649,8 @@ export function OrderDetailPage({
   const adjustItemsFetcher = useFetcher();
   const priceRequestFetcher = useFetcher();
   const ensureInvoiceFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const invoiceFetcher = useFetcher<{ ok: boolean; invoice: OrderInvoice | null; error?: string }>();
+  const timelineFetcher = useFetcher<{ ok: boolean; timeline: TimelineEvent[]; error?: string }>();
   const revalidator = useRevalidator();
 
   // Team Live View — broadcast CS agent state to cs-all room.
@@ -701,6 +703,22 @@ export function OrderDetailPage({
 
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
+
+  // Fetch heavy-but-non-blocking panels after mount to keep the page resilient.
+  useEffect(() => {
+    if (currentStatusIndex < getProgressIndex('CONFIRMED')) return;
+    if (invoice !== undefined) return; // loader provided it (streaming mode)
+    if (invoiceFetcher.state !== 'idle' || invoiceFetcher.data) return;
+    invoiceFetcher.load(`/api/order-invoice/${order.id}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id, currentStatusIndex, invoice]);
+
+  useEffect(() => {
+    if (timeline !== undefined) return; // loader provided it (streaming mode)
+    if (timelineFetcher.state !== 'idle' || timelineFetcher.data) return;
+    timelineFetcher.load(`/api/order-timeline/${order.id}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.id, timeline]);
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
@@ -1212,45 +1230,131 @@ export function OrderDetailPage({
             {/* Invoice card — auto-generated on CONFIRMED. Visible to CS, Logistics, etc.
                 Some legacy orders may not have one yet; in that case we still render
                 the section so it doesn't "disappear" from the page. */}
-            {invoice !== undefined && invoice !== null && currentStatusIndex >= getProgressIndex('CONFIRMED') && (
-              <DeferredSection
-                resolve={invoice}
-                skeleton="card"
-                errorElement={<DeferredPanelError label="Invoice (finance.getInvoiceByOrder)" />}
-              >
-                {(inv) => {
-                  const i = inv as OrderInvoice | null;
-                  if (!i) {
-                    return (
-                      <div className="card">
-                        <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
-                        <p className="text-sm text-app-fg-muted mb-3">
-                          This order doesn’t have an invoice yet.
-                        </p>
-                        <InlineNotification
-                          variant="info"
-                          message="Invoices are auto-generated the first time an order is confirmed. If this was confirmed before the invoice feature was enabled (or if generation failed), refresh or ask an admin/finance to regenerate."
-                        />
-                        {canGenerateInvoice && (
-                          <div className="mt-3 flex justify-end">
-                            <ensureInvoiceFetcher.Form method="post">
-                              <input type="hidden" name="intent" value="ensureInvoice" />
-                              <Button
-                                type="submit"
-                                variant="primary"
-                                size="sm"
-                                disabled={ensureInvoiceFetcher.state !== 'idle'}
-                              >
-                                {ensureInvoiceFetcher.state !== 'idle' ? 'Generating…' : 'Generate invoice'}
-                              </Button>
-                            </ensureInvoiceFetcher.Form>
+            {currentStatusIndex >= getProgressIndex('CONFIRMED') && (() => {
+              // Loader may stream invoice, but in the "fetch after mount" mode it will be undefined.
+              const invoiceLoadedViaFetcher = invoiceFetcher.data?.ok ? invoiceFetcher.data.invoice : null;
+              const invoiceError = invoiceFetcher.data && !invoiceFetcher.data.ok ? invoiceFetcher.data.error : null;
+              const i = invoice !== undefined ? null : invoiceLoadedViaFetcher;
+
+              if (invoice !== undefined && invoice !== null) {
+                return (
+                  <DeferredSection
+                    resolve={invoice}
+                    skeleton="card"
+                    errorElement={<DeferredPanelError label="Invoice (finance.getInvoiceByOrder)" />}
+                  >
+                    {(inv) => {
+                      const resolved = inv as OrderInvoice | null;
+                      if (!resolved) return null;
+                      return (
+                        <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm">
+                          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0 space-y-2">
+                              <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
+                                Yannis · Invoice
+                              </p>
+                              <h2 className="text-xl font-semibold tracking-tight text-app-fg font-mono">
+                                {resolved.referenceFormatted}
+                              </h2>
+                              <p className="text-sm text-app-fg-muted">
+                                <span className="font-medium text-app-fg">Bill to</span>{' '}
+                                {resolved.recipientInfo?.name?.trim() || '—'}
+                              </p>
+                            </div>
+                            <div className="flex flex-col gap-3 lg:items-end shrink-0 w-full lg:w-auto">
+                              <div className="lg:text-right">
+                                <p className="text-2xs font-semibold uppercase tracking-wide text-app-fg-muted">Total</p>
+                                <NairaPrice
+                                  amount={Number(resolved.totalAmount)}
+                                  className="text-2xl font-bold text-app-fg tabular-nums"
+                                />
+                              </div>
+                              <div className="flex flex-wrap gap-2 w-full lg:justify-end">
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => {
+                                    void generateInvoicePdf(resolved);
+                                  }}
+                                >
+                                  Download
+                                </Button>
+                                <Button type="button" variant="primary" size="sm" onClick={() => setInvoicePreview(resolved)}>
+                                  View
+                                </Button>
+                              </div>
+                            </div>
                           </div>
-                        )}
+                        </div>
+                      );
+                    }}
+                  </DeferredSection>
+                );
+              }
+
+              if (invoiceError) {
+                return (
+                  <div className="card">
+                    <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
+                    <InlineNotification
+                      variant="danger"
+                      message={`Failed to load Invoice. ${invoiceError}`}
+                      actions={[
+                        {
+                          label: invoiceFetcher.state === 'loading' ? 'Retrying…' : 'Retry',
+                          disabled: invoiceFetcher.state === 'loading',
+                          onClick: () => invoiceFetcher.load(`/api/order-invoice/${order.id}`),
+                        },
+                      ]}
+                    />
+                  </div>
+                );
+              }
+
+              if (invoiceFetcher.state === 'loading' && !invoiceFetcher.data) {
+                return (
+                  <div className="card">
+                    <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
+                    <div className="py-4 flex items-center justify-center text-app-fg-muted">
+                      <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
+                    </div>
+                  </div>
+                );
+              }
+
+              if (!i) {
+                return (
+                  <div className="card">
+                    <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
+                    <p className="text-sm text-app-fg-muted mb-3">
+                      This order doesn’t have an invoice yet.
+                    </p>
+                    <InlineNotification
+                      variant="info"
+                      message="Invoices are auto-generated the first time an order is confirmed. If this was confirmed before the invoice feature was enabled (or if generation failed), ask an admin/finance to regenerate."
+                    />
+                    {canGenerateInvoice && (
+                      <div className="mt-3 flex justify-end">
+                        <ensureInvoiceFetcher.Form method="post">
+                          <input type="hidden" name="intent" value="ensureInvoice" />
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            size="sm"
+                            disabled={ensureInvoiceFetcher.state !== 'idle'}
+                          >
+                            {ensureInvoiceFetcher.state !== 'idle' ? 'Generating…' : 'Generate invoice'}
+                          </Button>
+                        </ensureInvoiceFetcher.Form>
                       </div>
-                    );
-                  }
-                  return (
-                    <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm">
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm">
                       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0 space-y-2">
                           <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
@@ -1312,9 +1416,7 @@ export function OrderDetailPage({
                       </div>
                     </div>
                   );
-                }}
-              </DeferredSection>
-            )}
+            })()}
 
             {/* Order activity — lifecycle timeline */}
             <div className="card">
@@ -1322,7 +1424,7 @@ export function OrderDetailPage({
               <p className="text-sm text-app-fg-muted mb-3">
                 Every step taken on this order, with who did it and when.
               </p>
-              {timeline ? (
+              {timeline !== undefined ? (
                 <DeferredSection
                   resolve={timeline}
                   skeleton="table"
@@ -1330,8 +1432,28 @@ export function OrderDetailPage({
                 >
                   {(resolvedTimeline) => <OrderTimeline events={resolvedTimeline as TimelineEvent[]} />}
                 </DeferredSection>
+              ) : timelineFetcher.data && !timelineFetcher.data.ok ? (
+                <InlineNotification
+                  variant="danger"
+                  message={`Failed to load Order Activity. ${timelineFetcher.data.error ?? ''}`.trim()}
+                  actions={[
+                    {
+                      label: timelineFetcher.state === 'loading' ? 'Retrying…' : 'Retry',
+                      disabled: timelineFetcher.state === 'loading',
+                      onClick: () => timelineFetcher.load(`/api/order-timeline/${order.id}`),
+                    },
+                  ]}
+                />
+              ) : timelineFetcher.state === 'loading' && !timelineFetcher.data ? (
+                <div className="py-4 flex items-center justify-center text-app-fg-muted">
+                  <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
+                </div>
+              ) : timelineFetcher.data?.ok ? (
+                <OrderTimeline events={timelineFetcher.data.timeline as TimelineEvent[]} />
               ) : (
-                <p className="text-sm text-app-fg-muted py-4 text-center">No timeline data.</p>
+                <div className="py-4 flex items-center justify-center text-app-fg-muted">
+                  <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
+                </div>
               )}
             </div>
 

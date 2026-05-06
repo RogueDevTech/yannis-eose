@@ -39,6 +39,7 @@ import { PermissionsPreview } from './PermissionsPreview';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { Spinner } from '~/components/ui/spinner';
 
 // ─── Constants ──────────────────────────────────────────
 
@@ -203,6 +204,53 @@ export function UserDetailPage({
   /** True when SSR catalog fetch failed (401/503/etc.) — distinct from an legitimately empty catalog. */
   const [permissionCatalogRequestFailed, setPermissionCatalogRequestFailed] = useState(false);
 
+  const overviewFetcher = useFetcher<{
+    ok: boolean;
+    products: UserCreateProduct[];
+    roleTemplates: RoleTemplateOption[];
+    locations: UserCreateLocation[];
+    plans: UserCreateCommissionPlan[];
+    pendingEmailChange: PendingEmailChange | null;
+    onboardingSummary: UserOnboardingSummary | null;
+    pushStatus: UserPushStatus | null;
+    permissionCatalog: PermissionCatalogBundle;
+    templatePermissionsById: Record<string, string[]>;
+    userStampPreview: { userOverrides: Record<string, boolean>; templateCodes: string[]; effectiveCodes: string[] };
+    error?: string;
+  }>();
+  const activityFetcher = useFetcher<{
+    ok: boolean;
+    recentOrders: { orders: UserOrderSummary[]; total: number };
+    payouts: UserPayoutRecord[];
+    adjustments: UserAdjustment[];
+    auditLog: UserAuditEntry[];
+    marketingMetrics: UserMarketingMetrics | null;
+    error?: string;
+  }>();
+
+  useEffect(() => {
+    void overviewFetcher.load(`/api/hr-user-detail-overview-bundle/${user.id}`);
+  }, [user.id]);
+
+  useEffect(() => {
+    if (activeTab === 'overview') return;
+    if (activityFetcher.data?.ok) return;
+    void activityFetcher.load(`/api/hr-user-detail-activity-bundle/${user.id}`);
+  }, [activeTab, user.id]);
+
+  const overviewBundle = overviewFetcher.data?.ok ? overviewFetcher.data : null;
+  const activityBundle = activityFetcher.data?.ok ? activityFetcher.data : null;
+
+  const pendingEmailChangeResolved = overviewBundle?.pendingEmailChange ?? pendingEmailChange;
+  const locationsResolved = overviewBundle?.locations ?? locations;
+  const plansResolved = overviewBundle?.plans ?? plans;
+  const recentOrdersResolved = activityBundle?.recentOrders ?? recentOrders;
+  const payoutsResolved = activityBundle?.payouts ?? payouts;
+  const adjustmentsResolved = activityBundle?.adjustments ?? adjustments;
+  const auditLogResolved = activityBundle?.auditLog ?? auditLog;
+  const marketingMetricsResolved = activityBundle?.marketingMetrics ?? marketingMetrics;
+  const pushStatusResolved = overviewBundle?.pushStatus ?? pushStatus ?? null;
+
   useEffect(() => {
     let cancelled = false;
     setStampPreviewHydrated(false);
@@ -210,6 +258,20 @@ export function UserDetailPage({
     setStampPreviewEffectiveCodes([]);
     setPermissionCatalogHydrated(false);
     setPermissionCatalogRequestFailed(false);
+    if (overviewBundle) {
+      setResolvedRoleTemplates(overviewBundle.roleTemplates);
+      setResolvedTemplatePermissionsById(overviewBundle.templatePermissionsById);
+      setResolvedPermissionCatalog(overviewBundle.permissionCatalog.items);
+      setPermissionCatalogRequestFailed(overviewBundle.permissionCatalog.requestFailed);
+      setPermissionCatalogHydrated(true);
+      setPermissionOverridesLoaded(overviewBundle.userStampPreview.userOverrides);
+      setStampPreviewTemplateCodes(overviewBundle.userStampPreview.templateCodes);
+      setStampPreviewEffectiveCodes(overviewBundle.userStampPreview.effectiveCodes ?? []);
+      setStampPreviewHydrated(true);
+      return () => {
+        cancelled = true;
+      };
+    }
     if (roleTemplates) {
       roleTemplates.then((rows) => {
         if (!cancelled) setResolvedRoleTemplates(rows);
@@ -272,6 +334,7 @@ export function UserDetailPage({
     permissionCatalog,
     templatePermissionsById,
     userStampPreview,
+    overviewBundle,
   ]);
 
   /** True until stamp preview and permission catalog requests settle (do not key off catalog length — failed loads stay []). */
@@ -822,7 +885,7 @@ export function UserDetailPage({
                   </Link>
                 )}
               </div>
-              <DeferredSection resolve={pendingEmailChange} skeleton="inline">
+              <DeferredSection resolve={pendingEmailChangeResolved} skeleton="inline">
                 {(pending: PendingEmailChange | null) => pending && !isSuperAdminProfile && !restrictHeadView && (
                   <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-800 p-3 mb-4">
                     <p className="text-sm font-medium text-warning-800 dark:text-warning-200">
@@ -879,7 +942,7 @@ export function UserDetailPage({
                 {user.logisticsLocationId && (
                   <div>
                     <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Assigned Location</p>
-                    <DeferredSection resolve={locations} skeleton="inline">
+                    <DeferredSection resolve={locationsResolved} skeleton="inline">
                       {(resolvedLocations) => {
                         const assignedLocation = resolvedLocations.find(
                           (location) => location.id === user.logisticsLocationId,
@@ -909,7 +972,7 @@ export function UserDetailPage({
                 {user.commissionPlanId && (
                   <div>
                     <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Commission Plan</p>
-                    <DeferredSection resolve={plans} skeleton="inline">
+                    <DeferredSection resolve={plansResolved} skeleton="inline">
                       {(resolvedPlans) => {
                         const assignedCommissionPlan = resolvedPlans.find(
                           (plan) => plan.id === user.commissionPlanId,
@@ -931,7 +994,7 @@ export function UserDetailPage({
 
             {/* Marketing Metrics — only for marketing roles */}
             {isMarketingRole && (
-              <DeferredSection resolve={marketingMetrics} skeleton="stat">
+              <DeferredSection resolve={marketingMetricsResolved} skeleton="stat">
                 {(metrics) => metrics && (
                   <div className="card space-y-4">
                     <h2 className="text-base font-semibold text-app-fg">Marketing Performance</h2>
@@ -1027,7 +1090,7 @@ export function UserDetailPage({
           <div className="space-y-6">
             {/* Order Stats — only for roles with order attribution */}
             {showOrdersCard && (
-              <DeferredSection resolve={recentOrders} skeleton="stat">
+              <DeferredSection resolve={recentOrdersResolved} skeleton="stat">
                 {(data) => (
                   <div className="card space-y-3">
                     <div className="flex items-center justify-between">
@@ -1057,7 +1120,7 @@ export function UserDetailPage({
 
             {/* Payout Summary — only for roles with payroll */}
             {showPayrollCard && (
-            <DeferredSection resolve={payouts} skeleton="stat">
+            <DeferredSection resolve={payoutsResolved} skeleton="stat">
               {(payoutList) => (
                 <div className="card space-y-3">
                   <div className="flex items-center justify-between">
@@ -1088,7 +1151,7 @@ export function UserDetailPage({
             )}
 
             {/* Recent Activity */}
-            <DeferredSection resolve={auditLog} skeleton="stat">
+            <DeferredSection resolve={auditLogResolved} skeleton="stat">
               {(entries) => (
                 <div className="card space-y-3">
                   <div className="flex items-center justify-between">
@@ -1122,7 +1185,7 @@ export function UserDetailPage({
 
             {/* Push Notification Status — SuperAdmin only */}
             {isSuperAdmin && pushStatus && (
-              <DeferredSection resolve={pushStatus} skeleton="stat">
+              <DeferredSection resolve={pushStatusResolved} skeleton="stat">
                 {(status: UserPushStatus | null) => (
                   <div className="card space-y-3">
                     <div className="flex items-center justify-between">
@@ -1206,7 +1269,7 @@ export function UserDetailPage({
 
       {/* ─── Orders Tab ──────────────────────────────────── */}
       {activeTab === 'orders' && (
-        <DeferredSection resolve={recentOrders} skeleton="table">
+        <DeferredSection resolve={recentOrdersResolved} skeleton="table">
           {(data) => (
             <div className="card p-0">
               <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
@@ -1233,7 +1296,7 @@ export function UserDetailPage({
       {activeTab === 'payroll' && (
         <div className="space-y-6">
           {/* Payouts */}
-          <DeferredSection resolve={payouts} skeleton="table">
+          <DeferredSection resolve={payoutsResolved} skeleton="table">
             {(payoutList) => (
               <div className="card p-0">
                 <div className="px-4 py-3 border-b border-app-border">
@@ -1253,7 +1316,7 @@ export function UserDetailPage({
           </DeferredSection>
 
           {/* Adjustments */}
-          <DeferredSection resolve={adjustments} skeleton="table">
+          <DeferredSection resolve={adjustmentsResolved} skeleton="table">
             {(adjList) => (
               <div className="card p-0">
                 <div className="px-4 py-3 border-b border-app-border">
@@ -1304,7 +1367,7 @@ export function UserDetailPage({
 
       {/* ─── Activity / Audit Tab ────────────────────────── */}
       {activeTab === 'audit' && (
-        <DeferredSection resolve={auditLog} skeleton="stat">
+        <DeferredSection resolve={auditLogResolved} skeleton="stat">
           {(entries) => <ActivityTabContent entries={entries} />}
         </DeferredSection>
       )}

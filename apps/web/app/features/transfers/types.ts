@@ -43,8 +43,10 @@ export interface InventoryLevel {
 export interface TransfersStreamData {
   transfers: Transfer[];
   locations: Location[];
-  products: Promise<Product[]>;
-  levels: Promise<InventoryLevel[]>;
+  /** Loaded post-mount from `/api/transfers-form-data`. */
+  products: Product[] | null;
+  /** Loaded post-mount from `/api/transfers-form-data`. */
+  levels: InventoryLevel[] | null;
   /** When false (e.g. TPL view), hide Initiate Transfer button and form */
   canInitiate?: boolean;
 }

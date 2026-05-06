@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
 import { AuditPage } from '~/features/audit/AuditPage';
-import type { AuditEntry, AuditStreamData, ActorMap } from '~/features/audit/types';
+import type { AuditEntry, AuditStreamData } from '~/features/audit/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Audit Trail — Yannis EOSE' },
@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       rows: [] as AuditEntry[],
       total: 0,
       filters,
-      actorNames: Promise.resolve({} as ActorMap),
+      actorIds: [],
       error,
     } satisfies AuditStreamData;
   }
@@ -83,26 +83,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const actorIds = [...ids];
 
-  // Start the actorNames fetch but DON'T await it — return as promise
-  const actorNames = actorIds.length > 0
-    ? apiRequest<unknown>(
-        `/trpc/audit.actorNames?input=${encodeURIComponent(JSON.stringify({ userIds: actorIds }))}`,
-        { method: 'GET', cookie },
-      )
-        .then((namesRes) => {
-          if (namesRes.ok) {
-            const namesData = namesRes.data as { result?: { data?: ActorMap } };
-            return namesData?.result?.data ?? {};
-          }
-          return {} as ActorMap;
-        })
-        .catch(() => ({} as ActorMap))
-    : Promise.resolve({} as ActorMap);
-
   return {
     ...result,
     filters,
-    actorNames,
+    actorIds,
   } satisfies AuditStreamData;
 }
 
@@ -152,7 +136,7 @@ export default function AuditRoute() {
       rows={data.rows}
       total={data.total}
       filters={data.filters}
-      actorNames={data.actorNames}
+      actorIds={data.actorIds}
       error={data.error}
     />
     </>

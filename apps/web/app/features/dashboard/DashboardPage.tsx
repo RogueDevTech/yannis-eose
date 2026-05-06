@@ -1,5 +1,4 @@
 import { Link } from '@remix-run/react';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageHeader } from '~/components/ui/page-header';
@@ -8,6 +7,13 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel } from '~/lib/rbac';
+import {
+  DashboardHRSection,
+  DashboardMetricsSection,
+  DashboardProfitSection,
+  DashboardSecondaryProvider,
+  DashboardTotalProductsSection,
+} from './dashboard-secondary-context';
 
 
 const KNOWN_ROLES = [
@@ -33,6 +39,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
   const naira = (amount: number, opts?: Parameters<typeof formatNaira>[1]) => formatNaira(amount, opts);
 
   return (
+    <DashboardSecondaryProvider filters={dateFilters}>
     <div className="space-y-6">
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
@@ -61,10 +68,20 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
       {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'STOCK_MANAGER') && <WarehouseDashboard data={data} />}
-      {(role === 'HR_MANAGER') && <HRDashboard data={data} naira={naira} />}
+      {(role === 'HR_MANAGER') && <HRDashboard naira={naira} />}
 
       {/* Unknown role: generic fallback */}
       {role && !isKnownRole && <GenericFallbackDashboard />}
+    </div>
+    </DashboardSecondaryProvider>
+  );
+}
+
+function DualCardSkeleton() {
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="card animate-pulse min-h-[11rem] bg-app-hover/40" />
+      <div className="card animate-pulse min-h-[11rem] bg-app-hover/40" />
     </div>
   );
 }
@@ -133,7 +150,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
 
   return (
     <>
-      <DeferredSection resolve={data.profit} fallback={<OverviewStatStripSkeleton count={4} />}>
+      <DashboardProfitSection fallback={<OverviewStatStripSkeleton count={4} />}>
         {(profit) => (
           <OverviewStatStrip
             items={[
@@ -154,7 +171,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
             ]}
           />
         )}
-      </DeferredSection>
+      </DashboardProfitSection>
 
       {/* Awaiting logistics assignment alert */}
       {confirmed > 0 && (
@@ -235,7 +252,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
   if (role === 'CS_AGENT') {
     return (
       <>
-        <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={5} />}>
+        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
           {(metrics) => (
             <OverviewStatStrip
               tileClassName="min-w-[6rem]"
@@ -261,9 +278,9 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
               ]}
             />
           )}
-        </DeferredSection>
+        </DashboardMetricsSection>
 
-        <DeferredSection resolve={data.metrics} skeleton="card">
+        <DashboardMetricsSection fallback={<DualCardSkeleton />}>
           {(metrics) => (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="card">
@@ -280,7 +297,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
               <QuickActionsCard role={role} unprocessed={pendingQueue} />
             </div>
           )}
-        </DeferredSection>
+        </DashboardMetricsSection>
       </>
     );
   }
@@ -288,7 +305,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
   // Head of CS keeps the operational view: stats + full Order Pipeline + team controls + recent feed.
   return (
     <>
-      <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={4} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={4} />}>
         {(metrics) => (
           <OverviewStatStrip
             items={[
@@ -308,7 +325,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
             ]}
           />
         )}
-      </DeferredSection>
+      </DashboardMetricsSection>
 
       {/* Order Pipeline strip retired 2026-05-03 — the 4-tile summary above
           (Pending Queue / Currently Engaged / Confirmed / Delivery Rate) is the
@@ -367,7 +384,7 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
 function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; role: string; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
   return (
     <>
-      <DeferredSection resolve={data.metrics} fallback={<OverviewStatStripSkeleton count={5} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
         {(metrics) => (
           <OverviewStatStrip
             tileClassName="min-w-[6rem]"
@@ -394,7 +411,7 @@ function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; ro
             ]}
           />
         )}
-      </DeferredSection>
+      </DashboardMetricsSection>
 
       {role === 'HEAD_OF_MARKETING' && (
         <div className="card">
@@ -411,7 +428,7 @@ function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; ro
         </div>
       )}
 
-      <DeferredSection resolve={data.metrics} skeleton="card">
+      <DashboardMetricsSection fallback={<DualCardSkeleton />}>
         {(metrics) => (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="card">
@@ -428,7 +445,7 @@ function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; ro
             <QuickActionsCard role={role} unprocessed={0} />
           </div>
         )}
-      </DeferredSection>
+      </DashboardMetricsSection>
     </>
   );
 }
@@ -438,7 +455,7 @@ function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; ro
 function FinanceDashboard({ data, naira }: { data: DashboardPageData; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
   return (
     <>
-      <DeferredSection resolve={data.profit} fallback={<OverviewStatStripSkeleton count={4} />}>
+      <DashboardProfitSection fallback={<OverviewStatStripSkeleton count={4} />}>
         {(profit) => {
           const totalCosts = profit.landedCost + profit.deliveryFee + profit.adSpend + profit.commission + profit.fulfillmentCost + profit.operationalLoss;
           return (
@@ -489,7 +506,7 @@ function FinanceDashboard({ data, naira }: { data: DashboardPageData; naira: (am
             </>
           );
         }}
-      </DeferredSection>
+      </DashboardProfitSection>
     </>
   );
 }
@@ -567,7 +584,7 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
 function WarehouseDashboard({ data }: { data: DashboardPageData }) {
   return (
     <>
-      <DeferredSection resolve={data.totalProducts} fallback={<OverviewStatStripSkeleton count={4} />}>
+      <DashboardTotalProductsSection fallback={<OverviewStatStripSkeleton count={4} />}>
         {(total) => (
           <OverviewStatStrip
             items={[
@@ -586,7 +603,7 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
             ]}
           />
         )}
-      </DeferredSection>
+      </DashboardTotalProductsSection>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
@@ -608,32 +625,28 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
 
 // ── HR Dashboard ─────────────────────────────────────────
 
-function HRDashboard({ data, naira }: { data: DashboardPageData; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
+function HRDashboard({ naira }: { naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
   return (
-    <DeferredSection resolve={data.payoutSummary} fallback={<OverviewStatStripSkeleton count={4} />}>
-      {(summary) => {
+    <DashboardHRSection fallback={<OverviewStatStripSkeleton count={4} />}>
+      {({ payoutSummary: summary, totalUsers: total }) => {
         const draftTotal = Number(summary['DRAFT']?.total ?? 0);
         const approvedTotal = Number(summary['APPROVED']?.total ?? 0);
         const paidTotal = Number(summary['PAID']?.total ?? 0);
 
         return (
           <>
-            <DeferredSection resolve={data.totalUsers} fallback={<OverviewStatStripSkeleton count={4} />}>
-              {(total) => (
-                <OverviewStatStrip
-                  items={[
-                    {
-                      label: 'Draft Payouts',
-                      value: naira(draftTotal),
-                      valueClassName: draftTotal > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-                    },
-                    { label: 'Approved', value: naira(approvedTotal), valueClassName: 'text-app-fg' },
-                    { label: 'Paid', value: naira(paidTotal), valueClassName: 'text-success-600 dark:text-success-400' },
-                    { label: 'Staff', value: total.toString(), valueClassName: 'text-app-fg' },
-                  ]}
-                />
-              )}
-            </DeferredSection>
+            <OverviewStatStrip
+              items={[
+                {
+                  label: 'Draft Payouts',
+                  value: naira(draftTotal),
+                  valueClassName: draftTotal > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
+                },
+                { label: 'Approved', value: naira(approvedTotal), valueClassName: 'text-app-fg' },
+                { label: 'Paid', value: naira(paidTotal), valueClassName: 'text-success-600 dark:text-success-400' },
+                { label: 'Staff', value: total.toString(), valueClassName: 'text-app-fg' },
+              ]}
+            />
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
               <div className="card">
@@ -671,7 +684,7 @@ function HRDashboard({ data, naira }: { data: DashboardPageData; naira: (amount:
           </>
         );
       }}
-    </DeferredSection>
+    </DashboardHRSection>
   );
 }
 

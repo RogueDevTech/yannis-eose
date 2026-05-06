@@ -4,7 +4,6 @@ import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultThisMonthRange } from '~/lib/api.server';
 import { isAdminLevel } from '~/lib/rbac';
-import { extractTrpc } from '~/lib/trpc-extract.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
@@ -12,17 +11,11 @@ import { DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
 import { AdminQuickDashboard, type QuickOverviewData } from '~/features/dashboard/AdminQuickDashboard';
 import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
 
-const defaultMetrics: DashboardData['metrics'] = { totalSpend: 0, totalOrders: 0, deliveredOrders: 0, deliveredRevenue: 0, confirmedOrders: 0, confirmationRate: 0, cpa: 0, trueRoas: 0, deliveryRate: 0 };
-const defaultProfit: DashboardData['profit'] = { revenue: 0, landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0, trueProfit: 0, orderCount: 0, margin: 0 };
-
 const defaultQuickOverview: QuickOverviewData = {
   marketing: { today: { newOrders: 0, confirmed: 0, delivered: 0, cancelled: 0 } },
   cs: { closerCount: 0, totalPending: 0, idleCount: 0, unassigned: 0 },
   pendingApprovals: 0,
 };
-
-/** Non-admin-class roles that need marketing.metrics (admin-class via `isAdminLevel`). */
-const ROLES_NEED_METRICS = ['HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'] as const;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -48,8 +41,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
   const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
-  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
-  const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
   // Admin-class landing: lightweight path. The heavy Executive Overview with profit
   // aggregation, time series, charts, and leaderboards now lives at /admin/ceo. Landing on
@@ -74,29 +65,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify(ordersListInput)), deferredOpt);
   const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, deferredOpt);
 
-  const needsMetrics =
-    role && (isAdminLevel({ role }) || (ROLES_NEED_METRICS as readonly string[]).includes(role));
-  const needsProfit = role && (isAdminLevel({ role }) || role === 'FINANCE_OFFICER');
-  const needsUsers = role && (isAdminLevel({ role }) || role === 'HR_MANAGER');
-  const needsProducts = role && (isAdminLevel({ role }) || role === 'STOCK_MANAGER');
-  const needsPayout = role && (isAdminLevel({ role }) || role === 'HR_MANAGER');
-
-  const metricsP = needsMetrics
-    ? apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, deferredOpt)
-    : Promise.resolve({ ok: true, data: { result: { data: defaultMetrics } } });
-  const profitP = needsProfit
-    ? apiRequest<unknown>(`/trpc/finance.profitReport?input=${encodeURIComponent(profitInput)}`, deferredOpt)
-    : Promise.resolve({ ok: true, data: { result: { data: defaultProfit } } });
-  const usersP = needsUsers
-    ? apiRequest<unknown>('/trpc/users.list?input=%7B%22limit%22%3A1%7D', deferredOpt)
-    : Promise.resolve({ ok: false, data: {} });
-  const productsP = needsProducts
-    ? apiRequest<unknown>('/trpc/products.list?input=%7B%22limit%22%3A1%7D', deferredOpt)
-    : Promise.resolve({ ok: false, data: {} });
-  const payoutP = needsPayout
-    ? apiRequest<unknown>('/trpc/hr.payoutSummary', deferredOpt)
-    : Promise.resolve({ ok: false, data: {} });
-
   const ordersAndCountsPromise = Promise.all([ordersP, countsP]).then(([ordersRes, countsRes]): OrdersAndCounts => {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
@@ -116,19 +84,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     filters,
     data: {
       ordersAndCounts: ordersAndCountsPromise,
-      metrics: metricsP.then(r => extractTrpc(r, defaultMetrics)).catch(() => defaultMetrics),
-      profit: profitP.then(r => extractTrpc(r, defaultProfit)).catch(() => defaultProfit),
-      totalUsers: usersP.then(r => {
-        const d = r.ok ? (r.data as { result?: { data?: { pagination: { total: number } } } })?.result?.data : null;
-        return d?.pagination?.total ?? 0;
-      }).catch(() => 0),
-      totalProducts: productsP.then(r => {
-        const d = r.ok ? (r.data as { result?: { data?: { pagination: { total: number } } } })?.result?.data : null;
-        return d?.pagination?.total ?? 0;
-      }).catch(() => 0),
-      payoutSummary: payoutP.then(r => {
-        return r.ok ? (r.data as { result?: { data?: Record<string, { count: number; total: string }> } })?.result?.data ?? {} : {};
-      }).catch(() => ({})),
     } satisfies DashboardLoaderData,
   });
 }
@@ -155,13 +110,13 @@ export default function AdminDashboard() {
       </Suspense>
     );
   }
-  const { ordersAndCounts: _ordersPromise, ...restData } = loaderData.data;
+  const { ordersAndCounts: _ordersPromise } = loaderData.data;
   return (
     <Suspense fallback={<DashboardSkeleton />}>
       <Await resolve={_ordersPromise} errorElement={<DeferredError />}>
         {(ordersAndCounts) => (
           <DashboardPage
-            data={{ ...restData, ...ordersAndCounts }}
+            data={ordersAndCounts}
             role={role}
             userName={userName}
             filters={loaderData.filters}
