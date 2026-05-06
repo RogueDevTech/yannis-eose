@@ -13,7 +13,8 @@ import { ProductCategoriesService } from '../products/product-categories.service
 import { setProductCategoriesService } from './routers/product-categories.router';
 import { InventoryModule } from '../inventory/inventory.module';
 import { InventoryService } from '../inventory/inventory.service';
-import { setInventoryService } from './routers/inventory.router';
+import { ShipmentsService } from '../inventory/shipments.service';
+import { setInventoryService, setShipmentsService, setLogisticsServiceForInventory } from './routers/inventory.router';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { LogisticsService } from '../logistics/logistics.service';
 import { setLogisticsService } from './routers/logistics.router';
@@ -99,6 +100,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly productsService: ProductsService,
     private readonly productCategoriesService: ProductCategoriesService,
     private readonly inventoryService: InventoryService,
+    private readonly shipmentsService: ShipmentsService,
     private readonly logisticsService: LogisticsService,
     private readonly marketingService: MarketingService,
     private readonly financeService: FinanceService,
@@ -128,6 +130,8 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setProductsService(this.productsService);
     setProductCategoriesService(this.productCategoriesService);
     setInventoryService(this.inventoryService);
+    setShipmentsService(this.shipmentsService);
+    setLogisticsServiceForInventory(this.logisticsService);
     setLogisticsService(this.logisticsService);
     setMarketingService(this.marketingService);
     setFinanceService(this.financeService);

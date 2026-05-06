@@ -73,6 +73,8 @@ export interface CampaignFormConfig {
   customFields?: CustomFormField[];
   /** Post-submit redirect for the buyer (funnel thank-you page). */
   successCallbackUrl?: string;
+  /** When set, limit Edge tiers to this subset of ACTIVE `offer_templates`; empty/omitted = all ACTIVE tiers. */
+  selectedOfferTemplateIds?: string[];
 }
 
 export interface Campaign {
@@ -80,6 +82,7 @@ export interface Campaign {
   mediaBuyerId: string;
   name: string;
   productIds: string[] | null;
+  offerGroupId?: string | null;
   deploymentType: string;
   formConfig: CampaignFormConfig | null;
   status: string;
@@ -93,14 +96,52 @@ export interface ProductOfferRow {
   label: string;
   qty: number;
   price: string | number;
+  /** Tier thumbnails (`offer_templates.image_urls`); first https URL shown when enabled. */
+  imageUrls?: string[];
 }
 
 export interface Product {
   id: string;
   name: string;
   baseSalePrice: string;
+  galleryImageUrls?: string[];
   /** When omitted or empty, the hosted preview hides the offer picker until product data loads. */
   offers?: ProductOfferRow[];
+}
+
+/** One row from `marketing.listOfferTemplates` (join to product name) for the Offers hub. */
+export interface OfferTemplateListRow {
+  id: string;
+  productId: string;
+  productName: string;
+  name: string;
+  quantity: number;
+  price: string | number;
+  status: string;
+  imageUrls?: string[];
+}
+
+export interface OfferGroupItemRow {
+  id: string;
+  offerGroupId: string;
+  productId: string;
+  productName: string;
+  label: string;
+  quantity: number;
+  price: string | number;
+  imageUrl?: string | null;
+  sortOrder: number;
+  status: string;
+}
+
+export interface OfferGroupRow {
+  id: string;
+  name: string;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  items: OfferGroupItemRow[];
 }
 
 export interface FormsPageProps {
@@ -119,6 +160,13 @@ export interface FormsPageProps {
   mediaBuyerIdFilter?: string;
   /** Current user id (for building "My forms" link). */
   currentUserId?: string;
+  /** `marketing.offerTemplate` — Offers tab tier CRUD. */
+  canManageOfferTemplates?: boolean;
+  /** All catalog offer packages (reusable on forms that attach the same product). */
+  allOfferTemplates?: OfferTemplateListRow[];
+  offersListLoadError?: string | null;
+  offerGroups?: OfferGroupRow[];
+  offerGroupsLoadError?: string | null;
 }
 
 /** Streaming-aware loader shape for the forms route */
@@ -132,4 +180,9 @@ export interface FormsStreamData {
   currentUserId?: string;
   currentUserName?: string;
   mediaBuyerIdFilter?: string;
+  canManageOfferTemplates?: boolean;
+  allOfferTemplates?: OfferTemplateListRow[];
+  offersListLoadError?: string | null;
+  offerGroups?: OfferGroupRow[];
+  offerGroupsLoadError?: string | null;
 }

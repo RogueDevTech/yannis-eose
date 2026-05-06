@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
@@ -27,7 +28,11 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
         <div>
           <h1 className="text-2xl font-bold text-app-fg">{product.name}</h1>
           <p className="text-sm text-app-fg-muted mt-1">
-            View product details and offer bundles.
+            Catalog SKU — pricing packages for Edge forms are configured on{' '}
+            <Link to="/admin/marketing/forms" className="text-brand-600 dark:text-brand-400 hover:underline">
+              Marketing → Forms
+            </Link>{' '}
+            when this product is attached to a form.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -84,44 +89,31 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
         </dl>
       </div>
 
-      {/* Offer Bundles */}
-      <div className="card space-y-4">
-        <h2 className="text-lg font-semibold text-app-fg">Offer Bundles</h2>
-        {product.offers?.length ? (
-          <div className="space-y-3">
-            {product.offers.map((offer, index) => (
-              <div
-                key={index}
-                className="flex flex-col gap-3 p-4 rounded-lg bg-app-hover border border-app-border"
+      {/* Gallery */}
+      {product.galleryImageUrls?.length ? (
+        <div className="card space-y-4">
+          <h2 className="text-lg font-semibold text-app-fg">Gallery</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {product.galleryImageUrls.map((url) => (
+              <a
+                key={url}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="group block overflow-hidden rounded-xl border border-app-border bg-app-hover"
+                title="Open image"
               >
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-app-fg">{offer.label}</p>
-                    <p className="text-sm text-app-fg-muted mt-0.5">
-                      {offer.qty} unit{offer.qty !== 1 ? 's' : ''} · &#8358;{Number(offer.price).toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="text-sm font-semibold text-app-fg sm:text-right">
-                    &#8358;{Number(offer.price).toLocaleString()}
-                  </div>
-                  {offer.imageUrls && offer.imageUrls.length > 0 && (
-                    <div className="w-24 h-24 max-w-[200px] rounded-md border border-app-border overflow-hidden bg-app-elevated shrink-0">
-                      <a href={offer.imageUrls[0]} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                        <img src={offer.imageUrls[0]} alt="" className="w-full h-full object-cover" />
-                      </a>
-                    </div>
-                  )}
-                </div>
-                {offer.imageUrls && offer.imageUrls.length > 1 && (
-                  <p className="text-xs text-app-fg-muted">+{offer.imageUrls.length - 1} more image{offer.imageUrls.length - 1 === 1 ? '' : 's'}</p>
-                )}
-              </div>
+                <img
+                  src={url}
+                  alt={`${product.name} gallery`}
+                  className="h-32 w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                  loading="lazy"
+                />
+              </a>
             ))}
           </div>
-        ) : (
-          <p className="text-sm text-app-fg-muted">No offer tiers defined.</p>
-        )}
-      </div>
+        </div>
+      ) : null}
 
       {/* Cost & Stock (only if API returned cost; backend may strip for non-Finance/SuperAdmin) */}
       {product.costPrice != null && product.costPrice !== '' && (
@@ -136,7 +128,7 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
             </div>
           </dl>
           <p className="text-xs text-app-fg-muted">
-            Add stock via Inventory → Stock Intake.
+            Add stock via Inventory → Shipments → Receive Shipment (verify to post).
           </p>
         </div>
       )}

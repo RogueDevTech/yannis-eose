@@ -20,95 +20,40 @@ import { CompactTable, CompactTableActionButton, type CompactTableColumn } from 
 import { TextInput } from '~/components/ui/text-input';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { ActorMap, AuditEntry, AuditPageProps } from './types';
-
-/**
- * Resolve a user's name+role at a specific point in time. The audit map carries every
- * historical version of each user (newest-first); we pick the slice covering `asOf`.
- *
- * Returns `null` when the user is not in the map (unknown actor / FK to a deleted user).
- * Returns `isHistorical: true` when the matched slice is older than the current version,
- * so the UI can render "Kabir (now Admin)" instead of just "Kabir".
- */
-function resolveActor(
-  map: ActorMap,
-  userId: string,
-  asOf: string,
-): { name: string; role: string; nameNow: string; roleNow: string; isHistorical: boolean } | null {
-  const entry = map[userId];
-  if (!entry) return null;
-  for (const version of entry.history) {
-    const inRange = version.validFrom <= asOf && (version.validTo === null || asOf < version.validTo);
-    if (inRange) {
-      const isHistorical = version.validTo !== null;
-      return {
-        name: version.name,
-        role: version.role,
-        nameNow: entry.nameNow,
-        roleNow: entry.roleNow,
-        isHistorical: isHistorical || version.name !== entry.nameNow || version.role !== entry.roleNow,
-      };
-    }
-  }
-  return { name: entry.nameNow, role: entry.roleNow, nameNow: entry.nameNow, roleNow: entry.roleNow, isHistorical: false };
-}
+import {
+  resolveActor,
+  getActorDisplay,
+  isActorKnown,
+  ROLE_LABELS,
+  STATUS_LABELS,
+  formatAuditTableName,
+  getAuditSummaryParts,
+  generateAuditDescription,
+} from './audit-entry-summary';
 
 // ── Polling config ───────────────────────────────────────────────
 const POLL_INTERVAL_MS = 20_000;  // 20 seconds
 const SUCCESS_FLASH_MS = 2_000;   // Green for 2 seconds after fetch
 
 // ── Corrected list matching backend AUDITABLE_TABLES ─────────────
+// Tables intentionally OMITTED (skipped 2026-05 — see audit.service.ts comment
+// + migration 0119): inventory_levels, stock_batches, stock_movements,
+// call_logs, cart_abandonments. These had heavy churn and zero forensic
+// value beyond what stock_movements / live status already shows.
 const AUDITABLE_TABLES = [
-  'users', 'products', 'product_categories', 'stock_batches',
-  'logistics_providers', 'logistics_locations', 'inventory_levels',
+  'users', 'products', 'product_categories',
+  'logistics_providers', 'logistics_locations',
   'offer_templates', 'campaigns',
-  'orders', 'order_items', 'stock_transfers', 'stock_movements',
+  'orders', 'order_items', 'stock_transfers',
   'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
-  'call_logs',
   'invoices', 'approval_requests', 'budgets', 'settlement_configs',
-  'delivery_confirmation_requests',
   'commission_plans', 'payout_records', 'earnings_adjustments',
   'stock_reconciliations',
   'email_change_requests', 'user_product_assignments',
-  'permission_requests', 'system_settings', 'cart_abandonments',
+  'permission_requests', 'system_settings',
   'permissions', 'user_permissions',
+  'mirror_sessions',
 ];
-
-// ── Human-friendly table labels ──────────────────────────────────
-const TABLE_LABELS: Record<string, string> = {
-  users: 'Users',
-  products: 'Products',
-  product_categories: 'Product Categories',
-  stock_batches: 'Stock Batches',
-  logistics_providers: 'Logistics companies',
-  logistics_locations: 'Logistics Locations',
-  inventory_levels: 'Inventory Levels',
-  offer_templates: 'Offer Templates',
-  campaigns: 'Campaigns',
-  orders: 'Orders',
-  order_items: 'Order Items',
-  stock_transfers: 'Stock Transfers',
-  stock_movements: 'Stock Movements',
-  marketing_funding: 'Marketing Funding',
-  marketing_funding_requests: 'Marketing Funding Requests',
-  ad_spend_logs: 'Ad Spend Logs',
-  call_logs: 'Call Logs',
-  invoices: 'Invoices',
-  approval_requests: 'Approval Requests',
-  delivery_confirmation_requests: 'Delivery Confirmation Requests',
-  budgets: 'Budgets',
-  settlement_configs: 'Settlement Configs',
-  commission_plans: 'Commission Plans',
-  payout_records: 'Payout Records',
-  earnings_adjustments: 'Earnings Adjustments',
-  stock_reconciliations: 'Stock Reconciliations',
-  email_change_requests: 'Email Change Requests',
-  user_product_assignments: 'User Product Assignments',
-  permission_requests: 'Permission Requests',
-  system_settings: 'System Settings',
-  cart_abandonments: 'Cart Abandonments',
-  permissions: 'Permissions',
-  user_permissions: 'User Permissions',
-};
 
 // ── Human-friendly field labels ──────────────────────────────────
 const FIELD_LABELS: Record<string, string> = {
@@ -274,68 +219,7 @@ function AttachedFileDisplay({ url, onPreview }: { url: string; onPreview?: (url
   );
 }
 
-// ── Role labels ──────────────────────────────────────────────────
-const ROLE_LABELS: Record<string, string> = {
-  SUPER_ADMIN: 'Super Admin',
-  ADMIN: 'Admin',
-  HEAD_OF_MARKETING: 'Head of Marketing',
-  MEDIA_BUYER: 'Media Buyer',
-  HEAD_OF_CS: 'Head of CS',
-  CS_AGENT: 'CS Agent',
-  FINANCE_OFFICER: 'Finance Officer',
-  HEAD_OF_LOGISTICS: 'Head of Logistics',
-  STOCK_MANAGER: 'Stock Manager',
-  TPL_MANAGER: '3PL Manager',
-  TPL_RIDER: '3PL Rider',
-  HR_MANAGER: 'HR Manager',
-};
-
-// ── Status labels ────────────────────────────────────────────────
-const STATUS_LABELS: Record<string, string> = {
-  ACTIVE: 'Active',
-  INACTIVE: 'Inactive',
-  ARCHIVED: 'Archived',
-  UNPROCESSED: 'Unprocessed',
-  CS_ASSIGNED: 'CS Assigned',
-  CS_ENGAGED: 'CS Engaged',
-  CONFIRMED: 'Confirmed',
-  CANCELLED: 'Cancelled',
-  AGENT_ASSIGNED: 'Agent assigned',
-  DISPATCHED: 'Dispatched',
-  IN_TRANSIT: 'In Transit',
-  DELIVERED: 'Delivered',
-  PARTIALLY_DELIVERED: 'Partially Delivered',
-  RETURNED: 'Returned',
-  RESTOCKED: 'Restocked',
-  WRITTEN_OFF: 'Written Off',
-  REMITTED: 'Remitted',
-  PENDING: 'Pending',
-  APPROVED: 'Approved',
-  REJECTED: 'Rejected',
-  PAID: 'Paid',
-  DRAFT: 'Draft',
-  SENT: 'Sent',
-  DISPUTED: 'Disputed',
-  RECEIVED: 'Received',
-  OVERDUE: 'Overdue',
-  PENDING_APPROVAL: 'Pending Approval',
-  QUERIED: 'Queried',
-  ACCEPTED: 'Accepted',
-  INITIATED: 'Initiated',
-  RINGING: 'Ringing',
-  IN_PROGRESS: 'In Progress',
-  FAILED: 'Failed',
-  NO_ANSWER: 'No Answer',
-  BUSY: 'Busy',
-  MANUAL_CALL: 'Manual Call',
-  RESOLVED: 'Resolved',
-};
-
 // ── Formatting helpers ───────────────────────────────────────────
-
-function formatTableName(name: string): string {
-  return TABLE_LABELS[name] ?? name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 function formatFieldName(key: string): string {
   return FIELD_LABELS[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -454,38 +338,6 @@ function formatValue(key: string, val: unknown, actorNames: ActorMap, asOf: stri
   return strVal;
 }
 
-function getActorDisplay(
-  changedBy: string | null,
-  actorNames: ActorMap,
-  asOf: string,
-): string {
-  if (!changedBy) return 'System';
-  if (changedBy === EDGE_FORM_ACTOR_ID) return 'Edge Form';
-  const actor = resolveActor(actorNames, changedBy, asOf);
-  if (!actor) return `${changedBy.slice(0, 8)}...`;
-  return actor.isHistorical ? `${actor.name} (now ${actor.nameNow})` : actor.name;
-}
-
-function isActorKnown(
-  changedBy: string | null,
-  actorNames: ActorMap,
-): boolean {
-  if (!changedBy) return false;
-  return !!actorNames[changedBy];
-}
-
-/** Resolve a user-reference field (e.g. sender_id) to a display name AS OF the audit row's
- * timestamp. Returns null if unknown. */
-function lookupName(
-  value: unknown,
-  actorNames: ActorMap,
-  asOf: string,
-): string | null {
-  if (typeof value !== 'string' || value.length === 0) return null;
-  const actor = resolveActor(actorNames, value, asOf);
-  return actor?.name ?? null;
-}
-
 // ── Unknown Actor Modal ──────────────────────────────────────────
 
 function UnknownActorModal({
@@ -570,323 +422,6 @@ function getEntityLink(tableName: string, recordId: string, data?: Record<string
   }
 }
 
-interface DescriptionParts {
-  prefix: string;
-  entityLabel: string | null;
-  suffix: string;
-}
-
-function getDescriptionParts(
-  entry: AuditEntry,
-  actorNames: ActorMap,
-): DescriptionParts {
-  const data = entry.data;
-  const table = entry.tableName;
-  const asOf = entry.validFrom;
-  const actor = getActorDisplay(entry.changedBy, actorNames, asOf);
-
-  const recordLabel =
-    (data.name as string) ||
-    (data.customer_name as string) ||
-    (data.plan_name as string) ||
-    (data.campaign_name as string) ||
-    (data.reference_number as string) ||
-    (data.batch_number as string) ||
-    (data.email as string) ||
-    null;
-
-  // ── Per-table descriptions ──────────────────────────────────
-  if (table === 'mirror_sessions') {
-    // Mirror sessions are surfaced inline alongside row-history entries. The "actor" is
-    // the original admin (data.actor_id), the "target" is the user whose perspective they
-    // viewed (data.target_id). action === 'INSERT' means active session; 'UPDATE' means
-    // ended_at was just stamped (i.e. session closed).
-    const targetId = (data.target_id as string | undefined) ?? null;
-    const targetInfo = targetId ? resolveActor(actorNames, targetId, asOf) : null;
-    const targetLabel = targetInfo?.name ?? (targetId ? `${targetId.slice(0, 8)}…` : 'user');
-    const isActive = entry.action === 'INSERT';
-    if (isActive) {
-      return { prefix: `${actor} started mirroring `, entityLabel: targetLabel, suffix: '' };
-    }
-    // Ended session — try to compute duration for context
-    const startedRaw = data.started_at as string | undefined;
-    const endedRaw = data.ended_at as string | undefined;
-    let durationLabel = '';
-    if (startedRaw && endedRaw) {
-      const ms = new Date(endedRaw).getTime() - new Date(startedRaw).getTime();
-      const mins = Math.floor(ms / 60000);
-      const secs = Math.floor((ms % 60000) / 1000);
-      durationLabel = mins > 0 ? ` (${mins}m ${secs}s)` : ` (${secs}s)`;
-    }
-    return { prefix: `${actor} mirrored `, entityLabel: targetLabel, suffix: durationLabel };
-  }
-
-  if (table === 'users') {
-    const role = data.role ? (ROLE_LABELS[data.role as string] ?? data.role) : '';
-    const status = data.status as string | undefined;
-    const suffix = role ? ` (${role})` : '';
-    if (entry.action === 'INSERT') return { prefix: `${actor} created user `, entityLabel: recordLabel, suffix };
-    if (status === 'INACTIVE') return { prefix: `${actor} deactivated user `, entityLabel: recordLabel, suffix: '' };
-    if (status === 'ARCHIVED') return { prefix: `${actor} archived user `, entityLabel: recordLabel, suffix: '' };
-    return { prefix: `${actor} updated user `, entityLabel: recordLabel, suffix };
-  }
-
-  if (table === 'orders') {
-    const status = data.order_status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const customer = data.customer_name ? ` for ${data.customer_name}` : '';
-    const entityLabel = data.reference_number
-      ? String(data.reference_number)
-      : data.customer_name
-        ? `for ${data.customer_name}`
-        : 'order';
-    if (status === 'UNPROCESSED') return { prefix: 'New order created', entityLabel: data.customer_name ? `for ${data.customer_name}` : null, suffix: '' };
-    if (status === 'CS_ASSIGNED') return { prefix: 'Order assigned to CS agent', entityLabel: data.customer_name ? ` for ${data.customer_name}` : null, suffix: '' };
-    if (status === 'CS_ENGAGED') return { prefix: `${actor} engaged CS call on `, entityLabel: `order${customer}`, suffix: '' };
-    if (status === 'CONFIRMED') return { prefix: `${actor} confirmed order `, entityLabel, suffix: '' };
-    if (status === 'CANCELLED') {
-      const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
-      return { prefix: `${actor} cancelled order `, entityLabel, suffix: reason };
-    }
-    if (status === 'AGENT_ASSIGNED')
-      return { prefix: `${actor} assigned order `, entityLabel, suffix: ' for delivery (logistics company)' };
-    if (status === 'DISPATCHED') return { prefix: `${actor} dispatched order `, entityLabel, suffix: '' };
-    if (status === 'IN_TRANSIT') return { prefix: 'Order', entityLabel: customer ? customer.slice(1) : null, suffix: ' is in transit' };
-    if (status === 'DELIVERED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as delivered' };
-    if (status === 'PARTIALLY_DELIVERED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as partially delivered' };
-    if (status === 'RETURNED') return { prefix: `${actor} marked order `, entityLabel, suffix: ' as returned' };
-    if (status === 'RESTOCKED') return { prefix: `${actor} restocked returned order `, entityLabel, suffix: '' };
-    if (status === 'WRITTEN_OFF') return { prefix: `${actor} wrote off order `, entityLabel, suffix: '' };
-    if (status === 'REMITTED') return { prefix: 'Order', entityLabel: customer ? customer.slice(1) : null, suffix: ' marked as remitted' };
-    if (statusLabel) return { prefix: `${actor} updated order `, entityLabel, suffix: ` to ${statusLabel}` };
-    return { prefix: `${actor} updated order `, entityLabel, suffix: '' };
-  }
-
-  if (table === 'order_items') {
-    const qty = data.quantity ?? '';
-    const price = data.unit_price ? formatCurrency(data.unit_price) : '';
-    const full = qty && price
-      ? `${actor} updated order item — ${qty} units at ${price}`
-      : `${actor} updated order item`;
-    return { prefix: full, entityLabel: null, suffix: '' };
-  }
-
-  if (table === 'product_categories') {
-    const brand = data.brand_name ? ` (brand: ${data.brand_name})` : '';
-    const prefix = entry.action === 'INSERT'
-      ? `${actor} created product category `
-      : `${actor} updated product category `;
-    return { prefix, entityLabel: recordLabel, suffix: brand };
-  }
-
-  if (table === 'products') {
-    const priceVal = data.baseSalePrice ?? data.base_sale_price;
-    const price = priceVal ? ` (${formatCurrency(priceVal)})` : '';
-    if (entry.action === 'INSERT') return { prefix: `${actor} created product `, entityLabel: recordLabel, suffix: price };
-    if (data.status === 'INACTIVE' || data.is_active === false) return { prefix: `${actor} deactivated product `, entityLabel: recordLabel, suffix: price };
-    return { prefix: `${actor} updated product `, entityLabel: recordLabel, suffix: price };
-  }
-
-  if (table === 'stock_batches') {
-    const units = data.total_units ?? '';
-    const cost = data.factory_cost ? ` at ${formatCurrency(data.factory_cost)}/unit` : '';
-    const suffix = units ? ` — ${units} units${cost}` : '';
-    return { prefix: `${actor} updated stock batch `, entityLabel: recordLabel, suffix };
-  }
-
-  if (table === 'stock_transfers') {
-    const status = data.transfer_status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const qty = data.sent_quantity ? `${data.sent_quantity} units` : '';
-    if (status === 'RECEIVED') {
-      const received = data.received_quantity ?? data.sent_quantity ?? '';
-      return { prefix: `${actor} received transfer — `, entityLabel: null, suffix: `${received} units` };
-    }
-    if (status === 'DISPUTED') return { prefix: `${actor} disputed transfer — `, entityLabel: null, suffix: qty };
-    const full = statusLabel ? `${actor} updated stock transfer to ${statusLabel} — ${qty}` : `${actor} updated stock transfer — ${qty}`;
-    return { prefix: full, entityLabel: null, suffix: '' };
-  }
-
-  if (table === 'inventory_levels') {
-    const qty = data.available_units ?? data.quantity ?? '';
-    const full = `${actor} updated inventory level${qty ? ` — ${qty} units` : ''}`;
-    return { prefix: full, entityLabel: null, suffix: '' };
-  }
-
-  if (table === 'logistics_providers') {
-    return { prefix: `${actor} updated logistics company `, entityLabel: recordLabel, suffix: '' };
-  }
-
-  if (table === 'logistics_locations') {
-    return { prefix: `${actor} updated logistics location `, entityLabel: recordLabel, suffix: '' };
-  }
-
-  if (table === 'invoices') {
-    const status = data.invoice_status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.amount ? ` for ${formatCurrency(data.amount)}` : '';
-    const recipient = (data.recipient_info as { name?: string } | undefined)?.name;
-    const recipientLine = recipient ? ` to ${recipient}` : '';
-    const suffix = amount + recipientLine + (statusLabel ? ` — ${statusLabel}` : '');
-    return { prefix: `${actor} updated invoice `, entityLabel: recordLabel, suffix };
-  }
-
-  if (table === 'marketing_funding') {
-    const status = data.funding_status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    const sender = lookupName(data.sender_id, actorNames, asOf);
-    const receiver = lookupName(data.receiver_id, actorNames, asOf);
-    const parties = sender && receiver
-      ? ` (${sender} → ${receiver})`
-      : sender ? ` (from ${sender})` : receiver ? ` (to ${receiver})` : '';
-    if (status === 'COMPLETED') return { prefix: `${actor} confirmed funding received`, entityLabel: null, suffix: parties + amount };
-    if (status === 'DISPUTED') return { prefix: `${actor} disputed funding`, entityLabel: null, suffix: parties + amount };
-    const full = statusLabel ? `${actor} updated marketing funding${parties}${amount} — ${statusLabel}` : `${actor} updated marketing funding${parties}${amount}`;
-    return { prefix: full, entityLabel: null, suffix: '' };
-  }
-
-  if (table === 'campaigns' || table === 'offer_templates') {
-    return { prefix: `${actor} updated ${formatTableName(table).toLowerCase()} `, entityLabel: recordLabel, suffix: '' };
-  }
-
-  if (table === 'commission_plans') {
-    return { prefix: `${actor} updated commission plan `, entityLabel: recordLabel, suffix: '' };
-  }
-
-  if (table === 'payout_records') {
-    const status = data.payout_status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.net_amount ? ` — ${formatCurrency(data.net_amount)}` : '';
-    const staff = lookupName(data.staff_id ?? data.user_id, actorNames, asOf);
-    const staffLine = staff ? ` for ${staff}` : '';
-    const suffix = staffLine + amount + (statusLabel ? ` — ${statusLabel}` : '');
-    return { prefix: `${actor} updated payout`, entityLabel: null, suffix };
-  }
-
-  if (table === 'earnings_adjustments') {
-    const cat = data.category as string | undefined;
-    const catLabel = cat ? cat.charAt(0) + cat.slice(1).toLowerCase() : '';
-    const amount = data.amount ? ` of ${formatCurrency(data.amount)}` : '';
-    const staff = lookupName(data.user_id ?? data.staff_id, actorNames, asOf);
-    const staffLine = staff ? ` for ${staff}` : '';
-    if (catLabel) return { prefix: `${actor} added ${catLabel} adjustment`, entityLabel: null, suffix: staffLine + amount };
-    return { prefix: `${actor} updated earnings adjustment`, entityLabel: null, suffix: staffLine + amount };
-  }
-
-  if (table === 'marketing_funding_requests') {
-    const status = (data.funding_request_status ?? data.status) as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    const requester = lookupName(data.requester_id, actorNames, asOf);
-    const requesterLine = requester ? ` from ${requester}` : '';
-    return { prefix: `${actor} updated funding request${requesterLine}${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
-  }
-
-  if (table === 'ad_spend_logs') {
-    const status = (data.ad_spend_status ?? data.status) as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.spend_amount ? ` — ${formatCurrency(data.spend_amount)}` : '';
-    return { prefix: `${actor} updated ad spend${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
-  }
-
-  if (table === 'call_logs') {
-    const status = data.call_status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const duration = data.duration_seconds != null ? ` (${data.duration_seconds}s)` : '';
-    return { prefix: `${actor} call log — ${statusLabel}${duration}`, entityLabel: null, suffix: '' };
-  }
-
-  if (table === 'stock_reconciliations') {
-    const status = data.reconciliation_status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const disc = data.discrepancy != null ? ` — discrepancy ${data.discrepancy}` : '';
-    return { prefix: `${actor} updated stock reconciliation${disc}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
-  }
-
-  if (table === 'approval_requests') {
-    const status = (data.approval_status ?? data.status) as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const amount = data.amount ? ` — ${formatCurrency(data.amount)}` : '';
-    const requester = lookupName(data.requester_id, actorNames, asOf);
-    const approver = lookupName(data.approver_id, actorNames, asOf);
-    const parties = requester && approver
-      ? ` (${requester} → ${approver})`
-      : requester ? ` (from ${requester})` : approver ? ` (to ${approver})` : '';
-    return { prefix: `${actor} updated approval request${parties}${amount}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
-  }
-
-  if (table === 'budgets') {
-    const amount = data.total_budget ? ` — ${formatCurrency(data.total_budget)}` : '';
-    return { prefix: `${actor} updated budget${amount}`, entityLabel: recordLabel, suffix: '' };
-  }
-
-  if (table === 'settlement_configs') {
-    return { prefix: `${actor} updated settlement config`, entityLabel: null, suffix: '' };
-  }
-
-  if (table === 'stock_movements') {
-    const qty = data.quantity ?? '';
-    const moveType = data.movement_type as string | undefined;
-    const typeLabel = moveType ? moveType.replace(/_/g, ' ') : '';
-    return { prefix: `${actor} stock movement — ${typeLabel}`, entityLabel: null, suffix: qty ? ` ${qty} units` : '' };
-  }
-
-  if (table === 'email_change_requests') {
-    const status = data.status as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    return { prefix: `${actor} updated email change request`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
-  }
-
-  if (table === 'user_product_assignments') {
-    return { prefix: `${actor} updated user product assignment`, entityLabel: recordLabel, suffix: '' };
-  }
-
-  if (table === 'permission_requests') {
-    const status = (data.permission_request_status ?? data.status) as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    const typeLabel = (data.type as string) ?? '';
-    const requester = lookupName(data.requested_by ?? data.requester_id, actorNames, asOf);
-    const approver = lookupName(data.approved_by ?? data.approver_id, actorNames, asOf);
-    const parties = requester && approver
-      ? ` (${requester} → ${approver})`
-      : requester ? ` (from ${requester})` : '';
-    return { prefix: `${actor} updated permission request${parties} — ${typeLabel}`, entityLabel: null, suffix: statusLabel ? ` — ${statusLabel}` : '' };
-  }
-
-  if (table === 'system_settings') {
-    const key = data.key as string | undefined;
-    return { prefix: `${actor} updated system setting`, entityLabel: key ?? null, suffix: '' };
-  }
-
-  if (table === 'cart_abandonments') {
-    const status = (data.cart_status ?? data.status) as string | undefined;
-    const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
-    return { prefix: `${actor} updated cart abandonment`, entityLabel: recordLabel, suffix: statusLabel ? ` — ${statusLabel}` : '' };
-  }
-
-  if (table === 'permissions') {
-    const code = data.code as string | undefined;
-    return { prefix: `${actor} updated permission`, entityLabel: code ?? null, suffix: '' };
-  }
-
-  if (table === 'user_permissions') {
-    return { prefix: `${actor} updated user permission`, entityLabel: recordLabel, suffix: '' };
-  }
-
-  const full = `${actor} updated ${formatTableName(table).toLowerCase()} record`;
-  return { prefix: full, entityLabel: null, suffix: '' };
-}
-
-function generateDescription(
-  entry: AuditEntry,
-  actorNames: ActorMap,
-): string {
-  const { prefix, entityLabel, suffix } = getDescriptionParts(entry, actorNames);
-  const label = entityLabel ? `"${entityLabel}"` : '';
-  return prefix + label + suffix;
-}
-
 function AuditDescription({
   entry,
   actorNames,
@@ -894,7 +429,7 @@ function AuditDescription({
   entry: AuditEntry;
   actorNames: ActorMap;
 }) {
-  const { prefix, entityLabel, suffix } = getDescriptionParts(entry, actorNames);
+  const { prefix, entityLabel, suffix } = getAuditSummaryParts(entry, actorNames);
   const href = getEntityLink(entry.tableName, entry.recordId, entry.data);
 
   if (href && entityLabel) {
@@ -1127,8 +662,11 @@ function DetailModal({
             <h3 className="text-lg font-semibold text-app-fg">
               Record Detail
             </h3>
-            <p className="text-sm text-app-fg-muted mt-0.5">
-              {formatTableName(entry.tableName)} &middot; {entry.recordId.slice(0, 8)}...
+            <p className="text-sm text-app-fg mt-1 max-w-xl leading-snug">
+              {generateAuditDescription(entry, actorNames)}
+            </p>
+            <p className="text-xs text-app-fg-muted mt-1">
+              {formatAuditTableName(entry.tableName)} &middot; {entry.recordId.slice(0, 8)}...
             </p>
           </div>
           <button
@@ -1325,7 +863,7 @@ function TimeTravelPanel({
             name="tableName"
             value={ttTable}
             onChange={(e) => setTtTable(e.target.value)}
-            options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatTableName(t) }))}
+            options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) }))}
           />
           <TextInput
             name="recordId"
@@ -1563,7 +1101,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             value={filters.tableName}
             onChange={(e) => updateFilter('tableName', e.target.value)}
             placeholder="All Tables"
-            options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatTableName(t) }))}
+            options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) }))}
             wrapperClassName="w-full sm:w-56"
           />
           <DeferredSection resolve={actorNames} skeleton="inline">
@@ -1614,10 +1152,9 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             filenamePrefix="audit-log"
             rows={rows.map((entry) => ({
               timestamp: formatDate(entry.validFrom),
-              table: formatTableName(entry.tableName),
-              description: generateDescription(entry, resolvedActorNames),
+              table: formatAuditTableName(entry.tableName),
+              description: generateAuditDescription(entry, resolvedActorNames),
               actor: getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom),
-              action: entry.action,
               recordId: entry.recordId,
               validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
             }))}
@@ -1626,11 +1163,10 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
               { key: 'table', label: 'Table' },
               { key: 'description', label: 'Description' },
               { key: 'actor', label: 'Actor' },
-              { key: 'action', label: 'Action' },
               { key: 'recordId', label: 'Record ID' },
               { key: 'validTo', label: 'Valid To' },
             ]}
-            defaultColumns={['timestamp', 'table', 'description', 'actor', 'action', 'recordId', 'validTo']}
+            defaultColumns={['timestamp', 'table', 'description', 'actor', 'recordId', 'validTo']}
           />
         )}
       </DeferredSection>
@@ -1663,7 +1199,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                 key: 'description',
                 header: 'Description',
                 cellClassName:
-                  'text-xs text-app-fg-muted max-w-[180px] sm:max-w-xs md:max-w-sm break-words whitespace-normal min-w-0',
+                  'text-xs text-app-fg-muted max-w-[min(28rem,55vw)] md:max-w-xl lg:max-w-2xl break-words whitespace-normal min-w-0',
                 render: (entry) => (
                   <DeferredSection resolve={actorNames} skeleton="inline">
                     {(resolvedActorNames) => (
@@ -1709,27 +1245,6 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                       );
                     }}
                   </DeferredSection>
-                ),
-              },
-              {
-                key: 'action',
-                header: 'Action',
-                render: (entry) => (
-                  <span
-                    className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
-                      entry.action === 'INSERT'
-                        ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-500'
-                        : entry.action === 'DELETE'
-                          ? 'bg-danger-50 dark:bg-danger-700/20 text-danger-700 dark:text-danger-500'
-                          : 'bg-warning-50 dark:bg-warning-700/20 text-warning-700 dark:text-warning-500'
-                    }`}
-                  >
-                    {entry.action === 'INSERT'
-                      ? 'Created'
-                      : entry.action === 'DELETE'
-                        ? 'Deleted'
-                        : 'Updated'}
-                  </span>
                 ),
               },
               {
@@ -1790,20 +1305,7 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                           {display}
                         </button>
                       );
-                      return (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {actorNode}
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium ${
-                            entry.action === 'INSERT'
-                              ? 'bg-success-50 dark:bg-success-700/20 text-success-700 dark:text-success-500'
-                              : entry.action === 'DELETE'
-                              ? 'bg-danger-50 dark:bg-danger-700/20 text-danger-700 dark:text-danger-500'
-                              : 'bg-warning-50 dark:bg-warning-700/20 text-warning-700 dark:text-warning-500'
-                          }`}>
-                            {entry.action === 'INSERT' ? 'Created' : entry.action === 'DELETE' ? 'Deleted' : 'Updated'}
-                          </span>
-                        </div>
-                      );
+                      return <div className="flex items-center gap-2 flex-wrap">{actorNode}</div>;
                     }}
                   </DeferredSection>
                   <Button

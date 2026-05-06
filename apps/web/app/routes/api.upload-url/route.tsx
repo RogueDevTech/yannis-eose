@@ -84,7 +84,14 @@ export async function action({ request }: ActionFunctionArgs) {
     ContentType: fileType,
   });
 
-  const uploadUrl = await getSignedUrl(client, command, { expiresIn: 120 });
+  // @smithy/types is pulled in at two minor versions in node_modules, so S3Client
+  // and PutObjectCommand resolve to different (structurally identical) symbols
+  // than getSignedUrl's parameter slots. Runtime is fine; cast to keep typecheck quiet.
+  const uploadUrl = await getSignedUrl(
+    client as unknown as Parameters<typeof getSignedUrl>[0],
+    command as unknown as Parameters<typeof getSignedUrl>[1],
+    { expiresIn: 120 },
+  );
   const fileUrl = endpoint
     ? `${endpoint}/${bucket}/${key}`
     : `https://${bucket}.s3.${region}.amazonaws.com/${key}`;

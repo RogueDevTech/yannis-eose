@@ -1,6 +1,7 @@
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Textarea } from '~/components/ui/textarea';
+import { ChipInput } from '~/components/ui/chip-input';
 import type { StandardFieldConfig, StandardFieldKey } from './types';
 import {
   ADDITIONAL_FIELD_OPTION_KEYS,
@@ -67,19 +68,13 @@ export function StandardFieldsEditor({
     if (key === 'preferredDeliveryDate') {
       return (
         <div className="mt-2 pt-2 border-t border-app-border">
-          <label className="block text-xs font-medium text-app-fg-muted mb-1">Preferred delivery date options</label>
-          <Textarea
-            rows={4}
-            value={joinOptionLines(selectOptions.preferredDeliveryDateOptions)}
-            onChange={(e) =>
-              patchSelectOptions({ preferredDeliveryDateOptions: parseOptionLines(e.target.value) })
-            }
-            className="textarea textarea-bordered text-sm font-mono"
-            placeholder="One option per line"
+          <ChipInput
+            label="Preferred delivery date options"
+            value={selectOptions.preferredDeliveryDateOptions}
+            onChange={(next) => patchSelectOptions({ preferredDeliveryDateOptions: next })}
+            placeholder="Type an option and press Enter…"
+            hint="Press Enter to add. Backspace on empty input removes the last chip. Clear all and save to use the default timing choices on the live form."
           />
-          <p className="text-[11px] text-app-fg-muted mt-1">
-            One per line. Clear all and save to use the default timing choices on the live form.
-          </p>
         </div>
       );
     }

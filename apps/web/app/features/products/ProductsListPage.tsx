@@ -11,10 +11,7 @@ import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { FormSelect } from '~/components/ui/form-select';
 import { Modal } from '~/components/ui/modal';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
-import { PageHeader } from '~/components/ui/page-header';
-import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
-import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -28,6 +25,8 @@ interface ProductsListPageProps {
   total: number;
   page: number;
   totalPages: number;
+  /** Loader/API failure — not an empty catalog. */
+  productsLoadError?: string | null;
   canEditProduct?: boolean;
   /** Shown only when user has products.create (e.g. warehouse); media buyers must not see Add Product. */
   canCreateProduct?: boolean;
@@ -59,6 +58,8 @@ function thumbGradient(seed: string): string {
 }
 
 function firstProductThumbUrl(product: Product): string | undefined {
+  const g = product.galleryImageUrls?.[0];
+  if (typeof g === 'string' && g.length > 0) return g;
   for (const o of product.offers ?? []) {
     const u = o.imageUrls?.[0];
     if (typeof u === 'string' && u.length > 0) return u;
@@ -92,6 +93,7 @@ export function ProductsListPage({
   total,
   page,
   totalPages,
+  productsLoadError = null,
   canEditProduct = false,
   canCreateProduct = false,
   canInstantArchiveProduct = false,
@@ -278,64 +280,6 @@ export function ProductsListPage({
 
   return (
     <div className="space-y-4">
-      {/* Page header */}
-      <PageHeader
-        title="Products"
-        description="Manage your product catalog and bundle offers"
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Products tools"
-            sheetSubtitle={<span>Refresh and add product</span>}
-            triggerAriaLabel="Products toolbar"
-            desktop={
-              <>
-                <PageRefreshButton />
-                {canCreateProduct ? (
-                  <Link to="/admin/products/new" className="btn-primary">
-                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    Add Product
-                  </Link>
-                ) : null}
-              </>
-            }
-            sheet={({ closeSheet }) =>
-              canCreateProduct ? (
-                <Link
-                  to="/admin/products/new"
-                  className="btn-primary inline-flex w-full items-center justify-center gap-2"
-                  onClick={() => closeSheet()}
-                >
-                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  Add Product
-                </Link>
-              ) : (
-                <p className="text-center text-sm text-app-fg-muted">You do not have permission to create products.</p>
-              )
-            }
-          />
-        }
-      />
-
-      <OverviewStatStrip
-        items={[
-          { label: 'Total Products', value: total, valueClassName: 'text-app-fg' },
-          {
-            label: 'Active',
-            value: products.filter((p) => p.status === 'ACTIVE').length,
-            valueClassName: 'text-success-600 dark:text-success-400',
-          },
-          {
-            label: 'Categories',
-            value: new Set(products.map((p) => p.category).filter(Boolean)).size,
-            valueClassName: 'text-app-fg',
-          },
-        ]}
-      />
-
       <div className="card p-0 overflow-hidden">
         <ToolbarFiltersCollapsible
           className="!border-0"
@@ -381,15 +325,25 @@ export function ProductsListPage({
         />
       </div>
 
+      {productsLoadError && <RouteFetchErrorBanner messages={[productsLoadError]} variant="danger" />}
+
       <CompactTable<Product>
         columns={productColumns}
         rows={filteredProducts}
         rowKey={(p) => p.id}
-        emptyTitle={products.length === 0 ? 'No products yet' : 'No matching products found'}
+        emptyTitle={
+          productsLoadError
+            ? 'Unable to load products'
+            : products.length === 0
+              ? 'No products yet'
+              : 'No matching products found'
+        }
         emptyDescription={
-          products.length === 0
-            ? 'Add your first product with Add Product above.'
-            : 'Try adjusting your search or filters.'
+          productsLoadError
+            ? 'Use Reload data above. An empty table here does not mean your catalog is empty.'
+            : products.length === 0
+              ? 'Add your first product with Add Product above.'
+              : 'Try adjusting your search or filters.'
         }
         pagination={{
           page,

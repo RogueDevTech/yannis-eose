@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FormSelect } from '~/components/ui/form-select';
+import { TextInput } from '~/components/ui/text-input';
+import { Textarea } from '~/components/ui/textarea';
 import { FormConfigCustomFieldsPreview } from './form-config-custom-preview';
 import type { CustomFormField, ProductOfferRow, StandardFieldConfig, StandardFieldKey } from './types';
 import {
@@ -11,11 +14,23 @@ import {
 const DEFAULT_HEADING = 'Place Your Order';
 const DEFAULT_BUTTON = 'Submit Order';
 
+/** Match legacy `.input` chrome (same surface as core fields like Email in this preview). */
+const PREVIEW_FIELD_SURFACE = 'bg-app-elevated border-app-border-strong';
+/** Labels match manual fields: sm semibold, primary fg (not muted). */
+const PREVIEW_LABEL_WRAP = '[&_label]:text-sm [&_label]:font-medium [&_label]:text-app-fg';
+
 function formatOfferPrice(price: string | number): string {
   const num = typeof price === 'string' ? parseFloat(price) : price;
   if (Number.isNaN(num)) return String(price);
   const formatted = Math.abs(num).toLocaleString('en-NG');
   return num < 0 ? `-₦${formatted}` : `₦${formatted}`;
+}
+
+/** Matches Edge worker: first absolute http(s) image on the tier. */
+function firstOfferThumbnailUrl(urls: string[] | undefined): string {
+  if (!Array.isArray(urls)) return '';
+  const first = urls.find((u) => typeof u === 'string' && /^https?:\/\//i.test(u.trim()));
+  return first?.trim() ?? '';
 }
 
 export interface FormFullPreviewPreviewProduct {
@@ -39,6 +54,8 @@ export interface FormFullPreviewProps {
   previewProducts?: FormFullPreviewPreviewProduct[];
   /** Dropdown option lists for gender / delivery state / preferred date (matches Edge). */
   additionalSelectOptions?: AdditionalFieldSelectOptionsState;
+  /** When true, show tier thumbnails (same as hosted Edge form). Default true. */
+  showProductImages?: boolean;
   className?: string;
 }
 
@@ -54,6 +71,7 @@ export function FormFullPreview({
   previewOffers = [],
   previewProducts,
   additionalSelectOptions,
+  showProductImages = true,
   className = '',
 }: FormFullPreviewProps) {
   const [submitted, setSubmitted] = useState(false);
@@ -110,6 +128,7 @@ export function FormFullPreview({
         previewOffers,
         previewProducts,
         additionalSelectOptions: resolvedSelectOptions,
+        showProductImages,
       }),
     [
       heading,
@@ -123,6 +142,7 @@ export function FormFullPreview({
       previewOffers,
       previewProducts,
       resolvedSelectOptions,
+      showProductImages,
     ],
   );
 
@@ -195,7 +215,7 @@ export function FormFullPreview({
   return (
     <div
       className={[
-        'card text-left p-3 sm:p-4 space-y-3 sm:space-y-4 overflow-y-auto bg-[#efefef] dark:bg-app-elevated',
+        'form-order-preview card text-left p-3 sm:p-4 space-y-3 sm:space-y-4 overflow-y-auto bg-[#efefef] dark:bg-app-elevated',
         'max-h-[min(800px,calc(100vh-var(--header-height,3.5rem)-1.5rem))]',
         className,
       ]
@@ -248,7 +268,9 @@ export function FormFullPreview({
                   <p className="text-sm font-medium text-app-fg-muted -mt-1">{section.name}</p>
                 ) : null}
                 <div className="space-y-2 sm:space-y-3">
-                  {section.offers.map((o, idx) => (
+                  {section.offers.map((o, idx) => {
+                    const thumb = showProductImages ? firstOfferThumbnailUrl(o.imageUrls) : '';
+                    return (
                     <label
                       key={`${section.id}-${idx}-${o.label}`}
                       className="flex items-start gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl border-2 border-[#c8c8c8] px-3 py-2.5 sm:px-4 sm:py-3 cursor-pointer"
@@ -259,6 +281,16 @@ export function FormFullPreview({
                         name={multiProduct ? `preview-offer-${section.id}` : 'preview-offer'}
                         defaultChecked={idx === 0}
                       />
+                      {thumb ? (
+                        <img
+                          src={thumb}
+                          alt=""
+                          width={48}
+                          height={48}
+                          loading="lazy"
+                          className="mt-0.5 w-12 h-12 rounded-lg object-cover border border-[#c8c8c8] shrink-0 bg-app-hover"
+                        />
+                      ) : null}
                       <span className="min-w-0 flex-1 flex flex-col gap-1">
                         <span className="text-base sm:text-xl tracking-wide font-semibold text-app-fg leading-snug">
                           {o.label}
@@ -273,146 +305,148 @@ export function FormFullPreview({
                         </span>
                       </span>
                     </label>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
           </div>
         ) : null}
 
-        <div>
-          <label className="block text-sm font-medium text-app-fg mb-1">Full Name</label>
-          <input className="input input-bordered w-full" placeholder="Your full name" minLength={2} required />
-        </div>
+        <TextInput
+          label="Full Name"
+          required
+          placeholder="Your full name"
+          minLength={2}
+          controlSize="lg"
+          className={PREVIEW_FIELD_SURFACE}
+          wrapperClassName={PREVIEW_LABEL_WRAP}
+        />
 
-        <div>
-          <label className="block text-sm font-medium text-app-fg mb-1">Phone Number</label>
-          <input className="input input-bordered w-full" type="tel" placeholder="08012345678" required />
-        </div>
+        <TextInput
+          label="Phone Number"
+          type="tel"
+          required
+          placeholder="08012345678"
+          controlSize="lg"
+          className={PREVIEW_FIELD_SURFACE}
+          wrapperClassName={PREVIEW_LABEL_WRAP}
+        />
 
         {standard.has('gender') ? (
-          <div>
-            <label className="block text-sm font-medium text-app-fg mb-1">
-              Gender {standard.get('gender')?.required ? <span className="text-danger-500">*</span> : null}
-            </label>
-            <select className="select select-bordered w-full" required={!!standard.get('gender')?.required} defaultValue="">
-              <option value="">Select gender...</option>
-              {previewGenderOpts.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FormSelect
+            label="Gender"
+            required={!!standard.get('gender')?.required}
+            placeholder="Select gender..."
+            options={previewGenderOpts.map((opt) => ({ value: opt, label: opt }))}
+            defaultValue=""
+            controlSize="lg"
+            className={PREVIEW_FIELD_SURFACE}
+            wrapperClassName={PREVIEW_LABEL_WRAP}
+          />
         ) : null}
 
         {standard.has('deliveryState') ? (
-          <div>
-            <label className="block text-sm font-medium text-app-fg mb-1">
-              Delivery State {standard.get('deliveryState')?.required ? <span className="text-danger-500">*</span> : null}
-            </label>
-            <select className="select select-bordered w-full" required={!!standard.get('deliveryState')?.required} defaultValue="">
-              <option value="">Select state...</option>
-              {previewStateOpts.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FormSelect
+            label="Delivery State"
+            required={!!standard.get('deliveryState')?.required}
+            placeholder="Select state..."
+            options={previewStateOpts.map((opt) => ({ value: opt, label: opt }))}
+            defaultValue=""
+            controlSize="lg"
+            className={PREVIEW_FIELD_SURFACE}
+            wrapperClassName={PREVIEW_LABEL_WRAP}
+          />
         ) : null}
 
         {standard.has('deliveryAddress') ? (
-          <div>
-            <label className="block text-sm font-medium text-app-fg mb-1">
-              Delivery Address {standard.get('deliveryAddress')?.required ? <span className="text-danger-500">*</span> : null}
-            </label>
-            <textarea
-              className="textarea textarea-bordered w-full"
-              rows={2}
-              required={!!standard.get('deliveryAddress')?.required}
-              placeholder="Your delivery address"
-            />
-          </div>
+          <Textarea
+            label="Delivery Address"
+            required={!!standard.get('deliveryAddress')?.required}
+            rows={2}
+            placeholder="Your delivery address"
+            className={`${PREVIEW_FIELD_SURFACE} min-h-[4.5rem] !resize-y`}
+            wrapperClassName={PREVIEW_LABEL_WRAP}
+          />
         ) : null}
 
         {standard.has('deliveryNotes') ? (
-          <div>
-            <label className="block text-sm font-medium text-app-fg mb-1">
-              {standard.get('deliveryNotes')?.required ? 'Delivery Notes' : 'Delivery Notes (optional)'}{' '}
-              {standard.get('deliveryNotes')?.required ? <span className="text-danger-500">*</span> : null}
-            </label>
-            <input
-              className="input input-bordered w-full"
-              required={!!standard.get('deliveryNotes')?.required}
-              placeholder="Any special instructions"
-            />
-          </div>
+          <TextInput
+            label={
+              standard.get('deliveryNotes')?.required ? 'Delivery Notes' : 'Delivery Notes (optional)'
+            }
+            required={!!standard.get('deliveryNotes')?.required}
+            placeholder="Any special instructions"
+            controlSize="lg"
+            className={PREVIEW_FIELD_SURFACE}
+            wrapperClassName={PREVIEW_LABEL_WRAP}
+          />
         ) : null}
 
         {standard.has('preferredDeliveryDate') ? (
-          <div>
-            <label className="block text-sm font-medium text-app-fg mb-1">
-              When do you want to receive your order?{' '}
-              {standard.get('preferredDeliveryDate')?.required ? <span className="text-danger-500">*</span> : null}
-            </label>
-            <select className="select select-bordered w-full" required={!!standard.get('preferredDeliveryDate')?.required} defaultValue="">
-              <option value="">Select...</option>
-              {previewDateOpts.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FormSelect
+            label="When do you want to receive your order?"
+            required={!!standard.get('preferredDeliveryDate')?.required}
+            placeholder="Select..."
+            options={previewDateOpts.map((opt) => ({ value: opt, label: opt }))}
+            defaultValue=""
+            controlSize="lg"
+            className={PREVIEW_FIELD_SURFACE}
+            wrapperClassName={PREVIEW_LABEL_WRAP}
+          />
         ) : null}
 
         {standard.has('customerEmail') ? (
-          <div>
-            <label className="block text-sm font-medium text-app-fg mb-1">
-              {STANDARD_FIELD_LABELS.customerEmail}{' '}
-              {standard.get('customerEmail')?.required ? <span className="text-danger-500">*</span> : null}
-            </label>
-            <input
-              className="input input-bordered w-full"
-              type="email"
-              placeholder="your@email.com"
-              required={!!standard.get('customerEmail')?.required}
-            />
-          </div>
+          <TextInput
+            type="email"
+            label={STANDARD_FIELD_LABELS.customerEmail}
+            required={!!standard.get('customerEmail')?.required}
+            placeholder="your@email.com"
+            controlSize="lg"
+            className={PREVIEW_FIELD_SURFACE}
+            wrapperClassName={PREVIEW_LABEL_WRAP}
+          />
         ) : null}
 
         {standard.has('paymentMethod') ? (
           <div className="space-y-2">
             <div>
-              <label className="block text-sm font-medium text-app-fg mb-1">
-                {STANDARD_FIELD_LABELS.paymentMethod}{' '}
-                {standard.get('paymentMethod')?.required ? <span className="text-danger-500">*</span> : null}
-              </label>
-              <select
-                className="select select-bordered w-full"
-                value={paymentMethod}
+              <FormSelect
+                label={STANDARD_FIELD_LABELS.paymentMethod}
                 required={!!standard.get('paymentMethod')?.required}
+                placeholder="Select payment method..."
+                options={[
+                  { value: 'PAY_ON_DELIVERY', label: 'Pay on delivery' },
+                  { value: 'PAY_ONLINE', label: 'Pay online (card / bank)' },
+                ]}
+                value={paymentMethod}
                 onChange={(e) => setPaymentMethod(e.target.value)}
-              >
-                <option value="">Select payment method...</option>
-                <option value="PAY_ON_DELIVERY">Pay on delivery</option>
-                <option value="PAY_ONLINE">Pay online (card / bank)</option>
-              </select>
+                controlSize="lg"
+                className={PREVIEW_FIELD_SURFACE}
+                wrapperClassName={PREVIEW_LABEL_WRAP}
+              />
             </div>
             {paymentMethod === 'PAY_ONLINE' && !standard.has('customerEmail') ? (
-              <div>
-                <label className="block text-sm font-medium text-app-fg mb-1">
-                  Email (for payment receipt) <span className="text-danger-500">*</span>
-                </label>
-                <input className="input input-bordered w-full" type="email" required placeholder="your@email.com" />
-              </div>
+              <TextInput
+                type="email"
+                label="Email (for payment receipt)"
+                required
+                placeholder="your@email.com"
+                controlSize="lg"
+                className={PREVIEW_FIELD_SURFACE}
+                wrapperClassName={PREVIEW_LABEL_WRAP}
+              />
             ) : null}
           </div>
         ) : null}
 
         {sorted.length > 0 ? (
-          <FormConfigCustomFieldsPreview fields={sorted} accentColor={accentColor} withOuterWrap={false} />
+          <FormConfigCustomFieldsPreview
+            fields={sorted}
+            accentColor={accentColor}
+            withOuterWrap={false}
+            controlClassName={PREVIEW_FIELD_SURFACE}
+          />
         ) : null}
 
         <button type="submit" className="btn btn-primary w-full" style={{ backgroundColor: accentColor, borderColor: accentColor }}>

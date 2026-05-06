@@ -390,7 +390,8 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!updateRes.ok) {
       return json({ success: false, error: extractApiErrorMessage(updateRes.data, 'Update failed'), intent: 'updateDeliveryDate' }, { status: safeStatus(updateRes.status) });
     }
-    let current = updateRes.data?.result?.data;
+    type OrderSnapshot = { status?: string; logisticsLocationId?: string | null; riderId?: string | null };
+    let current: OrderSnapshot | undefined = updateRes.data?.result?.data;
     let status = current?.status;
     const terminal = ['DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'];
     if (status && terminal.includes(status)) {
@@ -400,11 +401,10 @@ export async function action({ request }: ActionFunctionArgs) {
     if (body.deliveryFeeAddOn != null) deliveryMetadata.deliveryFeeAddOn = body.deliveryFeeAddOn;
     if (body.deliveryDiscountAmount != null) deliveryMetadata.deliveryDiscountAmount = body.deliveryDiscountAmount;
 
-    type OrderSnapshot = { status?: string; logisticsLocationId?: string | null; riderId?: string | null };
-    const transitionResponse = async (res: { ok: boolean; status: number; data: unknown }) => {
-      if (!res.ok) return null;
+    const transitionResponse = async (res: { ok: boolean; status: number; data: unknown }): Promise<OrderSnapshot | undefined> => {
+      if (!res.ok) return undefined;
       const data = (res.data as { result?: { data?: OrderSnapshot } })?.result?.data;
-      return data ?? null;
+      return data ?? undefined;
     };
     const transitionError = (res: { data: unknown }, fallback: string): string =>
       extractApiErrorMessage(res.data, fallback);

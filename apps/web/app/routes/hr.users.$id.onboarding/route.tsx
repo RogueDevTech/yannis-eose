@@ -114,6 +114,28 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'requestOnboardingChanges') {
+    const reason = (fd.get('reason') ?? '').toString().trim();
+    if (reason.length < 10) {
+      return json(
+        { error: 'Please share at least 10 characters describing what needs changes.' },
+        { status: 400 },
+      );
+    }
+    const res = await apiRequest<unknown>('/trpc/onboarding.requestChanges', {
+      method: 'POST',
+      cookie,
+      body: { userId, reason },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to send changes request') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown intent' }, { status: 400 });
 }
 

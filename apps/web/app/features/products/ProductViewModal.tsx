@@ -54,6 +54,32 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
 
         {/* Scrollable body */}
         <div className="overflow-y-auto p-4 space-y-4">
+          {/* Gallery */}
+          {product.galleryImageUrls?.length ? (
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-app-fg">Gallery</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {product.galleryImageUrls.map((url) => (
+                  <a
+                    key={url}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group relative block overflow-hidden rounded-lg border border-app-border bg-app-hover"
+                    title="Open image"
+                  >
+                    <img
+                      src={url}
+                      alt={`${product.name} gallery`}
+                      className="h-28 w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                      loading="lazy"
+                    />
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {/* Product Details */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-app-fg">Product Details</h3>
@@ -77,45 +103,6 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
                 </dd>
               </div>
             </dl>
-          </div>
-
-          {/* Offer Bundles */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-app-fg">Offer Bundles</h3>
-            {product.offers?.length ? (
-              <div className="space-y-2">
-                {product.offers.map((offer, index) => (
-                  <div
-                    key={index}
-                    className="flex flex-col gap-2 p-3 rounded-lg bg-app-hover border border-app-border"
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="font-medium text-app-fg">{offer.label || `Qty ${offer.qty}`}</p>
-                        <p className="text-xs text-app-fg-muted">
-                          {offer.qty} unit{offer.qty !== 1 ? 's' : ''}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-sm font-semibold text-app-fg tabular-nums">
-                          &#8358;{Number(offer.price).toLocaleString()}
-                        </span>
-                        {offer.imageUrls && offer.imageUrls.length > 0 && (
-                          <div className="w-16 h-16 max-w-[200px] rounded border border-app-border overflow-hidden shrink-0">
-                            <img src={offer.imageUrls[0]} alt="" className="w-full h-full object-cover" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {offer.imageUrls && offer.imageUrls.length > 1 && (
-                      <p className="text-xs text-app-fg-muted">+{offer.imageUrls.length - 1} more image{offer.imageUrls.length - 1 === 1 ? '' : 's'}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-app-fg-muted">No offer tiers defined.</p>
-            )}
           </div>
 
           {/* Cost (if visible) */}

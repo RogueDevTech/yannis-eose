@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, lt, desc, count, gte, inArray, sql } from 'drizzle-orm';
+import { eq, and, lt, desc, count, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID } from '@yannis/shared';
@@ -285,11 +285,11 @@ export class CartService {
   }
 
   /**
-   * List ABANDONED carts in the last 24h for CS dashboard (Cart Abandonment tab).
-   * Same shape as listPending so the UI can render both.
+   * List ABANDONED carts for CS dashboard — persists until cleared via {@link deleteAbandoned}.
+   * Paginated; `page` is clamped to the last page when out of range (e.g. after deletes).
    */
-  async listAbandoned(limit = 50): Promise<
-    Array<{
+  async listAbandoned(opts: { page?: number; limit?: number } = {}): Promise<{
+    items: Array<{
       id: string;
       customerName: string;
       customerPhoneDisplay: string;
@@ -299,9 +299,24 @@ export class CartService {
       campaignName: string | null;
       offerLabel: string | null;
       updatedAt: Date;
-    }>
-  > {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    }>;
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
+    let page = Math.max(1, Math.floor(opts.page ?? 1));
+
+    const totalRows = await this.db
+      .select({ count: count() })
+      .from(schema.cartAbandonments)
+      .where(eq(schema.cartAbandonments.status, 'ABANDONED'));
+    const total = Number(totalRows[0]?.count ?? 0);
+    const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
+    if (totalPages > 0 && page > totalPages) page = totalPages;
+
+    const offset = (page - 1) * limit;
+
     const rows = await this.db
       .select({
         id: schema.cartAbandonments.id,
@@ -317,26 +332,27 @@ export class CartService {
       .from(schema.cartAbandonments)
       .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
       .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
-      .where(
-        and(
-          eq(schema.cartAbandonments.status, 'ABANDONED'),
-          gte(schema.cartAbandonments.updatedAt, twentyFourHoursAgo),
-        ),
-      )
+      .where(eq(schema.cartAbandonments.status, 'ABANDONED'))
       .orderBy(desc(schema.cartAbandonments.updatedAt))
-      .limit(limit);
+      .limit(limit)
+      .offset(offset);
 
-    return rows.map((r) => ({
-      id: r.id,
-      customerName: r.customerName,
-      customerPhoneDisplay: maskPhone(r.customerPhoneHash),
-      productId: r.productId,
-      productName: r.productName ?? null,
-      campaignId: r.campaignId,
-      campaignName: r.campaignName ?? null,
-      offerLabel: r.offerLabel ?? null,
-      updatedAt: r.updatedAt ?? new Date(),
-    }));
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        customerName: r.customerName,
+        customerPhoneDisplay: maskPhone(r.customerPhoneHash),
+        productId: r.productId,
+        productName: r.productName ?? null,
+        campaignId: r.campaignId,
+        campaignName: r.campaignName ?? null,
+        offerLabel: r.offerLabel ?? null,
+        updatedAt: r.updatedAt ?? new Date(),
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   /**
@@ -408,7 +424,7 @@ export class CartService {
           ca.status::text                                               AS "cartStatus",
           o.status                                                      AS "orderStatus",
           ca.converted_order_id                                         AS "linkedOrderId",
-          COALESCE(o.total_amount, ot.price)::text                     AS "totalAmount",
+          COALESCE(o.total_amount, ot.price, p.base_sale_price)::text  AS "totalAmount",
           GREATEST(ca.updated_at, COALESCE(o.updated_at, ca.updated_at)) AS "updatedAt"
         FROM cart_abandonments ca
         LEFT JOIN products p ON p.id = ca.product_id
@@ -486,9 +502,7 @@ export class CartService {
   /**
    * Get cart abandonment stats for CS dashboard.
    */
-  async getStats(): Promise<{ pending: number; abandonedLast24h: number }> {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
+  async getStats(): Promise<{ pending: number; abandonedOpen: number }> {
     const [pendingRes, abandonedRes] = await Promise.all([
       this.db
         .select({ count: count() })
@@ -497,17 +511,12 @@ export class CartService {
       this.db
         .select({ count: count() })
         .from(schema.cartAbandonments)
-        .where(
-          and(
-            eq(schema.cartAbandonments.status, 'ABANDONED'),
-            gte(schema.cartAbandonments.updatedAt, twentyFourHoursAgo),
-          ),
-        ),
+        .where(eq(schema.cartAbandonments.status, 'ABANDONED')),
     ]);
 
     return {
       pending: pendingRes[0]?.count ?? 0,
-      abandonedLast24h: abandonedRes[0]?.count ?? 0,
+      abandonedOpen: abandonedRes[0]?.count ?? 0,
     };
   }
 }

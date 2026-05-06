@@ -47,12 +47,22 @@ export const cartRouter = router({
     }),
 
   /**
-   * List ABANDONED carts in the last 24h for CS dashboard (Cart Abandonment tab).
+   * List ABANDONED carts until cleared (delete). Paginated (`page`, `limit` max 100).
    */
   listAbandoned: permissionProcedure('cart.read')
-    .input(z.object({ limit: z.number().int().min(1).max(100).default(50) }).optional())
+    .input(
+      z
+        .object({
+          page: z.number().int().min(1).default(1),
+          limit: z.number().int().min(1).max(100).default(25),
+        })
+        .optional(),
+    )
     .query(async ({ input }) => {
-      return getCartService().listAbandoned(input?.limit ?? 50);
+      return getCartService().listAbandoned({
+        page: input?.page ?? 1,
+        limit: input?.limit ?? 25,
+      });
     }),
 
   /**

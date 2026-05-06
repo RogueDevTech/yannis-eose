@@ -2,18 +2,31 @@ import { useMemo } from 'react';
 import { useFetcher, useRevalidator } from '@remix-run/react';
 
 /**
- * Derive synthetic "optimistic" rows from an in-flight `fetcher.formData`
- * payload. Returns an array (possibly empty) — the caller merges it with the
- * server-side loader data, typically as `[...optimisticRows, ...serverRows]`.
+ * Derive a synthetic "optimistic" row from a fetcher's submission payload and
+ * merge it into the list while the post-action loader revalidates.
  *
- * The hook handles the gating internally:
- *   isMutating = fetcher.state !== 'idle' || revalidatorState !== 'idle'
+ * **Lifecycle (default — `awaitSuccess: true`):**
+ *   1. User clicks Submit. `fetcher.state` → `'submitting'`. **No synthetic
+ *      row yet** — the action hasn't confirmed.
+ *   2. Server returns `{ success: true }`. `fetcher.data` flips, the modal
+ *      closes (via `useCloseOnFetcherSuccess`), and on the SAME React tick
+ *      the synthetic row appears in the list.
+ *   3. Loader revalidates (`fetcher.state` = `'loading'`). The real row lands.
+ *   4. `fetcher.state` → `'idle'`. Synthetic row drops; real row stays.
  *
- * That spans both the action phase AND the post-action loader revalidation,
- * so an optimistic row stays visible across the whole round-trip with no
- * flicker. As soon as the canonical row lands in the loader response and
- * `revalidatorState` returns to `'idle'`, the hook stops returning the
- * synthetic row — it's seamlessly replaced by the real data.
+ * The synthetic row is purely a bridge between modal-close and loader-
+ * revalidation. The user never sees "row appears, then disappears" because
+ * we wait for confirmation before showing anything.
+ *
+ * **Why the default is `awaitSuccess: true` (CEO directive 2026-05):** the
+ * earlier "show during submit" model briefly painted rows that the server
+ * could still reject, leading to flicker on bad input. Waiting for success
+ * makes every visible row a row that landed.
+ *
+ * **Failure path:** if the server returns `{ success: false }` or throws,
+ * `fetcher.data.success` is never `true` so the synthetic row never renders,
+ * and the modal stays open with the form values intact. The user sees their
+ * error toast and can retry without losing input.
  *
  * The `build` callback is the only per-page logic. It receives the live
  * `FormData` plus the resolved `intent` string (from the `name="intent"`
@@ -40,33 +53,38 @@ export function useOptimisticListMerge<T>(
   build: (formData: FormData, intent: string) => T[] | null,
   options?: {
     /**
-     * When `true`, the optimistic row only renders AFTER the action returns
-     * `{ success: true }` — i.e. during the loader-revalidation window
-     * (`fetcher.state === 'loading'`) and any post-action revalidator pass.
-     * Hide it during the in-flight `submitting` phase entirely.
+     * When `true` (default), the optimistic row only renders AFTER the action
+     * returns `{ success: true }` — i.e. during the loader-revalidation
+     * window (`fetcher.state === 'loading'`) and any post-action revalidator
+     * pass. Hidden during the in-flight `submitting` phase entirely. This is
+     * what every modal-driven CRUD list wants because the modal is still
+     * covering the table during submit, AND because painting a row that the
+     * server could reject leads to flicker on validation failure.
      *
-     * Use this when the modal blocks the table during submit (so optimistic
-     * UI under the modal is invisible anyway) and you want to avoid the
-     * "row briefly appears, then disappears" flash on action failure.
-     *
-     * Default `false` — preserves the original "show throughout the
-     * round-trip" behavior used by add-during-submit pages.
+     * Set to `false` only for non-modal in-line edits where instant feedback
+     * during the in-flight window matters more than rejection-flicker.
      */
     awaitSuccess?: boolean;
   },
 ): T[] {
   const { state: revalidatorState } = useRevalidator();
-  const awaitSuccess = options?.awaitSuccess ?? false;
+  const awaitSuccess = options?.awaitSuccess ?? true;
   return useMemo<T[]>(() => {
     const isMutating = fetcher.state !== 'idle' || revalidatorState !== 'idle';
     if (!isMutating) return [];
 
-    // Gate on success when caller opted in. `fetcher.data` is set as soon as
-    // the action returns (state transitions submitting → loading), so the
-    // "after success" window starts on the loading edge — exactly when the
-    // modal closes via `useCloseOnFetcherSuccess` and the table becomes
-    // visible. If `data.success !== true` (action failed), we never render.
+    // Gate on success when caller opted in (default). `fetcher.data` is set
+    // as soon as the action returns (state transitions submitting → loading),
+    // so the "after success" window starts on the loading edge — exactly
+    // when the modal closes via `useCloseOnFetcherSuccess` and the table
+    // becomes visible. If `data.success !== true` (action failed), we never
+    // render.
+    //
+    // We also guard against stale `fetcher.data` from a prior submit by
+    // requiring `fetcher.state !== 'submitting'` — a fresh submit clears the
+    // synthetic row until its own success lands.
     if (awaitSuccess) {
+      if (fetcher.state === 'submitting') return [];
       const data = fetcher.data;
       const succeeded =
         !!data && typeof data === 'object' && (data as { success?: boolean }).success === true;

@@ -171,7 +171,7 @@ export function ScheduleHeatCalendar({
               aria-label={`${iso}: ${title}`}
               onClick={() => onSelectDay(iso)}
               className={[
-                'flex aspect-square min-h-[2rem] flex-col items-center justify-center rounded-md border text-xs font-medium transition-colors',
+                'flex aspect-square min-h-[2rem] flex-col items-center justify-center gap-0.5 rounded-md border text-xs font-medium leading-none transition-colors',
                 'border-app-border hover:border-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-500',
                 heatClass || 'bg-app-hover/40 dark:bg-app-hover/25',
                 isSelected ? 'ring-2 ring-brand-500 ring-offset-1 ring-offset-app-elevated' : '',
@@ -181,7 +181,9 @@ export function ScheduleHeatCalendar({
             >
               <span className="tabular-nums text-app-fg">{cell.day}</span>
               {total > 0 ? (
-                <span className="text-[9px] font-normal text-app-fg-muted sm:text-[10px]">{total}</span>
+                <span className="tabular-nums text-[9px] font-normal text-app-fg-muted sm:text-[10px]" aria-hidden>
+                  {total}
+                </span>
               ) : null}
             </button>
           );

@@ -59,7 +59,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
     const svc = new InventoryService(
       db as any,
       { emitToRoom: () => {} } as any,
-      { createForRole: async () => undefined } as any,
+      { createForRole: async () => undefined, enqueueCreateForRole: () => undefined } as any,
       { get: async () => null } as any,
     );
 
@@ -326,7 +326,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
     const svc = new InventoryService(
       db as any,
       { emitToRoom: () => {} } as any,
-      { createForRole: async () => undefined } as any,
+      { createForRole: async () => undefined, enqueueCreateForRole: () => undefined } as any,
       { get: async () => null } as any,
     );
     await svc.verifyTransfer(
@@ -383,7 +383,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
     const svc = new InventoryService(
       db as any,
       { emitToRoom: () => {} } as any,
-      { createForRole: async () => undefined } as any,
+      { createForRole: async () => undefined, enqueueCreateForRole: () => undefined } as any,
       { get: async () => null } as any,
     );
     await svc.verifyTransfer({ transferId: transfer!.id, quantityReceived: 15 }, { id: actor.id } as any);
@@ -432,7 +432,7 @@ describe.skipIf(SKIP_IF_NO_DB)('FIFO Inventory Costing — Integration', () => {
     const svc = new InventoryService(
       db as any,
       { emitToRoom: () => {} } as any,
-      { createForRole: async () => undefined } as any,
+      { createForRole: async () => undefined, enqueueCreateForRole: () => undefined } as any,
       { get: async () => null } as any,
     );
     await svc.verifyTransfer(

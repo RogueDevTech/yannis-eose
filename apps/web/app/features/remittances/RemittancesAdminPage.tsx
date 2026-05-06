@@ -21,6 +21,7 @@ import {
   CompactTable,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
 
 export interface TransferConfirmationRecord {
   id: string;
@@ -64,7 +65,7 @@ export interface RemittancesAdminPageProps {
 }
 
 function formatLocationWithProvider(name: string, providerName: string | null | undefined): string {
-  return providerName ? `${name} — ${providerName}` : name;
+  return providerName ? `${name} • ${providerName}` : name;
 }
 
 const PROCESSED_TRANSFER_COLUMNS: CompactTableColumn<TransferConfirmationRecord>[] = [
@@ -76,11 +77,13 @@ const PROCESSED_TRANSFER_COLUMNS: CompactTableColumn<TransferConfirmationRecord>
   {
     key: 'route',
     header: 'From → To',
-    minWidth: 'min-w-[180px]',
+    minWidth: 'min-w-[200px]',
     render: (r) => (
-      <span className="text-app-fg-muted">
-        {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} →{' '}
-        {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
+      <span
+        className="text-app-fg-muted truncate block max-w-[18rem]"
+        title={`${formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} → ${formatLocationWithProvider(r.toLocationName, r.toProviderName)}`}
+      >
+        {r.fromLocationName} → {r.toLocationName}
       </span>
     ),
   },
@@ -130,6 +133,51 @@ const PROCESSED_TRANSFER_COLUMNS: CompactTableColumn<TransferConfirmationRecord>
   },
 ];
 
+const PENDING_TRANSFER_COLUMNS: CompactTableColumn<TransferConfirmationRecord>[] = [
+  {
+    key: 'product',
+    header: 'Product',
+    render: (r) => <span className="text-app-fg">{r.productName}</span>,
+  },
+  {
+    key: 'route',
+    header: 'From → To',
+    minWidth: 'min-w-[200px]',
+    render: (r) => (
+      <span
+        className="text-app-fg-muted truncate block max-w-[18rem]"
+        title={`${formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} → ${formatLocationWithProvider(r.toLocationName, r.toProviderName)}`}
+      >
+        {r.fromLocationName} → {r.toLocationName}
+      </span>
+    ),
+  },
+  {
+    key: 'qtySent',
+    header: 'Qty sent',
+    align: 'right',
+    nowrap: true,
+    render: (r) => <span className="tabular-nums">{r.quantitySent}</span>,
+  },
+  {
+    key: 'sender',
+    header: 'Sent by',
+    render: (r) => <span className="text-app-fg-muted">{r.senderName ?? 'Unknown user'}</span>,
+  },
+  {
+    key: 'created',
+    header: 'Created',
+    nowrap: true,
+    render: (r) => <span className="text-app-fg-muted">{new Date(r.createdAt).toLocaleString()}</span>,
+  },
+  {
+    key: 'status',
+    header: 'Status',
+    nowrap: true,
+    render: (r) => <StatusBadge status={r.transferStatus} />,
+  },
+];
+
 export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
@@ -140,6 +188,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   const [receiverNotes, setReceiverNotes] = useState<Record<string, string>>({});
   const [confirmTarget, setConfirmTarget] = useState<TransferConfirmationRecord | null>(null);
   const [confirmMode, setConfirmMode] = useState<'receive' | 'reject'>('receive');
+  const [viewTarget, setViewTarget] = useState<TransferConfirmationRecord | null>(null);
 
   useFetcherToast(fetcher.data, { successMessage: 'Transfer recorded' });
 
@@ -173,6 +222,11 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     setMarkingId(null);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleRemittanceFetcherSuccess);
+
+  const openConfirm = useCallback((mode: 'receive' | 'reject', remittance: TransferConfirmationRecord) => {
+    setConfirmMode(mode);
+    setConfirmTarget(remittance);
+  }, []);
 
   const handleMarkReceived = (remittance: TransferConfirmationRecord) => {
     const qty = quantityReceived[remittance.id] ?? String(remittance.quantitySent);
@@ -225,6 +279,25 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     setSearchParams(next);
   };
 
+  const processedColumnsWithActions = useMemo((): CompactTableColumn<TransferConfirmationRecord>[] => {
+    return [
+      ...PROCESSED_TRANSFER_COLUMNS,
+      {
+        key: 'actions',
+        header: '',
+        align: 'right',
+        tight: true,
+        render: (r) => (
+          <div className="inline-flex items-center justify-end">
+            <TableActionButton variant="primary" onClick={() => setViewTarget(r)}>
+              View
+            </TableActionButton>
+          </div>
+        ),
+      },
+    ];
+  }, []);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -274,7 +347,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               { value: '', label: 'All locations' },
               ...locations.map((loc) => ({
                 value: loc.id,
-                label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                label: loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name,
               })),
             ]}
           />
@@ -320,86 +393,144 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       </div>
 
       <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[16rem]">
-      {/* Pending list — visible on All / Pending. Each card carries the qty + comments
-          form so receivers can confirm without leaving the page. */}
+      {/* Pending list — visible on All / Pending. Table-first: summary row + receive form sub-row. */}
       {(statusValue === '' || statusValue === 'IN_TRANSIT') && sentRemittances.length > 0 && (
-        <div className="space-y-4">
-          {sentRemittances.map((r) => (
-            <div key={r.id} className="card p-4 space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-app-fg">{r.productName}</p>
-                  <p className="text-sm text-app-fg-muted">
-                    From {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} → {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
-                  </p>
-                  <p className="text-sm text-app-fg-muted">
-                    Quantity sent: {r.quantitySent} · Created {new Date(r.createdAt).toLocaleString()}
-                  </p>
-                  <p className="text-sm text-app-fg-muted">
-                    Sent by: {r.senderName ?? 'Unknown user'}
-                  </p>
+        <CompactTable<TransferConfirmationRecord>
+          columns={PENDING_TRANSFER_COLUMNS}
+          rows={sentRemittances}
+          rowKey={(r) => r.id}
+          renderRowDetail={(r) => {
+            const isBusy = markingId === r.id || fetcher.state === 'submitting';
+            return (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <TextInput
+                    label="Qty received"
+                    type="number"
+                    min={0}
+                    max={r.quantitySent}
+                    value={quantityReceived[r.id] ?? String(r.quantitySent)}
+                    onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    disabled={isBusy}
+                  />
+                  <TextInput
+                    label="Shrinkage reason (if short)"
+                    type="text"
+                    placeholder="Optional"
+                    value={shrinkageReason[r.id] ?? ''}
+                    onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    disabled={isBusy}
+                  />
+                  <Textarea
+                    label="Comments"
+                    placeholder="Optional notes from the receiver…"
+                    rows={2}
+                    value={receiverNotes[r.id] ?? ''}
+                    onChange={(e) => setReceiverNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    disabled={isBusy}
+                    maxLength={500}
+                  />
                 </div>
-                <StatusBadge status={r.transferStatus} />
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => openConfirm('reject', r)}
+                    loading={isBusy}
+                    loadingText="Saving..."
+                  >
+                    Not received
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => openConfirm('receive', r)}
+                    loading={isBusy}
+                    loadingText="Saving..."
+                  >
+                    Mark received
+                  </Button>
+                </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <TextInput
-                  label="Qty received"
-                  type="number"
-                  min={0}
-                  max={r.quantitySent}
-                  value={quantityReceived[r.id] ?? r.quantitySent}
-                  onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                  disabled={markingId === r.id}
-                />
-                <TextInput
-                  label="Shrinkage reason (if short)"
-                  type="text"
-                  placeholder="Optional"
-                  value={shrinkageReason[r.id] ?? ''}
-                  onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                  disabled={markingId === r.id}
-                />
-                <Textarea
-                  label="Comments"
-                  placeholder="Optional notes from the receiver…"
-                  rows={2}
-                  value={receiverNotes[r.id] ?? ''}
-                  onChange={(e) => setReceiverNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                  disabled={markingId === r.id}
-                  maxLength={500}
-                />
+            );
+          }}
+          renderMobileCard={(r) => {
+            const isBusy = markingId === r.id || fetcher.state === 'submitting';
+            return (
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-app-fg truncate">{r.productName}</p>
+                    <p className="text-sm text-app-fg-muted">
+                      {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} →{' '}
+                      {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
+                    </p>
+                    <p className="text-sm text-app-fg-muted">
+                      Qty sent: <span className="tabular-nums">{r.quantitySent}</span> ·{' '}
+                      {new Date(r.createdAt).toLocaleString()}
+                    </p>
+                    <p className="text-sm text-app-fg-muted">Sent by: {r.senderName ?? 'Unknown user'}</p>
+                  </div>
+                  <StatusBadge status={r.transferStatus} />
+                </div>
+
+                <div className="grid grid-cols-1 gap-2">
+                  <TextInput
+                    label="Qty received"
+                    type="number"
+                    min={0}
+                    max={r.quantitySent}
+                    value={quantityReceived[r.id] ?? String(r.quantitySent)}
+                    onChange={(e) => setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    disabled={isBusy}
+                  />
+                  <TextInput
+                    label="Shrinkage reason (if short)"
+                    type="text"
+                    placeholder="Optional"
+                    value={shrinkageReason[r.id] ?? ''}
+                    onChange={(e) => setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    disabled={isBusy}
+                  />
+                  <Textarea
+                    label="Comments"
+                    placeholder="Optional notes from the receiver…"
+                    rows={2}
+                    value={receiverNotes[r.id] ?? ''}
+                    onChange={(e) => setReceiverNotes((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    disabled={isBusy}
+                    maxLength={500}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => openConfirm('reject', r)}
+                    loading={isBusy}
+                    loadingText="Saving..."
+                  >
+                    Not received
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => openConfirm('receive', r)}
+                    loading={isBusy}
+                    loadingText="Saving..."
+                  >
+                    Mark received
+                  </Button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2 justify-end">
-                <Button
-                  type="button"
-                  variant="danger"
-                  size="sm"
-                  onClick={() => {
-                    setConfirmMode('reject');
-                    setConfirmTarget(r);
-                  }}
-                  loading={markingId === r.id || fetcher.state === 'submitting'}
-                  loadingText="Saving..."
-                >
-                  Not received
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => {
-                    setConfirmMode('receive');
-                    setConfirmTarget(r);
-                  }}
-                  loading={markingId === r.id || fetcher.state === 'submitting'}
-                  loadingText="Saving..."
-                >
-                  Mark received
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
+            );
+          }}
+        />
       )}
 
       {(statusValue === '' || statusValue === 'IN_TRANSIT') && sentRemittances.length === 0 && (
@@ -413,14 +544,11 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       {/* Processed list (Received / Disputed) — visible on All / Received / Disputed. */}
       {(statusValue === '' || statusValue === 'RECEIVED' || statusValue === 'DISPUTED') &&
         receivedOrDisputed.length > 0 && (
-        <div className="border border-app-border rounded-lg overflow-hidden">
-          <CompactTable<TransferConfirmationRecord>
-            columns={PROCESSED_TRANSFER_COLUMNS}
-            rows={receivedOrDisputed}
-            rowKey={(r) => r.id}
-            withCard={false}
-          />
-        </div>
+        <CompactTable<TransferConfirmationRecord>
+          columns={processedColumnsWithActions}
+          rows={receivedOrDisputed}
+          rowKey={(r) => r.id}
+        />
       )}
 
       {(statusValue === 'RECEIVED' || statusValue === 'DISPUTED') && receivedOrDisputed.length === 0 && (
@@ -510,6 +638,97 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               loadingText="Saving..."
             >
               {confirmMode === 'reject' ? 'Confirm not received' : 'Confirm mark received'}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {viewTarget && (
+        <Modal
+          open
+          onClose={() => setViewTarget(null)}
+          maxWidth="max-w-lg"
+          role="dialog"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-app-fg">Transfer record</h3>
+            <p className="text-sm text-app-fg-muted">
+              Full details for this stock transfer confirmation.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm space-y-2">
+            <div>
+              <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Transfer ID</p>
+              <p className="font-mono text-app-fg break-all">{viewTarget.id}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Product</p>
+              <p className="text-app-fg">{viewTarget.productName}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">From → To</p>
+              <p className="text-app-fg">
+                {formatLocationWithProvider(viewTarget.fromLocationName, viewTarget.fromProviderName)} →{' '}
+                {formatLocationWithProvider(viewTarget.toLocationName, viewTarget.toProviderName)}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Qty sent</p>
+                <p className="tabular-nums text-app-fg">{viewTarget.quantitySent}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Qty received</p>
+                <p className="tabular-nums text-app-fg">
+                  {viewTarget.outcomeQuantity ?? viewTarget.quantityReceived ?? '—'}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Status</p>
+                <div className="mt-0.5">
+                  <StatusBadge status={viewTarget.outcomeStatus ?? viewTarget.transferStatus} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Sent by</p>
+                <p className="text-app-fg">{viewTarget.senderName ?? 'Unknown user'}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Created</p>
+                <p className="text-app-fg">{new Date(viewTarget.createdAt).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Verified</p>
+                <p className="text-app-fg">
+                  {viewTarget.verifiedAt ? new Date(viewTarget.verifiedAt).toLocaleString() : '—'}
+                </p>
+              </div>
+            </div>
+            {viewTarget.receiverNotes ? (
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Receiver notes</p>
+                <p className="text-app-fg whitespace-pre-line break-words">{viewTarget.receiverNotes}</p>
+              </div>
+            ) : null}
+            {(viewTarget.outcomeReason ?? viewTarget.shrinkageReason) ? (
+              <div>
+                <p className="text-xs uppercase tracking-wide font-semibold text-app-fg-muted">Shrinkage reason</p>
+                <p className="text-warning-700 dark:text-warning-300 whitespace-pre-line break-words">
+                  {viewTarget.outcomeReason ?? viewTarget.shrinkageReason}
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => setViewTarget(null)}>
+              Close
             </Button>
           </div>
         </Modal>

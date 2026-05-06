@@ -65,9 +65,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const scheduleDate =
     scheduleDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(scheduleDateRaw) ? scheduleDateRaw : undefined;
-  if (scheduleKind === 'callback_on_day' || scheduleKind === 'delivery_on_day') {
-    if (!scheduleDate) scheduleKind = undefined;
-  }
+  // Keep `callback_on_day` / `delivery_on_day` in the filter model even before the user picks
+  // a date — the list stays unfiltered until `scheduleDate` is set (`hasScheduleListFilter`),
+  // but the schedule dropdown + date-picker modal need the kind to show the right copy.
 
   const now = new Date();
   const defaultCalendarMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -156,12 +156,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const heatInputEnc = encodeURIComponent(JSON.stringify(heatInput));
 
-  const [res, countsRes, myWorkloadRes, trendRes, heatRes] = await Promise.all([
+  const offlineProductsP = canCreateOffline
+    ? apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
+        `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+        { method: 'GET', cookie },
+      )
+    : Promise.resolve({ ok: false as const, data: null });
+
+  const [res, countsRes, myWorkloadRes, trendRes, heatRes, offlineProductsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
     isCSAgent ? apiRequest<unknown>('/trpc/orders.myCSWorkload', { method: 'GET', cookie }) : Promise.resolve(null),
     apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.scheduleCalendarHeat?input=${heatInputEnc}`, { method: 'GET', cookie }),
+    offlineProductsP,
   ]);
 
   const dailyCounts = trendRes.ok
@@ -217,13 +225,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
-  if (canCreateOffline) {
-    const productsRes = await apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
-      `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
-      { method: 'GET', cookie },
-    );
-    if (productsRes.ok && productsRes.data?.result?.data?.products) {
-      productsForOfflineOrder = productsRes.data.result.data.products;
+  if (canCreateOffline && offlineProductsRes.ok) {
+    const pack = offlineProductsRes.data as {
+      result?: { data?: { products: typeof productsForOfflineOrder } };
+    };
+    if (pack?.result?.data?.products) {
+      productsForOfflineOrder = pack.result.data.products;
     }
   }
 
@@ -372,14 +379,56 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'bulkAssign') {
     await requirePermission(request, 'orders.bulkAssign');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
-    const csAgentId = form.get('csAgentId') as string;
+    const csAgentIdsRaw = form.get('csAgentIds')?.toString();
+    const csAgentIdSingle = (form.get('csAgentId') as string | null) ?? '';
+
+    let csAgentIds: string[] = [];
+    if (csAgentIdsRaw) {
+      try {
+        const parsed = JSON.parse(csAgentIdsRaw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
+          csAgentIds = parsed as string[];
+        }
+      } catch {
+        return json(
+          {
+            success: false,
+            error: 'Invalid closer selection',
+            succeeded: 0,
+            failed: orderIds.length,
+            results: [],
+          },
+          { status: 400 },
+        );
+      }
+    }
+    if (csAgentIds.length === 0 && csAgentIdSingle) {
+      csAgentIds = [csAgentIdSingle];
+    }
+    if (csAgentIds.length === 0) {
+      return json(
+        {
+          success: false,
+          error: 'Pick at least one closer',
+          succeeded: 0,
+          failed: orderIds.length,
+          results: [],
+        },
+        { status: 400 },
+      );
+    }
+
+    const body =
+      csAgentIds.length === 1
+        ? { orderIds, csAgentId: csAgentIds[0] }
+        : { orderIds, csAgentIds };
 
     const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number; results: Array<{ orderId: string; success: boolean; error?: string }> } } }>(
       '/trpc/orders.bulkAssignToCS',
       {
         method: 'POST',
         cookie,
-        body: { orderIds, csAgentId },
+        body,
         timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
       },
     );

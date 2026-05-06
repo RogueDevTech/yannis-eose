@@ -2,6 +2,7 @@ import { Link } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { isSuperAdminOnly } from '~/lib/rbac';
 
 /**
  * Data shape for the lightweight admin landing. Populated by
@@ -61,7 +62,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
         description={
-          role === 'SUPER_ADMIN'
+          isSuperAdminOnly({ role })
             ? 'Quick snapshot — open the Executive Overview for the full picture.'
             : 'Quick snapshot of today.'
         }
@@ -71,7 +72,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
       {/* Marketing — today's order pulse. Click header to jump into the marketing module. */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Marketing — today</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Marketing today</h2>
           <Link
             to="/admin/marketing/overview"
             prefetch="intent"
@@ -116,7 +117,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
       {/* CS — current floor snapshot. */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">CS — right now</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Customer support today</h2>
           <Link
             to="/admin/cs/queue"
             prefetch="intent"
@@ -160,25 +161,39 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
       </div>
 
       {/* Executive Overview card — the prominent entry point to the heavy report */}
-      <Link
-        to="/admin/ceo"
-        className="card block hover:bg-app-hover/40 transition-colors"
-      >
+      <Link to="/admin/ceo" className="card block hover:bg-app-hover/40 transition-colors">
         <div className="flex items-start gap-4">
           <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+            <svg
+              className="w-5 h-5 text-brand-600 dark:text-brand-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
+              />
             </svg>
           </div>
           <div className="flex-1">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-app-fg">Executive Overview</h2>
-              <svg className="w-5 h-5 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="w-5 h-5 text-app-fg-muted"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </svg>
             </div>
             <p className="text-sm text-app-fg-muted mt-1">
-              Revenue, true profit, cost breakdown, order pipeline, media buyer &amp; CS performance, branch breakdown. Heavier page — loads in 1-2 seconds.
+              Revenue, true profit, cost breakdown, order pipeline, media buyer &amp; CS
+              performance, branch breakdown. Heavier page — loads in 1-2 seconds.
             </p>
           </div>
         </div>

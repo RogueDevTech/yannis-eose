@@ -53,6 +53,14 @@ export const staffOnboarding = pgTable('staff_onboarding', {
   approvedAt: timestamp('approved_at', { withTimezone: true }),
   approvedBy: uuid('approved_by').references(() => users.id),
 
+  /**
+   * HR "Request changes" trail. Set when HR sends a SUBMITTED onboarding back to
+   * the staff for edits; cleared when the staff re-submits.
+   */
+  changesRequestedAt: timestamp('changes_requested_at', { withTimezone: true }),
+  changesRequestedBy: uuid('changes_requested_by').references(() => users.id),
+  changesRequestedReason: text('changes_requested_reason'),
+
   ...temporalColumns,
   ...timestampColumns,
 });

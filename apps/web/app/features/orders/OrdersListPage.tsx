@@ -10,7 +10,7 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import { OrdersChartView } from '~/components/ui/orders-chart-view';
+import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
@@ -37,6 +37,7 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { CompactTable, type CompactTableColumn, type CompactTableMobileCardHelpers } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
@@ -118,6 +119,7 @@ interface OrdersListPageProps {
     agentName: string;
     capacity: number;
     pendingCount: number;
+    todayClosesCount?: number;
     lastActionAt: string | null;
   } | null;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
@@ -165,9 +167,9 @@ export function OrdersListPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const [showChartView, setShowChartView] = useState(false);
-  /** Schedule heat calendar lives in a modal — opened only when the user picks a
-   *  "…on date" schedule option (the date is required) or clicks the date badge to
-   *  change the picked day. Page never renders the calendar inline. */
+  /** Schedule heat calendar lives in a modal — opens when the user picks a "…on date"
+   *  schedule filter (before or after a date is chosen) or clicks the date badge.
+   *  Page never renders the calendar inline. */
   const [scheduleCalendarModalOpen, setScheduleCalendarModalOpen] = useState(false);
 
   const liveState = useLiveIndicator(liveEvents ?? []);
@@ -235,13 +237,17 @@ export function OrdersListPage({
   // Bulk Assign-to-CS modal state + dedicated fetcher (so the toast/close trigger
   // doesn't collide with the bulk transition fetcher above).
   const [assignModalOpen, setAssignModalOpen] = useState(false);
-  const [assignAgentId, setAssignAgentId] = useState('');
+  /** Initial assign (unprocessed) vs moving work between closers */
+  const [assignModalKind, setAssignModalKind] = useState<'assign' | 'reassign'>('assign');
+  const [assignAgentIds, setAssignAgentIds] = useState<Set<string>>(() => new Set());
   const assignFetcher = useFetcher<{ success?: boolean; error?: string; succeeded?: number; failed?: number }>();
   const isAssigning = assignFetcher.state !== 'idle';
-  useFetcherToast(assignFetcher.data, { successMessage: 'Orders assigned to closer' });
+  const assignSuccessMessage =
+    assignModalKind === 'reassign' ? 'Orders reassigned to closers' : 'Orders assigned to closers';
+  useFetcherToast(assignFetcher.data, { successMessage: assignSuccessMessage });
   useCloseOnFetcherSuccess(assignFetcher, () => {
     setAssignModalOpen(false);
-    setAssignAgentId('');
+    setAssignAgentIds(new Set());
     setSelectedIds(new Set());
   });
 
@@ -272,6 +278,11 @@ export function OrdersListPage({
           : scheduleFilters?.scheduleKind === 'delivery_overdue'
             ? 'delivery_overdue'
             : '';
+
+  /** URL updates immediately on dropdown change; loader data can lag one tick — use both for modal copy. */
+  const scheduleKindFromSearch = searchParams.get('scheduleKind');
+  const modalIsCallbackDayFilter =
+    scheduleKindFromSearch === 'callback_on_day' || scheduleFilters?.scheduleKind === 'callback_on_day';
 
   const applyScheduleKind = (v: string) => {
     setSearchParams((prev) => {
@@ -397,12 +408,22 @@ export function OrdersListPage({
     });
   };
 
-  // Eligibility: every selected order in {UNPROCESSED, CS_ASSIGNED} AND
-  // we have a populated closer list (HoCS / SuperAdmin / Admin scope).
+  // Eligibility: initial queue assign — only unprocessed orders.
   const canBulkAssignToCS =
     selectedOrders.length > 0 &&
     (csAgentsForFilter?.length ?? 0) > 0 &&
-    selectedOrders.every((o) => o.status === 'UNPROCESSED' || o.status === 'CS_ASSIGNED');
+    selectedOrders.every((o) => o.status === 'UNPROCESSED');
+
+  // Eligibility: Hot-swap style reassignment — orders already with a closer (same bulk API + random split).
+  const canBulkReassignToCS =
+    selectedOrders.length > 0 &&
+    (csAgentsForFilter?.length ?? 0) > 0 &&
+    selectedOrders.every((o) => o.status === 'CS_ASSIGNED' || o.status === 'CS_ENGAGED');
+
+  /** Unassigned + already-assigned mixed selection — cannot use Assign and Reassign in one batch. */
+  const bulkCloserSelectionMixed =
+    selectedOrders.some((o) => o.status === 'UNPROCESSED') &&
+    selectedOrders.some((o) => o.status === 'CS_ASSIGNED' || o.status === 'CS_ENGAGED');
 
   // Eligibility: every selected order in CONFIRMED AND we have at least one location.
   const canBulkAllocateTo3PL =
@@ -419,13 +440,16 @@ export function OrdersListPage({
   const submitBulkAssign = () => {
     setBulkResult(null);
     ensureBranchForAction({
-      actionLabel: 'assigning selected orders to a closer',
+      actionLabel:
+        assignModalKind === 'reassign'
+          ? 'reassigning selected orders to closers'
+          : 'assigning selected orders to closers',
       onProceed: () =>
         assignFetcher.submit(
           {
             intent: 'bulkAssign',
             orderIds: JSON.stringify([...selectedIds]),
-            csAgentId: assignAgentId,
+            csAgentIds: JSON.stringify(Array.from(assignAgentIds)),
           },
           { method: 'post' },
         ),
@@ -773,38 +797,37 @@ export function OrdersListPage({
                 {myWorkload.agentName}
               </p>
               <p className="text-xs text-app-fg-muted">
-                {myWorkload.pendingCount} of {myWorkload.capacity} slots
+                Today&apos;s duty: {myWorkload.todayClosesCount ?? 0} / {myWorkload.capacity}
+                <span className="text-app-fg-muted/80"> (Lagos)</span>
               </p>
+              <p className="text-[11px] text-app-fg-muted mt-0.5">Pipeline backlog: {myWorkload.pendingCount}</p>
             </div>
           </div>
           {(() => {
-            const utilization =
-              myWorkload.capacity > 0
-                ? (myWorkload.pendingCount / myWorkload.capacity) * 100
-                : 0;
+            const closes = myWorkload.todayClosesCount ?? 0;
+            const dailyPct = myWorkload.capacity > 0 ? (closes / myWorkload.capacity) * 100 : 0;
             const barColor =
-              utilization >= 90
-                ? 'bg-danger-500'
-                : utilization >= 70
-                  ? 'bg-warning-500'
-                  : 'bg-success-500';
+              dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
             return (
               <>
                 <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                    style={{ width: `${Math.min(utilization, 100)}%` }}
+                    style={{ width: `${Math.min(dailyPct, 100)}%` }}
                   />
                 </div>
-                <div className="flex items-center justify-between mt-2">
+                <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
                   <span className="text-xs text-app-fg-muted">
-                    {Math.round(utilization)}% utilized
+                    {Math.round(Math.min(dailyPct, 100))}% of daily target
                   </span>
-                  {myWorkload.pendingCount >= myWorkload.capacity && (
-                    <span className="text-xs font-medium text-danger-600 dark:text-danger-400">
-                      FULL
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                    {closes >= myWorkload.capacity && (
+                      <span className="text-xs font-medium text-success-600 dark:text-success-400">Target met</span>
+                    )}
+                    {myWorkload.pendingCount >= myWorkload.capacity && (
+                      <span className="text-xs font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
+                    )}
+                  </div>
                 </div>
               </>
             );
@@ -825,19 +848,41 @@ export function OrdersListPage({
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {/* Bulk Assign to CS — appears when selection is in {UNPROCESSED, CS_ASSIGNED} */}
+              {/* Bulk assign — unprocessed orders only */}
               {canBulkAssignToCS && (
                 <Button
                   variant="primary"
                   size="sm"
                   onClick={() => {
-                    setAssignAgentId('');
+                    setAssignModalKind('assign');
+                    setAssignAgentIds(new Set());
                     setAssignModalOpen(true);
                   }}
                   disabled={isSubmitting || isAssigning || isAllocating}
                 >
                   Assign to CS
                 </Button>
+              )}
+              {/* Reassign — orders already assigned / engaged; distinct from first-time assign */}
+              {canBulkReassignToCS && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setAssignModalKind('reassign');
+                    setAssignAgentIds(new Set());
+                    setAssignModalOpen(true);
+                  }}
+                  disabled={isSubmitting || isAssigning || isAllocating}
+                >
+                  Reassign closers
+                </Button>
+              )}
+              {bulkCloserSelectionMixed && (
+                <span className="text-xs text-app-fg-muted max-w-[14rem] sm:max-w-none">
+                  Use Assign for unassigned orders only, or Reassign when every selected order already has a closer — not
+                  both in one selection.
+                </span>
               )}
               {/* Bulk Allocate to 3PL — appears when every selection is CONFIRMED */}
               {canBulkAllocateTo3PL && (
@@ -1075,12 +1120,10 @@ export function OrdersListPage({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <h3 className="text-sm font-semibold text-app-fg">
-                {scheduleFilters.scheduleKind === 'callback_on_day'
-                  ? 'Pick a callback day'
-                  : 'Pick a delivery day'}
+                {modalIsCallbackDayFilter ? 'Pick a callback day' : 'Pick a delivery day'}
               </h3>
               <p className="text-xs text-app-fg-muted">
-                {scheduleFilters.scheduleKind === 'callback_on_day'
+                {modalIsCallbackDayFilter
                   ? 'Lagos callback date matches the day you select.'
                   : 'ISO preferred delivery date matches the day you select.'}
               </p>
@@ -1118,7 +1161,9 @@ export function OrdersListPage({
                 const dayHeat = (scheduleHeat ?? []).find((d) => d.date === iso);
                 const cb = dayHeat?.callbackCount ?? 0;
                 const del = dayHeat?.deliveryCount ?? 0;
-                const currentIsCallback = scheduleFilters.scheduleKind === 'callback_on_day';
+                const currentIsCallback =
+                  scheduleKindFromSearch === 'callback_on_day' ||
+                  scheduleFilters.scheduleKind === 'callback_on_day';
                 const dayKind: 'callback_on_day' | 'delivery_on_day' =
                   cb > 0 && del === 0
                     ? 'callback_on_day'
@@ -1343,49 +1388,81 @@ export function OrdersListPage({
         </Modal>
       )}
 
-      {/* Bulk Assign to CS modal */}
+      {/* Bulk assign / reassign to CS — checkbox list + random split (matches CS queue) */}
       {assignModalOpen && (
         <Modal
           open
           onClose={() => {
             if (isAssigning) return;
             setAssignModalOpen(false);
-            setAssignAgentId('');
+            setAssignAgentIds(new Set());
           }}
           maxWidth="max-w-md"
-          contentClassName="p-6"
+          contentClassName="p-0 max-h-[min(32rem,90dvh)] overflow-hidden flex flex-col"
         >
-          <h3 className="text-lg font-semibold text-app-fg mb-1">
-            Assign {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} to a closer
-          </h3>
-          <p className="text-sm text-app-fg-muted mb-4">
-            Pick a CS closer to take over these orders.
-          </p>
-          <div data-branch-scoped-action="true">
-            <div className="mb-4">
-              <SearchableSelect
-                id="bulk-assign-closer"
-                label="Closer"
-                value={assignAgentId}
-                onChange={setAssignAgentId}
-                options={assignCloserOptions}
-                placeholder="Select a closer..."
-                searchPlaceholder="Search closers..."
-              />
-            </div>
-            {assignFetcher.data?.error && !assignFetcher.data?.success && (
-              <p className="mb-3 text-xs text-danger-600 dark:text-danger-400">
-                {assignFetcher.data.error}
-              </p>
+          <div className="shrink-0 border-b border-app-border px-4 py-3">
+            <h3 className="text-lg font-semibold text-app-fg">
+              {assignModalKind === 'reassign'
+                ? `Reassign ${selectedIds.size} order${selectedIds.size !== 1 ? 's' : ''} to closers`
+                : `Assign ${selectedIds.size} order${selectedIds.size !== 1 ? 's' : ''} to closers`}
+            </h3>
+            <p className="text-sm text-app-fg-muted mt-0.5">
+              {assignModalKind === 'reassign'
+                ? 'Choose new closers for these orders.'
+                : 'Choose closers to receive these orders from the unassigned queue.'}
+            </p>
+            <p className="text-xs text-app-fg-muted mt-1.5">
+              Select one or more closers — orders are split among them at random.
+            </p>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-1.5">
+            {assignCloserOptions.length === 0 ? (
+              <p className="text-sm text-app-fg-muted">No closers available in your scope.</p>
+            ) : (
+              assignCloserOptions.map((opt) => {
+                const checked = assignAgentIds.has(opt.value);
+                return (
+                  <label
+                    key={opt.value}
+                    className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                      checked
+                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40 text-app-fg ring-1 ring-brand-500/30'
+                        : 'border-app-border bg-app-elevated hover:border-brand-300 dark:hover:border-brand-700'
+                    }`}
+                  >
+                    <Checkbox
+                      className="mt-0.5 shrink-0"
+                      checked={checked}
+                      onChange={() =>
+                        setAssignAgentIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(opt.value)) next.delete(opt.value);
+                          else next.add(opt.value);
+                          return next;
+                        })
+                      }
+                      aria-label={opt.label}
+                    />
+                    <span className="min-w-0 flex-1 text-left leading-snug">{opt.label}</span>
+                  </label>
+                );
+              })
             )}
-            <div className="flex justify-end gap-2">
+          </div>
+          <div data-branch-scoped-action="true">
+            {assignFetcher.data?.error && !assignFetcher.data?.success && (
+              <div className="shrink-0 px-4 pb-2">
+                <p className="text-xs text-danger-600 dark:text-danger-400">{assignFetcher.data.error}</p>
+              </div>
+            )}
+            <div className="shrink-0 flex justify-end gap-2 border-t border-app-border px-4 py-3">
               <Button
                 type="button"
                 variant="secondary"
                 disabled={isAssigning}
                 onClick={() => {
                   setAssignModalOpen(false);
-                  setAssignAgentId('');
+                  setAssignAgentIds(new Set());
                 }}
               >
                 Cancel
@@ -1393,12 +1470,12 @@ export function OrdersListPage({
               <Button
                 type="button"
                 variant="primary"
-                disabled={!assignAgentId || isAssigning}
+                disabled={assignAgentIds.size === 0 || assignCloserOptions.length === 0 || isAssigning}
                 loading={isAssigning}
-                loadingText="Assigning..."
+                loadingText={assignModalKind === 'reassign' ? 'Reassigning…' : 'Assigning…'}
                 onClick={submitBulkAssign}
               >
-                Assign
+                {assignModalKind === 'reassign' ? 'Reassign' : 'Assign'}
               </Button>
             </div>
           </div>

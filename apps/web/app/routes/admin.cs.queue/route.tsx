@@ -10,6 +10,7 @@ import {
   defaultTodayRange,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import {
@@ -20,6 +21,8 @@ import {
   type CSLeaderboardEntry,
   type PendingCart,
   type LiveActivityItem,
+  type AbandonedCartPagination,
+  ABANDONED_CARTS_PAGE_SIZE,
 } from '~/features/cs/types';
 
 /** SuperAdmin / org-wide heads often have `currentBranchId: null`; tRPC requires explicit `branchId` on branch-scoped mutations. */
@@ -51,33 +54,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const canCreateOffline = true;
   const canDeleteCart = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
-  let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
-  {
-    const productsRes = await apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
-      `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
-      { method: 'GET', cookie },
-    );
-    if (productsRes.ok && productsRes.data?.result?.data?.products) {
-      productsForOfflineOrder = productsRes.data.result.data.products;
-    }
-  }
 
   const url = new URL(request.url);
+  const abandonedPageRaw = parseInt(url.searchParams.get('abandonedPage') ?? '1', 10);
+  const abandonedPage =
+    Number.isFinite(abandonedPageRaw) && abandonedPageRaw >= 1 ? abandonedPageRaw : 1;
   const leaderboardPeriod = url.searchParams.get('period') === 'all_time' ? 'all_time' : 'this_month';
   const fromParamEarly = url.searchParams.get('from');
   const hotSwapFromParamEarly =
     url.searchParams.get('hotSwapFrom')?.trim() || fromParamEarly?.trim() || undefined;
-
-  // Fetch dispatch mode to know if claim mode is active
-  const dispatchSettingRes = await apiRequest<unknown>(
-    `/trpc/settings.getSystemSettings`,
-    { method: 'GET', cookie },
-  );
-  const settingsData = (dispatchSettingRes.data as { result?: { data?: Array<{ key: string; value: Record<string, unknown> }> } })?.result?.data ?? [];
-  const dispatchSetting = settingsData.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
-  const isClaimMode = dispatchSetting?.value?.strategy === 'claim';
-  const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
-  const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
 
   const hotSwapFromForLoader = hotSwapFromParamEarly;
   const hotSwapListInput = hotSwapFromForLoader
@@ -95,10 +80,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(hotSwapListInput))}`,
         { method: 'GET', cookie },
       )
-    : Promise.resolve({ ok: false as const, data: {} });
+    : Promise.resolve({ ok: false as const, status: 503, data: {} });
 
-  // ── Critical data: await these so the page always has core content ──
+  const productsP = apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
+    `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+    { method: 'GET', cookie },
+  );
+  const settingsP = apiRequest<unknown>(`/trpc/settings.getSystemSettings`, { method: 'GET', cookie });
+
+  // ── Critical data: single parallel batch (products + CS dispatch settings + queue slices) ──
   const [
+    productsRes,
+    dispatchSettingRes,
     workloadsRes,
     unassignedRes,
     statusCountsRes,
@@ -108,6 +101,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     abandonedRes,
     hotSwapOrdersRes,
   ] = await Promise.all([
+    productsP,
+    settingsP,
     apiRequest<unknown>('/trpc/orders.csWorkloads', { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 20 }))}`,
@@ -127,11 +122,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/cart.listAbandoned?input=${encodeURIComponent(JSON.stringify({ limit: 50 }))}`,
+      `/trpc/cart.listAbandoned?input=${encodeURIComponent(
+        JSON.stringify({ page: abandonedPage, limit: ABANDONED_CARTS_PAGE_SIZE }),
+      )}`,
       { method: 'GET', cookie },
     ),
     hotSwapOrdersP,
   ]);
+
+  let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
+  if (productsRes.ok && productsRes.data?.result?.data?.products) {
+    productsForOfflineOrder = productsRes.data.result.data.products;
+  }
+
+  const settingsData = (dispatchSettingRes.data as { result?: { data?: Array<{ key: string; value: Record<string, unknown> }> } })?.result?.data ?? [];
+  const dispatchSetting = settingsData.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
+  const isClaimMode = dispatchSetting?.value?.strategy === 'claim';
+  const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
+  const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
 
   const workloads = workloadsRes.ok
     ? (workloadsRes.data as { result?: { data?: AgentWorkload[] } })?.result?.data ?? []
@@ -151,9 +159,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const pendingCarts = pendingRes.ok
     ? (pendingRes.data as { result?: { data?: PendingCart[] } })?.result?.data ?? []
     : [];
-  const abandonedCarts = abandonedRes.ok
-    ? (abandonedRes.data as { result?: { data?: PendingCart[] } })?.result?.data ?? []
-    : [];
+  const abandonedPayload = abandonedRes.ok
+    ? (abandonedRes.data as {
+        result?: { data?: { items: PendingCart[]; total: number; page: number; limit: number } };
+      })?.result?.data
+    : undefined;
+  const abandonedCarts = abandonedPayload?.items ?? [];
+  const abandonedPagination: AbandonedCartPagination = abandonedPayload
+    ? { total: abandonedPayload.total, page: abandonedPayload.page, limit: abandonedPayload.limit }
+    : { total: 0, page: 1, limit: ABANDONED_CARTS_PAGE_SIZE };
 
   let hotSwapOrdersPayload: { forAgentId: string; orders: CSOrder[]; total: number } | null = null;
   if (hotSwapFromForLoader && hotSwapOrdersRes.ok) {
@@ -166,6 +180,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
         total: pack.pagination?.total ?? 0,
       };
     }
+  }
+
+  const criticalFetchErrors: string[] = [];
+  if (!productsRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Products catalog', productsRes));
+  if (!dispatchSettingRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Dispatch settings', dispatchSettingRes));
+  if (!workloadsRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Team workloads', workloadsRes));
+  if (!unassignedRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Unassigned queue', unassignedRes));
+  if (!statusCountsRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Pipeline counts', statusCountsRes));
+  if (!activeOrdersRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Active engagements', activeOrdersRes));
+  if (!activityRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Live cart activity', activityRes));
+  if (!pendingRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Pending carts', pendingRes));
+  if (!abandonedRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Abandoned carts', abandonedRes));
+  if (hotSwapListInput && !hotSwapOrdersRes.ok) {
+    criticalFetchErrors.push(describeApiFetchFailure('Hot swap orders', hotSwapOrdersRes));
   }
 
   const criticalData = {
@@ -182,6 +210,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       activityItems,
       pendingCarts,
       abandonedCarts,
+      abandonedPagination,
     },
   };
 
@@ -225,17 +254,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => [])
     : Promise.resolve([]);
 
-  const cartStats: Promise<{ pending: number; abandonedLast24h: number }> = apiRequest<unknown>(
+  const cartStats: Promise<{ pending: number; abandonedOpen: number }> = apiRequest<unknown>(
     '/trpc/cart.getStats?input=%7B%7D',
     { method: 'GET', cookie },
   ).then((res) =>
     res.ok
-      ? (res.data as { result?: { data?: { pending: number; abandonedLast24h: number } } })?.result?.data ?? { pending: 0, abandonedLast24h: 0 }
-      : { pending: 0, abandonedLast24h: 0 },
-  ).catch(() => ({ pending: 0, abandonedLast24h: 0 }));
+      ? (res.data as { result?: { data?: { pending: number; abandonedOpen: number } } })?.result?.data ?? { pending: 0, abandonedOpen: 0 }
+      : { pending: 0, abandonedOpen: 0 },
+  ).catch(() => ({ pending: 0, abandonedOpen: 0 }));
 
   return {
     criticalData,
+    criticalFetchErrors,
     inactiveAgents,
     callbackOrders,
     flaggedDuplicates,
@@ -280,6 +310,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Multi-select bulk-assign from the Unassigned Queue tab. Posts the same backend
     // mutation as `assign` but for an arbitrary list of order IDs.
     const orderIdsRaw = formData.get('orderIds')?.toString() ?? '[]';
+    const csAgentIdsRaw = formData.get('csAgentIds')?.toString();
     const csAgentId = formData.get('csAgentId')?.toString() ?? '';
 
     let orderIds: string[];
@@ -291,16 +322,36 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!Array.isArray(orderIds) || orderIds.length === 0) {
       return json({ error: 'Pick at least one order' }, { status: 400 });
     }
-    if (!csAgentId) {
-      return json({ error: 'Pick a closer to assign to' }, { status: 400 });
+
+    let csAgentIds: string[] = [];
+    if (csAgentIdsRaw) {
+      try {
+        const parsed = JSON.parse(csAgentIdsRaw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
+          csAgentIds = parsed as string[];
+        }
+      } catch {
+        return json({ error: 'Invalid closer selection' }, { status: 400 });
+      }
+    }
+    if (csAgentIds.length === 0 && csAgentId) {
+      csAgentIds = [csAgentId];
+    }
+    if (csAgentIds.length === 0) {
+      return json({ error: 'Pick at least one closer' }, { status: 400 });
     }
 
     const branchId = branchIdFromForm(formData);
 
+    const body =
+      csAgentIds.length === 1
+        ? { orderIds, csAgentId: csAgentIds[0], ...(branchId ? { branchId } : {}) }
+        : { orderIds, csAgentIds, ...(branchId ? { branchId } : {}) };
+
     const res = await apiRequest<unknown>('/trpc/orders.bulkAssignToCS', {
       method: 'POST',
       cookie,
-      body: { orderIds, csAgentId, ...(branchId ? { branchId } : {}) },
+      body,
       timeoutMs: BULK_ORDER_MUTATION_TIMEOUT_MS,
     });
     if (!res.ok) {
@@ -545,6 +596,7 @@ export default function CSQueueRoute() {
     <>
     <CSDashboardPage
       {...data.criticalData}
+      criticalFetchErrors={data.criticalFetchErrors}
       liveEvents={[...CS_QUEUE_LIVE_EVENTS]}
       inactiveAgents={data.inactiveAgents}
       callbackOrders={data.callbackOrders}

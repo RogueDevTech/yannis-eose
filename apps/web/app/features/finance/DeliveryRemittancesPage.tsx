@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import type { OrderInvoice } from '~/features/orders/types';
-import { useLocation, useSearchParams } from '@remix-run/react';
+import { useLocation, useNavigation, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -142,6 +142,7 @@ export function DeliveryRemittancesPage({
 }: DeliveryRemittancesPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
+  const navigation = useNavigation();
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
   const { totalPages, page, pageSize } = pagination;
   const {
@@ -157,8 +158,21 @@ export function DeliveryRemittancesPage({
     () => new Map(),
   );
 
-  /** Default view is Awaiting remittance; `?tab=remittances` selects the batch list. URL is the source of truth (no useOptimistic — it could revert when navigation + shouldRevalidate interact). */
-  const viewTab = searchParams.get('tab') === 'remittances' ? 'remittances' : 'eligible';
+  /**
+   * Default: Awaiting remittance; `?tab=remittances` is the batch list.
+   * While the loader refetches after a tab click, read `tab` from the **pending** URL so the
+   * underline switches immediately; tables keep using stale rows + `loading` overlay until idle.
+   */
+  const tabSearch =
+    navigation.state === 'loading' &&
+    navigation.location &&
+    navigation.location.pathname === location.pathname
+      ? navigation.location.search
+      : location.search;
+  const viewTab = useMemo(() => {
+    const p = new URLSearchParams(tabSearch);
+    return p.get('tab') === 'remittances' ? 'remittances' : 'eligible';
+  }, [tabSearch]);
 
   const setViewTab = useCallback(
     (tab: 'remittances' | 'eligible') => {

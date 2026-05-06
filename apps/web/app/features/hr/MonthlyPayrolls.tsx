@@ -85,6 +85,7 @@ interface BatchDetail {
     payoutBankName?: string | null;
     payoutAccountName?: string | null;
     payoutAccountNumber?: string | null;
+    payoutBankCode?: string | null;
   }>;
   adjustments: Array<{
     id: string;
@@ -296,8 +297,9 @@ export function MonthlyPayrolls({
 
   useEffect(() => {
     if (!showGenerate) return;
-    if (generatableDepartments.length > 0 && !generatableDepartments.includes(generateDepartment)) {
-      setGenerateDepartment(generatableDepartments[0]);
+    const first = generatableDepartments[0];
+    if (first && !generatableDepartments.includes(generateDepartment)) {
+      setGenerateDepartment(first);
     }
     if (!generatePeriodMonth) {
       setGeneratePeriodMonth(currentMonth);

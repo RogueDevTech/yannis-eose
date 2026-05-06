@@ -21,6 +21,7 @@ export interface User {
   payoutBankName?: string | null;
   payoutAccountName?: string | null;
   payoutAccountNumber?: string | null;
+  payoutBankCode?: string | null;
 }
 
 export const ROLE_COLORS: Record<string, string> = {

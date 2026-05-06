@@ -9,13 +9,34 @@ import {
   listMovementsSchema,
   createReconciliationSchema,
   resolveReconciliationSchema,
+  createShipmentSchema,
+  updateShipmentLinesSchema,
+  shipmentTransitionSchema,
+  verifyShipmentSchema,
+  cancelShipmentSchema,
+  listShipmentsSchema,
+  getShipmentSchema,
+  createWarehouseSchema,
+  listWarehousesSchema,
 } from '@yannis/shared';
 import type { InventoryService } from '../../inventory/inventory.service';
+import type { ShipmentsService } from '../../inventory/shipments.service';
+import type { LogisticsService } from '../../logistics/logistics.service';
 
 let inventoryServiceInstance: InventoryService | null = null;
+let shipmentsServiceInstance: ShipmentsService | null = null;
+let logisticsServiceInstance: LogisticsService | null = null;
 
 export function setInventoryService(service: InventoryService) {
   inventoryServiceInstance = service;
+}
+
+export function setShipmentsService(service: ShipmentsService) {
+  shipmentsServiceInstance = service;
+}
+
+export function setLogisticsServiceForInventory(service: LogisticsService) {
+  logisticsServiceInstance = service;
 }
 
 function getInventoryService(): InventoryService {
@@ -23,6 +44,20 @@ function getInventoryService(): InventoryService {
     throw new Error('InventoryService not initialized. Call setInventoryService() first.');
   }
   return inventoryServiceInstance;
+}
+
+function getShipmentsService(): ShipmentsService {
+  if (!shipmentsServiceInstance) {
+    throw new Error('ShipmentsService not initialized. Call setShipmentsService() first.');
+  }
+  return shipmentsServiceInstance;
+}
+
+function getLogisticsServiceForInventory(): LogisticsService {
+  if (!logisticsServiceInstance) {
+    throw new Error('LogisticsService not initialized for inventory router.');
+  }
+  return logisticsServiceInstance;
 }
 
 export const inventoryRouter = router({
@@ -145,8 +180,8 @@ export const inventoryRouter = router({
    */
   movements: authedProcedure
     .input(listMovementsSchema)
-    .query(async ({ input }) => {
-      return getInventoryService().listMovements(input);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().listMovements(input, ctx.user, ctx.currentBranchId ?? null);
     }),
 
   /**
@@ -210,4 +245,98 @@ export const inventoryRouter = router({
     .query(async ({ input }) => {
       return { locked: await getInventoryService().isDispatchLocked(input.locationId) };
     }),
+
+  // ============================================
+  // Inbound shipments — multi-line supplier receipts
+  // ============================================
+  shipments: router({
+    list: permissionProcedure('inventory.read')
+      .input(listShipmentsSchema)
+      .query(async ({ input, ctx }) => {
+        return getShipmentsService().listShipments(input, ctx.user, ctx.user.currentBranchId ?? null);
+      }),
+
+    get: permissionProcedure('inventory.read')
+      .input(getShipmentSchema)
+      .query(async ({ input, ctx }) => {
+        return getShipmentsService().getShipment(
+          input.shipmentId,
+          ctx.user,
+          ctx.user.currentBranchId ?? null,
+        );
+      }),
+
+    create: permissionProcedure('inventory.intake')
+      .input(createShipmentSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getShipmentsService().createShipment(input, ctx.user);
+      }),
+
+    updateLines: permissionProcedure('inventory.intake')
+      .input(updateShipmentLinesSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getShipmentsService().updateShipmentLines(input, ctx.user);
+      }),
+
+    markInTransit: permissionProcedure('inventory.intake')
+      .input(shipmentTransitionSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getShipmentsService().markInTransit(input, ctx.user);
+      }),
+
+    markArrived: permissionProcedure('inventory.intake')
+      .input(shipmentTransitionSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getShipmentsService().markArrived(input, ctx.user);
+      }),
+
+    verify: permissionProcedure('inventory.verifyTransfer')
+      .input(verifyShipmentSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getShipmentsService().verifyShipment(input, ctx.user);
+      }),
+
+    close: permissionProcedure('inventory.verifyTransfer')
+      .input(shipmentTransitionSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getShipmentsService().closeShipment(input, ctx.user);
+      }),
+
+    cancel: permissionProcedure('inventory.intake')
+      .input(cancelShipmentSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getShipmentsService().cancelShipment(input, ctx.user);
+      }),
+  }),
+
+  // ============================================
+  // Company-owned warehouses (provider kind WAREHOUSE) — distinct from 3PL partners
+  // ============================================
+  warehouses: router({
+    list: permissionProcedure('inventory.read')
+      .input(listWarehousesSchema)
+      .query(async ({ input }) => {
+        return getLogisticsServiceForInventory().listWarehouses(input);
+      }),
+
+    overview: permissionProcedure('inventory.read')
+      .query(async () => {
+        return getLogisticsServiceForInventory().getWarehousesOverview({ status: 'ACTIVE' });
+      }),
+
+    get: permissionProcedure('inventory.read')
+      .input(z.object({ warehouseId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return getLogisticsServiceForInventory().getWarehouseById(input.warehouseId);
+      }),
+
+    create: permissionProcedure('inventory.warehouses.write')
+      .input(createWarehouseSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getLogisticsServiceForInventory().createWarehouse(
+          { name: input.name, address: input.address, coordinates: input.coordinates },
+          ctx.user.id,
+        );
+      }),
+  }),
 });

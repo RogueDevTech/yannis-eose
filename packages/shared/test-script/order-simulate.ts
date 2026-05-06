@@ -81,27 +81,39 @@ async function main() {
     product_id: string;
     product_name: string;
     base_sale_price: string;
-    offers: unknown;
+    offer_label: string | null;
+    offer_price: string | null;
+    offer_qty: number | null;
   }> = await sql`
     SELECT
       c.id AS campaign_id,
       c.media_buyer_id,
       p.id AS product_id,
       p.name AS product_name,
-      p.base_sale_price,
-      p.offers
+      p.base_sale_price::text AS base_sale_price,
+      ot.name AS offer_label,
+      ot.price::text AS offer_price,
+      ot.quantity AS offer_qty
     FROM campaigns c
-    CROSS JOIN LATERAL jsonb_array_elements_text(
-      CASE
-        WHEN jsonb_typeof(c.product_ids) = 'array' THEN c.product_ids
-        WHEN jsonb_typeof(c.product_ids) = 'string' THEN (c.product_ids #>> '{}')::jsonb
-        ELSE '[]'::jsonb
-      END
-    ) AS pid
-    JOIN products p ON p.id = pid
+    JOIN LATERAL (
+      SELECT (t.elem)::uuid AS product_id
+      FROM jsonb_array_elements_text(
+        CASE
+          WHEN jsonb_typeof(c.product_ids) = 'array' THEN c.product_ids
+          WHEN jsonb_typeof(c.product_ids) = 'string' THEN (c.product_ids #>> '{}')::jsonb
+          ELSE '[]'::jsonb
+        END
+      ) WITH ORDINALITY AS t(elem, idx)
+      WHERE t.idx = 1
+    ) first_prod ON TRUE
+    JOIN products p ON p.id = first_prod.product_id
+    LEFT JOIN offer_templates ot
+      ON ot.product_id = p.id
+      AND ot.valid_to IS NULL
+      AND ot.status = 'ACTIVE'
     WHERE c.status = 'ACTIVE'
       AND p.status = 'ACTIVE'
-    ORDER BY c.id
+    ORDER BY c.id, ot.name ASC NULLS LAST, ot.id ASC NULLS LAST
   `;
 
   await sql.end();
@@ -115,18 +127,15 @@ async function main() {
   const targets: OrderTarget[] = [];
 
   for (const row of rows) {
-    const offers = row.offers as Array<{ label?: string; qty?: number; price?: string }> | null;
-    if (offers && Array.isArray(offers) && offers.length > 0) {
-      for (const offer of offers) {
-        targets.push({
-          campaignId: row.campaign_id,
-          mediaBuyerId: row.media_buyer_id,
-          productId: row.product_id,
-          unitPrice: parseFloat(offer.price ?? row.base_sale_price),
-          quantity: offer.qty ?? 1,
-          offerLabel: offer.label ?? 'Standard',
-        });
-      }
+    if (row.offer_label && row.offer_price != null) {
+      targets.push({
+        campaignId: row.campaign_id,
+        mediaBuyerId: row.media_buyer_id,
+        productId: row.product_id,
+        unitPrice: parseFloat(row.offer_price),
+        quantity: row.offer_qty ?? 1,
+        offerLabel: row.offer_label,
+      });
     } else {
       targets.push({
         campaignId: row.campaign_id,

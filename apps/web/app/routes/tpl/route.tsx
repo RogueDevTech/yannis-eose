@@ -1,6 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { Outlet, useLoaderData } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { getCurrentUser, getSessionCookie, apiRequest } from '~/lib/api.server';
 import { TplLayout } from '~/components/layout/tpl-layout';
 
@@ -33,16 +34,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const cookie = getSessionCookie(request);
-  const notificationsPromise = apiRequest<unknown>('/trpc/notifications.list?input=%7B%7D', { method: 'GET', cookie })
+  // Default page size = 20. See `routes/admin/route.tsx` for the rationale.
+  const notificationsInput = encodeURIComponent(JSON.stringify({ limit: 20 }));
+  const notificationsPromise = apiRequest<unknown>(`/trpc/notifications.list?input=${notificationsInput}`, { method: 'GET', cookie })
     .then((res) => {
-      if (!res.ok) return { notifications: [] as Notification[], unreadCount: 0 };
-      const data = (res.data as { result?: { data?: { notifications: Notification[]; unreadCount: number } } })?.result?.data;
-      return data ?? { notifications: [] as Notification[], unreadCount: 0 };
+      if (!res.ok) return { notifications: [] as Notification[], unreadCount: 0, total: 0 };
+      const data = (res.data as {
+        result?: {
+          data?: {
+            notifications: Notification[];
+            unreadCount: number;
+            pagination?: { total?: number };
+          };
+        };
+      })?.result?.data;
+      return {
+        notifications: data?.notifications ?? [],
+        unreadCount: data?.unreadCount ?? 0,
+        total: data?.pagination?.total ?? data?.notifications?.length ?? 0,
+      };
     })
-    .catch(() => ({ notifications: [] as Notification[], unreadCount: 0 }));
+    .catch(() => ({ notifications: [] as Notification[], unreadCount: 0, total: 0 }));
 
   return defer({ user, notifications: notificationsPromise });
 }
+
+/**
+ * Skip re-running this TPL shell loader on every child-route navigation. See the
+ * matching comment in `routes/admin/route.tsx::shouldRevalidate` for the full rationale.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formAction,
+  formMethod,
+}) => {
+  if (formAction && formMethod && formMethod !== 'GET') {
+    return defaultShouldRevalidate;
+  }
+  return false;
+};
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();

@@ -1,8 +1,9 @@
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type {
@@ -33,26 +34,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? { locationId, page: 1, limit: 50 }
     : { page: 1, limit: 50 };
 
+  const readOpts = { timeoutMs: DEFERRED_LOADER_TIMEOUT_MS } as const;
+
   // Start all fetches concurrently
   const levelsPromise = apiRequest<unknown>(
     `/trpc/inventory.levels?input=${encodeURIComponent(JSON.stringify(levelsInput))}`,
-    { method: 'GET', cookie },
+    { method: 'GET', cookie, ...readOpts },
   );
   const movementsPromise = apiRequest<unknown>(
     `/trpc/inventory.movements?input=${encodeURIComponent(JSON.stringify(movementsInput))}`,
-    { method: 'GET', cookie },
+    { method: 'GET', cookie, ...readOpts },
   );
   const productsPromise = apiRequest<unknown>(
     `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 50, status: 'ACTIVE' }))}`,
-    { method: 'GET', cookie },
+    { method: 'GET', cookie, ...readOpts },
   );
   const locationsPromise = apiRequest<unknown>(
     `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 20 }))}`,
-    { method: 'GET', cookie },
+    { method: 'GET', cookie, ...readOpts },
   );
-  const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
-  const returnedPromise = apiRequest<unknown>('/trpc/inventory.returnedOrders', { method: 'GET', cookie });
-  const reconciliationsPromise = apiRequest<unknown>('/trpc/inventory.reconciliations', { method: 'GET', cookie });
+  const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie, ...readOpts });
+  const returnedPromise = apiRequest<unknown>('/trpc/inventory.returnedOrders', { method: 'GET', cookie, ...readOpts });
+  const reconciliationsPromise = apiRequest<unknown>('/trpc/inventory.reconciliations', { method: 'GET', cookie, ...readOpts });
 
   // Await critical data
   const [levelsRes, movementsRes, productsRes, locationsRes, transfersRes, returnedRes] = await Promise.all([
@@ -64,12 +67,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
     returnedPromise,
   ]);
 
+  let levelsLoadError: string | null = null;
+  let movementsLoadError: string | null = null;
+
   const levelsData = levelsRes.ok
-    ? (levelsRes.data as { result?: { data?: { levels: InventoryLevel[]; pagination: { total: number } } } })?.result?.data
+    ? (levelsRes.data as {
+        result?: {
+          data?: {
+            levels: InventoryLevel[];
+            totals?: { totalStock: number; totalReserved: number };
+            pagination: { total: number };
+          };
+        };
+      })?.result?.data
     : null;
+  if (!levelsRes.ok) {
+    levelsLoadError = describeApiFetchFailure('Stock levels', levelsRes);
+  }
+
   const movementsData = movementsRes.ok
     ? (movementsRes.data as { result?: { data?: { movements: StockMovement[]; pagination: { total: number } } } })?.result?.data
     : null;
+  if (!movementsRes.ok) {
+    movementsLoadError = describeApiFetchFailure('Movement history', movementsRes);
+  }
 
   let products: ProductOption[] = [];
   if (productsRes.ok) {
@@ -111,6 +132,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     levels: levelsData?.levels ?? [],
+    levelsTotals: levelsData?.totals ?? { totalStock: 0, totalReserved: 0 },
     totalLevels: levelsData?.pagination?.total ?? 0,
     movements: movementsData?.movements ?? [],
     totalMovements: movementsData?.pagination?.total ?? 0,
@@ -121,6 +143,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     returnedOrders: returnedData,
     reconciliations,
     locationsWithLock,
+    levelsLoadError,
+    movementsLoadError,
   };
 }
 

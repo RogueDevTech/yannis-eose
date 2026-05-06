@@ -144,6 +144,8 @@ All primary keys use UUIDv7 (timestamp-ordered). This improves B-tree index perf
 ### Temporal Tables (System-Versioned)
 Every table that stores business data (orders, inventory, products, users, funding, ad_spend) must use PostgreSQL 18 system-versioned temporal logic. Every row has a `valid_period` (tstzrange) that records when that version of the row was true. When a row is updated, the old version is preserved with its time range. You can query the state of any record at any point in history.
 
+**Tables intentionally NOT audited (skipped 2026-05 — migration 0119, AUDITABLE_TABLES allowlist):** `inventory_levels`, `stock_batches`, `stock_movements`, `call_logs`, `cart_abandonments`. Each is either a write-once ledger (the row IS the audit — `stock_movements`, `call_logs`) or has heavy churn with no business context per delta (`inventory_levels`, `stock_batches` — covered by the `stock_movements` ledger anyway, `cart_abandonments` — cron-driven "System" actor). Migration 0119 dropped their `capture_history` + `capture_history_insert` triggers; the `*_history` tables were preserved for historical lookup but receive no new rows. Adding them back to the audit catalog requires both re-installing the triggers in a new migration AND re-listing them in `AUDITABLE_TABLES` ([apps/api/src/audit/audit.service.ts](apps/api/src/audit/audit.service.ts) + [apps/web/app/features/audit/AuditPage.tsx](apps/web/app/features/audit/AuditPage.tsx)).
+
 ### Row-Level Security (RLS)
 Permissions are enforced at the database level, not just the application level. Even if the API has a bug, the database will block unauthorized access. Media Buyers can only see their own orders. CS agents can only see orders assigned to them. Finance can see all orders but only edit financial fields. Third-Party Logistics partners can only see orders allocated to their location.
 
@@ -374,6 +376,32 @@ The admin temporarily renders the entire app *as* another user — their role, b
 
 **3PL off-platform — verify warehouse transfers:** `inventory.verifyTransfer` is granted to `TPL_MANAGER`, **`HEAD_OF_LOGISTICS`**, and **`STOCK_MANAGER`** in `packages/shared/scripts/seed-permissions.ts` so internal staff can post receipt when the partner never logs in. After changing role matrices, run `pnpm db:seed-permissions` so `role_permissions` stays synced.
 
+**Inbound Shipments (multi-line supplier receipts) — Phase 22, migration 0113:**
+The single-product **Stock Intake** stays for one-off corrections. Real supplier deliveries arrive as **shipments** — a parent record with N SKU lines under one freight/duty/clearing cost — and run through a five-stage lifecycle. Reference number is auto-generated as `SHIP-YYYY-XXXX` (mirrors invoice numbering at `finance.service.ts::formatReference`); ops may add an optional free-text label.
+
+| From | To | Trigger | Side effect |
+|---|---|---|---|
+| — | `CREATED` | `shipments.create` | Parent + lines (expected qtys only). Default for planned shipments. |
+| — | `ARRIVED` | `shipments.create` with `arrivedNow: true` | Same as above; retroactive entry for goods already on-site. |
+| `CREATED` | `IN_TRANSIT` | `shipments.markInTransit` | Visibility flip; pipeline view. |
+| `CREATED` / `IN_TRANSIT` | `ARRIVED` | `shipments.markArrived` | Stamps `arrived_at`; lines unlock for received-qty entry. |
+| `ARRIVED` | `VERIFIED` | `shipments.verify` | **Single tx in `withActorAndBranch`:** for each line — insert `stock_batches`, upsert `inventory_levels.stock_count`, log `stock_movements` (`INTAKE`, `referenceId = shipment_line.id`). Allocates the parent's `total_landing_cost` across lines weighted by `received_qty × factory_cost` (qty-only fallback). Mismatch between received + expected requires a `variance_reason`. |
+| `VERIFIED` | `CLOSED` | `shipments.close` | Final lock; row immutable. |
+| `CREATED` / `IN_TRANSIT` / `ARRIVED` | `CANCELLED` | `shipments.cancel` (reason ≥ 10 chars) | No inventory side effects — nothing was committed yet. |
+
+**Permissions reuse the existing inventory codes — no new RBAC entries:**
+- `inventory.intake` → create / update lines / mark in transit / mark arrived / cancel
+- `inventory.verifyTransfer` → verify / close
+- `inventory.read` → list / get
+
+**Files:** [shipments.service.ts](apps/api/src/inventory/shipments.service.ts), [inventory.router.ts](apps/api/src/trpc/routers/inventory.router.ts) (`shipments` sub-router), [shipments.ts](packages/shared/src/db/schema/shipments.ts), [inventory.ts validators](packages/shared/src/validators/inventory.ts), [ShipmentsTab.tsx](apps/web/app/features/inventory/ShipmentsTab.tsx), [ShipmentDetailPage.tsx](apps/web/app/features/inventory/ShipmentDetailPage.tsx).
+
+**Do NOT:**
+- Do NOT regenerate inventory side effects on `VERIFIED → CLOSED`. The receipt landed at VERIFY; CLOSE is a pure status flip.
+- Do NOT cancel a `VERIFIED` or `CLOSED` shipment — its receipts are already in inventory and there's no partial-rollback path. Use a stock adjustment (with reason) if you need to correct a verified receipt.
+- Do NOT skip the `variance_reason` requirement when received qty ≠ expected qty. The server gate enforces this; bypassing it loses the audit trail for the variance.
+- Do NOT regress to single-product per shipment. Real shipments mix SKUs and the landing-cost allocation depends on it.
+
 ### When Building the App Theme System
 - 6 theme IDs: `system`, `light`, `dark`, `dim`, `ink`, `soft`
 - `users.app_theme` is nullable — `null` means follow org default (`system_settings.client_ui_config.defaultTheme`)
@@ -424,6 +452,11 @@ The push system has four layers — all must be consistent:
 - SW `push` handler: always call `self.registration.showNotification()` — never skip even if app is open.
 - SW `notificationclick` handler: `clients.openWindow(data.url)` + POST to `/api/push/ack` with `clicked`.
 - SW `push` handler: after `showNotification()`, POST to `/api/push/ack` with `shown`.
+
+**Non-blocking in-app + email fan-out (API — locked):** Mutations and hot read paths must **not** `await` best-effort side effects that fan out to many users or external services (in-app notification row + push, `createForRole`, `createForLocation`, SendGrid). That couples request latency to N DB inserts, push sends, and deliverability.
+- Use **`NotificationsService.enqueueCreate`**, **`enqueueCreateForRole`**, **`enqueueCreateForLocation`** (or `void notifications.create(...).then(...)` for one-offs like password-reset email logging). Implementation: [`apps/api/src/notifications/notifications.service.ts`](apps/api/src/notifications/notifications.service.ts).
+- **`create` / `createForRole` / `createForLocation`** remain for call sites that intentionally sequence on completion (rare); role/location fan-out inside `createForRole` runs **parallel** `create` calls per recipient.
+- Do **not** reintroduce `await notifications.create…` on order transitions, payroll actions, marketing funding, or permission-request approval flows.
 
 ### When Building the Third-Party Logistics Module
 - Third-Party Logistics partners get their OWN login and simplified dashboard (not the full internal UI)
@@ -782,15 +815,24 @@ The component renders at:
 
 ## Modal + Optimistic UI Pattern (Non-Negotiable)
 
-Every modal-form-driven list page in the app follows this pattern. CEO directive: when a user submits a modal form, the new/edited row appears in the table **immediately**, and the modal closes the **same React tick** the success toast appears. No 100–500 ms lag while the loader revalidates.
+Every modal-form-driven list page in the app follows this pattern.
+
+**CEO directive 2026-05 (supersedes the earlier "row appears immediately" rule):** the synthetic row must NOT appear until the backend has confirmed the action succeeded — and by extension, until the modal has closed (which happens on the same React tick as success). The earlier "show during submit" model briefly painted rows that the server could still reject, leading to flicker on validation failure. The new flow:
+
+1. User submits → modal stays open with form values intact, button disabled, spinner inside.
+2. Server returns `{ success: true }` → modal closes (via `useCloseOnFetcherSuccess`) AND synthetic row appears in the list on the same render.
+3. Loader revalidates → real row replaces synthetic row.
+4. If server returns `{ success: false }` or throws → modal stays open, error toast surfaces, no synthetic row ever appears, form values stay intact for retry.
 
 ### The five ingredients
 
-1. **Optimistic ADD** — derive synthetic rows from `fetcher.formData` (the in-flight payload) and prepend them to the loader-data list. Use `useOptimisticListMerge<T>(fetcher, build)` from [apps/web/app/hooks/useOptimisticListMerge.ts](apps/web/app/hooks/useOptimisticListMerge.ts). Synthetic IDs come from `optimisticId(suffix?)` in [apps/web/app/lib/optimistic.ts](apps/web/app/lib/optimistic.ts) so consumers can detect them later.
-2. **Optimistic EDIT** — when the form submission contains the new field values for an existing row (text edits, status flips), overlay them on the matching server row by `id`. Use `useOptimisticListPatches<T>(fetcher, build)` + `applyOptimisticPatches(rows, patches)` + `isOptimisticPatched(patches, id)` from [apps/web/app/hooks/useOptimisticListPatches.ts](apps/web/app/hooks/useOptimisticListPatches.ts). Patched rows keep their REAL id (no `__optimistic_` prefix) so action buttons remain meaningful — disable them via `isOptimisticPatched(...)` while in flight.
-3. **Edge-trigger close** — close the modal the instant `fetcher.data` flips to `{ success: true }` (NOT when `fetcher.state === 'idle'`). Use `useCloseOnFetcherSuccess(fetcher, onSuccess)` from [apps/web/app/hooks/useCloseOnFetcherSuccess.ts](apps/web/app/hooks/useCloseOnFetcherSuccess.ts).
-4. **Toast on the same tick** — keep the existing `useFetcherToast(fetcher.data, ...)` import. All three hooks watch `fetcher.data` reference, so the toast appears and the modal closes together with no lag.
-5. **Visual marker on in-flight rows** — render with `opacity-60` + an inline "Saving…" chip, and `disabled={isOptimistic}` on row action buttons (View / Edit / Delete on a synthetic ID would 404 the API; on a patched id it would race against the in-flight write). Detect via `isOptimisticId(row.id)` (adds) or `isOptimisticPatched(patches, row.id)` (edits).
+1. **Optimistic ADD** — `useOptimisticListMerge<T>(fetcher, build)` from [apps/web/app/hooks/useOptimisticListMerge.ts](apps/web/app/hooks/useOptimisticListMerge.ts). Default `awaitSuccess: true` — synthetic row only renders during the post-success loader-revalidation window (steps 2 → 3 above). Synthetic IDs come from `optimisticId(suffix?)` in [apps/web/app/lib/optimistic.ts](apps/web/app/lib/optimistic.ts) so consumers can detect them later.
+2. **Optimistic EDIT** — `useOptimisticListPatches<T>(fetcher, build)` + `applyOptimisticPatches(rows, patches)` + `isOptimisticPatched(patches, id)` from [apps/web/app/hooks/useOptimisticListPatches.ts](apps/web/app/hooks/useOptimisticListPatches.ts). Same default — patches only apply after success. Patched rows keep their REAL id (no `__optimistic_` prefix) so action buttons remain meaningful — disable them via `isOptimisticPatched(...)` during the post-success revalidation window.
+3. **Edge-trigger close** — close the modal the instant `fetcher.data` flips to `{ success: true }` (NOT when `fetcher.state === 'idle'`). Use `useCloseOnFetcherSuccess(fetcher, onSuccess)` from [apps/web/app/hooks/useCloseOnFetcherSuccess.ts](apps/web/app/hooks/useCloseOnFetcherSuccess.ts). This fires on the same tick as the synthetic row's first render — modal close and row appearance are visually atomic to the user.
+4. **Toast on the same tick** — keep the existing `useFetcherToast(fetcher.data, ...)` import. All four hooks watch `fetcher.data` reference, so toast + modal close + synthetic row appear together.
+5. **Visual marker on in-flight rows** — during the post-success revalidation window the row briefly shows `opacity-60` + an inline "Saving…" chip with `disabled={isOptimistic}` on action buttons (View / Edit / Delete on a synthetic ID would 404 the API; on a patched id it would race against the canonical row landing). Detect via `isOptimisticId(row.id)` (adds) or `isOptimisticPatched(patches, row.id)` (edits).
+
+**Escape hatch:** pass `{ awaitSuccess: false }` to either hook for non-modal inline edits where instant feedback during submit matters more than rejection-flicker. Modal-driven CRUD pages should never need this.
 
 ### Canonical reference
 
@@ -849,7 +891,7 @@ const display = applyOptimisticPatches(widgets, widgetPatches);
 // …on action buttons: disabled={isOptimisticPatched(widgetPatches, row.id)}
 ```
 
-If the server rejects the patch, the row visibly snaps back to its server state and `useFetcherToast` surfaces the error — that UX is correct: the user knows their change didn't take.
+If the server rejects the patch the overlay never applies (because `awaitSuccess` gates on `data.success === true`), so the row stays at its server state for the entire round-trip and `useFetcherToast` surfaces the error. The modal stays open with the form values intact so the user can correct and retry.
 
 ### Do NOT
 
@@ -863,6 +905,7 @@ If the server rejects the patch, the row visibly snaps back to its server state 
 - Do NOT reuse one fetcher across two unrelated modals without the `intent` discriminator. Returning `null` from `build` for non-matching intents in `useOptimisticListMerge` / `useOptimisticListPatches` is the canonical way to scope per-modal/per-intent.
 - Do NOT hand-roll new variants of close-on-success / optimistic-list-merge / optimistic-list-patches. Use the hooks. New variants always reintroduce one of the bugs above.
 - Do NOT use `applyOptimisticPatches` to deep-merge nested objects. The helper is shallow merge by design — if a patch needs to update a nested object, the caller spreads inside `patch` (e.g. `{ recipientInfo: { ...row.recipientInfo, name: newName } }`). Deep-merging silently masks bugs where a partial nested update overwrites unrelated sibling fields.
+- Do NOT pass `{ awaitSuccess: false }` to `useOptimisticListMerge` / `useOptimisticListPatches` on a modal-driven CRUD list. The default of `true` is what implements the CEO directive 2026-05: row never appears until backend confirms success, modal close and row appearance happen on the same React tick. Falling back to `false` reintroduces the "row painted then snaps back on rejection" flicker the directive specifically retired.
 
 ---
 
@@ -878,6 +921,16 @@ If the server rejects the patch, the row visibly snaps back to its server state 
 - Domain-Driven Design: each module (orders, inventory, logistics, marketing, finance, hr) has its own folder with routes/, services/, schemas/, and validators/
 - NestJS: one module per domain. Services contain business logic. Controllers are thin (just call services and return)
 - Remix: one route file per page. Loaders fetch data. Actions handle mutations. Components render UI. No business logic in components
+
+### Remix / frontend data loading (perceived performance)
+Independent of API latency, the **web app feels slow** when loaders or components do the wrong work. Lock these in:
+
+- **Avoid loader waterfalls** — sequential `await` in a `loader` (A finishes, then B starts) adds round-trip time before first paint. Fetch independent data with **`Promise.all`** (or parallel `trpc` calls) so work runs together. Use **`defer` / `<Await>`** only for clearly secondary content (e.g. heavy chart after shell), not for everything by default.
+- **Keep loader payloads tight** — return only fields the route needs. Do not pass giant nested graphs “for convenience”; add a narrow procedure or query shape. Large JSON over the wire + hydration cost shows up as jank even when the DB was fast.
+- **Paginate list UIs** — table routes should drive **`page` / `limit` / cursor** from **search params** and pass them to the API. Rendering an unbounded `.map()` over thousands of rows (or shipping that many in one loader) blocks the main thread and blows transfer size. Prefer **`<CompactTable />` + `<Pagination />`** (see UI table) with server-backed slices.
+- **Refetch discipline** — filter/sort/pagination changes should re-run the loader; use **`<TableLoadingOverlay />` + `useLoaderRefetchBusy()`** and **`NavProgressBar`** so users see progress without swapping the whole page for a blank spinner.
+
+Do NOT fix slow pages only by adding spinners — reduce serial loader chains, payload size, and unbounded lists first.
 
 ### Error Handling
 - All database operations wrapped in try/catch with meaningful error messages
@@ -924,6 +977,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 
 ## What NOT To Do
 
+- Do NOT create **loader waterfalls** (serial `await` for independent fetches), return **oversized loader payloads** (“convenience” graphs the route doesn’t need), or ship **unbounded lists** without URL-driven pagination and a paged API — see **Remix / frontend data loading** under Code Quality Standards. Spinner-only fixes mask the problem.
 - Do NOT use localStorage or sessionStorage for anything security-sensitive. Sessions live in Redis
 - Do NOT expose raw **customer** phone numbers in any API response, log, or error message — ever. The Lead Fortress pillar applies to `orders.customer_phone`, `cart_submissions.phone`, and any other PII column tied to leads. **Staff** phone numbers (`users.phone`) are different: they are contact info for HR/admins/heads to reach their team. The mask helper in `apps/api/src/users/users.service.ts::resolveStaffPhone` returns the raw phone to authorized viewers (self, admin-class, HR, heads viewing their direct-report role; or anyone with `users.read` / `hr.read` permission) and the masked form to other authenticated users — do not blanket-mask `users.phone`.
 - Do NOT use auto-incrementing IDs — use UUIDv7
@@ -954,6 +1008,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
   - Socket: `useAgentStateBroadcast` checks `<html data-mirror="1">` before emitting and skips when set. `DashboardLayout` writes that attribute when mirroring.
   - When adding a NEW client-side side-effect helper (e.g. "mark seen", "track view", "ping recently active"), check `document.documentElement.dataset.mirror === '1'` first and bail. The flag is the canonical "we are pretending; touch nothing" signal.
 - Do NOT fire a Web Push without first inserting the in-app notification row — push is always the mirror layer, not a standalone channel
+- Do NOT `await` in-app notification creates, role fan-out (`createForRole`), or SendGrid sends on mutation hot paths — use `enqueueCreate*` / `enqueueCreateForRole` / `enqueueCreateForLocation` or fire-and-forget `void` + `.catch` so HTTP latency is not tied to N recipients or external mail APIs
 - Do NOT send push from an automation EVENT rule outside the triggering service method's transaction — inline check only
 - Do NOT delete a `push_delivery_log` row on failure — mark as `FAILED` and use resend flow
 - Do NOT apply app theme changes only on the client — always sync to server via `users.updateMyAppTheme` so the preference survives session restoration

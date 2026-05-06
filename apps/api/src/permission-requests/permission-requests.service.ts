@@ -159,6 +159,78 @@ export class PermissionRequestsService {
     );
   }
 
+  /** Combines optional status filter with the same viewer scope as {@link list}. */
+  private buildListWhere(
+    statusFilter: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED',
+    viewer: SessionUser | undefined,
+  ): SQL | undefined {
+    const parts: SQL[] = [];
+    if (statusFilter !== 'ALL') {
+      parts.push(eq(schema.permissionRequests.status, statusFilter));
+    }
+    if (viewer && viewer.role !== 'SUPER_ADMIN') {
+      const scope = this.viewerScopeWhere(viewer);
+      if (scope) parts.push(scope);
+    }
+    if (parts.length === 0) return undefined;
+    if (parts.length === 1) return parts[0];
+    return and(...parts);
+  }
+
+  private async enrichPermissionRequestRows(
+    rows: Array<{
+      id: string;
+      type: InferSelectModel<typeof schema.permissionRequests>['type'];
+      status: InferSelectModel<typeof schema.permissionRequests>['status'];
+      requesterId: string;
+      targetUserId: string | null;
+      requestedRole: string | null;
+      permissionCode: string | null;
+      reason: string;
+      payload: unknown;
+      approverId: string | null;
+      approvalReason: string | null;
+      approvedAt: Date | string | null;
+      createdAt: Date | string;
+    }>,
+  ) {
+    if (rows.length === 0) return [];
+
+    const idSet = new Set<string>();
+    for (const r of rows) {
+      idSet.add(r.requesterId);
+      if (r.targetUserId) idSet.add(r.targetUserId);
+      if (r.approverId) idSet.add(r.approverId);
+    }
+    const ids = [...idSet];
+    const userRows =
+      ids.length > 0
+        ? await this.db
+            .select({
+              id: schema.users.id,
+              name: schema.users.name,
+              email: schema.users.email,
+            })
+            .from(schema.users)
+            .where(inArray(schema.users.id, ids))
+        : [];
+    const byId = new Map(userRows.map((u) => [u.id, u]));
+
+    return rows.map((row) => {
+      const reqU = byId.get(row.requesterId);
+      const tgtU = row.targetUserId ? byId.get(row.targetUserId) : undefined;
+      const appU = row.approverId ? byId.get(row.approverId) : undefined;
+      return {
+        ...row,
+        requesterName: reqU?.name ?? 'Unknown',
+        requesterEmail: reqU?.email ?? '',
+        targetUserName: tgtU?.name ?? null,
+        targetUserEmail: tgtU?.email ?? null,
+        approverName: appU?.name ?? null,
+      };
+    });
+  }
+
   /** Per-status totals for tab badges — scoped identically to {@link list}. */
   async statusCounts(viewer: SessionUser): Promise<{
     pending: number;
@@ -191,102 +263,75 @@ export class PermissionRequestsService {
    * List all PENDING permission requests. Kept for backwards compatibility; thin wrapper
    * around {@link list} — new callers should use `list({ status: 'PENDING' })` directly.
    */
+  /** First page of pending only (limit 100); use {@link list} for full pagination. */
   async listPending(viewer?: SessionUser) {
-    return this.list({ status: 'PENDING' }, viewer);
+    const res = await this.list({ status: 'PENDING', page: 1, limit: 100 }, viewer);
+    return res.items;
   }
 
   /**
-   * List permission requests with an optional status filter.
-   * Returns the full history (PENDING + APPROVED + REJECTED) when `status` is 'ALL' or omitted.
-   * Enriched with requester, target, and approver names so the UI can show the full audit trail.
+   * List permission requests with optional status filter and SQL pagination.
+   * Enriched with requester, target, and approver names (batched user lookups per page).
    *
    * When `viewer` is supplied, the result is scoped to:
    *   - rows the viewer submitted (any type), AND
    *   - rows of types the viewer is allowed to approve.
-   * SuperAdmin / Admin pass through unfiltered.
+   * SuperAdmin sees all rows (no scope filter).
    */
   async list(
-    options?: { status?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED' },
+    options?: {
+      status?: 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
+      page?: number;
+      limit?: number;
+    },
     viewer?: SessionUser,
   ) {
     const statusFilter = options?.status ?? 'PENDING';
+    const page = options?.page ?? 1;
+    const limit = Math.min(Math.max(1, options?.limit ?? 20), 100);
+    const offset = (page - 1) * limit;
 
-    const baseQuery = this.db
-      .select({
-        id: schema.permissionRequests.id,
-        type: schema.permissionRequests.type,
-        status: schema.permissionRequests.status,
-        requesterId: schema.permissionRequests.requesterId,
-        targetUserId: schema.permissionRequests.targetUserId,
-        requestedRole: schema.permissionRequests.requestedRole,
-        permissionCode: schema.permissionRequests.permissionCode,
-        reason: schema.permissionRequests.reason,
-        payload: schema.permissionRequests.payload,
-        approverId: schema.permissionRequests.approverId,
-        approvalReason: schema.permissionRequests.approvalReason,
-        approvedAt: schema.permissionRequests.approvedAt,
-        createdAt: schema.permissionRequests.createdAt,
-      })
-      .from(schema.permissionRequests);
+    const whereClause = this.buildListWhere(statusFilter, viewer);
 
-    const allRows = statusFilter === 'ALL'
-      ? await baseQuery.orderBy(desc(schema.permissionRequests.createdAt))
-      : await baseQuery
-          .where(eq(schema.permissionRequests.status, statusFilter))
-          .orderBy(desc(schema.permissionRequests.createdAt));
+    const [countRow] = await (whereClause
+      ? this.db.select({ c: count() }).from(schema.permissionRequests).where(whereClause)
+      : this.db.select({ c: count() }).from(schema.permissionRequests));
+    const total = Number(countRow?.c ?? 0);
 
-    // Viewer-scope: when a viewer is supplied (every web call passes one), drop
-    // rows the caller has no business seeing. Admin-class users see everything;
-    // approvers see types they can approve; everyone else only sees rows they
-    // submitted personally. Without this, a CS Agent typing /admin/permission-requests
-    // could read every HR USER_CREATION, ORDER_DELETION reason, etc.
-    const rows = viewer && viewer.role !== 'SUPER_ADMIN'
-      ? (() => {
-          const viewableTypes = this.viewableTypesForViewer(viewer);
-          return allRows.filter(
-            (r) => r.requesterId === viewer.id || viewableTypes.has(r.type),
-          );
-        })()
-      : allRows;
+    const rowSelect = {
+      id: schema.permissionRequests.id,
+      type: schema.permissionRequests.type,
+      status: schema.permissionRequests.status,
+      requesterId: schema.permissionRequests.requesterId,
+      targetUserId: schema.permissionRequests.targetUserId,
+      requestedRole: schema.permissionRequests.requestedRole,
+      permissionCode: schema.permissionRequests.permissionCode,
+      reason: schema.permissionRequests.reason,
+      payload: schema.permissionRequests.payload,
+      approverId: schema.permissionRequests.approverId,
+      approvalReason: schema.permissionRequests.approvalReason,
+      approvedAt: schema.permissionRequests.approvedAt,
+      createdAt: schema.permissionRequests.createdAt,
+    };
 
-    const enriched = await Promise.all(
-      rows.map(async (row) => {
-        const [requester, targetUser, approver] = await Promise.all([
-          row.requesterId
-            ? this.db
-                .select({ name: schema.users.name, email: schema.users.email })
-                .from(schema.users)
-                .where(eq(schema.users.id, row.requesterId))
-                .limit(1)
-            : [],
-          row.targetUserId
-            ? this.db
-                .select({ name: schema.users.name, email: schema.users.email })
-                .from(schema.users)
-                .where(eq(schema.users.id, row.targetUserId))
-                .limit(1)
-            : [],
-          row.approverId
-            ? this.db
-                .select({ name: schema.users.name })
-                .from(schema.users)
-                .where(eq(schema.users.id, row.approverId))
-                .limit(1)
-            : [],
-        ]);
+    const rows = await (whereClause
+      ? this.db
+          .select(rowSelect)
+          .from(schema.permissionRequests)
+          .where(whereClause)
+          .orderBy(desc(schema.permissionRequests.createdAt))
+          .limit(limit)
+          .offset(offset)
+      : this.db
+          .select(rowSelect)
+          .from(schema.permissionRequests)
+          .orderBy(desc(schema.permissionRequests.createdAt))
+          .limit(limit)
+          .offset(offset));
 
-        return {
-          ...row,
-          requesterName: requester[0]?.name ?? 'Unknown',
-          requesterEmail: requester[0]?.email ?? '',
-          targetUserName: targetUser[0]?.name ?? null,
-          targetUserEmail: targetUser[0]?.email ?? null,
-          approverName: approver[0]?.name ?? null,
-        };
-      }),
-    );
+    const items = await this.enrichPermissionRequestRows(rows);
 
-    return enriched;
+    return { items, total, page, limit };
   }
 
   /**
@@ -442,16 +487,13 @@ export class PermissionRequestsService {
             ? `Your request to archive order ${deletionOrderId.slice(0, 8).toUpperCase()} was approved.`
             : `Your request (${req.type}) was approved.`;
 
-    // Notify requester
-    await this.notificationsService
-      .create({
-        userId: req.requesterId,
-        type: 'approval:permission_request',
-        title: 'Permission request approved',
-        body: approvalBody,
-        data: { requestId, action: 'APPROVED' },
-      })
-      .catch(() => {});
+    this.notificationsService.enqueueCreate({
+      userId: req.requesterId,
+      type: 'approval:permission_request',
+      title: 'Permission request approved',
+      body: approvalBody,
+      data: { requestId, action: 'APPROVED' },
+    });
 
     return { success: true, action: 'APPROVED' };
   }
@@ -530,16 +572,13 @@ export class PermissionRequestsService {
         ? `Your request to archive product "${rejectProductName}" was rejected. Reason: ${reason}`
         : `Your request (${req.type}) was rejected. Reason: ${reason}`;
 
-    // Notify requester
-    await this.notificationsService
-      .create({
-        userId: req.requesterId,
-        type: 'approval:permission_request',
-        title: 'Permission request rejected',
-        body: rejectBody,
-        data: { requestId, action: 'REJECTED' },
-      })
-      .catch(() => {});
+    this.notificationsService.enqueueCreate({
+      userId: req.requesterId,
+      type: 'approval:permission_request',
+      title: 'Permission request rejected',
+      body: rejectBody,
+      data: { requestId, action: 'REJECTED' },
+    });
 
     return { success: true, action: 'REJECTED' };
   }

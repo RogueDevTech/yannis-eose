@@ -7,6 +7,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { Spinner } from '~/components/ui/spinner';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -16,6 +17,9 @@ import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { EmptyState } from '~/components/ui/empty-state';
+import { TableActionButton } from '~/components/ui/table-action-button';
+import { Pagination } from '~/components/ui/pagination';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import {
@@ -40,6 +44,8 @@ import {
   type LiveActivityItem,
   type CSQueueTab,
   type CloserWorkloadOrder,
+  type AbandonedCartPagination,
+  ABANDONED_CARTS_PAGE_SIZE,
 } from './types';
 
 /** Most recently active closers first; stable tie-break for strip + View all. */
@@ -65,12 +71,10 @@ function AgentWorkloadCard({
   onOpen?: (agent: AgentWorkload) => void;
   isNew?: boolean;
 }) {
-  const utilization = agent.capacity > 0 ? (agent.pendingCount / agent.capacity) * 100 : 0;
-  const barColor = utilization >= 90
-    ? 'bg-danger-500'
-    : utilization >= 70
-    ? 'bg-warning-500'
-    : 'bg-success-500';
+  const closesToday = agent.todayClosesCount ?? 0;
+  const dailyPct = agent.capacity > 0 ? (closesToday / agent.capacity) * 100 : 0;
+  const barColor =
+    dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
 
   const inner = (
     <>
@@ -85,23 +89,32 @@ function AgentWorkloadCard({
             {agent.agentName}
           </p>
           <p className="text-xs text-app-fg-muted">
-            {agent.pendingCount} of {agent.capacity} slots
+            Today&apos;s duty: {closesToday} / {agent.capacity}
+            <span className="text-app-fg-muted/80"> (Lagos)</span>
+          </p>
+          <p className="text-[11px] text-app-fg-muted mt-0.5">
+            Pipeline backlog: {agent.pendingCount}
           </p>
         </div>
       </div>
       <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${Math.min(utilization, 100)}%` }}
+          style={{ width: `${Math.min(dailyPct, 100)}%` }}
         />
       </div>
-      <div className="flex items-center justify-between mt-2">
+      <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
         <span className="text-xs text-app-fg-muted">
-          {Math.round(utilization)}% utilized
+          {Math.round(Math.min(dailyPct, 100))}% of daily target
         </span>
-        {agent.pendingCount >= agent.capacity && (
-          <span className="text-xs font-medium text-danger-600 dark:text-danger-400">FULL</span>
-        )}
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          {closesToday >= agent.capacity && (
+            <span className="text-xs font-medium text-success-600 dark:text-success-400">Target met</span>
+          )}
+          {agent.pendingCount >= agent.capacity && (
+            <span className="text-xs font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
+          )}
+        </div>
       </div>
       {isNew && (
         <div className="mt-2 pt-2 border-t border-success-200 dark:border-success-800/50 flex items-center gap-1.5">
@@ -222,16 +235,16 @@ function AgentWorkloadDetailModal({
 
   if (!agent) return null;
 
-  const utilization = agent.capacity > 0 ? (agent.pendingCount / agent.capacity) * 100 : 0;
-  const free = agent.capacity - agent.pendingCount;
+  const closesToday = agent.todayClosesCount ?? 0;
+  const dailyPct = agent.capacity > 0 ? (closesToday / agent.capacity) * 100 : 0;
   const statusColor =
-    utilization >= 90 ? 'text-danger-600 dark:text-danger-400' :
-    utilization >= 70 ? 'text-warning-600 dark:text-warning-400' :
-    'text-success-600 dark:text-success-400';
+    dailyPct >= 100 ? 'text-success-600 dark:text-success-400' :
+    dailyPct >= 70 ? 'text-warning-600 dark:text-warning-400' :
+    'text-brand-600 dark:text-brand-400';
   const barColor =
-    utilization >= 90 ? 'bg-danger-500' :
-    utilization >= 70 ? 'bg-warning-500' :
-    'bg-success-500';
+    dailyPct >= 100 ? 'bg-success-500' :
+    dailyPct >= 70 ? 'bg-warning-500' :
+    'bg-brand-500';
   const initials = agent.agentName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
   const lastAction = agent.lastActionAt
     ? new Date(agent.lastActionAt).toLocaleString('en-NG', {
@@ -269,16 +282,16 @@ function AgentWorkloadDetailModal({
       <div className="px-5 -mt-6">
         <div className="bg-app-elevated rounded-xl shadow-md border border-app-border p-3.5 grid grid-cols-3 gap-2.5">
           <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Active</p>
+            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Backlog</p>
             <p className="text-xl leading-7 font-bold text-app-fg mt-1">{agent.pendingCount}</p>
           </div>
           <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Capacity</p>
+            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Daily target</p>
             <p className="text-xl leading-7 font-bold text-app-fg mt-1">{agent.capacity}</p>
           </div>
           <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Free slots</p>
-            <p className={`text-xl leading-7 font-bold mt-1 ${free <= 0 ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>{Math.max(0, free)}</p>
+            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Closed today</p>
+            <p className={`text-xl leading-7 font-bold mt-1 ${closesToday >= agent.capacity ? 'text-success-600 dark:text-success-400' : 'text-app-fg'}`}>{closesToday}</p>
           </div>
         </div>
       </div>
@@ -286,17 +299,19 @@ function AgentWorkloadDetailModal({
       {/* Utilization bar */}
       <div className="px-5 pt-5 pb-2">
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-xs font-medium text-app-fg-muted">Utilization</p>
-          <p className={`text-xs font-bold ${statusColor}`}>{Math.round(utilization)}%</p>
+          <p className="text-xs font-medium text-app-fg-muted">Today&apos;s duty (Lagos)</p>
+          <p className={`text-xs font-bold ${statusColor}`}>{closesToday} / {agent.capacity}</p>
         </div>
         <div className="w-full h-2.5 bg-app-hover rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-            style={{ width: `${Math.min(utilization, 100)}%` }}
+            style={{ width: `${Math.min(dailyPct, 100)}%` }}
           />
         </div>
         {agent.pendingCount >= agent.capacity && (
-          <p className="text-xs font-semibold text-danger-600 dark:text-danger-400 mt-1.5">Queue is full — no new orders can be assigned</p>
+          <p className="text-xs font-semibold text-danger-600 dark:text-danger-400 mt-1.5">
+            Pipeline at concurrent limit — dispatch may block until backlog clears.
+          </p>
         )}
       </div>
 
@@ -527,6 +542,7 @@ export function CSDashboardPage({
   canDeleteCart = false,
   productsForOfflineOrder = [],
   initialCartActivity,
+  criticalFetchErrors = [],
 }: CSDashboardStreamData) {
   const adminRouteData = useRouteLoaderData('routes/admin') as
     | { user?: { currentBranchId?: string | null }; branches?: Array<{ id: string }> }
@@ -552,9 +568,20 @@ export function CSDashboardPage({
   const revalidator = useRevalidator();
   const isRouteLoaderBusy = useLoaderRefetchBusy();
   const [searchParams, setSearchParams] = useSearchParams();
+  const abandonedPageFromUrl = useMemo(() => {
+    const n = parseInt(searchParams.get('abandonedPage') ?? '1', 10);
+    return Number.isFinite(n) && n >= 1 ? n : 1;
+  }, [searchParams]);
+  const abandonedPageFromUrlRef = useRef(abandonedPageFromUrl);
+  abandonedPageFromUrlRef.current = abandonedPageFromUrl;
   const [hotSwapSearchPending, startHotSwapSearchTransition] = useTransition();
   const claimFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
-  const cartsFetcher = useFetcher<{ activityItems?: LiveActivityItem[]; pendingCarts?: PendingCart[]; abandonedCarts?: PendingCart[] }>();
+  const cartsFetcher = useFetcher<{
+    activityItems?: LiveActivityItem[];
+    pendingCarts?: PendingCart[];
+    abandonedCarts?: PendingCart[];
+    abandonedPagination?: AbandonedCartPagination;
+  }>();
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   /** Tab follows `?tab=` so deep links and client <Link> navigations (e.g. Hot Swap from a closer card) switch the panel — local useState did not update when the URL changed. */
@@ -892,8 +919,8 @@ export function CSDashboardPage({
   }, [selectedQueueOrder]);
   /** Multi-select for bulk-assign on the Unassigned Queue tab. */
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
-  /** Chosen closer inside the Unassigned "Assign" modal (assignable only). */
-  const [bulkAssignAgentId, setBulkAssignAgentId] = useState<string>('');
+  /** Selected closers inside the Unassigned "Assign" modal (assignable only). */
+  const [bulkAssignAgentIds, setBulkAssignAgentIds] = useState<Set<string>>(() => new Set());
   const [assignCloserModalOpen, setAssignCloserModalOpen] = useState(false);
   const bulkAssignFetcher = useFetcher<{ success?: boolean; error?: string; assigned?: number }>();
   const isBulkAssigning = bulkAssignFetcher.state !== 'idle';
@@ -914,7 +941,7 @@ export function CSDashboardPage({
   // revalidation and lags 100–500ms behind the toast). See CLAUDE.md →
   // "Modal + Optimistic UI Pattern".
   useCloseOnFetcherSuccess(bulkAssignFetcher, () => {
-    setBulkAssignAgentId('');
+    setBulkAssignAgentIds(new Set());
     clearQueueSelection();
     setAssignCloserModalOpen(false);
   });
@@ -966,7 +993,21 @@ export function CSDashboardPage({
   /** Agent IDs that just received a new order — for green highlight + sort-to-front */
   const [newAgentIds, setNewAgentIds] = useState<Set<string>>(new Set());
   const prevWorkloadCountsRef = useRef<Map<string, number>>(new Map());
-  const liveActivityData = cartsFetcher.data ?? initialCartActivity ?? { activityItems: [], pendingCarts: [], abandonedCarts: [] };
+  const liveActivityData =
+    cartsFetcher.data ??
+    initialCartActivity ?? {
+      activityItems: [] as LiveActivityItem[],
+      pendingCarts: [] as PendingCart[],
+      abandonedCarts: [] as PendingCart[],
+    };
+  const abandonedPagination: AbandonedCartPagination = liveActivityData.abandonedPagination ?? {
+    total: liveActivityData.abandonedCarts?.length ?? 0,
+    page: 1,
+    limit: ABANDONED_CARTS_PAGE_SIZE,
+  };
+  const abandonedCartsList = liveActivityData.abandonedCarts ?? [];
+  const abandonedTotalPages =
+    abandonedPagination.total === 0 ? 0 : Math.ceil(abandonedPagination.total / abandonedPagination.limit);
   const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const overviewScrollRef = useRef<HTMLDivElement>(null);
   const agentScrollRef = useRef<HTMLDivElement>(null);
@@ -991,6 +1032,7 @@ export function CSDashboardPage({
     const tp = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
     const cap = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
     const sc = statusCounts as Record<string, number>;
+    const tc = workloads.reduce((s: number, w: AgentWorkload) => s + (w.todayClosesCount ?? 0), 0);
     return [
       workloads.length,
       tp,
@@ -998,6 +1040,7 @@ export function CSDashboardPage({
       sc['CONFIRMED'] ?? 0,
       sc['DELIVERED'] ?? 0,
       cap,
+      tc,
       sc['CS_ENGAGED'] ?? 0,
       sc['CANCELLED'] ?? 0,
       cartStats ? '1' : '0',
@@ -1023,17 +1066,33 @@ export function CSDashboardPage({
     return () => window.removeEventListener('keydown', onKey);
   }, [viewAllAgentsOpen]);
 
-  // Fetch cart data on mount and whenever user switches to the Cart Abandonment tab
+  /** Align browser URL when API clamps abandoned page (e.g. delete shrunk total pages). */
   useEffect(() => {
-    cartsFetcher.load('/admin/cs/queue/carts');
-  }, []);
+    const serverPage = liveActivityData.abandonedPagination?.page;
+    if (serverPage == null) return;
+    if (serverPage !== abandonedPageFromUrl) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('abandonedPage', String(serverPage));
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [liveActivityData.abandonedPagination?.page, abandonedPageFromUrl, setSearchParams]);
+
+  // Refresh cart payloads whenever abandoned pagination URL changes (and on first paint)
+  useEffect(() => {
+    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrl}`);
+  }, [abandonedPageFromUrl]);
 
   // Reload activity on any order event
   useSocketEvent('order:new', () => {
-    cartsFetcher.load('/admin/cs/queue/carts');
+    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
   });
   useSocketEvent('order:status_changed', () => {
-    cartsFetcher.load('/admin/cs/queue/carts');
+    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
   });
 
   const actionError = (fetcher.data as { error?: string })?.error;
@@ -1054,13 +1113,13 @@ export function CSDashboardPage({
   useEffect(() => {
     if (deleteCartFetcher.state === 'idle' && deleteCartFetcher.data?.ok) {
       setDeleteCartConfirm(null);
-      cartsFetcher.load('/admin/cs/queue/carts');
+      cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
     }
   }, [deleteCartFetcher.state, deleteCartFetcher.data]);
 
   // cart:updated socket event → reload carts fetcher directly (main loader revalidation won't refresh fetcher data)
   useSocketEvent('cart:updated', () => {
-    cartsFetcher.load('/admin/cs/queue/carts');
+    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
   });
 
   // Detect newly arrived + updated activity items after each fetcher response
@@ -1160,6 +1219,7 @@ export function CSDashboardPage({
 
   const totalPending = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
   const totalCapacity = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
+  const totalClosesToday = workloads.reduce((sum: number, w: AgentWorkload) => sum + (w.todayClosesCount ?? 0), 0);
   const confirmedCount = (statusCounts as Record<string, number>)['CONFIRMED'] ?? 0;
   const cancelledCount = (statusCounts as Record<string, number>)['CANCELLED'] ?? 0;
   const assignableCloserOptions = useMemo(
@@ -1262,6 +1322,10 @@ export function CSDashboardPage({
         </div>
       </div>
 
+      {criticalFetchErrors.length > 0 && (
+        <RouteFetchErrorBanner messages={criticalFetchErrors} variant="danger" />
+      )}
+
       {canCreateOffline && (
         <CreateOfflineOrderModal
           open={createOfflineOpen}
@@ -1328,7 +1392,7 @@ export function CSDashboardPage({
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
             <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Capacity
+              Backlog / cap
             </p>
             <p className="text-xl font-bold text-app-fg mt-1">
               {totalPending}
@@ -1336,6 +1400,18 @@ export function CSDashboardPage({
                 /{totalCapacity}
               </span>
             </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
+              Duty today
+            </p>
+            <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">
+              {totalClosesToday}
+              <span className="text-sm font-normal text-app-fg-muted">
+                /{totalCapacity}
+              </span>
+            </p>
+            <p className="text-[10px] text-app-fg-muted mt-0.5 leading-tight">Lagos</p>
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
             <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
@@ -1356,7 +1432,7 @@ export function CSDashboardPage({
           {cartStats && (
             <>
               <DeferredSection resolve={cartStats} skeleton="inline">
-                {(stats: { pending: number; abandonedLast24h: number }) => (
+                {(stats: { pending: number; abandonedOpen: number }) => (
                   <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
                     <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
                       Cart Pending
@@ -1368,13 +1444,13 @@ export function CSDashboardPage({
                 )}
               </DeferredSection>
               <DeferredSection resolve={cartStats} skeleton="inline">
-                {(stats: { pending: number; abandonedLast24h: number }) => (
+                {(stats: { pending: number; abandonedOpen: number }) => (
                   <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
                     <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-                      Abandoned (24h)
+                      Abandoned
                     </p>
                     <p className="text-xl font-bold text-app-fg mt-1">
-                      {stats.abandonedLast24h}
+                      {stats.abandonedOpen}
                     </p>
                   </div>
                 )}
@@ -1416,15 +1492,16 @@ export function CSDashboardPage({
             const rawActivity = liveActivityData.activityItems ?? [];
             const items: LiveActivityItem[] = rawActivity.length > 0
               ? rawActivity
-              : (liveActivityData.pendingCarts ?? []).map((c) => ({
+              : (liveActivityData.pendingCarts ?? []).map<LiveActivityItem>((c) => ({
                   id: c.id,
                   customerName: c.customerName,
                   customerPhoneDisplay: c.customerPhoneDisplay,
                   productName: c.productName,
                   offerLabel: c.offerLabel,
-                  cartStatus: 'PENDING' as const,
+                  cartStatus: 'PENDING',
                   orderStatus: null,
                   linkedOrderId: null,
+                  totalAmount: null,
                   updatedAt: c.updatedAt,
                 }));
             // Sort: new first, then updated, then rest by updatedAt desc
@@ -1631,7 +1708,8 @@ export function CSDashboardPage({
           <div>
             <h2 className="text-sm font-semibold text-app-fg">Closer workloads</h2>
             <p className="text-xs text-app-fg-muted mt-0.5">
-              {workloads.length} active closer{workloads.length !== 1 ? 's' : ''} · {totalPending}/{totalCapacity} slots filled
+              {workloads.length} active closer{workloads.length !== 1 ? 's' : ''} · backlog {totalPending}/{totalCapacity}{' '}
+              (concurrent) · duty {totalClosesToday}/{totalCapacity} today (Lagos)
             </p>
           </div>
           {workloads.length > 0 && (
@@ -1721,17 +1799,31 @@ export function CSDashboardPage({
             {
               value: 'active',
               label: `Active Orders (${activeTotal})`,
+            },
+            {
+              value: 'duplicates',
+              label: 'Duplicates',
               badge: (
                 <DeferredSection resolve={flaggedDuplicates} skeleton="inline">
                   {(pairs: DuplicatePair[]) =>
                     pairs.length > 0 ? (
-                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400 text-xs font-bold" title={`${pairs.length} duplicate(s)`}>
-                        ⚠{pairs.length}
+                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400 text-xs font-bold">
+                        {pairs.length}
                       </span>
                     ) : null
                   }
                 </DeferredSection>
               ),
+            },
+            {
+              value: 'abandoned',
+              label: 'Cart abandonment',
+              badge:
+                abandonedPagination.total > 0 ? (
+                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-surface-200 dark:bg-surface-700 text-app-fg-muted text-xs font-bold">
+                    {abandonedPagination.total}
+                  </span>
+                ) : undefined,
             },
             {
               value: 'callbacks',
@@ -1832,7 +1924,7 @@ export function CSDashboardPage({
                     size="sm"
                     disabled={selectedQueueIds.size === 0}
                     onClick={() => {
-                      setBulkAssignAgentId('');
+                      setBulkAssignAgentIds(new Set());
                       setAssignCloserModalOpen(true);
                     }}
                   >
@@ -1980,7 +2072,7 @@ export function CSDashboardPage({
         onClose={() => {
           if (isBulkAssigning) return;
           setAssignCloserModalOpen(false);
-          setBulkAssignAgentId('');
+          setBulkAssignAgentIds(new Set());
         }}
         maxWidth="max-w-md"
         aria-labelledby="assign-closer-title"
@@ -1994,6 +2086,9 @@ export function CSDashboardPage({
           <p className="text-sm text-app-fg-muted mt-0.5">
             {selectedQueueIds.size} order{selectedQueueIds.size !== 1 ? 's' : ''} selected
           </p>
+          <p className="text-xs text-app-fg-muted mt-1.5">
+            Select one or more closers — selected orders are split among them at random.
+          </p>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-1.5">
           {assignableCloserOptions.length === 0 ? (
@@ -2002,20 +2097,31 @@ export function CSDashboardPage({
             </p>
           ) : (
             assignableCloserOptions.map((opt) => {
-              const isPick = bulkAssignAgentId === opt.value;
+              const checked = bulkAssignAgentIds.has(opt.value);
               return (
-                <button
+                <label
                   key={opt.value}
-                  type="button"
-                  onClick={() => setBulkAssignAgentId(opt.value)}
-                  className={`w-full text-left rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                    isPick
+                  className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    checked
                       ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40 text-app-fg ring-1 ring-brand-500/30'
                       : 'border-app-border bg-app-elevated hover:border-brand-300 dark:hover:border-brand-700'
                   }`}
                 >
-                  {opt.label}
-                </button>
+                  <Checkbox
+                    className="mt-0.5 shrink-0"
+                    checked={checked}
+                    onChange={() =>
+                      setBulkAssignAgentIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(opt.value)) next.delete(opt.value);
+                        else next.add(opt.value);
+                        return next;
+                      })
+                    }
+                    aria-label={opt.label}
+                  />
+                  <span className="min-w-0 flex-1 text-left leading-snug">{opt.label}</span>
+                </label>
               );
             })
           )}
@@ -2033,7 +2139,7 @@ export function CSDashboardPage({
             disabled={isBulkAssigning}
             onClick={() => {
               setAssignCloserModalOpen(false);
-              setBulkAssignAgentId('');
+              setBulkAssignAgentIds(new Set());
             }}
           >
             Cancel
@@ -2043,7 +2149,10 @@ export function CSDashboardPage({
             variant="primary"
             size="sm"
             disabled={
-              selectedQueueIds.size === 0 || !bulkAssignAgentId || assignableCloserOptions.length === 0 || isBulkAssigning
+              selectedQueueIds.size === 0 ||
+                bulkAssignAgentIds.size === 0 ||
+                assignableCloserOptions.length === 0 ||
+                isBulkAssigning
             }
             loading={isBulkAssigning}
             loadingText="Assigning…"
@@ -2052,7 +2161,7 @@ export function CSDashboardPage({
                 {
                   intent: 'bulkAssignToCS',
                   orderIds: JSON.stringify(Array.from(selectedQueueIds)),
-                  csAgentId: bulkAssignAgentId,
+                  csAgentIds: JSON.stringify(Array.from(bulkAssignAgentIds)),
                   ...csMutationBranchPayload(unassignedOrders.filter((o) => selectedQueueIds.has(o.id))),
                 },
                 { method: 'post' },
@@ -2821,82 +2930,229 @@ export function CSDashboardPage({
         </DeferredSection>
       )}
 
-      {/* ── Duplicates warning (shown when Active Orders tab is active) ─── */}
-      {activeTab === 'active' && (
-        <DeferredSection resolve={flaggedDuplicates} skeleton="inline">
-          {(pairs: DuplicatePair[]) =>
-            pairs.length > 0 ? (
-              <div className="card border-danger-200 dark:border-danger-800 bg-danger-50/40 dark:bg-danger-900/10">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center shrink-0 mt-0.5">
-                    <svg className="w-4 h-4 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-danger-700 dark:text-danger-400">
-                      {pairs.length} potential duplicate{pairs.length > 1 ? 's' : ''} detected
+      {/* ── Duplicates Tab ──────────────────────────── */}
+      {activeTab === 'duplicates' && (
+        <DeferredSection resolve={flaggedDuplicates} skeleton="table">
+          {(pairs: DuplicatePair[]) => (
+            <div className="h-[28rem] overflow-auto">
+              <div className="space-y-4">
+                <div className="card">
+                  <div className="mb-4">
+                    <h2 className="text-lg font-semibold text-app-fg">Potential duplicates</h2>
+                    <p className="text-sm text-app-fg-muted mt-0.5">
+                      New orders flagged because another non-cancelled order shares the same buyer phone within the last 6
+                      hours. Merge into the original or dismiss if this is a legitimate separate order.
                     </p>
-                    <div className="mt-2 space-y-2">
-                      {pairs.slice(0, 3).map((pair: DuplicatePair) => (
-                        <div key={pair.duplicate.id} className="flex items-center justify-between gap-2 text-xs">
-                          <span className="inline-flex items-center gap-1 text-app-fg-muted truncate">
-                            {pair.duplicate.customerName} — #
-                            <OrderIdBadge id={pair.duplicate.id} ellipsis="" textClassName="text-app-fg-muted" />
-                          </span>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <Button
-                              type="button"
-                              variant="danger"
-                              size="sm"
-                              className="text-[11px] px-2 py-0.5 h-auto"
-                              onClick={() =>
-                                fetcher.submit(
-                                  {
-                                    intent: 'mergeDuplicate',
-                                    duplicateId: pair.duplicate.id,
-                                    originalId: pair.original?.id ?? '',
-                                    ...csMutationBranchPayload(
-                                      [pair.duplicate, ...(pair.original ? [pair.original] : [])],
-                                    ),
-                                  },
-                                  { method: 'post' },
-                                )}
-                              disabled={!pair.original || fetcher.state !== 'idle'}
-                            >
-                              Merge
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              className="text-[11px] px-2 py-0.5 h-auto"
-                              onClick={() =>
-                                fetcher.submit(
-                                  {
-                                    intent: 'dismissDuplicate',
-                                    orderId: pair.duplicate.id,
-                                    ...csMutationBranchPayload([pair.duplicate]),
-                                  },
-                                  { method: 'post' },
-                                )}
-                              disabled={fetcher.state !== 'idle'}
-                            >
-                              Dismiss
-                            </Button>
+                  </div>
+
+                  {pairs.length === 0 ? (
+                    <EmptyState title="No flagged duplicates" description="Nothing needs review right now." />
+                  ) : (
+                    <div className="space-y-3">
+                      {pairs.map((pair: DuplicatePair) => (
+                        <div
+                          key={pair.duplicate.id}
+                          className="rounded-lg border border-danger-200 dark:border-danger-800/80 bg-danger-50/30 dark:bg-danger-900/10 p-4"
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-danger-100 dark:bg-danger-900/35 text-danger-700 dark:text-danger-400">
+                                  Flagged duplicate
+                                </span>
+                                <OrderIdBadge
+                                  id={pair.duplicate.id}
+                                  linkTo={`/admin/orders/${pair.duplicate.id}`}
+                                  textClassName="text-brand-500 hover:text-brand-600 font-medium text-sm"
+                                />
+                              </div>
+                              <p className="text-sm font-medium text-app-fg">{pair.duplicate.customerName}</p>
+                              <p className="text-xs text-app-fg-muted">
+                                <span className="font-mono">{pair.duplicate.customerPhoneDisplay ?? '—'}</span>
+                                {pair.duplicate.totalAmount ? (
+                                  <>
+                                    {' '}
+                                    · ₦{Number(pair.duplicate.totalAmount).toLocaleString('en-NG')}
+                                  </>
+                                ) : null}
+                              </p>
+                              <p className="text-xs text-app-fg-muted">
+                                Received:{' '}
+                                {new Date(pair.duplicate.createdAt).toLocaleString('en-NG', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </p>
+                              {pair.original ? (
+                                <p className="text-xs text-app-fg-muted">
+                                  Original:{' '}
+                                  <OrderIdBadge
+                                    id={pair.original.id}
+                                    linkTo={`/admin/orders/${pair.original.id}`}
+                                    textClassName="text-brand-500 hover:text-brand-600 font-medium text-xs"
+                                  />
+                                </p>
+                              ) : (
+                                <p className="text-xs text-warning-700 dark:text-warning-400">
+                                  Original order missing — merge unavailable until linked.
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
+                              <TableActionButton to={`/admin/orders/${pair.duplicate.id}`} variant="primary">
+                                View
+                              </TableActionButton>
+                              <TableActionButton
+                                variant="neutral"
+                                disabled={!pair.original || fetcher.state !== 'idle'}
+                                onClick={() =>
+                                  fetcher.submit(
+                                    {
+                                      intent: 'mergeDuplicate',
+                                      duplicateId: pair.duplicate.id,
+                                      originalId: pair.original?.id ?? '',
+                                      ...csMutationBranchPayload(
+                                        [pair.duplicate, ...(pair.original ? [pair.original] : [])],
+                                      ),
+                                    },
+                                    { method: 'post' },
+                                  )}
+                              >
+                                Merge
+                              </TableActionButton>
+                              <TableActionButton
+                                variant="neutral"
+                                disabled={fetcher.state !== 'idle'}
+                                onClick={() =>
+                                  fetcher.submit(
+                                    {
+                                      intent: 'dismissDuplicate',
+                                      orderId: pair.duplicate.id,
+                                      ...csMutationBranchPayload([pair.duplicate]),
+                                    },
+                                    { method: 'post' },
+                                  )}
+                              >
+                                Dismiss
+                              </TableActionButton>
+                            </div>
                           </div>
                         </div>
                       ))}
-                      {pairs.length > 3 && (
-                        <p className="text-[11px] text-danger-600 dark:text-danger-400">+{pairs.length - 3} more duplicates</p>
-                      )}
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
-            ) : null
-          }
+            </div>
+          )}
         </DeferredSection>
+      )}
+
+      {/* ── Cart abandonment Tab ──────────────────────────── */}
+      {activeTab === 'abandoned' && (
+        <div className="h-[28rem] overflow-auto">
+          <div className="space-y-4">
+            <div className="card">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold text-app-fg">Cart abandonment</h2>
+                <p className="text-sm text-app-fg-muted mt-0.5">
+                  Sessions marked dropped-off after idle — they stay here until cleared. Use{' '}
+                  <strong className="text-app-fg">Clear</strong> when handled. Total backlog matches the overview{' '}
+                  <strong className="text-app-fg">Abandoned</strong> count ({abandonedPagination.total}).
+                </p>
+              </div>
+
+              {abandonedCartsList.length === 0 ? (
+                <EmptyState
+                  title={abandonedPagination.total === 0 ? 'No abandoned carts' : 'No carts on this page'}
+                  description={
+                    abandonedPagination.total === 0
+                      ? 'Dropped-off sessions appear here until cleared.'
+                      : 'Try another page or go back to page 1.'
+                  }
+                />
+              ) : (
+                <div className="space-y-3">
+                  {abandonedCartsList.map((c: PendingCart) => (
+                    <div
+                      key={c.id}
+                      className="rounded-lg border border-app-border bg-app-elevated p-4 dark:border-app-border-strong"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-app-hover text-app-fg-muted">
+                            Dropped off
+                          </span>
+                          <p className="text-sm font-semibold text-app-fg">{c.customerName}</p>
+                          <p className="text-xs text-app-fg-muted font-mono">{c.customerPhoneDisplay}</p>
+                          <p className="text-xs text-app-fg">
+                            <span className="text-app-fg-muted">Product:</span>{' '}
+                            {c.productName ?? '—'}
+                            {c.offerLabel ? (
+                              <>
+                                {' '}
+                                <span className="text-app-fg-muted">·</span> {c.offerLabel}
+                              </>
+                            ) : null}
+                          </p>
+                          {c.campaignName ? (
+                            <p className="text-xs text-app-fg-muted">
+                              <span className="font-medium text-app-fg-muted">Form:</span> {c.campaignName}
+                            </p>
+                          ) : null}
+                          <p className="text-xs text-app-fg-muted">
+                            Last activity:{' '}
+                            {new Date(c.updatedAt).toLocaleString('en-NG', {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          {canCreateOffline ? (
+                            <TableActionButton
+                              variant="primary"
+                              disabled={deleteCartFetcher.state !== 'idle'}
+                              onClick={() => {
+                                setCreateOfflinePrefill({ customerName: c.customerName });
+                                setCreateOfflineOpen(true);
+                              }}
+                            >
+                              Offline order
+                            </TableActionButton>
+                          ) : null}
+                          {canDeleteCart ? (
+                            <TableActionButton variant="danger" onClick={() => setDeleteCartConfirm(c)}>
+                              Clear
+                            </TableActionButton>
+                          ) : null}
+                          {!canCreateOffline && !canDeleteCart ? (
+                            <span className="text-xs text-app-fg-muted">No actions — ask HoCS for clear access.</span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {abandonedTotalPages >= 1 ? (
+                <div className="mt-4 flex justify-center border-t border-app-border pt-4">
+                  <Pagination
+                    page={abandonedPagination.page}
+                    totalPages={abandonedTotalPages}
+                    pageParam="abandonedPage"
+                    showWhenSinglePage
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Delete abandoned cart confirmation ─── */}

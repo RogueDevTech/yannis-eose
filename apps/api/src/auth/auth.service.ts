@@ -147,14 +147,6 @@ export class AuthService {
       this.logger.warn(`rate_limit_clear_failed ip=${clientIp} reason=${(err as Error).message}`);
     }
 
-    // Option B: first login — move PENDING → ACTIVE
-    if (user.status === 'PENDING') {
-      await this.db
-        .update(schema.users)
-        .set({ status: 'ACTIVE', updatedAt: new Date() })
-        .where(eq(schema.users.id, user.id));
-    }
-
     // Generate session token
     const token = randomBytes(32).toString('hex');
 
@@ -233,15 +225,14 @@ export class AuthService {
         : this.sessionTtl
       : secondsUntilEndOfLocalDay();
 
-    // Bump login_count + last_login_at as the user themselves so the temporal
-    // trigger writes a users_history row attributed to them. The audit log
-    // (audit.globalLog) picks this up automatically — no separate audit_events
-    // table is needed. Login lands in the audit feed alongside profile/role edits.
+    // Bump login_count + last_login_at as the signing-in user; first login also moves
+    // PENDING → ACTIVE in the same transaction so temporal audit records modified_by (never bare pool writes → "System").
     try {
       await withActor(this.db, sessionUser, async (tx) => {
         await tx
           .update(schema.users)
           .set({
+            ...(user.status === 'PENDING' ? { status: 'ACTIVE' as const } : {}),
             loginCount: sql`${schema.users.loginCount} + 1`,
             lastLoginAt: new Date(),
             updatedAt: new Date(),
@@ -569,20 +560,21 @@ export class AuthService {
 
     const text = `Hi ${user.name},\n\nWe received a request to reset your password.\n\nReset your password: ${resetUrl}\n\nThis link expires in 30 minutes.\n\nIf you didn't request this, you can safely ignore this email.`;
 
-    const sent = await this.notifications.sendEmail({
-      to: user.email,
-      subject: 'Yannis EOSE — Password Reset',
-      html,
-      text,
-    });
-
     this.logger.log(`Password reset token generated for user ${user.id}`);
-    if (!sent && process.env.NODE_ENV !== 'production') {
-      // Email is best-effort; local DNS/offline often breaks SendGrid. Surface link only in dev.
-      this.logger.warn(
-        `[dev] Password reset email was not delivered — use this link once: ${resetUrl}`,
-      );
-    }
+    void this.notifications
+      .sendEmail({
+        to: user.email,
+        subject: 'Yannis EOSE — Password Reset',
+        html,
+        text,
+      })
+      .then((sent) => {
+        if (!sent && process.env.NODE_ENV !== 'production') {
+          this.logger.warn(
+            `[dev] Password reset email was not delivered — use this link once: ${resetUrl}`,
+          );
+        }
+      });
   }
 
   /**
@@ -610,14 +602,17 @@ export class AuthService {
     // Hash the new password
     const passwordHash = await this.hashPassword(newPassword);
 
-    // Update password in database (with actor injection for audit trail)
-    await this.db.execute(
-      sql`SELECT set_config('yannis.current_user_id', ${userId}, true)`,
-    );
-    await this.db
-      .update(schema.users)
-      .set({ passwordHash })
-      .where(eq(schema.users.id, userId));
+    // Update password with actor injection. `withActor` opens a drizzle
+    // transaction and runs `SET LOCAL yannis.current_user_id` on the same pinned
+    // connection as the UPDATE — without the transaction wrapper, postgres.js's
+    // pool would land the UPDATE on a different connection and the audit trail
+    // would attribute the password reset to "System" instead of the user.
+    await withActor(this.db, { id: userId }, async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({ passwordHash })
+        .where(eq(schema.users.id, userId));
+    });
 
     // Invalidate the reset token (single-use)
     await this.redis.del(`${RESET_TOKEN_PREFIX}${token}`);

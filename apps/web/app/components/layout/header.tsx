@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Form, Link, useNavigate, useFetcher, useSubmit, useNavigation } from '@remix-run/react';
+import { Form, Link, useNavigate, useFetcher, useSubmit, useNavigation, useLocation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
@@ -116,6 +116,12 @@ export function Header({
   const navigate = useNavigate();
   const submit = useSubmit();
   const navigation = useNavigation();
+  const location = useLocation();
+  // Per-shell notifications page: TPL users land on `/tpl/notifications`, everyone else
+  // (admin / hr / tpl-admin) shares the canonical `/admin/notifications` history page.
+  const notificationsHistoryPath = location.pathname.startsWith('/tpl')
+    ? '/tpl/notifications'
+    : '/admin/notifications';
   const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
   const isMobileBranchSwitching =
     navigation.state !== 'idle' && navigation.formAction?.includes('/admin/branches/switch');
@@ -276,13 +282,22 @@ export function Header({
         {/* Notifications bell — deferred so layout loads immediately */}
         <div className="relative">
           <DeferredSection resolve={notificationsPromise} skeleton="inline">
-            {({ notifications, unreadCount }) => {
+            {({ notifications, unreadCount, total }: { notifications: Notification[]; unreadCount: number; total?: number }) => {
               // Deduplicate: only include realtime notifications NOT already in the server list
               const serverIds = new Set(notifications.map((n: Notification) => n.id));
               const uniqueRealtime = realtimeNotifications.filter((n) => !serverIds.has(n.id));
               const mergedNotifications = [...uniqueRealtime, ...notifications];
               const serverUnread = unreadCount + uniqueRealtime.length;
               const mergedUnreadCount = displayUnreadCount(serverUnread);
+              // Total across the user's full history (server `pagination.total`). May be
+              // larger than `mergedNotifications.length` because the drawer is capped at
+              // 50 — surfaced in the header so the user can tell at a glance whether
+              // more notifications exist beyond what's rendered here.
+              const serverTotal =
+                typeof total === 'number'
+                  ? Math.max(total, mergedNotifications.length)
+                  : mergedNotifications.length;
+              const hasOlderHistory = serverTotal > mergedNotifications.length;
               return (
                 <>
                   <SyncNotificationReadIds notifications={notifications} onPruneServerKnown={onPruneServerKnown} />
@@ -331,11 +346,13 @@ export function Header({
                           <div className="flex items-center justify-between px-4 py-4 border-b border-app-border flex-shrink-0">
                             <h3 className="text-base font-semibold text-app-fg">
                               Notifications
-                              {mergedUnreadCount > 0 && (
-                                <span className="ml-1.5 text-sm text-app-fg-muted font-normal">
-                                  ({mergedUnreadCount} unread)
-                                </span>
-                              )}
+                              <span className="ml-1.5 text-sm text-app-fg-muted font-normal">
+                                {mergedUnreadCount > 0
+                                  ? `(${mergedUnreadCount} unread · ${serverTotal} total)`
+                                  : serverTotal > 0
+                                    ? `(${serverTotal} total)`
+                                    : null}
+                              </span>
                             </h3>
                             <div className="flex items-center gap-2">
                               {mergedUnreadCount > 0 && (
@@ -414,14 +431,19 @@ export function Header({
                           </div>
 
                           {mergedNotifications.length > 0 && (
-                            <div className="px-4 py-3 border-t border-app-border flex-shrink-0">
+                            <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-app-border flex-shrink-0">
                               <a
-                                href="/admin/notifications"
+                                href={notificationsHistoryPath}
                                 className="text-sm text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 font-medium"
                                 onClick={() => setNotifOpen(false)}
                               >
                                 View all notifications
                               </a>
+                              {hasOlderHistory && (
+                                <span className="text-xs text-app-fg-muted">
+                                  +{serverTotal - mergedNotifications.length} older in history
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>

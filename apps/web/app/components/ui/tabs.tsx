@@ -1,9 +1,12 @@
 import type { ReactNode } from 'react';
+import { Link } from '@remix-run/react';
 
 export interface TabItem {
   value: string;
   label: string;
   badge?: ReactNode;
+  /** When provided, tab renders as a Link (route navigation) instead of a button (in-page tab switch). */
+  to?: string;
 }
 
 export interface TabsProps {
@@ -20,20 +23,40 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', className =
       <div className={`flex rounded-lg bg-app-hover border border-app-border p-1 ${className}`.trim()}>
         {tabs.map((tab) => {
           const isActive = value === tab.value;
-          return (
-            <button
-              key={tab.value}
-              type="button"
-              onClick={() => onChange(tab.value)}
-              className={`flex-1 rounded-md py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
-                isActive
-                  ? 'bg-white dark:bg-transparent text-app-fg shadow-sm border border-app-border'
-                  : 'text-app-fg-muted hover:text-app-fg'
-              }`}
-            >
+          const content = (
+            <>
               {tab.label}
               {tab.badge}
-            </button>
+            </>
+          );
+          return (
+            tab.to ? (
+              <Link
+                key={tab.value}
+                to={tab.to}
+                prefetch="intent"
+                className={`flex-1 rounded-md py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+                  isActive
+                    ? 'bg-white dark:bg-transparent text-app-fg shadow-sm border border-app-border'
+                    : 'text-app-fg-muted hover:text-app-fg'
+                }`}
+              >
+                {content}
+              </Link>
+            ) : (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => onChange(tab.value)}
+                className={`flex-1 rounded-md py-2 text-xs font-medium transition-colors flex items-center justify-center gap-1.5 ${
+                  isActive
+                    ? 'bg-white dark:bg-transparent text-app-fg shadow-sm border border-app-border'
+                    : 'text-app-fg-muted hover:text-app-fg'
+                }`}
+              >
+                {content}
+              </button>
+            )
           );
         })}
       </div>
@@ -48,20 +71,40 @@ export function Tabs({ value, onChange, tabs, variant = 'underline', className =
       >
         {tabs.map((tab) => {
           const isActive = value === tab.value;
-          return (
-            <button
-              key={tab.value}
-              type="button"
-              onClick={() => onChange(tab.value)}
-              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 pb-2.5 text-sm font-medium transition-colors ${
-                isActive
-                  ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-                  : 'border-transparent text-app-fg-muted hover:text-app-fg'
-              }`}
-            >
+          const content = (
+            <>
               {tab.label}
               {tab.badge}
-            </button>
+            </>
+          );
+          return (
+            tab.to ? (
+              <Link
+                key={tab.value}
+                to={tab.to}
+                prefetch="intent"
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 pb-2.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+                    : 'border-transparent text-app-fg-muted hover:text-app-fg'
+                }`}
+              >
+                {content}
+              </Link>
+            ) : (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => onChange(tab.value)}
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 pb-2.5 text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+                    : 'border-transparent text-app-fg-muted hover:text-app-fg'
+                }`}
+              >
+                {content}
+              </button>
+            )
           );
         })}
       </nav>

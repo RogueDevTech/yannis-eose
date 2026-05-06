@@ -196,7 +196,8 @@ export class NotificationsService {
 
   /**
    * Create notifications for all ACTIVE users with a given role.
-   * Non-blocking — logs errors but doesn't throw (notifications are best-effort).
+   * Fan-out runs in parallel per user. Prefer `enqueueCreateForRole` on request paths so HTTP latency
+   * is not tied to DB insert + push for every recipient.
    */
   async createForRole(
     role: (typeof schema.users.$inferSelect)['role'],
@@ -212,13 +213,15 @@ export class NotificationsService {
         ),
       );
 
-    for (const row of rows) {
-      try {
-        await this.create({ ...input, userId: row.id });
-      } catch (err) {
-        this.logger.warn(`Failed to create notification for user ${row.id}: ${err}`);
-      }
-    }
+    await Promise.all(
+      rows.map(async (row) => {
+        try {
+          await this.create({ ...input, userId: row.id });
+        } catch (err) {
+          this.logger.warn(`Failed to create notification for user ${row.id}: ${err}`);
+        }
+      }),
+    );
   }
 
   /**
@@ -239,13 +242,52 @@ export class NotificationsService {
         ),
       );
 
-    for (const row of rows) {
-      try {
-        await this.create({ ...input, userId: row.id });
-      } catch (err) {
-        this.logger.warn(`Failed to create notification for user ${row.id}: ${err}`);
-      }
-    }
+    await Promise.all(
+      rows.map(async (row) => {
+        try {
+          await this.create({ ...input, userId: row.id });
+        } catch (err) {
+          this.logger.warn(`Failed to create notification for user ${row.id}: ${err}`);
+        }
+      }),
+    );
+  }
+
+  /**
+   * Single-recipient in-app (+ push) notification without blocking the caller.
+   */
+  enqueueCreate(input: CreateNotificationInput): void {
+    void this.create(input).catch((err: unknown) => {
+      this.logger.warn(
+        `enqueueCreate failed user=${input.userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }
+
+  /**
+   * Fire-and-forget role fan-out (`createForRole`). Use from orders / inventory / cart / payment code paths
+   * so request latency is not tied to N sequential `create()` calls. Errors are logged only.
+   */
+  enqueueCreateForRole(
+    role: (typeof schema.users.$inferSelect)['role'],
+    input: Omit<CreateNotificationInput, 'userId'>,
+  ): void {
+    void this.createForRole(role, input).catch((err: unknown) => {
+      this.logger.warn(
+        `createForRole(${role}) failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  }
+
+  /**
+   * Fire-and-forget location fan-out (`createForLocation`). Same rationale as `enqueueCreateForRole`.
+   */
+  enqueueCreateForLocation(locationId: string, input: Omit<CreateNotificationInput, 'userId'>): void {
+    void this.createForLocation(locationId, input).catch((err: unknown) => {
+      this.logger.warn(
+        `createForLocation(${locationId}) failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   }
 
   /**
@@ -333,6 +375,12 @@ export class NotificationsService {
     if (data['transferId']) return '/admin/inventory';
     if (data['payoutId']) return '/admin/hr';
     if (data['batchId'] && type.startsWith('hr:batch_')) return `/hr/payroll?batchId=${data['batchId']}`;
+    if (type === 'hr:onboarding_changes_requested' || type === 'hr:onboarding_approved') {
+      return '/admin/onboarding';
+    }
+    if (type === 'hr:onboarding_submitted' && data['userId']) {
+      return `/hr/users/${data['userId']}/onboarding`;
+    }
     return '/admin';
   }
 
@@ -365,6 +413,14 @@ export class NotificationsService {
    */
   async create(input: CreateNotificationInput) {
     if (await this.isUserOptedOut(input.userId, input.type)) {
+      // Silent drops here are how "I should have 40 notifications, I see 2" happens
+      // in practice: a user toggled a type off in Settings → Notifications, then every
+      // future notification of that type is skipped (no DB row, no socket, no push, no
+      // email). Mandatory types bypass opt-out, so this only fires for opted-out types.
+      // Log it (warn-level) so operators have a paper trail without grepping the prefs.
+      this.logger.warn(
+        `notification:dropped (user opted out) — userId=${input.userId} type=${input.type} title="${input.title}"`,
+      );
       return null;
     }
 

@@ -692,18 +692,26 @@ export function CEODashboardPage({
           <div className="space-y-3">
             <MetricRow label="Agents Active" value={csTeamSafe.agentCount.toString()} />
             <MetricRow
-              label="Pending Orders"
+              label="Pipeline backlog"
               value={csTeamSafe.pendingOrders.toString()}
               highlight={csTeamSafe.pendingOrders > 20 ? 'danger' : csTeamSafe.pendingOrders > 10 ? 'warning' : undefined}
             />
             <MetricRow
-              label="Utilization"
+              label="Avg daily duty"
               value={`${csTeamSafe.utilization}%`}
-              highlight={csTeamSafe.utilization >= 80 ? 'danger' : csTeamSafe.utilization >= 60 ? 'warning' : 'success'}
+              highlight={
+                csTeamSafe.agentCount === 0
+                  ? undefined
+                  : csTeamSafe.utilization >= 70
+                    ? 'success'
+                    : csTeamSafe.utilization >= 40
+                      ? 'warning'
+                      : 'danger'
+              }
             />
             {csTeamSafe.agentCount > 0 && (
               <MetricRow
-                label="Avg per Agent"
+                label="Avg backlog / agent"
                 value={(csTeamSafe.pendingOrders / csTeamSafe.agentCount).toFixed(1)}
               />
             )}
@@ -992,7 +1000,8 @@ export function CEODashboardPage({
         <div className="card">
           <h2 className="text-lg font-semibold text-app-fg mb-4">CS agent workload</h2>
           <p className="text-sm text-app-fg-muted mb-4">
-            Pending orders per agent (Unprocessed, CS Assigned, CS Engaged).
+            Pipeline backlog (pre-confirm queue), per-agent daily duty target (capacity setting), and CS-stage closes
+            today (confirm + cancel, Africa/Lagos calendar).
           </p>
           {chartDisplayData.chartTopicData?.csWorkloads && chartDisplayData.chartTopicData.csWorkloads.length > 0 ? (
             <div className="h-80 min-h-[280px] w-full min-w-0">
@@ -1005,6 +1014,7 @@ export function CEODashboardPage({
                     name: w.agentName,
                     pending: w.pendingCount,
                     capacity: w.capacity,
+                    closesToday: w.todayClosesCount ?? 0,
                   }))}
                   margin={{ top: 8, right: 24, left: 120, bottom: 8 }}
                 >
@@ -1012,12 +1022,22 @@ export function CEODashboardPage({
                   <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                   <YAxis type="category" dataKey="name" width={112} tick={{ fontSize: 11 }} />
                   <Tooltip
-                    formatter={((value: number | undefined, name: string) => [value ?? 0, name === 'pending' ? 'Pending orders' : 'Capacity']) as never}
+                    formatter={
+                      ((value: number | undefined, label: string) => {
+                        const map: Record<string, string> = {
+                          'Pipeline backlog': 'Pipeline backlog',
+                          'Daily target': 'Daily duty target',
+                          'Closed today': 'Closed today (Lagos)',
+                        };
+                        return [value ?? 0, map[label] ?? label];
+                      }) as never
+                    }
                     contentStyle={{ borderRadius: '8px' }}
                     cursor={{ fill: 'rgba(0,0,0,0.04)' }}
                   />
-                  <Bar dataKey="pending" name="Pending orders" fill="#0284c7" radius={[0, 4, 4, 0]} minPointSize={4} />
-                  <Bar dataKey="capacity" name="Capacity" fill="#94a3b8" radius={[0, 4, 4, 0]} minPointSize={4} />
+                  <Bar dataKey="pending" name="Pipeline backlog" fill="#0284c7" radius={[0, 4, 4, 0]} minPointSize={4} />
+                  <Bar dataKey="capacity" name="Daily target" fill="#94a3b8" radius={[0, 4, 4, 0]} minPointSize={4} />
+                  <Bar dataKey="closesToday" name="Closed today" fill="#22c55e" radius={[0, 4, 4, 0]} minPointSize={4} />
                 </BarChart>
               </ResponsiveContainer>
               </div>

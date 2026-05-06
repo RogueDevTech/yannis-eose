@@ -5,7 +5,7 @@ export interface Order {
   status: string;
   totalAmount: string | null;
   createdAt: string;
-  /** ISO `YYYY-MM-DD` when set (CS confirm / logistics); list API includes full row. */
+  /** ISO `YYYY-MM-DD` when set (CS confirm); list API includes full row. */
   preferredDeliveryDate?: string | null;
   assignedCsId: string | null;
   /** Set in list when available (e.g. CS orders for HoS/SuperAdmin) */
@@ -70,6 +70,7 @@ export interface OrderDetail {
   riderId?: string | null;
   deliveryState?: string | null;
   customerGender?: string | null;
+  /** ISO `YYYY-MM-DD` — set at confirm; shown as Schedule date on the detail page */
   preferredDeliveryDate?: string | null;
   deliveryOtp?: string | null;
   deliveryGpsLat?: string | null;
@@ -203,6 +204,27 @@ export interface OrderDetailPageExtraProps {
       available: number;
     }> | null;
   }>;
+  /**
+   * Heavy: eligibility + per-product availability per location.
+   * Prefer streaming this (deferred) so order detail loads fast, and only the allocate modal waits.
+   */
+  allocatableLocationsDeferred?: Promise<
+    Array<{
+      id: string;
+      name: string;
+      address: string | null;
+      whatsappGroupLink?: string | null;
+      providerName: string | null;
+      eligible: boolean;
+      reason: string | null;
+      availabilityByProduct: Array<{
+        productId: string;
+        productName: string;
+        needed: number;
+        available: number;
+      }> | null;
+    }>
+  >;
   /** WhatsApp group dispatch templates — loaded for the CS "Share to logistics company" flow. */
   logisticsDispatchTemplates?: Array<{ id: string; name: string; body: string }>;
   /** Auto-generated invoice for the order (CONFIRMED side effect). null if none yet. Streamed. */

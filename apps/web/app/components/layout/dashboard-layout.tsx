@@ -270,6 +270,12 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
       },
       {
+        label: 'Our warehouse',
+        href: '/admin/inventory/warehouses',
+        icon: SidebarIcons.inventory,
+        permission: 'inventory.read',
+      },
+      {
         label: 'Transfers',
         href: '/admin/transfers',
         icon: SidebarIcons.transfers,
@@ -363,8 +369,10 @@ const navStructure: NavGroupDef[] = [
         // bypass via the standard permission middleware. Submitters (CS Agents
         // tracking their own price-change requests) reach the page via direct URL
         // — we don't surface the sidebar link unless they can approve something.
+        // Head of Logistics: default approver for CS order price / archive requests
+        // (ROLE_PERMISSIONS); surface the link for the role like the Remix loader.
         permission: 'permission_requests.user_creation.approve',
-        roles: ['SUPER_ADMIN', 'ADMIN'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_LOGISTICS'],
       },
     ],
   },
@@ -464,6 +472,7 @@ function getNavGroupsForUser(
         // the sidebar entry for them.
         if (item.href === '/admin/permission-requests') {
           if (user?.role === 'SUPER_ADMIN') return true;
+          if (user?.role === 'HEAD_OF_LOGISTICS') return true;
           return (
             perms.includes('permission_requests.user_creation.approve') ||
             perms.includes('permission_requests.role_change.approve') ||
@@ -540,6 +549,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin',
     '/admin/logistics/orders',
     '/admin/logistics/partners',
+    '/admin/permission-requests',
     '/admin/logistics/remittances',
   ],
   TPL_MANAGER: [
@@ -590,6 +600,7 @@ function getBottomNavItemsForUser(
             perms.includes('hr.onboarding.approve'))) ||
         (item.href === '/admin/permission-requests' &&
           (user.role === 'SUPER_ADMIN' ||
+            user.role === 'HEAD_OF_LOGISTICS' ||
             perms.includes('permission_requests.user_creation.approve') ||
             perms.includes('permission_requests.role_change.approve') ||
             perms.includes('permission_requests.permission_grant.approve') ||

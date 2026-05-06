@@ -21,6 +21,7 @@ import {
   hrUpdateOnboardingSchema,
   submitOnboardingSchema,
   approveOnboardingSchema,
+  requestOnboardingChangesSchema,
   getOnboardingSchema,
   listStaffOnboardingDocumentsSchema,
 } from '@yannis/shared';
@@ -71,6 +72,13 @@ export const onboardingRouter = router({
   approve: authedProcedure.input(approveOnboardingSchema).mutation(async ({ input, ctx }) => {
     return getService().approve(input.userId, ctx.user);
   }),
+
+  /** Send a SUBMITTED packet back to the staff for edits — HR / admin only. */
+  requestChanges: authedProcedure
+    .input(requestOnboardingChangesSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getService().requestChanges(input.userId, input.reason, ctx.user);
+    }),
 
   /** HR overview — staff × onboarding status (service enforces HR onboarding visibility). */
   listStaffDocuments: authedProcedure

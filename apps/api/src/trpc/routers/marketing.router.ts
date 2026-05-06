@@ -21,6 +21,12 @@ import {
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
   listOfferTemplatesSchema,
+  archiveAllOfferTemplatesForProductSchema,
+  createOfferGroupSchema,
+  updateOfferGroupSchema,
+  listOfferGroupsSchema,
+  getOfferGroupSchema,
+  clearLegacyOfferTemplatesSchema,
   createCampaignSchema,
   updateCampaignSchema,
   listCampaignsSchema,
@@ -239,8 +245,12 @@ export const marketingRouter = router({
       );
     }),
 
-  /** Phase 20: gated by `marketing.funding.approve` (HoM, Finance, Admin templates carry it). */
-  approveFundingRequest: permissionProcedure('marketing.funding.approve')
+  /**
+   * HoM / custom roles: `marketing.funding.approve`.
+   * Finance disbursements (`/admin/finance/disbursements`): `finance.disburse` only — catalog
+   * removed `marketing.funding.approve` from FINANCE_OFFICER (2026-05-05); both codes OR here.
+   */
+  approveFundingRequest: permissionProcedure('marketing.funding.approve', 'finance.disburse')
     .meta({ branchScopedMutation: true })
     .input(approveFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
@@ -253,8 +263,8 @@ export const marketingRouter = router({
       );
     }),
 
-  /** Phase 20: same `marketing.funding.approve` permission covers both approve and reject. */
-  rejectFundingRequest: permissionProcedure('marketing.funding.approve')
+  /** Approve parity — Finance rejects from disbursements inbox with same gate as approve. */
+  rejectFundingRequest: permissionProcedure('marketing.funding.approve', 'finance.disburse')
     .meta({ branchScopedMutation: true })
     .input(rejectFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
@@ -426,7 +436,7 @@ export const marketingRouter = router({
     }),
 
   // ── Offer Templates ──────────────────────────────
-  createOfferTemplate: permissionProcedure('marketing.offerTemplate')
+  createOfferTemplate: permissionProcedure('products.offers')
     .meta({ branchScopedMutation: true })
     .input(createOfferTemplateSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
@@ -434,12 +444,20 @@ export const marketingRouter = router({
       return getMarketingService().createOfferTemplate(offerTemplateInput, ctx.user.id);
     }),
 
-  updateOfferTemplate: permissionProcedure('marketing.offerTemplate')
+  updateOfferTemplate: permissionProcedure('products.offers')
     .meta({ branchScopedMutation: true })
     .input(updateOfferTemplateSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...offerTemplateInput } = input;
       return getMarketingService().updateOfferTemplate(offerTemplateInput, ctx.user.id);
+    }),
+
+  archiveAllOfferTemplatesForProduct: permissionProcedure('products.offers')
+    .meta({ branchScopedMutation: true })
+    .input(archiveAllOfferTemplatesForProductSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _b, ...rest } = input;
+      return getMarketingService().archiveAllOfferTemplatesForProduct(rest.productId, ctx.user.id);
     }),
 
   getOfferTemplate: authedProcedure
@@ -452,6 +470,43 @@ export const marketingRouter = router({
     .input(listOfferTemplatesSchema)
     .query(async ({ input }) => {
       return getMarketingService().listOfferTemplates(input);
+    }),
+
+  // ── Offer Groups ─────────────────────────────────
+  createOfferGroup: permissionProcedure('products.offers')
+    .meta({ branchScopedMutation: true })
+    .input(createOfferGroupSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _branchId, ...offerGroupInput } = input;
+      return getMarketingService().createOfferGroup(offerGroupInput, ctx.user.id);
+    }),
+
+  updateOfferGroup: permissionProcedure('products.offers')
+    .meta({ branchScopedMutation: true })
+    .input(updateOfferGroupSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _branchId, ...offerGroupInput } = input;
+      return getMarketingService().updateOfferGroup(offerGroupInput, ctx.user.id);
+    }),
+
+  getOfferGroup: authedProcedure
+    .input(getOfferGroupSchema)
+    .query(async ({ input }) => {
+      return getMarketingService().getOfferGroup(input.id);
+    }),
+
+  listOfferGroups: authedProcedure
+    .input(listOfferGroupsSchema)
+    .query(async ({ input }) => {
+      return getMarketingService().listOfferGroups(input);
+    }),
+
+  clearLegacyOfferTemplates: permissionProcedure('products.offers')
+    .meta({ branchScopedMutation: true })
+    .input(clearLegacyOfferTemplatesSchema.extend({ branchId: z.string().uuid().optional() }))
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _branchId, ...rest } = input;
+      return getMarketingService().clearLegacyOfferTemplates(rest, ctx.user.id);
     }),
 
   // ── Campaigns ────────────────────────────────────

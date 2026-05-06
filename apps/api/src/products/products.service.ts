@@ -18,13 +18,61 @@ import { NotificationsService } from '../notifications/notifications.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isSuperAdminOnly } from '../common/authz';
 
-function lowestOfferPrice(offers: ProductOffer[]): number {
-  if (offers.length === 0) return 0;
-  return Math.min(...offers.map((o) => o.price));
-}
-
 function normalizeProductName(name: string): string {
   return name.trim().toLowerCase();
+}
+
+function parseJsonStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === 'string' && x.length > 0);
+}
+
+function legacyEmbeddedOffers(raw: unknown): ProductOffer[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: ProductOffer[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    const label = typeof o.label === 'string' ? o.label : '';
+    const qty = typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1;
+    const price = typeof o.price === 'number' ? o.price : Number(o.price);
+    if (!label || Number.isNaN(price)) continue;
+    out.push({
+      label,
+      qty,
+      price,
+      imageUrls: parseJsonStringArray(o.imageUrls),
+    });
+  }
+  return out.length > 0 ? out : null;
+}
+
+function templateRowsToOffers(
+  rows: Array<{
+    name: string;
+    price: string;
+    quantity: number | null;
+    imageUrls: unknown;
+  }>,
+): ProductOffer[] {
+  return rows.map((t) => ({
+    label: t.name,
+    qty: t.quantity != null && t.quantity >= 1 ? t.quantity : 1,
+    price: Number(t.price),
+    imageUrls: parseJsonStringArray(t.imageUrls),
+  }));
+}
+
+function resolveOffersForProduct(
+  templateRows: ProductOffer[],
+  legacyOffersRaw: unknown,
+  baseSalePrice: string,
+): ProductOffer[] {
+  if (templateRows.length > 0) return templateRows;
+  const legacy = legacyEmbeddedOffers(legacyOffersRaw);
+  if (legacy && legacy.length > 0) return legacy;
+  const p = Number(baseSalePrice);
+  return [{ label: 'Standard', qty: 1, price: Number.isFinite(p) ? p : 0, imageUrls: [] }];
 }
 
 @Injectable()
@@ -71,6 +119,43 @@ export class ProductsService {
    * is set, or when they have any user_product_assignments row. Other roles unchanged.
    * SuperAdmin bypasses.
    */
+  /**
+   * Active merchandising tiers (`offer_templates`) for many products — newest first per product.
+   */
+  private async loadActiveOfferTemplatesByProductIds(productIds: string[]) {
+    const map = new Map<string, ProductOffer[]>();
+    if (productIds.length === 0) return map;
+
+    const rows = await this.db
+      .select({
+        productId: schema.offerTemplates.productId,
+        name: schema.offerTemplates.name,
+        price: schema.offerTemplates.price,
+        quantity: schema.offerTemplates.quantity,
+        imageUrls: schema.offerTemplates.imageUrls,
+        createdAt: schema.offerTemplates.createdAt,
+      })
+      .from(schema.offerTemplates)
+      .where(
+        and(
+          inArray(schema.offerTemplates.productId, productIds),
+          eq(schema.offerTemplates.status, 'ACTIVE'),
+        ),
+      )
+      .orderBy(desc(schema.offerTemplates.createdAt));
+
+    const byProduct = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const arr = byProduct.get(r.productId) ?? [];
+      arr.push(r);
+      byProduct.set(r.productId, arr);
+    }
+    for (const [pid, list] of byProduct) {
+      map.set(pid, templateRowsToOffers(list));
+    }
+    return map;
+  }
+
   private async getCatalogScopeForViewer(
     viewerId: string,
     role: string,
@@ -110,7 +195,7 @@ export class ProductsService {
    * Uses transaction so set_config and insert run on same connection (audit trigger).
    */
   async create(input: CreateProductInput, actor: SessionUser) {
-    const baseSalePrice = lowestOfferPrice(input.offers);
+    const baseSalePrice = input.baseSalePrice;
     this.logger.log('create input', {
       costPrice: input.costPrice,
       costPriceType: typeof input.costPrice,
@@ -129,7 +214,8 @@ export class ProductsService {
             .values({
               name: input.name,
               description: input.description ?? null,
-              offers: input.offers as unknown,
+              galleryImageUrls: input.galleryImageUrls ?? [],
+              offers: [] as unknown,
               baseSalePrice: sql`${baseSalePrice}::numeric`,
               costPrice: sql`${input.costPrice}::numeric`,
               category: input.category ?? null,
@@ -199,7 +285,13 @@ export class ProductsService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
     }
 
-    return product;
+    const templateMap = await this.loadActiveOfferTemplatesByProductIds([product.id]);
+    const templates = templateMap.get(product.id) ?? [];
+    return {
+      ...product,
+      galleryImageUrls: parseJsonStringArray(product.galleryImageUrls),
+      offers: resolveOffersForProduct(templates, product.offers, String(product.baseSalePrice)),
+    };
   }
 
   /**
@@ -252,6 +344,7 @@ export class ProductsService {
           id: schema.products.id,
           name: schema.products.name,
           description: schema.products.description,
+          galleryImageUrls: schema.products.galleryImageUrls,
           offers: schema.products.offers,
           baseSalePrice: schema.products.baseSalePrice,
           costPrice: schema.products.costPrice,
@@ -279,6 +372,7 @@ export class ProductsService {
 
     // Aggregate available stock (sum across all locations) for the listed products in one query.
     const productIds = rows.map((r) => r.id);
+    const templateMap = await this.loadActiveOfferTemplatesByProductIds(productIds);
     const stockMap = new Map<string, number>();
     if (productIds.length > 0) {
       const stockRows = await this.db
@@ -296,7 +390,12 @@ export class ProductsService {
       id: r.id,
       name: r.name,
       description: r.description,
-      offers: r.offers,
+      galleryImageUrls: parseJsonStringArray(r.galleryImageUrls),
+      offers: resolveOffersForProduct(
+        templateMap.get(r.id) ?? [],
+        r.offers,
+        String(r.baseSalePrice),
+      ),
       baseSalePrice: r.baseSalePrice,
       costPrice: r.costPrice,
       category: r.category,
@@ -350,9 +449,11 @@ export class ProductsService {
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
       if (input.name !== undefined) updateFields['name'] = input.name;
       if (input.description !== undefined) updateFields['description'] = input.description;
-      if (input.offers !== undefined) {
-        updateFields['offers'] = input.offers;
-        updateFields['baseSalePrice'] = sql`${lowestOfferPrice(input.offers)}::numeric`;
+      if (input.baseSalePrice !== undefined) {
+        updateFields['baseSalePrice'] = sql`${input.baseSalePrice}::numeric`;
+      }
+      if (input.galleryImageUrls !== undefined) {
+        updateFields['galleryImageUrls'] = input.galleryImageUrls;
       }
       if (input.costPrice !== undefined) updateFields['costPrice'] = sql`${input.costPrice}::numeric`;
       if (input.category !== undefined) updateFields['category'] = input.category;
@@ -479,14 +580,12 @@ export class ProductsService {
     );
 
     if (req?.id) {
-      await this.notifications
-        .createForRole('SUPER_ADMIN', {
-          type: 'approval:permission_request',
-          title: 'Product archive pending',
-          body: `${actor.name} requested to archive product "${product.name}".`,
-          data: { requestId: req.id, type: 'PRODUCT_ARCHIVE' },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreateForRole('SUPER_ADMIN', {
+        type: 'approval:permission_request',
+        title: 'Product archive pending',
+        body: `${actor.name} requested to archive product "${product.name}".`,
+        data: { requestId: req.id, type: 'PRODUCT_ARCHIVE' },
+      });
     }
 
     return {

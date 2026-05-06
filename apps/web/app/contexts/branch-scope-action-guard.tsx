@@ -18,6 +18,7 @@ const BRANCH_SCOPED_INTENTS = new Set([
   'transition',
   'assignToCS',
   'bulkTransition',
+  'bulkAssign',
   'bulkAssignToCS',
   'bulkReassign',
   'redistribute',

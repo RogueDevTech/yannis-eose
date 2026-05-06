@@ -13,7 +13,12 @@ import { useToast } from '~/components/ui/toast';
 const NotificationsStateContext = createContext<NotificationsStateContextValue | null>(null);
 
 export interface NotificationsStateContextValue {
-  /** Display unread count = server count minus optimistically read; 0 if markAllRead. */
+  /**
+   * Badge unread count: server total minus in-flight mark-read rows only.
+   * Row styling uses a separate set so IDs cleared from the badge after success do not
+   * double-subtract once `unreadCount` already dropped server-side (e.g. marked from
+   * another page — those IDs never appear on the bell's first page for sync pruning).
+   */
   displayUnreadCount: (serverUnreadCount: number) => number;
   /** True if this id has been optimistically marked read. */
   isOptimisticallyRead: (id: string) => boolean;
@@ -37,7 +42,10 @@ interface NotificationsStateProviderProps {
 }
 
 export function NotificationsStateProvider({ actionUrl, children, readOnly = false }: NotificationsStateProviderProps) {
+  /** Row/modal styling until server list shows `read: true` (pruned in syncReadIdsFromServer). */
   const [optimisticReadIds, setOptimisticReadIds] = useState<Set<string>>(new Set());
+  /** Subtracted from badge only while the mark-read request is in flight (not entire optimistic set). */
+  const [pendingBadgeAdjustIds, setPendingBadgeAdjustIds] = useState<Set<string>>(new Set());
   const [markAllRead, setMarkAllRead] = useState(false);
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const { revalidate } = useRevalidator();
@@ -49,9 +57,9 @@ export function NotificationsStateProvider({ actionUrl, children, readOnly = fal
   const displayUnreadCount = useCallback(
     (serverUnreadCount: number): number => {
       if (markAllRead) return 0;
-      return Math.max(0, serverUnreadCount - optimisticReadIds.size);
+      return Math.max(0, serverUnreadCount - pendingBadgeAdjustIds.size);
     },
-    [markAllRead, optimisticReadIds.size],
+    [markAllRead, pendingBadgeAdjustIds.size],
   );
 
   const isOptimisticallyRead = useCallback(
@@ -66,6 +74,7 @@ export function NotificationsStateProvider({ actionUrl, children, readOnly = fal
       // Mirror Mode is view-only — never touch the target user's read state.
       if (readOnly) return;
       setOptimisticReadIds((prev) => new Set(prev).add(id));
+      setPendingBadgeAdjustIds((prev) => new Set(prev).add(id));
       lastIntentRef.current = 'one';
       lastIdRef.current = id;
       fetcher.submit(
@@ -94,10 +103,16 @@ export function NotificationsStateProvider({ actionUrl, children, readOnly = fal
       readIds.forEach((id) => next.delete(id));
       return next.size === prev.size ? prev : next;
     });
+    setPendingBadgeAdjustIds((prev) => {
+      const next = new Set(prev);
+      readIds.forEach((id) => next.delete(id));
+      return next.size === prev.size ? prev : next;
+    });
   }, []);
 
-  // On success: revalidate so layout gets fresh server count. Do NOT clear optimisticReadIds
-  // here — revalidated server data may still be stale; prune via syncReadIdsFromServer when list has read: true.
+  // On success: drop badge adjustments immediately (server unread already excludes those rows
+  // after persist + cache invalidation). Keep optimisticReadIds for row styling until sync.
+  // Reset markAllRead after mark-all success so new notifications increment the badge again.
   // Only run once per response: re-renders after revalidate() would otherwise call revalidate() again and loop.
   useEffect(() => {
     if (fetcher.state !== 'idle' || fetcher.data == null) return;
@@ -105,10 +120,22 @@ export function NotificationsStateProvider({ actionUrl, children, readOnly = fal
     lastProcessedDataRef.current = fetcher.data;
 
     if (fetcher.data.success) {
-      // Do NOT remove from optimisticReadIds here: revalidate() may return stale unread count,
-      // causing the badge to "come back". Prune via syncReadIdsFromServer when server list has read: true.
+      const intent = lastIntentRef.current;
+      const id = lastIdRef.current;
       lastIntentRef.current = null;
       lastIdRef.current = null;
+
+      if (intent === 'one' && id) {
+        setPendingBadgeAdjustIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next.size === prev.size ? prev : next;
+        });
+      } else if (intent === 'all') {
+        setPendingBadgeAdjustIds(new Set());
+        setMarkAllRead(false);
+      }
+
       revalidate();
       return;
     }
@@ -116,9 +143,15 @@ export function NotificationsStateProvider({ actionUrl, children, readOnly = fal
       if (lastIntentRef.current === 'all') {
         setMarkAllRead(false);
       } else if (lastIntentRef.current === 'one' && lastIdRef.current) {
+        const rid = lastIdRef.current;
         setOptimisticReadIds((prev) => {
           const next = new Set(prev);
-          next.delete(lastIdRef.current!);
+          next.delete(rid);
+          return next;
+        });
+        setPendingBadgeAdjustIds((prev) => {
+          const next = new Set(prev);
+          next.delete(rid);
           return next;
         });
       }

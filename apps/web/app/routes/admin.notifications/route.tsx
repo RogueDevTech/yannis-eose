@@ -56,7 +56,7 @@ export type NotificationsTabId = (typeof NOTIFICATIONS_TAB_IDS)[number];
 const EMPTY_FEED: FeedListResult = {
   notifications: [],
   unreadCount: 0,
-  pagination: { page: 1, limit: 10, total: 0, totalPages: 0 },
+  pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
 };
 
 function resolveNotificationsTab(
@@ -104,7 +104,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
-  const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') ?? '10', 10)));
+  const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') ?? '20', 10)));
   const unreadOnly = url.searchParams.get('unreadOnly') === 'true';
   const feedInput = encodeURIComponent(JSON.stringify({ page, limit, unreadOnly }));
 
@@ -400,7 +400,11 @@ const LEGACY_HASH_TO_TAB: Record<string, NotificationsTabId> = {
 };
 
 export default function AdminNotificationsRoute() {
-  const data = useLoaderData<typeof loader>();
+  // The loader's `intent=searchUsers` early-return is consumed only by useFetcher
+  // (broadcast "One user" picker), never on the page render path. Narrow to the
+  // main tab shape so destructuring `data.tab`, `data.feed`, etc. typechecks.
+  const rawData = useLoaderData<typeof loader>();
+  const data = rawData as Exclude<typeof rawData, { users: unknown }>;
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();

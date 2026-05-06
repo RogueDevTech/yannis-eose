@@ -16,6 +16,8 @@ export const meta: MetaFunction = () => [
 const ALLOWED_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 type StatusFilter = (typeof ALLOWED_STATUSES)[number];
 
+const PER_PAGE = 20;
+
 /**
  * Permission codes that grant approve rights for at least one request type.
  * Anyone holding ANY of these can land on the page and see rows for those types
@@ -72,15 +74,27 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (rawStatus as StatusFilter)
     : 'ALL';
 
-  const listInput = encodeURIComponent(JSON.stringify({ status }));
+  const pageRaw = parseInt(url.searchParams.get('page') || '1', 10);
+  const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
+
+  const listInput = encodeURIComponent(JSON.stringify({ status, page, limit: PER_PAGE }));
   const [listRes, countsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/permissionRequests.list?input=${listInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/permissionRequests.statusCounts`, { method: 'GET', cookie }),
   ]);
 
-  const requests: PermissionRequest[] = listRes.ok
-    ? ((listRes.data as { result?: { data?: PermissionRequest[] } })?.result?.data ?? [])
-    : [];
+  type ListPayload = {
+    items: PermissionRequest[];
+    total: number;
+    page: number;
+    limit: number;
+  };
+  const listPayload = listRes.ok
+    ? ((listRes.data as { result?: { data?: ListPayload } })?.result?.data ?? null)
+    : null;
+  const requests: PermissionRequest[] = listPayload?.items ?? [];
+  const total = listPayload?.total ?? 0;
+  const totalPages = total > 0 ? Math.ceil(total / PER_PAGE) : 1;
 
   type StatusCounts = { pending: number; approved: number; rejected: number; all: number };
   const statusCounts: StatusCounts = countsRes.ok
@@ -116,6 +130,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     requests,
+    total,
+    page,
+    totalPages,
+    limit: PER_PAGE,
     statusCounts,
     canApprove,
     canApproveProductArchive,
@@ -169,6 +187,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function PermissionRequestsRoute() {
   const {
     requests,
+    total,
+    page,
+    totalPages,
+    limit,
     statusCounts,
     canApprove,
     canApproveProductArchive,
@@ -179,6 +201,10 @@ export default function PermissionRequestsRoute() {
   return (
     <PermissionRequestsPage
       requests={requests}
+      total={total}
+      page={page}
+      totalPages={totalPages}
+      limit={limit}
       statusCounts={statusCounts}
       canApprove={canApprove}
       canApproveProductArchive={canApproveProductArchive}

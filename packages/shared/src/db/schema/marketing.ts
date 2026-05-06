@@ -1,9 +1,48 @@
-import { uuid, pgTable, text, numeric, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
+import { uuid, pgTable, text, numeric, jsonb, timestamp, index, integer } from 'drizzle-orm/pg-core';
 import { deploymentTypeEnum, fundingStatusEnum, fundingRequestStatusEnum, recordStatusEnum, adSpendStatusEnum, adPlatformEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
 import { products } from './products';
 import { branches } from './branches';
+
+// Table: offer_groups — reusable multi-item offers
+export const offerGroups = pgTable('offer_groups', {
+  id: uuidv7Pk(),
+  name: text('name').notNull(),
+  status: recordStatusEnum('status').default('ACTIVE').notNull(),
+  createdBy: uuid('created_by')
+    .notNull()
+    .references(() => users.id),
+  ...temporalColumns,
+  ...timestampColumns,
+});
+
+// Table: offer_group_items — offer items within a group
+export const offerGroupItems = pgTable(
+  'offer_group_items',
+  {
+    id: uuidv7Pk(),
+    offerGroupId: uuid('offer_group_id')
+      .notNull()
+      .references(() => offerGroups.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id),
+    label: text('label').notNull(),
+    quantity: integer('quantity').notNull().default(1),
+    price: numeric('price', { precision: 12, scale: 2 }).notNull(),
+    imageUrl: text('image_url'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    status: recordStatusEnum('status').default('ACTIVE').notNull(),
+    ...temporalColumns,
+    ...timestampColumns,
+  },
+  (table) => ({
+    groupSortIdx: index('offer_group_items_group_sort_idx').on(table.offerGroupId, table.sortOrder),
+    productIdx: index('offer_group_items_product_idx').on(table.productId),
+    statusIdx: index('offer_group_items_status_idx').on(table.status),
+  }),
+);
 
 // Table 7: offer_templates — pre-configured sale offers
 export const offerTemplates = pgTable('offer_templates', {
@@ -13,6 +52,10 @@ export const offerTemplates = pgTable('offer_templates', {
     .references(() => products.id),
   name: text('name').notNull(),
   price: numeric('price', { precision: 12, scale: 2 }).notNull(),
+  /** Sellable bundle quantity for this tier (Edge form / orders). */
+  quantity: integer('quantity').notNull().default(1),
+  /** Thumbnail gallery for this tier on public forms (URLs). */
+  imageUrls: jsonb('image_urls').notNull().default([]),
   variants: jsonb('variants'),
   createdBy: uuid('created_by')
     .notNull()
@@ -31,6 +74,7 @@ export const campaigns = pgTable('campaigns', {
   name: text('name').notNull(),
   productIds: jsonb('product_ids'),
   offerTemplateId: uuid('offer_template_id').references(() => offerTemplates.id),
+  offerGroupId: uuid('offer_group_id').references(() => offerGroups.id),
   formConfig: jsonb('form_config'),
   deploymentType: deploymentTypeEnum('deployment_type').default('HOSTED').notNull(),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),

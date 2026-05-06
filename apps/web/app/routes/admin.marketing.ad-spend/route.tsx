@@ -1,5 +1,5 @@
 import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
+import { json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
@@ -144,6 +144,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       lineCount: number;
       totalAmount: string;
       rolledStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
+      overallOrderCount?: number;
+      overallCpa?: number | null;
       lines: Array<{
         id: string;
         mediaBuyerId: string;
@@ -163,6 +165,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         approvedAt: string | null;
         rejectedAt: string | null;
         createdAt: string;
+        orderCount?: number;
+        indicativeCpa?: number | null;
       }>;
     }>;
     pagination?: { page: number; limit: number; total: number };
@@ -170,9 +174,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const groupedData: GroupedShape = groupedRes.ok
     ? (((groupedRes.data as { result?: { data?: GroupedShape } })?.result?.data) ?? {})
     : {};
-  const groups = groupedData.groups ?? [];
+  const resolvedGpage = groupedRes.ok ? (groupedData.pagination?.page ?? groupsPage) : groupsPage;
+  if (groupedRes.ok && groupedData.pagination != null && resolvedGpage !== groupsPage) {
+    const next = new URL(request.url);
+    next.searchParams.set('gpage', String(resolvedGpage));
+    throw redirect(next.pathname + next.search);
+  }
+  const groups = (groupedData.groups ?? []).map((g) => ({
+    ...g,
+    overallOrderCount: g.overallOrderCount ?? 0,
+    overallCpa: g.overallCpa ?? null,
+    lines: (g.lines ?? []).map((l) => ({
+      ...l,
+      orderCount: l.orderCount ?? 0,
+      indicativeCpa: l.indicativeCpa ?? null,
+    })),
+  }));
   const groupsTotal = groupedData.pagination?.total ?? 0;
   const groupsTotalPages = Math.max(1, Math.ceil(groupsTotal / 20));
+  /** Aligns with API clamp when dataset shrinks (e.g. approve on last page of pending groups). */
+  const groupsPageForUi = resolvedGpage;
   const mediaBuyersForFilter =
     buyersRes.ok
       ? (
@@ -257,7 +278,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     filters,
     groups,
     groupsTotal,
-    groupsPage,
+    groupsPage: groupsPageForUi,
     groupsTotalPages,
   };
 

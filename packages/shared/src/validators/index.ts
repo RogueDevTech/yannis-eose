@@ -70,7 +70,10 @@ export type {
 
 // Product validators
 export {
+  MAX_OFFER_TIER_IMAGES,
+  MAX_PRODUCT_GALLERY_IMAGES,
   MAX_PRODUCT_OFFER_IMAGES,
+  galleryImageUrlsSchema,
   productOfferSchema,
   createProductSchema,
   updateProductSchema,
@@ -109,6 +112,16 @@ export {
   listMovementsSchema,
   createReconciliationSchema,
   resolveReconciliationSchema,
+  shipmentStatusSchema,
+  createShipmentSchema,
+  updateShipmentLinesSchema,
+  shipmentTransitionSchema,
+  verifyShipmentSchema,
+  cancelShipmentSchema,
+  listShipmentsSchema,
+  getShipmentSchema,
+  createWarehouseSchema,
+  listWarehousesSchema,
 } from './inventory';
 
 export type {
@@ -120,6 +133,16 @@ export type {
   ListMovementsInput,
   CreateReconciliationInput,
   ResolveReconciliationInput,
+  ShipmentStatus,
+  CreateShipmentInput,
+  UpdateShipmentLinesInput,
+  ShipmentTransitionInput,
+  VerifyShipmentInput,
+  CancelShipmentInput,
+  ListShipmentsInput,
+  GetShipmentInput,
+  CreateWarehouseInput,
+  ListWarehousesInput,
 } from './inventory';
 
 // Logistics validators
@@ -196,6 +219,12 @@ export {
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
   listOfferTemplatesSchema,
+  archiveAllOfferTemplatesForProductSchema,
+  createOfferGroupSchema,
+  updateOfferGroupSchema,
+  listOfferGroupsSchema,
+  getOfferGroupSchema,
+  clearLegacyOfferTemplatesSchema,
   createCampaignSchema,
   updateCampaignSchema,
   listCampaignsSchema,
@@ -230,6 +259,12 @@ export type {
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
+  ArchiveAllOfferTemplatesForProductInput,
+  CreateOfferGroupInput,
+  UpdateOfferGroupInput,
+  ListOfferGroupsInput,
+  GetOfferGroupInput,
+  ClearLegacyOfferTemplatesInput,
   CreateCampaignInput,
   UpdateCampaignInput,
   ListCampaignsInput,
@@ -373,6 +408,7 @@ export {
   hrUpdateOnboardingSchema,
   submitOnboardingSchema,
   approveOnboardingSchema,
+  requestOnboardingChangesSchema,
   getOnboardingSchema,
   staffOnboardingDocumentsFilterStatusSchema,
   listStaffOnboardingDocumentsSchema,
@@ -386,6 +422,7 @@ export type {
   HrUpdateOnboardingInput,
   SubmitOnboardingInput,
   ApproveOnboardingInput,
+  RequestOnboardingChangesInput,
   GetOnboardingInput,
   ListStaffOnboardingDocumentsInput,
 } from './staff-onboarding';

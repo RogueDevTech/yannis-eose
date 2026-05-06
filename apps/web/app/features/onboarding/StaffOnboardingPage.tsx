@@ -12,9 +12,11 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { S3_FOLDERS } from '~/lib/s3-upload';
 import { useFetcherToast } from '~/components/ui/toast';
+import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
 type OnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
 
@@ -41,6 +43,13 @@ export interface OnboardingRecord {
   submittedAt: string | null;
   approvedAt: string | null;
   approvedBy: string | null;
+  payoutBankName: string | null;
+  payoutAccountName: string | null;
+  payoutAccountNumber: string | null;
+  payoutBankCode: string | null;
+  changesRequestedAt: string | null;
+  changesRequestedBy: string | null;
+  changesRequestedReason: string | null;
 }
 
 export interface StaffOnboardingPageProps {
@@ -196,7 +205,47 @@ function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
         <GuarantorReadOnlyCard index={1} record={record} />
         <GuarantorReadOnlyCard index={2} record={record} />
       </div>
+
+      <BankDetailsReadOnlyCard record={record} />
     </div>
+  );
+}
+
+function BankDetailsReadOnlyCard({ record }: { record: OnboardingRecord }) {
+  const empty = <span className="text-app-fg-muted">Not provided</span>;
+  return (
+    <Card>
+      <CardHeader
+        title="Payout bank details"
+        description="Used by Finance to process monthly payroll. Visible only to Finance and HR."
+      />
+      <CardBody>
+        <DescriptionList
+          layout="grid"
+          divided
+          items={[
+            { label: 'Bank name', value: record.payoutBankName?.trim() ? record.payoutBankName : empty },
+            { label: 'Account name', value: record.payoutAccountName?.trim() ? record.payoutAccountName : empty },
+            {
+              label: 'Account number',
+              value: record.payoutAccountNumber?.trim() ? (
+                <span className="tabular-nums">{record.payoutAccountNumber}</span>
+              ) : (
+                empty
+              ),
+            },
+            {
+              label: 'Bank code',
+              value: record.payoutBankCode?.trim() ? (
+                <span className="tabular-nums">{record.payoutBankCode}</span>
+              ) : (
+                empty
+              ),
+            },
+          ]}
+        />
+      </CardBody>
+    </Card>
   );
 }
 
@@ -267,6 +316,18 @@ export function StaffOnboardingPage({
   const [supportingDocs, setSupportingDocs] = useState(record.supportingDocuments);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
+  const [requestChangesOpen, setRequestChangesOpen] = useState(false);
+  const [requestChangesReason, setRequestChangesReason] = useState('');
+
+  // Close confirm modals only AFTER the action returns success — keeps the
+  // user on the spinner until the request actually resolves so they know
+  // whether it went through.
+  useCloseOnFetcherSuccess(fetcher, () => {
+    setConfirmSubmit(false);
+    setConfirmApprove(false);
+    setRequestChangesOpen(false);
+    setRequestChangesReason('');
+  });
 
   const isSavingDraft =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'updateOnboarding';
@@ -274,6 +335,10 @@ export function StaffOnboardingPage({
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'submitOnboarding';
   const isApproving =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'approveOnboarding';
+  const isRequestingChanges =
+    fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'requestOnboardingChanges';
+  const trimmedReason = requestChangesReason.trim();
+  const reasonReady = trimmedReason.length >= 10 && trimmedReason.length <= 1000;
 
   const submittedDate = useMemo(
     () => (record.submittedAt ? new Date(record.submittedAt).toLocaleDateString('en-NG', { dateStyle: 'medium' }) : null),
@@ -337,30 +402,50 @@ export function StaffOnboardingPage({
           ) : null}
         </div>
       ) : null}
-      {readOnly && mode === 'hr' ? (
-        <div className="rounded-lg border border-dashed border-app-border bg-app-elevated/40 px-4 py-3 text-sm text-app-fg-muted">
-          <span className="font-medium text-app-fg">HR review</span>
-          {' · '}
-          Only the staff member can edit this packet from{' '}
-          <span className="text-app-fg font-medium">Your onboarding</span>. Use the sections below to verify details and
-          open documents; approve when the submission is complete.
+
+      {mode === 'self' && !readOnly && record.changesRequestedReason ? (
+        <div className="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-900 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-100">
+          <p className="font-semibold">{reviewerLabel(subject.role)} requested changes</p>
+          <p className="mt-1 whitespace-pre-wrap">{record.changesRequestedReason}</p>
+          <p className="mt-1 text-xs text-warning-800/80 dark:text-warning-100/70">
+            Update the relevant sections below and re-submit when ready.
+          </p>
         </div>
       ) : null}
 
+      {mode === 'hr' && record.status === 'IN_PROGRESS' && record.changesRequestedReason ? (
+        <div className="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-900 dark:border-warning-700 dark:bg-warning-900/30 dark:text-warning-100">
+          <p className="font-semibold">Sent back for changes</p>
+          <p className="mt-1 whitespace-pre-wrap">{record.changesRequestedReason}</p>
+          <p className="mt-1 text-xs text-warning-800/80 dark:text-warning-100/70">
+            Waiting for the staff member to update and re-submit.
+          </p>
+        </div>
+      ) : null}
       {readOnly ? (
         <div className="space-y-4">
           <OnboardingReadOnlyView record={record} />
 
           <div className="flex flex-wrap items-center justify-end gap-2">
             {mode === 'hr' && record.status === 'SUBMITTED' ? (
-              <Button
-                type="button"
-                variant="primary"
-                loading={isApproving}
-                onClick={() => setConfirmApprove(true)}
-              >
-                Approve onboarding
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  loading={isRequestingChanges}
+                  onClick={() => setRequestChangesOpen(true)}
+                >
+                  Request changes
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  loading={isApproving}
+                  onClick={() => setConfirmApprove(true)}
+                >
+                  Approve onboarding
+                </Button>
+              </>
             ) : null}
           </div>
 
@@ -480,6 +565,46 @@ export function StaffOnboardingPage({
             />
           </div>
 
+          <Card>
+            <CardHeader
+              title="Payout bank details"
+              description="Where Finance sends your monthly payroll. Required before you can submit for review."
+            />
+            <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField label="Bank name" hint="e.g. GTBank, Access Bank, OPay">
+                <TextInput
+                  name="payoutBankName"
+                  defaultValue={record.payoutBankName ?? ''}
+                  maxLength={120}
+                />
+              </FormField>
+              <FormField label="Account name" hint="As it appears on your bank statement">
+                <TextInput
+                  name="payoutAccountName"
+                  defaultValue={record.payoutAccountName ?? ''}
+                  maxLength={120}
+                />
+              </FormField>
+              <FormField label="Account number" hint="10-digit NUBAN">
+                <TextInput
+                  name="payoutAccountNumber"
+                  defaultValue={record.payoutAccountNumber ?? ''}
+                  maxLength={20}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                />
+              </FormField>
+              <FormField label="Bank code" hint="Optional — 3-digit CBN code (e.g. 058 for GTBank)">
+                <TextInput
+                  name="payoutBankCode"
+                  defaultValue={record.payoutBankCode ?? ''}
+                  maxLength={20}
+                  inputMode="numeric"
+                />
+              </FormField>
+            </CardBody>
+          </Card>
+
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button type="submit" variant="secondary" loading={isSavingDraft || navigation.state === 'submitting'}>
               Save draft
@@ -516,7 +641,6 @@ export function StaffOnboardingPage({
           const fd = new FormData();
           fd.set('intent', 'submitOnboarding');
           fetcher.submit(fd, { method: 'post', action: actionUrl });
-          setConfirmSubmit(false);
         }}
       />
 
@@ -533,9 +657,67 @@ export function StaffOnboardingPage({
           fd.set('intent', 'approveOnboarding');
           fd.set('userId', subject.id);
           fetcher.submit(fd, { method: 'post', action: actionUrl });
-          setConfirmApprove(false);
         }}
       />
+
+      <Modal
+        open={requestChangesOpen}
+        onClose={() => {
+          if (isRequestingChanges) return;
+          setRequestChangesOpen(false);
+          setRequestChangesReason('');
+        }}
+        aria-labelledby="request-changes-title"
+      >
+        <div className="space-y-3 p-5">
+          <h3 id="request-changes-title" className="text-base font-semibold text-app-fg">
+            Request changes
+          </h3>
+          <p className="text-sm text-app-fg-muted">
+            The staff member will be notified and can edit their onboarding again.
+            Be specific about what to update so they can fix it on the first round.
+          </p>
+          <FormField label="What needs changes?" hint="Min 10 characters · sent to the staff member">
+            <Textarea
+              rows={4}
+              value={requestChangesReason}
+              onChange={(e) => setRequestChangesReason(e.target.value)}
+              placeholder="e.g. Re-upload the proof of address — the current file is unreadable."
+              maxLength={1000}
+              autoFocus
+            />
+          </FormField>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setRequestChangesOpen(false);
+                setRequestChangesReason('');
+              }}
+              disabled={isRequestingChanges}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              loading={isRequestingChanges}
+              disabled={!reasonReady}
+              onClick={() => {
+                if (!reasonReady) return;
+                const fd = new FormData();
+                fd.set('intent', 'requestOnboardingChanges');
+                fd.set('userId', subject.id);
+                fd.set('reason', trimmedReason);
+                fetcher.submit(fd, { method: 'post', action: actionUrl });
+              }}
+            >
+              Send to staff
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

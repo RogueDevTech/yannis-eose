@@ -7,10 +7,12 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
+import { isAdminLevel } from '~/lib/rbac';
 
 
 const KNOWN_ROLES = [
   'SUPER_ADMIN',
+  'ADMIN',
   'HEAD_OF_CS',
   'CS_AGENT',
   'HEAD_OF_MARKETING',
@@ -53,7 +55,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
       {!role && <GenericFallbackDashboard />}
 
       {/* Role-specific dashboard */}
-      {(role === 'SUPER_ADMIN' || role === 'ADMIN') && <SuperAdminDashboard data={data} naira={naira} />}
+      {role && isAdminLevel({ role }) && <SuperAdminDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_CS' || role === 'CS_AGENT') && <CSDashboard data={data} role={role} />}
       {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} />}
       {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}

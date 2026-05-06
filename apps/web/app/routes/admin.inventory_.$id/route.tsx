@@ -262,9 +262,10 @@ export default function InventoryLevelDetailRoute() {
     startDate,
     endDate,
   } = useLoaderData<typeof loader>();
-  const [searchParams] = useSearchParams();
-  const tabParam = searchParams.get('tab') === 'audit' ? 'audit' : 'batches';
-  const [activeTab, setActiveTab] = useState<TabId>(tabParam as TabId);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // URL-driven tab state (so back/forward + deep links work).
+  // Default is Movement history (audit) per ops workflow.
+  const activeTab: TabId = searchParams.get('tab') === 'batches' ? 'batches' : 'audit';
   const [direction, setDirection] = useState<DirectionFilter>('all');
   const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null);
   const [selectedBatch, setSelectedBatch] = useState<LevelBatch | null>(null);
@@ -380,13 +381,23 @@ export default function InventoryLevelDetailRoute() {
         ]}
       />
 
-      {/* Tabs: FIFO batches | Audit trail */}
+      {/* Tabs: received stock / costing vs movement log */}
       <Tabs
         value={activeTab}
-        onChange={(v) => setActiveTab(v as TabId)}
+        onChange={(v) => {
+          const next = new URLSearchParams(searchParams);
+          next.set('tab', v === 'batches' ? 'batches' : 'audit');
+          // Tab switches should not affect pagination, but if we ever add
+          // tab-specific paging, resetting to page=1 is the safer default.
+          next.delete('page');
+          setSearchParams(next, { replace: true });
+        }}
         tabs={[
-          { value: 'batches', label: `FIFO batches at ${locationLabel}` },
-          { value: 'audit', label: `Audit trail (${total})` },
+          {
+            value: 'batches',
+            label: `Received stock · ${locationLabel}`,
+          },
+          { value: 'audit', label: `Movement history (${total})` },
         ]}
       />
 
@@ -395,8 +406,8 @@ export default function InventoryLevelDetailRoute() {
           rows={batches}
           rowKey={(b) => b.id}
           rowClassName={(b) => (b.remainingQuantity === 0 ? 'opacity-60' : '')}
-          emptyTitle="No batches at this location"
-          emptyDescription="Stock intakes received here will appear as cost layers."
+          emptyTitle="No receipts at this location yet"
+          emptyDescription="Each intake you record here becomes a cost layer (used for profit and FIFO costing)."
           columns={[
             {
               key: 'received',
@@ -650,9 +661,9 @@ function BatchDetailModal({
       <div className="space-y-5 px-5 pt-5 md:px-6 md:pt-6 pb-2">
         <div>
           <h2 id="batch-detail-title" className="text-base font-semibold text-app-fg">
-            FIFO batch
+            Stock receipt
           </h2>
-          <p className="text-xs text-app-fg-muted mt-0.5">Cost layer at {locationLabel}</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">Cost layer at {locationLabel} (FIFO)</p>
         </div>
 
         <div className="rounded-lg border border-app-border bg-app-canvas px-4 py-3">

@@ -102,11 +102,7 @@ export function OfferImagesEditor({
     <div className="w-full min-w-0 space-y-2">
       <FormField
         label="Offer images"
-        hint={
-          MAX_PRODUCT_OFFER_IMAGES === 1
-            ? 'Optional — one image for this tier (forms, catalog).'
-            : `Optional — up to ${MAX_PRODUCT_OFFER_IMAGES} images for this tier (forms, catalog).`
-        }
+        hint={`Optional — up to ${MAX_PRODUCT_OFFER_IMAGES} image(s) for this tier (forms, catalog).`}
       >
         {imageUrls.length > 0 && (
           <ul className="flex flex-wrap gap-2 mb-2">
@@ -136,7 +132,7 @@ export function OfferImagesEditor({
             folder={S3_FOLDERS.PRODUCT_IMAGES}
             accept="image/*"
             maxSizeMB={10}
-            label={MAX_PRODUCT_OFFER_IMAGES === 1 ? 'Upload image' : imageUrls.length === 0 ? 'Upload images' : 'Add another image'}
+            label={imageUrls.length === 0 ? 'Upload images' : 'Add another image'}
             size="sm"
             onUpload={(url) => {
               if (url) appendUrl(url);

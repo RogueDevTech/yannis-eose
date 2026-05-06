@@ -84,8 +84,13 @@ export function StaffOnboardingDocumentsPage({
       header: 'Staff',
       render: (row) => (
         <div className="min-w-0">
-          <div className="font-medium text-app-fg truncate">{row.name}</div>
-          <div className="text-xs text-app-muted truncate">{row.email}</div>
+          <Link
+            to={`/hr/users/${row.userId}`}
+            prefetch="intent"
+            className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400 hover:underline underline-offset-2"
+          >
+            {row.name}
+          </Link>
         </div>
       ),
     },

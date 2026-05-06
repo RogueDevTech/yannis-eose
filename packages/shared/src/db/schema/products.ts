@@ -21,6 +21,8 @@ export const products = pgTable('products', {
   id: uuidv7Pk(),
   name: text('name').notNull(),
   description: text('description'),
+  /** Catalog gallery (public-safe URLs); offer tiers store images on `offer_templates.image_urls`. */
+  galleryImageUrls: jsonb('gallery_image_urls').notNull().default([]),
   offers: jsonb('offers').notNull().default([]),
   baseSalePrice: numeric('base_sale_price', { precision: 12, scale: 2 }).notNull(),
   costPrice: numeric('cost_price', { precision: 12, scale: 2 }).notNull(),

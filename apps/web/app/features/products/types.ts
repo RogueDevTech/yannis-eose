@@ -10,7 +10,10 @@ export interface Product {
   id: string;
   name: string;
   description: string | null;
+  /** Hydrated from offer templates for lists/previews — not edited on the product page. */
   offers: ProductOffer[];
+  /** Catalog gallery (HTTPS URLs). */
+  galleryImageUrls: string[];
   baseSalePrice: string;
   /** Cost is stripped from API responses unless viewer has finance access. */
   costPrice: string | null;

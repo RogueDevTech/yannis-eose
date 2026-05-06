@@ -11,6 +11,12 @@ export const logisticsProviders = pgTable('logistics_providers', {
   contactInfo: text('contact_info'),
   coverageArea: text('coverage_area'),
   rateCard: jsonb('rate_card'),
+  /**
+   * Discriminator — `THIRD_PARTY` (default; external 3PL companies) or
+   * `WAREHOUSE` (company-owned facilities / “our warehouses”, managed via `/admin/inventory/warehouses`).
+   * Migration 0114 adds the column with a CHECK constraint enforcing these two values.
+   */
+  kind: text('kind').default('THIRD_PARTY').notNull(),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,

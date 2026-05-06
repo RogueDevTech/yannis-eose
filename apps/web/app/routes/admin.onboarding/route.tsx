@@ -66,6 +66,10 @@ export async function action({ request }: ActionFunctionArgs) {
       guarantor2Address: emptyToNull(fd.get('guarantor2Address')),
       guarantor2Relationship: emptyToNull(fd.get('guarantor2Relationship')),
       guarantor2LetterUrl: emptyToNull(fd.get('guarantor2LetterUrl')),
+      payoutBankName: emptyToNull(fd.get('payoutBankName')),
+      payoutAccountName: emptyToNull(fd.get('payoutAccountName')),
+      payoutAccountNumber: emptyToNull(fd.get('payoutAccountNumber')),
+      payoutBankCode: emptyToNull(fd.get('payoutBankCode')),
     };
     const res = await apiRequest<unknown>('/trpc/onboarding.update', {
       method: 'POST',

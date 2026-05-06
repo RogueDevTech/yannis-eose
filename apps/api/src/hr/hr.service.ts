@@ -375,17 +375,14 @@ export class HrService {
       return rows[0];
     });
 
-    // Notify staff when payout is approved (outside the transaction)
     if (input.status === 'APPROVED') {
-      this.notifications
-        .create({
-          userId: payout.staffId,
-          type: 'hr:payout_approved',
-          title: 'Payout approved',
-          body: `Your payout for the period has been approved.`,
-          data: { payoutId: payout.id, totalPayout: payout.totalPayout },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: payout.staffId,
+        type: 'hr:payout_approved',
+        title: 'Payout approved',
+        body: `Your payout for the period has been approved.`,
+        data: { payoutId: payout.id, totalPayout: payout.totalPayout },
+      });
     }
 
     return payout;
@@ -684,15 +681,13 @@ export class HrService {
     // Notify staff when clawback/deduction is created (they need to know)
     const isDeduction = ['CLAWBACK', 'DEDUCTION'].includes(input.category) || Number(input.amount) < 0;
     if (isDeduction) {
-      this.notifications
-        .create({
-          userId: input.staffId,
-          type: 'hr:deduction_created',
-          title: 'Deduction added',
-          body: 'A deduction has been added to your earnings. It will be applied to your next payout.',
-          data: { adjustmentId: adj.id, amount: input.amount, category: input.category },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: input.staffId,
+        type: 'hr:deduction_created',
+        title: 'Deduction added',
+        body: 'A deduction has been added to your earnings. It will be applied to your next payout.',
+        data: { adjustmentId: adj.id, amount: input.amount, category: input.category },
+      });
     }
 
     return adj;
@@ -720,17 +715,15 @@ export class HrService {
     // Notify staff when add-on/bonus is approved (or clawback/deduction is applied)
     if (input.approved) {
       const isDeduction = Number(row.amount) < 0 || ['CLAWBACK', 'DEDUCTION'].includes(row.category);
-      this.notifications
-        .create({
-          userId: row.staffId,
-          type: isDeduction ? 'hr:deduction_applied' : 'hr:addon_approved',
-          title: isDeduction ? 'Deduction applied' : 'Add-on approved',
-          body: isDeduction
-            ? 'A deduction has been applied to your earnings.'
-            : 'Your add-on earnings have been approved.',
-          data: { adjustmentId: row.id, amount: row.amount, category: row.category },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: row.staffId,
+        type: isDeduction ? 'hr:deduction_applied' : 'hr:addon_approved',
+        title: isDeduction ? 'Deduction applied' : 'Add-on approved',
+        body: isDeduction
+          ? 'A deduction has been applied to your earnings.'
+          : 'Your add-on earnings have been approved.',
+        data: { adjustmentId: row.id, amount: row.amount, category: row.category },
+      });
     }
 
     return row;

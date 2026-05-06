@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { ABANDONED_CARTS_PAGE_SIZE, type AbandonedCartPagination } from '~/features/cs/types';
 
 type ActivityItem = {
   id: string;
@@ -17,6 +18,10 @@ type ActivityItem = {
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'cart.read');
   const cookie = getSessionCookie(request);
+  const url = new URL(request.url);
+  const abandonedPageRaw = parseInt(url.searchParams.get('abandonedPage') ?? '1', 10);
+  const abandonedPage =
+    Number.isFinite(abandonedPageRaw) && abandonedPageRaw >= 1 ? abandonedPageRaw : 1;
 
   const [activityRes, pendingRes, abandonedRes] = await Promise.all([
     apiRequest<unknown>(
@@ -28,7 +33,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/cart.listAbandoned?input=${encodeURIComponent(JSON.stringify({ limit: 50 }))}`,
+      `/trpc/cart.listAbandoned?input=${encodeURIComponent(
+        JSON.stringify({ page: abandonedPage, limit: ABANDONED_CARTS_PAGE_SIZE }),
+      )}`,
       { method: 'GET', cookie },
     ),
   ]);
@@ -39,11 +46,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const pendingCarts = pendingRes.ok
     ? (pendingRes.data as { result?: { data?: Array<{ id: string; customerName: string; customerPhoneDisplay: string; productName: string | null; campaignName: string | null; offerLabel: string | null; updatedAt: string }> } })?.result?.data ?? []
     : [];
-  const abandonedCarts = abandonedRes.ok
-    ? (abandonedRes.data as { result?: { data?: Array<{ id: string; customerName: string; customerPhoneDisplay: string; productName: string | null; campaignName: string | null; offerLabel: string | null; updatedAt: string }> } })?.result?.data ?? []
-    : [];
+  const abandonedPayload = abandonedRes.ok
+    ? (abandonedRes.data as {
+        result?: {
+          data?: {
+            items: Array<{
+              id: string;
+              customerName: string;
+              customerPhoneDisplay: string;
+              productName: string | null;
+              campaignName: string | null;
+              offerLabel: string | null;
+              updatedAt: string;
+            }>;
+            total: number;
+            page: number;
+            limit: number;
+          };
+        };
+      })?.result?.data
+    : undefined;
+  const abandonedCarts = abandonedPayload?.items ?? [];
+  const abandonedPagination: AbandonedCartPagination = abandonedPayload
+    ? { total: abandonedPayload.total, page: abandonedPayload.page, limit: abandonedPayload.limit }
+    : { total: 0, page: 1, limit: ABANDONED_CARTS_PAGE_SIZE };
 
-  return json({ activityItems, pendingCarts, abandonedCarts });
+  return json({ activityItems, pendingCarts, abandonedCarts, abandonedPagination });
 }
 
 export async function action({ request }: ActionFunctionArgs) {

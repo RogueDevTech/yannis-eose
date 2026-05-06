@@ -261,10 +261,10 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
               key={line.uid}
               className="rounded-lg border border-app-border bg-app-elevated px-3 py-2.5 space-y-2"
             >
-              {/* Compact header — line label + Remove on the right. */}
+              {/* Compact header — ad row label + Remove on the right. */}
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-app-fg-muted uppercase tracking-wide">
-                  Line {idx + 1}
+                  Ads {idx + 1}
                 </span>
                 <Button
                   type="button"

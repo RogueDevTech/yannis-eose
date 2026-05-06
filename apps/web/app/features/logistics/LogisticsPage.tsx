@@ -69,7 +69,9 @@ function AddProviderForm({
     );
   }
 
-  const filledCount = rows.filter((r) => r.name.trim()).length;
+  const filledCount = rows.filter(
+    (r) => r.name.trim() && r.contactInfo.trim() && r.coverageArea.trim(),
+  ).length;
 
   return (
     <fetcher.Form method="post" className="px-6 py-4 space-y-3">
@@ -80,7 +82,13 @@ function AddProviderForm({
       </div>
       <input type="hidden" name="intent" value={rows.length > 1 ? 'createProviders' : 'createProvider'} />
       <div className="space-y-3">
-        {rows.map((row, idx) => (
+        {rows.map((row, idx) => {
+          const partialRow =
+            row.name.trim().length > 0 ||
+            row.contactInfo.trim().length > 0 ||
+            row.coverageArea.trim().length > 0;
+          const rowRequired = idx === 0 || partialRow;
+          return (
           <div key={idx} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
             <TextInput
               name={rows.length > 1 ? `provider_${idx}_name` : 'name'}
@@ -89,7 +97,7 @@ function AddProviderForm({
               value={row.name}
               onChange={(e) => updateRow(idx, 'name', e.target.value)}
               placeholder="Logistics company name"
-              required={idx === 0}
+              required={rowRequired}
             />
             <TextInput
               name={rows.length > 1 ? `provider_${idx}_contactInfo` : 'contactInfo'}
@@ -97,7 +105,8 @@ function AddProviderForm({
               label={idx === 0 ? 'Contact info' : undefined}
               value={row.contactInfo}
               onChange={(e) => updateRow(idx, 'contactInfo', e.target.value)}
-              placeholder="Contact info"
+              placeholder="Phone, email, or contact name"
+              required={rowRequired}
             />
             <div className="flex gap-2 items-end">
               <div className="flex-1">
@@ -107,7 +116,8 @@ function AddProviderForm({
                   label={idx === 0 ? 'Coverage area' : undefined}
                   value={row.coverageArea}
                   onChange={(e) => updateRow(idx, 'coverageArea', e.target.value)}
-                  placeholder="Coverage area"
+                  placeholder="e.g. Lagos, Kogi"
+                  required={rowRequired}
                 />
               </div>
               {rows.length > 1 && (
@@ -124,7 +134,8 @@ function AddProviderForm({
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating...">
@@ -161,13 +172,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       const now = new Date().toISOString();
       if (intent === 'createProvider') {
         const name = fd.get('name')?.toString().trim();
-        if (!name) return null;
+        const contactInfo = fd.get('contactInfo')?.toString().trim();
+        const coverageArea = fd.get('coverageArea')?.toString().trim();
+        if (!name || !contactInfo || !coverageArea) return null;
         return [
           {
             id: optimisticId(),
             name,
-            contactInfo: fd.get('contactInfo')?.toString().trim() || null,
-            coverageArea: fd.get('coverageArea')?.toString().trim() || null,
+            contactInfo,
+            coverageArea,
             status: 'ACTIVE',
             createdAt: now,
           },
@@ -177,12 +190,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         const out: Provider[] = [];
         for (let i = 0; i < 50; i++) {
           const name = fd.get(`provider_${i}_name`)?.toString().trim();
+          const contactInfo = fd.get(`provider_${i}_contactInfo`)?.toString().trim();
+          const coverageArea = fd.get(`provider_${i}_coverageArea`)?.toString().trim();
           if (!name) continue;
+          if (!contactInfo || !coverageArea) continue;
           out.push({
             id: optimisticId(i),
             name,
-            contactInfo: fd.get(`provider_${i}_contactInfo`)?.toString().trim() || null,
-            coverageArea: fd.get(`provider_${i}_coverageArea`)?.toString().trim() || null,
+            contactInfo,
+            coverageArea,
             status: 'ACTIVE',
             createdAt: now,
           });
@@ -233,9 +249,9 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     const name = fd.get('name')?.toString().trim();
     if (name) patch.name = name;
     const contactInfo = fd.get('contactInfo')?.toString().trim();
-    if (contactInfo !== undefined) patch.contactInfo = contactInfo || null;
     const coverageArea = fd.get('coverageArea')?.toString().trim();
-    if (coverageArea !== undefined) patch.coverageArea = coverageArea || null;
+    if (contactInfo) patch.contactInfo = contactInfo;
+    if (coverageArea) patch.coverageArea = coverageArea;
     const status = fd.get('status')?.toString();
     if (status) patch.status = status;
     return [{ id, patch }];
@@ -580,6 +596,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 label="Contact info"
                 defaultValue={editingProvider.contactInfo ?? ''}
                 placeholder="Phone, email, or contact name"
+                required
               />
               <TextInput
                 name="coverageArea"
@@ -587,6 +604,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 label="Coverage area"
                 defaultValue={editingProvider.coverageArea ?? ''}
                 placeholder="e.g. Lagos, Abuja"
+                required
               />
               <FormSelect
                 name="status"

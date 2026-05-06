@@ -41,6 +41,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'products.read', resource: 'products', action: 'read', description: 'View products' },
   { code: 'products.create', resource: 'products', action: 'create', description: 'Create products' },
   { code: 'products.update', resource: 'products', action: 'update', description: 'Update products' },
+  { code: 'products.offers', resource: 'products', action: 'offers', description: 'Manage offer packages (stock-owned)' },
   { code: 'categories.read', resource: 'categories', action: 'read', description: 'View categories' },
   { code: 'categories.write', resource: 'categories', action: 'write', description: 'Create/update categories' },
   { code: 'inventory.read', resource: 'inventory', action: 'read', description: 'View inventory' },
@@ -53,6 +54,12 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'inventory.createReconciliation', resource: 'inventory', action: 'createReconciliation', description: 'Create stock reconciliation' },
   { code: 'inventory.resolveReconciliation', resource: 'inventory', action: 'resolveReconciliation', description: 'Resolve reconciliation' },
   { code: 'inventory.reconciliations', resource: 'inventory', action: 'reconciliations', description: 'View reconciliations' },
+  {
+    code: 'inventory.warehouses.write',
+    resource: 'inventory',
+    action: 'warehouses.write',
+    description: 'Create / update Yannis-owned warehouses',
+  },
   { code: 'transfers.read', resource: 'transfers', action: 'read', description: 'View transfers' },
   { code: 'returns.read', resource: 'returns', action: 'read', description: 'View returns' },
   { code: 'logistics.read', resource: 'logistics', action: 'read', description: 'View logistics' },
@@ -65,7 +72,12 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'marketing.adSpend', resource: 'marketing', action: 'adSpend', description: 'Log ad spend' },
   { code: 'marketing.leaderboard', resource: 'marketing', action: 'leaderboard', description: 'View marketing leaderboard' },
   { code: 'marketing.checkHighCpa', resource: 'marketing', action: 'checkHighCpa', description: 'Check high CPA' },
-  { code: 'marketing.offerTemplate', resource: 'marketing', action: 'offerTemplate', description: 'Create/update offer templates' },
+  {
+    code: 'marketing.offerTemplate',
+    resource: 'marketing',
+    action: 'offerTemplate',
+    description: 'Legacy: create, update, and archive Edge offer tiers (deprecated — offers are stock-owned under products.offers)',
+  },
   { code: 'marketing.campaigns', resource: 'marketing', action: 'campaigns', description: 'Create/update campaigns' },
   { code: 'marketing.teamOverview', resource: 'marketing', action: 'teamOverview', description: 'Marketing team overview (Head of Marketing only)' },
   { code: 'marketing.orders', resource: 'marketing', action: 'orders', description: 'View own orders (Media Buyer) or marketing orders (Head of Marketing)' },
@@ -195,7 +207,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'marketing.fundingSummary',
     'marketing.leaderboard',
     'marketing.checkHighCpa',
-    'marketing.offerTemplate',
     'marketing.campaigns',
     'marketing.teamOverview',
     'marketing.orders',
@@ -275,19 +286,17 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'finance.costView',
     'finance.approve',
     'finance.disburse',
-    'marketing.read',
-    'marketing.fundingSummary',
     'orders.read',
     'audit.read',
     'users.read',
-    // CEO directive 2026-05-05: Finance can VIEW funding requests on
-    // /admin/marketing/funding for awareness, but approve/reject is HoM's
-    // space. Finance acts on their own /admin/finance/disbursements page —
-    // separate flow, separate permission. `marketing.funding.approve`
-    // intentionally removed here; admin-class still bypasses.
+    // Marketing access intentionally excluded: Head of Marketing owns
+    // marketing workflows; Finance acts via finance pages only.
     'finance.cashRemittance.create',
     'finance.cashRemittance.markReceived',
   ],
+  // Permission inbox: order line price + archive approvals from CS (`permission_requests.*`),
+  // plus direct line-price edits via `orders.line_price.edit`. Org-wide scope via
+  // `logistics.scope.global` powers `canActorEditOrderLinePrices` for cross-branch orders.
   HEAD_OF_LOGISTICS: [
     'orders.read',
     'orders.bulkTransition',
@@ -298,6 +307,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'inventory.intake',
     'inventory.verifyTransfer',
     'inventory.lowStockAlerts',
+    'inventory.warehouses.write',
     'returns.read',
     'inventory.returnedOrders',
     'inventory.reconciliations',
@@ -328,10 +338,12 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'inventory.createReconciliation',
     'inventory.resolveReconciliation',
     'inventory.reconciliations',
+    'inventory.warehouses.write',
     'transfers.read',
     'returns.read',
     'products.read',
     'products.create',
+    'products.offers',
     'categories.read',
     'categories.write',
   ],
@@ -359,6 +371,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'users.read',
     'users.create',
     'users.update',
+    'notifications.broadcast',
     'audit.read',
     'hr.onboarding.read',
     'hr.onboarding.write',

@@ -20,7 +20,7 @@ import {
 } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
-import { OrdersChartView } from '~/components/ui/orders-chart-view';
+import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { ExportModal, type ExportModalPicklists } from '~/components/ui/export-modal';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';

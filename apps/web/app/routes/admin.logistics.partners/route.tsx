@@ -14,9 +14,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'logistics.read');
   const cookie = getSessionCookie(request);
 
-  const listInput = JSON.stringify({ page: 1, limit: 20 });
-  const providersPromise = apiRequest<unknown>(`/trpc/logistics.listProviders?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
-  const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(listInput)}`, { method: 'GET', cookie });
+  const providersInput = JSON.stringify({ page: 1, limit: 20, kind: 'THIRD_PARTY' });
+  const locationsInput = JSON.stringify({ page: 1, limit: 20, providerKind: 'THIRD_PARTY' });
+  const providersPromise = apiRequest<unknown>(`/trpc/logistics.listProviders?input=${encodeURIComponent(providersInput)}`, { method: 'GET', cookie });
+  const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(locationsInput)}`, { method: 'GET', cookie });
 
   const [providersRes, locationsRes] = await Promise.all([providersPromise, locationsPromise]);
 
@@ -46,22 +47,33 @@ export async function action({ request }: ActionFunctionArgs) {
     if (intent === 'createProviders') {
       for (let i = 0; i < 50; i++) {
         const name = formData.get(`provider_${i}_name`)?.toString()?.trim();
-        if (name) {
-          providers.push({
-            name,
-            contactInfo: formData.get(`provider_${i}_contactInfo`)?.toString()?.trim() || undefined,
-            coverageArea: formData.get(`provider_${i}_coverageArea`)?.toString()?.trim() || undefined,
-          });
+        const contactInfo = formData.get(`provider_${i}_contactInfo`)?.toString()?.trim();
+        const coverageArea = formData.get(`provider_${i}_coverageArea`)?.toString()?.trim();
+        const anyFilled = Boolean(name || contactInfo || coverageArea);
+        if (!anyFilled) continue;
+        if (!name) {
+          return json({ error: 'Each logistics company row must include a name.' }, { status: 400 });
         }
+        if (!contactInfo || !coverageArea) {
+          return json(
+            { error: 'Contact info and coverage area are required for every logistics company.' },
+            { status: 400 },
+          );
+        }
+        providers.push({ name, contactInfo, coverageArea });
       }
     } else {
       const name = formData.get('name')?.toString()?.trim();
-      if (name) {
-        providers.push({
-          name,
-          contactInfo: formData.get('contactInfo')?.toString()?.trim() || undefined,
-          coverageArea: formData.get('coverageArea')?.toString()?.trim() || undefined,
-        });
+      const contactInfo = formData.get('contactInfo')?.toString()?.trim();
+      const coverageArea = formData.get('coverageArea')?.toString()?.trim();
+      if (name || contactInfo || coverageArea) {
+        if (!name || !contactInfo || !coverageArea) {
+          return json(
+            { error: 'Name, contact info, and coverage area are all required.' },
+            { status: 400 },
+          );
+        }
+        providers.push({ name, contactInfo, coverageArea });
       }
     }
     if (providers.length === 0) {
@@ -86,14 +98,19 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'updateProvider') {
+    const contactInfo = formData.get('contactInfo')?.toString()?.trim();
+    const coverageArea = formData.get('coverageArea')?.toString()?.trim();
+    if (!contactInfo || !coverageArea) {
+      return json({ error: 'Contact info and coverage area are required.' }, { status: 400 });
+    }
     const res = await apiRequest<unknown>('/trpc/logistics.updateProvider', {
       method: 'POST',
       cookie,
       body: {
         providerId: formData.get('providerId')?.toString() ?? '',
         name: formData.get('name')?.toString()?.trim() || undefined,
-        contactInfo: formData.get('contactInfo')?.toString()?.trim() || undefined,
-        coverageArea: formData.get('coverageArea')?.toString()?.trim() || undefined,
+        contactInfo,
+        coverageArea,
         status: formData.get('status')?.toString() || undefined,
       },
     });

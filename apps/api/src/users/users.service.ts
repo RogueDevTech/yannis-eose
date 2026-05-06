@@ -39,7 +39,7 @@ export class UsersService {
   ) {}
 
   private defaultScopeForRole(role: string): { scopeGlobal: boolean; scopeOrgWideHead: boolean } {
-    if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+    if (isAdminLevelRole(role)) {
       return { scopeGlobal: true, scopeOrgWideHead: false };
     }
     if (role === 'HEAD_OF_CS' || role === 'HEAD_OF_MARKETING' || role === 'HEAD_OF_LOGISTICS') {
@@ -368,14 +368,12 @@ export class UsersService {
       );
 
       if (req?.id) {
-        this.notificationsService
-          .createForRole('SUPER_ADMIN', {
-            type: 'approval:permission_request',
-            title: 'Permission request pending',
-            body: `HR requested to create user "${input.name}" (${input.email}) with role ${input.role}.`,
-            data: { requestId: req.id, type: 'USER_CREATION' },
-          })
-          .catch(() => {});
+        this.notificationsService.enqueueCreateForRole('SUPER_ADMIN', {
+          type: 'approval:permission_request',
+          title: 'Permission request pending',
+          body: `HR requested to create user "${input.name}" (${input.email}) with role ${input.role}.`,
+          data: { requestId: req.id, type: 'USER_CREATION' },
+        });
 
         return {
           requiresApproval: true,
@@ -618,19 +616,17 @@ export class UsersService {
       });
 
     if (input.productIds && input.productIds.length > 0) {
-      this.notificationsService
-        .create({
+      this.notificationsService.enqueueCreate({
+        userId: user.id,
+        type: 'account:updated',
+        title: 'Your account was updated',
+        body: `Product access: ${input.productIds.length} product(s) assigned to your account. Sign in to use the catalog.`,
+        data: {
           userId: user.id,
-          type: 'account:updated',
-          title: 'Your account was updated',
-          body: `Product access: ${input.productIds.length} product(s) assigned to your account. Sign in to use the catalog.`,
-          data: {
-            userId: user.id,
-            changedKeys: ['productIds'],
-            productCount: input.productIds.length,
-          },
-        })
-        .catch(() => {});
+          changedKeys: ['productIds'],
+          productCount: input.productIds.length,
+        },
+      });
     }
 
     return {
@@ -805,6 +801,7 @@ export class UsersService {
           payoutBankName: schema.users.payoutBankName,
           payoutAccountName: schema.users.payoutAccountName,
           payoutAccountNumber: schema.users.payoutAccountNumber,
+          payoutBankCode: schema.users.payoutBankCode,
         })
         .from(schema.users)
         .where(whereClause)
@@ -822,7 +819,7 @@ export class UsersService {
 
     return {
       users: users.map((u) => {
-        const { payoutBankName, payoutAccountName, payoutAccountNumber, ...rest } = u;
+        const { payoutBankName, payoutAccountName, payoutAccountNumber, payoutBankCode, ...rest } = u;
         return {
           ...rest,
           phone: this.resolveStaffPhone(actor, { id: u.id, role: u.role, phone: u.phone }),
@@ -832,6 +829,7 @@ export class UsersService {
                 payoutBankName: payoutBankName ?? null,
                 payoutAccountName: payoutAccountName ?? null,
                 payoutAccountNumber: payoutAccountNumber ?? null,
+                payoutBankCode: payoutBankCode ?? null,
               }
             : {}),
         };
@@ -1170,28 +1168,28 @@ export class UsersService {
         });
       }
 
-      const [req] = await this.db
-        .insert(schema.permissionRequests)
-        .values({
-          type: 'ROLE_CHANGE',
-          status: 'PENDING',
-          requesterId: actor.id,
-          targetUserId: input.userId,
-          requestedRole: input.role,
-          reason: `HR requested role change to ${input.role}`,
-          payload: input as unknown as Record<string, unknown>,
-        })
-        .returning({ id: schema.permissionRequests.id });
+      const [req] = await withActor(this.db, actor, async (tx) =>
+        tx
+          .insert(schema.permissionRequests)
+          .values({
+            type: 'ROLE_CHANGE',
+            status: 'PENDING',
+            requesterId: actor.id,
+            targetUserId: input.userId,
+            requestedRole: input.role,
+            reason: `HR requested role change to ${input.role}`,
+            payload: input as unknown as Record<string, unknown>,
+          })
+          .returning({ id: schema.permissionRequests.id }),
+      );
 
       if (req?.id) {
-        this.notificationsService
-          .createForRole('SUPER_ADMIN', {
-            type: 'approval:permission_request',
-            title: 'Permission request pending',
-            body: `HR requested to change user role to ${input.role}.`,
-            data: { requestId: req.id, type: 'ROLE_CHANGE', targetUserId: input.userId },
-          })
-          .catch(() => {});
+        this.notificationsService.enqueueCreateForRole('SUPER_ADMIN', {
+          type: 'approval:permission_request',
+          title: 'Permission request pending',
+          body: `HR requested to change user role to ${input.role}.`,
+          data: { requestId: req.id, type: 'ROLE_CHANGE', targetUserId: input.userId },
+        });
 
         return {
           requiresApproval: true,
@@ -1226,38 +1224,36 @@ export class UsersService {
         });
       }
 
-      // Cancel any existing PENDING request for this user
-      await this.db
-        .update(schema.emailChangeRequests)
-        .set({ status: 'REJECTED', updatedAt: new Date(), approvalReason: 'Superseded by new request' })
-        .where(
-          and(
-            eq(schema.emailChangeRequests.userId, input.userId),
-            eq(schema.emailChangeRequests.status, 'PENDING'),
-          ),
-        );
+      const requestId = await withActor(this.db, actor, async (tx) => {
+        await tx
+          .update(schema.emailChangeRequests)
+          .set({ status: 'REJECTED', updatedAt: new Date(), approvalReason: 'Superseded by new request' })
+          .where(
+            and(
+              eq(schema.emailChangeRequests.userId, input.userId),
+              eq(schema.emailChangeRequests.status, 'PENDING'),
+            ),
+          );
 
-      // Create new email change request
-      const requestRows = await this.db
-        .insert(schema.emailChangeRequests)
-        .values({
-          userId: input.userId,
-          requestedNewEmail: newEmail,
-          requesterId: actor.id,
-          status: 'PENDING',
-        })
-        .returning({ id: schema.emailChangeRequests.id });
-
-      const requestId = requestRows[0]?.id;
-      if (requestId) {
-        this.notificationsService
-          .createForRole('SUPER_ADMIN', {
-            type: 'approval:email_change',
-            title: 'Email change approval required',
-            body: `A user has requested an email change. Approval needed.`,
-            data: { requestId, userId: input.userId, requestedNewEmail: newEmail },
+        const requestRows = await tx
+          .insert(schema.emailChangeRequests)
+          .values({
+            userId: input.userId,
+            requestedNewEmail: newEmail,
+            requesterId: actor.id,
+            status: 'PENDING',
           })
-          .catch((err) => this.logger.warn(`Failed to notify SuperAdmin: ${err}`));
+          .returning({ id: schema.emailChangeRequests.id });
+
+        return requestRows[0]?.id;
+      });
+      if (requestId) {
+        this.notificationsService.enqueueCreateForRole('SUPER_ADMIN', {
+          type: 'approval:email_change',
+          title: 'Email change approval required',
+          body: `A user has requested an email change. Approval needed.`,
+          data: { requestId, userId: input.userId, requestedNewEmail: newEmail },
+        });
       }
 
       emailChangePending = true;
@@ -1330,6 +1326,23 @@ export class UsersService {
       (overridesPayloadPresent || roleChanged || templateDirectChanged);
     const overridesForSnapshot = overridesPayloadPresent ? (input.permissionOverrides ?? {}) : {};
 
+    let permissionOverridesChanged = false;
+    if (overridesPayloadPresent && beforeRow.role !== 'SUPER_ADMIN') {
+      const priorSparse = await this.getSparsePermissionOverridesForUser(input.userId);
+      permissionOverridesChanged =
+        this.stableOverrideRecordJson(priorSparse) !==
+        this.stableOverrideRecordJson(
+          (input.permissionOverrides ?? {}) as Record<string, boolean>,
+        );
+    }
+
+    const beforeMembershipBranchIds = [...existingBranchIds].sort((a, b) => a.localeCompare(b));
+    const branchesOrPrimaryPayloadTouched =
+      input.branchIds !== undefined || input.primaryBranchId !== undefined;
+    const afterMembershipBranchIds = branchesOrPrimaryPayloadTouched
+      ? [...new Set(nextBranchIds)].sort((a, b) => a.localeCompare(b))
+      : beforeMembershipBranchIds;
+
     const updatedRows = await this.db.transaction(async (tx) => {
       // Audit actor for this transaction (see with-actor.ts for why SET LOCAL must be inside).
       await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actor.id}, true)`);
@@ -1348,6 +1361,8 @@ export class UsersService {
           phone: schema.users.phone,
           visibleOrderStatuses: schema.users.visibleOrderStatuses,
           restrictProductAccess: schema.users.restrictProductAccess,
+          primaryBranchId: schema.users.primaryBranchId,
+          roleTemplateId: schema.users.roleTemplateId,
           updatedAt: schema.users.updatedAt,
         });
       if (input.branchIds !== undefined || input.primaryBranchId !== undefined) {
@@ -1425,8 +1440,11 @@ export class UsersService {
         phone: beforeRow.phone,
         visibleOrderStatuses: beforeRow.visibleOrderStatuses,
         restrictProductAccess: beforeRow.restrictProductAccess,
+        primaryBranchId: beforeRow.primaryBranchId ?? null,
+        roleTemplateId: beforeRow.roleTemplateId ?? null,
       },
       beforeProductIds,
+      beforeBranchIds: beforeMembershipBranchIds,
       after: {
         name: updated.name,
         email: updated.email,
@@ -1437,8 +1455,12 @@ export class UsersService {
         phone: updated.phone,
         visibleOrderStatuses: updated.visibleOrderStatuses,
         restrictProductAccess: updated.restrictProductAccess,
+        primaryBranchId: updated.primaryBranchId ?? null,
+        roleTemplateId: updated.roleTemplateId ?? null,
       },
       afterProductIds,
+      afterBranchIds: afterMembershipBranchIds,
+      permissionOverridesChanged,
     });
 
     return {
@@ -1663,15 +1685,13 @@ export class UsersService {
 
     await this.authService.killUserSessions(input.userId);
 
-    this.notificationsService
-      .create({
-        userId: input.userId,
-        type: 'account:security',
-        title: 'Your password was reset',
-        body: 'An administrator reset your password. Use the new credentials you were given. Contact support if you did not expect this.',
-        data: { userId: input.userId, event: 'password_reset' },
-      })
-      .catch(() => {});
+    this.notificationsService.enqueueCreate({
+      userId: input.userId,
+      type: 'account:security',
+      title: 'Your password was reset',
+      body: 'An administrator reset your password. Use the new credentials you were given. Contact support if you did not expect this.',
+      data: { userId: input.userId, event: 'password_reset' },
+    });
 
     return { success: true };
   }
@@ -1821,22 +1841,92 @@ export class UsersService {
         ? `Your login email was updated to ${req.requestedNewEmail}. Use this address to sign in from now on.`
         : `Your email change request was not approved. Reason: ${input.reason}`;
 
-    this.notificationsService
-      .create({
+    this.notificationsService.enqueueCreate({
+      userId: req.userId,
+      type: 'account:updated',
+      title:
+        input.action === 'APPROVED' ? 'Your email was updated' : 'Email change request declined',
+      body,
+      data: {
         userId: req.userId,
-        type: 'account:updated',
-        title:
-          input.action === 'APPROVED' ? 'Your email was updated' : 'Email change request declined',
-        body,
-        data: {
-          userId: req.userId,
-          changedKeys: input.action === 'APPROVED' ? ['email'] : [],
-          emailChangeAction: input.action,
-        },
-      })
-      .catch(() => {});
+        changedKeys: input.action === 'APPROVED' ? ['email'] : [],
+        emailChangeAction: input.action,
+      },
+    });
 
     return { success: true, action: input.action };
+  }
+
+  /** Canonical JSON for comparing permission-matrix payloads (sorted keys). */
+  private stableOverrideRecordJson(record: Record<string, boolean>): string {
+    const keys = Object.keys(record).sort((a, b) => a.localeCompare(b));
+    const sorted: Record<string, boolean> = {};
+    for (const key of keys) {
+      sorted[key] = record[key]!;
+    }
+    return JSON.stringify(sorted);
+  }
+
+  /**
+   * Sparse permission deltas vs template baseline — same shape as `permissions.getUserMatrix`
+   * `userOverrides` (grants off-template + revokes on-template).
+   */
+  private async getSparsePermissionOverridesForUser(userId: string): Promise<Record<string, boolean>> {
+    const [user] = await this.db
+      .select({
+        role: schema.users.role,
+        roleTemplateId: schema.users.roleTemplateId,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) return {};
+
+    const overrideRows = await this.db
+      .select({
+        code: schema.permissions.code,
+        granted: schema.userPermissions.granted,
+      })
+      .from(schema.userPermissions)
+      .innerJoin(schema.permissions, eq(schema.userPermissions.permissionId, schema.permissions.id))
+      .where(and(eq(schema.userPermissions.userId, userId), isNull(schema.userPermissions.validTo)));
+
+    let templateId: string | null = user.roleTemplateId;
+    if (!templateId && user.role) {
+      const [fallback] = await this.db
+        .select({ id: schema.roleTemplates.id })
+        .from(schema.roleTemplates)
+        .where(
+          and(
+            eq(schema.roleTemplates.mappedRole, user.role),
+            eq(schema.roleTemplates.kind, 'SYSTEM'),
+            isNull(schema.roleTemplates.validTo),
+          ),
+        )
+        .limit(1);
+      templateId = fallback?.id ?? null;
+    }
+
+    const templateCodesCanon = await resolveRoleTemplateBaselineCodes(
+      this.db,
+      templateId,
+      user.role ?? '',
+    );
+    const templateSet = new Set(templateCodesCanon);
+
+    const userOverrides: Record<string, boolean> = {};
+    for (const row of overrideRows) {
+      const code = canonicalPermissionCode(row.code);
+      const inTpl = templateSet.has(code);
+      if (row.granted) {
+        if (!inTpl) userOverrides[code] = true;
+      } else if (inTpl) {
+        userOverrides[code] = false;
+      }
+    }
+
+    return userOverrides;
   }
 
   /**
@@ -1854,8 +1944,11 @@ export class UsersService {
       phone: string | null;
       visibleOrderStatuses: unknown;
       restrictProductAccess: boolean;
+      primaryBranchId: string | null;
+      roleTemplateId: string | null;
     };
     beforeProductIds: string[];
+    beforeBranchIds: string[];
     after: {
       name: string;
       email: string;
@@ -1866,10 +1959,23 @@ export class UsersService {
       phone: string | null;
       visibleOrderStatuses: unknown;
       restrictProductAccess: boolean;
+      primaryBranchId: string | null;
+      roleTemplateId: string | null;
     };
     afterProductIds: string[];
+    afterBranchIds: string[];
+    permissionOverridesChanged: boolean;
   }): void {
-    const { targetUserId, before, after, beforeProductIds, afterProductIds } = params;
+    const {
+      targetUserId,
+      before,
+      after,
+      beforeProductIds,
+      afterProductIds,
+      beforeBranchIds,
+      afterBranchIds,
+      permissionOverridesChanged,
+    } = params;
 
     const normJson = (v: unknown) => JSON.stringify(v ?? null);
     const changedKeys: string[] = [];
@@ -1887,6 +1993,18 @@ export class UsersService {
     }
     if (before.restrictProductAccess !== after.restrictProductAccess) {
       changedKeys.push('restrictProductAccess');
+    }
+    if (before.primaryBranchId !== after.primaryBranchId) {
+      changedKeys.push('primaryBranchId');
+    }
+    if ((before.roleTemplateId ?? null) !== (after.roleTemplateId ?? null)) {
+      changedKeys.push('roleTemplateId');
+    }
+    if (beforeBranchIds.join('\0') !== afterBranchIds.join('\0')) {
+      changedKeys.push('branchIds');
+    }
+    if (permissionOverridesChanged) {
+      changedKeys.push('permissionOverrides');
     }
     const productsChanged = beforeProductIds.join('\0') !== afterProductIds.join('\0');
     if (productsChanged) changedKeys.push('productIds');
@@ -1923,6 +2041,18 @@ export class UsersService {
           : `Your product access was updated (${n} product(s) assigned).`,
       );
     }
+    if (changedKeys.includes('branchIds')) {
+      lines.push('Your branch memberships were updated.');
+    }
+    if (changedKeys.includes('primaryBranchId')) {
+      lines.push('Your default (primary) branch was updated.');
+    }
+    if (changedKeys.includes('roleTemplateId')) {
+      lines.push('Your permission template assignment was updated.');
+    }
+    if (changedKeys.includes('permissionOverrides')) {
+      lines.push('Your individual permission overrides were updated.');
+    }
 
     const becameDeactivated = before.status !== 'DEACTIVATED' && after.status === 'DEACTIVATED';
 
@@ -1937,15 +2067,13 @@ export class UsersService {
       return;
     }
 
-    this.notificationsService
-      .create({
-        userId: targetUserId,
-        type: 'account:updated',
-        title: 'Your account was updated',
-        body: lines.join(' '),
-        data: { userId: targetUserId, changedKeys },
-      })
-      .catch(() => {});
+    this.notificationsService.enqueueCreate({
+      userId: targetUserId,
+      type: 'account:updated',
+      title: 'Your account was updated',
+      body: lines.join(' '),
+      data: { userId: targetUserId, changedKeys },
+    });
   }
 
   /** Current saved theme preference from DB (null = org default). */
@@ -2110,15 +2238,13 @@ export class UsersService {
         .where(eq(schema.users.id, actor.id));
     });
 
-    this.notificationsService
-      .create({
-        userId: actor.id,
-        type: 'account:security',
-        title: 'Password changed',
-        body: 'Your password was successfully changed. If this wasn’t you, contact your administrator immediately.',
-        data: {},
-      })
-      .catch(() => {});
+    this.notificationsService.enqueueCreate({
+      userId: actor.id,
+      type: 'account:security',
+      title: 'Password changed',
+      body: 'Your password was successfully changed. If this wasn’t you, contact your administrator immediately.',
+      data: {},
+    });
 
     return { success: true };
   }

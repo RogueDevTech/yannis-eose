@@ -50,6 +50,8 @@ export const users = pgTable('users', {
   payoutAccountName: text('payout_account_name'),
   /** Payout beneficiary account number (finance-only visibility). */
   payoutAccountNumber: text('payout_account_number'),
+  /** Payout beneficiary bank routing/sort code (finance-only visibility). */
+  payoutBankCode: text('payout_bank_code'),
   /**
    * Per-user notification opt-outs. Map of notification-type → enabled.
    * Empty / missing key = enabled (default). `false` = skip this type entirely

@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
-import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
-import { isOptimisticId, optimisticId } from '~/lib/optimistic';
+import { isOptimisticId } from '~/lib/optimistic';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
-import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { DescriptionList } from '~/components/ui/description-list';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
@@ -23,6 +21,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
+import { RadioGroup } from '~/components/ui/radio-group';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -37,30 +36,46 @@ import {
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type {
-  InventoryLevel, InventoryStreamData, ProductOption, LocationOption, StockMovement,
+  InventoryLevel, InventoryStreamData, ProductOption, LocationOption,
   Transfer, ReturnedOrder, Reconciliation, LocationWithLock, LowStockAlertsResult,
 } from './types';
-import {
-  MOVEMENT_COLORS,
-  formatMovementType,
-  REASON_LABELS,
-} from './types';
+import { REASON_LABELS } from './types';
+import { ShipmentsTab } from './ShipmentsTab';
 
 export function InventoryPage({
-  levels, totalLevels, levelsPage = 1, levelsTotalPages = 1, levelsLimit = 20,
+  levels,
+  levelsTotals,
+  totalLevels,
+  levelsPage = 1,
+  levelsTotalPages = 1,
+  levelsLimit = 20,
   levelsProductFilter: serverProductFilter = '', levelsLocationFilter: serverLocationFilter = '',
+  levelsShipmentFilter: serverShipmentFilter = '',
   levelsSearch: serverSearch = '',
   levelsSort: serverSort = 'default',
-  movements, totalMovements, products, locations, canIntake = false, canAdjust = false, canExport = false,
+  displayLocations = [] as LocationOption[],
+  movements: _movements,
+  totalMovements,
+  products,
+  locations,
+  canIntake = false,
+  canAdjust = false,
+  canExport = false,
   transfers, returnedOrders, reconciliations, locationsWithLock,
   lowStockThreshold = 10, canEditLowStock = false, lowStockAlerts,
+  shipments = [], totalShipments = 0,
+  levelsLoadError = null,
+  movementsLoadError = null,
 }: InventoryStreamData) {
   const hasTransfers = !!transfers;
   const hasReturns = !!returnedOrders;
 
-  const deliveryDeductions = movements.filter((m) => m.movementType === 'DELIVERY');
-
-  type TabValue = 'levels' | 'delivery_deductions' | 'transfers' | 'returns' | 'reconciliation';
+  type TabValue =
+    | 'levels'
+    | 'transfers'
+    | 'returns'
+    | 'reconciliation'
+    | 'shipments';
   const [activeTab, setActiveTab] = useState<TabValue>('levels');
 
   // Stock Levels filter + sort are URL-driven so the backend can do the actual filter/sort/paginate.
@@ -68,7 +83,7 @@ export function InventoryPage({
   type LevelsSort = 'default' | 'lowestAvailable' | 'highestAvailable';
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const updateLevelsParam = (key: 'productId' | 'locationId' | 'sort' | 'search', value: string) => {
+  const updateLevelsParam = (key: 'productId' | 'locationId' | 'shipmentId' | 'sort' | 'search', value: string) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (!value || value === 'ALL' || value === 'default') next.delete(key);
@@ -84,6 +99,7 @@ export function InventoryPage({
       const next = new URLSearchParams(prev);
       next.delete('productId');
       next.delete('locationId');
+      next.delete('shipmentId');
       next.delete('sort');
       next.delete('search');
       next.delete('page');
@@ -106,21 +122,28 @@ export function InventoryPage({
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
   const locationName = (id: string | null) => {
     if (!id) return '—';
-    const loc = locations.find((l) => l.id === id);
+    const loc = displayLocations.find((l) => l.id === id) ?? locations.find((l) => l.id === id);
     if (!loc) return 'Unknown location';
-    return loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name;
+    return loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name;
+  };
+
+  const locationLabelParts = (id: string | null): { name: string; tag?: string } => {
+    if (!id) return { name: '—' };
+    const loc = displayLocations.find((l) => l.id === id) ?? locations.find((l) => l.id === id);
+    if (!loc) return { name: 'Unknown location' };
+    return { name: loc.name, ...(loc.providerName ? { tag: loc.providerName } : {}) };
   };
 
   // displayedLevels is computed below — after the optimisticLevels hook fires
   // (it depends on `fetcher` which isn't declared yet here).
   const currentProductFilter = serverProductFilter || 'ALL';
   const currentLocationFilter = serverLocationFilter || 'ALL';
+  const currentShipmentFilter = serverShipmentFilter || 'ALL';
   const currentSort: LevelsSort = serverSort;
-  const [showIntakeForm, setShowIntakeForm] = useState(false);
-  /** Bumps when the intake modal opens so quantity/cost fields remount fresh. */
-  const [intakeFormInstance, setIntakeFormInstance] = useState(0);
-  const [intakeProductId, setIntakeProductId] = useState('');
-  const [intakeLocationId, setIntakeLocationId] = useState('');
+
+  const goToReceiveShipment = () => {
+    window.location.href = '/admin/inventory/shipments/receive';
+  };
 
   type AdjustDirection = 'increase' | 'decrease';
   // Adjust modal: row-level stock correction (signed ADJUSTMENT); direction sets UX + sign.
@@ -131,9 +154,9 @@ export function InventoryPage({
   const adjustFetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(adjustFetcher.data, { successMessage: 'Stock adjusted' });
 
-  const openAdjustModal = (level: InventoryLevel, direction: AdjustDirection) => {
+  const openAdjustModal = (level: InventoryLevel) => {
     setEditingLevel(level);
-    setAdjustDirection(direction);
+    setAdjustDirection('decrease');
     setAdjustQty('');
     setAdjustReason('');
   };
@@ -143,25 +166,6 @@ export function InventoryPage({
     setAdjustDirection(null);
     setAdjustQty('');
     setAdjustReason('');
-  };
-
-  const openIntakeModal = (prefill: { productId: string; locationId: string } | null) => {
-    if (prefill) {
-      setIntakeProductId(prefill.productId);
-      setIntakeLocationId(prefill.locationId);
-    } else {
-      setIntakeProductId('');
-      setIntakeLocationId('');
-    }
-    setIntakeFormInstance((n) => n + 1);
-    setShowIntakeForm(true);
-  };
-
-  const openIntakeFromAdjustIncrease = () => {
-    if (!canIntake || !editingLevel) return;
-    const prefill = { productId: editingLevel.productId, locationId: editingLevel.locationId };
-    closeAdjustModal();
-    openIntakeModal(prefill);
   };
 
   const signedAdjustmentQuantityStr = useMemo(() => {
@@ -183,96 +187,6 @@ export function InventoryPage({
 
   const fetcher = useFetcher();
 
-  const intakeError = (fetcher.data as { error?: string } | undefined)?.error;
-  const intakeErrorRef = useRef<HTMLDivElement>(null);
-  const [dismissedIntakeError, setDismissedIntakeError] = useState(false);
-  useFetcherToast(fetcher.data, { successMessage: 'Stock added successfully' });
-
-  useEffect(() => {
-    if (intakeError) setDismissedIntakeError(false);
-  }, [intakeError]);
-
-  useEffect(() => {
-    if (intakeError && intakeErrorRef.current) {
-      intakeErrorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [intakeError]);
-
-  /**
-   * Edge-trigger close + reset on successful intake. Replaces the old
-   * `useEffect([fetcher.data, showIntakeForm])` variant per CLAUDE.md →
-   * "Modal + Optimistic UI Pattern". Intent-filtered so the same `fetcher`
-   * (which also handles `adjustStock`, `markIntakeReceipt`, etc.) doesn't
-   * tear down the intake modal on unrelated success.
-   */
-  const handleIntakeSuccess = useCallback(() => {
-    setShowIntakeForm(false);
-    setIntakeProductId('');
-    setIntakeLocationId('');
-  }, []);
-  useCloseOnFetcherSuccess(fetcher, handleIntakeSuccess, { intent: 'stockIntake' });
-
-  /**
-   * Optimistic-add: derive a synthetic InventoryLevel row from the in-flight
-   * `stockIntake` payload so the new row appears in the table the same React
-   * tick the toast fires. Sticks through revalidation; canonical row replaces
-   * it cleanly when the loader returns. The render path below dims the row
-   * with `opacity-60`, shows a "Saving…" chip, and disables row actions while
-   * the synthetic id is in flight (`__optimistic_…` would 404 the API).
-   *
-   * We only synthesize when the (productId, locationId) pair isn't already in
-   * the levels list — when it IS already there, the server does an UPDATE
-   * (stockCount += quantity) and the existing row is sufficient. This avoids
-   * showing a duplicate row while the actual UPDATE is in flight.
-   */
-  const buildOptimisticLevels = useCallback<
-    (fd: FormData, intent: string) => InventoryLevel[] | null
-  >(
-    (fd, intent) => {
-      if (intent !== 'stockIntake') return null;
-      const productId = fd.get('productId')?.toString().trim();
-      const locationId = fd.get('locationId')?.toString().trim();
-      const qty = parseInt(fd.get('quantity')?.toString() ?? '0', 10);
-      if (!productId || !locationId || !Number.isFinite(qty) || qty < 1) return null;
-      // If a row for this (product, location) already exists, server UPDATEs it
-      // — don't synthesize a duplicate. Optimistic visual feedback for the
-      // increment isn't worth the duplicate-row confusion.
-      const existing = levels.some((l) => l.productId === productId && l.locationId === locationId);
-      if (existing) return null;
-      return [
-        {
-          id: optimisticId(`${productId}_${locationId}`),
-          productId,
-          locationId,
-          stockCount: qty,
-          reservedCount: 0,
-          status: 'AVAILABLE',
-          updatedAt: new Date().toISOString(),
-        },
-      ];
-    },
-    [levels],
-  );
-  // `awaitSuccess: true` — only render the synthetic row AFTER the action
-  // returns success (during the loader-revalidation window). The intake
-  // modal blocks the table during submit so an optimistic-during-submit row
-  // would be invisible; this also avoids a brief "row appears, then
-  // disappears" flash if the intake fails server-side.
-  const optimisticLevels = useOptimisticListMerge<InventoryLevel>(
-    fetcher,
-    buildOptimisticLevels,
-    { awaitSuccess: true },
-  );
-
-  /** Prepend in-flight optimistic rows so the user sees their addition the
-   * same React tick the toast appears. Server's default sort is
-   * `updatedAt DESC` so prepending matches the canonical order — the
-   * synthetic row stays at top until it's replaced by the canonical row. */
-  const displayedLevels = useMemo(
-    () => [...optimisticLevels, ...levels],
-    [levels, optimisticLevels],
-  );
-
   // Low-stock threshold editor (admin-only)
   const [showThresholdModal, setShowThresholdModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -286,8 +200,10 @@ export function InventoryPage({
     }
   }, [thresholdFetcher.data]);
 
-  const totalStock = levels.reduce((sum, l) => sum + l.stockCount, 0);
-  const totalReserved = levels.reduce((sum, l) => sum + l.reservedCount, 0);
+  const pageStockSum = levels.reduce((sum, l) => sum + l.stockCount, 0);
+  const pageReservedSum = levels.reduce((sum, l) => sum + l.reservedCount, 0);
+  const totalStock = levelsTotals?.totalStock ?? pageStockSum;
+  const totalReserved = levelsTotals?.totalReserved ?? pageReservedSum;
 
   /** CompactTable columns for stock levels — `hideOnMobile` drops Reserved + Status
    *  on narrow desktop table columns; mobile uses card rows from the same component. */
@@ -310,7 +226,49 @@ export function InventoryPage({
     {
       key: 'location',
       header: 'Location',
-      render: (level) => <span className="text-app-fg-muted">{locationName(level.locationId)}</span>,
+      render: (level) => {
+        const parts = locationLabelParts(level.locationId);
+        return (
+          <span className="inline-flex items-center gap-2 min-w-0">
+            <span className="text-app-fg-muted truncate">{parts.name}</span>
+            {parts.tag ? (
+              <span className="inline-flex items-center rounded-full border border-app-border bg-app-hover px-2 py-0.5 text-[10px] font-medium text-app-fg-muted whitespace-nowrap">
+                {parts.tag}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'shipments',
+      header: 'Shipment (FIFO)',
+      render: (level) => {
+        const layers = level.shipmentLayers ?? [];
+        const manual = level.hasManualFifoRemaining === true;
+        if (layers.length === 0 && !manual) {
+          return <span className="text-app-fg-muted text-xs">—</span>;
+        }
+        return (
+          <div className="flex flex-wrap gap-1 justify-end sm:justify-start max-w-[16rem]">
+            {layers.map((s) => (
+              <Link
+                key={s.id}
+                to={`/admin/inventory/shipments/${s.id}`}
+                prefetch="intent"
+                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
+              >
+                {s.referenceLabel}
+              </Link>
+            ))}
+            {manual && (
+              <span className="text-xs rounded px-1.5 py-0.5 border border-app-border bg-app-hover text-app-fg-muted whitespace-nowrap">
+                Manual intake
+              </span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: 'stock',
@@ -365,18 +323,11 @@ export function InventoryPage({
             {canAdjust && (
               <>
                 <TableActionButton
-                  variant="danger"
-                  disabled={isOptimistic}
-                  onClick={() => openAdjustModal(level, 'decrease')}
-                >
-                  Remove
-                </TableActionButton>
-                <TableActionButton
                   variant="neutral"
                   disabled={isOptimistic}
-                  onClick={() => openAdjustModal(level, 'increase')}
+                  onClick={() => openAdjustModal(level)}
                 >
-                  Add
+                  Reconcile
                 </TableActionButton>
               </>
             )}
@@ -391,11 +342,11 @@ export function InventoryPage({
       {/* Page header */}
       <PageHeader
         title="Inventory"
-        description="Track stock levels, transfers, and reconciliations across all locations"
+        description="Pick Stock levels or Shipments below — shelf totals vs inbound receive/verify."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Inventory tools"
-            sheetSubtitle={<span>Threshold, stock intake, and export</span>}
+            sheetSubtitle={<span>Threshold, receive shipment, and export</span>}
             triggerAriaLabel="Inventory toolbar"
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -424,32 +375,17 @@ export function InventoryPage({
                   </span>
                 </button>
                 {canIntake && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="flex-1 sm:flex-initial whitespace-nowrap"
-                    onClick={() => {
-                      if (showIntakeForm) {
-                        setShowIntakeForm(false);
-                        setIntakeProductId('');
-                        setIntakeLocationId('');
-                      } else {
-                        openIntakeModal(null);
-                      }
-                    }}
+                  <Link
+                    to="/admin/inventory/shipments/receive"
+                    prefetch="intent"
+                    className="btn-primary btn-sm flex-1 sm:flex-initial whitespace-nowrap inline-flex items-center justify-center gap-2"
                   >
-                    {showIntakeForm ? (
-                      'Close'
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                        </svg>
-                        <span className="sm:hidden">Intake</span>
-                        <span className="hidden sm:inline">Stock Intake</span>
-                      </>
-                    )}
-                  </Button>
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    <span className="sm:hidden">Shipment</span>
+                    <span className="hidden sm:inline">Receive Shipment</span>
+                  </Link>
                 )}
                 {canExport && (
                   <Button
@@ -490,16 +426,11 @@ export function InventoryPage({
                     className="w-full justify-center"
                     onClick={() => {
                       closeSheet();
-                      if (showIntakeForm) {
-                        setShowIntakeForm(false);
-                        setIntakeProductId('');
-                        setIntakeLocationId('');
-                      } else {
-                        openIntakeModal(null);
-                      }
+                      // Use the dedicated page for large multi-line shipments.
+                      window.location.href = '/admin/inventory/shipments/receive';
                     }}
                   >
-                    {showIntakeForm ? 'Close stock intake' : 'Stock Intake'}
+                    Receive Shipment
                   </Button>
                 )}
                 {canExport && (
@@ -520,6 +451,10 @@ export function InventoryPage({
           />
         }
       />
+      {levelsLoadError && <RouteFetchErrorBanner messages={[levelsLoadError]} variant="danger" />}
+      {movementsLoadError && (
+        <RouteFetchErrorBanner messages={[movementsLoadError]} variant="warning" />
+      )}
       <ExportModal
         open={showExportModal}
         onClose={() => setShowExportModal(false)}
@@ -527,174 +462,13 @@ export function InventoryPage({
         initialFilters={{
           productId: serverProductFilter || undefined,
           locationId: serverLocationFilter || undefined,
+          shipmentId: serverShipmentFilter || undefined,
           search: serverSearch || undefined,
           sort: serverSort === 'default' ? undefined : serverSort,
         }}
       />
 
-      {/* Stock Intake modal (only when user has inventory.intake) */}
-      {canIntake && showIntakeForm && (
-        <Modal
-          open
-          onClose={() => {
-            setShowIntakeForm(false);
-            setIntakeProductId('');
-            setIntakeLocationId('');
-          }}
-          maxWidth="max-w-2xl"
-          contentClassName="p-6 space-y-4 bg-app-elevated"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h3 className="text-lg font-semibold text-app-fg">Receive Stock (Stock Intake)</h3>
-              <p className="text-sm text-app-fg-muted mt-1">
-                Add a new FIFO batch. Each intake creates a batch with its own factory and landing cost.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setShowIntakeForm(false);
-                setIntakeProductId('');
-                setIntakeLocationId('');
-              }}
-              aria-label="Close"
-              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          {intakeError && !dismissedIntakeError && (
-            <div ref={intakeErrorRef}>
-              <PageNotification
-                variant="error"
-                message={intakeError}
-                durationMs={5000}
-                onDismiss={() => setDismissedIntakeError(true)}
-              />
-            </div>
-          )}
-          {(products.length === 0 || locations.length === 0) ? (
-            <InlineNotification
-              variant="warning"
-              message={
-                products.length === 0 && locations.length === 0
-                  ? 'You need at least one product and one logistics location before you can receive stock.'
-                  : products.length === 0
-                    ? 'You need at least one product before you can receive stock.'
-                    : 'You need at least one logistics location before you can receive stock.'
-              }
-              actions={
-                products.length === 0 && locations.length === 0
-                  ? [
-                      { label: 'New product', href: '/admin/products/new' },
-                      { label: 'Logistics partners', href: '/admin/logistics/partners' },
-                    ]
-                  : products.length === 0
-                    ? [{ label: 'New product', href: '/admin/products/new' }]
-                    : [{ label: 'Logistics partners', href: '/admin/logistics/partners' }]
-              }
-            />
-          ) : (
-            <fetcher.Form
-              key={intakeFormInstance}
-              method="post"
-              className="grid grid-cols-1 sm:grid-cols-2 gap-4"
-            >
-              <input type="hidden" name="intent" value="stockIntake" />
-              <input type="hidden" name="productId" value={intakeProductId} />
-              <input type="hidden" name="locationId" value={intakeLocationId} />
-              <SearchableSelect
-                label="Product"
-                id="intake-productId"
-                required
-                value={intakeProductId}
-                onChange={setIntakeProductId}
-                placeholder="Select product..."
-                searchPlaceholder="Search products..."
-                options={products.map((p: ProductOption) => ({ value: p.id, label: p.name }))}
-                wrapperClassName="sm:col-span-2"
-              />
-              <SearchableSelect
-                label="Location"
-                id="intake-locationId"
-                required
-                value={intakeLocationId}
-                onChange={setIntakeLocationId}
-                placeholder="Select location..."
-                searchPlaceholder="Search locations..."
-                options={locations.map((l: LocationOption) => ({
-                  value: l.id,
-                  label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
-                }))}
-                wrapperClassName="sm:col-span-2"
-              />
-              <TextInput
-                label="Quantity"
-                id="intake-quantity"
-                name="quantity"
-                type="number"
-                required
-                min={1}
-                placeholder="0"
-              />
-              <div>
-                <label htmlFor="intake-factoryCost" className="block text-sm font-medium text-app-fg-muted mb-1">
-                  Factory Cost (&#8358;)
-                </label>
-                <AmountInput
-                  id="intake-factoryCost"
-                  name="factoryCost"
-                  required
-                  className="input"
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label htmlFor="intake-landingCost" className="block text-sm font-medium text-app-fg-muted mb-1">
-                  Landing Cost (&#8358;)
-                </label>
-                <AmountInput
-                  id="intake-landingCost"
-                  name="landingCost"
-                  className="input"
-                  placeholder="0.00"
-                  defaultValue="0"
-                />
-                <p className="text-xs text-app-fg-muted mt-0.5">
-                  Freight, duty, etc. Default 0.
-                </p>
-              </div>
-              <div className="sm:col-span-2 flex justify-end gap-2 pt-2 border-t border-app-border">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    setShowIntakeForm(false);
-                    setIntakeProductId('');
-                    setIntakeLocationId('');
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={!intakeProductId || !intakeLocationId}
-                  loading={fetcher.state === 'submitting'}
-                  loadingText="Adding..."
-                >
-                  Add Stock
-                </Button>
-              </div>
-            </fetcher.Form>
-          )}
-        </Modal>
-      )}
-
-      {/* Adjust modal — signed ADJUSTMENT movement + reason (intake handles receipts with COGS). */}
+      {/* Adjust modal — signed ADJUSTMENT movement + reason (supplier receipts use Shipments → verify). */}
       {canAdjust && editingLevel && adjustDirection && (
         <Modal
           open
@@ -705,7 +479,7 @@ export function InventoryPage({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <h3 className="text-lg font-semibold text-app-fg">
-                {adjustDirection === 'decrease' ? 'Remove stock' : 'Add units (adjustment)'}
+                {adjustDirection === 'decrease' ? 'Reconcile stock (remove)' : 'Reconcile stock (add)'}
               </h3>
               <p className="text-sm text-app-fg-muted mt-1 truncate">
                 {productName(editingLevel.productId)} · {locationName(editingLevel.locationId)}
@@ -732,11 +506,21 @@ export function InventoryPage({
               variant="info"
               message={
                 canIntake
-                  ? 'Received goods with invoices or cost basis? Use Stock Intake so landed cost is tracked in FIFO batches.'
-                  : 'Received goods with invoices or cost basis? Ask someone with Stock Intake access to record the receipt so landed cost is tracked in FIFO batches.'
+                  ? 'Received goods from a supplier? Record a shipment under Shipments and verify it — that creates FIFO batches with landed cost.'
+                  : 'Received goods from a supplier? Ask someone with intake access to receive a shipment under Shipments and verify it.'
               }
               actions={
-                canIntake ? [{ label: 'Open stock intake', onClick: openIntakeFromAdjustIncrease }] : undefined
+                canIntake
+                  ? [
+                      {
+                        label: 'Receive shipment',
+                        onClick: () => {
+                          closeAdjustModal();
+                          goToReceiveShipment();
+                        },
+                      },
+                    ]
+                  : undefined
               }
             />
           )}
@@ -752,8 +536,28 @@ export function InventoryPage({
             <input type="hidden" name="productId" value={editingLevel.productId} />
             <input type="hidden" name="locationId" value={editingLevel.locationId} />
             <input type="hidden" name="adjustmentQuantity" value={signedAdjustmentQuantityStr} />
+            <RadioGroup<AdjustDirection>
+              name="adjustDirection"
+              label="Reconciliation type"
+              required
+              layout="card"
+              value={adjustDirection}
+              onChange={(v) => setAdjustDirection(v)}
+              options={[
+                {
+                  value: 'decrease',
+                  label: 'Reduction',
+                  description: 'Digital stock is higher than physical count',
+                },
+                {
+                  value: 'increase',
+                  label: 'Addition',
+                  description: 'Digital stock is lower than physical count',
+                },
+              ]}
+            />
             <TextInput
-              label={adjustDirection === 'decrease' ? 'Units to remove' : 'Units to add'}
+              label={adjustDirection === 'decrease' ? 'Units to reduce by' : 'Units to add'}
               id="adjust-qty-display"
               type="number"
               required
@@ -764,8 +568,8 @@ export function InventoryPage({
               onChange={(e) => setAdjustQty(e.target.value)}
               hint={
                 adjustDirection === 'decrease'
-                  ? `Removes from on-hand stock (max ${editingLevel.stockCount}). Creates an ADJUSTMENT movement — not a FIFO batch.`
-                  : 'For true count gains only. New supply with cost should use Stock Intake.'
+                  ? `Reconciles on-hand stock downward (max ${editingLevel.stockCount}). Creates an ADJUSTMENT movement — not a FIFO batch.`
+                  : 'Reconciles on-hand stock upward (count fix only). New supplier stock must use Receive Shipment → verify.'
               }
             />
             <Textarea
@@ -791,9 +595,9 @@ export function InventoryPage({
                   adjustFetcher.state !== 'idle'
                 }
                 loading={adjustFetcher.state !== 'idle'}
-                loadingText={adjustDirection === 'decrease' ? 'Removing…' : 'Adding…'}
+                loadingText={adjustDirection === 'decrease' ? 'Reconciling…' : 'Reconciling…'}
               >
-                {adjustDirection === 'decrease' ? 'Remove' : 'Add units'}
+                {adjustDirection === 'decrease' ? 'Reconcile (reduction)' : 'Reconcile (addition)'}
               </Button>
             </div>
           </adjustFetcher.Form>
@@ -858,10 +662,17 @@ export function InventoryPage({
         </Modal>
       )}
 
-      <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
+      {/* Overview stats — summary for Stock Levels + Shipments */}
+      <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={5} />}>
         {(count) => (
           <OverviewStatStrip
             items={[
+              {
+                label: 'Shipments',
+                value: totalShipments.toLocaleString(),
+                valueClassName: 'text-app-fg',
+                title: 'Inbound shipments visible for your branch (all statuses)',
+              },
               { label: 'Total Stock', value: totalStock.toLocaleString(), valueClassName: 'text-app-fg' },
               { label: 'Reserved', value: totalReserved.toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
               {
@@ -869,14 +680,13 @@ export function InventoryPage({
                 value: (totalStock - totalReserved).toLocaleString(),
                 valueClassName: 'text-success-600 dark:text-success-400',
               },
-              { label: 'Movements', value: count, valueClassName: 'text-app-fg' },
+              { label: 'Movements', value: (typeof count === 'number' ? count : Number(count)).toLocaleString(), valueClassName: 'text-app-fg' },
             ]}
           />
         )}
       </DeferredSection>
 
-      {/* Low-stock alert — compact summary + small cards in a responsive grid (not bound to current page). */}
-      {lowStockAlerts && (
+      {activeTab === 'levels' && lowStockAlerts && (
         <DeferredSection resolve={lowStockAlerts} skeleton="card">
           {(alerts) => {
             const a = alerts as LowStockAlertsResult;
@@ -918,19 +728,6 @@ export function InventoryPage({
                           {item.availableCount} avail
                         </p>
                       </Link>
-                      {canIntake && (
-                        <div className="mt-2 pt-2 border-t border-warning-200/70 dark:border-warning-800/60">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="w-full text-xs"
-                            onClick={() => openIntakeModal({ productId: item.productId, locationId: item.locationId })}
-                          >
-                            Restock
-                          </Button>
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -949,14 +746,15 @@ export function InventoryPage({
         </DeferredSection>
       )}
 
+      {/* Tabs directly under the overview stats (primary: Levels + Shipments; optional: other inventory tabs). */}
       <Tabs
         value={activeTab}
         onChange={(v) => setActiveTab(v as TabValue)}
         tabs={[
           { value: 'levels', label: `Stock Levels (${totalLevels})` },
-          { value: 'delivery_deductions', label: `Delivery Deductions (${deliveryDeductions.length})` },
-          ...(hasTransfers ? [{ value: 'transfers' as const, label: `Transfers (${transfers.length})` }] : []),
-          ...(hasReturns ? [{ value: 'returns' as const, label: `Returns (${returnedOrders.length})` }] : []),
+          { value: 'shipments', label: `Shipments (${totalShipments})` },
+          ...(hasTransfers ? [{ value: 'transfers' as const, label: `Transfers (${(transfers ?? []).length})` }] : []),
+          ...(hasReturns ? [{ value: 'returns' as const, label: `Returns (${(returnedOrders ?? []).length})` }] : []),
           ...(reconciliations != null ? [{ value: 'reconciliation' as const, label: 'Reconciliation' }] : []),
         ]}
       />
@@ -965,7 +763,12 @@ export function InventoryPage({
       {activeTab === 'levels' && (
         <>
         {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
-        {(totalLevels > 0 || currentProductFilter !== 'ALL' || currentLocationFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
+        {(totalLevels > 0 ||
+          currentProductFilter !== 'ALL' ||
+          currentLocationFilter !== 'ALL' ||
+          currentShipmentFilter !== 'ALL' ||
+          currentSort !== 'default' ||
+          serverSearch) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <SearchableSelect
               id="levels-product-filter"
@@ -983,14 +786,41 @@ export function InventoryPage({
               id="levels-location-filter"
               value={currentLocationFilter}
               onChange={(v) => updateLevelsParam('locationId', v)}
-              wrapperClassName="w-full sm:w-48"
+              wrapperClassName="w-full min-w-0 sm:w-48"
               placeholder="All locations"
               searchPlaceholder="Search locations..."
               options={[
                 { value: 'ALL', label: 'All locations' },
-                ...locations.map((l: LocationOption) => ({
+                ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
                   value: l.id,
-                  label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+                  label: l.name,
+                  ...(l.providerName
+                    ? {
+                        leading: (
+                          <span className="inline-flex items-center rounded-full border border-app-border bg-app-hover px-2 py-0.5 text-[10px] font-medium text-app-fg-muted whitespace-nowrap">
+                            {l.providerName}
+                          </span>
+                        ),
+                      }
+                    : {}),
+                })),
+              ]}
+            />
+            <SearchableSelect
+              id="levels-shipment-filter"
+              value={currentShipmentFilter}
+              onChange={(v) => updateLevelsParam('shipmentId', v)}
+              wrapperClassName="w-full min-w-0 sm:w-52"
+              placeholder="All shipments"
+              searchPlaceholder="Search SHIP ref…"
+              options={[
+                { value: 'ALL', label: 'All shipments' },
+                ...shipments.map((s) => ({
+                  value: s.id,
+                  label:
+                    s.label != null && s.label.trim() !== ''
+                      ? `${s.referenceLabel} — ${s.label}`
+                      : s.referenceLabel,
                 })),
               ]}
             />
@@ -1028,7 +858,11 @@ export function InventoryPage({
               ]}
               aria-label="Sort order"
             />
-            {(currentProductFilter !== 'ALL' || currentLocationFilter !== 'ALL' || currentSort !== 'default' || serverSearch) && (
+            {(currentProductFilter !== 'ALL' ||
+              currentLocationFilter !== 'ALL' ||
+              currentShipmentFilter !== 'ALL' ||
+              currentSort !== 'default' ||
+              serverSearch) && (
               <button
                 type="button"
                 onClick={resetLevelsFilters}
@@ -1041,20 +875,24 @@ export function InventoryPage({
         )}
         <CompactTable<InventoryLevel>
           columns={levelColumns}
-          rows={displayedLevels}
+          rows={levels}
           rowKey={(r) => r.id}
           rowClassName={(level) => (isOptimisticId(level.id) ? 'opacity-60' : '')}
           loading={isLoadingLevels}
           loadingVariant="overlay"
           emptyTitle={
-            levels.length === 0
-              ? 'No inventory data yet'
-              : 'No inventory matches your filter'
+            levelsLoadError
+              ? 'Unable to load stock levels'
+              : levels.length === 0
+                ? 'No inventory data yet'
+                : 'No inventory matches your filter'
           }
           emptyDescription={
-            levels.length === 0
-              ? 'Add products and receive stock to get started.'
-              : 'Try changing the product filter or sort.'
+            levelsLoadError
+              ? 'Use Reload data above or refresh the page. Empty totals here do not mean you have no stock.'
+              : levels.length === 0
+                ? 'Add products, then receive supplier stock via the Shipments panel (verify to post into inventory).'
+                : 'Try changing filters (product, location, shipment) or sort.'
           }
         />
 
@@ -1081,14 +919,6 @@ export function InventoryPage({
         />
       )}
 
-      {activeTab === 'delivery_deductions' && (
-        <DeliveryDeductionsTab
-          movements={deliveryDeductions}
-          productName={productName}
-          locationName={locationName}
-        />
-      )}
-
       {activeTab === 'returns' && hasReturns && (
         <ReturnsTab
           returnedOrders={returnedOrders}
@@ -1106,229 +936,20 @@ export function InventoryPage({
           fetcher={fetcher}
         />
       )}
+
+      {/* Keep mounted so Receive Shipment nonce + modal state survive tab switches */}
+      <div className={activeTab === 'shipments' ? '' : 'hidden'} aria-hidden={activeTab !== 'shipments'}>
+        <ShipmentsTab
+          shipments={shipments}
+          totalShipments={totalShipments}
+          canIntake={canIntake}
+        />
+      </div>
     </div>
   );
 }
 
 /* ── Transfers Tab ── */
-
-function DeliveryDeductionsTab({
-  movements,
-  productName,
-  locationName,
-}: {
-  movements: StockMovement[];
-  productName: (id: string) => string;
-  locationName: (id: string | null) => string;
-}) {
-  const [selectedMovement, setSelectedMovement] = useState<StockMovement | null>(null);
-  const selectedOrderId =
-    selectedMovement && typeof selectedMovement.referenceId === 'string' && selectedMovement.referenceId.length > 0
-      ? selectedMovement.referenceId
-      : null;
-
-  const deductionColumns = useMemo((): CompactTableColumn<StockMovement>[] => [
-    {
-      key: 'type',
-      header: 'Type',
-      render: (m) => (
-        <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
-          {formatMovementType(m.movementType)}
-        </span>
-      ),
-    },
-    {
-      key: 'product',
-      header: 'Product',
-      render: (m) => <span className="font-medium text-app-fg">{productName(m.productId)}</span>,
-      minWidth: 'min-w-[140px]',
-    },
-    {
-      key: 'customer',
-      header: 'Customer',
-      render: (m) => <span className="text-app-fg">{m.referenceCustomerName ?? '—'}</span>,
-    },
-    {
-      key: 'qty',
-      header: 'Qty',
-      align: 'right',
-      nowrap: true,
-      render: (m) => (
-        <span className="font-medium text-danger-600 dark:text-danger-400 tabular-nums">
-          -{Math.abs(m.quantity)}
-        </span>
-      ),
-    },
-    {
-      key: 'from',
-      header: 'From',
-      hideOnMobile: true,
-      render: (m) => <span className="text-app-fg-muted">{locationName(m.fromLocationId)}</span>,
-    },
-    {
-      key: 'to',
-      header: 'To',
-      hideOnMobile: true,
-      render: (m) => <span className="text-app-fg-muted">{locationName(m.toLocationId)}</span>,
-    },
-    {
-      key: 'route',
-      header: 'Route',
-      className: 'sm:hidden',
-      render: (m) => (
-        <span className="text-xs text-app-fg-muted">
-          {locationName(m.fromLocationId)} → {locationName(m.toLocationId)}
-        </span>
-      ),
-    },
-    {
-      key: 'date',
-      header: 'Date',
-      nowrap: true,
-      render: (m) => (
-        <span className="text-app-fg-muted whitespace-nowrap text-xs sm:text-sm">
-          {new Date(m.createdAt).toLocaleDateString('en-NG', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: 'Actions',
-      align: 'right',
-      tight: true,
-      nowrap: true,
-      minWidth: 'min-w-[4.5rem]',
-      mobileShowLabel: false,
-      render: (m) => (
-        <CompactTableActions className="justify-end shrink-0">
-          <CompactTableActionButton onClick={() => setSelectedMovement(m)}>View</CompactTableActionButton>
-        </CompactTableActions>
-      ),
-    },
-  ], [productName, locationName]);
-
-  return (
-    <>
-      <div className="card p-0">
-        <CompactTable<StockMovement>
-          caption="Delivery deductions"
-          columns={deductionColumns}
-          rows={movements}
-          rowKey={(m) => m.id}
-          withCard={false}
-          className="min-w-[720px]"
-          emptyTitle="No delivery deductions yet"
-          emptyDescription="Stock reductions from delivered orders will appear here."
-          renderMobileCard={(m) => (
-            <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className={MOVEMENT_COLORS[m.movementType] ?? 'badge'}>
-                  {formatMovementType(m.movementType)}
-                </span>
-                <span className="font-medium text-danger-600 dark:text-danger-400 tabular-nums">
-                  -{Math.abs(m.quantity)}
-                </span>
-              </div>
-              <div className="space-y-1 text-sm">
-                <p className="font-medium text-app-fg">{productName(m.productId)}</p>
-                <p className="text-app-fg-muted">{m.referenceCustomerName ?? '—'}</p>
-                <p className="text-app-fg-muted">{locationName(m.fromLocationId)} → {locationName(m.toLocationId)}</p>
-                <p className="text-xs text-app-fg-muted">
-                  {new Date(m.createdAt).toLocaleDateString('en-NG', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </p>
-              </div>
-              <div className="pt-2 border-t border-app-border">
-                <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedMovement(m)}>
-                  View
-                </Button>
-              </div>
-            </div>
-          )}
-        />
-      </div>
-
-      <Modal
-        open={!!selectedMovement}
-        onClose={() => setSelectedMovement(null)}
-        maxWidth="max-w-lg"
-        aria-labelledby="delivery-deduction-detail-title"
-      >
-        {selectedMovement && (
-          <div className="card border-0 shadow-none space-y-4 p-4 sm:p-6">
-            <div className="flex items-center justify-between gap-2">
-              <h3 id="delivery-deduction-detail-title" className="text-lg font-semibold text-app-fg">
-                Delivery deduction
-              </h3>
-              <button
-                type="button"
-                onClick={() => setSelectedMovement(null)}
-                className="text-app-fg-muted hover:text-app-fg shrink-0"
-                aria-label="Close"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <DescriptionList
-              items={[
-                { label: 'Customer', value: selectedMovement.referenceCustomerName ?? '—' },
-                {
-                  label: 'Order',
-                  value: selectedOrderId ? (
-                    <OrderIdBadge id={selectedOrderId} linkTo={`/admin/orders/${selectedOrderId}`} />
-                  ) : (
-                    '—'
-                  ),
-                },
-                { label: 'Product', value: productName(selectedMovement.productId) },
-                { label: 'From', value: locationName(selectedMovement.fromLocationId) },
-                { label: 'To', value: locationName(selectedMovement.toLocationId) },
-                { label: 'Quantity', value: `-${Math.abs(selectedMovement.quantity)}` },
-                {
-                  label: 'Date',
-                  value: new Date(selectedMovement.createdAt).toLocaleDateString('en-NG', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  }),
-                },
-              ]}
-            />
-
-            <div className="flex items-center gap-2">
-              {selectedOrderId && (
-                <Link
-                  to={`/admin/orders/${selectedOrderId}`}
-                  className="btn-primary btn-sm"
-                  onClick={() => setSelectedMovement(null)}
-                >
-                  Open order
-                </Link>
-              )}
-              <Button type="button" variant="secondary" size="sm" onClick={() => setSelectedMovement(null)}>
-                Close
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-    </>
-  );
-}
 
 function TransfersTab({
   transfers,
@@ -1383,6 +1004,12 @@ function TransfersTab({
           {locationName(t.fromLocationId)} → {locationName(t.toLocationId)}
         </span>
       ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      hideOnMobile: true,
+      render: (t) => <StatusBadge status={t.transferStatus} showDot />,
     },
     {
       key: 'qty',
