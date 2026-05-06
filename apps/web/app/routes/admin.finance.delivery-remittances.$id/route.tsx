@@ -10,6 +10,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import type { DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
 import { DeliveryRemittanceDetailPage } from '~/features/finance/DeliveryRemittanceDetailPage';
 
@@ -34,7 +35,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`,
+      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: USERS_LIST_MAX_LIMIT }))}`,
       { method: 'GET', cookie },
     ),
   ]);

@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -112,7 +113,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => ({})),
     ]);
 
-    return json({
+    return secondaryCacheJson({
       ok: true as const,
       metrics,
       profit,

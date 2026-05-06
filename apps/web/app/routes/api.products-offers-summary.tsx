@@ -1,11 +1,13 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
   getSessionCookie,
   requirePermission,
 } from '~/lib/api.server';
+import { PRODUCTS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import type { OfferGroupRow } from '~/features/campaigns/types';
 import type { Product } from '~/features/products/types';
@@ -66,7 +68,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const opt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
-  const productsInput = { page: 1, limit: 200, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
+  // `products.list` validator caps limit at 100 (packages/shared/src/validators/products.ts).
+  // Keep this in sync so Stock Manager / offers modal always receives products.
+  const productsInput = {
+    page: 1,
+    limit: PRODUCTS_LIST_MAX_LIMIT,
+    sortBy: 'createdAt' as const,
+    sortOrder: 'desc' as const,
+  };
 
   try {
     const [productsRes, offerGroupsRes] = await Promise.all([
@@ -94,7 +103,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       offerGroups,
       offerGroupsLoadError,
     };
-    return json({ ok: true as const, ...payload });
+    return secondaryCacheJson({ ok: true as const, ...payload });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to load offers';
     const payload: OffersSummaryPayload = {

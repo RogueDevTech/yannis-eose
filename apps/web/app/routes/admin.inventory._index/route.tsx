@@ -12,6 +12,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
 import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption, ShipmentRow, WarehouseRowLite } from '~/features/inventory/types';
@@ -32,6 +33,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     permission: 'inventory.read',
   });
   const cookie = getSessionCookie(request);
+  const actorPerms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
 
   // Parse Stock-Levels filter + sort + pagination from URL search params.
   // `sort=lowestAvailable|highestAvailable` maps to backend sortBy/sortOrder pairs.
@@ -281,8 +283,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     locations,
     displayLocations,
     // Receive shipment (same gate as legacy intake); single-product intake UI removed — receipts go through shipments.
-    canIntake: isAdminLevel(user) || (user.permissions?.includes('inventory.intake') ?? false),
-    canAdjust: isAdminLevel(user) || (user.permissions?.includes('inventory.adjust') ?? false),
+    canIntake:
+      isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.intake')),
+    canAdjust:
+      isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.adjust')),
     // Inventory CSV export is restricted to admin-level users and STOCK_MANAGER — the same
     // roles that own the stock data. Everyone else reading inventory (logistics, TPL managers,
     // finance) still sees the table but cannot download the raw levels.

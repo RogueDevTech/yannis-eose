@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -60,10 +61,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })?.result?.data ?? [])
     : [];
 
-  return json({
-    ok: res.ok as boolean,
+  if (!res.ok) {
+    return json({
+      ok: false as const,
+      dailyCounts,
+      error: 'Could not load chart trend.',
+    });
+  }
+
+  return secondaryCacheJson({
+    ok: true as const,
     dailyCounts,
-    error: res.ok ? null : 'Could not load chart trend.',
+    error: null,
   });
 }
 

@@ -215,17 +215,11 @@ export function WarehousesPage({
             <TableActionButton inert variant="primary">
               View stock
             </TableActionButton>
-            <TableActionButton inert variant="neutral">
-              Shipments
-            </TableActionButton>
           </div>
         ) : (
           <div className="inline-flex items-center justify-end gap-1.5">
             <TableActionButton to={`/admin/inventory?locationId=${w.id}`} variant="primary">
               View stock
-            </TableActionButton>
-            <TableActionButton to={`/admin/inventory/warehouses/${w.id}`} variant="neutral">
-              Shipments
             </TableActionButton>
           </div>
         ),

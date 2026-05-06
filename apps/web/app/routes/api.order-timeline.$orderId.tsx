@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, requirePermission } from '~/lib/api.server';
 import type { TimelineEvent } from '~/features/orders/types';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -23,6 +24,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   const data = (res.data as { result?: { data?: TimelineEvent[] } })?.result?.data ?? [];
-  return json({ ok: true, timeline: data });
+  return secondaryCacheJson({ ok: true, timeline: data });
 }
 

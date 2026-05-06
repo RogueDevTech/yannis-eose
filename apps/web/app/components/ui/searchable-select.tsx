@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Spinner } from './spinner';
 
 type SearchableSelectSize = 'sm' | 'md' | 'lg';
 
@@ -23,6 +24,7 @@ interface SearchableSelectProps {
   searchPlaceholder?: string;
   emptyText?: string;
   disabled?: boolean;
+  loading?: boolean;
   required?: boolean;
   controlSize?: SearchableSelectSize;
   wrapperClassName?: string;
@@ -59,6 +61,7 @@ export function SearchableSelect({
   searchPlaceholder = 'Search...',
   emptyText = 'No results',
   disabled = false,
+  loading = false,
   required = false,
   controlSize = 'md',
   wrapperClassName = '',
@@ -210,20 +213,32 @@ export function SearchableSelect({
             {selected?.label ?? placeholder}
           </span>
         </button>
-        <span
-          className={[
-            'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
-            chevronSizeClasses[controlSize],
-          ].join(' ')}
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" className="w-full h-full" aria-hidden="true">
-            <path
-              fillRule="evenodd"
-              d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </span>
+        {loading ? (
+          <span
+            className={[
+              'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
+              chevronSizeClasses[controlSize],
+            ].join(' ')}
+            aria-hidden
+          >
+            <Spinner size="sm" className="w-full h-full" />
+          </span>
+        ) : (
+          <span
+            className={[
+              'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
+              chevronSizeClasses[controlSize],
+            ].join(' ')}
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="w-full h-full" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </span>
+        )}
       </div>
 
       {(error || hint) && (

@@ -10,6 +10,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import {
   WarehousesPage,
   type WarehouseRow,
@@ -84,9 +85,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const totalPages = Math.max(1, Math.ceil(totalWarehouses / WAREHOUSES_PAGE_LIMIT));
 
+  const actorPerms = new Set((user?.permissions ?? []).map((p) => canonicalPermissionCode(p)));
   const canManage =
     !!user &&
-    (isAdminLevel(user) || (user.permissions ?? []).includes('inventory.warehouses.write'));
+    (isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.warehouses.write')));
 
   const overview = overviewRes.ok
     ? ((overviewRes.data as {

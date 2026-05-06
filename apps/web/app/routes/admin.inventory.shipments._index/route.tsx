@@ -11,6 +11,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
@@ -27,6 +28,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     permission: 'inventory.read',
   });
   const cookie = getSessionCookie(request);
+  const actorPerms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
 
   const url = new URL(request.url);
   const rawPage = Number(url.searchParams.get('page') ?? '1');
@@ -90,7 +92,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit: LIMIT,
     products,
     locations,
-    canIntake: isAdminLevel(user) || (user.permissions?.includes('inventory.intake') ?? false),
+    canIntake:
+      isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.intake')),
     loadError: shipmentsRes.ok ? null : extractApiErrorMessage(shipmentsRes.data, 'Failed to load shipments'),
   });
 }
