@@ -61,6 +61,8 @@ export type StockAdjustmentInput = z.infer<typeof stockAdjustmentSchema>;
 export const listInventorySchema = z.object({
   productId: z.string().uuid().optional(),
   locationId: z.string().uuid().optional(),
+  /** Only levels that still hold FIFO from this verified shipment (batch remaining > 0). */
+  shipmentId: z.string().uuid().optional(),
   belowThreshold: z.boolean().optional(),
   /** Substring match against the product name (case-insensitive). */
   search: z.string().trim().min(1).max(100).optional(),
@@ -119,3 +121,125 @@ export const resolveReconciliationSchema = z.object({
 });
 
 export type ResolveReconciliationInput = z.infer<typeof resolveReconciliationSchema>;
+
+// ============================================
+// Inbound Shipments — multi-line supplier receipts
+// ============================================
+
+export const shipmentStatusSchema = z.enum([
+  'CREATED',
+  'IN_TRANSIT',
+  'ARRIVED',
+  'VERIFIED',
+  'CLOSED',
+  'CANCELLED',
+]);
+export type ShipmentStatus = z.infer<typeof shipmentStatusSchema>;
+
+const moneyAmount = z.coerce.number().min(0).multipleOf(0.01);
+
+const createShipmentLineSchema = z.object({
+  productId: z.string().uuid(),
+  expectedQuantity: z.number().int().min(1, 'Expected quantity must be at least 1'),
+  factoryCost: moneyAmount,
+});
+
+export const createShipmentSchema = z.object({
+  destinationLocationId: z.string().uuid(),
+  label: z.string().trim().max(160).optional().or(z.literal('')),
+  supplierName: z.string().trim().max(160).optional().or(z.literal('')),
+  supplierReference: z.string().trim().max(160).optional().or(z.literal('')),
+  expectedArrivalDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected arrival must be YYYY-MM-DD')
+    .optional()
+    .or(z.literal('')),
+  totalLandingCost: moneyAmount.default(0),
+  notes: z.string().trim().max(1000).optional().or(z.literal('')),
+  /**
+   * `arrivedNow: true` skips planning and creates the shipment in ARRIVED state
+   * (retroactive entry — goods already on-site). Default is `CREATED`.
+   */
+  arrivedNow: z.boolean().optional(),
+  lines: z.array(createShipmentLineSchema).min(1, 'At least one line item is required'),
+});
+export type CreateShipmentInput = z.infer<typeof createShipmentSchema>;
+
+export const updateShipmentLinesSchema = z.object({
+  shipmentId: z.string().uuid(),
+  totalLandingCost: moneyAmount.optional(),
+  label: z.string().trim().max(160).optional().or(z.literal('')),
+  supplierName: z.string().trim().max(160).optional().or(z.literal('')),
+  supplierReference: z.string().trim().max(160).optional().or(z.literal('')),
+  expectedArrivalDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected arrival must be YYYY-MM-DD')
+    .optional()
+    .or(z.literal('')),
+  notes: z.string().trim().max(1000).optional().or(z.literal('')),
+  /** Replace the line set wholesale. Each entry is the same shape as create. */
+  lines: z.array(createShipmentLineSchema).min(1).optional(),
+});
+export type UpdateShipmentLinesInput = z.infer<typeof updateShipmentLinesSchema>;
+
+export const shipmentTransitionSchema = z.object({
+  shipmentId: z.string().uuid(),
+});
+export type ShipmentTransitionInput = z.infer<typeof shipmentTransitionSchema>;
+
+export const verifyShipmentSchema = z.object({
+  shipmentId: z.string().uuid(),
+  lines: z
+    .array(
+      z.object({
+        lineId: z.string().uuid(),
+        receivedQuantity: z.number().int().min(0),
+        varianceReason: z.string().trim().max(500).optional().or(z.literal('')),
+      }),
+    )
+    .min(1),
+});
+export type VerifyShipmentInput = z.infer<typeof verifyShipmentSchema>;
+
+export const cancelShipmentSchema = z.object({
+  shipmentId: z.string().uuid(),
+  reason: z.string().trim().min(10, 'Reason must be at least 10 characters').max(500),
+});
+export type CancelShipmentInput = z.infer<typeof cancelShipmentSchema>;
+
+export const listShipmentsSchema = z.object({
+  status: shipmentStatusSchema.optional(),
+  destinationLocationId: z.string().uuid().optional(),
+  search: z.string().trim().min(1).max(100).optional(),
+  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+export type ListShipmentsInput = z.infer<typeof listShipmentsSchema>;
+
+export const getShipmentSchema = z.object({
+  shipmentId: z.string().uuid(),
+});
+export type GetShipmentInput = z.infer<typeof getShipmentSchema>;
+
+// ============================================
+// Our warehouses (internal provider kind WAREHOUSE) — managed at /admin/inventory/warehouses
+// ============================================
+
+export const createWarehouseSchema = z.object({
+  name: z.string().trim().min(2, 'Name must be at least 2 characters').max(160),
+  address: z.string().trim().min(2, 'Address is required').max(500),
+  coordinates: z.string().trim().max(100).optional().or(z.literal('')),
+});
+export type CreateWarehouseInput = z.infer<typeof createWarehouseSchema>;
+
+export const listWarehousesSchema = z.object({
+  status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+  search: z.string().trim().min(1).max(100).optional(),
+  /** `all` — every logistics site. `our` — internal (provider kind WAREHOUSE) sites only. */
+  listScope: z.enum(['all', 'our']).default('all'),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(50),
+});
+export type ListWarehousesInput = z.infer<typeof listWarehousesSchema>;

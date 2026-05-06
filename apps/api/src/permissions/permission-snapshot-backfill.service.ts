@@ -47,6 +47,18 @@ export class PermissionSnapshotBackfillService implements OnApplicationBootstrap
 
     this.logger.log('Running one-time permission snapshot backfill (legacy union → user_permissions)…');
 
+    const [bootstrapSuperAdmin] = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.role, 'SUPER_ADMIN'))
+      .limit(1);
+    const bootstrapActorId = bootstrapSuperAdmin?.id ?? null;
+    if (!bootstrapActorId) {
+      this.logger.warn(
+        'Permission snapshot backfill: no SUPER_ADMIN row — user_permissions writes will attribute to System in audit.',
+      );
+    }
+
     const staffRows = await this.db
       .select({ id: schema.users.id })
       .from(schema.users)
@@ -57,6 +69,9 @@ export class PermissionSnapshotBackfillService implements OnApplicationBootstrap
       const effective = await this.permissionsService.getEffectivePermissionsLegacyUnion(u.id);
       const canonUnique = [...new Set([...effective].map((c) => canonicalPermissionCode(c)))];
       await this.db.transaction(async (tx) => {
+        if (bootstrapActorId) {
+          await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${bootstrapActorId}, true)`);
+        }
         await tx
           .delete(schema.userPermissions)
           .where(and(eq(schema.userPermissions.userId, u.id), isNull(schema.userPermissions.validTo)));

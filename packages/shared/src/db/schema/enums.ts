@@ -355,3 +355,26 @@ export const staffGenderEnum = pgEnum('staff_gender', [
   'OTHER',
   'PREFER_NOT_TO_SAY',
 ]);
+
+/**
+ * Inbound shipment lifecycle. Drives the parent `shipments` row through the
+ * supplier → warehouse receipt flow:
+ *
+ *   CREATED     — planned, not yet shipped
+ *   IN_TRANSIT  — supplier has dispatched
+ *   ARRIVED     — physically at the destination warehouse, awaiting verification
+ *   VERIFIED    — received quantities recorded; stock_batches + inventory_levels
+ *                 + INTAKE movements written; landing cost allocated per line
+ *   CLOSED      — final lock, audit point
+ *   CANCELLED   — voided pre-VERIFY (reason required, no inventory side effects)
+ *
+ * See CLAUDE.md → "Shipment Lifecycle" for the full state machine.
+ */
+export const shipmentStatusEnum = pgEnum('shipment_status', [
+  'CREATED',
+  'IN_TRANSIT',
+  'ARRIVED',
+  'VERIFIED',
+  'CLOSED',
+  'CANCELLED',
+]);

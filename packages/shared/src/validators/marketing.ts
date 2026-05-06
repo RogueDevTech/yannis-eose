@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_OFFER_TIER_IMAGES } from './products';
 
 // ============================================
 // Marketing Funding Validators
@@ -283,10 +284,18 @@ export type PreviewAdSpendIntervalInput = z.infer<typeof previewAdSpendIntervalS
 // Offer Template Validators
 // ============================================
 
+const offerTemplateImagesSchema = z
+  .array(z.string().url())
+  .max(MAX_OFFER_TIER_IMAGES)
+  .optional()
+  .transform((v) => (Array.isArray(v) ? v : []));
+
 export const createOfferTemplateSchema = z.object({
   productId: z.string().uuid(),
   name: z.string().min(1, 'Template name is required').max(200),
   price: z.coerce.number().min(0).multipleOf(0.01),
+  quantity: z.number().int().min(1).optional().default(1),
+  imageUrls: offerTemplateImagesSchema,
   variants: z.record(z.unknown()).optional(),
 });
 export type CreateOfferTemplateInput = z.infer<typeof createOfferTemplateSchema>;
@@ -295,6 +304,8 @@ export const updateOfferTemplateSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(200).optional(),
   price: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  quantity: z.number().int().min(1).optional(),
+  imageUrls: offerTemplateImagesSchema.optional(),
   variants: z.record(z.unknown()).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
 });
@@ -304,9 +315,63 @@ export const listOfferTemplatesSchema = z.object({
   productId: z.string().uuid().optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  /** Hub page loads up to 250 rows; per-product screens use smaller pages. */
+  limit: z.number().int().min(1).max(250).default(20),
 });
 export type ListOfferTemplatesInput = z.infer<typeof listOfferTemplatesSchema>;
+
+/** Bulk-archive ACTIVE + INACTIVE tiers for a product (clears campaign tier picks / legacy FK). */
+export const archiveAllOfferTemplatesForProductSchema = z.object({
+  productId: z.string().uuid(),
+});
+export type ArchiveAllOfferTemplatesForProductInput = z.infer<
+  typeof archiveAllOfferTemplatesForProductSchema
+>;
+
+// ============================================
+// Offer Groups (multi-item offers)
+// ============================================
+
+const offerGroupItemSchema = z.object({
+  productId: z.string().uuid(),
+  label: z.string().trim().min(1, 'Label is required').max(200),
+  quantity: z.number().int().min(1).default(1),
+  price: z.coerce.number().min(0).multipleOf(0.01),
+  /** Optional image URL selected from the product's gallery. */
+  imageUrl: z.union([z.literal(''), z.string().url()]).optional().transform((v) => (v ? v : undefined)),
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const createOfferGroupSchema = z.object({
+  name: z.string().trim().min(1, 'Offer name is required').max(200),
+  items: z.array(offerGroupItemSchema).min(1, 'Add at least one offer item').max(50),
+});
+export type CreateOfferGroupInput = z.infer<typeof createOfferGroupSchema>;
+
+export const updateOfferGroupSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(200).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+  /** Full replace of items for now (simple + safe). */
+  items: z.array(offerGroupItemSchema).min(1).max(50).optional(),
+});
+export type UpdateOfferGroupInput = z.infer<typeof updateOfferGroupSchema>;
+
+export const getOfferGroupSchema = z.object({ id: z.string().uuid() });
+export type GetOfferGroupInput = z.infer<typeof getOfferGroupSchema>;
+
+export const listOfferGroupsSchema = z.object({
+  status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(250).default(20),
+});
+export type ListOfferGroupsInput = z.infer<typeof listOfferGroupsSchema>;
+
+export const clearLegacyOfferTemplatesSchema = z.object({
+  /** When true, detach campaigns from offer_template_id and clear selectedOfferTemplateIds in formConfig. */
+  detachCampaigns: z.boolean().optional().default(true),
+});
+export type ClearLegacyOfferTemplatesInput = z.infer<typeof clearLegacyOfferTemplatesSchema>;
 
 // ============================================
 // Campaign Validators
@@ -461,12 +526,17 @@ export const formConfigSchema = z.object({
    */
   successCallbackUrl: z.string().url().optional(),
   maxQuantity: z.number().int().min(1).max(100).optional(),
+  /** Limit which `offer_templates` tiers appear on the Edge form (same product as campaign). Empty = all ACTIVE. */
+  selectedOfferTemplateIds: z.array(z.string().uuid()).max(50).optional(),
 });
 export type FormConfig = z.infer<typeof formConfigSchema>;
 
 export const createCampaignSchema = z.object({
   name: z.string().min(1, 'Campaign name is required').max(200),
-  productIds: z.array(z.string().uuid()).min(1, 'At least one product is required'),
+  /** Single-product Edge forms (CEO directive — multi-product campaigns deprecated). */
+  productIds: z.array(z.string().uuid()).length(1, 'Select exactly one product'),
+  /** Optional offer group (multi-item offers). When set, legacy offer_template_id/selectedOfferTemplateIds are ignored. */
+  offerGroupId: z.string().uuid().optional(),
   deploymentType: z.enum(['SNIPPET', 'IFRAME', 'HOSTED']).default('HOSTED'),
   formConfig: formConfigSchema.optional(),
 });
@@ -476,6 +546,7 @@ export const updateCampaignSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(200).optional(),
   formConfig: z.record(z.unknown()).optional(),
+  offerGroupId: z.string().uuid().nullable().optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
 });
 export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;

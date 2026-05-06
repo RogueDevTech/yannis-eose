@@ -28,6 +28,16 @@ interface LoaderData {
   canEditProduct: boolean;
 }
 
+function canonicalPerm(p: string) {
+  return p.trim().replace(/_/g, '.');
+}
+
+function mapGalleryUrls(apiProduct: Record<string, unknown>): string[] {
+  const raw = apiProduct.galleryImageUrls ?? apiProduct.gallery_image_urls;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((u): u is string => typeof u === 'string' && u.length > 0);
+}
+
 function mapApiProductToProduct(apiProduct: Record<string, unknown>): Product {
   const offers =
     (apiProduct.offers as Array<{ label: string; qty: number; price: string; imageUrls?: unknown }>) ?? [];
@@ -35,6 +45,7 @@ function mapApiProductToProduct(apiProduct: Record<string, unknown>): Product {
     id: String(apiProduct.id ?? ''),
     name: String(apiProduct.name ?? ''),
     description: apiProduct.description != null ? String(apiProduct.description) : null,
+    galleryImageUrls: mapGalleryUrls(apiProduct),
     offers: offers.map((o) => {
       const raw = o?.imageUrls;
       const imageUrls = Array.isArray(raw)
@@ -48,18 +59,26 @@ function mapApiProductToProduct(apiProduct: Record<string, unknown>): Product {
       };
     }),
     baseSalePrice: String(apiProduct.baseSalePrice ?? apiProduct.base_sale_price ?? '0'),
-    costPrice: apiProduct.costPrice != null || apiProduct.cost_price != null
-      ? String(apiProduct.costPrice ?? apiProduct.cost_price ?? '')
-      : null,
+    costPrice:
+      apiProduct.costPrice != null || apiProduct.cost_price != null
+        ? String(apiProduct.costPrice ?? apiProduct.cost_price ?? '')
+        : null,
     category: apiProduct.category != null ? String(apiProduct.category) : null,
-    categoryId: apiProduct.categoryId != null || apiProduct.category_id != null
-      ? String(apiProduct.categoryId ?? apiProduct.category_id ?? '')
-      : null,
+    categoryId:
+      apiProduct.categoryId != null || apiProduct.category_id != null
+        ? String(apiProduct.categoryId ?? apiProduct.category_id ?? '')
+        : null,
     categoryName: apiProduct.categoryName != null ? String(apiProduct.categoryName) : null,
     brandName: apiProduct.brandName != null ? String(apiProduct.brandName) : null,
     status: String(apiProduct.status ?? 'ACTIVE'),
     createdAt: String(apiProduct.createdAt ?? apiProduct.created_at ?? ''),
   };
+}
+
+function parseCurrencyToNumber(raw: string): number | null {
+  const n = Number(String(raw).replace(/,/g, '').trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -98,13 +117,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const product = mapApiProductToProduct(apiProduct);
   const canEditProduct =
-    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('products.update');
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    (user.permissions ?? []).map(canonicalPerm).includes('products.update');
 
   return { product, categories, canEditProduct } satisfies LoaderData;
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  await requirePermission(request, 'products.update');
   const cookie = getSessionCookie(request);
   const productId = params['id'];
 
@@ -113,29 +133,30 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   const formData = await request.formData();
+  await requirePermission(request, 'products.update');
+
   const name = formData.get('name')?.toString() ?? '';
+  const baseSalePriceRaw = formData.get('baseSalePrice')?.toString() ?? '';
   const costPrice = formData.get('costPrice')?.toString() ?? '';
   const description = formData.get('description')?.toString() || undefined;
   const category = formData.get('category')?.toString() || undefined;
   const categoryId = formData.get('categoryId')?.toString() || null;
   const status = formData.get('status')?.toString() as 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' | undefined;
-  const offersRaw = formData.get('offers')?.toString() ?? '[]';
 
-  let offers: Array<{ label: string; qty: number; price: string }>;
+  let galleryImageUrls: string[] = [];
   try {
-    offers = JSON.parse(offersRaw);
-  } catch {
-    return json({ error: 'Invalid offers data' }, { status: 400 });
-  }
-
-  if (!name || !costPrice || offers.length === 0) {
-    return json({ error: 'Name, cost price, and at least one offer are required' }, { status: 400 });
-  }
-
-  for (const offer of offers) {
-    if (!offer.label || !offer.price || !offer.qty) {
-      return json({ error: 'Each offer must have a label, quantity, and price' }, { status: 400 });
+    galleryImageUrls = JSON.parse(formData.get('galleryImageUrls')?.toString() ?? '[]');
+    if (!Array.isArray(galleryImageUrls)) {
+      throw new Error('not array');
     }
+    galleryImageUrls = galleryImageUrls.filter((u): u is string => typeof u === 'string');
+  } catch {
+    return json({ error: 'Invalid gallery images data' }, { status: 400 });
+  }
+
+  const baseParsed = parseCurrencyToNumber(baseSalePriceRaw);
+  if (!name || !costPrice || baseParsed == null) {
+    return json({ error: 'Name, list price, and cost price are required' }, { status: 400 });
   }
 
   const res = await apiRequest<unknown>('/trpc/products.update', {
@@ -144,8 +165,9 @@ export async function action({ request, params }: ActionFunctionArgs) {
     body: {
       productId,
       name,
-      offers,
+      baseSalePrice: baseParsed,
       costPrice,
+      galleryImageUrls,
       description: description ?? null,
       category: category ?? null,
       categoryId: categoryId || null,
@@ -177,7 +199,11 @@ export default function ProductDetailRoute() {
       <ProductEditPage
         product={product}
         categories={categories}
-        actionData={actionData}
+        actionData={
+          typeof actionData === 'object' && actionData !== null && 'error' in actionData
+            ? (actionData as { error?: string })
+            : undefined
+        }
         productId={product.id}
       />
     );

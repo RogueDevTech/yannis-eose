@@ -128,12 +128,22 @@ export function UsersListPage({
         ),
       },
       {
-        key: 'bank',
-        header: 'Bank code',
-        minWidth: 'min-w-[7rem]',
+        key: 'bankName',
+        header: 'Bank',
+        minWidth: 'min-w-[8rem]',
         render: (user) => (
           <span className="text-sm text-app-fg-muted" title={user.payoutBankName ?? undefined}>
             {user.payoutBankName?.trim() ? user.payoutBankName : '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'bankCode',
+        header: 'Bank code',
+        minWidth: 'min-w-[6rem]',
+        render: (user) => (
+          <span className="font-mono text-sm text-app-fg-muted tabular-nums">
+            {user.payoutBankCode?.trim() ? user.payoutBankCode : '—'}
           </span>
         ),
       },

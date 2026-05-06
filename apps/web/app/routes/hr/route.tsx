@@ -1,6 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { DashboardLayout } from '~/components/layout/dashboard-layout';
 import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
@@ -36,16 +37,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const cookie = getSessionCookie(request);
-  const notificationsPromise = apiRequest<unknown>('/trpc/notifications.list?input=%7B%7D', { method: 'GET', cookie })
+  // Default page size = 20. See `routes/admin/route.tsx` for the rationale.
+  const notificationsInput = encodeURIComponent(JSON.stringify({ limit: 20 }));
+  const notificationsPromise = apiRequest<unknown>(`/trpc/notifications.list?input=${notificationsInput}`, { method: 'GET', cookie })
     .then((res) => {
-      if (!res.ok) return { notifications: [] as Notification[], unreadCount: 0 };
-      const data = (res.data as { result?: { data?: NotificationsData } })?.result?.data;
-      return data ?? { notifications: [] as Notification[], unreadCount: 0 };
+      if (!res.ok) return { notifications: [] as Notification[], unreadCount: 0, total: 0 };
+      const data = (res.data as {
+        result?: {
+          data?: {
+            notifications: Notification[];
+            unreadCount: number;
+            pagination?: { total?: number };
+          };
+        };
+      })?.result?.data;
+      return {
+        notifications: data?.notifications ?? [],
+        unreadCount: data?.unreadCount ?? 0,
+        total: data?.pagination?.total ?? data?.notifications?.length ?? 0,
+      };
     })
-    .catch(() => ({ notifications: [] as Notification[], unreadCount: 0 }));
+    .catch(() => ({ notifications: [] as Notification[], unreadCount: 0, total: 0 }));
 
   return defer({ user, notifications: notificationsPromise });
 }
+
+/**
+ * Skip re-running this shell loader on every child-route navigation. See the matching
+ * comment in `routes/admin/route.tsx::shouldRevalidate` for the full rationale —
+ * tl;dr the shell data (current user, initial notifications batch) is stable between
+ * sub-routes, and `useRevalidator().revalidate()` / form submissions still trigger a
+ * refresh.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formAction,
+  formMethod,
+}) => {
+  if (formAction && formMethod && formMethod !== 'GET') {
+    return defaultShouldRevalidate;
+  }
+  return false;
+};
 
 /**
  * Action — handle mark-all-read from the notification panel.

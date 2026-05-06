@@ -25,6 +25,7 @@ interface BatchDetail {
     payoutBankName?: string | null;
     payoutAccountName?: string | null;
     payoutAccountNumber?: string | null;
+    payoutBankCode?: string | null;
   }>;
 }
 
@@ -152,6 +153,12 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         nowrap: true,
         render: (p) => <span className="text-app-fg-muted tabular-nums">{p.payoutAccountNumber ?? '—'}</span>,
       },
+      {
+        key: 'bankCode',
+        header: 'Bank code',
+        nowrap: true,
+        render: (p) => <span className="text-app-fg-muted tabular-nums">{p.payoutBankCode ?? '—'}</span>,
+      },
     ],
     [],
   );
@@ -270,6 +277,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
             bankName: row.payoutBankName ?? '',
             accountName: row.payoutAccountName ?? '',
             accountNumber: row.payoutAccountNumber ?? '',
+            bankCode: row.payoutBankCode ?? '',
           }))}
           columns={[
             { key: 'staffName', label: 'Staff' },
@@ -278,8 +286,9 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
             { key: 'bankName', label: 'Bank' },
             { key: 'accountName', label: 'Account Name' },
             { key: 'accountNumber', label: 'Account Number' },
+            { key: 'bankCode', label: 'Bank Code' },
           ]}
-          defaultColumns={['staffName', 'staffRole', 'amount', 'bankName', 'accountName', 'accountNumber']}
+          defaultColumns={['staffName', 'staffRole', 'amount', 'bankName', 'accountName', 'accountNumber', 'bankCode']}
         />
       )}
     </div>

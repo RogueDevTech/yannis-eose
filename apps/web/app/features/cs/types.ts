@@ -3,6 +3,8 @@ export interface AgentWorkload {
   agentName: string;
   capacity: number;
   pendingCount: number;
+  /** CS stage closes today (confirm + cancel), Africa/Lagos calendar — display-only. */
+  todayClosesCount: number;
   lastActionAt: string | null;
 }
 
@@ -109,6 +111,16 @@ export interface PendingCart {
   updatedAt: string;
 }
 
+/** Pagination meta for `cart.listAbandoned` (CS abandoned tab + cart resource loader). */
+export interface AbandonedCartPagination {
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/** Page size for CS abandoned tab / `cart.listAbandoned` Remix loaders. */
+export const ABANDONED_CARTS_PAGE_SIZE = 25;
+
 /** A single item in the Live Activity feed — a cart that may have progressed to an order. */
 export interface LiveActivityItem {
   id: string;
@@ -122,7 +134,7 @@ export interface LiveActivityItem {
   orderStatus: string | null;
   /** Order ID when converted */
   linkedOrderId: string | null;
-  /** Order total amount — null for carts that haven't converted yet */
+  /** Order total, else offer price, else product base sale price (see cart.listActivity) */
   totalAmount: string | null;
   updatedAt: string;
 }
@@ -141,6 +153,8 @@ export interface CSActivityItem {
 export const CS_QUEUE_TAB_VALUES = [
   'queue',
   'active',
+  'duplicates',
+  'abandoned',
   'callbacks',
   'hotswap',
   'performance',
@@ -182,6 +196,7 @@ export interface CSDashboardStreamData {
     activityItems: LiveActivityItem[];
     pendingCarts: PendingCart[];
     abandonedCarts: PendingCart[];
+    abandonedPagination?: AbandonedCartPagination;
   };
   // Deferred (streaming promises)
   inactiveAgents: Promise<InactiveAgent[]>;
@@ -189,7 +204,7 @@ export interface CSDashboardStreamData {
   flaggedDuplicates: Promise<DuplicatePair[]>;
   leaderboard: Promise<CSLeaderboardEntry[]>;
   leaderboardPeriod: 'this_month' | 'all_time';
-  cartStats?: Promise<{ pending: number; abandonedLast24h: number }>;
+  cartStats?: Promise<{ pending: number; abandonedOpen: number }>;
   /** Deferred claim queue — only populated when isClaimMode is true. */
   claimQueue?: Promise<CSOrder[]>;
   pendingCarts?: Promise<PendingCart[]>;
@@ -203,4 +218,6 @@ export interface CSDashboardStreamData {
   canDeleteCart?: boolean;
   /** Products list for offline order form (when canCreateOffline). */
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+  /** Non-empty when any critical queue loader request failed (timeout/API) — avoid silent empty queues. */
+  criticalFetchErrors?: string[];
 }

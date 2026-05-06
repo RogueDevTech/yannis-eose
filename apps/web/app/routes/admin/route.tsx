@@ -1,6 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { DashboardLayout } from '~/components/layout/dashboard-layout';
 import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
@@ -14,7 +15,14 @@ interface Notification {
   createdAt: string;
 }
 
-export type NotificationsData = { notifications: Notification[]; unreadCount: number };
+export type NotificationsData = {
+  notifications: Notification[];
+  unreadCount: number;
+  /** Server-side total across all pages — used by the bell drawer to render
+   *  "X total" alongside "Y unread", and to surface a "+N more on /notifications"
+   *  hint when the drawer's first page is smaller than the user's full history. */
+  total?: number;
+};
 
 /**
  * Loader — check session and redirect to /auth if not authenticated.
@@ -41,13 +49,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const cookie = getSessionCookie(request);
-  const notificationsPromise = apiRequest<unknown>('/trpc/notifications.list?input=%7B%7D', { method: 'GET', cookie })
+  // Default page size = 20. The drawer shows the latest 20; older history is reachable
+  // via the "View all notifications" link (full pagination on `/admin/notifications`).
+  // We still pull `pagination.total` so the drawer header can show "(N total)" and
+  // surface a "+M older in history" hint when more exist beyond the first page.
+  const notificationsInput = encodeURIComponent(JSON.stringify({ limit: 20 }));
+  const notificationsPromise = apiRequest<unknown>(`/trpc/notifications.list?input=${notificationsInput}`, { method: 'GET', cookie })
     .then((res) => {
-      if (!res.ok) return { notifications: [] as Notification[], unreadCount: 0 };
-      const data = (res.data as { result?: { data?: NotificationsData } })?.result?.data;
-      return data ?? { notifications: [] as Notification[], unreadCount: 0 };
+      if (!res.ok) return { notifications: [] as Notification[], unreadCount: 0, total: 0 };
+      const data = (res.data as {
+        result?: {
+          data?: {
+            notifications: Notification[];
+            unreadCount: number;
+            pagination?: { total?: number };
+          };
+        };
+      })?.result?.data;
+      return {
+        notifications: data?.notifications ?? [],
+        unreadCount: data?.unreadCount ?? 0,
+        total: data?.pagination?.total ?? data?.notifications?.length ?? 0,
+      };
     })
-    .catch(() => ({ notifications: [] as Notification[], unreadCount: 0 }));
+    .catch(() => ({ notifications: [] as Notification[], unreadCount: 0, total: 0 }));
 
   // Fetch user's branches for the branch switcher (non-blocking)
   const branchesPromise = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
@@ -62,6 +87,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ user, notifications: notificationsPromise, branches });
 }
+
+/**
+ * Skip re-running this shell loader on every child-route navigation. Without this, going
+ * from `/admin/orders` to `/admin/orders/123` re-fetches the current user, the branch
+ * list, and the first 20 notifications — three round-trips that already lived in memory.
+ *
+ * What still triggers a revalidation:
+ *   • `<PageRefreshButton>` / any `useRevalidator().revalidate()` call (bypasses this hook
+ *     entirely — Remix re-runs every loader regardless of `shouldRevalidate`).
+ *   • Form submissions to this route's action (mark-all-read, exit-mirror, branch switch
+ *     elsewhere posts to `/admin/branches/switch` which lives at this layout). When
+ *     `formAction` is set we honour `defaultShouldRevalidate` so Remix's standard rules
+ *     apply (it'll revalidate after a successful POST).
+ *   • Real-time notification arrivals: those come via Socket.io (`notification:new`
+ *     event) and update local state directly — no loader re-run needed.
+ *
+ * What's intentionally skipped:
+ *   • Pure child-route navigation (the most common case in this app). The shell data
+ *     hasn't changed, so we return false and Remix reuses the cached loader payload.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  defaultShouldRevalidate,
+  formAction,
+  formMethod,
+}) => {
+  if (formAction && formMethod && formMethod !== 'GET') {
+    return defaultShouldRevalidate;
+  }
+  return false;
+};
 
 /**
  * Action — handle mark-all-read from the notification panel.

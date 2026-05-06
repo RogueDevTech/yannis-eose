@@ -64,54 +64,54 @@ export function defaultTodayRange(): { startDate: string; endDate: string } {
 }
 
 /**
- * Default request timeout in ms.
+ * Default request timeout for **reads** (GET/HEAD and any non-mutating method) in ms.
  *
- * Set just under Remix's single-fetch server timeout (5_000ms). Reason:
- * deferred loaders fan out many `apiRequest` calls into the streamed response;
- * if any one exceeds 5s, Remix kills the whole stream with a generic
- * `SanitizedError: Server Timeout` and the page renders an error icon.
+ * Parallel GETs each use this budget independently (wall time ≈ slowest call, not the sum).
+ * Raised from ~4.7s so cold Nest / DB work is less likely to abort before the API responds.
  *
- * Bounding every call at 4.5s by default means a single slow upstream
- * fail-fasts and the per-call fallback (`if (!res.ok) return [];` patterns
- * pervasive across loaders) renders empty data for that section while the
- * rest of the page resolves cleanly.
+ * **Framework note:** Some Remix / React Router single-fetch deployments cap total loader
+ * stream time (~5s in older docs). If heavy loaders still fail with a generic server timeout,
+ * parallelize critical GETs or adjust your deploy’s stream/SSR timeout — this value only
+ * controls `AbortController` inside {@link apiRequest}.
  *
- * Actions that genuinely need a longer budget (auth flows, CSV exports,
- * heavy admin jobs) opt in by passing `timeoutMs: ...` explicitly. The login
- * action already does this with 20_000ms.
+ * **Mutations** (POST/PUT/PATCH/DELETE) default to {@link DEFAULT_MUTATION_API_TIMEOUT_MS}.
+ * Override `timeoutMs` for auth flows, CSV exports, MV refresh, etc.; the login action uses 20_000ms.
  */
-const DEFAULT_API_TIMEOUT_MS = 4_500;
+export const DEFAULT_READ_API_TIMEOUT_MS = 10_000;
 
 /** `/auth/me` can run on layout revalidation after tab resume — slightly longer than default to reduce false timeouts. */
 const AUTH_ME_TIMEOUT_MS = 15_000;
 
 /**
- * Order detail actions that hit VOIP providers or audited phone reveal (DB + optional state
- * transition). Default 4.5s aborts before Twilio/Africa's Talking cold starts finish — use this
- * for `orders.initiateCall` and `orders.revealPhoneForManualCall` from Remix actions only.
+ * Default `apiRequest` budget for POST/PUT/PATCH/DELETE when `timeoutMs` is omitted.
+ * Aligns with typical Nest mutation work (DB, audit, notifications).
  */
-export const ORDER_VOIP_ACTION_TIMEOUT_MS = 30_000;
+export const DEFAULT_MUTATION_API_TIMEOUT_MS = 30_000;
+
+/**
+ * Order detail actions that hit VOIP providers or audited phone reveal (DB + optional state
+ * transition). Alias of {@link DEFAULT_MUTATION_API_TIMEOUT_MS} for call-site clarity.
+ */
+export const ORDER_VOIP_ACTION_TIMEOUT_MS = DEFAULT_MUTATION_API_TIMEOUT_MS;
 
 /**
  * `orders.bulkAssignToCS` / `orders.bulkTransition` run sequential per-order work server-side.
- * The default 4.5s client abort fires while Nest may still complete — users see "failed" with DB updated.
  */
-export const BULK_ORDER_MUTATION_TIMEOUT_MS = 30_000;
+export const BULK_ORDER_MUTATION_TIMEOUT_MS = DEFAULT_MUTATION_API_TIMEOUT_MS;
 
 /**
  * `users.create` / `users.update` — permission snapshot, templates, notifications, finance-hat swap.
- * Default 4.5s aborts while Nest still completes; users see a false "timed out" and HTTP 422 via `safeStatus(504)`.
  */
-export const USER_WRITE_ACTION_TIMEOUT_MS = 30_000;
+export const USER_WRITE_ACTION_TIMEOUT_MS = DEFAULT_MUTATION_API_TIMEOUT_MS;
 
-/** Timeout used for deferred loader requests — stay below Remix single-fetch turbo-stream cap (~4950ms). */
-export const DEFERRED_LOADER_TIMEOUT_MS = 4_700;
+/** Alias of {@link DEFAULT_READ_API_TIMEOUT_MS} — use in loaders that spread shared read options. */
+export const DEFERRED_LOADER_TIMEOUT_MS = DEFAULT_READ_API_TIMEOUT_MS;
 
 interface ApiOptions {
   method?: string;
   body?: unknown;
   cookie?: string;
-  /** Override timeout in ms (used by deferred loaders to stay under Remix server timeout). */
+  /** Override timeout in ms when default {@link DEFAULT_READ_API_TIMEOUT_MS} / mutation budgets are too tight. */
   timeoutMs?: number;
 }
 
@@ -142,11 +142,20 @@ function getSetCookieValues(headers: Headers): string[] {
  * Make an authenticated request to the NestJS API.
  * Forwards the session cookie from the browser request.
  */
+function defaultTimeoutForMethod(method: string | undefined): number {
+  const m = (method ?? 'GET').toUpperCase();
+  if (m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE') {
+    return DEFAULT_MUTATION_API_TIMEOUT_MS;
+  }
+  return DEFAULT_READ_API_TIMEOUT_MS;
+}
+
 export async function apiRequest<T = unknown>(
   path: string,
   options: ApiOptions = {},
 ): Promise<ApiResponse<T>> {
-  const { method = 'GET', body, cookie, timeoutMs = DEFAULT_API_TIMEOUT_MS } = options;
+  const { method = 'GET', body, cookie } = options;
+  const timeoutMs = options.timeoutMs ?? defaultTimeoutForMethod(method);
 
   // tRPC GET queries need ?input={} even when all fields are optional,
   // otherwise Zod receives undefined instead of an object and fails.
@@ -391,7 +400,15 @@ export async function requireOnboardingHrPagesAccess(request: Request): Promise<
 export async function requirePermissionOrRoles(
   request: Request,
   options: { roles: string[]; permission: string | string[] },
-): Promise<{ id: string; email: string; name: string; role: string; permissions?: string[] }> {
+): Promise<{
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  permissions?: string[];
+  logisticsLocationId?: string | null;
+  currentBranchId?: string | null;
+}> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   if (user.role === 'SUPER_ADMIN') return user;

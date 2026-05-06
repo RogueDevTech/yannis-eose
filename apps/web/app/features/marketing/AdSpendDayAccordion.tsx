@@ -84,6 +84,27 @@ function buildAdSpendLineColumns(
       render: (line) => <NairaPrice amount={Number(line.spendAmount)} />,
     },
     {
+      key: 'orders',
+      header: 'Orders',
+      align: 'right',
+      nowrap: true,
+      render: (line) => (
+        <span className="text-sm text-app-fg-muted tabular-nums">{(line.orderCount ?? 0).toLocaleString()}</span>
+      ),
+    },
+    {
+      key: 'cpa',
+      header: 'CPA',
+      align: 'right',
+      nowrap: true,
+      render: (line) =>
+        line.indicativeCpa != null ? (
+          <NairaPrice amount={line.indicativeCpa} />
+        ) : (
+          <span className="text-sm text-app-fg-muted">—</span>
+        ),
+    },
+    {
       key: 'ad',
       header: 'Ad',
       render: (line) =>
@@ -117,7 +138,7 @@ function buildAdSpendLineColumns(
   ];
   // Actions column always renders when there's *any* possible action — the
   // submitter (MB) gets just the Edit button on their own PENDING/REJECTED rows;
-  // moderators get Edit + Approve + Reject. Approved rows render '—'.
+  // moderators get Edit + Approve + Reject. APPROVED rows are locked (no Edit).
   cols.push({
     key: 'actions',
     header: 'Actions',
@@ -544,6 +565,18 @@ export function AdSpendDayAccordion({
                           avg <NairaPrice amount={avgPerLine} /> / line
                         </div>
                       )}
+                      <div className="text-[11px] text-app-fg-muted tabular-nums mt-0.5">
+                        <span className="font-medium text-app-fg/90">{(g.overallOrderCount ?? 0).toLocaleString()}</span>{' '}
+                        orders
+                        {g.overallCpa != null ? (
+                          <>
+                            {' '}
+                            · <NairaPrice amount={g.overallCpa} /> day CPA
+                          </>
+                        ) : (
+                          <span> · CPA —</span>
+                        )}
+                      </div>
                     </div>
                     <StatusBadge status={g.rolledStatus} label={rolledStatusLabel(g.rolledStatus)} />
                   </div>
@@ -696,6 +729,17 @@ function LineCardMobile({
       <p className="text-sm text-app-fg-muted">
         {line.campaignName ?? '—'} · {line.productName ?? '—'} ·{' '}
         {linePlatformLabel(line)}
+      </p>
+      <p className="text-xs text-app-fg-muted tabular-nums">
+        Orders: {(line.orderCount ?? 0).toLocaleString()}
+        {line.indicativeCpa != null ? (
+          <>
+            {' '}
+            · CPA <NairaPrice amount={line.indicativeCpa} />
+          </>
+        ) : (
+          ' · CPA —'
+        )}
       </p>
       <div className="flex flex-nowrap gap-3 text-xs overflow-x-auto">
         {line.adUrl && (

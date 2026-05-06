@@ -6,23 +6,48 @@ import { inArray } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { PG_CLIENT, DRIZZLE } from '../database/database.module';
 import { shouldScopeGlobalAuditToBranch, type GlobalAuditAccessUser } from '../common/authz';
+import { CacheService } from '../common/cache/cache.service';
 
 /**
  * Whitelist of tables that have _history counterparts.
  * Only these table names are accepted in audit queries — prevents SQL injection.
+ *
+ * Tables intentionally OMITTED from audit queries even though their `*_history`
+ * tables exist (skipped 2026-05 — see migration 0119):
+ *   - inventory_levels    — every order CONFIRMED/AGENT_ASSIGNED/DELIVERED
+ *                           updates `(stock_count, reserved_count)`. The
+ *                           per-row delta has no business context; the
+ *                           order's own audit row + the `stock_movements`
+ *                           ledger already say WHY the count changed.
+ *   - stock_batches       — `remaining_quantity` decrements on every FIFO
+ *                           consumption. Same story: stock_movements is
+ *                           the canonical movement ledger; the batch
+ *                           history table just duplicates it without context.
+ *   - stock_movements     — append-only ledger. Every row IS the audit
+ *                           entry — a `*_history` twin is a 1:1 duplicate.
+ *   - call_logs           — append-only call attempts. The row itself is
+ *                           the audit; status transitions are visible on
+ *                           the live row.
+ *   - cart_abandonments   — most state transitions (PENDING → ABANDONED)
+ *                           are cron-driven with a "System" actor. The
+ *                           live row's status + timestamps tell the story.
+ *
+ * Migration 0119 drops the `capture_history` and `capture_history_insert`
+ * triggers on those five tables so they stop generating new history rows
+ * (per-write overhead win). Existing history rows stay in place — recover
+ * from there if a forensic question ever needs them.
  */
 const AUDITABLE_TABLES = [
-  'users', 'products', 'product_categories', 'stock_batches',
-  'logistics_providers', 'logistics_locations', 'inventory_levels',
+  'users', 'products', 'product_categories',
+  'logistics_providers', 'logistics_locations',
   'offer_templates', 'campaigns',
-  'orders', 'order_items', 'stock_transfers', 'stock_movements',
+  'orders', 'order_items', 'stock_transfers',
   'marketing_funding', 'marketing_funding_requests', 'ad_spend_logs',
-  'call_logs',
   'invoices', 'approval_requests', 'budgets', 'settlement_configs',
   'commission_plans', 'payout_records', 'earnings_adjustments',
   'stock_reconciliations',
   'email_change_requests', 'user_product_assignments',
-  'permission_requests', 'system_settings', 'cart_abandonments',
+  'permission_requests', 'system_settings',
   'permissions', 'user_permissions',
   // mirror_sessions is append-only (no _history twin) — globalLog SELECTs from it
   // directly using started_at/ended_at as the temporal markers.
@@ -116,6 +141,7 @@ export class AuditService {
   constructor(
     @Inject(PG_CLIENT) private readonly sql: ReturnType<typeof postgres>,
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    private readonly cache: CacheService,
   ) {}
 
   /**
@@ -328,7 +354,18 @@ export class AuditService {
         params.push(branchId);
       }
 
-      const unionParts: string[] = [];
+      // Per-arm cap: each table only needs to surface its top (limit + offset)
+      // newest rows — anything older than that on a single table cannot affect
+      // the global page being requested. This is what turns each arm from a
+      // "scan whole history table + sort" into an O(log N) index seek that
+      // walks the new `*_history_valid_from_desc_idx` index (migration 0118).
+      const perArmCap = limit + offset;
+      const dataLimitIdx = next;
+      next += 1;
+      const dataParams = [...params, perArmCap];
+
+      const dataUnionParts: string[] = [];
+      const countUnionParts: string[] = [];
 
       for (const table of tables) {
         const conditions: string[] = [];
@@ -361,41 +398,75 @@ export class AuditService {
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+        // Two SELECTs per arm — the data path includes ORDER BY + LIMIT so the
+        // planner can use the (valid_from DESC) index, while the count path
+        // stays predicate-only (a top-N cap on each arm would under-count the
+        // total).
         if (isMirror) {
-          unionParts.push(
-            `SELECT 'mirror_sessions' AS _table_name, id, actor_id::text AS modified_by,
-                    COALESCE(ended_at, started_at) AS valid_from, ended_at AS valid_to,
-                    row_to_json(mirror_sessions.*) AS _row_data
-             FROM mirror_sessions
-             ${whereClause}`,
+          dataUnionParts.push(
+            `(SELECT 'mirror_sessions' AS _table_name, id, actor_id::text AS modified_by,
+                     COALESCE(ended_at, started_at) AS valid_from, ended_at AS valid_to,
+                     row_to_json(mirror_sessions.*) AS _row_data
+              FROM mirror_sessions
+              ${whereClause}
+              ORDER BY ${fromCol} DESC
+              LIMIT $${dataLimitIdx})`,
+          );
+          countUnionParts.push(
+            `SELECT 1 FROM mirror_sessions ${whereClause}`,
           );
         } else {
           // Always cast `modified_by` to text in the SELECT so the UNION succeeds
           // even if a history table declares it as text instead of uuid (drift).
-          unionParts.push(
-            `SELECT '${table}' AS _table_name, id, modified_by::text AS modified_by,
-                    valid_from, valid_to,
-                    row_to_json(${table}_history.*) AS _row_data
-             FROM ${table}_history
-             ${whereClause}`,
+          dataUnionParts.push(
+            `(SELECT '${table}' AS _table_name, id, modified_by::text AS modified_by,
+                     valid_from, valid_to,
+                     row_to_json(${table}_history.*) AS _row_data
+              FROM ${table}_history
+              ${whereClause}
+              ORDER BY valid_from DESC
+              LIMIT $${dataLimitIdx})`,
+          );
+          countUnionParts.push(
+            `SELECT 1 FROM ${table}_history ${whereClause}`,
           );
         }
       }
 
-      const unionQuery = unionParts.join('\n UNION ALL \n');
+      // ── Total: Redis-cached for 30s ──────────────────────────────────────
+      // Counting a UNION across 30+ history tables is the single most expensive
+      // step of this query (it must scan every table, where the data fetch
+      // only walks the top N rows of each). Audit volume changes constantly
+      // but the user's perception of "Page X of Y" is fine with 30s staleness.
+      // Cache key encodes every filter + viewer scope so different views don't
+      // collide.
+      const countCacheKey =
+        `cache:audit:count:` +
+        CacheService.hashInput({
+          tables,
+          actorId: actorId ?? null,
+          startDate: startDate ?? null,
+          endDate: endDate ?? null,
+          branchId: scopeToBranch ? branchId : null,
+        });
+      const total = await this.cache.getOrSet<number>(countCacheKey, 30, async () => {
+        const countQuery = `SELECT COUNT(*)::int AS total FROM (${countUnionParts.join('\n UNION ALL \n')}) AS _audit_count`;
+        const countResult = await this.sql.unsafe(countQuery, params);
+        return ((countResult[0] as Record<string, unknown> | undefined)?.total ?? 0) as number;
+      });
 
-      const countQuery = `SELECT COUNT(*)::int AS total FROM (${unionQuery}) AS _audit_union`;
-      const countResult = await this.sql.unsafe(countQuery, params);
-      const total = ((countResult[0] as Record<string, unknown> | undefined)?.total ?? 0) as number;
+      // ── Page: per-arm ORDER BY + LIMIT, then re-sort the small result ────
+      // After per-arm caps, the outer query sees at most `tables × perArmCap`
+      // rows (e.g. 30 tables × 40 = 1200 rows), trivial to sort in memory.
+      const outerLimitIdx = next;
+      const outerOffsetIdx = next + 1;
+      const finalParams = [...dataParams, limit, offset];
+      const dataQuery =
+        `SELECT * FROM (${dataUnionParts.join('\n UNION ALL \n')}) AS _audit_union
+         ORDER BY valid_from DESC
+         LIMIT $${outerLimitIdx} OFFSET $${outerOffsetIdx}`;
 
-      const limitIdx = next;
-      const offsetIdx = next + 1;
-      const dataParams = [...params, limit, offset];
-      const dataQuery = `SELECT * FROM (${unionQuery}) AS _audit_union
-                         ORDER BY valid_from DESC
-                         LIMIT $${limitIdx} OFFSET $${offsetIdx}`;
-
-      const rows = await this.sql.unsafe(dataQuery, dataParams);
+      const rows = await this.sql.unsafe(dataQuery, finalParams);
 
       return {
         rows: rows.map((row) => {

@@ -29,6 +29,8 @@ interface DescriptionListProps {
   items: DescriptionItem[];
   /** stacked = label above value; horizontal = label left value right; grid = 2-col */
   layout?: DescriptionListLayout;
+  /** Applies only when layout="grid". Default is 2 columns. */
+  gridColumns?: 2 | 3;
   /** Separator line between items */
   divided?: boolean;
   className?: string;
@@ -41,16 +43,21 @@ function isEmptyValue(value: React.ReactNode): boolean {
 export function DescriptionList({
   items,
   layout = 'stacked',
+  gridColumns = 2,
   divided = false,
   className = '',
 }: DescriptionListProps) {
   const visibleItems = items.filter((item) => !(item.hideIfEmpty && isEmptyValue(item.value)));
 
   if (layout === 'grid') {
+    const gridColsClass = gridColumns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2';
+    const fullWidthClass = gridColumns === 3 ? 'sm:col-span-3' : 'sm:col-span-2';
+
     return (
       <dl
         className={[
-          'grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2',
+          'grid grid-cols-1 gap-x-6 gap-y-4',
+          gridColsClass,
           divided ? 'divide-y divide-app-border sm:divide-y-0' : '',
           className,
         ]
@@ -62,7 +69,7 @@ export function DescriptionList({
             key={i}
             className={[
               'flex flex-col gap-0.5',
-              item.fullWidth ? 'sm:col-span-2' : '',
+              item.fullWidth ? fullWidthClass : '',
               divided ? 'pt-4 first:pt-0' : '',
             ]
               .filter(Boolean)

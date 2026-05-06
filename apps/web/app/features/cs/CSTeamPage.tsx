@@ -90,22 +90,24 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
         <>
           <div className="mb-3">
             <p className="text-xs text-app-fg-muted mb-1">
-              {workload.pendingCount} of {workload.capacity} slots
+              Today&apos;s duty: {(workload.todayClosesCount ?? 0)} / {workload.capacity}
+              <span className="text-app-fg-muted/80"> (Lagos)</span>
               {!member.isIdle && (
                 <span className="ml-1">· {formatLastActive(workload.lastActionAt)}</span>
               )}
             </p>
+            <p className="text-[11px] text-app-fg-muted mb-1">Backlog: {workload.pendingCount}</p>
             <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
-                  (workload.capacity > 0 ? (workload.pendingCount / workload.capacity) * 100 : 0) >= 90
-                    ? 'bg-danger-500'
-                    : (workload.capacity > 0 ? (workload.pendingCount / workload.capacity) * 100 : 0) >= 70
-                    ? 'bg-warning-500'
-                    : 'bg-success-500'
+                  (() => {
+                    const d =
+                      workload.capacity > 0 ? ((workload.todayClosesCount ?? 0) / workload.capacity) * 100 : 0;
+                    return d >= 100 ? 'bg-success-500' : d >= 70 ? 'bg-warning-500' : 'bg-brand-500';
+                  })()
                 }`}
                 style={{
-                  width: `${Math.min(workload.capacity > 0 ? (workload.pendingCount / workload.capacity) * 100 : 0, 100)}%`,
+                  width: `${Math.min(workload.capacity > 0 ? ((workload.todayClosesCount ?? 0) / workload.capacity) * 100 : 0, 100)}%`,
                 }}
               />
             </div>
@@ -189,16 +191,16 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
         render: (member) => {
           const isAgent = member.role === 'CS_AGENT';
           const workload = member.workload;
-          const workloadPct = workload && workload.capacity > 0 ? (workload.pendingCount / workload.capacity) * 100 : 0;
+          const dailyPct =
+            workload && workload.capacity > 0 ? ((workload.todayClosesCount ?? 0) / workload.capacity) * 100 : 0;
           return isAgent && workload ? (
-            <span
-              className={`text-sm font-medium ${
-                workloadPct >= 80
-                  ? 'text-danger-600 dark:text-danger-400'
-                  : 'text-success-600 dark:text-success-400'
-              }`}
-            >
-              {workload.pendingCount} / {workload.capacity}
+            <span className="text-sm text-app-fg">
+              <span className={`font-medium ${dailyPct >= 100 ? 'text-success-600 dark:text-success-400' : 'text-app-fg'}`}>
+                {workload.todayClosesCount ?? 0}/{workload.capacity}
+              </span>
+              <span className="text-app-fg-muted font-normal"> duty · </span>
+              <span className="font-medium text-app-fg-muted">{workload.pendingCount}</span>
+              <span className="text-app-fg-muted font-normal"> backlog</span>
             </span>
           ) : (
             <span className="text-sm text-app-fg-muted">{'\u2014'}</span>

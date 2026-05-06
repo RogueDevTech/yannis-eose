@@ -47,53 +47,42 @@ interface MyNotificationPrefs {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   const cookie = getSessionCookie(request);
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
 
-  // Fetch system settings
+  // Wave A — independent fetches for everyone with a session cookie path.
+  const settingsP = apiRequest<unknown>('/trpc/settings.getSystemSettings', { method: 'GET', cookie });
+  const prefsP = user
+    ? apiRequest<unknown>('/trpc/users.getMyNotificationPreferences', { method: 'GET', cookie })
+    : Promise.resolve({ ok: false as const, data: null });
+
+  const [settingsRes, prefsRes] = await Promise.all([settingsP, prefsP]);
+
   let systemSettings: SystemSetting[] = [];
-  const settingsRes = await apiRequest<unknown>(
-    '/trpc/settings.getSystemSettings',
-    { method: 'GET', cookie },
-  );
   if (settingsRes.ok) {
     const data = settingsRes.data as { result?: { data?: SystemSetting[] } };
     systemSettings = data?.result?.data ?? [];
   }
 
-  // Fetch notification email config (SuperAdmin only)
+  let myNotificationPrefs: MyNotificationPrefs | null = null;
+  if (prefsRes.ok) {
+    const data = prefsRes.data as { result?: { data?: MyNotificationPrefs } };
+    myNotificationPrefs = data?.result?.data ?? null;
+  }
+
   let notificationEmailConfig: NotificationEmailConfig | null = null;
-  if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') {
-    const configRes = await apiRequest<unknown>(
-      '/trpc/settings.getNotificationEmailConfig',
-      { method: 'GET', cookie },
-    );
+  let voipState: VoipState | null = null;
+
+  // Wave B — admin-only slices in one parallel batch (notification email config + VOIP).
+  if (isAdmin) {
+    const [configRes, activeRes, listRes] = await Promise.all([
+      apiRequest<unknown>('/trpc/settings.getNotificationEmailConfig', { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/voip.listProviders', { method: 'GET', cookie }),
+    ]);
     if (configRes.ok) {
       const data = configRes.data as { result?: { data?: NotificationEmailConfig } };
       notificationEmailConfig = data?.result?.data ?? null;
     }
-  }
-
-  // Per-user notification preferences (every authenticated user has a Notifications tab).
-  let myNotificationPrefs: MyNotificationPrefs | null = null;
-  if (user) {
-    const prefsRes = await apiRequest<unknown>(
-      '/trpc/users.getMyNotificationPreferences',
-      { method: 'GET', cookie },
-    );
-    if (prefsRes.ok) {
-      const data = prefsRes.data as { result?: { data?: MyNotificationPrefs } };
-      myNotificationPrefs = data?.result?.data ?? null;
-    }
-  }
-
-  // VOIP provider state — needed so the System tab can render the provider picker. The
-  // backend exposes the list (which is configured) and the active selection separately,
-  // so the dropdown can disable unconfigured options + show which env vars are missing.
-  let voipState: VoipState | null = null;
-  if (user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN') {
-    const [activeRes, listRes] = await Promise.all([
-      apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
-      apiRequest<unknown>('/trpc/voip.listProviders', { method: 'GET', cookie }),
-    ]);
     const active = activeRes.ok
       ? (activeRes.data as { result?: { data?: VoipActive } })?.result?.data ?? null
       : null;

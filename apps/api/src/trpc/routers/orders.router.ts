@@ -13,10 +13,13 @@ import {
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { canonicalPermissionCode } from '@yannis/shared';
 import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
 import { getBranchTeamsService } from './branches.router';
 import { OrdersService } from '../../orders/orders.service';
 import type { VoipService } from '../../voip/voip.service';
+import { isAdminLevel } from '../../common/authz';
+import type { SessionUser } from '../../common/decorators/current-user.decorator';
 
 // We need to pass the service instance through context or create it inline.
 // Since tRPC routers in this architecture are static, we use a factory pattern.
@@ -53,6 +56,14 @@ function getVoipService(): VoipService {
  */
 function orderListBranchId(_user: { role: string }, sessionBranchId: string | null): string | null {
   return sessionBranchId;
+}
+
+/** Mirrors Remix `requirePermissionOrRoles` on `/admin/inventory` for movement customer labels. */
+function canAccessDeliveryMovementCustomerNames(user: SessionUser): boolean {
+  if (isAdminLevel(user)) return true;
+  if (user.role === 'HEAD_OF_MARKETING' || user.role === 'HEAD_OF_CS') return true;
+  const inv = canonicalPermissionCode('inventory.read');
+  return (user.permissions ?? []).some((p) => canonicalPermissionCode(p) === inv);
 }
 
 export const ordersRouter = router({
@@ -127,6 +138,19 @@ export const ordersRouter = router({
           : Promise.resolve(false),
       ]);
       return { ...order, viewerCanEditOrderLinePrices, viewerIsCsTeamSupervisor };
+    }),
+
+  /**
+   * Single round-trip for inventory DELIVERY rows: customer names only.
+   * Gated like `/admin/inventory`; per-order visibility matches `orders.getById`.
+   */
+  deliveryMovementCustomerNames: authedProcedure
+    .input(z.object({ orderIds: z.array(z.string().uuid()).min(1).max(50) }))
+    .query(async ({ input, ctx }) => {
+      if (!canAccessDeliveryMovementCustomerNames(ctx.user)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized' });
+      }
+      return getOrdersService().listCustomerNamesByOrderIds(ctx.user, input.orderIds);
     }),
 
   listAllocatableLocations: authedProcedure
@@ -649,18 +673,40 @@ export const ordersRouter = router({
   bulkAssignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(
-      z.object({
-        orderIds: z.array(z.string().uuid()).min(1).max(100),
-        csAgentId: z.string().uuid(),
-        branchId: z.string().uuid().optional(),
-      }),
+      z
+        .object({
+          orderIds: z.array(z.string().uuid()).min(1).max(100),
+          csAgentId: z.string().uuid().optional(),
+          csAgentIds: z.array(z.string().uuid()).min(1).max(50).optional(),
+          branchId: z.string().uuid().optional(),
+        })
+        .superRefine((val, ctx) => {
+          const fromMulti = val.csAgentIds && val.csAgentIds.length > 0;
+          const fromSingle = Boolean(val.csAgentId);
+          if (!fromMulti && !fromSingle) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: 'Provide csAgentId or csAgentIds',
+              path: ['csAgentId'],
+            });
+          }
+          if (fromMulti && fromSingle) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: 'Use either csAgentId or csAgentIds, not both',
+              path: ['csAgentIds'],
+            });
+          }
+        }),
     )
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().bulkAssignToCS(
-        input.orderIds,
-        input.csAgentId,
-        ctx.user,
-      );
+      const csAgentIds =
+        input.csAgentIds && input.csAgentIds.length > 0
+          ? input.csAgentIds
+          : input.csAgentId
+            ? [input.csAgentId]
+            : [];
+      return getOrdersService().bulkAssignToCS(input.orderIds, csAgentIds, ctx.user);
     }),
 
   // ── Order Timeline ─────────────────────────────────────

@@ -577,8 +577,8 @@ export function MarketingAdSpendPage({
       rejectionReason: line.rejectionReason,
       rejectedAt: line.rejectedAt,
       rejectedBy: null,
-      orderCount: 0,
-      indicativeCpa: null,
+      orderCount: line.orderCount ?? 0,
+      indicativeCpa: line.indicativeCpa ?? null,
     });
     setRejectStep(false);
   };
@@ -1152,6 +1152,8 @@ export function MarketingAdSpendPage({
                   rejectionReason: line.rejectionReason,
                   rejectedAt: line.rejectedAt,
                   rejectedBy: null,
+                  orderCount: line.orderCount ?? 0,
+                  indicativeCpa: line.indicativeCpa ?? null,
                 })
               }
             />

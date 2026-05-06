@@ -6,7 +6,6 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { formatNaira } from '~/lib/format-amount';
 import { FinanceOverviewPulseRail } from './finance-overview-pulse';
-import { FinanceProductContributionTable } from './finance-product-contribution-table';
 import { FinanceProfitWaterfall } from './finance-profit-waterfall';
 import type { FinanceOverviewLoaderData } from './types';
 
@@ -130,19 +129,8 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
 
       <FinanceOverviewPulseRail pulse={pulse} />
 
-      <div className="grid gap-4 lg:grid-cols-5 lg:items-start">
-        <div className="lg:col-span-2">
-          <FinanceProfitWaterfall profit={profit} />
-        </div>
-        <div className="lg:col-span-3 min-w-0">
-          {profit.byProduct && profit.byProduct.length > 0 ? (
-            <FinanceProductContributionTable rows={profit.byProduct} />
-          ) : (
-            <div className="card p-6 text-sm text-app-fg-muted">
-              No product-level lines in this range (no delivered orders with line items), or data is still loading.
-            </div>
-          )}
-        </div>
+      <div className="min-w-0">
+        <FinanceProfitWaterfall profit={profit} />
       </div>
     </div>
   );

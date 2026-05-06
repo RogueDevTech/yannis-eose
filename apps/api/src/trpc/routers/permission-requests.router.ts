@@ -34,11 +34,20 @@ export const permissionRequestsRouter = router({
       z
         .object({
           status: z.enum(['ALL', 'PENDING', 'APPROVED', 'REJECTED']).optional(),
+          page: z.number().int().min(1).default(1),
+          limit: z.number().int().min(1).max(100).default(20),
         })
         .optional(),
     )
     .query(async ({ input, ctx }) => {
-      return getService().list({ status: input?.status }, ctx.user);
+      return getService().list(
+        {
+          status: input?.status,
+          page: input?.page,
+          limit: input?.limit,
+        },
+        ctx.user,
+      );
     }),
 
   statusCounts: authedProcedure.query(async ({ ctx }) => {

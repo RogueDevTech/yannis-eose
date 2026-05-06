@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, asc, desc, count, sql, inArray } from 'drizzle-orm';
+import { eq, and, or, asc, desc, count, sql, inArray, gt } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -13,11 +13,17 @@ import type {
   CreateReconciliationInput,
   ResolveReconciliationInput,
 } from '@yannis/shared';
+
+/** Transaction executor from `withActor` / `.transaction` — matches FIFO paging helpers. */
+type InventoryDbTx = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]
+>[0];
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isAdminLevel } from '../common/authz';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { isMissingRelationError } from '../common/db/missing-relation';
 
@@ -38,6 +44,7 @@ export class InventoryService {
   /** Default low-stock threshold used when the setting row is missing or malformed. */
   private static readonly DEFAULT_LOW_STOCK_THRESHOLD = 10;
   private static readonly LOW_STOCK_DEDUP_HOURS = 6;
+  private static readonly FIFO_BATCH_PAGE_SIZE = 256;
 
   /**
    * Fire in-app + push notifications to stock-aware admins when available stock at
@@ -106,12 +113,108 @@ export class InventoryService {
         data: { productId, locationId, available, threshold },
       };
 
-      // Target roles that can actually act on low stock.
-      for (const role of ['SUPER_ADMIN', 'ADMIN', 'STOCK_MANAGER'] as const) {
-        await this.notifications.createForRole(role, payload).catch(() => {});
+      const roles = ['SUPER_ADMIN', 'ADMIN', 'STOCK_MANAGER'] as const;
+      for (const role of roles) {
+        this.notifications.enqueueCreateForRole(role, payload);
       }
     } catch {
       // Notifications are best-effort — never break a stock mutation because of them.
+    }
+  }
+
+  /**
+   * Deferred low-stock check — does not block the caller or extend mutation latency.
+   * Fan-out notifications run after inventory rows are stable.
+   */
+  scheduleLowStockCheck(productId: string, locationId: string): void {
+    void this.checkLowStockAndNotify(productId, locationId).catch((err: unknown) => {
+      this.logger.warn(
+        `Deferred low-stock check failed — product=${productId} location=${locationId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+  }
+
+  // ============================================
+  // FIFO — paged batches (remaining > 0, received_at,id)
+  // ============================================
+
+  /**
+   * Next window of active FIFO batches. Always reads from the head (`remaining > 0`, oldest first)
+   * so partial consumption of the last row on a page cannot skip remaining units (keyset cursors would).
+   */
+  private async fifoActiveBatchPage(
+    tx: InventoryDbTx,
+    productId: string,
+  ): Promise<Array<typeof schema.stockBatches.$inferSelect>> {
+    return tx
+      .select()
+      .from(schema.stockBatches)
+      .where(and(eq(schema.stockBatches.productId, productId), gt(schema.stockBatches.remainingQuantity, 0)))
+      .orderBy(asc(schema.stockBatches.receivedAt), asc(schema.stockBatches.id))
+      .limit(InventoryService.FIFO_BATCH_PAGE_SIZE);
+  }
+
+  /**
+   * FIFO landed cost for exactly `quantity` units — read-only simulation (CONFIRMED order, transfer costing).
+   * Same per-unit arithmetic as legacy `parseFloat(batch.totalLandedCost)`.
+   */
+  async computeFifoLandedCostForQuantityInTx(
+    tx: InventoryDbTx,
+    productId: string,
+    quantityNeeded: number,
+  ): Promise<number> {
+    if (quantityNeeded <= 0) return 0;
+    let costTotal = 0;
+    let costRemaining = quantityNeeded;
+
+    while (costRemaining > 0) {
+      const page = await this.fifoActiveBatchPage(tx, productId);
+      if (page.length === 0) break;
+
+      for (const batch of page) {
+        if (costRemaining <= 0) break;
+        const batchRemaining = batch.remainingQuantity ?? 0;
+        const units = Math.min(costRemaining, batchRemaining);
+        const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
+        costTotal += units * costPerUnit;
+        costRemaining -= units;
+      }
+    }
+
+    return costTotal;
+  }
+
+  /** Apply FIFO decrement for delivery — updates `remaining_quantity`. */
+  private async consumeFifoRemainingInTx(
+    tx: InventoryDbTx,
+    productId: string,
+    quantityNeeded: number,
+    errorInsufficientMessage: string,
+  ): Promise<void> {
+    if (quantityNeeded <= 0) return;
+    let remaining = quantityNeeded;
+
+    while (remaining > 0) {
+      const page = await this.fifoActiveBatchPage(tx, productId);
+      if (page.length === 0) break;
+
+      for (const batch of page) {
+        if (remaining <= 0) break;
+        const batchRemaining = batch.remainingQuantity ?? 0;
+        if (batchRemaining <= 0) continue;
+        const deduct = Math.min(remaining, batchRemaining);
+        await tx
+          .update(schema.stockBatches)
+          .set({ remainingQuantity: batchRemaining - deduct })
+          .where(eq(schema.stockBatches.id, batch.id));
+        remaining -= deduct;
+      }
+    }
+
+    if (remaining > 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: errorInsufficientMessage });
     }
   }
 
@@ -298,25 +401,11 @@ export class InventoryService {
           .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
       }
 
-      // Calculate transfer cost from FIFO batch costing
-      const costBatches = await tx
-        .select()
-        .from(schema.stockBatches)
-        .where(eq(schema.stockBatches.productId, input.productId))
-        .orderBy(schema.stockBatches.receivedAt);
-
-      let transferCostTotal = 0;
-      let costRemaining = input.quantity;
-      for (const batch of costBatches) {
-        if (costRemaining <= 0) break;
-        const batchRemaining = batch.remainingQuantity ?? 0;
-        if (batchRemaining <= 0) continue;
-
-        const units = Math.min(costRemaining, batchRemaining);
-        const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
-        transferCostTotal += units * costPerUnit;
-        costRemaining -= units;
-      }
+      const transferCostTotal = await this.computeFifoLandedCostForQuantityInTx(
+        tx,
+        input.productId,
+        input.quantity,
+      );
 
       const transferRows = await tx
         .insert(schema.stockTransfers)
@@ -356,7 +445,7 @@ export class InventoryService {
       completed: false,
     });
 
-    await this.checkLowStockAndNotify(input.productId, input.fromLocationId);
+    this.scheduleLowStockCheck(input.productId, input.fromLocationId);
 
     return transfer;
   }
@@ -433,22 +522,18 @@ export class InventoryService {
     // Shrinkage alert: notify SuperAdmin and Head of Logistics
     if (hasShrinkage) {
       const shortage = transfer.quantitySent - input.quantityReceived;
-      this.notifications
-        .createForRole('SUPER_ADMIN', {
-          type: 'logistics:shrinkage',
-          title: 'Stock shrinkage alert',
-          body: `Transfer received with shortage: ${shortage} unit(s) missing. Requires investigation.`,
-          data: { transferId: transfer.id, productId: transfer.productId, shortage },
-        })
-        .catch(() => {});
-      this.notifications
-        .createForRole('HEAD_OF_LOGISTICS', {
-          type: 'logistics:shrinkage',
-          title: 'Stock shrinkage alert',
-          body: `Transfer received with shortage: ${shortage} unit(s) missing. Requires investigation.`,
-          data: { transferId: transfer.id, productId: transfer.productId, shortage },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreateForRole('SUPER_ADMIN', {
+        type: 'logistics:shrinkage',
+        title: 'Stock shrinkage alert',
+        body: `Transfer received with shortage: ${shortage} unit(s) missing. Requires investigation.`,
+        data: { transferId: transfer.id, productId: transfer.productId, shortage },
+      });
+      this.notifications.enqueueCreateForRole('HEAD_OF_LOGISTICS', {
+        type: 'logistics:shrinkage',
+        title: 'Stock shrinkage alert',
+        body: `Transfer received with shortage: ${shortage} unit(s) missing. Requires investigation.`,
+        data: { transferId: transfer.id, productId: transfer.productId, shortage },
+      });
     }
 
     // Add stock to destination location
@@ -712,10 +797,9 @@ export class InventoryService {
       });
 
       return { stockCount: newCount };
-    }).then(async (result) => {
-      // Fire low-stock alert only on net reductions. Fire-and-forget; never blocks the mutation.
+    }).then((result) => {
       if (input.adjustmentQuantity < 0) {
-        await this.checkLowStockAndNotify(input.productId, input.locationId);
+        this.scheduleLowStockCheck(input.productId, input.locationId);
       }
       return result;
     });
@@ -729,6 +813,120 @@ export class InventoryService {
    * Get inventory levels with optional product/location filters.
    * Applies the virtual buffer for sales-facing queries.
    */
+  /**
+   * Parse JSON aggregation payloads from `json_agg` — driver may return object or string.
+   */
+  private parseShipmentLayersPayload(raw: unknown): Array<{ id: string; referenceLabel: string }> {
+    if (raw == null) return [];
+    if (Array.isArray(raw)) {
+      return raw.filter(
+        (x): x is { id: string; referenceLabel: string } =>
+          typeof x === 'object' &&
+          x !== null &&
+          'id' in x &&
+          'referenceLabel' in x &&
+          typeof (x as { id: unknown }).id === 'string' &&
+          typeof (x as { referenceLabel: unknown }).referenceLabel === 'string',
+      );
+    }
+    if (typeof raw === 'string') {
+      try {
+        const v = JSON.parse(raw) as unknown;
+        return this.parseShipmentLayersPayload(v);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+
+  /**
+   * Annotate paginated `inventory_levels` rows with active FIFO shipment refs + manual-intake flag.
+   */
+  private async enrichLevelsWithShipmentLayers<
+    T extends {
+      id: string;
+      productId: string;
+      locationId: string;
+      stockCount: number;
+      reservedCount: number;
+      status: string;
+      batchId: string | null;
+      updatedAt: Date;
+    },
+  >(levels: T[]): Promise<
+    Array<
+      T & {
+        shipmentLayers: Array<{ id: string; referenceLabel: string }>;
+        hasManualFifoRemaining: boolean;
+      }
+    >
+  > {
+    if (levels.length === 0) return [];
+
+    const ids = levels.map((l) => l.id);
+    const metaRows = await this.db
+      .select({
+        id: schema.inventoryLevels.id,
+        // Correlated subquery: the body references the outer `inventory_levels`
+        // row's product_id / location_id. Drizzle's column-template
+        // interpolation generates a bare `product_id` / `location_id`
+        // identifier without a table qualifier, which collides with
+        // `stock_batches.product_id` and `stock_movements.to_location_id` etc.
+        // inside this subquery (Postgres errors with "column reference is
+        // ambiguous"). Use the literal table-qualified identifier instead.
+        shipmentLayers: sql<unknown>`COALESCE(
+          (
+            SELECT json_agg(
+              json_build_object(
+                'id', x.id,
+                'referenceLabel',
+                  'SHIP-' ||
+                  EXTRACT(YEAR FROM x.created_at AT TIME ZONE 'UTC')::int::text ||
+                  '-' ||
+                  LPAD(x.reference_number::text, 4, '0')
+              )
+              ORDER BY x.reference_number
+            )
+            FROM (
+              SELECT DISTINCT ship.id, ship.reference_number, ship.created_at
+              FROM stock_batches sb
+              INNER JOIN shipment_lines sl ON sl.batch_id = sb.id
+              INNER JOIN shipments ship ON ship.id = sl.shipment_id
+              WHERE sb.product_id = inventory_levels.product_id
+                AND sb.remaining_quantity > 0
+                AND ship.destination_location_id = inventory_levels.location_id
+            ) x
+          ),
+          '[]'::json
+        )`,
+        hasManualFifoRemaining: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM stock_batches sb
+          INNER JOIN stock_movements sm
+            ON sm.reference_id = sb.id
+           AND sm.movement_type = 'INTAKE'
+           AND sm.to_location_id = inventory_levels.location_id
+           AND sm.product_id = inventory_levels.product_id
+          WHERE sb.remaining_quantity > 0
+            AND NOT EXISTS (SELECT 1 FROM shipment_lines sl WHERE sl.batch_id = sb.id)
+        )`,
+      })
+      .from(schema.inventoryLevels)
+      .where(inArray(schema.inventoryLevels.id, ids));
+
+    const byId = new Map(metaRows.map((r) => [r.id, r]));
+
+    return levels.map((level) => {
+      const meta = byId.get(level.id);
+      return {
+        ...level,
+        shipmentLayers: this.parseShipmentLayersPayload(meta?.shipmentLayers),
+        hasManualFifoRemaining: Boolean(meta?.hasManualFifoRemaining),
+      };
+    });
+  }
+
   async listLevels(input: ListInventoryInput) {
     const conditions = [];
 
@@ -737,6 +935,24 @@ export class InventoryService {
     }
     if (input.locationId) {
       conditions.push(eq(schema.inventoryLevels.locationId, input.locationId));
+    }
+    if (input.shipmentId) {
+      // Fully-qualify the outer-table refs with `inventory_levels.…` — both
+      // `inventory_levels` and `stock_batches sb` carry `product_id` /
+      // `location_id`, so a bare `product_id` in this EXISTS body resolves
+      // ambiguously and Postgres errors with "column reference is ambiguous".
+      conditions.push(
+        sql`EXISTS (
+          SELECT 1
+          FROM stock_batches sb
+          INNER JOIN shipment_lines sl ON sl.batch_id = sb.id
+          INNER JOIN shipments sh ON sh.id = sl.shipment_id
+          WHERE sh.id = ${input.shipmentId}::uuid
+            AND sb.product_id = inventory_levels.product_id
+            AND inventory_levels.location_id = sh.destination_location_id
+            AND sb.remaining_quantity > 0
+        )`,
+      );
     }
     if (input.search) {
       // Substring match against the product name. Subquery keeps the outer query simple
@@ -759,7 +975,7 @@ export class InventoryService {
           : sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) DESC`
         : direction(schema.inventoryLevels.updatedAt);
 
-    const [levels, totalRows] = await Promise.all([
+    const [levelsRaw, totalRows, sumsRows] = await Promise.all([
       this.db
         .select()
         .from(schema.inventoryLevels)
@@ -771,12 +987,30 @@ export class InventoryService {
         .select({ count: count() })
         .from(schema.inventoryLevels)
         .where(whereClause),
+      this.db
+        .select({
+          totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`.mapWith(
+            Number,
+          ),
+          totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`.mapWith(
+            Number,
+          ),
+        })
+        .from(schema.inventoryLevels)
+        .where(whereClause),
     ]);
 
+    const levels = await this.enrichLevelsWithShipmentLayers(levelsRaw);
+
     const total = totalRows[0]?.count ?? 0;
+    const sums = sumsRows[0];
 
     return {
       levels,
+      totals: {
+        totalStock: sums?.totalStock ?? 0,
+        totalReserved: sums?.totalReserved ?? 0,
+      },
       pagination: {
         page: input.page,
         limit: input.limit,
@@ -1004,9 +1238,27 @@ export class InventoryService {
   }
 
   /**
+   * Branch scope for movement reads — mirrors `ShipmentsService.resolveBranchFilter`.
+   * `inventory_levels` is RLS branch-scoped; `stock_movements` has no RLS, so we filter
+   * here or branch users would see org-wide ledger rows while Stock Levels stayed empty.
+   */
+  private movementsReadBranchFilter(
+    actor: SessionUser,
+    currentBranchId: string | null,
+  ): string | null {
+    if (isAdminLevel(actor)) return null;
+    if (!currentBranchId) return null;
+    return currentBranchId;
+  }
+
+  /**
    * Get stock movements log.
    */
-  async listMovements(input: ListMovementsInput) {
+  async listMovements(
+    input: ListMovementsInput,
+    actor: SessionUser,
+    currentBranchId: string | null,
+  ) {
     const conditions = [];
 
     if (input.productId) {
@@ -1024,6 +1276,24 @@ export class InventoryService {
           eq(schema.stockMovements.fromLocationId, input.locationId),
           eq(schema.stockMovements.toLocationId, input.locationId),
         )!,
+      );
+    }
+
+    const branchFilter = this.movementsReadBranchFilter(actor, currentBranchId);
+    if (branchFilter) {
+      conditions.push(
+        sql<boolean>`(
+          EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.stockMovements.fromLocationId}
+              AND (ll.branch_id IS NULL OR ll.branch_id = ${branchFilter})
+          )
+          OR EXISTS (
+            SELECT 1 FROM logistics_locations ll
+            WHERE ll.id = ${schema.stockMovements.toLocationId}
+              AND (ll.branch_id IS NULL OR ll.branch_id = ${branchFilter})
+          )
+        )`,
       );
     }
 
@@ -1073,7 +1343,9 @@ export class InventoryService {
       .from(schema.stockTransfers)
       .where(whereClause)
       .orderBy(desc(schema.stockTransfers.createdAt))
-      .limit(50);
+      // Enough rows that in-transit transfers aren't dropped for high-volume orgs
+      // (newest sort — a row missing here felt like the transfer "vanished").
+      .limit(200);
 
     if (transfers.length === 0) return transfers;
 
@@ -1551,30 +1823,38 @@ export class InventoryService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no line items to allocate.' });
     }
 
+    const productIds = [...byProduct.keys()];
+    const shelfAgg = await this.db
+      .select({
+        productId: schema.inventoryLevels.productId,
+        available: sql<number>`COALESCE(
+          SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}),
+          0
+        )::int`,
+      })
+      .from(schema.inventoryLevels)
+      .where(
+        and(
+          eq(schema.inventoryLevels.locationId, locationId),
+          inArray(schema.inventoryLevels.productId, productIds),
+        ),
+      )
+      .groupBy(schema.inventoryLevels.productId);
+
+    const availableByProduct = new Map<string, number>();
+    for (const row of shelfAgg) {
+      availableByProduct.set(row.productId, Number(row.available) || 0);
+    }
+
     for (const [productId, need] of byProduct) {
-      const rows = await this.db
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, productId),
-            eq(schema.inventoryLevels.locationId, locationId),
-          ),
-        )
-        .limit(1);
-      const level = rows[0];
-      if (!level) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message:
-            'This logistics company location has no inventory row for a product on the order. Receive stock (intake or verified transfer) before allocating.',
-        });
-      }
-      const avail = level.stockCount - level.reservedCount;
+      const avail = availableByProduct.get(productId) ?? 0;
       if (avail < need) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `Insufficient stock at the selected location for this order (available ${avail}, need ${need} for one SKU).`,
+          message:
+            avail <= 0
+              ? 'This logistics company location has no sellable shelf stock for a product on the order. Receive stock (intake or verified transfer) before allocating.'
+              : `Insufficient stock at the selected location for this order (available ${avail}, need ${need} for one SKU).`,
         });
       }
     }
@@ -1598,28 +1878,51 @@ export class InventoryService {
               eq(schema.inventoryLevels.locationId, locationId),
             ),
           )
-          .limit(1);
-        const level = rows[0];
-        if (!level) {
+          .orderBy(
+            desc(
+              sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount})`,
+            ),
+          );
+
+        if (rows.length === 0) {
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
             message: 'Inventory row disappeared between validation and reservation.',
           });
         }
-        const avail = level.stockCount - level.reservedCount;
-        if (avail < qty) {
+
+        const totalFree = rows.reduce(
+          (sum, r) => sum + (r.stockCount - r.reservedCount),
+          0,
+        );
+        if (totalFree < qty) {
           throw new TRPCError({
             code: 'CONFLICT',
             message: 'Stock changed while allocating — not enough free units left at this location.',
           });
         }
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            reservedCount: sql`${schema.inventoryLevels.reservedCount} + ${qty}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.inventoryLevels.id, level.id));
+
+        let remaining = qty;
+        for (const level of rows) {
+          if (remaining <= 0) break;
+          const free = level.stockCount - level.reservedCount;
+          if (free <= 0) continue;
+          const add = Math.min(remaining, free);
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              reservedCount: sql`${schema.inventoryLevels.reservedCount} + ${add}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.inventoryLevels.id, level.id));
+          remaining -= add;
+        }
+        if (remaining > 0) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Stock changed while allocating — not enough free units left at this location.',
+          });
+        }
 
         await tx.insert(schema.stockMovements).values({
           productId,
@@ -1652,28 +1955,37 @@ export class InventoryService {
               eq(schema.inventoryLevels.locationId, locationId),
             ),
           )
-          .limit(1);
-        const level = rows[0];
-        if (!level) {
+          .orderBy(desc(schema.inventoryLevels.reservedCount));
+
+        if (rows.length === 0) {
           throw new TRPCError({
             code: 'INTERNAL_SERVER_ERROR',
             message: 'Inventory row missing at prior allocation location during reallocation.',
           });
         }
-        if (level.reservedCount < qty) {
+        const totalReserved = rows.reduce((sum, r) => sum + r.reservedCount, 0);
+        if (totalReserved < qty) {
           throw new TRPCError({
             code: 'CONFLICT',
             message:
               'Cannot reallocate: reserved quantity at the prior location is below this order (inventory may have been adjusted).',
           });
         }
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${qty}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.inventoryLevels.id, level.id));
+
+        let remaining = qty;
+        for (const level of rows) {
+          if (remaining <= 0) break;
+          const take = Math.min(remaining, level.reservedCount);
+          if (take <= 0) continue;
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${take}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.inventoryLevels.id, level.id));
+          remaining -= take;
+        }
 
         await tx.insert(schema.stockMovements).values({
           productId,
@@ -1704,30 +2016,12 @@ export class InventoryService {
 
     await withActor(this.db, actor, async (tx) => {
       for (const [productId, lineQty] of byProduct) {
-        const batches = await tx
-          .select()
-          .from(schema.stockBatches)
-          .where(eq(schema.stockBatches.productId, productId))
-          .orderBy(asc(schema.stockBatches.receivedAt));
-
-        let remaining = lineQty;
-        for (const batch of batches) {
-          if (remaining <= 0) break;
-          const batchRemaining = batch.remainingQuantity ?? 0;
-          if (batchRemaining <= 0) continue;
-          const deduct = Math.min(remaining, batchRemaining);
-          await tx
-            .update(schema.stockBatches)
-            .set({ remainingQuantity: batchRemaining - deduct })
-            .where(eq(schema.stockBatches.id, batch.id));
-          remaining -= deduct;
-        }
-        if (remaining > 0) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Cannot record delivery: insufficient FIFO batch remaining for a product on this order.',
-          });
-        }
+        await this.consumeFifoRemainingInTx(
+          tx,
+          productId,
+          lineQty,
+          'Cannot record delivery: insufficient FIFO batch remaining for a product on this order.',
+        );
 
         await tx.insert(schema.stockMovements).values({
           productId,
@@ -1748,35 +2042,71 @@ export class InventoryService {
               eq(schema.inventoryLevels.locationId, logisticsLocationId),
             ),
           )
-          .limit(1);
-        const level = levelRows[0];
-        if (!level) {
+          .orderBy(desc(schema.inventoryLevels.stockCount));
+
+        if (levelRows.length === 0) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message:
               'Cannot record delivery: no inventory level at the fulfillment location for a product on this order.',
           });
         }
-        if (level.stockCount < lineQty) {
+
+        const totalStock = levelRows.reduce((sum, r) => sum + r.stockCount, 0);
+        const totalReserved = levelRows.reduce((sum, r) => sum + r.reservedCount, 0);
+        if (totalStock < lineQty) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: 'Cannot record delivery: shelf count at location is below shipped quantity.',
           });
         }
-        const reservedRelease = Math.min(level.reservedCount, lineQty);
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} - ${lineQty}`,
-            reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${reservedRelease}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.inventoryLevels.id, level.id));
+
+        let stockRemaining = lineQty;
+        for (const level of levelRows) {
+          if (stockRemaining <= 0) break;
+          const take = Math.min(stockRemaining, level.stockCount);
+          if (take <= 0) continue;
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: sql`${schema.inventoryLevels.stockCount} - ${take}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.inventoryLevels.id, level.id));
+          stockRemaining -= take;
+        }
+
+        const reservedToRelease = Math.min(lineQty, totalReserved);
+        let resRemaining = reservedToRelease;
+        const rowsAfter = await tx
+          .select()
+          .from(schema.inventoryLevels)
+          .where(
+            and(
+              eq(schema.inventoryLevels.productId, productId),
+              eq(schema.inventoryLevels.locationId, logisticsLocationId),
+            ),
+          )
+          .orderBy(desc(schema.inventoryLevels.reservedCount));
+
+        for (const level of rowsAfter) {
+          if (resRemaining <= 0) break;
+          const take = Math.min(resRemaining, level.reservedCount);
+          if (take <= 0) continue;
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              reservedCount: sql`${schema.inventoryLevels.reservedCount} - ${take}`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.inventoryLevels.id, level.id));
+          resRemaining -= take;
+        }
       }
     });
 
     for (const productId of byProduct.keys()) {
-      await this.checkLowStockAndNotify(productId, logisticsLocationId);
+      this.scheduleLowStockCheck(productId, logisticsLocationId);
     }
   }
 }

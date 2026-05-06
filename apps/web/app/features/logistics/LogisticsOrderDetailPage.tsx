@@ -822,7 +822,7 @@ export function LogisticsOrderDetailPage({
                       className="w-full"
                       onClick={() => void handleCopyOrderSummary()}
                     >
-                      Copy for WhatsApp
+                      Copy order
                     </Button>
                     <Button
                       type="button"

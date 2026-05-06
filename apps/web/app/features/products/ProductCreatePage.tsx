@@ -19,13 +19,6 @@ interface CategoryOption {
   brandName: string;
 }
 
-interface OfferRow {
-  label: string;
-  qty: string;
-  price: string;
-  imageUrls: string[];
-}
-
 interface ProductCreatePageProps {
   actionData?: { error?: string } | undefined;
   categories?: CategoryOption[];
@@ -36,6 +29,9 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
   const isSubmitting = navigation.state === 'submitting';
   const errorRef = useRef<HTMLDivElement>(null);
   const [dismissedError, setDismissedError] = useState(false);
+  const [categoryId, setCategoryId] = useState('');
+  const [galleryImageUrls, setGalleryImageUrls] = useState<string[]>([]);
+  const [galleryUploadState, setGalleryUploadState] = useState<FileUploadUploadState>('idle');
 
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
@@ -47,34 +43,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
     }
   }, [actionData?.error]);
 
-  const [offers, setOffers] = useState<OfferRow[]>([
-    { label: '', qty: '1', price: '', imageUrls: [] },
-  ]);
-  const [categoryId, setCategoryId] = useState('');
-  const [offerUploadStates, setOfferUploadStates] = useState<Record<number, FileUploadUploadState>>({});
-
-  const anyOfferImageUploading = useMemo(
-    () => Object.values(offerUploadStates).some((s) => s === 'uploading'),
-    [offerUploadStates],
-  );
-
-  function addOffer() {
-    setOffers((prev) => [...prev, { label: '', qty: '1', price: '', imageUrls: [] }]);
-  }
-
-  function removeOffer(index: number) {
-    setOffers((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function updateOffer(index: number, field: keyof Pick<OfferRow, 'label' | 'qty' | 'price'>, value: string) {
-    setOffers((prev) =>
-      prev.map((o, i) => (i === index ? { ...o, [field]: value } : o)),
-    );
-  }
-
-  function setOfferImageUrls(index: number, urls: string[]) {
-    setOffers((prev) => prev.map((o, i) => (i === index ? { ...o, imageUrls: urls } : o)));
-  }
+  const galleryJson = useMemo(() => JSON.stringify(galleryImageUrls), [galleryImageUrls]);
 
   return (
     <div className="w-full space-y-6">
@@ -82,7 +51,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
 
       <PageHeader
         title="Add Product"
-        description="Add a new product to the catalog with bundle offers and stock thresholds."
+        description="Create a catalog SKU, then add sellable tiers (offer templates) after save — or assign tiers when building marketing forms."
       />
 
       {actionData?.error && !dismissedError && (
@@ -98,17 +67,8 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
 
       <Form method="post" className="space-y-6">
         {categories.length > 0 ? <input type="hidden" name="categoryId" value={categoryId} /> : null}
-        {/* Hidden offers JSON */}
-        <input type="hidden" name="offers" value={JSON.stringify(
-          offers.map((o) => ({
-            label: o.label,
-            qty: parseInt(o.qty, 10) || 1,
-            price: o.price,
-            imageUrls: o.imageUrls,
-          })),
-        )} />
+        <input type="hidden" name="galleryImageUrls" value={galleryJson} readOnly />
 
-        {/* Basic Info */}
         <div className="card space-y-4">
           <h2 className="text-lg font-semibold text-app-fg">Product Details</h2>
 
@@ -161,136 +121,45 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
             rows={3}
             placeholder="Optional product description"
           />
-        </div>
 
-        {/* Offer Bundles */}
-        <div className="card space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-app-fg">Offer Bundles</h2>
-              <p className="text-xs text-app-fg-muted mt-0.5">
-                Define pricing tiers. Each tier can have its own images (e.g. for edge sales forms).
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={addOffer}
-              className="btn-secondary text-sm py-1.5 px-3"
-            >
-              <svg className="w-4 h-4 mr-1 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              Add Tier
-            </button>
-          </div>
-
-          {offers.length === 0 && (
-            <p className="text-sm text-danger-600 dark:text-danger-400">At least one offer is required.</p>
-          )}
-
-          <div className="space-y-3">
-            {offers.map((offer, index) => (
-              <div
-                key={index}
-                className="rounded-xl border border-app-border bg-app-elevated/40 dark:bg-app-hover/30 p-3 shadow-sm"
-              >
-                <div
-                  className={
-                    offers.length > 1
-                      ? 'grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_4.5rem_7rem_minmax(0,12.5rem)_2.75rem] sm:gap-x-2 sm:items-end'
-                      : 'grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_4.5rem_7rem_minmax(0,12.5rem)] sm:gap-x-2 sm:items-end'
-                  }
-                >
-                  <div className="min-w-0 sm:col-span-1">
-                    <TextInput
-                      id={`offer-label-${index}`}
-                      label="Label"
-                      required
-                      placeholder="e.g. Buy 1 Get 1 Free"
-                      value={offer.label}
-                      onChange={(e) => updateOffer(index, 'label', e.target.value)}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <TextInput
-                      id={`offer-qty-${index}`}
-                      label="Qty"
-                      title="Total units in this tier"
-                      type="number"
-                      required
-                      min={1}
-                      placeholder="2"
-                      value={offer.qty}
-                      onChange={(e) => updateOffer(index, 'qty', e.target.value)}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <FormField label="Price (&#8358;)" htmlFor={`offer-price-${index}`}>
-                      <AmountInput
-                        id={`offer-price-${index}`}
-                        required
-                        className="input py-2 text-sm"
-                        placeholder="16,500.00"
-                        value={offer.price}
-                        onChange={(v) => updateOffer(index, 'price', v)}
-                      />
-                    </FormField>
-                  </div>
-                  <div className="min-w-0 max-sm:max-w-[200px]">
-                    <OfferImagesEditor
-                      imageUrls={offer.imageUrls}
-                      onChange={(urls) => setOfferImageUrls(index, urls)}
-                      compact
-                      disabled={isSubmitting}
-                      onUploadStateChange={(s) =>
-                        setOfferUploadStates((prev) => ({ ...prev, [index]: s }))
-                      }
-                    />
-                  </div>
-                  {offers.length > 1 && (
-                    <div className="flex justify-end sm:justify-center pb-1 sm:pb-0.5">
-                      <button
-                        type="button"
-                        onClick={() => removeOffer(index)}
-                        className="p-1.5 rounded-lg text-danger-500 hover:text-danger-700 dark:hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
-                        title="Remove tier"
-                      >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Cost & Stock */}
-        <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-app-fg">Cost & Stock</h2>
-
-          <FormField label="Cost Price per Unit (&#8358;)" htmlFor="costPrice">
+          <FormField label="List price (&#8358;)" htmlFor="baseSalePrice" hint="Public “from” price for sorts and dashboards. Edge packages are offer tiers on Marketing → Forms.">
             <AmountInput
-              id="costPrice"
-              name="costPrice"
+              id="baseSalePrice"
+              name="baseSalePrice"
               required
               className="input"
               placeholder="0.00"
             />
-            <p className="text-xs text-app-fg-muted mt-1">
-              Only visible to Finance and SuperAdmin roles.
-            </p>
           </FormField>
-          <InlineNotification
-            variant="info"
-            message="Add stock after creating the product via Inventory → Stock Intake."
-            action={{ label: 'Stock Intake', href: '/admin/inventory' }}
+        </div>
+
+        <div className="card space-y-3">
+          <h2 className="text-lg font-semibold text-app-fg">Catalog images</h2>
+          <p className="text-xs text-app-fg-muted">
+            Optional gallery for this SKU. Individual offer tiers can pick images when you create templates.
+          </p>
+          <OfferImagesEditor
+            imageUrls={galleryImageUrls}
+            onChange={setGalleryImageUrls}
+            disabled={isSubmitting}
+            onUploadStateChange={setGalleryUploadState}
           />
         </div>
 
-        {/* Actions */}
+        <div className="card space-y-4">
+          <h2 className="text-lg font-semibold text-app-fg">Cost</h2>
+
+          <FormField label="Cost Price per Unit (&#8358;)" htmlFor="costPrice">
+            <AmountInput id="costPrice" name="costPrice" required className="input" placeholder="0.00" />
+            <p className="text-xs text-app-fg-muted mt-1">Only visible to Finance and SuperAdmin roles.</p>
+          </FormField>
+          <InlineNotification
+            variant="info"
+            message="Add stock after creating the product via Inventory → Shipments → Receive Shipment (verify to post)."
+            action={{ label: 'Inventory', href: '/admin/inventory' }}
+          />
+        </div>
+
         <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
           <Link to="/admin/products" className="btn-secondary w-full sm:w-auto">
             Cancel
@@ -301,7 +170,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
             className="w-full sm:w-auto"
             loading={isSubmitting}
             loadingText="Creating..."
-            disabled={offers.length === 0 || anyOfferImageUploading}
+            disabled={galleryUploadState === 'uploading'}
           >
             Create Product
           </Button>

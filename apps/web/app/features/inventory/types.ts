@@ -1,3 +1,9 @@
+/** Inbound shipment still contributing FIFO units at this shelf row (batch remaining > 0). */
+export interface InventoryLevelShipmentLayer {
+  id: string;
+  referenceLabel: string;
+}
+
 export interface InventoryLevel {
   id: string;
   productId: string;
@@ -6,6 +12,10 @@ export interface InventoryLevel {
   reservedCount: number;
   status: string;
   updatedAt: string;
+  /** Shipments whose verified lines created batches that still have remaining qty for this product at this destination. */
+  shipmentLayers?: InventoryLevelShipmentLayer[];
+  /** True when non-shipment INTAKE (e.g. legacy manual intake) still has FIFO remaining at this location. */
+  hasManualFifoRemaining?: boolean;
 }
 
 export interface StockMovement {
@@ -59,22 +69,32 @@ export function formatMovementReasonForDisplay(reason: string | null | undefined
     .replace(/\b3PL\b/g, 'logistics company');
 }
 
-/** Product option for Stock Intake */
+/** Product option for shipment receive UI */
 export interface ProductOption {
   id: string;
   name: string;
 }
 
-/** Location option for Stock Intake */
+/** Location option for shipment receive UI */
 export interface LocationOption {
   id: string;
   name: string;
   providerName: string | null;
 }
 
+export interface WarehouseRowLite {
+  id: string;
+  name: string;
+  address: string;
+  dispatchLocked: boolean;
+  stockSummary: { totalStock: number; totalReserved: number; skuCount: number };
+}
+
 /** Streaming loader shape — movements arrive as a deferred promise */
 export interface InventoryStreamData {
   levels: InventoryLevel[];
+  /** Sum of stock/reserved across all rows matching current filters (not just this page). */
+  levelsTotals?: { totalStock: number; totalReserved: number };
   totalLevels: number;
   /** Server-side pagination state for the Stock Levels tab. */
   levelsPage?: number;
@@ -84,6 +104,10 @@ export interface InventoryStreamData {
   levelsProductFilter?: string;
   /** Logistics location UUID filter (empty string = no filter). */
   levelsLocationFilter?: string;
+  /** Inbound shipment UUID filter (empty string = no filter). */
+  levelsShipmentFilter?: string;
+  /** Broader location list for resolving names on stock rows (3PL, etc.); warehouse-only list stays on `locations` for receive UI. */
+  displayLocations?: LocationOption[];
   /** Substring search against product name (empty string = no search). */
   levelsSearch?: string;
   /** `default` | `lowestAvailable` | `highestAvailable`. */
@@ -92,7 +116,7 @@ export interface InventoryStreamData {
   totalMovements: number;
   products: ProductOption[];
   locations: LocationOption[];
-  /** When false, Stock Intake button and form are hidden (view-only). */
+  /** When false, Receive Shipment actions are hidden (`inventory.intake` gate). */
   canIntake?: boolean;
   /** When false, the row-level "Edit" (stock adjust) action is hidden. */
   canAdjust?: boolean;
@@ -110,6 +134,16 @@ export interface InventoryStreamData {
   canEditLowStock?: boolean;
   /** Low-stock items currently below threshold — drives the inline banner. Streamed. */
   lowStockAlerts?: Promise<LowStockAlertsResult> | LowStockAlertsResult;
+  /** Inbound shipments visible to the actor (auto-scoped to current branch for non-admins). */
+  shipments?: ShipmentRow[];
+  /** Total shipments matching the page's filters (for pagination). */
+  totalShipments?: number;
+  /** Inhouse warehouses summary list (so warehouse stock is visible on /admin/inventory). */
+  warehouses?: WarehouseRowLite[];
+  /** Set when `inventory.levels` failed — avoids silent empty state after timeout/API errors. */
+  levelsLoadError?: string | null;
+  /** Set when `inventory.movements` failed — movement tabs / stats may be incomplete. */
+  movementsLoadError?: string | null;
 }
 
 export interface LowStockAlertItem {
@@ -199,3 +233,100 @@ export const REASON_LABELS: Record<string, string> = {
   COUNTING_ERROR: 'Counting Error',
   OTHER: 'Other',
 };
+
+/* ── Inbound shipments — multi-line supplier receipts ── */
+
+export type ShipmentStatus =
+  | 'CREATED'
+  | 'IN_TRANSIT'
+  | 'ARRIVED'
+  | 'VERIFIED'
+  | 'CLOSED'
+  | 'CANCELLED';
+
+export interface ShipmentRow {
+  id: string;
+  referenceNumber: number;
+  referenceLabel: string;
+  label: string | null;
+  status: ShipmentStatus;
+  destinationLocationId: string;
+  destinationLocationName: string | null;
+  supplierName: string | null;
+  supplierReference: string | null;
+  expectedArrivalAt: string | null;
+  arrivedAt: string | null;
+  verifiedAt: string | null;
+  closedAt: string | null;
+  totalLandingCost: string | null;
+  createdAt: string;
+  lineCount: number;
+  totalExpected: number;
+  totalReceived: number;
+}
+
+export interface ShipmentDetail {
+  shipment: {
+    id: string;
+    referenceNumber: number;
+    referenceLabel: string;
+    label: string | null;
+    status: ShipmentStatus;
+    destinationLocationId: string;
+    destinationLocationName: string | null;
+    supplierName: string | null;
+    supplierReference: string | null;
+    expectedArrivalAt: string | null;
+    arrivedAt: string | null;
+    verifiedAt: string | null;
+    closedAt: string | null;
+    cancelledAt: string | null;
+    totalLandingCost: string;
+    cancelledReason: string | null;
+    notes: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  lines: Array<{
+    id: string;
+    productId: string;
+    productName: string | null;
+    expectedQuantity: number;
+    receivedQuantity: number | null;
+    factoryCost: string;
+    allocatedLandingCost: string | null;
+    batchId: string | null;
+    varianceReason: string | null;
+    createdAt: string;
+  }>;
+  allowedTransitions: string[];
+}
+
+export const SHIPMENT_STATUS_VARIANT: Record<
+  ShipmentStatus,
+  'neutral' | 'info' | 'warning' | 'success' | 'danger'
+> = {
+  CREATED: 'neutral',
+  IN_TRANSIT: 'warning',
+  ARRIVED: 'info',
+  VERIFIED: 'success',
+  CLOSED: 'success',
+  CANCELLED: 'danger',
+};
+
+export function formatShipmentStatus(status: ShipmentStatus): string {
+  switch (status) {
+    case 'CREATED':
+      return 'Created';
+    case 'IN_TRANSIT':
+      return 'In transit';
+    case 'ARRIVED':
+      return 'Arrived';
+    case 'VERIFIED':
+      return 'Verified';
+    case 'CLOSED':
+      return 'Closed';
+    case 'CANCELLED':
+      return 'Cancelled';
+  }
+}

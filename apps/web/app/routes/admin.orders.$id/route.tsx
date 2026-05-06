@@ -134,35 +134,99 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     };
   })();
 
+  // Fan out the four supporting fetches in parallel — none of them depend on each
+  // other, so collapsing the previous serial chain saves ~3 round-trips of latency
+  // per order detail navigation. Each call still has its own .catch so a single
+  // upstream blip doesn't fail the whole loader.
+  type ApiResult = { ok: boolean; status: number; data: unknown };
+  const onError = (label: string) => (err: unknown): ApiResult => {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    logOrderDetailLoaderWarning(orderId, label, msg);
+    return { ok: false, status: 503, data: {} };
+  };
+  const allocatableLocationsDeferred: Promise<
+    Array<{
+      id: string;
+      name: string;
+      address: string | null;
+      whatsappGroupLink?: string | null;
+      providerName: string | null;
+      eligible: boolean;
+      reason: string | null;
+      availabilityByProduct: Array<{
+        productId: string;
+        productName: string;
+        needed: number;
+        available: number;
+      }> | null;
+    }>
+  > = apiRequest<unknown>(
+    `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+    deferredOpt,
+  )
+    .then((allocatableRes) => {
+      if (!allocatableRes.ok) {
+        logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', `status ${allocatableRes.status}`);
+        return [];
+      }
+      const data = allocatableRes.data as {
+        result?: {
+          data?: Array<{
+            id: string;
+            name: string;
+            address: string | null;
+            whatsappGroupLink?: string | null;
+            providerName?: string | null;
+            eligible: boolean;
+            reason: string | null;
+            availabilityByProduct: Array<{
+              productId: string;
+              productName: string;
+              needed: number;
+              available: number;
+            }> | null;
+          }>;
+        };
+      };
+      return (data?.result?.data ?? []).map((loc) => ({
+        ...loc,
+        providerName: loc.providerName ?? null,
+      }));
+    })
+    .catch((err) => {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', msg);
+      return [];
+    });
+
+  const [agentsRes, locationsRes, templatesRes] = await Promise.all([
+    apiRequest<unknown>('/trpc/orders.listCSAgents', deferredOpt).catch(
+      onError('orders.listCSAgents'),
+    ),
+    apiRequest<unknown>(
+      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
+      deferredOpt,
+    ).catch(onError('logistics.listLocations')),
+    apiRequest<unknown>(
+      `/trpc/messaging.templates.list?input=${encodeURIComponent(JSON.stringify({ channel: 'WHATSAPP_GROUP' }))}`,
+      deferredOpt,
+    ).catch(onError('messaging.templates.list')),
+  ]);
+
   let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
   // `orders.listCSAgents` returns the full roster for HoCS/Admin (`orders.reassign`) and supervised
   // CS agents only for branch CS team supervisors; others get an empty list.
-  {
-    const agentsRes = await apiRequest<unknown>('/trpc/orders.listCSAgents', deferredOpt).catch((err) => {
-      const msg = err instanceof Error ? err.message : 'unknown';
-      logOrderDetailLoaderWarning(orderId, 'orders.listCSAgents', msg);
-      return { ok: false, status: 503, data: {} };
-    });
-    if (agentsRes.ok) {
-      const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
-      const list = agentsData?.result?.data ?? [];
-      csAgentsForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
-    } else {
-      logOrderDetailLoaderWarning(orderId, 'orders.listCSAgents', `status ${agentsRes.status}`);
-    }
+  if (agentsRes.ok) {
+    const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
+    const list = agentsData?.result?.data ?? [];
+    csAgentsForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+  } else {
+    logOrderDetailLoaderWarning(orderId, 'orders.listCSAgents', `status ${agentsRes.status}`);
   }
 
   // Logistics locations — used by the "Allocate to logistics company" action available to the assigned
   // CS agent, Logistics, and admins when the order is CONFIRMED.
   let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }> = [];
-  const locationsRes = await apiRequest<unknown>(
-    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
-    deferredOpt,
-  ).catch((err) => {
-    const msg = err instanceof Error ? err.message : 'unknown';
-    logOrderDetailLoaderWarning(orderId, 'logistics.listLocations', msg);
-    return { ok: false, status: 503, data: {} };
-  });
   if (locationsRes.ok) {
     const locationsData = locationsRes.data as {
       result?: { data?: { locations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }> } };
@@ -178,7 +242,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     logOrderDetailLoaderWarning(orderId, 'logistics.listLocations', `status ${locationsRes.status}`);
   }
 
-  let allocatableLocations: Array<{
+  // allocatableLocations is heavy (per-location eligibility). Stream it so the page loads fast.
+  const allocatableLocations: Array<{
     id: string;
     name: string;
     address: string | null;
@@ -193,52 +258,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       available: number;
     }> | null;
   }> = [];
-  const allocatableRes = await apiRequest<unknown>(
-    `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-    deferredOpt,
-  ).catch((err) => {
-    const msg = err instanceof Error ? err.message : 'unknown';
-    logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', msg);
-    return { ok: false, status: 503, data: {} };
-  });
-  if (allocatableRes.ok) {
-    const data = allocatableRes.data as {
-      result?: {
-        data?: Array<{
-          id: string;
-          name: string;
-          address: string | null;
-          whatsappGroupLink?: string | null;
-          providerName?: string | null;
-          eligible: boolean;
-          reason: string | null;
-          availabilityByProduct: Array<{
-            productId: string;
-            productName: string;
-            needed: number;
-            available: number;
-          }> | null;
-        }>;
-      };
-    };
-    allocatableLocations = (data?.result?.data ?? []).map((loc) => ({
-      ...loc,
-      providerName: loc.providerName ?? null,
-    }));
-  } else {
-    logOrderDetailLoaderWarning(orderId, 'orders.listAllocatableLocations', `status ${allocatableRes.status}`);
-  }
 
   // Dispatch templates for the "Share to logistics company" WhatsApp flow.
   let logisticsDispatchTemplates: Array<{ id: string; name: string; body: string }> = [];
-  const templatesRes = await apiRequest<unknown>(
-    `/trpc/messaging.templates.list?input=${encodeURIComponent(JSON.stringify({ channel: 'WHATSAPP_GROUP' }))}`,
-    deferredOpt,
-  ).catch((err) => {
-    const msg = err instanceof Error ? err.message : 'unknown';
-    logOrderDetailLoaderWarning(orderId, 'messaging.templates.list', msg);
-    return { ok: false, status: 503, data: {} };
-  });
   if (templatesRes.ok) {
     const templatesData = templatesRes.data as { result?: { data?: Array<{ id: string; name: string; body: string }> } };
     logisticsDispatchTemplates = templatesData?.result?.data ?? [];
@@ -274,6 +296,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     csAgentsForAssign: csAgentsForAssign,
     logisticsLocations,
     allocatableLocations,
+    allocatableLocationsDeferred,
     logisticsDispatchTemplates,
     invoice: invoicePromise,
   });
@@ -306,6 +329,20 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       const err = extractApiErrorMessage(res.data, 'Assign failed');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'ensureInvoice') {
+    const res = await apiRequest<unknown>('/trpc/finance.ensureInvoiceByOrder', {
+      method: 'POST',
+      cookie,
+      body: { orderId },
+      timeoutMs: 20_000,
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Could not generate invoice');
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
@@ -691,7 +728,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const deliveryFeeAddOnStr = formData.get('deliveryFeeAddOn')?.toString();
     const deliveryDiscountAmountStr = formData.get('deliveryDiscountAmount')?.toString();
 
-    const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString() || undefined;
+    const preferredDeliveryDate = formData.get('preferredDeliveryDate')?.toString().trim() || undefined;
     const deliveryNote = formData.get('deliveryNote')?.toString() || undefined;
     const deliveryProofUrl = formData.get('deliveryProofUrl')?.toString() || undefined;
 
@@ -700,7 +737,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (logisticsLocationId) metadata['logisticsLocationId'] = logisticsLocationId;
     if (logisticsProviderId) metadata['logisticsProviderId'] = logisticsProviderId;
     if (riderId) metadata['riderId'] = riderId;
-    if (preferredDeliveryDate) metadata['preferredDeliveryDate'] = preferredDeliveryDate;
+    if (newStatus === 'CONFIRMED') {
+      if (!preferredDeliveryDate || !/^\d{4}-\d{2}-\d{2}$/.test(preferredDeliveryDate)) {
+        return json({ error: 'Scheduled delivery date is required.' }, { status: 400 });
+      }
+      metadata['preferredDeliveryDate'] = preferredDeliveryDate;
+    } else if (preferredDeliveryDate) {
+      metadata['preferredDeliveryDate'] = preferredDeliveryDate;
+    }
     if (deliveryNote) metadata['deliveryNote'] = deliveryNote;
     if (deliveryProofUrl) metadata['deliveryProofUrl'] = deliveryProofUrl;
     const deliveredQty = deliveredQtyStr != null ? parseInt(deliveredQtyStr, 10) : NaN;
@@ -763,6 +807,7 @@ export default function OrderDetailRoute() {
     csAgentsForAssign,
     logisticsLocations,
     allocatableLocations,
+    allocatableLocationsDeferred,
     logisticsDispatchTemplates,
     invoice,
   } = useLoaderData<typeof loader>();
@@ -810,6 +855,7 @@ export default function OrderDetailRoute() {
             csAgentsForAssign={csAgentsForAssign}
             logisticsLocations={logisticsLocations}
             allocatableLocations={allocatableLocations}
+            allocatableLocationsDeferred={allocatableLocationsDeferred}
             logisticsDispatchTemplates={logisticsDispatchTemplates}
             invoice={invoice}
           />

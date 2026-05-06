@@ -4,7 +4,6 @@ import {
   transitionOrderSchema,
   listOrdersSchema,
   bulkReassignSchema,
-  updateOrderSchema,
 } from './orders';
 
 const VALID_UUID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
@@ -79,7 +78,7 @@ describe('createOrderSchema', () => {
       ...baseValid,
       items: [{ productId: VALID_UUID, quantity: 1, unitPrice: '10000' }],
     });
-    expect(typeof result.items[0].unitPrice).toBe('number');
+    expect(typeof result.items[0]?.unitPrice).toBe('number');
   });
 });
 

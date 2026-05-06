@@ -143,11 +143,12 @@ async function _ceoOverviewFetch(params: {
     (sum: number, w: { pendingCount: number }) => sum + w.pendingCount,
     0,
   );
-  const csUtilization =
+  /** Average progress toward per-agent daily duty target (CS stage closes today ÷ capacity). */
+  const csDailyDutyProgress =
     safeCSWorkloads.length > 0
       ? safeCSWorkloads.reduce(
-          (sum: number, w: { pendingCount: number; capacity: number }) =>
-            sum + w.pendingCount / Math.max(w.capacity, 1),
+          (sum: number, w: { todayClosesCount?: number; capacity: number }) =>
+            sum + (w.todayClosesCount ?? 0) / Math.max(w.capacity, 1),
           0,
         ) / safeCSWorkloads.length
       : 0;
@@ -181,7 +182,7 @@ async function _ceoOverviewFetch(params: {
     csTeam: {
       agentCount: totalCSAgents,
       pendingOrders: totalCSPending,
-      utilization: Math.round(csUtilization * 100),
+      utilization: Math.round(csDailyDutyProgress * 100),
     },
     payroll: {
       totalPaid: safePayoutSummary.totalPaid ?? 0,

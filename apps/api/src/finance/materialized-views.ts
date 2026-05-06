@@ -73,21 +73,26 @@ export const MV_COMMISSION_SUMMARY = `
 
 /**
  * SQL to create unique indexes on the materialized views for fast refresh.
+ *
+ * Every MV needs a UNIQUE index for `REFRESH MATERIALIZED VIEW CONCURRENTLY`
+ * to work; without it the refresh takes an `ACCESS EXCLUSIVE` lock and blocks
+ * every reader for the whole refresh duration. `mv_ad_spend_summary` groups by
+ * (spend_date, media_buyer_id, product_id) so that triple is its natural key.
  */
 export const MV_INDEXES = [
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_profit_summary_date ON mv_profit_summary (delivery_date)',
-  'CREATE INDEX IF NOT EXISTS idx_mv_ad_spend_summary_date ON mv_ad_spend_summary (spend_date)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS uq_mv_ad_spend_summary ON mv_ad_spend_summary (spend_date, media_buyer_id, product_id)',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_order_pipeline_status ON mv_order_pipeline (status)',
   'CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_commission_summary_month ON mv_commission_summary (period_month)',
 ];
 
 /**
  * Refresh commands for each materialized view.
- * CONCURRENTLY allows reads during refresh (requires unique index).
+ * CONCURRENTLY allows reads during refresh (requires unique index — see MV_INDEXES).
  */
 export const MV_REFRESH_COMMANDS = {
   profitSummary: 'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_profit_summary',
-  adSpendSummary: 'REFRESH MATERIALIZED VIEW mv_ad_spend_summary',
+  adSpendSummary: 'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_ad_spend_summary',
   orderPipeline: 'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_order_pipeline',
   commissionSummary: 'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_commission_summary',
 };

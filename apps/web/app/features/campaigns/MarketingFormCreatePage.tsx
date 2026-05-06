@@ -1,13 +1,13 @@
 import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useFetcher } from '@remix-run/react';
+import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
-import type { CustomFormField, Product, StandardFieldConfig } from './types';
+import type { CustomFormField, OfferGroupRow, Product, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
 import { FormFullPreview } from './form-full-preview';
 import { cloneDefaultAdditionalFieldSelectOptions } from './standard-fields';
@@ -15,17 +15,30 @@ import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormCreatePageProps {
   products: Product[];
+  offerGroups: OfferGroupRow[];
   productsLoadError?: string | null;
+  canManageOfferTemplates?: boolean;
 }
 
 /**
  * Full-page create flow: basic form settings + custom field builder, single submit to
  * `marketing.createCampaign` with `formConfig.customFields`.
  */
-export function MarketingFormCreatePage({ products, productsLoadError = null }: MarketingFormCreatePageProps) {
-  const fetcher = useFetcher<{ error?: string }>();
+export function MarketingFormCreatePage({
+  products,
+  offerGroups,
+  productsLoadError = null,
+  canManageOfferTemplates = false,
+}: MarketingFormCreatePageProps) {
+  const navigation = useNavigation();
+  const actionData = useActionData<{ error?: string } | undefined>();
 
-  const [accentColor, setAccentColor] = useState(DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
+  /** Use Remix `<Form>` (not `fetcher.Form`) so the action’s `redirect()` applies a real navigation after create. */
+  const isCreatingForm =
+    navigation.formData?.get('intent') === 'createForm' &&
+    (navigation.state === 'submitting' || navigation.state === 'loading');
+
+  const [accentColor, setAccentColor] = useState<string>(DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
   const [fields, setFields] = useState<CustomFormField[]>([]);
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>([]);
   const [dismissedProductsError, setDismissedProductsError] = useState(false);
@@ -37,6 +50,7 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
   const [selectedProductId, setSelectedProductId] = useState('');
   const [showProductImages, setShowProductImages] = useState(true);
   const [additionalSelectOptions, setAdditionalSelectOptions] = useState(cloneDefaultAdditionalFieldSelectOptions);
+  const [selectedOfferGroupId, setSelectedOfferGroupId] = useState('');
 
   const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
   const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
@@ -44,11 +58,18 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
     () => JSON.stringify(additionalSelectOptions),
     [additionalSelectOptions],
   );
-  const actionError = (fetcher.data as { error?: string } | undefined)?.error;
+  const actionError = actionData?.error;
 
   useEffect(() => {
-    if (fetcher.state === 'submitting') setDismissedActionError(false);
-  }, [fetcher.state]);
+    if (navigation.state === 'submitting' && navigation.formData?.get('intent') === 'createForm') {
+      setDismissedActionError(false);
+    }
+  }, [navigation.state, navigation.formData]);
+
+  useEffect(() => {
+    // Reset offer selection when product changes.
+    setSelectedOfferGroupId('');
+  }, [selectedProductId]);
 
   const productOptions = useMemo(
     () =>
@@ -59,11 +80,38 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
     [products],
   );
 
-  const selectedProduct = useMemo(
-    () => products.find((p) => p.id === selectedProductId),
-    [products, selectedProductId],
+  // CEO directive 2026-05-04: an offer carries its own products. Forms pick from
+  // ANY active, non-empty offer group; the offer's items drive what the form sells.
+  // No longer constrained to the form's currently-selected product.
+  const compatibleOfferGroups = useMemo(() => {
+    return offerGroups
+      .filter((g) => String(g.status).toUpperCase() === 'ACTIVE')
+      .filter((g) => g.items.length > 0);
+  }, [offerGroups]);
+
+  const offerGroupOptions = useMemo(
+    () =>
+      compatibleOfferGroups.map((g) => ({
+        value: g.id,
+        label: `${g.name} (${g.items.length} items)`,
+      })),
+    [compatibleOfferGroups],
   );
-  const previewOffers = useMemo(() => selectedProduct?.offers ?? [], [selectedProduct]);
+
+  const previewOffers = useMemo(() => {
+    if (!selectedOfferGroupId) return [];
+    const g = compatibleOfferGroups.find((x) => x.id === selectedOfferGroupId);
+    if (!g) return [];
+    return g.items
+      .slice()
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((it) => ({
+        label: it.label,
+        qty: Number(it.quantity ?? 1) || 1,
+        price: typeof it.price === 'number' ? String(it.price) : String(it.price ?? ''),
+        ...(typeof it.imageUrl === 'string' && it.imageUrl.length > 0 ? { imageUrls: [it.imageUrl] } : {}),
+      }));
+  }, [compatibleOfferGroups, selectedOfferGroupId]);
 
   return (
     <div className="space-y-4">
@@ -99,27 +147,48 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
 
       <div className="grid grid-cols-1 lg:grid-cols-[7fr_3fr] gap-6 items-start">
         <div className="min-w-0">
-          <fetcher.Form method="post" className="space-y-6">
+          <Form method="post" className="space-y-6">
             <input type="hidden" name="intent" value="createForm" />
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
             <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="productId" value={selectedProductId} readOnly />
+            <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
 
             <div className="card space-y-3">
               <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <TextInput name="name" required placeholder="Form name" />
+                <TextInput name="name" required placeholder="Form name" className="sm:col-span-2" />
                 <SearchableSelect
                   id="marketing-form-product"
+                  label="Product"
                   value={selectedProductId}
                   onChange={setSelectedProductId}
                   required
                   options={productOptions}
                   placeholder="Select product..."
                   searchPlaceholder="Search products..."
+                />
+                <SearchableSelect
+                  id="marketing-form-offer-group"
+                  label="Offer"
+                  value={selectedOfferGroupId}
+                  onChange={setSelectedOfferGroupId}
+                  options={
+                    compatibleOfferGroups.length > 0
+                      ? [{ value: '', label: 'No offer selected' }, ...offerGroupOptions]
+                      : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
+                  }
+                  disabled={compatibleOfferGroups.length === 0}
+                  placeholder="Select offer…"
+                  searchPlaceholder="Search offers…"
+                  hint={
+                    compatibleOfferGroups.length === 0
+                      ? 'No offers yet — create one on the Offers tab.'
+                      : 'Optional: pick one offer to display as cards on the Edge form.'
+                  }
                 />
               </div>
 
@@ -201,14 +270,14 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Creating…">
+              <Button type="submit" variant="primary" size="sm" loading={isCreatingForm} loadingText="Creating…">
                 Create form
               </Button>
               <Link to="/admin/marketing/forms" className="btn-secondary btn-sm inline-flex items-center justify-center">
                 Cancel
               </Link>
             </div>
-          </fetcher.Form>
+          </Form>
         </div>
 
         <div className="min-w-0 space-y-2 self-start static lg:sticky lg:top-[calc(var(--header-height,3.5rem)+0.5rem)] z-[1] max-lg:mb-2">
@@ -224,6 +293,7 @@ export function MarketingFormCreatePage({ products, productsLoadError = null }: 
             customFields={fields}
             previewOffers={previewOffers}
             additionalSelectOptions={additionalSelectOptions}
+            showProductImages={showProductImages}
           />
         </div>
       </div>

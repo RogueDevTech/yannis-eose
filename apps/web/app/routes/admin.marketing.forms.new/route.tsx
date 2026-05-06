@@ -3,6 +3,8 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
+import { userCanManageOfferTemplates } from '~/lib/marketing-offer-tier.server';
 import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreatePage';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
 import {
@@ -10,12 +12,12 @@ import {
   parseStandardFieldsPayload,
   toLegacyStandardFieldFlags,
 } from '~/features/campaigns/standard-fields';
-import type { Product } from '~/features/campaigns/types';
+import type { OfferGroupRow, Product } from '~/features/campaigns/types';
 
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'marketing.campaigns');
+  const user = await requirePermission(request, 'marketing.campaigns');
   const cookie = getSessionCookie(request);
 
   const productsListInput = {
@@ -27,6 +29,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const productsInputStr = encodeURIComponent(JSON.stringify(productsListInput));
   const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie });
+
+  const offerGroupsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 250 }));
+  const offerGroupsPromise = apiRequest<unknown>(`/trpc/marketing.listOfferGroups?input=${offerGroupsInputStr}`, { method: 'GET', cookie });
 
   let products: Product[] = [];
   let productsLoadError: string | null = null;
@@ -44,7 +49,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productsLoadError = 'Could not load products. Try refreshing the page.';
   }
 
-  return { products, productsLoadError };
+  let offerGroups: OfferGroupRow[] = [];
+  try {
+    const offerGroupsRes = await offerGroupsPromise;
+    if (offerGroupsRes.ok) {
+      const raw = (offerGroupsRes.data as { result?: { data?: { groups?: unknown[] } } })?.result?.data?.groups ?? [];
+      offerGroups = Array.isArray(raw) ? (raw as OfferGroupRow[]) : [];
+    } else {
+      console.error('[admin.marketing.forms.new] listOfferGroups failed', offerGroupsRes.status, offerGroupsRes.data);
+    }
+  } catch (err) {
+    console.error('[admin.marketing.forms.new] listOfferGroups error', err);
+  }
+
+  return {
+    products,
+    offerGroups,
+    productsLoadError,
+    canManageOfferTemplates: userCanManageOfferTemplates(user),
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -52,11 +75,30 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const intent = formData.get('intent')?.toString();
 
+  if (
+    intent === 'createOfferTemplate' ||
+    intent === 'updateOfferTemplate' ||
+    intent === 'archiveAllOfferTemplates'
+  ) {
+    await requirePermission(request, 'marketing.offerTemplate');
+    if (!cookie) {
+      return json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const tierResp = await respondToOfferTemplateIntent({
+      intent,
+      formData,
+      cookie,
+      unauthorizedRedirect: '/admin/marketing/forms/new',
+    });
+    if (tierResp) return tierResp;
+  }
+
   if (intent !== 'createForm') {
     return json({ error: 'Unknown action' }, { status: 400 });
   }
 
   const productId = formData.get('productId')?.toString() ?? '';
+  const offerGroupId = formData.get('offerGroupId')?.toString()?.trim() || undefined;
   const heading = formData.get('formHeading')?.toString();
   const subtitle = formData.get('formSubtitle')?.toString();
   const buttonText = formData.get('formButtonText')?.toString();
@@ -116,6 +158,7 @@ export async function action({ request }: ActionFunctionArgs) {
     body: {
       name: formData.get('name')?.toString() ?? '',
       productIds: [productId],
+      ...(offerGroupId ? { offerGroupId } : {}),
       deploymentType: formData.get('deploymentType')?.toString() ?? 'HOSTED',
       ...(formConfig ? { formConfig } : {}),
     },
@@ -128,5 +171,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function MarketingFormNewRoute() {
   const data = useLoaderData<typeof loader>();
-  return <MarketingFormCreatePage products={data.products} productsLoadError={data.productsLoadError} />;
+  return (
+    <MarketingFormCreatePage
+      products={data.products}
+      offerGroups={data.offerGroups}
+      productsLoadError={data.productsLoadError}
+      canManageOfferTemplates={data.canManageOfferTemplates}
+    />
+  );
 }

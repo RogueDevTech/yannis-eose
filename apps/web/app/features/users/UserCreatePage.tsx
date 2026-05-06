@@ -19,7 +19,7 @@ import type {
   UserCreateCommissionPlan,
   UserCreateBranch,
 } from './types';
-import { formatRole } from './types';
+import { formatRole, ROLE_AVATAR_GRADIENTS } from './types';
 import { PermissionMatrix } from './PermissionMatrix';
 
 // HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
@@ -148,6 +148,7 @@ export function UserCreatePage({
   }, [actionData?.error]);
 
   const [selectedRole, setSelectedRole] = useState(editingUser?.role ?? '');
+  const [accountName, setAccountName] = useState(editingUser?.name ?? '');
   const [selectedBranchId, setSelectedBranchId] = useState(editingUser?.primaryBranchId ?? '');
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
     editingUser?.branchIds ?? [],
@@ -270,6 +271,37 @@ export function UserCreatePage({
     if (tid) setSelectedTemplateId(tid);
   }, [selectedRole, templateByRole, isEditMode, editingUser?.role, editingUser?.roleTemplateId]);
 
+  const activeBranches = useMemo(
+    () => branches.filter((b: UserCreateBranch) => b.status === 'ACTIVE'),
+    [branches],
+  );
+
+  const allBranchesSelected =
+    activeBranches.length > 0 &&
+    activeBranches.every((b) => selectedBranchIds.includes(b.id));
+
+  const someBranchesSelected =
+    activeBranches.length > 0 &&
+    !allBranchesSelected &&
+    activeBranches.some((b) => selectedBranchIds.includes(b.id));
+
+  const selectAllBranchesRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = selectAllBranchesRef.current;
+    if (el) el.indeterminate = someBranchesSelected;
+  }, [someBranchesSelected]);
+
+  const toggleSelectAllBranches = () => {
+    if (allBranchesSelected) {
+      setSelectedBranchIds([]);
+      setSelectedBranchId('');
+      return;
+    }
+    const ids = activeBranches.map((b) => b.id);
+    setSelectedBranchIds(ids);
+    setSelectedBranchId((prev) => (prev && ids.includes(prev) ? prev : ids[0] ?? ''));
+  };
+
   const toggleBranch = (id: string) => {
     setSelectedBranchIds((prev) => {
       if (prev.includes(id)) {
@@ -285,6 +317,19 @@ export function UserCreatePage({
       return [...prev, id];
     });
   };
+
+  const avatarGradient =
+    selectedRole && ROLE_AVATAR_GRADIENTS[selectedRole]
+      ? ROLE_AVATAR_GRADIENTS[selectedRole]
+      : 'from-brand-500 to-brand-700';
+  const avatarInitials =
+    accountName
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase())
+      .slice(0, 2)
+      .join('') || '?';
 
   // Reset permission overrides whenever the role/template changes — but in edit mode,
   // keep the seeded user overrides on initial mount (when role + template still match the
@@ -396,7 +441,20 @@ export function UserCreatePage({
 
         {/* Section 1: Account Details */}
         <div className="card space-y-4">
-          <h2 className="text-lg font-semibold text-app-fg">Account Details</h2>
+          <div className="flex flex-col-reverse sm:flex-row sm:items-start sm:justify-between gap-4">
+            <h2 className="text-lg font-semibold text-app-fg shrink-0">Account Details</h2>
+            <div
+              className={`sm:mt-0 w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-gradient-to-br ${avatarGradient} flex items-center justify-center shadow-md ring-2 ring-app-border flex-shrink-0 self-start sm:self-auto`}
+              aria-hidden
+            >
+              <span className="text-lg sm:text-xl font-bold text-white tracking-wide">
+                {avatarInitials}
+              </span>
+            </div>
+          </div>
+          <p className="text-xs text-app-fg-muted -mt-2 sm:-mt-1">
+            Initials preview from the full name and role (same style as the user profile header).
+          </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Role — first so conditional sections appear below */}
@@ -446,7 +504,8 @@ export function UserCreatePage({
                 required
                 minLength={2}
                 placeholder="John Doe"
-                defaultValue={editingUser?.name ?? ''}
+                value={accountName}
+                onChange={(e) => setAccountName(e.target.value)}
               />
             </div>
 
@@ -471,10 +530,20 @@ export function UserCreatePage({
               <label className="block text-sm font-medium text-app-fg-muted">
                 Branch Memberships
               </label>
-              <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
-                {branches
-                  .filter((branch: UserCreateBranch) => branch.status === 'ACTIVE')
-                  .map((branch: UserCreateBranch) => (
+              <div className="border border-app-border rounded-lg overflow-hidden flex flex-col">
+                {activeBranches.length > 0 ? (
+                  <label className="flex items-center gap-3 px-3 py-2.5 bg-app-hover/70 border-b border-app-border hover:bg-app-hover cursor-pointer shrink-0">
+                    <Checkbox
+                      ref={selectAllBranchesRef}
+                      checked={allBranchesSelected}
+                      onChange={toggleSelectAllBranches}
+                      aria-label="Select all branches"
+                    />
+                    <span className="text-sm font-medium text-app-fg">Select all branches</span>
+                  </label>
+                ) : null}
+                <div className="max-h-48 overflow-y-auto">
+                  {activeBranches.map((branch: UserCreateBranch) => (
                     <label
                       key={branch.id}
                       className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
@@ -487,6 +556,7 @@ export function UserCreatePage({
                       <span className="text-xs text-app-fg-muted ml-auto">{branch.code}</span>
                     </label>
                   ))}
+                </div>
               </div>
               <SearchableSelect
                 id="primaryBranchId"

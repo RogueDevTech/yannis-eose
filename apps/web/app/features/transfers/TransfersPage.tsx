@@ -120,7 +120,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
       const productId = fd.get('productId')?.toString().trim();
       const fromLocationId = fd.get('fromLocationId')?.toString().trim();
       const toLocationId = fd.get('toLocationId')?.toString().trim();
-      const quantitySent = Number(fd.get('quantitySent')?.toString() ?? '0');
+      const quantitySent = Number(fd.get('quantity')?.toString() ?? '0');
       if (!productId || !fromLocationId || !toLocationId || !Number.isFinite(quantitySent) || quantitySent <= 0) {
         return null;
       }
@@ -132,7 +132,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
           quantityReceived: null,
           fromLocationId,
           toLocationId,
-          transferStatus: 'PENDING',
+          transferStatus: 'IN_TRANSIT',
           shrinkageReason: null,
           receiverNotes: null,
           transferCost: fd.get('transferCost')?.toString().trim() || null,
@@ -293,7 +293,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
     <div className="space-y-4">
       <PageHeader
         title="Stock Transfers"
-        description="Record stock movements between your warehouse and other locations. Receipt is confirmed in Logistics → Stock Transfer Confirmations."
+        description="Send stock between locations. Transfers stay on this list as In transit until the destination confirms receipt (Logistics → Stock Transfer Confirmations)."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Stock transfers tools"
@@ -686,7 +686,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
               {
                 key: 'status',
                 header: 'Status',
-                render: (t) => <StatusBadge status={t.transferStatus} />,
+                render: (t) => <StatusBadge status={t.transferStatus} showDot />,
               },
               {
                 key: 'actions',
@@ -725,12 +725,24 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 caption="Stock transfers"
                 columns={columns}
                 rows={filteredTransfers}
-                rowKey={(t) => t.id}
+                rowKey={(t) => {
+                  const o = t as Transfer & {
+                    outcomeStatus?: string;
+                    outcomeQuantity?: number | null;
+                  };
+                  if (o.outcomeStatus != null)
+                    return `${t.id}-${o.outcomeStatus}-${String(o.outcomeQuantity ?? '')}`;
+                  return t.id;
+                }}
                 rowClassName={(t) => (isOptimisticId(t.id) ? 'opacity-60' : '')}
                 loading={isLoaderRefetchBusy}
                 loadingVariant="overlay"
                 emptyTitle="No transfers yet"
-                emptyDescription="No transfers found for the selected date range."
+                emptyDescription={
+                  periodAllTime
+                    ? 'No transfers match your filters, or none recorded yet. In-transit transfers stay visible until received — try the In transit tab or clear filters.'
+                    : 'No transfers in this date range. In-transit transfers are dated by when they were sent (created). Try All time or widen the range.'
+                }
                 withCard={false}
                 className="overflow-hidden rounded-xl border border-app-border"
               />

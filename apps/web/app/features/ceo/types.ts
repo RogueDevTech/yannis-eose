@@ -41,6 +41,7 @@ export interface CEODashboardData {
   csTeam: {
     agentCount: number;
     pendingOrders: number;
+    /** Mean of (todayClosesCount / capacity) across CS agents — Lagos calendar day. */
     utilization: number;
   };
 
@@ -88,6 +89,7 @@ export interface CEODashboardData {
       agentName: string;
       capacity: number;
       pendingCount: number;
+      todayClosesCount?: number;
       lastActionAt?: string | null;
     }>;
   };

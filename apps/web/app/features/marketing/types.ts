@@ -352,6 +352,9 @@ export interface AdSpendGroupLine {
   approvedAt: string | null;
   rejectedAt: string | null;
   createdAt: string;
+  /** Same interval window as detailed `listAdSpend` / Log Ad Spend preview. */
+  orderCount?: number;
+  indicativeCpa?: number | null;
 }
 
 /** One accordion row = one (date × MB) batch with its line items. */
@@ -362,6 +365,10 @@ export interface AdSpendGroup {
   lineCount: number;
   totalAmount: string;
   rolledStatus: RolledStatus;
+  /** All orders (any status) attributed to this media buyer on this UTC spend date. */
+  overallOrderCount: number;
+  /** `totalAmount / overallOrderCount` when orders exist; otherwise null. */
+  overallCpa: number | null;
   lines: AdSpendGroupLine[];
 }
 

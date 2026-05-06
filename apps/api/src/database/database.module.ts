@@ -54,9 +54,16 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
         // loader timeout (504 errors on `permissions.listCatalog`).
         //
         // connect_timeout 30s: remote/cold-start DBs often need more than 10s.
-        const poolMax = parseInt(process.env['PG_MAX_CONNECTIONS'] ?? '10', 10);
+        //
+        // 2026-05 bump: 10 → 20. The `max: 10` ceiling was queuing requests during
+        // normal multi-user load (one person clicking around + the materialized-view
+        // refresh cron + a background notification fan-out is enough to fill 10 slots
+        // and start serializing). Cloud SQL handles 50–100 connections per instance
+        // comfortably, so 20 is conservative. Override via PG_MAX_CONNECTIONS if
+        // you need more (or less) at deploy time.
+        const poolMax = parseInt(process.env['PG_MAX_CONNECTIONS'] ?? '20', 10);
         return postgres(connectionString, {
-          max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 10,
+          max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 20,
           idle_timeout: 10,
           connect_timeout: 30,
           ssl: { rejectUnauthorized: false },

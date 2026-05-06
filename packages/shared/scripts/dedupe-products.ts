@@ -1,6 +1,6 @@
 /**
- * Find products that are exact duplicates (same name, description, offers, prices,
- * category, category_id, status among current rows) and merge them into one row.
+ * Find products that are exact duplicates (same name, description, gallery, offer-templates
+ * fingerprint, prices, category, category_id, status among current rows) and merge them into one row.
  *
  * Canonical row: lexicographically smallest `id` (UUIDv7 ≈ oldest insert).
  * - Inventory at the same location is merged (stock + reserved) into the canonical row.
@@ -65,11 +65,31 @@ async function findDuplicateGroups(sql: postgres.Sql): Promise<DupGroup[]> {
       array_agg(p.id::text ORDER BY p.id::text) AS all_ids,
       count(*)::int AS cnt
     FROM products p
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        (
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'name', ot.name,
+              'price', ot.price::text,
+              'quantity', ot.quantity,
+              'image_urls', ot.image_urls,
+              'status', ot.status
+            )
+            ORDER BY ot.name ASC, ot.id ASC
+          )
+          FROM offer_templates ot
+          WHERE ot.product_id = p.id AND ot.valid_to IS NULL
+        ),
+        '[]'::jsonb
+      ) AS tiers
+    ) ot_agg ON TRUE
     WHERE p.valid_to IS NULL
     GROUP BY
       p.name,
       coalesce(p.description, ''),
-      p.offers,
+      coalesce(p.gallery_image_urls, '[]'::jsonb),
+      ot_agg.tiers,
       p.base_sale_price,
       p.cost_price,
       coalesce(p.category, ''),
@@ -81,7 +101,7 @@ async function findDuplicateGroups(sql: postgres.Sql): Promise<DupGroup[]> {
 }
 
 /**
- * Duplicates that differ only in description, offers JSON, category label, or category_id
+ * Duplicates that differ only in description, gallery/templates fingerprint, category label, or category_id
  * (typical clone/import). Canonical row = lexicographically smallest id (UUIDv7 ≈ oldest).
  */
 async function findLooseDuplicateGroups(sql: postgres.Sql): Promise<DupGroup[]> {
@@ -104,7 +124,7 @@ async function findLooseDuplicateGroups(sql: postgres.Sql): Promise<DupGroup[]> 
 
 /**
  * Same name + prices + category + status, multiple current rows.
- * If `distinct_fingerprints` > 1, rows differ in description/offers and will NOT merge
+ * If `distinct_fingerprints` > 1, rows differ in description/templates/gallery and will NOT merge
  * until those columns match (or you merge manually).
  */
 type LooserDupRow = {
@@ -119,9 +139,32 @@ async function findLooserDuplicateSummary(sql: postgres.Sql): Promise<LooserDupR
       p.name::text AS name,
       count(*)::int AS row_count,
       count(
-        DISTINCT md5(json_build_object('d', coalesce(p.description, ''), 'o', p.offers)::text)
+        DISTINCT md5(json_build_object(
+          'd', coalesce(p.description, ''),
+          'g', coalesce(p.gallery_image_urls, '[]'::jsonb),
+          't', ot_agg.tiers
+        )::text)
       )::int AS distinct_fingerprints
     FROM products p
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        (
+          SELECT jsonb_agg(
+            jsonb_build_object(
+              'name', ot.name,
+              'price', ot.price::text,
+              'quantity', ot.quantity,
+              'image_urls', ot.image_urls,
+              'status', ot.status
+            )
+            ORDER BY ot.name ASC, ot.id ASC
+          )
+          FROM offer_templates ot
+          WHERE ot.product_id = p.id AND ot.valid_to IS NULL
+        ),
+        '[]'::jsonb
+      ) AS tiers
+    ) ot_agg ON TRUE
     WHERE p.valid_to IS NULL
     GROUP BY
       p.name,
@@ -344,11 +387,11 @@ async function main() {
       const split = looser.filter((r) => r.distinct_fingerprints > 1);
       console.log(
         `\nSame name + prices + category + status (${looser.length} group(s)); ` +
-          `${split.length} group(s) have differing description/offers — those rows will NOT merge until fingerprints match.\n`,
+          `${split.length} group(s) have differing description/gallery/templates — those rows will NOT merge until fingerprints match.\n`,
       );
       for (const r of looser.slice(0, 50)) {
-        const tag = r.distinct_fingerprints > 1 ? ' [needs description/offers alignment]' : '';
-        console.log(`  ${r.name}  rows=${r.row_count}  distinct_desc_offers=${r.distinct_fingerprints}${tag}`);
+        const tag = r.distinct_fingerprints > 1 ? ' [needs description/templates alignment]' : '';
+        console.log(`  ${r.name}  rows=${r.row_count}  distinct_fingerprint_groups=${r.distinct_fingerprints}${tag}`);
       }
       if (looser.length > 50) {
         console.log(`  … and ${looser.length - 50} more name+price groups`);
@@ -365,7 +408,7 @@ async function main() {
       if (!LOOSE && looser.length > 0) {
         console.log(
           'Looser duplicate groups exist (see above). Re-run with --loose to merge same-name+price+status clones, ' +
-            'or align description + offers JSON and re-run without --loose.',
+            'or align description + offer templates / gallery and re-run without --loose.',
         );
       }
       return;

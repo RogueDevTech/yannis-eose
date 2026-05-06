@@ -95,6 +95,23 @@
     @apply font-sans bg-app-canvas text-app-fg;
   }
 
+  /*
+   * Native <select> popovers (especially WebKit): options can inherit muted `color`
+   * from a themed parent and render as pale grey on white — unreadable. OS lists are
+   * typically light; force a clear foreground for option rows.
+   */
+  select option {
+    color: rgb(15 23 42);
+    background-color: rgb(255 255 255);
+  }
+
+  /* Hosted form builder preview: native `<select>` respects app dark surfaces (Safari/WebKit). */
+  [data-app-theme='dark'] .form-order-preview select,
+  [data-app-theme='dim'] .form-order-preview select,
+  [data-app-theme='ink'] .form-order-preview select {
+    color-scheme: dark;
+  }
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     @apply w-1.5;

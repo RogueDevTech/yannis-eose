@@ -1,0 +1,180 @@
+import { useMemo } from 'react';
+import { Link } from '@remix-run/react';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { TableActionButton } from '~/components/ui/table-action-button';
+import { EmptyState } from '~/components/ui/empty-state';
+import { StatusBadge } from '~/components/ui/status-badge';
+import { isOptimisticId } from '~/lib/optimistic';
+import type { ShipmentRow, ShipmentStatus } from './types';
+import { SHIPMENT_STATUS_VARIANT, formatShipmentStatus } from './types';
+
+interface ShipmentsTabProps {
+  shipments: ShipmentRow[];
+  totalShipments: number;
+  canIntake: boolean;
+}
+
+function formatNaira(value: string | number | null | undefined): string {
+  const n = typeof value === 'string' ? parseFloat(value) : value ?? 0;
+  if (!Number.isFinite(n)) return '₦0';
+  return `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 2 })}`;
+}
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-NG', { dateStyle: 'medium' });
+}
+
+export function ShipmentsTab({
+  shipments,
+  totalShipments,
+  canIntake,
+}: ShipmentsTabProps) {
+  const display = shipments;
+
+  const shouldHideBackfillSublines = (s: ShipmentRow) =>
+    (s.label ?? '').trim().toLowerCase() === 'legacy intake backfill' &&
+    (s.supplierReference ?? '').trim().toUpperCase() === 'BACKFILL';
+
+  const columns = useMemo<CompactTableColumn<ShipmentRow>[]>(
+    () => [
+      {
+        key: 'reference',
+        header: 'Reference',
+        render: (s) => (
+          <div className="flex flex-col min-w-0">
+            <span className="font-mono text-sm font-medium text-app-fg truncate">
+              {s.referenceLabel}
+            </span>
+            {s.label && !shouldHideBackfillSublines(s) ? (
+              <span className="text-xs text-app-fg-muted truncate">{s.label}</span>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        key: 'supplier',
+        header: 'Supplier',
+        render: (s) => (
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm text-app-fg truncate">{s.supplierName ?? '—'}</span>
+            {s.supplierReference && !shouldHideBackfillSublines(s) ? (
+              <span className="text-xs text-app-fg-muted truncate">{s.supplierReference}</span>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        key: 'destination',
+        header: 'Destination',
+        render: (s) => (
+          <span className="text-sm text-app-fg-muted">{s.destinationLocationName ?? '—'}</span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (s) => (
+          <StatusBadge
+            status={s.status}
+            label={formatShipmentStatus(s.status)}
+            variant={SHIPMENT_STATUS_VARIANT[s.status]}
+          />
+        ),
+      },
+      {
+        key: 'eta',
+        header: 'Expected',
+        nowrap: true,
+        render: (s) => <span className="text-sm text-app-fg-muted">{formatDate(s.expectedArrivalAt)}</span>,
+      },
+      {
+        key: 'lines',
+        header: 'Lines',
+        align: 'right',
+        nowrap: true,
+        render: (s) => (
+          <span className="text-sm text-app-fg tabular-nums">
+            {s.lineCount} ({s.totalExpected} units)
+          </span>
+        ),
+      },
+      {
+        key: 'landing',
+        header: 'Landing',
+        align: 'right',
+        nowrap: true,
+        render: (s) => (
+          <span className="text-sm text-app-fg-muted tabular-nums">
+            {formatNaira(s.totalLandingCost)}
+          </span>
+        ),
+      },
+      {
+        key: 'actions',
+        header: '',
+        align: 'right',
+        tight: true,
+        render: (s) =>
+          isOptimisticId(s.id) ? (
+            <TableActionButton inert variant="primary">
+              View
+            </TableActionButton>
+          ) : (
+            <TableActionButton
+              to={`/admin/inventory/shipments/${s.id}`}
+              prefetch="intent"
+              variant="primary"
+            >
+              View
+            </TableActionButton>
+          ),
+      },
+    ],
+    [],
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm text-app-fg-muted">
+          {totalShipments} shipment{totalShipments === 1 ? '' : 's'}
+        </div>
+        {canIntake ? (
+          <Link to="/admin/inventory/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
+            Receive shipment
+          </Link>
+        ) : null}
+      </div>
+
+      {display.length === 0 ? (
+        <EmptyState
+          variant="page"
+          title="No shipments yet"
+          description={
+            canIntake
+              ? 'Track incoming stock from suppliers — record planned shipments or log goods that already arrived.'
+              : 'No inbound shipments have been recorded for your branch yet.'
+          }
+          action={
+            canIntake ? (
+              <Link to="/admin/inventory/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
+                Receive shipment
+              </Link>
+            ) : undefined
+          }
+        />
+      ) : (
+        <CompactTable<ShipmentRow>
+          columns={columns}
+          rows={display}
+          rowKey={(r) => r.id}
+          rowClassName={(s) => (isOptimisticId(s.id) ? 'opacity-60' : '')}
+          emptyTitle="No shipments yet"
+        />
+      )}
+    </div>
+  );
+}

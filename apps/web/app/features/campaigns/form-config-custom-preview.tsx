@@ -25,6 +25,8 @@ export interface FormConfigCustomFieldsPreviewProps {
   withOuterWrap?: boolean;
   emptyMessage?: string;
   className?: string;
+  /** Surface/border on controls — align with form preview built-in fields (e.g. `bg-app-elevated`). */
+  controlClassName?: string;
 }
 
 /**
@@ -36,6 +38,7 @@ export function FormConfigCustomFieldsPreview({
   withOuterWrap = true,
   emptyMessage = 'Add a custom field in the list to see it here.',
   className = '',
+  controlClassName,
 }: FormConfigCustomFieldsPreviewProps) {
   if (fields.length === 0) {
     return (
@@ -56,14 +59,22 @@ export function FormConfigCustomFieldsPreview({
   const inner = (
     <div className={['space-y-4', withOuterWrap ? 'rounded-lg bg-app-canvas p-4 border border-app-border' : 'space-y-3', className].filter(Boolean).join(' ')}>
       {fields.map((field) => (
-        <FormConfigCustomFieldBlock key={field.id} field={field} accentColor={accentColor} />
+        <FormConfigCustomFieldBlock key={field.id} field={field} accentColor={accentColor} controlClassName={controlClassName} />
       ))}
     </div>
   );
   return inner;
 }
 
-function FormConfigCustomFieldBlock({ field, accentColor }: { field: CustomFormField; accentColor: string }) {
+function FormConfigCustomFieldBlock({
+  field,
+  accentColor,
+  controlClassName,
+}: {
+  field: CustomFormField;
+  accentColor: string;
+  controlClassName?: string;
+}) {
   const labelEl = (
     <label className="block text-sm font-medium text-app-fg mb-1">
       {field.label}
@@ -95,6 +106,8 @@ function FormConfigCustomFieldBlock({ field, accentColor }: { field: CustomFormF
             placeholder={field.placeholder}
             disabled
             readOnly
+            controlSize="lg"
+            className={controlClassName}
             wrapperClassName="pointer-events-none"
           />
           {helpEl}
@@ -104,7 +117,14 @@ function FormConfigCustomFieldBlock({ field, accentColor }: { field: CustomFormF
       return (
         <div>
           {labelEl}
-          <Textarea rows={3} placeholder={field.placeholder} disabled readOnly wrapperClassName="pointer-events-none" />
+          <Textarea
+            rows={3}
+            placeholder={field.placeholder}
+            disabled
+            readOnly
+            className={[controlClassName, '!resize-y'].filter(Boolean).join(' ')}
+            wrapperClassName="pointer-events-none"
+          />
           {helpEl}
         </div>
       );
@@ -117,6 +137,8 @@ function FormConfigCustomFieldBlock({ field, accentColor }: { field: CustomFormF
             placeholder="Select..."
             options={(field.options ?? []).map((opt, i) => ({ value: `opt-${i}`, label: opt }))}
             defaultValue=""
+            controlSize="lg"
+            className={controlClassName}
             wrapperClassName="pointer-events-none"
           />
           {helpEl}

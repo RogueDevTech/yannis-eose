@@ -1,25 +1,37 @@
 import { z } from 'zod';
 
 // ============================================
-// Product Offer (bundle pricing)
+// Product Offer (response shape / legacy JSON)
 // ============================================
 
-/** Max gallery images per offer tier (stored in `products.offers` JSON). */
-export const MAX_PRODUCT_OFFER_IMAGES = 1;
+/** Max images per offer tier on public forms (stored on `offer_templates.image_urls`). */
+export const MAX_OFFER_TIER_IMAGES = 8;
+
+/** @deprecated Alias for MAX_OFFER_TIER_IMAGES (existing UI imports). */
+export const MAX_PRODUCT_OFFER_IMAGES = MAX_OFFER_TIER_IMAGES;
 
 export const productOfferSchema = z.object({
   label: z.string().min(1, 'Offer label is required'),
   qty: z.number().int().min(1, 'Quantity must be at least 1'),
   price: z.coerce.number().min(0).multipleOf(0.01),
-  /** Public URLs (e.g. S3) for this tier; optional. */
+  /** Public URLs (e.g. R2/S3) for this tier — optional */
   imageUrls: z
     .array(z.string().url('Each image must be a valid URL'))
-    .max(MAX_PRODUCT_OFFER_IMAGES)
+    .max(MAX_OFFER_TIER_IMAGES)
     .optional()
     .transform((v) => (Array.isArray(v) ? v : [])),
 });
 
 export type ProductOffer = z.infer<typeof productOfferSchema>;
+
+/** Max catalog gallery images (`products.gallery_image_urls`). */
+export const MAX_PRODUCT_GALLERY_IMAGES = 24;
+
+export const galleryImageUrlsSchema = z
+  .array(z.string().url('Each image must be a valid URL'))
+  .max(MAX_PRODUCT_GALLERY_IMAGES)
+  .optional()
+  .transform((v) => (Array.isArray(v) ? v : []));
 
 // ============================================
 // Create Product
@@ -28,8 +40,10 @@ export type ProductOffer = z.infer<typeof productOfferSchema>;
 export const createProductSchema = z.object({
   name: z.string().min(2, 'Product name is required'),
   description: z.string().optional(),
-  offers: z.array(productOfferSchema).min(1, 'At least one offer is required'),
+  /** Public list / sort price (“from” price) — merchandising tiers live in `offer_templates`. */
+  baseSalePrice: z.coerce.number().min(0).multipleOf(0.01),
   costPrice: z.coerce.number().min(0).multipleOf(0.01),
+  galleryImageUrls: galleryImageUrlsSchema,
   category: z.string().optional(),
   categoryId: z.string().uuid().nullable().optional(),
   initialStockQty: z.number().int().min(0).optional(),
@@ -52,8 +66,9 @@ export const updateProductSchema = z.object({
   productId: z.string().uuid(),
   name: z.string().min(2).optional(),
   description: z.string().nullable().optional(),
-  offers: z.array(productOfferSchema).min(1).optional(),
+  baseSalePrice: z.coerce.number().min(0).multipleOf(0.01).optional(),
   costPrice: z.coerce.number().min(0).multipleOf(0.01).optional(),
+  galleryImageUrls: galleryImageUrlsSchema.optional(),
   category: z.string().nullable().optional(),
   categoryId: z.string().uuid().nullable().optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),

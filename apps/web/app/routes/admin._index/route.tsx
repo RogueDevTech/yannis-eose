@@ -3,6 +3,7 @@ import { useLoaderData, useRouteLoaderData, Await } from '@remix-run/react';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultThisMonthRange } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
@@ -20,16 +21,8 @@ const defaultQuickOverview: QuickOverviewData = {
   pendingApprovals: 0,
 };
 
-/** Roles that need marketing.metrics */
-const ROLES_NEED_METRICS = ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'];
-/** Roles that need finance.profitReport */
-const ROLES_NEED_PROFIT = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'];
-/** Roles that need users.list (totalUsers) */
-const ROLES_NEED_USERS = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'];
-/** Roles that need products.list (totalProducts) */
-const ROLES_NEED_PRODUCTS = ['SUPER_ADMIN', 'ADMIN', 'STOCK_MANAGER'];
-/** Roles that need hr.payoutSummary */
-const ROLES_NEED_PAYOUT = ['SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'];
+/** Non-admin-class roles that need marketing.metrics (admin-class via `isAdminLevel`). */
+const ROLES_NEED_METRICS = ['HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'] as const;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -58,10 +51,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
-  // SUPER_ADMIN + ADMIN: lightweight landing. The heavy Executive Overview with profit
+  // Admin-class landing: lightweight path. The heavy Executive Overview with profit
   // aggregation, time series, charts, and leaderboards now lives at /admin/ceo. Landing on
   // /admin hits ONE tRPC call (dashboard.quickOverview) and renders in <200ms.
-  if (role === 'SUPER_ADMIN' || role === 'ADMIN') {
+  if (role && isAdminLevel({ role })) {
     const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
     const quickPromise = apiRequest<{ result?: { data?: QuickOverviewData } }>(
       '/trpc/dashboard.quickOverview',
@@ -81,11 +74,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify(ordersListInput)), deferredOpt);
   const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, deferredOpt);
 
-  const needsMetrics = role && ROLES_NEED_METRICS.includes(role);
-  const needsProfit = role && ROLES_NEED_PROFIT.includes(role);
-  const needsUsers = role && ROLES_NEED_USERS.includes(role);
-  const needsProducts = role && ROLES_NEED_PRODUCTS.includes(role);
-  const needsPayout = role && ROLES_NEED_PAYOUT.includes(role);
+  const needsMetrics =
+    role && (isAdminLevel({ role }) || (ROLES_NEED_METRICS as readonly string[]).includes(role));
+  const needsProfit = role && (isAdminLevel({ role }) || role === 'FINANCE_OFFICER');
+  const needsUsers = role && (isAdminLevel({ role }) || role === 'HR_MANAGER');
+  const needsProducts = role && (isAdminLevel({ role }) || role === 'STOCK_MANAGER');
+  const needsPayout = role && (isAdminLevel({ role }) || role === 'HR_MANAGER');
 
   const metricsP = needsMetrics
     ? apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, deferredOpt)

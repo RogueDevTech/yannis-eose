@@ -36,6 +36,12 @@ const ENDPOINTS: TrpcEndpoint[] = [
   // Orders
   { procedure: 'orders.create', method: 'POST', summary: 'Create a new order', tag: 'Orders' },
   { procedure: 'orders.getById', method: 'GET', summary: 'Get order by ID', tag: 'Orders' },
+  {
+    procedure: 'orders.deliveryMovementCustomerNames',
+    method: 'GET',
+    summary: 'Batch order customer names for inventory DELIVERY movements',
+    tag: 'Orders',
+  },
   { procedure: 'orders.list', method: 'GET', summary: 'List orders with filters', tag: 'Orders' },
   { procedure: 'orders.transition', method: 'POST', summary: 'Transition order status', tag: 'Orders' },
   { procedure: 'orders.update', method: 'POST', summary: 'Update order details', tag: 'Orders' },
@@ -163,6 +169,12 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'marketing.checkHighCpa', method: 'GET', summary: 'Check high CPA warning', tag: 'Marketing' },
   { procedure: 'marketing.createOfferTemplate', method: 'POST', summary: 'Create offer template', tag: 'Marketing' },
   { procedure: 'marketing.updateOfferTemplate', method: 'POST', summary: 'Update offer template', tag: 'Marketing' },
+  {
+    procedure: 'marketing.archiveAllOfferTemplatesForProduct',
+    method: 'POST',
+    summary: 'Archive all offer templates for a product',
+    tag: 'Marketing',
+  },
   { procedure: 'marketing.getOfferTemplate', method: 'GET', summary: 'Get offer template', tag: 'Marketing' },
   { procedure: 'marketing.listOfferTemplates', method: 'GET', summary: 'List offer templates', tag: 'Marketing' },
   { procedure: 'marketing.createCampaign', method: 'POST', summary: 'Create campaign', tag: 'Marketing' },
@@ -247,7 +259,13 @@ const ENDPOINTS: TrpcEndpoint[] = [
   { procedure: 'cart.getStats', method: 'GET', summary: 'Cart stats', tag: 'Cart' },
 
   // Permission Requests
-  { procedure: 'permissionRequests.listPending', method: 'GET', summary: 'List pending permission requests', tag: 'Permission Requests' },
+  { procedure: 'permissionRequests.listPending', method: 'GET', summary: 'List pending permission requests (first page)', tag: 'Permission Requests' },
+  {
+    procedure: 'permissionRequests.list',
+    method: 'GET',
+    summary: 'List permission requests (paginated, viewer-scoped)',
+    tag: 'Permission Requests',
+  },
   { procedure: 'permissionRequests.statusCounts', method: 'GET', summary: 'Permission request counts by status (viewer-scoped)', tag: 'Permission Requests' },
   { procedure: 'permissionRequests.approve', method: 'POST', summary: 'Approve permission request', tag: 'Permission Requests' },
   { procedure: 'permissionRequests.reject', method: 'POST', summary: 'Reject permission request', tag: 'Permission Requests' },

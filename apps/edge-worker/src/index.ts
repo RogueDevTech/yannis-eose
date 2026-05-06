@@ -122,6 +122,8 @@ interface CampaignConfig {
     id: string;
     name: string;
     price: string;
+    /** Optional catalog gallery from `products.gallery_image_urls` (Worker may use as fallbacks). */
+    galleryImageUrls?: string[];
     offers: ProductOffer[];
     variants?: unknown;
   }>;

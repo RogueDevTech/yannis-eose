@@ -681,13 +681,13 @@ export class PayrollBatchService {
       .from(schema.payoutRecords)
       .where(eq(schema.payoutRecords.batchId, input.batchId));
     for (const p of staffPayouts) {
-      this.notifications.create({
+      this.notifications.enqueueCreate({
         userId: p.staffId,
         type: 'hr:payout_approved',
         title: 'Payout paid',
         body: `Your payout of ₦${Number(p.totalPayout).toLocaleString('en-NG')} for ${this.formatPeriod(batch.periodMonth)} has been disbursed.`,
         data: { payoutId: p.payoutId, batchId: batch.id, amount: p.totalPayout },
-      }).catch(() => {});
+      });
     }
 
     return updated;
@@ -938,6 +938,7 @@ export class PayrollBatchService {
             payoutBankName: schema.users.payoutBankName,
             payoutAccountName: schema.users.payoutAccountName,
             payoutAccountNumber: schema.users.payoutAccountNumber,
+            payoutBankCode: schema.users.payoutBankCode,
           })
           .from(schema.users)
           .where(inArray(schema.users.id, staffIds))
@@ -964,6 +965,7 @@ export class PayrollBatchService {
         payoutBankName: hasFinanceAccess(viewer) ? (staffById.get(p.staffId)?.payoutBankName ?? null) : null,
         payoutAccountName: hasFinanceAccess(viewer) ? (staffById.get(p.staffId)?.payoutAccountName ?? null) : null,
         payoutAccountNumber: hasFinanceAccess(viewer) ? (staffById.get(p.staffId)?.payoutAccountNumber ?? null) : null,
+        payoutBankCode: hasFinanceAccess(viewer) ? (staffById.get(p.staffId)?.payoutBankCode ?? null) : null,
       })),
       adjustments,
       allowedTransitions,
@@ -1088,15 +1090,13 @@ export class PayrollBatchService {
         ),
       );
     for (const r of recipients) {
-      this.notifications
-        .create({
-          userId: r.id,
-          type: payload.type,
-          title: payload.title,
-          body: payload.body,
-          data: { batchId: payload.batchId },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: r.id,
+        type: payload.type,
+        title: payload.title,
+        body: payload.body,
+        data: { batchId: payload.batchId },
+      });
     }
   }
 
@@ -1116,15 +1116,13 @@ export class PayrollBatchService {
         ),
       );
     for (const r of recipients) {
-      this.notifications
-        .create({
-          userId: r.id,
-          type: payload.type,
-          title: payload.title,
-          body: payload.body,
-          data: { batchId: payload.batchId, branchId },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: r.id,
+        type: payload.type,
+        title: payload.title,
+        body: payload.body,
+        data: { batchId: payload.batchId, branchId },
+      });
     }
   }
 }

@@ -3,7 +3,7 @@
 **Project:** Yannis EOSE (Enterprise Operations & Sales Engine)
 **Version:** 1.0
 **Date:** March 2026
-**Status:** 98%+ Complete — All application features done | Only infrastructure tasks remain: Multi-CDN (6.1), Load Testing (6.3)
+**Status:** 98%+ Complete — All application features done | Infrastructure backlog: Multi-CDN (6.1), Load Testing (6.3), Redis notification fan-out queue (6.4)
 
 ---
 
@@ -1773,6 +1773,29 @@ Build the unified dashboard that renders different content based on the authenti
 
 ---
 
+### Task 6.4 — Redis Queue for Role / Location Notification Fan-out 🟢
+`[ ]` Status: Not Started
+**Dependencies:** Redis (existing); interim: `NotificationsService.enqueueCreateForRole` / `enqueueCreateForLocation` + ESLint guard on `orders` / `inventory` / `cart` / `payments` (already shipped — do not regress)
+
+**Why:** `createForRole` / `createForLocation` load every ACTIVE recipient and call `create()` sequentially per user. Fire-and-forget (`enqueue*`) avoids blocking HTTP latency but drops reliability (no retries, silent failures). A Redis-backed job queue restores **retries**, **backpressure**, and **visibility** without requiring QStash.
+
+**Implementation Steps:**
+1. Add **BullMQ** (or Bull) with existing Redis URL — Nest module + queue(s) e.g. `notifications-fanout`.
+2. Replace or wrap `enqueueCreateForRole` / `enqueueCreateForLocation` to **add jobs** with payload `{ kind: 'role' | 'location', role?, locationId?, input }` after domain transactions commit.
+3. **Worker** processor calls existing `createForRole` / `createForLocation` (or future bulk-insert path); configure retries + dead-letter / logging on exhaustion.
+4. **Optional (phase 2):** bulk `INSERT` into `notifications` for all recipient `user_id`s in one statement, then async push/email per row or batched — reduces DB round-trips when many heads exist.
+5. **Do not** `await` fan-out on order/inventory/cart/payment hot paths — ESLint rule stays; producers only enqueue.
+
+**Acceptance Criteria:**
+- [ ] Failed fan-out jobs retry per queue policy and surface in logs (or ops dashboard).
+- [ ] API request latency does not wait on full per-user `create()` completion for role/location alerts enqueued from hot paths.
+- [ ] No regression: in-app notification + push mirror behavior unchanged for recipients once jobs succeed.
+- [ ] Document env vars (queue name, concurrency) in `.env.example` for API.
+
+**Note:** QStash remains **optional** for HTTP-triggered / serverless edges; this task standardizes on **Redis + BullMQ** inside Nest.
+
+---
+
 ## Phase 7: Polish & Launch Prep
 
 > **Goal:** Production-ready quality, documentation, and deployment.
@@ -1978,6 +2001,7 @@ Legend: ✅ Complete  ~ Partial  ❌ Not Started
 ### REMAINING — Infrastructure Only (Can Be Deferred to Deployment Phase)
 1. `Task 6.1` — Multi-CDN DNS Failover — Requires DNS provider setup (Route 53/NS1) + secondary CDN
 2. `Task 6.3` — Load Testing — Requires production-scale data volume and staging environment
+3. `Task 6.4` — Redis queue (BullMQ) for `createForRole` / `createForLocation` fan-out — retries + observability; builds on existing `enqueue*` + ESLint guard
 
 ### COMPLETED — Feature Batch 2 (Phase 8) ✅
 3. `Task 8.x` — Order Lifecycle Timeline ✅ (schema, event writer, tRPC, UI)

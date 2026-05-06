@@ -3,9 +3,11 @@ import { TRPCError } from '@trpc/server';
 import {
   eq,
   and,
+  asc,
   desc,
   ilike,
   count,
+  countDistinct,
   lt,
   gte,
   lte,
@@ -76,8 +78,8 @@ export class LogisticsService {
         .insert(schema.logisticsProviders)
         .values({
           name: input.name,
-          contactInfo: input.contactInfo ?? null,
-          coverageArea: input.coverageArea ?? null,
+          contactInfo: input.contactInfo,
+          coverageArea: input.coverageArea,
           rateCard: input.rateCard ?? null,
         })
         .returning();
@@ -139,6 +141,9 @@ export class LogisticsService {
     }
     if (input.search) {
       conditions.push(ilike(schema.logisticsProviders.name, `%${input.search}%`));
+    }
+    if (input.kind) {
+      conditions.push(eq(schema.logisticsProviders.kind, input.kind));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -223,6 +228,9 @@ export class LogisticsService {
     if (input.status) {
       conditions.push(eq(schema.logisticsLocations.status, input.status));
     }
+    if (input.providerKind) {
+      conditions.push(eq(schema.logisticsProviders.kind, input.providerKind));
+    }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
@@ -232,6 +240,7 @@ export class LogisticsService {
         .select({
           location: schema.logisticsLocations,
           providerName: schema.logisticsProviders.name,
+          providerKind: schema.logisticsProviders.kind,
         })
         .from(schema.logisticsLocations)
         .leftJoin(
@@ -242,17 +251,332 @@ export class LogisticsService {
         .orderBy(desc(schema.logisticsLocations.createdAt))
         .limit(input.limit)
         .offset(offset),
-      this.db.select({ count: count() }).from(schema.logisticsLocations).where(whereClause),
+      input.providerKind
+        ? this.db
+            .select({ count: count() })
+            .from(schema.logisticsLocations)
+            .leftJoin(
+              schema.logisticsProviders,
+              eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+            )
+            .where(whereClause)
+        : this.db.select({ count: count() }).from(schema.logisticsLocations).where(whereClause),
     ]);
 
     const locations = rows.map((row) => ({
       ...row.location,
       providerName: row.providerName ?? null,
+      providerKind: row.providerKind ?? 'THIRD_PARTY',
     }));
 
     return {
       locations,
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
+    };
+  }
+
+  // ============================================
+  // Company-owned warehouses (provider kind WAREHOUSE)
+  // ============================================
+
+  /**
+   * Singleton internal warehouse provider — locations of kind WAREHOUSE all hang off it.
+   * Auto-created the first time a warehouse is added; survives subsequent calls
+   * via `ON CONFLICT DO NOTHING`-style lookup-then-insert.
+   */
+  private async getOrCreateOurWarehouseProvider(actorId: string): Promise<string> {
+    const existing = await this.db
+      .select({ id: schema.logisticsProviders.id })
+      .from(schema.logisticsProviders)
+      .where(eq(schema.logisticsProviders.kind, 'WAREHOUSE'))
+      .orderBy(desc(schema.logisticsProviders.createdAt))
+      .limit(1);
+    if (existing[0]) return existing[0].id;
+
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      // Race-safe: re-check inside the actor tx in case a concurrent call won.
+      const recheck = await tx
+        .select({ id: schema.logisticsProviders.id })
+        .from(schema.logisticsProviders)
+        .where(eq(schema.logisticsProviders.kind, 'WAREHOUSE'))
+        .limit(1);
+      if (recheck[0]) return recheck[0].id;
+      const inserted = await tx
+        .insert(schema.logisticsProviders)
+        .values({
+          name: 'Our warehouses',
+          contactInfo: null,
+          coverageArea: null,
+          kind: 'WAREHOUSE',
+          status: 'ACTIVE',
+        })
+        .returning({ id: schema.logisticsProviders.id });
+      const id = inserted[0]?.id;
+      if (!id) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to provision internal warehouse provider',
+        });
+      }
+      return id;
+    });
+  }
+
+  async createWarehouse(
+    input: { name: string; address: string; coordinates?: string },
+    actorId: string,
+  ) {
+    const providerId = await this.getOrCreateOurWarehouseProvider(actorId);
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const rows = await tx
+        .insert(schema.logisticsLocations)
+        .values({
+          providerId,
+          name: input.name.trim(),
+          address: input.address.trim(),
+          coordinates: input.coordinates?.trim() || null,
+        })
+        .returning();
+      const location = rows[0];
+      if (!location) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create warehouse',
+        });
+      }
+      return location;
+    });
+  }
+
+  async listWarehouses(input: {
+    status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+    search?: string;
+    /** Default `all` — partner sites + our warehouses. `our` — internal WAREHOUSE-kind sites only. */
+    listScope?: 'all' | 'our';
+    page: number;
+    limit: number;
+  }) {
+    const conditions: SQL[] = [];
+    if (input.listScope === 'our') {
+      conditions.push(eq(schema.logisticsProviders.kind, 'WAREHOUSE'));
+    }
+    if (input.status) {
+      conditions.push(eq(schema.logisticsLocations.status, input.status));
+    }
+    if (input.search) {
+      conditions.push(ilike(schema.logisticsLocations.name, `%${input.search}%`));
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (input.page - 1) * input.limit;
+
+    const kindOrder = asc(
+      sql`(CASE WHEN ${schema.logisticsProviders.kind} = 'WAREHOUSE' THEN 0 ELSE 1 END)`,
+    );
+
+    const [rows, totalRows] = await Promise.all([
+      this.db
+        .select({
+          id: schema.logisticsLocations.id,
+          name: schema.logisticsLocations.name,
+          address: schema.logisticsLocations.address,
+          coordinates: schema.logisticsLocations.coordinates,
+          dispatchLocked: schema.logisticsLocations.dispatchLocked,
+          status: schema.logisticsLocations.status,
+          createdAt: schema.logisticsLocations.createdAt,
+          providerKind: schema.logisticsProviders.kind,
+          providerName: schema.logisticsProviders.name,
+        })
+        .from(schema.logisticsLocations)
+        .innerJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(whereClause)
+        .orderBy(kindOrder, desc(schema.logisticsLocations.createdAt))
+        .limit(input.limit)
+        .offset(offset),
+      this.db
+        .select({ count: count() })
+        .from(schema.logisticsLocations)
+        .innerJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(whereClause),
+    ]);
+
+    const warehouseIds = rows.map((r) => r.id);
+    const stockByLocation = new Map<
+      string,
+      { totalStock: number; totalReserved: number; skuCount: number }
+    >();
+
+    if (warehouseIds.length > 0) {
+      const sums = await this.db
+        .select({
+          locationId: schema.inventoryLevels.locationId,
+          totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`.mapWith(
+            Number,
+          ),
+          totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`.mapWith(
+            Number,
+          ),
+          skuCount: countDistinct(schema.inventoryLevels.productId),
+        })
+        .from(schema.inventoryLevels)
+        .where(inArray(schema.inventoryLevels.locationId, warehouseIds))
+        .groupBy(schema.inventoryLevels.locationId);
+
+      for (const s of sums) {
+        stockByLocation.set(s.locationId, {
+          totalStock: s.totalStock,
+          totalReserved: s.totalReserved,
+          skuCount: Number(s.skuCount ?? 0),
+        });
+      }
+    }
+
+    return {
+      warehouses: rows.map((w) => ({
+        ...w,
+        stockSummary: stockByLocation.get(w.id) ?? {
+          totalStock: 0,
+          totalReserved: 0,
+          skuCount: 0,
+        },
+      })),
+      pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
+    };
+  }
+
+  async getWarehousesOverview(input?: { status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' }) {
+    const conditions: SQL[] = [eq(schema.logisticsProviders.kind, 'WAREHOUSE')];
+    if (input?.status) {
+      conditions.push(eq(schema.logisticsLocations.status, input.status));
+    }
+    const whereClause = and(...conditions);
+
+    const stockByLocation = this.db
+      .select({
+        locationId: schema.inventoryLevels.locationId,
+        // Must alias raw SQL fields so `stockByLocation.totalStock` can be referenced
+        // from the outer query without Drizzle selection-proxy errors.
+        totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`
+          .mapWith(Number)
+          .as('totalStock'),
+        totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`
+          .mapWith(Number)
+          .as('totalReserved'),
+      })
+      .from(schema.inventoryLevels)
+      .groupBy(schema.inventoryLevels.locationId)
+      .as('stock_by_location');
+
+    const [baseRows, skuRows] = await Promise.all([
+      this.db
+        .select({
+          activeWarehousesCount: countDistinct(schema.logisticsLocations.id),
+          dispatchLockedCount: sql<number>`COUNT(DISTINCT CASE WHEN ${schema.logisticsLocations.dispatchLocked} THEN ${schema.logisticsLocations.id} END)`.mapWith(
+            Number,
+          ),
+          warehousesWithAvailableStockCount: sql<number>`COUNT(DISTINCT CASE WHEN COALESCE(${stockByLocation.totalStock}, 0) - COALESCE(${stockByLocation.totalReserved}, 0) > 0 THEN ${schema.logisticsLocations.id} END)`.mapWith(
+            Number,
+          ),
+          totalUnits: sql<number>`COALESCE(SUM(COALESCE(${stockByLocation.totalStock}, 0)), 0)`.mapWith(
+            Number,
+          ),
+          totalReserved: sql<number>`COALESCE(SUM(COALESCE(${stockByLocation.totalReserved}, 0)), 0)`.mapWith(
+            Number,
+          ),
+        })
+        .from(schema.logisticsLocations)
+        .innerJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .leftJoin(stockByLocation, eq(stockByLocation.locationId, schema.logisticsLocations.id))
+        .where(whereClause),
+      this.db
+        .select({ skuCount: countDistinct(schema.inventoryLevels.productId) })
+        .from(schema.inventoryLevels)
+        .innerJoin(
+          schema.logisticsLocations,
+          eq(schema.logisticsLocations.id, schema.inventoryLevels.locationId),
+        )
+        .innerJoin(
+          schema.logisticsProviders,
+          eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+        )
+        .where(whereClause),
+    ]);
+
+    const base = baseRows[0];
+    const totalUnits = Number(base?.totalUnits ?? 0);
+    const totalReserved = Number(base?.totalReserved ?? 0);
+    const totalAvailable = Math.max(0, totalUnits - totalReserved);
+
+    return {
+      activeWarehousesCount: Number(base?.activeWarehousesCount ?? 0),
+      warehousesWithAvailableStockCount: Number(base?.warehousesWithAvailableStockCount ?? 0),
+      dispatchLockedCount: Number(base?.dispatchLockedCount ?? 0),
+      totalUnits,
+      totalReserved,
+      totalAvailable,
+      skuCount: Number(skuRows[0]?.skuCount ?? 0),
+    };
+  }
+
+  async getWarehouseById(warehouseId: string) {
+    const [row] = await this.db
+      .select({
+        id: schema.logisticsLocations.id,
+        name: schema.logisticsLocations.name,
+        address: schema.logisticsLocations.address,
+        coordinates: schema.logisticsLocations.coordinates,
+        dispatchLocked: schema.logisticsLocations.dispatchLocked,
+        status: schema.logisticsLocations.status,
+        createdAt: schema.logisticsLocations.createdAt,
+        providerKind: schema.logisticsProviders.kind,
+        providerName: schema.logisticsProviders.name,
+      })
+      .from(schema.logisticsLocations)
+      .innerJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(
+        and(
+          eq(schema.logisticsLocations.id, warehouseId),
+          eq(schema.logisticsProviders.kind, 'WAREHOUSE'),
+        ),
+      )
+      .limit(1);
+
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Warehouse not found' });
+    }
+
+    const [stock] = await this.db
+      .select({
+        totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`.mapWith(
+          Number,
+        ),
+        totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`.mapWith(
+          Number,
+        ),
+        skuCount: countDistinct(schema.inventoryLevels.productId),
+      })
+      .from(schema.inventoryLevels)
+      .where(eq(schema.inventoryLevels.locationId, warehouseId));
+
+    return {
+      ...row,
+      stockSummary: {
+        totalStock: Number(stock?.totalStock ?? 0),
+        totalReserved: Number(stock?.totalReserved ?? 0),
+        skuCount: Number(stock?.skuCount ?? 0),
+      },
     };
   }
 
@@ -491,14 +815,12 @@ export class LogisticsService {
       return row;
     });
 
-    this.notifications
-      .createForRole('HEAD_OF_LOGISTICS', {
-        type: 'remittance:sent',
-        title: 'Transfer remittance received',
-        body: `3PL location submitted a remittance: ${input.quantitySent} unit(s) of product. Please mark as received when stock arrives.`,
-        data: { remittanceId: remittance.id, productId: input.productId, quantitySent: input.quantitySent },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreateForRole('HEAD_OF_LOGISTICS', {
+      type: 'remittance:sent',
+      title: 'Transfer remittance received',
+      body: `3PL location submitted a remittance: ${input.quantitySent} unit(s) of product. Please mark as received when stock arrives.`,
+      data: { remittanceId: remittance.id, productId: input.productId, quantitySent: input.quantitySent },
+    });
 
     return remittance;
   }
@@ -668,16 +990,14 @@ export class LogisticsService {
       return { remittance: found, status: newStatus, hasShrinkage: hasShort };
     });
 
-    this.notifications
-      .createForLocation(remittance.fromLocationId, {
-        type: 'remittance:received',
-        title: 'Remittance marked received',
-        body: hasShrinkage
-          ? `Your remittance was received with a shortfall. Status: DISPUTED.`
-          : `Your remittance has been marked as received by Head of Logistics.`,
-        data: { remittanceId: remittance.id, status },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreateForLocation(remittance.fromLocationId, {
+      type: 'remittance:received',
+      title: 'Remittance marked received',
+      body: hasShrinkage
+        ? `Your remittance was received with a shortfall. Status: DISPUTED.`
+        : `Your remittance has been marked as received by Head of Logistics.`,
+      data: { remittanceId: remittance.id, status },
+    });
 
     return { success: true, status };
   }
@@ -856,14 +1176,12 @@ export class LogisticsService {
     // Notify Finance when a TPL caller drops a remittance for review. Finance-
     // led inserts don't need a self-notification.
     if (isTplCaller) {
-      this.notifications
-        .createForRole('FINANCE_OFFICER', {
-          type: 'delivery_remittance:sent',
-          title: 'Delivery remittance received',
-          body: `3PL submitted a delivery remittance with ${input.orderIds.length} order(s). Please review and mark as received.`,
-          data: { deliveryRemittanceId: result.remittance.id },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreateForRole('FINANCE_OFFICER', {
+        type: 'delivery_remittance:sent',
+        title: 'Delivery remittance received',
+        body: `3PL submitted a delivery remittance with ${input.orderIds.length} order(s). Please review and mark as received.`,
+        data: { deliveryRemittanceId: result.remittance.id },
+      });
     }
 
     return result.remittance;
@@ -1668,14 +1986,12 @@ export class LogisticsService {
       return row;
     });
 
-    this.notifications
-      .createForRole('HEAD_OF_LOGISTICS', {
-        type: 'logistics:delivery_confirmation_pending',
-        title: 'Delivery confirmation pending',
-        body: `Order ${input.orderId.slice(0, 8)}… — ${input.newStatus} confirmation awaiting your approval.`,
-        data: { requestId: request.id, orderId: input.orderId },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreateForRole('HEAD_OF_LOGISTICS', {
+      type: 'logistics:delivery_confirmation_pending',
+      title: 'Delivery confirmation pending',
+      body: `Order ${input.orderId.slice(0, 8)}… — ${input.newStatus} confirmation awaiting your approval.`,
+      data: { requestId: request.id, orderId: input.orderId },
+    });
 
     return request;
   }

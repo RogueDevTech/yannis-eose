@@ -133,6 +133,77 @@ export class FinanceService {
     };
   }
 
+  /**
+   * Idempotently create a draft invoice for a confirmed order if it doesn't exist yet.
+   * Used as an ops escape-hatch when auto-invoice failed on CONFIRM (best-effort) or
+   * for older orders created before auto-invoice existed.
+   */
+  async ensureInvoiceForOrder(params: {
+    order: {
+      id: string;
+      confirmedAt: string | Date | null;
+      customerName: string;
+      customerAddress: string | null;
+      orderItems: Array<{ quantity: number; unitPrice: string; productName: string | null; productId: string }>;
+    };
+    actorId: string;
+  }) {
+    const existing = await this.getInvoiceByOrderId(params.order.id);
+    if (existing) return existing;
+
+    if (!params.order.confirmedAt) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Invoice can only be generated after the order is confirmed',
+      });
+    }
+
+    if (!params.order.orderItems || params.order.orderItems.length === 0) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Order has no items; cannot generate invoice',
+      });
+    }
+
+    const lineItems = params.order.orderItems.map((it) => ({
+      description: `${it.productName ?? 'Product'}`,
+      quantity: it.quantity,
+      unitPrice: String(it.unitPrice),
+    }));
+
+    const totalAmount = params.order.orderItems.reduce(
+      (sum, it) => sum + it.quantity * Number(it.unitPrice),
+      0,
+    );
+
+    return withActor(this.db, { id: params.actorId }, async (tx) => {
+      const [row] = await tx
+        .insert(schema.invoices)
+        .values({
+          orderId: params.order.id,
+          recipientInfo: {
+            name: params.order.customerName,
+            address: params.order.customerAddress ?? undefined,
+          },
+          lineItems,
+          taxRate: null,
+          totalAmount: totalAmount.toFixed(2),
+          dueDate: null,
+          status: 'DRAFT',
+        })
+        .returning();
+
+      if (!row) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create invoice' });
+      }
+
+      return {
+        ...row,
+        referenceFormatted: this.formatReference(row.referenceNumber),
+      };
+    });
+  }
+
   async listInvoices(input: ListInvoicesInput) {
     const conditions = [];
     if (input.status) {
@@ -538,23 +609,20 @@ export class FinanceService {
       return inserted;
     });
 
-    // Notify Finance Officers and SuperAdmin
-    this.notifications
-      .createForRole('FINANCE_OFFICER', {
-        type: 'finance:approval_required',
-        title: 'Approval request pending',
-        body: `A ${input.type} approval request for ${input.amount} requires your review.`,
-        data: { requestId: request.id, type: input.type, amount: input.amount },
-      })
-      .catch(() => {});
-    this.notifications
-      .createForRole('SUPER_ADMIN', {
-        type: 'finance:approval_required',
-        title: 'Approval request pending',
+    const approverPayload = {
+      type: 'finance:approval_required' as const,
+      title: 'Approval request pending',
+      body: `A ${input.type} approval request for ${input.amount} requires your review.`,
+      data: { requestId: request.id, type: input.type, amount: input.amount },
+    };
+    this.notifications.enqueueCreateForRole('FINANCE_OFFICER', approverPayload);
+    this.notifications.enqueueCreateForRole(
+      'SUPER_ADMIN',
+      {
+        ...approverPayload,
         body: `A ${input.type} approval request for ${input.amount} requires review.`,
-        data: { requestId: request.id, type: input.type, amount: input.amount },
-      })
-      .catch(() => {});
+      },
+    );
 
     return request;
   }

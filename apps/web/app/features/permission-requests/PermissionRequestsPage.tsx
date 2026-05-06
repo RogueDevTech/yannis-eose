@@ -12,6 +12,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { Pagination } from '~/components/ui/pagination';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Textarea } from '~/components/ui/textarea';
@@ -79,6 +80,10 @@ function targetSummary(req: PermissionRequest): string {
 
 export function PermissionRequestsPage({
   requests,
+  total = 0,
+  page = 1,
+  totalPages = 1,
+  limit: _limit = 20,
   statusCounts,
   canApprove = false,
   canApproveProductArchive = false,
@@ -87,6 +92,11 @@ export function PermissionRequestsPage({
   activeStatus = 'ALL',
 }: {
   requests: PermissionRequest[];
+  /** Total rows for the active status filter (all pages). */
+  total?: number;
+  page?: number;
+  totalPages?: number;
+  limit?: number;
   statusCounts: { pending: number; approved: number; rejected: number; all: number };
   canApprove?: boolean;
   /** Only Super Admin may approve/reject product archive requests (even if user has audit.read). */
@@ -126,6 +136,8 @@ export function PermissionRequestsPage({
     } else {
       params.set('status', next);
     }
+    // Each tab has its own row count; drop page so we do not land on an empty high page.
+    params.delete('page');
     setSearchParams(params, { replace: true });
   };
 
@@ -261,6 +273,16 @@ export function PermissionRequestsPage({
           emptyDescription={emptyDescription}
         />
       </div>
+
+      {total > 0 && totalPages > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-app-fg-muted tabular-nums">
+            {total} {total === 1 ? 'request' : 'requests'}
+            {totalPages > 1 ? ` · page ${page} of ${totalPages}` : null}
+          </p>
+          <Pagination page={page} totalPages={totalPages} pageParam="page" />
+        </div>
+      )}
 
       {viewing && (
         <Modal

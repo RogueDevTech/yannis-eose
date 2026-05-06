@@ -65,11 +65,38 @@ export class OnboardingService {
         message: 'You can only view your own onboarding record.',
       });
     }
-    const [row] = await this.db
-      .select()
-      .from(schema.staffOnboarding)
-      .where(eq(schema.staffOnboarding.userId, targetUserId))
-      .limit(1);
+
+    // Pull payout bank fields from `users` alongside the onboarding row so the
+    // form can keep one packet for the staff member instead of bouncing them
+    // to a separate finance page. Self-read always sees their own bank info;
+    // HR / admin reviewers see it too — finance/staff-accounts is the only
+    // other reader and the onboarding packet is the source of truth.
+    const [row, userRow] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.staffOnboarding)
+        .where(eq(schema.staffOnboarding.userId, targetUserId))
+        .limit(1)
+        .then((rows) => rows[0]),
+      this.db
+        .select({
+          payoutBankName: schema.users.payoutBankName,
+          payoutAccountName: schema.users.payoutAccountName,
+          payoutAccountNumber: schema.users.payoutAccountNumber,
+          payoutBankCode: schema.users.payoutBankCode,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, targetUserId))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+    ]);
+
+    const bankFields = {
+      payoutBankName: userRow?.payoutBankName ?? null,
+      payoutAccountName: userRow?.payoutAccountName ?? null,
+      payoutAccountNumber: userRow?.payoutAccountNumber ?? null,
+      payoutBankCode: userRow?.payoutBankCode ?? null,
+    };
 
     if (!row) {
       return {
@@ -95,9 +122,13 @@ export class OnboardingService {
         submittedAt: null,
         approvedAt: null,
         approvedBy: null,
+        changesRequestedAt: null,
+        changesRequestedBy: null,
+        changesRequestedReason: null,
+        ...bankFields,
       };
     }
-    return row;
+    return { ...row, ...bankFields };
   }
 
   /**
@@ -162,6 +193,33 @@ export class OnboardingService {
       setIfPresent('guarantor2Relationship', 'guarantor2Relationship');
       setIfPresent('guarantor2LetterUrl', 'guarantor2LetterUrl');
 
+      // Bank fields live on `users` (finance-only visibility). Write them in
+      // the same withActor transaction so the audit trigger attributes them to
+      // the staff member doing the update.
+      const bankPatch: Record<string, unknown> = {};
+      const setBankIfPresent = (
+        key: keyof UpdateOnboardingProfileInput,
+        column: 'payoutBankName' | 'payoutAccountName' | 'payoutAccountNumber' | 'payoutBankCode',
+      ) => {
+        const value = input[key];
+        if (value === undefined) return;
+        bankPatch[column] = value === '' ? null : value;
+      };
+      setBankIfPresent('payoutBankName', 'payoutBankName');
+      setBankIfPresent('payoutAccountName', 'payoutAccountName');
+      setBankIfPresent('payoutAccountNumber', 'payoutAccountNumber');
+      setBankIfPresent('payoutBankCode', 'payoutBankCode');
+      if (Object.keys(bankPatch).length > 0) {
+        await tx
+          .update(schema.users)
+          .set(bankPatch)
+          .where(eq(schema.users.id, targetUserId));
+      }
+
+      let onboardingRow: typeof schema.staffOnboarding.$inferSelect;
+      // The onboarding row may not exist yet AND the user may have only
+      // touched bank fields — in that case `patch` only carries `updatedAt`
+      // and we still want to insert a row so status flips to IN_PROGRESS.
       if (existing) {
         // Bump NOT_STARTED → IN_PROGRESS on first edit.
         if (existing.status === 'NOT_STARTED') {
@@ -172,18 +230,39 @@ export class OnboardingService {
           .set(patch)
           .where(eq(schema.staffOnboarding.userId, targetUserId))
           .returning();
-        return updated!;
+        onboardingRow = updated!;
+      } else {
+        const [inserted] = await tx
+          .insert(schema.staffOnboarding)
+          .values({
+            userId: targetUserId,
+            status: 'IN_PROGRESS',
+            ...patch,
+          } as typeof schema.staffOnboarding.$inferInsert)
+          .returning();
+        onboardingRow = inserted!;
       }
 
-      const [inserted] = await tx
-        .insert(schema.staffOnboarding)
-        .values({
-          userId: targetUserId,
-          status: 'IN_PROGRESS',
-          ...patch,
-        } as typeof schema.staffOnboarding.$inferInsert)
-        .returning();
-      return inserted!;
+      // Read bank fields back out so the response carries the canonical state
+      // the UI needs (the onboarding row itself doesn't hold them).
+      const [userBank] = await tx
+        .select({
+          payoutBankName: schema.users.payoutBankName,
+          payoutAccountName: schema.users.payoutAccountName,
+          payoutAccountNumber: schema.users.payoutAccountNumber,
+          payoutBankCode: schema.users.payoutBankCode,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, targetUserId))
+        .limit(1);
+
+      return {
+        ...onboardingRow,
+        payoutBankName: userBank?.payoutBankName ?? null,
+        payoutAccountName: userBank?.payoutAccountName ?? null,
+        payoutAccountNumber: userBank?.payoutAccountNumber ?? null,
+        payoutBankCode: userBank?.payoutBankCode ?? null,
+      };
     });
   }
 
@@ -226,6 +305,17 @@ export class OnboardingService {
         });
       }
 
+      const [bankRow] = await tx
+        .select({
+          payoutBankName: schema.users.payoutBankName,
+          payoutAccountName: schema.users.payoutAccountName,
+          payoutAccountNumber: schema.users.payoutAccountNumber,
+          payoutBankCode: schema.users.payoutBankCode,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, targetUserId))
+        .limit(1);
+
       const missing: string[] = [];
       if (!existing.gender) missing.push('gender');
       if (!existing.dateOfBirth) missing.push('date of birth');
@@ -237,6 +327,13 @@ export class OnboardingService {
       if (!existing.guarantor2Name || !existing.guarantor2Phone || !existing.guarantor2LetterUrl) {
         missing.push('guarantor 2 (name, phone, signed letter)');
       }
+      if (
+        !bankRow?.payoutBankName?.trim() ||
+        !bankRow?.payoutAccountName?.trim() ||
+        !bankRow?.payoutAccountNumber?.trim()
+      ) {
+        missing.push('payout bank details (bank name, account name, account number)');
+      }
       if (missing.length > 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -244,24 +341,38 @@ export class OnboardingService {
         });
       }
 
+      // Clear any prior "changes requested" trail so the staff banner doesn't
+      // linger after the resubmission lands in HR's queue. The history table
+      // still preserves that HR asked for the round-trip.
       const [updated] = await tx
         .update(schema.staffOnboarding)
-        .set({ status: 'SUBMITTED', submittedAt: new Date(), updatedAt: new Date() })
+        .set({
+          status: 'SUBMITTED',
+          submittedAt: new Date(),
+          updatedAt: new Date(),
+          changesRequestedAt: null,
+          changesRequestedBy: null,
+          changesRequestedReason: null,
+        })
         .where(eq(schema.staffOnboarding.userId, targetUserId))
         .returning();
-      return updated!;
+      return {
+        ...updated!,
+        payoutBankName: bankRow?.payoutBankName ?? null,
+        payoutAccountName: bankRow?.payoutAccountName ?? null,
+        payoutAccountNumber: bankRow?.payoutAccountNumber ?? null,
+        payoutBankCode: bankRow?.payoutBankCode ?? null,
+      };
     });
 
     // Notify HR_MANAGERs that there's a new onboarding awaiting review. Best-
     // effort — never block the submission on notification failure.
-    this.notifications
-      .createForRole('HR_MANAGER', {
-        type: 'hr:onboarding_submitted',
-        title: 'Onboarding submitted for review',
-        body: `${actor.name ?? 'A staff member'} submitted their onboarding profile.`,
-        data: { userId: targetUserId },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreateForRole('HR_MANAGER', {
+      type: 'hr:onboarding_submitted',
+      title: 'Onboarding submitted for review',
+      body: `${actor.name ?? 'A staff member'} submitted their onboarding profile.`,
+      data: { userId: targetUserId },
+    });
 
     return submitted;
   }
@@ -318,17 +429,89 @@ export class OnboardingService {
       return updated!;
     });
 
-    this.notifications
-      .create({
-        userId: targetUserId,
-        type: 'hr:onboarding_approved',
-        title: 'Onboarding approved',
-        body: 'Your onboarding profile has been approved by HR.',
-        data: { userId: targetUserId },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: targetUserId,
+      type: 'hr:onboarding_approved',
+      title: 'Onboarding approved',
+      body: 'Your onboarding profile has been approved by HR.',
+      data: { userId: targetUserId },
+    });
 
     return approved;
+  }
+
+  /**
+   * Send a SUBMITTED onboarding back to the staff member with a reason.
+   * Status drops back to IN_PROGRESS so they can edit and re-submit; the
+   * reason is stored on the row so the staff banner explains what HR asked
+   * for. HR / admin only.
+   */
+  async requestChanges(targetUserId: string, reason: string, actor: SessionUser) {
+    if (!this.canApproveOnboarding(actor)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only HR or an admin can request onboarding changes.',
+      });
+    }
+    if (targetUserId === actor.id) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'You cannot request changes on your own onboarding.',
+      });
+    }
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length < 10) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Please provide a reason of at least 10 characters.',
+      });
+    }
+
+    const updated = await withActor(this.db, actor, async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.staffOnboarding)
+        .where(eq(schema.staffOnboarding.userId, targetUserId))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'No onboarding record exists for this user.',
+        });
+      }
+      if (existing.status !== 'SUBMITTED') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            existing.status === 'APPROVED'
+              ? 'This onboarding is already approved. Reach out to the staff directly for corrections.'
+              : 'Only submitted onboarding records can be sent back for changes.',
+        });
+      }
+      const [row] = await tx
+        .update(schema.staffOnboarding)
+        .set({
+          status: 'IN_PROGRESS',
+          submittedAt: null,
+          changesRequestedAt: new Date(),
+          changesRequestedBy: actor.id,
+          changesRequestedReason: trimmedReason,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.staffOnboarding.userId, targetUserId))
+        .returning();
+      return row!;
+    });
+
+    this.notifications.enqueueCreate({
+      userId: targetUserId,
+      type: 'hr:onboarding_changes_requested',
+      title: 'Onboarding — changes requested',
+      body: trimmedReason,
+      data: { userId: targetUserId, reason: trimmedReason },
+    });
+
+    return updated;
   }
 
   /**

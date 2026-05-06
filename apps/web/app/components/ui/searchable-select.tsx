@@ -74,7 +74,7 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState<number>(-1);
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, minWidth: 0, maxWidth: 0 });
 
   const selected = options.find((o) => o.value === value);
   const effectiveFilter = filterFn ?? defaultFilter;
@@ -95,7 +95,14 @@ export function SearchableSelect({
   useEffect(() => {
     if (!open || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
-    setPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+    const viewportMax = Math.max(240, Math.floor(window.innerWidth - rect.left - 8));
+    const maxWidth = Math.min(Math.floor(rect.width * 2), viewportMax);
+    setPos({
+      top: rect.bottom + 4,
+      left: rect.left,
+      minWidth: Math.floor(rect.width),
+      maxWidth,
+    });
   }, [open]);
 
   useEffect(() => {
@@ -199,7 +206,9 @@ export function SearchableSelect({
           aria-expanded={open}
           aria-controls={listboxId}
         >
-          {selected?.label ?? placeholder}
+          <span className="block min-w-0 truncate">
+            {selected?.label ?? placeholder}
+          </span>
         </button>
         <span
           className={[
@@ -227,7 +236,7 @@ export function SearchableSelect({
         <div
           ref={popoverRef}
           className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated shadow-lg p-2"
-          style={{ top: pos.top, left: pos.left, width: pos.width }}
+          style={{ top: pos.top, left: pos.left, minWidth: pos.minWidth, maxWidth: pos.maxWidth, width: 'auto' }}
         >
           <input
             ref={searchRef}

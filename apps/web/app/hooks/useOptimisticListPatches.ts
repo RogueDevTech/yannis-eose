@@ -12,23 +12,29 @@ export interface OptimisticPatch<T> {
 }
 
 /**
- * Sibling of `useOptimisticListMerge` for EDIT mutations. When the user
- * submits an edit form, the new field values are already in
- * `fetcher.formData` — we read them, build a patch keyed on the row id,
- * and overlay onto the matching server row for the duration of the
- * round-trip. As soon as the loader revalidates with the canonical row,
- * the overlay drops cleanly (the hook returns `[]` once `fetcher.state`
- * AND `revalidatorState` are both `idle`).
+ * Sibling of `useOptimisticListMerge` for EDIT mutations. The edited values
+ * already live in `fetcher.formData` — we read them, build a patch keyed on
+ * the row id, and overlay onto the matching server row.
  *
- * Unlike optimistic-add the edited row keeps its REAL id — no
- * `__optimistic_` prefix — so action buttons (View / Edit / Delete) remain
- * meaningful. Use `isOptimisticPatched(patches, row.id)` to dim the row
- * (`opacity-60` + "Saving…" chip) and `disabled={isOptimisticPatched(...)}` on
- * action buttons during the in-flight window to avoid stale-form races.
+ * **Lifecycle (default — `awaitSuccess: true`, CEO directive 2026-05):**
+ *   1. User submits the edit form. `fetcher.state` → `'submitting'`. **No
+ *      patch overlay yet** — the action hasn't confirmed.
+ *   2. Server returns `{ success: true }`. The modal closes (via
+ *      `useCloseOnFetcherSuccess`) and on the same React tick the patch
+ *      overlay applies to the row in the list.
+ *   3. Loader revalidates. The canonical row lands and the overlay drops
+ *      cleanly when `fetcher.state` and `revalidatorState` return to `'idle'`.
  *
- * If the server rejects the change, `useFetcherToast` surfaces the error
- * and the overlay drops — the row visibly "snaps back" to its server state.
- * That UX is correct: the user knows their change didn't take.
+ * The edited row keeps its REAL id — no `__optimistic_` prefix — so action
+ * buttons (View / Edit / Delete) remain meaningful. Use
+ * `isOptimisticPatched(patches, row.id)` to dim the row (`opacity-60` +
+ * "Saving…" chip) and `disabled={isOptimisticPatched(...)}` on action
+ * buttons during the in-flight window to avoid stale-form races.
+ *
+ * **Failure path:** if the server rejects, `data.success` is never `true`
+ * so the overlay never applies. The row stays at its server state and the
+ * error toast surfaces — the user knows their change didn't take and the
+ * modal stays open with the form values intact for retry.
  *
  * @example
  *   const patches = useOptimisticListPatches<Provider>(fetcher, (fd, intent) => {
@@ -43,18 +49,36 @@ export interface OptimisticPatch<T> {
 export function useOptimisticListPatches<T extends { id: string }>(
   fetcher: ReturnType<typeof useFetcher>,
   build: (formData: FormData, intent: string) => OptimisticPatch<T>[] | null,
+  options?: {
+    /**
+     * When `true` (default), patches only apply AFTER the action returns
+     * `{ success: true }`. Use `false` for non-modal inline edits where
+     * showing the new value during submit matters more than rejection-flicker.
+     */
+    awaitSuccess?: boolean;
+  },
 ): OptimisticPatch<T>[] {
   const { state: revalidatorState } = useRevalidator();
+  const awaitSuccess = options?.awaitSuccess ?? true;
   return useMemo<OptimisticPatch<T>[]>(() => {
     const isMutating = fetcher.state !== 'idle' || revalidatorState !== 'idle';
     if (!isMutating) return [];
+
+    if (awaitSuccess) {
+      if (fetcher.state === 'submitting') return [];
+      const data = fetcher.data;
+      const succeeded =
+        !!data && typeof data === 'object' && (data as { success?: boolean }).success === true;
+      if (!succeeded) return [];
+    }
+
     const fd = fetcher.formData;
     if (!fd) return [];
     const intent = fd.get('intent')?.toString() ?? '';
     if (!intent) return [];
     const patches = build(fd, intent);
     return patches ?? [];
-  }, [fetcher.formData, fetcher.state, revalidatorState, build]);
+  }, [fetcher.formData, fetcher.state, fetcher.data, revalidatorState, build, awaitSuccess]);
 }
 
 /**

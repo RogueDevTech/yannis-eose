@@ -5,18 +5,18 @@ import { z } from 'zod';
 // ============================================
 
 export const createProviderSchema = z.object({
-  name: z.string().min(2).max(200),
-  contactInfo: z.string().max(500).optional(),
-  coverageArea: z.string().max(500).optional(),
+  name: z.string().trim().min(2).max(200),
+  contactInfo: z.string().trim().min(1).max(500),
+  coverageArea: z.string().trim().min(1).max(500),
   rateCard: z.record(z.unknown()).optional(),
 });
 export type CreateProviderInput = z.infer<typeof createProviderSchema>;
 
 export const updateProviderSchema = z.object({
   providerId: z.string().uuid(),
-  name: z.string().min(2).max(200).optional(),
-  contactInfo: z.string().max(500).optional(),
-  coverageArea: z.string().max(500).optional(),
+  name: z.string().trim().min(2).max(200).optional(),
+  contactInfo: z.string().trim().min(1).max(500),
+  coverageArea: z.string().trim().min(1).max(500),
   rateCard: z.record(z.unknown()).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
 });
@@ -25,6 +25,8 @@ export type UpdateProviderInput = z.infer<typeof updateProviderSchema>;
 export const listProvidersSchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
   search: z.string().optional(),
+  /** Filter by kind. The Logistics Partners page passes `THIRD_PARTY` to hide Yannis warehouses. */
+  kind: z.enum(['THIRD_PARTY', 'WAREHOUSE']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });
@@ -63,6 +65,8 @@ export type UpdateLocationInput = z.infer<typeof updateLocationSchema>;
 export const listLocationsSchema = z.object({
   providerId: z.string().uuid().optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  /** Filter by parent provider's kind — used by the shipment destination dropdown to show warehouses only. */
+  providerKind: z.enum(['THIRD_PARTY', 'WAREHOUSE']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });

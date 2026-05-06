@@ -40,6 +40,22 @@ export const updateOnboardingProfileSchema = z.object({
   guarantor2Address: z.string().max(500).nullish(),
   guarantor2Relationship: z.string().max(80).nullish(),
   guarantor2LetterUrl: z.string().max(500).nullish(),
+
+  /**
+   * Payout beneficiary bank details. Live on `users` (finance-only visibility);
+   * onboarding writes them through to the user row in the same transaction so
+   * `/admin/finance/staff-accounts` and payout exports stay aligned with what
+   * staff filled in here.
+   */
+  payoutBankName: z.string().max(120).nullish(),
+  payoutAccountName: z.string().max(120).nullish(),
+  payoutAccountNumber: z
+    .string()
+    .max(40)
+    .regex(/^[0-9]*$/u, 'Account number must be digits only')
+    .nullish()
+    .or(z.literal('')),
+  payoutBankCode: z.string().max(20).nullish(),
 });
 
 export type UpdateOnboardingProfileInput = z.infer<typeof updateOnboardingProfileSchema>;
@@ -60,6 +76,16 @@ export const approveOnboardingSchema = z.object({
   userId: z.string().uuid(),
 });
 export type ApproveOnboardingInput = z.infer<typeof approveOnboardingSchema>;
+
+/**
+ * HR sends a SUBMITTED onboarding back to the staff member for edits.
+ * Reason is required so the staff side can show a useful banner.
+ */
+export const requestOnboardingChangesSchema = z.object({
+  userId: z.string().uuid(),
+  reason: z.string().trim().min(10, 'Reason must be at least 10 characters').max(1000),
+});
+export type RequestOnboardingChangesInput = z.infer<typeof requestOnboardingChangesSchema>;
 
 export const getOnboardingSchema = z.object({
   /** Defaults to the caller's own onboarding when omitted. */

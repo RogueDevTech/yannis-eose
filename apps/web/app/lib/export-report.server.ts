@@ -6,7 +6,9 @@ export type ExportReportActionData =
   | { ok: true; filename: string; csvContent: string }
   | { ok: false; error: string };
 
-export async function handleExportReportAction(request: Request) {
+export async function handleExportReportAction(
+  request: Request,
+): Promise<ReturnType<typeof data<ExportReportActionData>> | null> {
   const cookie = getSessionCookie(request);
   // Read from a clone so route actions can still parse the original request body.
   const formData = await request.clone().formData();

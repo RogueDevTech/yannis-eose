@@ -7,6 +7,7 @@ import { Button } from '~/components/ui/button';
 import { Spinner } from '~/components/ui/spinner';
 import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
+import { InlineNotification } from '~/components/ui/inline-notification';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -31,6 +32,28 @@ import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard'
 import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
 import { buildOrderSummaryClipboardText } from './build-order-summary-clipboard';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
+
+function DeferredPanelError({ label }: { label: string }) {
+  const { revalidate, state } = useRevalidator();
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-danger-200/70 dark:border-danger-800/60 bg-danger-50/60 dark:bg-danger-900/10 px-3 py-2">
+      <div className="flex items-center gap-2 text-danger-700 dark:text-danger-300">
+        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+        </svg>
+        <span className="text-xs font-medium">Failed to load {label}.</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => revalidate()}
+        disabled={state === 'loading'}
+        className="text-xs font-medium text-danger-700 dark:text-danger-300 hover:underline disabled:opacity-50"
+      >
+        {state === 'loading' ? 'Retrying…' : 'Retry'}
+      </button>
+    </div>
+  );
+}
 
 function canCopyOrderSummaryForChat(
   userRole: string,
@@ -106,6 +129,21 @@ function getProgressIndex(status: string): number {
   return STATUS_FLOW.indexOf(status as (typeof STATUS_FLOW)[number]);
 }
 
+/** ISO `YYYY-MM-DD` from confirm modal → readable label (no timezone shift). */
+function formatScheduleDateDisplay(value: string | null | undefined): string {
+  const s = value?.trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return new Date(`${s}T12:00:00`).toLocaleDateString('en-NG', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  }
+  return s;
+}
+
 const CALL_STATUS_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
   INITIATED: { bg: 'bg-info-50 dark:bg-info-700/20', text: 'text-info-600 dark:text-info-400', icon: 'text-info-500' },
   RINGING: { bg: 'bg-warning-50 dark:bg-warning-700/20', text: 'text-warning-600 dark:text-warning-400', icon: 'text-warning-500' },
@@ -130,6 +168,8 @@ type DetailValueClass = string | ((value: unknown, order: OrderDetail) => string
 interface DetailFieldConfig {
   label: string;
   alwaysShow?: boolean;
+  /** When true, hide this row once the order is confirmed — shown prominently under Order Progress instead */
+  suppressAfterConfirm?: boolean;
   getValue: (order: OrderDetail) => unknown;
   format: (value: unknown, order: OrderDetail) => string;
   ddClassName?: DetailValueClass;
@@ -193,9 +233,10 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
-    label: 'Preferred delivery date',
+    label: 'Schedule date',
+    suppressAfterConfirm: true,
     getValue: (o) => o.preferredDeliveryDate,
-    format: (v) => (v ? String(v) : ''),
+    format: (v) => (v ? formatScheduleDateDisplay(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
@@ -597,6 +638,7 @@ export function OrderDetailPage({
   csAgentsForAssign = [],
   logisticsLocations = [],
   allocatableLocations = [],
+  allocatableLocationsDeferred,
   logisticsDispatchTemplates = [],
   invoice,
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
@@ -606,6 +648,7 @@ export function OrderDetailPage({
   const scheduleFetcher = useFetcher();
   const adjustItemsFetcher = useFetcher();
   const priceRequestFetcher = useFetcher();
+  const ensureInvoiceFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const revalidator = useRevalidator();
 
   // Team Live View — broadcast CS agent state to cs-all room.
@@ -670,6 +713,9 @@ export function OrderDetailPage({
   }, [actionError, requiresBranchSelection, ensureBranchForAction]);
   useFetcherToast(adjustItemsFetcher.data, { successMessage: 'Order items updated' });
   useFetcherToast(priceRequestFetcher.data, { successMessage: 'Price change request submitted' });
+  useFetcherToast(ensureInvoiceFetcher.data, { successMessage: 'Invoice generated' });
+  const canGenerateInvoice =
+    isAdminLevel({ role: userRole }) || (permissions ?? []).includes('finance.read');
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
   const logisticsLocationWithGroupLink =
     order.logisticsLocationId != null
@@ -867,6 +913,19 @@ export function OrderDetailPage({
   // Reset ref when order changes so a new copy on another order can trigger one revalidation
   useEffect(() => {
     revalidatedForRecordCallRef.current = false;
+  }, [order.id]);
+
+  // Revalidate after generating an invoice so the invoice card appears immediately.
+  const ensureInvoiceData = ensureInvoiceFetcher.data as { success?: boolean; error?: string } | undefined;
+  const revalidatedForEnsureInvoiceRef = useRef(false);
+  useEffect(() => {
+    if (ensureInvoiceData?.success && revalidator.state === 'idle' && !revalidatedForEnsureInvoiceRef.current) {
+      revalidatedForEnsureInvoiceRef.current = true;
+      revalidator.revalidate();
+    }
+  }, [ensureInvoiceData?.success, revalidator]);
+  useEffect(() => {
+    revalidatedForEnsureInvoiceRef.current = false;
   }, [order.id]);
 
   // Close modals when their fetcher returns success — edge-triggered via the
@@ -1090,6 +1149,18 @@ export function OrderDetailPage({
                 })}
                 </div>
               </div>
+              {order.confirmedAt ? (
+                <div className="mt-4 pt-4 border-t border-app-border">
+                  <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
+                    Schedule date
+                  </p>
+                  <p className="mt-1 text-base font-semibold text-app-fg tabular-nums">
+                    {order.preferredDeliveryDate?.trim()
+                      ? formatScheduleDateDisplay(order.preferredDeliveryDate)
+                      : 'Not set'}
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             {/* Order Items — card layout (typically 3–4 items) */}
@@ -1139,12 +1210,45 @@ export function OrderDetailPage({
             </div>
 
             {/* Invoice card — auto-generated on CONFIRMED. Visible to CS, Logistics, etc.
-                Renders nothing while pending or when no invoice exists yet. */}
-            {invoice !== undefined && invoice !== null && (
-              <DeferredSection resolve={invoice} skeleton="card">
+                Some legacy orders may not have one yet; in that case we still render
+                the section so it doesn't "disappear" from the page. */}
+            {invoice !== undefined && invoice !== null && currentStatusIndex >= getProgressIndex('CONFIRMED') && (
+              <DeferredSection
+                resolve={invoice}
+                skeleton="card"
+                errorElement={<DeferredPanelError label="Invoice (finance.getInvoiceByOrder)" />}
+              >
                 {(inv) => {
                   const i = inv as OrderInvoice | null;
-                  if (!i) return null;
+                  if (!i) {
+                    return (
+                      <div className="card">
+                        <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
+                        <p className="text-sm text-app-fg-muted mb-3">
+                          This order doesn’t have an invoice yet.
+                        </p>
+                        <InlineNotification
+                          variant="info"
+                          message="Invoices are auto-generated the first time an order is confirmed. If this was confirmed before the invoice feature was enabled (or if generation failed), refresh or ask an admin/finance to regenerate."
+                        />
+                        {canGenerateInvoice && (
+                          <div className="mt-3 flex justify-end">
+                            <ensureInvoiceFetcher.Form method="post">
+                              <input type="hidden" name="intent" value="ensureInvoice" />
+                              <Button
+                                type="submit"
+                                variant="primary"
+                                size="sm"
+                                disabled={ensureInvoiceFetcher.state !== 'idle'}
+                              >
+                                {ensureInvoiceFetcher.state !== 'idle' ? 'Generating…' : 'Generate invoice'}
+                              </Button>
+                            </ensureInvoiceFetcher.Form>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
                   return (
                     <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm">
                       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1219,7 +1323,11 @@ export function OrderDetailPage({
                 Every step taken on this order, with who did it and when.
               </p>
               {timeline ? (
-                <DeferredSection resolve={timeline} skeleton="table">
+                <DeferredSection
+                  resolve={timeline}
+                  skeleton="table"
+                  errorElement={<DeferredPanelError label="Order Activity (orders.getTimeline)" />}
+                >
                   {(resolvedTimeline) => <OrderTimeline events={resolvedTimeline as TimelineEvent[]} />}
                 </DeferredSection>
               ) : (
@@ -1505,6 +1613,18 @@ export function OrderDetailPage({
               return (
                 <div className="card">
                   <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
+                  {order.confirmedAt ? (
+                    <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2 mb-3">
+                      <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">
+                        Schedule date
+                      </p>
+                      <p className="mt-0.5 text-sm font-semibold text-app-fg tabular-nums">
+                        {order.preferredDeliveryDate?.trim()
+                          ? formatScheduleDateDisplay(order.preferredDeliveryDate)
+                          : 'Not set'}
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="space-y-2">
                     {order.status === 'CONFIRMED' && canTransitionTo('AGENT_ASSIGNED') && logisticsLocations.length > 0 && (
                       <Button
@@ -1563,7 +1683,7 @@ export function OrderDetailPage({
                           className="w-full"
                           onClick={() => void handleCopyOrderSummary()}
                         >
-                          Copy for WhatsApp
+                          Copy order
                         </Button>
                         <Button
                           type="button"
@@ -1588,7 +1708,7 @@ export function OrderDetailPage({
                         className="w-full"
                         onClick={() => void handleCopyOrderSummary()}
                       >
-                        Copy for WhatsApp
+                        Copy order
                       </Button>
                     )}
                     {showCopyOrderSummary &&
@@ -1679,6 +1799,7 @@ export function OrderDetailPage({
               <h2 className="text-lg font-semibold text-app-fg mb-3">Details</h2>
               <dl className="space-y-2.5 text-sm">
                 {ORDER_DETAIL_FIELDS.map((field) => {
+                  if (field.suppressAfterConfirm && order.confirmedAt) return null;
                   const value = field.getValue(order);
                   if (!field.alwaysShow && !hasValue(value)) return null;
                   const formatted = field.format(value, order);
@@ -1729,7 +1850,7 @@ export function OrderDetailPage({
         >
           <h3 className="text-lg font-semibold text-app-fg mb-1">Confirm order</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            Set an optional delivery date and confirm when the customer is ready.
+            Choose when logistics should deliver, then confirm when the customer is ready.
           </p>
           <fetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="transition" />
@@ -1743,10 +1864,11 @@ export function OrderDetailPage({
                 value={deliveryDate}
                 onChange={(e) => setDeliveryDate(e.target.value)}
                 min={new Date().toISOString().split('T')[0]}
+                required
                 aria-label="Delivery date"
               />
               <p className="text-xs text-app-fg-muted">
-                When should logistics deliver this order? Leave empty if not specified.
+                When should logistics deliver this order? Required before you can confirm.
               </p>
             </div>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -1765,7 +1887,7 @@ export function OrderDetailPage({
                 type="submit"
                 variant="primary"
                 className="w-full sm:w-auto"
-                disabled={fetcher.state === 'submitting'}
+                disabled={fetcher.state === 'submitting' || !deliveryDate.trim()}
                 loading={fetcher.state === 'submitting'}
                 loadingText="Confirming..."
               >
@@ -1928,59 +2050,146 @@ export function OrderDetailPage({
               ? 'Pick a different 3PL location. Shelf reservation at the current location is released and stock is reserved at the new one (both must have enough free units).'
               : 'Select the logistics company location that will fulfil this order. Stock must be available at that location.'}
           </p>
-          {eligibleAllocatableCount === 0 ? (
-            <EmptyState
-              title="No locations with enough stock"
-              description="No logistics hub currently has enough stock for this order. Receive stock (intake or verified transfer) and try again."
-              variant="card"
-            />
+          {allocatableLocations.length > 0 ? (
+            <>
+              {eligibleAllocatableCount === 0 ? (
+                <InlineNotification
+                  variant="warning"
+                  className="mb-3"
+                  message="No hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Expand a location below to see the reason."
+                />
+              ) : null}
+              <SearchableSelect
+                id="allocate-location-id"
+                label="Logistics location"
+                value={allocateLocationId}
+                onChange={setAllocateLocationId}
+                placeholder="Select a location..."
+                searchPlaceholder="Search locations..."
+                options={allocatableLocations.map((loc) => ({
+                  value: loc.id,
+                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                  description: describeAllocatableLocation(loc),
+                  disabled:
+                    !loc.eligible ||
+                    (order.status === 'AGENT_ASSIGNED' && loc.id === order.logisticsLocationId),
+                }))}
+              />
+              <div className="flex gap-2 mt-4 justify-end">
+                <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
+                  Back
+                </Button>
+                {eligibleAllocatableCount > 0 && (
+                  <fetcher.Form method="post">
+                    <input type="hidden" name="intent" value="transition" />
+                    <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
+                    {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                    <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={
+                        !allocateLocationId ||
+                        !selectedAllocatableLocation?.eligible ||
+                        fetcher.state === 'submitting' ||
+                        (order.status === 'AGENT_ASSIGNED' &&
+                          !!order.logisticsLocationId &&
+                          allocateLocationId === order.logisticsLocationId)
+                      }
+                      loading={fetcher.state === 'submitting'}
+                      loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
+                    >
+                      {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
+                    </Button>
+                  </fetcher.Form>
+                )}
+              </div>
+            </>
+          ) : allocatableLocationsDeferred ? (
+            <DeferredSection resolve={allocatableLocationsDeferred} skeleton="card">
+              {(rows) => {
+                const list = Array.isArray(rows) ? rows : [];
+                const eligibleCount = list.filter((l) => l.eligible).length;
+                const selected = allocateLocationId ? list.find((l) => l.id === allocateLocationId) : undefined;
+
+                return list.length === 0 ? (
+                  <EmptyState
+                    title="No locations with enough stock"
+                    description="No logistics hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Receive stock (intake or verified transfer) and try again."
+                    variant="card"
+                  />
+                ) : (
+                  <>
+                    {eligibleCount === 0 ? (
+                      <InlineNotification
+                        variant="warning"
+                        className="mb-3"
+                        message="No hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Expand a location below to see the reason."
+                      />
+                    ) : null}
+                    <SearchableSelect
+                      id="allocate-location-id"
+                      label="Logistics location"
+                      value={allocateLocationId}
+                      onChange={setAllocateLocationId}
+                      placeholder="Select a location..."
+                      searchPlaceholder="Search locations..."
+                      options={list.map((loc) => ({
+                        value: loc.id,
+                        label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                        description: describeAllocatableLocation(loc),
+                        disabled:
+                          !loc.eligible ||
+                          (order.status === 'AGENT_ASSIGNED' && loc.id === order.logisticsLocationId),
+                      }))}
+                    />
+                    <div className="flex gap-2 mt-4 justify-end">
+                      <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
+                        Back
+                      </Button>
+                      {eligibleCount > 0 && (
+                        <fetcher.Form method="post">
+                          <input type="hidden" name="intent" value="transition" />
+                          <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
+                          {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                          <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
+                          <Button
+                            type="submit"
+                            variant="primary"
+                            disabled={
+                              !allocateLocationId ||
+                              !selected?.eligible ||
+                              fetcher.state === 'submitting' ||
+                              (order.status === 'AGENT_ASSIGNED' &&
+                                !!order.logisticsLocationId &&
+                                allocateLocationId === order.logisticsLocationId)
+                            }
+                            loading={fetcher.state === 'submitting'}
+                            loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
+                          >
+                            {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
+                          </Button>
+                        </fetcher.Form>
+                      )}
+                    </div>
+                  </>
+                );
+              }}
+            </DeferredSection>
           ) : (
-            <SearchableSelect
-              id="allocate-location-id"
-              label="Logistics location"
-              value={allocateLocationId}
-              onChange={setAllocateLocationId}
-              placeholder="Select a location..."
-              searchPlaceholder="Search locations..."
-              options={allocatableLocations.map((loc) => ({
-                value: loc.id,
-                label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                description: describeAllocatableLocation(loc),
-                disabled:
-                  !loc.eligible ||
-                  (order.status === 'AGENT_ASSIGNED' && loc.id === order.logisticsLocationId),
-              }))}
-            />
+            <>
+              <EmptyState
+                title="Loading locations…"
+                description="Fetching eligible hubs from the server."
+                variant="card"
+              />
+              <div className="flex gap-2 mt-4 justify-end">
+                <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
+                  Back
+                </Button>
+              </div>
+            </>
           )}
-          <div className="flex gap-2 mt-4 justify-end">
-            <Button type="button" variant="secondary" onClick={() => setAllocateModalOpen(false)}>
-              Back
-            </Button>
-            {eligibleAllocatableCount > 0 && (
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="transition" />
-              <input type="hidden" name="newStatus" value="AGENT_ASSIGNED" />
-              {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-              <input type="hidden" name="logisticsLocationId" value={allocateLocationId} />
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={
-                  !allocateLocationId ||
-                  !selectedAllocatableLocation?.eligible ||
-                  fetcher.state === 'submitting' ||
-                  (order.status === 'AGENT_ASSIGNED' &&
-                    !!order.logisticsLocationId &&
-                    allocateLocationId === order.logisticsLocationId)
-                }
-                loading={fetcher.state === 'submitting'}
-                loadingText={order.status === 'AGENT_ASSIGNED' ? 'Reassigning…' : 'Assigning…'}
-              >
-                {order.status === 'AGENT_ASSIGNED' ? 'Reassign' : 'Assign'}
-              </Button>
-            </fetcher.Form>
-            )}
-          </div>
         </Modal>
       )}
 
@@ -2000,9 +2209,9 @@ export function OrderDetailPage({
               allocation; can be changed if a different provider stepped in. */}
           {logisticsLocations.length > 0 && (
             <div className="mb-4">
+              <p className="text-xs font-medium text-app-fg-muted mb-1.5">Logistics provider</p>
               <SearchableSelect
                 id="deliver-logistics-location"
-                label="Logistics provider"
                 value={deliverLocationId}
                 onChange={setDeliverLocationId}
                 placeholder="Select the provider that delivered…"
@@ -2012,7 +2221,8 @@ export function OrderDetailPage({
                   description:
                     loc.id === order.logisticsLocationId ? 'Originally allocated' : undefined,
                 }))}
-                searchPlaceholder="Search providers / locations…"
+                searchPlaceholder="Search providers..."
+                controlSize="lg"
               />
               {order.logisticsLocationId &&
                 deliverLocationId &&

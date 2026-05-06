@@ -70,6 +70,25 @@ export const financeRouter = router({
       return getFinanceService().getInvoiceByOrderId(input.orderId);
     }),
 
+  /**
+   * Ops escape hatch: create invoice on-demand when auto-invoice failed or for older orders.
+   * Restricted to finance readers + admin-level, and still gated by order-level visibility.
+   */
+  ensureInvoiceByOrder: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const perms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+      const mayGenerate = isAdminLevel(ctx.user) || perms.includes(canonicalPermissionCode('finance.read'));
+      if (!mayGenerate) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to generate invoices' });
+      }
+
+      const order = await getOrdersService().getById(input.orderId);
+      getOrdersService().assertActorMayViewOrderForRead(ctx.user, order);
+
+      return getFinanceService().ensureInvoiceForOrder({ order, actorId: ctx.user.id });
+    }),
+
   listInvoices: authedProcedure
     .input(listInvoicesSchema)
     .query(async ({ input }) => {

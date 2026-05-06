@@ -17,11 +17,13 @@ export function TableLoadingOverlay({ show, children, minHeightClassName = 'min-
       {children}
       {show ? (
         <div
-          className="absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-app-elevated/70 backdrop-blur-[1px]"
+          className="absolute inset-0 z-10 rounded-[inherit] bg-app-elevated/70 backdrop-blur-[1px]"
           aria-busy="true"
           aria-live="polite"
         >
-          <Spinner size="lg" />
+          <div className="absolute left-1/2 top-[20%] -translate-x-1/2">
+            <Spinner size="lg" />
+          </div>
         </div>
       ) : null}
     </div>

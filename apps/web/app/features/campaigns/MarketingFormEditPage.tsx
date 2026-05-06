@@ -1,6 +1,6 @@
 import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useFetcher, useRevalidator } from '@remix-run/react';
+import { Form, Link, useActionData, useFetcher, useNavigation, useRevalidator } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
@@ -8,8 +8,10 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { InlineNotification } from '~/components/ui/inline-notification';
 import { useFetcherToast } from '~/components/ui/toast';
-import type { Campaign, CustomFormField, Product, StandardFieldConfig } from './types';
+import { templatesToPreviewOffers, type MinimalOfferTemplateForPreview } from './offer-template-preview';
+import type { Campaign, CustomFormField, OfferGroupRow, Product, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
 import { sortAndReindexCustomFields } from './custom-fields-order';
 import { FormFullPreview } from './form-full-preview';
@@ -18,8 +20,14 @@ import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormEditPageProps {
   campaign: Campaign;
-  /** Catalog rows for `campaign.productIds` (offers drive the live preview). */
+  /** Catalog rows for `campaign.productIds` (fallback context / legacy multi-product rows). */
   formProducts: Product[];
+  /** All offer templates for the campaign’s primary product (`productIds[0]`). */
+  offerTemplates: MinimalOfferTemplateForPreview[];
+  offerGroups: OfferGroupRow[];
+  offerGroupsLoadError?: string | null;
+  /** `marketing.offerTemplate` — enables Offer tiers panel on this form. */
+  canManageOfferTemplates?: boolean;
 }
 
 const FORMS_INDEX_ACTION = '/admin/marketing/forms';
@@ -50,19 +58,42 @@ const ArchiveIcon = (
  * Full-page edit: basic form settings + custom fields (same shape as new form), one save.
  * Activate / deactivate / archive use the forms index action (status-only) so they apply immediately.
  */
-export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormEditPageProps) {
-  const fetcher = useFetcher<{ error?: string }>();
+export function MarketingFormEditPage({
+  campaign,
+  formProducts,
+  offerTemplates,
+  offerGroups,
+  offerGroupsLoadError = null,
+  canManageOfferTemplates = false,
+}: MarketingFormEditPageProps) {
+  const navigation = useNavigation();
+  const actionData = useActionData<{ error?: string } | undefined>();
   const statusFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const { revalidate } = useRevalidator();
   const [dismissedActionError, setDismissedActionError] = useState(false);
-  const actionError = (fetcher.data as { error?: string } | undefined)?.error;
+  const actionError = actionData?.error;
+
+  /** Use Remix `<Form>` so save action `redirect()` navigates back to the forms list on success. */
+  const isSavingForm =
+    navigation.formData?.get('intent') === 'updateForm' &&
+    (navigation.state === 'submitting' || navigation.state === 'loading');
 
   const [confirmAction, setConfirmAction] = useState<{ type: 'deactivate' | 'archive' } | null>(null);
+  const [dismissedOffersLoadError, setDismissedOffersLoadError] = useState(false);
+  // Reset the dismissed-warning flag whenever the loader either fixes the error or surfaces a new one.
+  useEffect(() => {
+    setDismissedOffersLoadError(false);
+  }, [offerGroupsLoadError]);
 
   useFetcherToast(statusFetcher.data, { successMessage: 'Status updated' });
 
   const cfg = campaign.formConfig;
-  const multiProduct = (campaign.productIds?.length ?? 0) > 1;
+  const legacyMultiProduct = (campaign.productIds?.length ?? 0) > 1;
+
+  const [selectedOfferTemplateIds, setSelectedOfferTemplateIds] = useState<string[]>(() =>
+    Array.isArray(cfg?.selectedOfferTemplateIds) ? cfg.selectedOfferTemplateIds : [],
+  );
+  const [selectedOfferGroupId, setSelectedOfferGroupId] = useState<string>(() => campaign.offerGroupId ?? '');
 
   const [fields, setFields] = useState<CustomFormField[]>(() =>
     sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[]),
@@ -89,6 +120,8 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
     setShowProductImages(c?.showProductImages !== false);
     setStandardFields(normalizeStandardFields(c));
     setAdditionalSelectOptions(additionalFieldSelectOptionsFromConfig(c));
+    setSelectedOfferTemplateIds(Array.isArray(c?.selectedOfferTemplateIds) ? c.selectedOfferTemplateIds : []);
+    setSelectedOfferGroupId(campaign.offerGroupId ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset when switching form
   }, [campaign.id]);
 
@@ -99,23 +132,66 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
     [additionalSelectOptions],
   );
 
-  const previewOffers = useMemo(() => {
-    if (multiProduct) return [];
-    return formProducts[0]?.offers ?? [];
-  }, [multiProduct, formProducts]);
+  const selectedOfferTemplateIdsJson = useMemo(
+    () => JSON.stringify(selectedOfferTemplateIds),
+    [selectedOfferTemplateIds],
+  );
 
-  const previewProducts = useMemo(() => {
-    if (!multiProduct) return undefined;
-    return formProducts.map((p) => ({
-      id: p.id,
-      name: p.name,
-      offers: p.offers ?? [],
-    }));
-  }, [multiProduct, formProducts]);
+  const soleProductId = useMemo(() => {
+    const ids = campaign.productIds;
+    if (!Array.isArray(ids) || ids.length === 0 || typeof ids[0] !== 'string') return null;
+    return ids[0];
+  }, [campaign.productIds]);
+
+  // CEO directive 2026-05-04: an offer carries its own products. Forms pick from
+  // ANY non-archived, non-empty offer group; the offer's items drive what the
+  // Edge form renders. The previous constraint (offer must contain the form's
+  // `primary product`) was rejected — products live inside the offer, not the
+  // other way around.
+  const compatibleOfferGroups = useMemo(() => {
+    return offerGroups
+      .filter((g) => String(g.status).toUpperCase() !== 'ARCHIVED')
+      .filter((g) => g.items.length > 0);
+  }, [offerGroups]);
+
+  const offerGroupOptions = useMemo(
+    () =>
+      compatibleOfferGroups.map((g) => ({
+        value: g.id,
+        label: `${g.name} · ${String(g.status).toUpperCase()} (${g.items.length} items)`,
+      })),
+    [compatibleOfferGroups],
+  );
+
+  const previewOffers = useMemo(() => {
+    if (selectedOfferGroupId) {
+      const g = compatibleOfferGroups.find((x) => x.id === selectedOfferGroupId);
+      if (!g) return [];
+      return g.items
+        .slice()
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        .map((it) => ({
+          label: it.label,
+          qty: Number(it.quantity ?? 1) || 1,
+          price: typeof it.price === 'number' ? String(it.price) : String(it.price ?? ''),
+          ...(typeof it.imageUrl === 'string' && it.imageUrl.length > 0 ? { imageUrls: [it.imageUrl] } : {}),
+        }));
+    }
+    return templatesToPreviewOffers(offerTemplates, selectedOfferTemplateIds);
+  }, [compatibleOfferGroups, offerTemplates, selectedOfferGroupId, selectedOfferTemplateIds]);
+
+  function toggleOfferTemplate(templateId: string, checked: boolean) {
+    setSelectedOfferTemplateIds((prev) => {
+      if (checked) return prev.includes(templateId) ? prev : [...prev, templateId];
+      return prev.filter((id) => id !== templateId);
+    });
+  }
 
   useEffect(() => {
-    if (fetcher.state === 'submitting') setDismissedActionError(false);
-  }, [fetcher.state]);
+    if (navigation.state === 'submitting' && navigation.formData?.get('intent') === 'updateForm') {
+      setDismissedActionError(false);
+    }
+  }, [navigation.state, navigation.formData]);
 
   useEffect(() => {
     if (statusFetcher.state === 'idle' && statusFetcher.data) {
@@ -196,6 +272,16 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
         actions={statusActions}
       />
 
+      {!!offerGroupsLoadError && !dismissedOffersLoadError && (
+        <PageNotification
+          variant="warning"
+          title="Offers could not be loaded"
+          message={offerGroupsLoadError}
+          durationMs={8000}
+          onDismiss={() => setDismissedOffersLoadError(true)}
+        />
+      )}
+
       {actionError && !dismissedActionError && (
         <PageNotification
           variant="error"
@@ -205,9 +291,16 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
         />
       )}
 
+      {legacyMultiProduct ? (
+        <InlineNotification
+          variant="warning"
+          message={`Legacy form: multiple catalog products (${formProducts.map((p) => p.name).join(', ')}). The public Edge form only resolves tiers from the first product.`}
+        />
+      ) : null}
+
       <div className="grid grid-cols-1 lg:grid-cols-[7fr_3fr] gap-6 items-start">
         <div className="min-w-0">
-          <fetcher.Form method="post" className="space-y-6" key={campaign.id}>
+          <Form method="post" className="space-y-6" key={campaign.id}>
             <input type="hidden" name="intent" value="updateForm" />
             <input type="hidden" name="id" value={campaign.id} />
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
@@ -215,6 +308,8 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
             <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
+            <input type="hidden" name="selectedOfferTemplateIds" value={selectedOfferTemplateIdsJson} readOnly />
+            <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
 
             <div className="card space-y-4">
               <h2 className="text-sm font-semibold text-app-fg">Basic settings</h2>
@@ -230,6 +325,22 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
                     { value: 'INACTIVE', label: 'Inactive' },
                     { value: 'ARCHIVED', label: 'Archived' },
                   ]}
+                />
+                <FormSelect
+                  label="Offer"
+                  name="offerGroupIdSelect"
+                  value={selectedOfferGroupId}
+                  onChange={(e) => {
+                    setSelectedOfferGroupId(e.target.value);
+                    // Selecting an offer group supersedes legacy tier selection.
+                    setSelectedOfferTemplateIds([]);
+                  }}
+                  options={
+                    compatibleOfferGroups.length > 0
+                      ? [{ value: '', label: 'No offer selected' }, ...offerGroupOptions]
+                      : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
+                  }
+                  disabled={compatibleOfferGroups.length === 0}
                 />
               </div>
 
@@ -311,14 +422,14 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving…">
+              <Button type="submit" variant="primary" size="sm" loading={isSavingForm} loadingText="Saving…">
                 Save changes
               </Button>
               <Link to="/admin/marketing/forms" className="btn-secondary btn-sm inline-flex items-center justify-center">
                 Cancel
               </Link>
             </div>
-          </fetcher.Form>
+          </Form>
         </div>
 
         <div className="min-w-0 space-y-2 self-start static lg:sticky lg:top-[calc(var(--header-height,3.5rem)+0.5rem)] z-[1] max-lg:mb-2">
@@ -328,13 +439,13 @@ export function MarketingFormEditPage({ campaign, formProducts }: MarketingFormE
             subtitle={formSubtitle}
             buttonText={formButtonText}
             accentColor={accentColor}
-            multiProduct={multiProduct}
+            multiProduct={false}
             standardFields={standardFields}
             successCallbackUrl={successCallbackUrl}
             customFields={fields}
             previewOffers={previewOffers}
-            previewProducts={previewProducts}
             additionalSelectOptions={additionalSelectOptions}
+            showProductImages={showProductImages}
           />
         </div>
       </div>

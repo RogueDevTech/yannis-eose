@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, Link } from '@remix-run/react';
 import { useToast } from '~/components/ui/toast';
-import { PageNotification } from '~/components/ui/page-notification';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
-import { DeferredSection } from '~/components/ui/deferred-section';
-import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -107,36 +105,59 @@ const CheckIconSm = (
 // ── Main Component ───────────────────────────────────
 export function FormsPage({
   forms,
-  totalForms: _totalForms,
-  products,
-  productsLoadError = null,
+  totalForms,
   isMediaBuyer = false,
   showMediaBuyerColumn = false,
   currentUserName: _currentUserName,
   currentUserId,
 }: FormsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  /** URL: no/`all` → all forms (non-MB); `mine` → my forms. */
+  const navFormsScope: 'all' | 'mine' = isMediaBuyer || tabParam === 'mine' ? 'mine' : 'all';
+
+  const setMainNavTab = useCallback(
+    (v: 'all' | 'mine') => {
+      // Avoid Remix navigation/refetch on tab switch. We still keep the URL in sync
+      // for shareability using History API.
+      if (typeof window === 'undefined') return;
+      const url = new URL(window.location.href);
+      if (v === 'all') url.searchParams.delete('tab');
+      else url.searchParams.set('tab', v);
+      window.history.replaceState({}, '', url.pathname + url.search);
+    },
+    [],
+  );
+
+  const allForms = forms as Campaign[];
+  const mineFormsCount = currentUserId ? allForms.filter((c) => c.mediaBuyerId === currentUserId).length : 0;
+  const allFormsCount = allForms.length;
+
+  const navTabValue: 'all' | 'mine' = navFormsScope === 'mine' ? 'mine' : 'all';
+
+  // Local UI tab state so the tab/content switches immediately (same tick),
+  // without triggering a loader refetch.
+  const [uiTabValue, setUiTabValue] = useState<'all' | 'mine'>(navTabValue);
+  useEffect(() => {
+    setUiTabValue(navTabValue);
+  }, [navTabValue]);
+
+  const uiFormsScope: 'all' | 'mine' = isMediaBuyer || uiTabValue === 'mine' ? 'mine' : 'all';
+
   const [deploymentModal, setDeploymentModal] = useState<Campaign | null>(null);
   const [deploymentCopiedSection, setDeploymentCopiedSection] = useState<DeploymentCopySection | null>(null);
   const deploymentCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Client-side tab: 'all' | 'mine'. Only relevant when !isMediaBuyer (HoM/SuperAdmin). */
-  const [viewMode, setViewMode] = useState<'all' | 'mine'>('all');
-
-  /** Forms to display: all from server, or filtered to current user when viewMode === 'mine'. */
+  /** Forms list slice for the active scope (server already scopes MB to own campaigns). */
   const displayedForms = useMemo(() => {
-    if (isMediaBuyer || !currentUserId) return forms as Campaign[];
-    if (viewMode === 'mine') return (forms as Campaign[]).filter((c) => c.mediaBuyerId === currentUserId);
+    if (uiFormsScope === 'mine') {
+      if (!currentUserId) return forms as Campaign[];
+      return (forms as Campaign[]).filter((c) => c.mediaBuyerId === currentUserId);
+    }
     return forms as Campaign[];
-  }, [forms, isMediaBuyer, currentUserId, viewMode]);
+  }, [forms, uiFormsScope, currentUserId]);
 
-  const showMyFormsOnly = isMediaBuyer || viewMode === 'mine';
-
-  const [dismissedProductsError, setDismissedProductsError] = useState(false);
-
-  useEffect(() => {
-    if (productsLoadError) setDismissedProductsError(false);
-  }, [productsLoadError]);
+  const showMyFormsOnly = uiFormsScope === 'mine';
 
   const { toast } = useToast();
   const SAVED_TOAST_KEY = 'yannis-forms-saved-toast';
@@ -184,34 +205,73 @@ export function FormsPage({
     });
   }, []);
 
+  // Sync UI tab with back/forward navigation (URL changes outside Remix navigation).
+  useEffect(() => {
+    const onPopState = () => {
+      const url = new URL(window.location.href);
+      const t = url.searchParams.get('tab');
+      const next: 'all' | 'mine' = t === 'mine' ? 'mine' : 'all';
+      setUiTabValue(next);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   return (
     <div className="space-y-4">
       <PageHeader
-        title={showMyFormsOnly ? 'My Forms' : 'Forms'}
+        title={
+          showMyFormsOnly ? 'My Forms' : 'Forms'
+        }
         description={
           showMyFormsOnly
-            ? 'Create and manage your order forms'
-            : 'Create and manage order forms for your products'
+              ? 'Create and manage your order forms'
+              : 'Create and manage order forms for your products'
         }
         actions={
           <>
             <PageRefreshButton />
-            <Link to="/admin/marketing/forms/new" className="btn-primary btn-sm inline-flex items-center justify-center">
-              + New Form
+            <Link to="/admin/marketing/forms/new" prefetch="intent">
+              <Button variant="primary" size="sm">
+                + New Form
+              </Button>
             </Link>
           </>
         }
       />
 
-      {productsLoadError && !dismissedProductsError && (
-        <PageNotification
-          variant="error"
-          message={productsLoadError}
-          durationMs={8000}
-          onDismiss={() => setDismissedProductsError(true)}
-        />
-      )}
+      <OverviewStatStrip
+        items={[
+          { label: 'Total Forms', value: totalForms, valueClassName: 'text-app-fg' },
+          {
+            label: 'Active Forms',
+            value: allForms.filter((c) => c.status === 'ACTIVE').length,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+        ]}
+      />
 
+      <Tabs
+        value={uiTabValue}
+        onChange={(v) => {
+          const next = v as 'all' | 'mine';
+          setUiTabValue(next);
+          setMainNavTab(next);
+        }}
+        tabs={
+          isMediaBuyer
+            ? [
+                { value: 'mine', label: `My forms (${mineFormsCount})` },
+              ]
+            : [
+                { value: 'all', label: `All forms (${allFormsCount})` },
+                { value: 'mine', label: `My forms (${mineFormsCount})` },
+              ]
+        }
+      />
+
+      <div className="relative">
+        <>
       {/* Empty state hint: why you might not see forms */}
       {displayedForms.length === 0 && (
         <div className="rounded-lg bg-info-50 dark:bg-info-700/20 border border-info-200 dark:border-info-700/50 px-4 py-3">
@@ -223,7 +283,7 @@ export function FormsPage({
               </Link>{' '}
               to create one.
             </p>
-          ) : viewMode === 'mine' ? (
+          ) : uiFormsScope === 'mine' ? (
             <p className="text-sm text-info-800 dark:text-info-200">
               No forms in this view. You&apos;re viewing <strong>My forms</strong> — switch to the <strong>All forms</strong> tab above to see forms created by other users.
             </p>
@@ -237,34 +297,6 @@ export function FormsPage({
             </p>
           )}
         </div>
-      )}
-
-      <DeferredSection resolve={products} fallback={<OverviewStatStripSkeleton count={3} />}>
-        {(resolvedProducts) => (
-          <OverviewStatStrip
-            items={[
-              { label: 'Total Forms', value: displayedForms.length, valueClassName: 'text-app-fg' },
-              {
-                label: 'Active Forms',
-                value: displayedForms.filter((c) => c.status === 'ACTIVE').length,
-                valueClassName: 'text-success-600 dark:text-success-400',
-              },
-              { label: 'Products', value: resolvedProducts.length, valueClassName: 'text-app-fg' },
-            ]}
-          />
-        )}
-      </DeferredSection>
-
-      {/* All / Mine tabs (HoM/SuperAdmin only — Media Buyer always sees own forms) */}
-      {!isMediaBuyer && currentUserId && (
-        <Tabs
-          value={viewMode}
-          onChange={(v) => setViewMode(v as typeof viewMode)}
-          tabs={[
-            { value: 'all', label: `All forms (${(forms as Campaign[]).length})` },
-            { value: 'mine', label: `My forms (${(forms as Campaign[]).filter((c) => c.mediaBuyerId === currentUserId).length})` },
-          ]}
-        />
       )}
 
       {/* ── Forms Cards ───────────────────────────── */}
@@ -335,6 +367,8 @@ export function FormsPage({
             />
           </div>
         )}
+      </div>
+        </>
       </div>
 
       {/* ── Deployment Modal ──────────────────────────── */}

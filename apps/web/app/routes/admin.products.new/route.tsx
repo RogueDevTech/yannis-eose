@@ -19,6 +19,12 @@ interface LoaderData {
   categories: CategoryOption[];
 }
 
+function parseCurrencyToNumber(raw: string): number | null {
+  const n = Number(String(raw).replace(/,/g, '').trim());
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'products.create');
   const cookie = getSessionCookie(request);
@@ -38,27 +44,25 @@ export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
   const name = formData.get('name')?.toString() ?? '';
   const costPrice = formData.get('costPrice')?.toString() ?? '';
+  const baseSalePriceRaw = formData.get('baseSalePrice')?.toString() ?? '';
   const description = formData.get('description')?.toString() || undefined;
   const category = formData.get('category')?.toString() || undefined;
   const categoryId = formData.get('categoryId')?.toString() || null;
-  const offersRaw = formData.get('offers')?.toString() ?? '[]';
 
-  let offers: Array<{ label: string; qty: number; price: string }>;
+  let galleryImageUrls: unknown;
   try {
-    offers = JSON.parse(offersRaw);
+    galleryImageUrls = JSON.parse(formData.get('galleryImageUrls')?.toString() ?? '[]');
   } catch {
-    return json({ error: 'Invalid offers data' }, { status: 400 });
+    return json({ error: 'Invalid gallery images data' }, { status: 400 });
+  }
+  if (!Array.isArray(galleryImageUrls) || !galleryImageUrls.every((u) => typeof u === 'string')) {
+    return json({ error: 'Gallery images must be a JSON array of URL strings' }, { status: 400 });
   }
 
-  if (!name || !costPrice || offers.length === 0) {
-    return json({ error: 'Name, cost price, and at least one offer are required' }, { status: 400 });
-  }
+  const baseSalePrice = parseCurrencyToNumber(baseSalePriceRaw);
 
-  // Validate each offer has required fields
-  for (const offer of offers) {
-    if (!offer.label || !offer.price || !offer.qty) {
-      return json({ error: 'Each offer must have a label, quantity, and price' }, { status: 400 });
-    }
+  if (!name || !costPrice || baseSalePrice == null) {
+    return json({ error: 'Name, list price, and cost price are required' }, { status: 400 });
   }
 
   const cookie = getSessionCookie(request);
@@ -68,8 +72,9 @@ export async function action({ request }: ActionFunctionArgs) {
     cookie,
     body: {
       name,
-      offers,
+      baseSalePrice,
       costPrice,
+      galleryImageUrls,
       description,
       category,
       categoryId: categoryId || null,

@@ -22,7 +22,7 @@ import {
 } from '@yannis/shared';
 import { EDGE_FORM_ACTOR_ID, canonicalPermissionCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
-import { withActor } from '../common/db/with-actor';
+import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -330,7 +330,7 @@ export class OrdersService {
         .where(
           and(
             eq(schema.users.status, 'ACTIVE'),
-            inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'BRANCH_ADMIN']),
+            inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
             eq(schema.users.primaryBranchId, params.branchId),
           ),
         );
@@ -339,16 +339,24 @@ export class OrdersService {
       }
     }
 
+    // Org-wide HoLogistics often has no primary_branch match to the order branch;
+    // notify every active Head of Logistics (multi-holder safe — Set dedupes).
+    const hoLogistics = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS')));
+    for (const r of hoLogistics) {
+      if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+    }
+
     for (const userId of recipientIds) {
-      await this.notifications
-        .create({
-          userId,
-          type: 'approval:permission_request',
-          title,
-          body,
-          data,
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId,
+        type: 'approval:permission_request',
+        title,
+        body,
+        data,
+      });
     }
   }
 
@@ -384,7 +392,7 @@ export class OrdersService {
         .where(
           and(
             eq(schema.users.status, 'ACTIVE'),
-            inArray(schema.users.role, ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'BRANCH_ADMIN']),
+            inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
             eq(schema.users.primaryBranchId, params.branchId),
           ),
         );
@@ -393,16 +401,22 @@ export class OrdersService {
       }
     }
 
+    const hoLogisticsDeletion = await this.db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS')));
+    for (const r of hoLogisticsDeletion) {
+      if (r.id !== params.excludeUserId) recipientIds.add(r.id);
+    }
+
     for (const userId of recipientIds) {
-      await this.notifications
-        .create({
-          userId,
-          type: 'approval:permission_request',
-          title,
-          body,
-          data,
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId,
+        type: 'approval:permission_request',
+        title,
+        body,
+        data,
+      });
     }
   }
 
@@ -509,7 +523,7 @@ export class OrdersService {
     const proposedTotalForTimeline = Math.round(input.totalAmount * 100) / 100;
     const reasonSnippet =
       input.reason.length > 80 ? `${input.reason.slice(0, 77)}…` : input.reason;
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId: input.orderId,
       eventType: 'LINE_PRICE_CHANGE_REQUESTED',
       actorId: actor.id,
@@ -523,6 +537,7 @@ export class OrdersService {
         proposedTotalAmount: input.totalAmount,
         reason: input.reason,
       },
+      branchId: order.branchId ?? null,
     });
 
     void this.notifyOrderLinePriceChangeApprovers({
@@ -725,6 +740,110 @@ export class OrdersService {
     return params.fallbackBranchId ?? null;
   }
 
+  /** Edge tamper gate: order lines must match allowlisted tiers for this campaign (templates or legacy base price). */
+  private async assertEdgeFormLineItemsAllowlisted(orderInput: CreateOrderInput): Promise<void> {
+    const campaignId = orderInput.campaignId;
+    if (!campaignId) return;
+
+    const [camp] = await this.db
+      .select({
+        productIds: schema.campaigns.productIds,
+        formConfig: schema.campaigns.formConfig,
+      })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+
+    const campaignProductId = ((camp?.productIds ?? []) as string[])[0];
+    if (!campaignProductId) return;
+
+    const selectedIds = (
+      camp?.formConfig as { selectedOfferTemplateIds?: string[] } | null | undefined
+    )?.selectedOfferTemplateIds;
+
+    const tmplConds = [
+      eq(schema.offerTemplates.productId, campaignProductId),
+      eq(schema.offerTemplates.status, 'ACTIVE'),
+    ];
+    if (selectedIds?.length) {
+      tmplConds.push(inArray(schema.offerTemplates.id, selectedIds));
+    }
+
+    const allowList = await this.db
+      .select({
+        name: schema.offerTemplates.name,
+        price: schema.offerTemplates.price,
+        quantity: schema.offerTemplates.quantity,
+      })
+      .from(schema.offerTemplates)
+      .where(and(...tmplConds));
+
+    const priceNearlyEq = (a: number, b: number) => Math.abs(a - b) < 0.02;
+
+    let synthetic: typeof allowList = [];
+
+    if (allowList.length === 0) {
+      const [p] = await this.db
+        .select({
+          baseSalePrice: schema.products.baseSalePrice,
+          offers: schema.products.offers,
+        })
+        .from(schema.products)
+        .where(eq(schema.products.id, campaignProductId))
+        .limit(1);
+      if (!p) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Product not found for this campaign.',
+        });
+      }
+      const embedded = p.offers as Array<{ label?: string; qty?: number; price?: string | number }> | null;
+      if (Array.isArray(embedded) && embedded.length > 0) {
+        synthetic = embedded.map((o) => ({
+          name: typeof o.label === 'string' ? o.label : 'Offer',
+          price: String(o.price ?? p.baseSalePrice),
+          quantity: typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1,
+        }));
+      } else {
+        synthetic = [{ name: 'Standard', price: String(p.baseSalePrice), quantity: 1 }];
+      }
+    }
+
+    const tiers = synthetic.length ? synthetic : allowList;
+
+    for (const item of orderInput.items) {
+      if (item.productId !== campaignProductId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Product does not match this campaign.',
+        });
+      }
+
+      const unitNum = Number(item.unitPrice);
+      const templateQty = item.quantity;
+      const labelTrim = (item.offerLabel ?? '').trim();
+
+      const candidates = tiers.filter(
+        (t) =>
+          (t.quantity ?? 1) === templateQty && priceNearlyEq(Number(t.price), unitNum),
+      );
+
+      let ok = false;
+      if (labelTrim.length > 0) {
+        ok = candidates.some((t) => t.name.trim() === labelTrim);
+      } else if (candidates.length === 1) {
+        ok = true;
+      }
+
+      if (!ok) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Offer selection does not match this form.',
+        });
+      }
+    }
+  }
+
   /**
    * Create a new order with status UNPROCESSED.
    * Called by Edge Worker or admin manual entry.
@@ -769,6 +888,10 @@ export class OrdersService {
           );
         }
       }
+    }
+
+    if (orderSource === 'edge-form' && orderInput.campaignId) {
+      await this.assertEdgeFormLineItemsAllowlisted(orderInput);
     }
 
     const branchId = await this.resolveBranchIdForNewOrder({
@@ -873,22 +996,18 @@ export class OrdersService {
 
     // Notify Head of CS + Head of Marketing only on new order (not every CS agent — they get
     // order:assigned when Hot Swap / auto-dispatch / claim assigns them). SuperAdmin excluded (volume).
-    this.notifications
-      .createForRole('HEAD_OF_CS', {
-        type: 'order:new',
-        title: 'New order received',
-        body: 'A new order needs attention.',
-        data: { orderId: order.id },
-      })
-      .catch(() => {});
-    this.notifications
-      .createForRole('HEAD_OF_MARKETING', {
-        type: 'order:new',
-        title: 'New order received',
-        body: 'A new order has been created.',
-        data: { orderId: order.id },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
+      type: 'order:new',
+      title: 'New order received',
+      body: 'A new order needs attention.',
+      data: { orderId: order.id },
+    });
+    this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
+      type: 'order:new',
+      title: 'New order received',
+      body: 'A new order has been created.',
+      data: { orderId: order.id },
+    });
 
     // Notify Media Buyer if order is from their campaign. Body is
     // personalized with the customer name + campaign name so the MB can
@@ -909,15 +1028,13 @@ export class OrdersService {
       const body = campaignName
         ? `${customerLabel} just placed an order via ${campaignName}.`
         : `${customerLabel} just placed an order from your campaign.`;
-      this.notifications
-        .create({
-          userId: order.mediaBuyerId,
-          type: 'order:new_campaign',
-          title: 'New order from your campaign',
-          body,
-          data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName, customerName: customerLabel },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: order.mediaBuyerId,
+        type: 'order:new_campaign',
+        title: 'New order from your campaign',
+        body,
+        data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName, customerName: customerLabel },
+      });
     }
 
     // Auto-dispatch to least-loaded CS agent
@@ -946,7 +1063,7 @@ export class OrdersService {
       receivedDescription = `Order created${mbSuffix}`;
     }
 
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId: order.id,
       eventType: 'ORDER_RECEIVED',
       actorId: receivedActorId,
@@ -956,6 +1073,7 @@ export class OrdersService {
         mediaBuyerName && order.mediaBuyerId
           ? { mediaBuyerId: order.mediaBuyerId, mediaBuyerName }
           : undefined,
+      branchId: order.branchId ?? null,
     });
 
     // Mark cart as CONVERTED if cartId was provided (same actor as order create for audit)
@@ -1090,15 +1208,13 @@ export class OrdersService {
     this.events.emitToUser(actorId, 'order:assigned', { orderId: order.id });
     this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id }, order.branchId ?? null);
 
-    this.notifications
-      .create({
-        userId: actorId,
-        type: 'order:assigned',
-        title: 'Offline order created',
-        body: 'You created an offline order. It is assigned to you.',
-        data: { orderId: order.id },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: actorId,
+      type: 'order:assigned',
+      title: 'Offline order created',
+      body: 'You created an offline order. It is assigned to you.',
+      data: { orderId: order.id },
+    });
 
     const [actorRow, mediaBuyerName] = await Promise.all([
       this.db
@@ -1111,7 +1227,7 @@ export class OrdersService {
     const actorName = actorRow[0]?.name ?? null;
     const mbSuffix = mediaBuyerName ? ` — attributed to media buyer ${mediaBuyerName}` : '';
 
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId: order.id,
       eventType: 'ORDER_RECEIVED',
       actorId: actorId,
@@ -1121,6 +1237,7 @@ export class OrdersService {
         mediaBuyerName && order.mediaBuyerId
           ? { mediaBuyerId: order.mediaBuyerId, mediaBuyerName }
           : undefined,
+      branchId: order.branchId ?? null,
     });
 
     return { id: order.id };
@@ -1380,6 +1497,38 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Batch customer names for inventory DELIVERY movement labels. Same visibility as
+   * `orders.getById` + `assertActorMayViewOrderForRead`; rows the actor cannot read are omitted.
+   */
+  async listCustomerNamesByOrderIds(
+    actor: SessionUser,
+    orderIds: string[],
+  ): Promise<Array<{ orderId: string; customerName: string }>> {
+    const unique = [...new Set(orderIds)];
+    if (unique.length === 0) return [];
+
+    const rows = await this.db
+      .select({
+        id: schema.orders.id,
+        mediaBuyerId: schema.orders.mediaBuyerId,
+        customerName: schema.orders.customerName,
+      })
+      .from(schema.orders)
+      .where(and(inArray(schema.orders.id, unique), isNull(schema.orders.deletedAt)));
+
+    const out: Array<{ orderId: string; customerName: string }> = [];
+    for (const row of rows) {
+      try {
+        this.assertActorMayViewOrderForRead(actor, { mediaBuyerId: row.mediaBuyerId });
+        out.push({ orderId: row.id, customerName: row.customerName });
+      } catch {
+        /* same as failed per-order getById — omit */
+      }
+    }
+    return out;
+  }
+
   async listAllocatableLocations(
     orderId: string,
     viewerRole?: string | null,
@@ -1437,6 +1586,7 @@ export class OrdersService {
         address: schema.logisticsLocations.address,
         whatsappGroupLink: schema.logisticsLocations.whatsappGroupLink,
         providerName: schema.logisticsProviders.name,
+        dispatchLocked: schema.logisticsLocations.dispatchLocked,
       })
       .from(schema.logisticsLocations)
       .leftJoin(
@@ -1468,12 +1618,45 @@ export class OrdersService {
       }> | null;
     };
     const results: LocationResult[] = [];
+    const productIds = [...needsByProduct.keys()];
+
+    // Batch availability across ALL active locations in one query to avoid N×round-trips
+    // (which regularly times out on remote DBs and makes the UI show an empty list).
+    const locationIds = locations.map((l) => l.id);
+    const shelfAgg =
+      productIds.length === 0 || locationIds.length === 0
+        ? []
+        : await this.db
+            .select({
+              locationId: schema.inventoryLevels.locationId,
+              productId: schema.inventoryLevels.productId,
+              available: sql<number>`COALESCE(
+                SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}),
+                0
+              )::int`,
+            })
+            .from(schema.inventoryLevels)
+            .where(
+              and(
+                inArray(schema.inventoryLevels.locationId, locationIds),
+                inArray(schema.inventoryLevels.productId, productIds),
+              ),
+            )
+            .groupBy(schema.inventoryLevels.locationId, schema.inventoryLevels.productId);
+
+    const availableByLocationProduct = new Map<string, number>();
+    for (const row of shelfAgg) {
+      availableByLocationProduct.set(`${row.locationId}:${row.productId}`, Number(row.available) || 0);
+    }
 
     for (const location of locations) {
-      const isLocked = await this.inventoryService.isDispatchLocked(location.id);
-      if (isLocked) {
+      if (location.dispatchLocked) {
         results.push({
-          ...location,
+          id: location.id,
+          name: location.name,
+          address: location.address,
+          whatsappGroupLink: location.whatsappGroupLink,
+          providerName: location.providerName ?? null,
           eligible: false,
           reason: 'Dispatch locked at this location. Resolve stock reconciliations first.',
           availabilityByProduct: null,
@@ -1491,20 +1674,7 @@ export class OrdersService {
       let genericReason: string | null = null;
 
       for (const [productId, need] of needsByProduct) {
-        const levelRows = await this.db
-          .select({
-            stockCount: schema.inventoryLevels.stockCount,
-            reservedCount: schema.inventoryLevels.reservedCount,
-          })
-          .from(schema.inventoryLevels)
-          .where(and(
-            eq(schema.inventoryLevels.productId, productId),
-            eq(schema.inventoryLevels.locationId, location.id),
-          ))
-          .limit(1);
-
-        const level = levelRows[0];
-        const available = level ? level.stockCount - level.reservedCount : 0;
+        const available = availableByLocationProduct.get(`${location.id}:${productId}`) ?? 0;
         availabilityByProduct.push({
           productId,
           productName: need.name,
@@ -1513,8 +1683,8 @@ export class OrdersService {
         });
 
         if (detailedReason == null) {
-          if (!level) {
-            detailedReason = `No inventory row for ${need.name}. Receive stock first.`;
+          if (available <= 0) {
+            detailedReason = `No sellable shelf stock for ${need.name} at this hub. Receive stock first.`;
             genericReason = 'No inventory at this location.';
           } else if (available < need.qty) {
             detailedReason = `Insufficient ${need.name} stock (need ${need.qty}, have ${available}).`;
@@ -1524,7 +1694,11 @@ export class OrdersService {
       }
 
       results.push({
-        ...location,
+        id: location.id,
+        name: location.name,
+        address: location.address,
+        whatsappGroupLink: location.whatsappGroupLink,
+        providerName: location.providerName ?? null,
         eligible: detailedReason == null,
         reason: hideStockCounts ? genericReason : detailedReason,
         availabilityByProduct: hideStockCounts ? null : availabilityByProduct,
@@ -2098,9 +2272,11 @@ export class OrdersService {
       updateFields['lockedBy'] = actor.id;
     }
 
-    // Save preferred delivery date on CONFIRMED (set by CS agent via confirm modal)
-    if (newStatus === 'CONFIRMED' && input.metadata?.preferredDeliveryDate) {
-      updateFields['preferredDeliveryDate'] = input.metadata.preferredDeliveryDate;
+    // Save preferred delivery date on CONFIRMED (required — set by CS via confirm modal)
+    if (newStatus === 'CONFIRMED') {
+      updateFields['preferredDeliveryDate'] = String(
+        input.metadata?.preferredDeliveryDate ?? '',
+      ).trim();
     }
 
     // Clear lock when order moves past CS engagement
@@ -2279,7 +2455,7 @@ export class OrdersService {
           .limit(1);
         reallocatedFromName = prevRows[0]?.name ?? undefined;
       }
-      this.writeTimelineEvent({
+      void this.writeTimelineEvent({
         orderId: input.orderId,
         eventType: timelineType,
         actorId: actor.id,
@@ -2298,6 +2474,7 @@ export class OrdersService {
               : undefined,
         }),
         metadata: input.metadata as Record<string, unknown> | undefined,
+        branchId: updated.branchId ?? null,
       });
     }
 
@@ -2315,25 +2492,21 @@ export class OrdersService {
 
     // Persistent notifications for logistics flow
     if (newStatus === 'AGENT_ASSIGNED' && updated.logisticsLocationId) {
-      this.notifications
-        .createForLocation(updated.logisticsLocationId, {
-          type: 'order:allocated',
-          title: 'Agent-assigned order at your location',
-          body: 'An order was assigned for delivery here. Please assign a rider.',
-          data: { orderId: order.id },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreateForLocation(updated.logisticsLocationId, {
+        type: 'order:allocated',
+        title: 'Agent-assigned order at your location',
+        body: 'An order was assigned for delivery here. Please assign a rider.',
+        data: { orderId: order.id },
+      });
     }
     if (newStatus === 'DISPATCHED' && updated.riderId) {
-      this.notifications
-        .create({
-          userId: updated.riderId,
-          type: 'delivery:assigned',
-          title: 'Delivery assigned to you',
-          body: 'A delivery has been assigned to you. Please pick up and deliver.',
-          data: { orderId: order.id },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: updated.riderId,
+        type: 'delivery:assigned',
+        title: 'Delivery assigned to you',
+        body: 'A delivery has been assigned to you. Please pick up and deliver.',
+        data: { orderId: order.id },
+      });
     }
 
     return {
@@ -2503,12 +2676,13 @@ export class OrdersService {
       workingInput.preferredDeliveryDate !== undefined ||
       workingInput.customFields !== undefined
     ) {
-      this.writeTimelineEvent({
+      void this.writeTimelineEvent({
         orderId: input.orderId,
         eventType: 'ADDRESS_UPDATED',
         actorId: actor.id,
         actorName: actor.name ?? null,
         description: `Delivery details updated by ${actorName}`,
+        branchId: updated.branchId ?? null,
       });
     }
     if (workingInput.items !== undefined) {
@@ -2525,12 +2699,13 @@ export class OrdersService {
         (sum, item) => sum + item.quantity,
         0,
       );
-      this.writeTimelineEvent({
+      void this.writeTimelineEvent({
         orderId: input.orderId,
         eventType: 'QUANTITY_UPDATED',
         actorId: actor.id,
         actorName: actor.name ?? null,
         description: `Order quantity updated from ${oldQty} to ${newQty} by ${actorName}`,
+        branchId: updated.branchId ?? null,
       });
     }
 
@@ -2638,8 +2813,18 @@ export class OrdersService {
         branchId: order.branchId ?? null,
         mediaBuyerId: order.mediaBuyerId ?? null,
       });
-      this.notifications.createForRole('HEAD_OF_CS', { type: 'order:new', title: 'New order received', body: 'A new order needs attention.', data: { orderId: order.id } }).catch(() => {});
-      this.notifications.createForRole('HEAD_OF_MARKETING', { type: 'order:new', title: 'New order received', body: 'A new order has been created.', data: { orderId: order.id } }).catch(() => {});
+      this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
+        type: 'order:new',
+        title: 'New order received',
+        body: 'A new order needs attention.',
+        data: { orderId: order.id },
+      });
+      this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
+        type: 'order:new',
+        title: 'New order received',
+        body: 'A new order has been created.',
+        data: { orderId: order.id },
+      });
       if (order.mediaBuyerId) {
         const campaignNamePay = order.campaignId
           ? (
@@ -2654,15 +2839,13 @@ export class OrdersService {
         const bodyPay = campaignNamePay
           ? `${customerLabelPay} just placed an order via ${campaignNamePay}.`
           : `${customerLabelPay} just placed an order from your campaign.`;
-        this.notifications
-          .create({
-            userId: order.mediaBuyerId,
-            type: 'order:new_campaign',
-            title: 'New order from your campaign',
-            body: bodyPay,
-            data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName: campaignNamePay, customerName: customerLabelPay },
-          })
-          .catch(() => {});
+        this.notifications.enqueueCreate({
+          userId: order.mediaBuyerId,
+          type: 'order:new_campaign',
+          title: 'New order from your campaign',
+          body: bodyPay,
+          data: { orderId: order.id, campaignId: order.campaignId ?? null, campaignName: campaignNamePay, customerName: customerLabelPay },
+        });
       }
       const mediaBuyerNamePay = order.mediaBuyerId
         ? await this.resolveUserNameById(order.mediaBuyerId)
@@ -2671,7 +2854,7 @@ export class OrdersService {
         ? ` — attributed to media buyer ${mediaBuyerNamePay}`
         : '';
       this.autoDispatchToCS(order.id).catch(() => {});
-      this.writeTimelineEvent({
+      void this.writeTimelineEvent({
         orderId: order.id,
         eventType: 'ORDER_RECEIVED',
         actorId: actorId,
@@ -2681,14 +2864,16 @@ export class OrdersService {
           mediaBuyerNamePay && order.mediaBuyerId
             ? { mediaBuyerId: order.mediaBuyerId, mediaBuyerName: mediaBuyerNamePay }
             : undefined,
+        branchId: order.branchId ?? null,
       });
-      this.writeTimelineEvent({
+      void this.writeTimelineEvent({
         orderId: order.id,
         eventType: 'PAYMENT_RECEIVED',
         actorId: actorId,
         actorName: 'Paystack',
         description: 'Online payment received',
         metadata: { paymentReference: reference },
+        branchId: order.branchId ?? null,
       });
       if (cartId) {
         this.cartService.convert(cartId, order.id, actorId).catch(() => {});
@@ -2713,7 +2898,11 @@ export class OrdersService {
     if (!orderId) return null;
 
     const orderRow = await this.db
-      .select({ totalAmount: schema.orders.totalAmount, paymentStatus: schema.orders.paymentStatus })
+      .select({
+        totalAmount: schema.orders.totalAmount,
+        paymentStatus: schema.orders.paymentStatus,
+        branchId: schema.orders.branchId,
+      })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
       .limit(1);
@@ -2728,13 +2917,14 @@ export class OrdersService {
       .update(schema.orders)
       .set({ paymentStatus: 'PAID', updatedAt: new Date() })
       .where(eq(schema.orders.id, orderId));
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId,
       eventType: 'PAYMENT_RECEIVED',
       actorId: null,
       actorName: 'Paystack',
       description: 'Online payment received',
       metadata: { paymentReference: reference },
+      branchId: order.branchId ?? null,
     });
     return { orderId, success: true };
   }
@@ -2789,23 +2979,21 @@ export class OrdersService {
       orderId,
       customerName: updated.customerName,
     }, updated.branchId ?? null);
-    this.notifications
-      .create({
-        userId: csAgentId,
-        type: 'order:assigned',
-        title: 'Order assigned to you',
-        body: this.formatAssignedOrderBody({
-          customerName: updated.customerName,
-          totalAmount: updated.totalAmount,
-        }),
-        data: {
-          orderId,
-          customerName: updated.customerName,
-          totalAmount: updated.totalAmount,
-          assignedBy: actor.name ?? null,
-        },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: csAgentId,
+      type: 'order:assigned',
+      title: 'Order assigned to you',
+      body: this.formatAssignedOrderBody({
+        customerName: updated.customerName,
+        totalAmount: updated.totalAmount,
+      }),
+      data: {
+        orderId,
+        customerName: updated.customerName,
+        totalAmount: updated.totalAmount,
+        assignedBy: actor.name ?? null,
+      },
+    });
 
     // Timeline event: manually assigned
     const agentRow = await this.db
@@ -2814,13 +3002,14 @@ export class OrdersService {
       .where(eq(schema.users.id, csAgentId))
       .limit(1);
     const agentName = agentRow[0]?.name ?? null;
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId,
       eventType: 'ORDER_MANUALLY_ASSIGNED',
       actorId: actor.id,
       actorName: actor.name ?? null,
       description: `Assigned to ${agentName ?? csAgentId} by ${actor.name ?? 'Head of CS'}`,
       metadata: { csAgentId },
+      branchId: updated.branchId ?? null,
     });
 
     return updated;
@@ -2871,24 +3060,20 @@ export class OrdersService {
       bulkTotal > 0 ? `₦${Math.round(bulkTotal).toLocaleString('en-NG')}` : null;
     const noun = updated.length === 1 ? 'order' : 'orders';
 
-    this.notifications
-      .create({
-        userId: fromAgentId,
-        type: 'order:reassigned',
-        title: 'Orders reassigned',
-        body: `${updated.length} ${noun}${formattedTotal ? ` (${formattedTotal})` : ''} moved off your queue.`,
-        data: { count: updated.length, toAgentId },
-      })
-      .catch(() => {});
-    this.notifications
-      .create({
-        userId: toAgentId,
-        type: 'order:assigned_bulk',
-        title: 'Orders assigned to you',
-        body: `${updated.length} ${noun}${formattedTotal ? ` · ${formattedTotal}` : ''} added to your queue — tap to start calling.`,
-        data: { count: updated.length, fromAgentId, orderIds: updated.map((o) => o.id) },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: fromAgentId,
+      type: 'order:reassigned',
+      title: 'Orders reassigned',
+      body: `${updated.length} ${noun}${formattedTotal ? ` (${formattedTotal})` : ''} moved off your queue.`,
+      data: { count: updated.length, toAgentId },
+    });
+    this.notifications.enqueueCreate({
+      userId: toAgentId,
+      type: 'order:assigned_bulk',
+      title: 'Orders assigned to you',
+      body: `${updated.length} ${noun}${formattedTotal ? ` · ${formattedTotal}` : ''} added to your queue — tap to start calling.`,
+      data: { count: updated.length, fromAgentId, orderIds: updated.map((o) => o.id) },
+    });
 
     // Notify cs-all so CS overview refreshes
     this.events.emitToRoom('cs-all', 'order:reassigned', {
@@ -2908,13 +3093,14 @@ export class OrdersService {
       .limit(1);
     const toAgentName = toNameRow[0]?.name ?? toAgentId;
     for (const changed of updated) {
-      this.writeTimelineEvent({
+      void this.writeTimelineEvent({
         orderId: changed.id,
         eventType: 'ORDER_REASSIGNED',
         actorId: actor.id,
         actorName: actor.name ?? null,
         description: `Reassigned to ${toAgentName} by ${actor.name ?? 'Head of CS'}`,
         metadata: { fromAgentId, toAgentId },
+        branchId: changed.branchId ?? null,
       });
     }
 
@@ -3114,15 +3300,13 @@ export class OrdersService {
         count: redistributed,
         toAgentId: undefined,
       });
-      this.notifications
-        .create({
-          userId: agentId,
-          type: 'order:reassigned',
-          title: 'Orders redistributed',
-          body: `${redistributed} ${redistributed === 1 ? 'order' : 'orders'} moved off your queue and spread across the team.`,
-          data: { count: redistributed },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: agentId,
+        type: 'order:reassigned',
+        title: 'Orders redistributed',
+        body: `${redistributed} ${redistributed === 1 ? 'order' : 'orders'} moved off your queue and spread across the team.`,
+        data: { count: redistributed },
+      });
       for (const [toAgentId, orderIds] of ordersByTarget) {
         this.events.emitToUser(toAgentId, 'order:assigned_bulk', {
           count: orderIds.length,
@@ -3130,15 +3314,13 @@ export class OrdersService {
           orderIds,
         });
         const noun = orderIds.length === 1 ? 'order' : 'orders';
-        this.notifications
-          .create({
-            userId: toAgentId,
-            type: 'order:assigned_bulk',
-            title: 'Orders assigned to you',
-            body: `${orderIds.length} ${noun} added to your queue — tap to start calling.`,
-            data: { count: orderIds.length, fromAgentId: agentId, orderIds },
-          })
-          .catch(() => {});
+        this.notifications.enqueueCreate({
+          userId: toAgentId,
+          type: 'order:assigned_bulk',
+          title: 'Orders assigned to you',
+          body: `${orderIds.length} ${noun} added to your queue — tap to start calling.`,
+          data: { count: orderIds.length, fromAgentId: agentId, orderIds },
+        });
       }
       this.events.emitToRoom('cs-all', 'order:assignments_changed', { redistributed }, actor.currentBranchId ?? null);
     }
@@ -3242,11 +3424,50 @@ export class OrdersService {
   }
 
   /**
+   * Distinct orders per assigned CS agent whose CS stage closed today (Africa/Lagos calendar).
+   * Uses timeline ORDER_CONFIRMED / ORDER_CANCELLED joined to orders by assigned_cs_id (display-only).
+   * Attribution uses current assigned_cs_id — rare reassignment after close could mis-attribute.
+   */
+  private async getTodayCsStageCloseCountsByAgent(
+    branchId?: string | null,
+    onlyAgentId?: string,
+  ): Promise<Record<string, number>> {
+    const conditions: Parameters<typeof and>[0][] = [
+      inArray(schema.orderTimelineEvents.eventType, ['ORDER_CONFIRMED', 'ORDER_CANCELLED']),
+      sql`(timezone('Africa/Lagos', ${schema.orderTimelineEvents.createdAt}))::date = (timezone('Africa/Lagos', now()))::date`,
+      sql`${schema.orders.assignedCsId} IS NOT NULL`,
+      isNull(schema.orders.deletedAt),
+    ];
+    if (branchId) {
+      conditions.push(eq(schema.orders.branchId, branchId));
+    }
+    if (onlyAgentId) {
+      conditions.push(eq(schema.orders.assignedCsId, onlyAgentId));
+    }
+
+    const rows = await this.db
+      .select({
+        assignedCsId: schema.orders.assignedCsId,
+        cnt: sql<number>`COUNT(DISTINCT ${schema.orders.id})::int`,
+      })
+      .from(schema.orderTimelineEvents)
+      .innerJoin(schema.orders, eq(schema.orderTimelineEvents.orderId, schema.orders.id))
+      .where(and(...conditions))
+      .groupBy(schema.orders.assignedCsId);
+
+    const map: Record<string, number> = {};
+    for (const row of rows) {
+      if (row.assignedCsId) map[row.assignedCsId] = Number(row.cnt ?? 0);
+    }
+    return map;
+  }
+
+  /**
    * Get CS agent workload — for dispatch algorithm and dashboard.
    * Single aggregation query + user list (no N+1).
    */
   async getCSAgentWorkloads(branchId?: string | null) {
-    const [agents, pendingByAgent] = await Promise.all([
+    const [agents, pendingByAgent, closesTodayMap] = await Promise.all([
       this.db
         .select({
           id: schema.users.id,
@@ -3275,6 +3496,7 @@ export class OrdersService {
           ),
         )
         .groupBy(schema.orders.assignedCsId),
+      this.getTodayCsStageCloseCountsByAgent(branchId),
     ]);
 
     const pendingMap: Record<string, number> = {};
@@ -3287,6 +3509,7 @@ export class OrdersService {
       agentName: agent.name,
       capacity: agent.capacity ?? 10,
       pendingCount: pendingMap[agent.id] ?? 0,
+      todayClosesCount: closesTodayMap[agent.id] ?? 0,
       lastActionAt: agent.lastActionAt,
     }));
   }
@@ -3385,25 +3608,29 @@ export class OrdersService {
       return null;
     }
 
-    const pendingRows = await this.db
-      .select({ count: count() })
-      .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.assignedCsId, actor.id),
-          or(
-            eq(schema.orders.status, 'UNPROCESSED'),
-            eq(schema.orders.status, 'CS_ASSIGNED'),
-            eq(schema.orders.status, 'CS_ENGAGED'),
+    const [pendingRows, closesTodayMap] = await Promise.all([
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.assignedCsId, actor.id),
+            or(
+              eq(schema.orders.status, 'UNPROCESSED'),
+              eq(schema.orders.status, 'CS_ASSIGNED'),
+              eq(schema.orders.status, 'CS_ENGAGED'),
+            ),
           ),
         ),
-      );
+      this.getTodayCsStageCloseCountsByAgent(undefined, actor.id),
+    ]);
 
     return {
       agentId: user.id,
       agentName: user.name,
       capacity: user.capacity ?? 10,
       pendingCount: pendingRows[0]?.count ?? 0,
+      todayClosesCount: closesTodayMap[actor.id] ?? 0,
       lastActionAt: user.lastActionAt,
     };
   }
@@ -3876,32 +4103,31 @@ export class OrdersService {
 
     this.events.emitToUser(targetAgent.agentId, 'order:assigned', { orderId });
     this.events.emitToRoom('cs-all', 'order:assigned', { orderId }, orderRow?.branchId ?? null);
-    this.notifications
-      .create({
-        userId: targetAgent.agentId,
-        type: 'order:assigned',
-        title: 'Order assigned to you',
-        body: this.formatAssignedOrderBody({
-          customerName: orderRow?.customerName ?? null,
-          totalAmount: orderRow?.totalAmount ?? null,
-        }),
-        data: {
-          orderId,
-          customerName: orderRow?.customerName ?? null,
-          totalAmount: orderRow?.totalAmount ?? null,
-          assignedBy: 'Auto-dispatch',
-        },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: targetAgent.agentId,
+      type: 'order:assigned',
+      title: 'Order assigned to you',
+      body: this.formatAssignedOrderBody({
+        customerName: orderRow?.customerName ?? null,
+        totalAmount: orderRow?.totalAmount ?? null,
+      }),
+      data: {
+        orderId,
+        customerName: orderRow?.customerName ?? null,
+        totalAmount: orderRow?.totalAmount ?? null,
+        assignedBy: 'Auto-dispatch',
+      },
+    });
 
     // Timeline event: auto-assigned
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId,
       eventType: 'ORDER_AUTO_ASSIGNED',
       actorId: targetAgent.agentId,
       actorName: targetAgent.agentName,
       description: `Auto-assigned to ${targetAgent.agentName}`,
       metadata: { agentId: targetAgent.agentId, strategy },
+      branchId: orderRow?.branchId ?? null,
     });
 
     return true;
@@ -4018,23 +4244,22 @@ export class OrdersService {
       assignedCsId: actor.id,
     }, actor.currentBranchId ?? null);
 
-    this.notifications
-      .create({
-        userId: actor.id,
-        type: 'order:assigned',
-        title: 'Order assigned to you',
-        body: 'You claimed this order from the queue. Please attend to it.',
-        data: { orderId },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: actor.id,
+      type: 'order:assigned',
+      title: 'Order assigned to you',
+      body: 'You claimed this order from the queue. Please attend to it.',
+      data: { orderId },
+    });
 
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId,
       eventType: 'ORDER_CLAIMED',
       actorId: actor.id,
       actorName: actor.name,
       description: `${actor.name} claimed this order`,
       metadata: { agentId: actor.id, mode: 'claim' },
+      branchId: claimedRow?.branchId ?? actor.currentBranchId ?? null,
     });
 
     return { success: true };
@@ -4139,6 +4364,22 @@ export class OrdersService {
       }
 
       case 'CONFIRMED': {
+        const rawPreferred = metadata?.preferredDeliveryDate;
+        const preferredTrimmed =
+          typeof rawPreferred === 'string' ? rawPreferred.trim() : '';
+        if (!preferredTrimmed) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Scheduled delivery date is required to confirm the order.',
+          });
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(preferredTrimmed)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Scheduled delivery date must be a valid calendar date (YYYY-MM-DD).',
+          });
+        }
+
         const confirmPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
         const hasConfirmPerm = (code: string) =>
           actor.role === 'SUPER_ADMIN' ||
@@ -4471,15 +4712,6 @@ export class OrdersService {
 
     switch (newStatus) {
       case 'CONFIRMED': {
-        // Previously this looped per item with two queries each (INSERT
-        // stockMovement + SELECT batches) — N×2 sequential round-trips that
-        // dominated the CONFIRMED transaction on a remote DB. Batched into:
-        //   1. One bulk-INSERT for all stockMovements rows
-        //   2. One IN-list SELECT for all batches across all products,
-        //      grouped client-side for the FIFO landed-cost calc
-        // Constant 2 round-trips inside the tx regardless of line-item count.
-        const productIds = [...new Set(orderItems.map((item) => item.productId))];
-
         await withActor(this.db, actor, async (tx) => {
           const movementValues = orderItems.map((item) => ({
             productId: item.productId,
@@ -4493,34 +4725,18 @@ export class OrdersService {
             await tx.insert(schema.stockMovements).values(movementValues);
           }
 
-          const allBatches =
-            productIds.length > 0
-              ? await tx
-                  .select()
-                  .from(schema.stockBatches)
-                  .where(inArray(schema.stockBatches.productId, productIds))
-                  .orderBy(asc(schema.stockBatches.receivedAt))
-              : [];
-          const batchesByProduct = new Map<string, typeof allBatches>();
-          for (const batch of allBatches) {
-            const list = batchesByProduct.get(batch.productId) ?? [];
-            list.push(batch);
-            batchesByProduct.set(batch.productId, list);
+          const qtyByProduct = new Map<string, number>();
+          for (const item of orderItems) {
+            qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.quantity);
           }
 
           let totalLandedCost = 0;
-          for (const item of orderItems) {
-            const batches = batchesByProduct.get(item.productId) ?? [];
-            let remaining = item.quantity;
-            for (const batch of batches) {
-              if (remaining <= 0) break;
-              const batchRemaining = batch.remainingQuantity ?? 0;
-              if (batchRemaining <= 0) continue;
-              const units = Math.min(remaining, batchRemaining);
-              const costPerUnit = parseFloat(batch.totalLandedCost ?? '0');
-              totalLandedCost += units * costPerUnit;
-              remaining -= units;
-            }
+          for (const [productId, qty] of qtyByProduct) {
+            totalLandedCost += await this.inventoryService.computeFifoLandedCostForQuantityInTx(
+              tx,
+              productId,
+              qty,
+            );
           }
 
           await tx
@@ -4679,7 +4895,7 @@ export class OrdersService {
           });
 
           if (updatedOrder.logisticsLocationId) {
-            await this.inventoryService.checkLowStockAndNotify(item.productId, updatedOrder.logisticsLocationId);
+            this.inventoryService.scheduleLowStockCheck(item.productId, updatedOrder.logisticsLocationId);
           }
         }
         break;
@@ -4746,12 +4962,13 @@ export class OrdersService {
         customerName: order.customerName,
         attempts: currentAttempts,
       }, order.branchId ?? null);
-      this.writeTimelineEvent({
+      void this.writeTimelineEvent({
         orderId,
         eventType: 'ORDER_CANCELLED',
         actorId: actor.id,
         actorName: actor.name ?? null,
         description: `Order cancelled after ${currentAttempts} callback attempts`,
+        branchId: order.branchId ?? null,
       });
 
       return { action: 'auto_cancelled', attempts: currentAttempts, maxAttempts };
@@ -4786,25 +5003,26 @@ export class OrdersService {
       const timeLabel = scheduledAt.toLocaleString('en-NG', {
         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
       });
-      this.notifications.create({
+      this.notifications.enqueueCreate({
         userId: order.assignedCsId,
         type: 'order:callback_scheduled',
         title: 'Callback scheduled',
         body: `Order ${orderId.slice(0, 8)}... callback scheduled for ${timeLabel}. Attempt ${currentAttempts + 1}/${maxAttempts}.`,
         data: { orderId, scheduledAt: scheduledAt.toISOString() },
-      }).catch(() => {});
+      });
     }
     const noteSuffix =
       options?.notes && options.notes.trim().length > 0
         ? ` (${options.notes.trim()})`
         : '';
-    this.writeTimelineEvent({
+    void this.writeTimelineEvent({
       orderId,
       eventType: 'CALLBACK_SCHEDULED',
       actorId: actor.id,
       actorName: actor.name ?? null,
       description: `Callback scheduled for ${scheduledAt.toLocaleString('en-NG')}${noteSuffix}`,
       metadata: { scheduledAt: scheduledAt.toISOString(), delayMinutes },
+      branchId: order.branchId ?? null,
     });
 
     return {
@@ -4885,13 +5103,13 @@ export class OrdersService {
 
         await this.redis.set(dedupKey, '1', 'EX', 1800);
 
-        this.notifications.create({
+        this.notifications.enqueueCreate({
           userId: order.assignedCsId,
           type: 'order:callback_due',
           title: 'Callback due now',
           body: `Order ${order.id.slice(0, 8)}... is due for a callback. Attempt ${order.callbackAttempts ?? 0}/3.`,
           data: { orderId: order.id },
-        }).catch(() => {});
+        });
 
         // Also push to the CS room so the queue tab refreshes
         this.events.emitToRoom('cs-all', 'order:callback_due', { orderId: order.id }, order.branchId ?? null);
@@ -5141,14 +5359,20 @@ export class OrdersService {
   }
 
   /**
-   * Bulk assign multiple orders to a CS agent.
-   * Each order is assigned individually.
+   * Bulk assign multiple orders to one or more CS agents.
+   * - One agent: every order goes to that agent (same as before).
+   * - Multiple agents: each order is assigned to a uniformly random pick from the list.
    */
   async bulkAssignToCS(
     orderIds: string[],
-    csAgentId: string,
+    csAgentIds: string[],
     actor: SessionUser,
   ) {
+    const agents = [...new Set(csAgentIds)].filter(Boolean);
+    if (agents.length === 0) {
+      throw new Error('At least one closer is required');
+    }
+
     const results: Array<{
       orderId: string;
       success: boolean;
@@ -5157,7 +5381,8 @@ export class OrdersService {
 
     for (const orderId of orderIds) {
       try {
-        await this.assignToCS(orderId, csAgentId, actor);
+        const idx = Math.floor(Math.random() * agents.length);
+        await this.assignToCS(orderId, agents[idx]!, actor);
         results.push({ orderId, success: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -5231,6 +5456,14 @@ export class OrdersService {
       'ORDER_ARCHIVED',
     ]);
 
+    // Match the same visibility rules as `orders.getById` (which is what the
+    // order detail page itself uses). Relying on RLS alone here caused a
+    // confusing "No timeline events yet" empty state for branch-scoped users
+    // when `order_timeline_events.branch_id` (or the synthetic ORDER_RECEIVED)
+    // didn't match their active branch session.
+    const order = await this.getById(orderId);
+    this.assertActorMayViewOrderForRead(actor, order);
+
     const rows = await this.db
       .select()
       .from(schema.orderTimelineEvents)
@@ -5240,18 +5473,19 @@ export class OrdersService {
     const hasOrderReceived = rows.some((r) => r.eventType === 'ORDER_RECEIVED');
     let mergedRows = rows;
     if (!hasOrderReceived) {
-      const [ord] = await this.db
-        .select({
-          id: schema.orders.id,
-          createdAt: schema.orders.createdAt,
-          orderSource: schema.orders.orderSource,
-          mediaBuyerId: schema.orders.mediaBuyerId,
-          assignedCsId: schema.orders.assignedCsId,
-        })
-        .from(schema.orders)
-        .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
-        .limit(1);
-      if (ord) {
+      // Use the already-authorized order row as the source of truth.
+      // Important: `order_timeline_events` is branch-scoped, so stamp the
+      // synthetic ORDER_RECEIVED with the order's branchId (not null) to keep it
+      // visible under branch-scoped RLS.
+      const ord = {
+        id: order.id,
+        createdAt: order.createdAt,
+        orderSource: order.orderSource,
+        mediaBuyerId: order.mediaBuyerId,
+        assignedCsId: order.assignedCsId,
+        branchId: order.branchId ?? null,
+      };
+      {
         const [mediaBuyerName, assignedCsName] = await Promise.all([
           ord.mediaBuyerId ? this.resolveUserNameById(ord.mediaBuyerId) : Promise.resolve(null),
           ord.orderSource === 'offline' && ord.assignedCsId
@@ -5274,7 +5508,7 @@ export class OrdersService {
                     ? { mediaBuyerId: ord.mediaBuyerId, mediaBuyerName }
                     : {}),
                 },
-                branchId: null,
+                branchId: ord.branchId,
                 createdAt: ord.createdAt,
               } satisfies (typeof rows)[number])
             : ({
@@ -5290,7 +5524,7 @@ export class OrdersService {
                     ? { mediaBuyerId: ord.mediaBuyerId, mediaBuyerName }
                     : {}),
                 },
-                branchId: null,
+                branchId: ord.branchId,
                 createdAt: ord.createdAt,
               } satisfies (typeof rows)[number]);
         mergedRows = [...rows, synthetic].sort(
@@ -5339,27 +5573,40 @@ export class OrdersService {
 
   /**
    * Append an event to the order_timeline_events table.
-   * Fire-and-forget — never throws so it does not interrupt the calling flow.
+   * Best-effort — never throws so it does not interrupt the calling flow.
+   *
+   * Critical: `order_timeline_events` is branch-scoped. Always persist `branchId` so the
+   * timeline remains visible under RLS when the viewer has a branch session selected.
    */
-  writeTimelineEvent(params: {
+  async writeTimelineEvent(params: {
     orderId: string;
     eventType: string;
     actorId?: string | null;
     actorName?: string | null;
     description: string;
     metadata?: Record<string, unknown>;
-  }): void {
-    this.db
-      .insert(schema.orderTimelineEvents)
-      .values({
-        orderId: params.orderId,
-        eventType: params.eventType as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
-        actorId: params.actorId ?? null,
-        actorName: params.actorName ?? null,
-        description: params.description,
-        metadata: params.metadata ?? null,
-      })
-      .catch(() => {});
+    branchId?: string | null;
+  }): Promise<void> {
+    const actorId = params.actorId ?? EDGE_FORM_ACTOR_ID;
+    const branchId = params.branchId ?? null;
+
+    // We open a tiny transaction so we can reliably set both session variables
+    // on the same pinned connection for branch-scoped insert policies.
+    await withActorAndBranch(
+      this.db,
+      { id: actorId, currentBranchId: branchId },
+      async (tx) => {
+        await tx.insert(schema.orderTimelineEvents).values({
+          orderId: params.orderId,
+          eventType: params.eventType as (typeof schema.orderTimelineEvents.$inferInsert)['eventType'],
+          actorId: params.actorId ?? null,
+          actorName: params.actorName ?? null,
+          description: params.description,
+          metadata: params.metadata ?? null,
+          branchId,
+        });
+      },
+    ).catch(() => {});
   }
 
   private buildTransitionActivityDescription(

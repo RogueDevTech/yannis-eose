@@ -20,6 +20,10 @@ import type {
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
+  CreateOfferGroupInput,
+  UpdateOfferGroupInput,
+  ListOfferGroupsInput,
+  ClearLegacyOfferTemplatesInput,
   CreateCampaignInput,
   UpdateCampaignInput,
   ListCampaignsInput,
@@ -330,6 +334,29 @@ export class MarketingService {
     };
   }
 
+  /** All-status order count for a media buyer on a single UTC calendar day (branch-scoped when `branchId` is set). */
+  private async countOrdersForMediaBuyerOnUtcDay(params: {
+    mediaBuyerId: string;
+    spendDateYmd: string;
+    branchId?: string | null;
+  }): Promise<number> {
+    const dayStart = new Date(`${params.spendDateYmd}T00:00:00.000Z`);
+    const dayEnd = new Date(`${params.spendDateYmd}T23:59:59.999Z`);
+    const conditions: SQL[] = [
+      eq(schema.orders.mediaBuyerId, params.mediaBuyerId),
+      gte(schema.orders.createdAt, dayStart),
+      lte(schema.orders.createdAt, dayEnd),
+    ];
+    if (params.branchId) {
+      conditions.push(eq(schema.orders.branchId, params.branchId));
+    }
+    const [row] = await this.db
+      .select({ c: count() })
+      .from(schema.orders)
+      .where(and(...conditions));
+    return Number(row?.c ?? 0);
+  }
+
   /**
    * Validates who may appear as sender/receiver on marketing_funding.
    * `viaFundingRequest`: when true, Finance/SuperAdmin/Admin may fund a Media Buyer
@@ -440,15 +467,13 @@ export class MarketingService {
       fundingId: funding.id,
       amount: input.amount,
     });
-    this.notifications
-      .create({
-        userId: input.receiverId,
-        type: 'funding:sent',
-        title: 'Funding received',
-        body: `You have received funding. Please mark as Received or Not Received.`,
-        data: { fundingId: funding.id, amount: input.amount },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: input.receiverId,
+      type: 'funding:sent',
+      title: 'Funding received',
+      body: `You have received funding. Please mark as Received or Not Received.`,
+      data: { fundingId: funding.id, amount: input.amount },
+    });
 
     return funding;
   }
@@ -497,22 +522,14 @@ export class MarketingService {
         amount: funding.amount,
         reason: input.disputeReason,
       });
-      this.notifications
-        .createForRole('SUPER_ADMIN', {
-          type: 'funding:disputed',
-          title: 'Funding disputed',
-          body: `A Media Buyer marked funding as Not Received. Requires resolution.`,
-          data: { fundingId: funding.id, amount: funding.amount },
-        })
-        .catch(() => {});
-      this.notifications
-        .createForRole('HEAD_OF_MARKETING', {
-          type: 'funding:disputed',
-          title: 'Funding disputed',
-          body: `A Media Buyer marked funding as Not Received. Requires resolution.`,
-          data: { fundingId: funding.id, amount: funding.amount },
-        })
-        .catch(() => {});
+      const disputedPayload = {
+        type: 'funding:disputed' as const,
+        title: 'Funding disputed',
+        body: `A Media Buyer marked funding as Not Received. Requires resolution.`,
+        data: { fundingId: funding.id, amount: funding.amount },
+      };
+      this.notifications.enqueueCreateForRole('SUPER_ADMIN', disputedPayload);
+      this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', disputedPayload);
     }
 
     return updated[0];
@@ -1171,43 +1188,30 @@ export class MarketingService {
     const body = `${name} requested ₦${Number(amount).toLocaleString()}.${bodySuffix}`;
 
     if (validatedTargetUserId) {
-      // Targeted notification — only the chosen recipient is notified.
-      await this.notifications
-        .create({
-          userId: validatedTargetUserId,
-          type: 'funding:request',
-          title: 'Funding request',
-          body,
-          data: { requesterId, amount, reason: reason || null, requestId: request.id },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreate({
+        userId: validatedTargetUserId,
+        type: 'funding:request',
+        title: 'Funding request',
+        body,
+        data: { requesterId, amount, reason: reason || null, requestId: request.id },
+      });
     } else if (requesterRole === 'HEAD_OF_MARKETING') {
       const bodyWithAction = `${body} Disburse via Finance → Disbursements.`;
-      await this.notifications
-        .createForRole('SUPER_ADMIN', {
-          type: 'funding:request',
-          title: 'Funding request',
-          body: bodyWithAction,
-          data: { requesterId, amount, reason: reason || null, requestId: request.id },
-        })
-        .catch(() => {});
-      await this.notifications
-        .createForRole('FINANCE_OFFICER', {
-          type: 'funding:request',
-          title: 'Funding request',
-          body: bodyWithAction,
-          data: { requesterId, amount, reason: reason || null, requestId: request.id },
-        })
-        .catch(() => {});
+      const payload = {
+        type: 'funding:request' as const,
+        title: 'Funding request',
+        body: bodyWithAction,
+        data: { requesterId, amount, reason: reason || null, requestId: request.id },
+      };
+      this.notifications.enqueueCreateForRole('SUPER_ADMIN', payload);
+      this.notifications.enqueueCreateForRole('FINANCE_OFFICER', payload);
     } else {
-      await this.notifications
-        .createForRole('HEAD_OF_MARKETING', {
-          type: 'funding:request',
-          title: 'Funding request',
-          body,
-          data: { requesterId, amount, reason: reason || null, requestId: request.id },
-        })
-        .catch(() => {});
+      this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
+        type: 'funding:request',
+        title: 'Funding request',
+        body,
+        data: { requesterId, amount, reason: reason || null, requestId: request.id },
+      });
     }
 
     return request;
@@ -1443,19 +1447,17 @@ export class MarketingService {
       sentCents < requestedCents
         ? `Your funding request (₦${nf(requestedAmount)}) was approved for ₦${nf(sentAmount)}. You can view the receipt in Marketing → Funding.`
         : `Your funding request of ₦${nf(sentAmount)} was approved. You can view the receipt in Marketing → Funding.`;
-    await this.notifications
-      .create({
-        userId: existing.requesterId,
-        type: 'funding:approved',
-        title: 'Funding request approved',
-        body,
-        data: {
-          requestId: updated.id,
-          receiptUrl: updated.receiptUrl,
-          amount: sentAmount,
-        },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: existing.requesterId,
+      type: 'funding:approved',
+      title: 'Funding request approved',
+      body,
+      data: {
+        requestId: updated.id,
+        receiptUrl: updated.receiptUrl,
+        amount: sentAmount,
+      },
+    });
 
     return updated;
   }
@@ -1512,15 +1514,13 @@ export class MarketingService {
     });
 
     const amount = Number(existing.amount);
-    await this.notifications
-      .create({
-        userId: existing.requesterId,
-        type: 'funding:rejected',
-        title: 'Funding request not approved',
-        body: `Your funding request of ₦${amount.toLocaleString()} was not approved.`,
-        data: { requestId: updated.id, amount },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreate({
+      userId: existing.requesterId,
+      type: 'funding:rejected',
+      title: 'Funding request not approved',
+      body: `Your funding request of ₦${amount.toLocaleString()} was not approved.`,
+      data: { requestId: updated.id, amount },
+    });
 
     return updated;
   }
@@ -1902,22 +1902,20 @@ export class MarketingService {
     }
     const lineWord = input.lines.length === 1 ? 'line' : 'lines';
 
-    this.notifications
-      .createForRole('HEAD_OF_MARKETING', {
-        type: 'marketing:ad_spend_submitted',
-        title: `${mbName} logged ad spend`,
-        body: `${input.lines.length} ${lineWord} · ₦${total.toLocaleString()}${campaignSegment} · ${dateLabel}`,
-        data: {
-          mediaBuyerId,
-          mediaBuyerName: mbName,
-          spendDate: input.spendDate,
-          count: input.lines.length,
-          totalAmount: total,
-          campaignIds: uniqueCampaignIds,
-          campaignNames,
-        },
-      })
-      .catch(() => {});
+    this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
+      type: 'marketing:ad_spend_submitted',
+      title: `${mbName} logged ad spend`,
+      body: `${input.lines.length} ${lineWord} · ₦${total.toLocaleString()}${campaignSegment} · ${dateLabel}`,
+      data: {
+        mediaBuyerId,
+        mediaBuyerName: mbName,
+        spendDate: input.spendDate,
+        count: input.lines.length,
+        totalAmount: total,
+        campaignIds: uniqueCampaignIds,
+        campaignNames,
+      },
+    });
 
     return { count: inserted.length, total: String(total) };
   }
@@ -2375,12 +2373,71 @@ export class MarketingService {
     });
 
     const total = allGroups.length;
-    const start = (page - 1) * limit;
-    const groups = allGroups.slice(start, start + limit);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const pageSafe = Math.min(Math.max(1, page), totalPages);
+    const start = (pageSafe - 1) * limit;
+    const pageGroups = allGroups.slice(start, start + limit);
+
+    const groups = await Promise.all(
+      pageGroups.map(async (g) => {
+        const overallOrderCount = await this.countOrdersForMediaBuyerOnUtcDay({
+          mediaBuyerId: g.mediaBuyerId,
+          spendDateYmd: g.spendDate,
+          branchId,
+        });
+        const totalAmt = Number(g.totalAmount);
+        const overallCpa = overallOrderCount > 0 ? totalAmt / overallOrderCount : null;
+
+        const lines = await Promise.all(
+          g.lines.map(async (line) => {
+            const spendYmd = this.spendDateToYmd(line.spendDate);
+            const snap = await this.getAdSpendIntervalSnapshot({
+              mediaBuyerId: line.mediaBuyerId,
+              campaignId: line.campaignId,
+              productId: line.productId,
+              spendDate: spendYmd,
+              spendAmount: Number(line.spendAmount),
+              branchId,
+            });
+            return {
+              ...line,
+              spendDate: spendYmd,
+              approvedAt:
+                line.approvedAt == null
+                  ? null
+                  : line.approvedAt instanceof Date
+                    ? line.approvedAt.toISOString()
+                    : line.approvedAt,
+              rejectedAt:
+                line.rejectedAt == null
+                  ? null
+                  : line.rejectedAt instanceof Date
+                    ? line.rejectedAt.toISOString()
+                    : line.rejectedAt,
+              createdAt: line.createdAt instanceof Date ? line.createdAt.toISOString() : line.createdAt,
+              orderCount: snap.orderCount,
+              indicativeCpa: snap.indicativeCpa,
+            };
+          }),
+        );
+
+        return {
+          spendDate: g.spendDate,
+          mediaBuyerId: g.mediaBuyerId,
+          mediaBuyerName: g.mediaBuyerName,
+          lineCount: g.lineCount,
+          totalAmount: g.totalAmount,
+          rolledStatus: g.rolledStatus,
+          overallOrderCount,
+          overallCpa,
+          lines,
+        };
+      }),
+    );
 
     return {
       groups,
-      pagination: { page, limit, total },
+      pagination: { page: pageSafe, limit, total },
     };
   }
 
@@ -2649,22 +2706,14 @@ export class MarketingService {
         cpa: buyer.cpa,
         threshold: cpaThreshold,
       });
-      this.notifications
-        .createForRole('SUPER_ADMIN', {
-          type: 'marketing:high_cpa',
-          title: 'High CPA warning',
-          body: `${buyer.name} has CPA ${buyer.cpa.toFixed(2)} (threshold: ${cpaThreshold}).`,
-          data: { mediaBuyerId: buyer.mediaBuyerId, cpa: buyer.cpa, threshold: cpaThreshold },
-        })
-        .catch(() => {});
-      this.notifications
-        .createForRole('HEAD_OF_MARKETING', {
-          type: 'marketing:high_cpa',
-          title: 'High CPA warning',
-          body: `${buyer.name} has CPA ${buyer.cpa.toFixed(2)} (threshold: ${cpaThreshold}).`,
-          data: { mediaBuyerId: buyer.mediaBuyerId, cpa: buyer.cpa, threshold: cpaThreshold },
-        })
-        .catch(() => {});
+      const highCpaPayload = {
+        type: 'marketing:high_cpa' as const,
+        title: 'High CPA warning',
+        body: `${buyer.name} has CPA ${buyer.cpa.toFixed(2)} (threshold: ${cpaThreshold}).`,
+        data: { mediaBuyerId: buyer.mediaBuyerId, cpa: buyer.cpa, threshold: cpaThreshold },
+      };
+      this.notifications.enqueueCreateForRole('SUPER_ADMIN', highCpaPayload);
+      this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', highCpaPayload);
     }
 
     return alerts;
@@ -2835,6 +2884,53 @@ export class MarketingService {
   // Offer Templates
   // ============================================
 
+  private async syncProductBaseSalePriceFromTemplates(
+    tx: MarketingFundingTx,
+    productId: string,
+  ): Promise<void> {
+    const [row] = await tx
+      .select({
+        minP: sql<string>`min(${schema.offerTemplates.price}::numeric)`,
+      })
+      .from(schema.offerTemplates)
+      .where(
+        and(
+          eq(schema.offerTemplates.productId, productId),
+          eq(schema.offerTemplates.status, 'ACTIVE'),
+        ),
+      );
+    if (row?.minP == null || row.minP === '') return;
+    await tx
+      .update(schema.products)
+      .set({ baseSalePrice: sql`${row.minP}::numeric`, updatedAt: new Date() })
+      .where(eq(schema.products.id, productId));
+  }
+
+  private async assertCampaignOfferTemplatesAllowed(
+    tx: MarketingFundingTx,
+    productId: string,
+    selectedIds: string[] | undefined | null,
+  ): Promise<void> {
+    const ids = selectedIds?.filter(Boolean) ?? [];
+    if (ids.length === 0) return;
+    const rows = await tx
+      .select({ id: schema.offerTemplates.id })
+      .from(schema.offerTemplates)
+      .where(
+        and(
+          inArray(schema.offerTemplates.id, ids),
+          eq(schema.offerTemplates.productId, productId),
+          eq(schema.offerTemplates.status, 'ACTIVE'),
+        ),
+      );
+    if (rows.length !== ids.length) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'One or more selected offer tiers are invalid for this product.',
+      });
+    }
+  }
+
   async createOfferTemplate(input: CreateOfferTemplateInput, createdBy: string) {
     return withActor(this.db, { id: createdBy }, async (tx) => {
       // Verify product exists
@@ -2854,6 +2950,8 @@ export class MarketingService {
           productId: input.productId,
           name: input.name,
           price: String(input.price),
+          quantity: input.quantity ?? 1,
+          imageUrls: input.imageUrls ?? [],
           variants: input.variants ?? null,
           createdBy,
           status: 'ACTIVE',
@@ -2864,6 +2962,7 @@ export class MarketingService {
       if (!template) {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offer template' });
       }
+      await this.syncProductBaseSalePriceFromTemplates(tx, input.productId);
       return template;
     });
   }
@@ -2883,6 +2982,8 @@ export class MarketingService {
       const updateData: Record<string, unknown> = {};
       if (input.name !== undefined) updateData['name'] = input.name;
       if (input.price !== undefined) updateData['price'] = String(input.price);
+      if (input.quantity !== undefined) updateData['quantity'] = input.quantity;
+      if (input.imageUrls !== undefined) updateData['imageUrls'] = input.imageUrls;
       if (input.variants !== undefined) updateData['variants'] = input.variants;
       if (input.status !== undefined) updateData['status'] = input.status;
 
@@ -2892,7 +2993,96 @@ export class MarketingService {
         .where(eq(schema.offerTemplates.id, input.id))
         .returning();
 
-      return updated[0];
+      const row = updated[0];
+      if (row) {
+        await this.syncProductBaseSalePriceFromTemplates(tx, row.productId);
+      }
+      return row;
+    });
+  }
+
+  /**
+   * Archive every ACTIVE / INACTIVE offer tier for a product so ops can rebuild tiers (qty, images,
+   * form `selectedOfferTemplateIds`) without editing rows one-by-one. Clears stale tier IDs from
+   * campaign `form_config` and legacy `offer_template_id` when they pointed at archived tiers.
+   * Catalog list price is only recomputed when at least one ACTIVE tier remains (otherwise unchanged).
+   */
+  async archiveAllOfferTemplatesForProduct(productId: string, actorId: string): Promise<{ archivedCount: number }> {
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const [productRow] = await tx
+        .select({ id: schema.products.id })
+        .from(schema.products)
+        .where(eq(schema.products.id, productId))
+        .limit(1);
+
+      if (!productRow) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+      }
+
+      const tierRows = await tx
+        .select({ id: schema.offerTemplates.id })
+        .from(schema.offerTemplates)
+        .where(
+          and(
+            eq(schema.offerTemplates.productId, productId),
+            inArray(schema.offerTemplates.status, ['ACTIVE', 'INACTIVE']),
+          ),
+        );
+
+      const archivedIds = new Set(tierRows.map((r) => r.id));
+      if (archivedIds.size === 0) {
+        return { archivedCount: 0 };
+      }
+
+      const productIdsContains = sql`${schema.campaigns.productIds}::jsonb @> ${JSON.stringify([productId])}::jsonb`;
+
+      const campaignRows = await tx
+        .select({
+          id: schema.campaigns.id,
+          formConfig: schema.campaigns.formConfig,
+          offerTemplateId: schema.campaigns.offerTemplateId,
+        })
+        .from(schema.campaigns)
+        .where(and(isNull(schema.campaigns.validTo), productIdsContains));
+
+      for (const c of campaignRows) {
+        const fc = { ...((c.formConfig as Record<string, unknown> | null) ?? {}) };
+        let dirtyForm = false;
+
+        const sel = fc['selectedOfferTemplateIds'];
+        if (Array.isArray(sel)) {
+          const filtered = sel.filter((x): x is string => typeof x === 'string' && !archivedIds.has(x));
+          if (filtered.length !== sel.length) {
+            dirtyForm = true;
+            if (filtered.length === 0) delete fc['selectedOfferTemplateIds'];
+            else fc['selectedOfferTemplateIds'] = filtered;
+          }
+        }
+
+        const clearLegacyFk = c.offerTemplateId != null && archivedIds.has(c.offerTemplateId);
+
+        if (!dirtyForm && !clearLegacyFk) continue;
+
+        const setPayload: Record<string, unknown> = { updatedAt: new Date() };
+        if (dirtyForm) setPayload['formConfig'] = fc;
+        if (clearLegacyFk) setPayload['offerTemplateId'] = null;
+
+        await tx.update(schema.campaigns).set(setPayload).where(eq(schema.campaigns.id, c.id));
+      }
+
+      await tx
+        .update(schema.offerTemplates)
+        .set({ status: 'ARCHIVED', updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.offerTemplates.productId, productId),
+            inArray(schema.offerTemplates.status, ['ACTIVE', 'INACTIVE']),
+          ),
+        );
+
+      await this.syncProductBaseSalePriceFromTemplates(tx, productId);
+
+      return { archivedCount: archivedIds.size };
     });
   }
 
@@ -2921,17 +3111,318 @@ export class MarketingService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
+    const baseFrom = this.db
+      .select({
+        ...getTableColumns(schema.offerTemplates),
+        productName: schema.products.name,
+      })
+      .from(schema.offerTemplates)
+      .innerJoin(schema.products, eq(schema.offerTemplates.productId, schema.products.id));
+
+    const countBase = this.db
+      .select({ count: count() })
+      .from(schema.offerTemplates)
+      .innerJoin(schema.products, eq(schema.offerTemplates.productId, schema.products.id));
+
     const [templates, totalRows] = await Promise.all([
-      this.db.select().from(schema.offerTemplates).where(whereClause)
+      (whereClause ? baseFrom.where(whereClause) : baseFrom)
         .orderBy(desc(schema.offerTemplates.createdAt))
-        .limit(input.limit).offset(offset),
-      this.db.select({ count: count() }).from(schema.offerTemplates).where(whereClause),
+        .limit(input.limit)
+        .offset(offset),
+      whereClause ? countBase.where(whereClause) : countBase,
     ]);
 
     return {
       templates,
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };
+  }
+
+  // ============================================
+  // Offer Groups
+  // ============================================
+
+  private assertOfferGroupItemsSingleProduct(items: Array<{ productId: string }>): string {
+    if (items.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Add at least one offer item.' });
+    }
+    const pid = items[0]!.productId;
+    for (const it of items) {
+      if (it.productId !== pid) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'All items in an offer must use the same catalog product (single-SKU Edge forms).',
+        });
+      }
+    }
+    return pid;
+  }
+
+  private async assertOfferItemImageInProductGallery(
+    tx: MarketingFundingTx,
+    productId: string,
+    imageUrl: string | undefined,
+  ): Promise<void> {
+    if (!imageUrl) return;
+    const [p] = await tx
+      .select({ gallery: schema.products.galleryImageUrls })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    if (!p) throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+    const gallery = Array.isArray(p.gallery) ? p.gallery.filter((x): x is string => typeof x === 'string') : [];
+    if (!gallery.includes(imageUrl)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Selected image must be from the product gallery.',
+      });
+    }
+  }
+
+  async createOfferGroup(input: CreateOfferGroupInput, actorId: string) {
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const productId = this.assertOfferGroupItemsSingleProduct(input.items);
+
+      // Verify product exists once (and validate all chosen images are from gallery).
+      const [p] = await tx
+        .select({ id: schema.products.id, gallery: schema.products.galleryImageUrls, baseSalePrice: schema.products.baseSalePrice })
+        .from(schema.products)
+        .where(eq(schema.products.id, productId))
+        .limit(1);
+      if (!p) throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
+      const gallery = Array.isArray(p.gallery) ? p.gallery.filter((x): x is string => typeof x === 'string') : [];
+      const inheritedUnitPrice = p.baseSalePrice != null ? Number(p.baseSalePrice) : NaN;
+
+      for (const it of input.items) {
+        const img = typeof it.imageUrl === 'string' ? it.imageUrl : undefined;
+        if (img && !gallery.includes(img)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Selected image must be from the product gallery.' });
+        }
+      }
+
+      const [group] = await tx
+        .insert(schema.offerGroups)
+        .values({
+          name: input.name,
+          createdBy: actorId,
+          status: 'ACTIVE',
+        })
+        .returning();
+      if (!group) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offer' });
+
+      const itemValues = input.items.map((it, idx) => ({
+        offerGroupId: group.id,
+        productId: it.productId,
+        label: it.label,
+        quantity: it.quantity ?? 1,
+        // Price is the TOTAL line price, relative to quantity (unit price inherited from product).
+        price: Number.isFinite(inheritedUnitPrice)
+          ? sql`${String(inheritedUnitPrice * (it.quantity ?? 1))}::numeric`
+          : sql`0::numeric`,
+        imageUrl: it.imageUrl ?? null,
+        sortOrder: it.sortOrder ?? idx,
+        status: 'ACTIVE' as const,
+      }));
+
+      const items = await tx.insert(schema.offerGroupItems).values(itemValues).returning();
+
+      return { group, items };
+    });
+  }
+
+  async updateOfferGroup(input: UpdateOfferGroupInput, actorId: string) {
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(schema.offerGroups)
+        .where(eq(schema.offerGroups.id, input.id))
+        .limit(1);
+      if (!existing) throw new TRPCError({ code: 'NOT_FOUND', message: 'Offer not found' });
+
+      const updateData: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name !== undefined) updateData['name'] = input.name;
+      if (input.status !== undefined) updateData['status'] = input.status;
+
+      let updatedGroup = existing;
+      if (Object.keys(updateData).length > 1) {
+        const [row] = await tx
+          .update(schema.offerGroups)
+          .set(updateData)
+          .where(eq(schema.offerGroups.id, input.id))
+          .returning();
+        if (row) updatedGroup = row;
+      }
+
+      if (input.items) {
+        const productId = this.assertOfferGroupItemsSingleProduct(input.items);
+        const [priceRow] = await tx
+          .select({ baseSalePrice: schema.products.baseSalePrice })
+          .from(schema.products)
+          .where(eq(schema.products.id, productId))
+          .limit(1);
+        const inheritedUnitPrice = priceRow?.baseSalePrice != null ? Number(priceRow.baseSalePrice) : NaN;
+        // Validate images against product gallery.
+        for (const it of input.items) {
+          await this.assertOfferItemImageInProductGallery(tx, productId, it.imageUrl);
+        }
+
+        await tx.delete(schema.offerGroupItems).where(eq(schema.offerGroupItems.offerGroupId, input.id));
+
+        const itemValues = input.items.map((it, idx) => ({
+          offerGroupId: input.id,
+          productId: it.productId,
+          label: it.label,
+          quantity: it.quantity ?? 1,
+          // Price is the TOTAL line price, relative to quantity (unit price inherited from product).
+          price: Number.isFinite(inheritedUnitPrice)
+            ? sql`${String(inheritedUnitPrice * (it.quantity ?? 1))}::numeric`
+            : sql`0::numeric`,
+          imageUrl: it.imageUrl ?? null,
+          sortOrder: it.sortOrder ?? idx,
+          status: 'ACTIVE' as const,
+        }));
+        await tx.insert(schema.offerGroupItems).values(itemValues);
+      }
+
+      const items = await tx
+        .select({
+          ...getTableColumns(schema.offerGroupItems),
+          productName: schema.products.name,
+        })
+        .from(schema.offerGroupItems)
+        .innerJoin(schema.products, eq(schema.offerGroupItems.productId, schema.products.id))
+        .where(and(eq(schema.offerGroupItems.offerGroupId, input.id), eq(schema.offerGroupItems.status, 'ACTIVE')))
+        .orderBy(schema.offerGroupItems.sortOrder);
+
+      return { group: updatedGroup, items };
+    });
+  }
+
+  async getOfferGroup(id: string) {
+    const [group] = await this.db
+      .select()
+      .from(schema.offerGroups)
+      .where(eq(schema.offerGroups.id, id))
+      .limit(1);
+    if (!group) throw new TRPCError({ code: 'NOT_FOUND', message: 'Offer not found' });
+
+    const items = await this.db
+      .select({
+        ...getTableColumns(schema.offerGroupItems),
+        productName: schema.products.name,
+      })
+      .from(schema.offerGroupItems)
+      .innerJoin(schema.products, eq(schema.offerGroupItems.productId, schema.products.id))
+      .where(and(eq(schema.offerGroupItems.offerGroupId, id), eq(schema.offerGroupItems.status, 'ACTIVE')))
+      .orderBy(schema.offerGroupItems.sortOrder);
+
+    return { group, items };
+  }
+
+  async listOfferGroups(input: ListOfferGroupsInput) {
+    const conditions = [];
+    if (input.status) conditions.push(eq(schema.offerGroups.status, input.status));
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const offset = (input.page - 1) * input.limit;
+
+    const base = this.db.select().from(schema.offerGroups);
+    const countBase = this.db.select({ count: count() }).from(schema.offerGroups);
+
+    const [groups, totalRows] = await Promise.all([
+      (whereClause ? base.where(whereClause) : base)
+        .orderBy(desc(schema.offerGroups.createdAt))
+        .limit(input.limit)
+        .offset(offset),
+      whereClause ? countBase.where(whereClause) : countBase,
+    ]);
+
+    const ids = groups.map((g) => g.id);
+    const items =
+      ids.length === 0
+        ? []
+        : await this.db
+            .select({
+              ...getTableColumns(schema.offerGroupItems),
+              productName: schema.products.name,
+            })
+            .from(schema.offerGroupItems)
+            .innerJoin(schema.products, eq(schema.offerGroupItems.productId, schema.products.id))
+            .where(and(inArray(schema.offerGroupItems.offerGroupId, ids), eq(schema.offerGroupItems.status, 'ACTIVE')))
+            .orderBy(schema.offerGroupItems.offerGroupId, schema.offerGroupItems.sortOrder);
+
+    const itemsByGroup = new Map<string, typeof items>();
+    for (const it of items) {
+      const arr = itemsByGroup.get(it.offerGroupId) ?? [];
+      arr.push(it);
+      itemsByGroup.set(it.offerGroupId, arr);
+    }
+
+    return {
+      groups: groups.map((g) => ({ ...g, items: itemsByGroup.get(g.id) ?? [] })),
+      pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
+    };
+  }
+
+  async clearLegacyOfferTemplates(
+    input: ClearLegacyOfferTemplatesInput,
+    actorId: string,
+  ): Promise<{ archivedCount: number; detachedCampaigns: number }> {
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const tierRows = await tx
+        .select({ id: schema.offerTemplates.id })
+        .from(schema.offerTemplates)
+        .where(inArray(schema.offerTemplates.status, ['ACTIVE', 'INACTIVE']));
+      const archivedIds = new Set(tierRows.map((r) => r.id));
+
+      let detachedCampaigns = 0;
+      if (input.detachCampaigns !== false) {
+        const campaignRows = await tx
+          .select({
+            id: schema.campaigns.id,
+            formConfig: schema.campaigns.formConfig,
+            offerTemplateId: schema.campaigns.offerTemplateId,
+          })
+          .from(schema.campaigns)
+          .where(
+            and(
+              isNull(schema.campaigns.validTo),
+              or(
+                sql`${schema.campaigns.offerTemplateId} IS NOT NULL`,
+                sql`${schema.campaigns.formConfig}::jsonb ? 'selectedOfferTemplateIds'`,
+              ),
+            ),
+          );
+
+        for (const c of campaignRows) {
+          const fc = { ...((c.formConfig as Record<string, unknown> | null) ?? {}) };
+          let dirtyForm = false;
+
+          if ('selectedOfferTemplateIds' in fc) {
+            dirtyForm = true;
+            delete fc['selectedOfferTemplateIds'];
+          }
+
+          const clearLegacyFk = c.offerTemplateId != null;
+          if (!dirtyForm && !clearLegacyFk) continue;
+
+          const setPayload: Record<string, unknown> = { updatedAt: new Date() };
+          if (dirtyForm) setPayload['formConfig'] = fc;
+          if (clearLegacyFk) setPayload['offerTemplateId'] = null;
+
+          await tx.update(schema.campaigns).set(setPayload).where(eq(schema.campaigns.id, c.id));
+          detachedCampaigns += 1;
+        }
+      }
+
+      if (archivedIds.size > 0) {
+        await tx
+          .update(schema.offerTemplates)
+          .set({ status: 'ARCHIVED', updatedAt: new Date() })
+          .where(inArray(schema.offerTemplates.id, [...archivedIds]));
+      }
+
+      return { archivedCount: archivedIds.size, detachedCampaigns };
+    });
   }
 
   // ============================================
@@ -2960,12 +3451,40 @@ export class MarketingService {
         });
       }
 
+      const soleProductId = input.productIds[0]!;
+      if (input.offerGroupId) {
+        const items = await tx
+          .select({ productId: schema.offerGroupItems.productId })
+          .from(schema.offerGroupItems)
+          .where(and(
+            eq(schema.offerGroupItems.offerGroupId, input.offerGroupId),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+          ))
+          .limit(1);
+        if (items.length === 0) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Selected offer has no active items.' });
+        }
+        if (items[0]!.productId !== soleProductId) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Selected offer does not match this form’s product.',
+          });
+        }
+      } else {
+        await this.assertCampaignOfferTemplatesAllowed(
+          tx,
+          soleProductId,
+          input.formConfig?.selectedOfferTemplateIds,
+        );
+      }
+
       const rows = await tx
         .insert(schema.campaigns)
         .values({
           mediaBuyerId,
           name: input.name,
           productIds: input.productIds,
+          offerGroupId: input.offerGroupId ?? null,
           deploymentType: input.deploymentType,
           formConfig: input.formConfig ?? null,
           status: 'ACTIVE',
@@ -3017,7 +3536,46 @@ export class MarketingService {
       const updateData: Record<string, unknown> = {};
       if (input.name !== undefined) updateData['name'] = input.name;
       if (input.formConfig !== undefined) updateData['formConfig'] = input.formConfig;
+      if (input.offerGroupId !== undefined) updateData['offerGroupId'] = input.offerGroupId;
       if (input.status !== undefined) updateData['status'] = input.status;
+
+      if (input.formConfig !== undefined) {
+        const prevRow = existing[0]!;
+        const prev = (prevRow.formConfig as Record<string, unknown> | null) ?? {};
+        const merged = { ...prev, ...input.formConfig };
+        const pid = ((prevRow.productIds ?? []) as string[])[0];
+        if (pid && input.offerGroupId == null) {
+          await this.assertCampaignOfferTemplatesAllowed(
+            tx,
+            pid,
+            merged.selectedOfferTemplateIds as string[] | undefined,
+          );
+        }
+      }
+
+      if (input.offerGroupId) {
+        const prevRow = existing[0]!;
+        const pid = ((prevRow.productIds ?? []) as string[])[0];
+        if (pid) {
+          const items = await tx
+            .select({ productId: schema.offerGroupItems.productId })
+            .from(schema.offerGroupItems)
+            .where(and(
+              eq(schema.offerGroupItems.offerGroupId, input.offerGroupId),
+              eq(schema.offerGroupItems.status, 'ACTIVE'),
+            ))
+            .limit(1);
+          if (items.length === 0) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: 'Selected offer has no active items.' });
+          }
+          if (items[0]!.productId !== pid) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message: 'Selected offer does not match this form’s product.',
+            });
+          }
+        }
+      }
 
       const updated = await tx
         .update(schema.campaigns)
@@ -3062,22 +3620,38 @@ export class MarketingService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Campaign not found or inactive' });
     }
 
-    // Load products directly from productIds
-    const products: Array<{
+    type PublicProduct = {
       id: string;
       name: string;
       price: string;
+      galleryImageUrls?: string[];
       offers: Array<{ label: string; qty: number; price: string; imageUrls?: string[] }>;
-    }> = [];
+    };
+    const products: PublicProduct[] = [];
 
     const pIds = (campaign.productIds ?? []) as string[];
-    for (const pid of pIds) {
+    const pid = pIds.length > 0 ? pIds[0] : null;
+
+    const formConfigRaw = campaign.formConfig as Record<string, unknown> | null;
+    const selectedIdsRaw = formConfigRaw?.selectedOfferTemplateIds;
+    const selectedSet =
+      Array.isArray(selectedIdsRaw) && selectedIdsRaw.length > 0
+        ? new Set(selectedIdsRaw.filter((x): x is string => typeof x === 'string'))
+        : null;
+
+    const parseGallery = (raw: unknown): string[] => {
+      if (!Array.isArray(raw)) return [];
+      return raw.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    };
+
+    if (pid) {
       const pRows = await this.db
         .select({
           id: schema.products.id,
           name: schema.products.name,
           baseSalePrice: schema.products.baseSalePrice,
           offers: schema.products.offers,
+          galleryImageUrls: schema.products.galleryImageUrls,
         })
         .from(schema.products)
         .where(eq(schema.products.id, pid))
@@ -3085,17 +3659,99 @@ export class MarketingService {
 
       const p = pRows[0];
       if (p) {
-        const productOffers = (p.offers ?? []) as Array<{
-          label: string;
-          qty: number;
-          price: string;
-          imageUrls?: string[];
-        }>;
+        const galleryImageUrls = parseGallery(p.galleryImageUrls);
+
+        let offerList: Array<{ label: string; qty: number; price: string; imageUrls?: string[] }> = [];
+
+        if (campaign.offerGroupId) {
+          const itemRows = await this.db
+            .select({
+              label: schema.offerGroupItems.label,
+              quantity: schema.offerGroupItems.quantity,
+              price: schema.offerGroupItems.price,
+              imageUrl: schema.offerGroupItems.imageUrl,
+            })
+            .from(schema.offerGroupItems)
+            .where(and(
+              eq(schema.offerGroupItems.offerGroupId, campaign.offerGroupId),
+              eq(schema.offerGroupItems.status, 'ACTIVE'),
+            ))
+            .orderBy(schema.offerGroupItems.sortOrder);
+
+          offerList = itemRows.map((it) => ({
+            label: it.label,
+            qty: it.quantity ?? 1,
+            price: String(it.price),
+            imageUrls:
+              typeof it.imageUrl === 'string' && it.imageUrl.length > 0
+                ? [it.imageUrl]
+                : galleryImageUrls.length > 0
+                  ? galleryImageUrls
+                  : undefined,
+          }));
+        } else {
+          const templateConditions = [
+            eq(schema.offerTemplates.productId, p.id),
+            eq(schema.offerTemplates.status, 'ACTIVE'),
+          ];
+          if (selectedSet && selectedSet.size > 0) {
+            templateConditions.push(inArray(schema.offerTemplates.id, [...selectedSet]));
+          }
+
+          const templateRows = await this.db
+            .select({
+              name: schema.offerTemplates.name,
+              price: schema.offerTemplates.price,
+              quantity: schema.offerTemplates.quantity,
+              imageUrls: schema.offerTemplates.imageUrls,
+            })
+            .from(schema.offerTemplates)
+            .where(and(...templateConditions));
+
+          offerList = templateRows.map((t) => ({
+            label: t.name,
+            qty: t.quantity ?? 1,
+            price: String(t.price),
+            imageUrls:
+              parseGallery(t.imageUrls).length > 0
+                ? parseGallery(t.imageUrls)
+                : galleryImageUrls.length > 0
+                  ? galleryImageUrls
+                  : undefined,
+          }));
+        }
+
+        if (offerList.length === 0) {
+          const legacy = (p.offers ?? []) as Array<{
+            label: string;
+            qty: number;
+            price: string;
+            imageUrls?: string[];
+          }>;
+          offerList =
+            legacy.length > 0
+              ? legacy.map((o) => ({
+                  label: o.label,
+                  qty: o.qty,
+                  price: typeof o.price === 'string' ? o.price : String(o.price),
+                  imageUrls: o.imageUrls ?? (galleryImageUrls.length ? galleryImageUrls : undefined),
+                }))
+              : [
+                  {
+                    label: 'Standard',
+                    qty: 1,
+                    price: String(p.baseSalePrice),
+                    imageUrls: galleryImageUrls.length ? galleryImageUrls : undefined,
+                  },
+                ];
+        }
+
         products.push({
           id: p.id,
           name: p.name,
-          price: p.baseSalePrice,
-          offers: productOffers.length > 0 ? productOffers : [{ label: 'Standard', qty: 1, price: p.baseSalePrice }],
+          price: String(p.baseSalePrice),
+          galleryImageUrls: galleryImageUrls.length > 0 ? galleryImageUrls : undefined,
+          offers: offerList,
         });
       }
     }
