@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, requirePermission } from '~/lib/api.server';
 import {
   buildLeaderboardInput,
@@ -210,7 +211,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       groupsPage: resolvedGpage,
       groupsTotalPages,
     };
-    return json({ ok: true as const, ...payload });
+    return secondaryCacheJson({ ok: true as const, ...payload });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Secondary load failed';
     return json({ ok: false as const, error: msg, ...emptyPayload() });

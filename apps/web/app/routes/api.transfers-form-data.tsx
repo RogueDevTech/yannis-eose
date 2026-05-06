@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -28,12 +29,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ((levelsRes.data as { result?: { data?: { levels?: InventoryLevel[] } } })?.result?.data?.levels ?? [])
       : [];
 
-    return json({
-      ok: productsRes.ok && levelsRes.ok,
+    const okBoth = productsRes.ok && levelsRes.ok;
+    const payload = {
+      ok: okBoth,
       products,
       levels,
-      error: productsRes.ok && levelsRes.ok ? null : 'Could not load transfer form data.',
-    });
+      error: okBoth ? null : ('Could not load transfer form data.' as const),
+    };
+    return okBoth ? secondaryCacheJson(payload) : json(payload);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Could not load transfer form data.';
     return json({ ok: false as const, products: [] as Product[], levels: [] as InventoryLevel[], error: msg });

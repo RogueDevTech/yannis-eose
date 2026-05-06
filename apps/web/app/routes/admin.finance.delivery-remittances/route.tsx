@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
@@ -103,7 +104,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`,
+      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: USERS_LIST_MAX_LIMIT }))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(

@@ -1,4 +1,5 @@
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 
@@ -38,7 +39,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const productId = params.productId ?? '';
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
-    return json({ templates: [] as TemplateRow[] });
+    return secondaryCacheJson({ templates: [] as TemplateRow[] });
   }
 
   const cookie = getSessionCookie(request);
@@ -63,5 +64,5 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     .map((r) => mapTemplate(typeof r === 'object' && r != null ? (r as Record<string, unknown>) : {}))
     .filter((x): x is TemplateRow => x != null);
 
-  return json({ templates });
+  return secondaryCacheJson({ templates });
 }

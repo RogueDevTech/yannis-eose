@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
+import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -130,7 +131,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           ?.result?.data ?? { userOverrides: {}, templateCodes: [], effectiveCodes: [] })
       : { userOverrides: {}, templateCodes: [], effectiveCodes: [] };
 
-  return json({
+  return secondaryCacheJson({
     ok: true as const,
     products,
     roleTemplates,

@@ -3,6 +3,7 @@ import type { ShouldRevalidateFunctionArgs } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { DisbursementsPage } from '~/features/disbursements/DisbursementsPage';
@@ -172,7 +173,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(JSON.stringify({}))}`,
       { method: 'GET', cookie },
     ),
-    apiRequest<unknown>(`/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: 200 }))}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(
+      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: USERS_LIST_MAX_LIMIT }))}`,
+      { method: 'GET', cookie },
+    ),
   ]);
 
   const recipientBalancesAll = parseBalancesList(balancesRes);

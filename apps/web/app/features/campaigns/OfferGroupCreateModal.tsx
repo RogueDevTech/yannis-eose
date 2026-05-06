@@ -141,6 +141,7 @@ export function OfferGroupCreateModal({
             placeholder="Select product…"
             searchPlaceholder="Search products…"
             disabled={productsLoading || productOptions.length === 0}
+            loading={productsLoading}
           />
         </div>
 

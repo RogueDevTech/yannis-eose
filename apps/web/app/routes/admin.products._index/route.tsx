@@ -6,6 +6,7 @@ import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/l
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -103,14 +104,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'products.read');
   const cookie = getSessionCookie(request);
 
+  const permSet = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
   const canEditProduct =
-    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('products.update');
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    permSet.has(canonicalPermissionCode('products.update'));
   const canCreateProduct =
-    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('products.create');
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    permSet.has(canonicalPermissionCode('products.create'));
   const canInstantArchiveProduct = isSuperAdminOnly(user);
 
   const canManageOffers =
-    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || (user.permissions ?? []).includes('products.offers');
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    permSet.has(canonicalPermissionCode('products.offers'));
 
   const pageParam = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
@@ -305,15 +313,26 @@ export default function ProductsRoute() {
     window.history.replaceState({}, '', url.pathname + url.search);
   }, []);
 
-  // Lazy-load offers content on first switch (no Remix navigation).
-  React.useEffect(() => {
-    if (uiTab !== 'offers') return;
+  const startOffersSummaryFetch = React.useCallback(() => {
     if (!data.canManageOffers) return;
     if (offersLoaded) return;
     if (offersFetchStartedRef.current) return;
     offersFetchStartedRef.current = true;
     offersFetcher.load('/api/products-offers-summary');
-  }, [uiTab, offersLoaded, offersFetcher, data.canManageOffers]);
+  }, [data.canManageOffers, offersLoaded, offersFetcher]);
+
+  // Lazy-load offers content on first switch (no Remix navigation).
+  React.useEffect(() => {
+    if (uiTab !== 'offers') return;
+    startOffersSummaryFetch();
+  }, [uiTab, startOffersSummaryFetch]);
+
+  // Ensure the Create Offer modal can load products even if the user
+  // opens it from the Product tab before ever switching to Offers.
+  React.useEffect(() => {
+    if (!showCreateOffer) return;
+    startOffersSummaryFetch();
+  }, [showCreateOffer, startOffersSummaryFetch]);
 
   React.useEffect(() => {
     if (!offersFetcher.data) return;
@@ -356,7 +375,15 @@ export default function ProductsRoute() {
           <div className="flex items-center gap-2">
             <PageRefreshButton />
             {data.canManageOffers ? (
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowCreateOffer(true)}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  startOffersSummaryFetch();
+                  setShowCreateOffer(true);
+                }}
+              >
                 + Create offer
               </Button>
             ) : null}
@@ -407,7 +434,7 @@ export default function ProductsRoute() {
             open={showCreateOffer}
             onClose={() => setShowCreateOffer(false)}
             products={offersLoaded ? offersCache.offersProducts : []}
-            productsLoading={uiTab === 'offers' && !offersLoaded && offersFetcher.state !== 'idle'}
+            productsLoading={!offersLoaded && offersFetcher.state !== 'idle'}
             actionUrl="/admin/products?index"
             onCreated={() => {
               setOffersLoaded(false);

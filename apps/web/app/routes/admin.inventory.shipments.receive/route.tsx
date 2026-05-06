@@ -11,6 +11,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -27,6 +28,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     permission: 'inventory.read',
   });
   const cookie = getSessionCookie(request);
+  const actorPerms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
 
   const productsPromise = apiRequest<unknown>(
     `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 100, status: 'ACTIVE' }))}`,
@@ -59,7 +61,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     providerName: l.providerName ?? null,
   }));
 
-  const canIntake = isAdminLevel(user) || (user.permissions?.includes('inventory.intake') ?? false);
+  const canIntake =
+    isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.intake'));
 
   return {
     products,
