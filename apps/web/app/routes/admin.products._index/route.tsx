@@ -34,6 +34,10 @@ type ResolvedOffersSummary = {
   offerGroupsLoadError: string | null;
 };
 
+type OffersSummaryApiOk = { ok: true } & ResolvedOffersSummary;
+type OffersSummaryApiErr = { ok: false; error: string } & ResolvedOffersSummary;
+type OffersSummaryApiResponse = OffersSummaryApiOk | OffersSummaryApiErr;
+
 type ProductsLoaderData = {
   /** URL tab hint for direct-link SSR; UI switching is client-side. */
   initialTab: 'product' | 'offers';
@@ -282,7 +286,7 @@ export default function ProductsRoute() {
   const [uiTab, setUiTab] = React.useState<'product' | 'offers'>(data.initialTab);
   const [showCreateOffer, setShowCreateOffer] = React.useState(false);
 
-  const offersFetcher = useFetcher<ResolvedOffersSummary>();
+  const offersFetcher = useFetcher<OffersSummaryApiResponse>();
   const offersFetchStartedRef = React.useRef(false);
   const [offersCache, setOffersCache] = React.useState<ResolvedOffersSummary>(() => ({
     offersProducts: [],
@@ -308,12 +312,22 @@ export default function ProductsRoute() {
     if (offersLoaded) return;
     if (offersFetchStartedRef.current) return;
     offersFetchStartedRef.current = true;
-    offersFetcher.load('/admin/products?index&tab=offers');
+    offersFetcher.load('/api/products-offers-summary');
   }, [uiTab, offersLoaded, offersFetcher, data.canManageOffers]);
 
   React.useEffect(() => {
     if (!offersFetcher.data) return;
-    setOffersCache(offersFetcher.data);
+    if (offersFetcher.data.ok) {
+      setOffersCache(offersFetcher.data);
+      setOffersLoaded(true);
+      return;
+    }
+    setOffersCache({
+      offersProducts: offersFetcher.data.offersProducts,
+      productsLoadError: offersFetcher.data.productsLoadError ?? offersFetcher.data.error ?? 'Offers could not be loaded.',
+      offerGroups: offersFetcher.data.offerGroups,
+      offerGroupsLoadError: offersFetcher.data.offerGroupsLoadError ?? offersFetcher.data.error ?? 'Offers could not be loaded.',
+    });
     setOffersLoaded(true);
   }, [offersFetcher.data]);
 
@@ -398,7 +412,7 @@ export default function ProductsRoute() {
             onCreated={() => {
               setOffersLoaded(false);
               offersFetchStartedRef.current = false;
-              offersFetcher.load('/admin/products?index&tab=offers');
+              offersFetcher.load('/api/products-offers-summary');
             }}
           />
 

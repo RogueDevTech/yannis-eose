@@ -9,7 +9,6 @@ import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -50,6 +49,23 @@ import type {
 import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
 import { AdSpendDayAccordion } from './AdSpendDayAccordion';
 
+type SecondaryOk = {
+  ok: true;
+  metrics: NonNullable<MarketingAdSpendLoaderData['metrics']>;
+  leaderboard: NonNullable<MarketingAdSpendLoaderData['leaderboard']>;
+  users: NonNullable<MarketingAdSpendLoaderData['users']>;
+  products: NonNullable<MarketingAdSpendLoaderData['products']>;
+  groups: NonNullable<MarketingAdSpendLoaderData['groups']>;
+  groupsTotal: number;
+  groupsPage: number;
+  groupsTotalPages: number;
+};
+type SecondaryErr = {
+  ok: false;
+  error: string;
+} & Omit<SecondaryOk, 'ok'>;
+type SecondaryResponse = SecondaryOk | SecondaryErr;
+
 const AD_SPEND_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'ALL', label: 'All entries' },
   { value: 'PENDING', label: 'Pending' },
@@ -63,6 +79,15 @@ function adSpendRowCanEdit(s: AdSpendRecord): boolean {
 }
 
 const HIGH_CPA_THRESHOLD = 5000;
+
+function InlineLoadingText({ label = 'Loading…' }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
+      <Spinner className="w-3.5 h-3.5" />
+      <span>{label}</span>
+    </span>
+  );
+}
 
 function hasPositiveSpendAmountInput(raw: string): boolean {
   const t = raw.replace(/,/g, '').trim();
@@ -83,15 +108,15 @@ export function MarketingAdSpendPage({
   mediaBuyerIdFilter,
   mediaBuyersForFilter,
   statusCounts,
-  metrics,
-  leaderboard,
-  users,
-  products,
+  metrics: initialMetrics,
+  leaderboard: initialLeaderboard,
+  users: initialUsers,
+  products: initialProducts,
   campaigns,
   filters,
   viewMode = 'admin',
   canApproveAdSpend = false,
-  groups,
+  groups: initialGroups,
   groupsPage,
   groupsTotalPages,
   currentUserId,
@@ -99,6 +124,7 @@ export function MarketingAdSpendPage({
   const dateFilters = filters;
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
+  const secondaryFetcher = useFetcher<SecondaryResponse>();
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
   const isFilterLoading = useLoaderRefetchBusy();
@@ -119,6 +145,69 @@ export function MarketingAdSpendPage({
   const [editScreenshotUrl, setEditScreenshotUrl] = useState('');
   const [editFileUploadState, setEditFileUploadState] = useState<FileUploadUploadState>('idle');
   const [dismissedError, setDismissedError] = useState(false);
+
+  const userIdsOnPage = useMemo(() => {
+    const s = new Set<string>();
+    for (const row of adSpend ?? []) {
+      if (row.mediaBuyerId) s.add(row.mediaBuyerId);
+      if (row.approvedBy) s.add(row.approvedBy);
+      if (row.rejectedBy) s.add(row.rejectedBy);
+    }
+    return Array.from(s);
+  }, [adSpend]);
+
+  const secondaryQueryString = useMemo(() => {
+    const p = new URLSearchParams();
+    if (filters?.startDate) p.set('startDate', filters.startDate);
+    if (filters?.endDate) p.set('endDate', filters.endDate);
+    if (filters?.periodAllTime) p.set('periodAllTime', 'true');
+    if (statusFilter) p.set('status', statusFilter);
+    if (searchFilter) p.set('search', searchFilter);
+    if (productIdFilter) p.set('productId', productIdFilter);
+    if (campaignIdFilter) p.set('campaignId', campaignIdFilter);
+    if (mediaBuyerIdFilter) p.set('mediaBuyerId', mediaBuyerIdFilter);
+    p.set('gpage', String(groupsPage ?? 1));
+    p.set('view', viewMode);
+    if (userIdsOnPage.length > 0) p.set('userIds', JSON.stringify(userIdsOnPage));
+    return p.toString();
+  }, [
+    filters?.startDate,
+    filters?.endDate,
+    filters?.periodAllTime,
+    statusFilter,
+    searchFilter,
+    productIdFilter,
+    campaignIdFilter,
+    mediaBuyerIdFilter,
+    groupsPage,
+    viewMode,
+    userIdsOnPage,
+  ]);
+
+  useEffect(() => {
+    void secondaryFetcher.load(`/api/marketing-ad-spend-secondary?${secondaryQueryString}`);
+  }, [secondaryQueryString]);
+
+  const secondary = secondaryFetcher.data?.ok ? secondaryFetcher.data : null;
+  const secondaryLoading = secondaryFetcher.state === 'loading' && !secondaryFetcher.data;
+  const secondaryError = secondaryFetcher.data && !secondaryFetcher.data.ok ? secondaryFetcher.data.error : null;
+
+  const metrics = secondary?.metrics ?? initialMetrics ?? null;
+  const leaderboard = secondary?.leaderboard ?? initialLeaderboard ?? null;
+  const users = secondary?.users ?? initialUsers ?? [];
+  const products = secondary?.products ?? initialProducts ?? [];
+  const groups = secondary?.groups ?? initialGroups ?? [];
+  const groupsTotalResolved = secondary?.groupsTotal ?? 0;
+  const groupsPageResolved = secondary?.groupsPage ?? groupsPage;
+  const groupsTotalPagesResolved = secondary?.groupsTotalPages ?? groupsTotalPages;
+
+  useEffect(() => {
+    if (!secondary?.ok) return;
+    if (!groupsPageResolved || groupsPageResolved === groupsPage) return;
+    setSearchParams(getListParams({ gpage: groupsPageResolved }));
+  }, [secondary?.ok, groupsPageResolved]);
+
+  const inlineLoading = secondaryLoading && !secondary && (products.length === 0 || groups.length === 0);
 
   const [formCampaignId, setFormCampaignId] = useState('');
   const [formProductId, setFormProductId] = useState('');
@@ -412,9 +501,13 @@ export function MarketingAdSpendPage({
         key: 'mediaBuyer',
         header: 'Media Buyer',
         render: (s) => (
-          <DeferredSection resolve={users} skeleton="inline">
-            {(resolvedUsers: User[]) => <span className="text-sm text-app-fg">{getUserName(s.mediaBuyerId, resolvedUsers)}</span>}
-          </DeferredSection>
+          <span className="text-sm text-app-fg">
+            {users.length === 0 && secondaryLoading ? (
+              <InlineLoadingText />
+            ) : (
+              getUserName(s.mediaBuyerId, users)
+            )}
+          </span>
         ),
       });
     }
@@ -432,16 +525,16 @@ export function MarketingAdSpendPage({
         render: (s) => (
           <span className="text-sm text-app-fg-muted">
             {s.productId ? (
-              <DeferredSection resolve={products} skeleton="inline">
-                {(resolvedProducts: Product[]) => (
-                  <Link
-                    to={`/admin/products/${s.productId}`}
-                    className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-                  >
-                    {getProductName(s.productId, resolvedProducts)}
-                  </Link>
-                )}
-              </DeferredSection>
+              products.length === 0 && secondaryLoading ? (
+                <InlineLoadingText />
+              ) : (
+                <Link
+                  to={`/admin/products/${s.productId}`}
+                  className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                >
+                  {getProductName(s.productId, products)}
+                </Link>
+              )
             ) : (
               '\u2014'
             )}
@@ -653,44 +746,48 @@ export function MarketingAdSpendPage({
         />
       )}
 
-      <DeferredSection resolve={metrics} fallback={<OverviewStatStripSkeleton count={4} />}>
-        {(m) => (
-          <OverviewStatStrip
-            items={[
-              {
-                label: 'Total spend',
-                value: <>{'\u20A6'}{Math.round(m.totalSpend).toLocaleString()}</>,
-                valueClassName: 'text-app-fg',
-                title: `${m.totalOrders} orders, ${m.deliveredOrders} delivered`,
-              },
-              {
-                label: 'CPA',
-                value: <>{'\u20A6'}{Math.round(m.cpa).toLocaleString()}</>,
-                valueClassName: 'text-app-fg',
-                title: 'Spend / all orders',
-              },
-              {
-                label: 'True ROAS',
-                value: <>{m.trueRoas.toFixed(2)}x</>,
-                valueClassName: 'text-brand-600 dark:text-brand-400',
-                title: 'Delivered revenue / spend',
-              },
-            ]}
-          />
-        )}
-      </DeferredSection>
+      {metrics ? (
+        <OverviewStatStrip
+          items={[
+            {
+              label: 'Total spend',
+              value: <>{'\u20A6'}{Math.round(metrics.totalSpend).toLocaleString()}</>,
+              valueClassName: 'text-app-fg',
+              title: `${metrics.totalOrders} orders, ${metrics.deliveredOrders} delivered`,
+            },
+            {
+              label: 'CPA',
+              value: <>{'\u20A6'}{Math.round(metrics.cpa).toLocaleString()}</>,
+              valueClassName: 'text-app-fg',
+              title: 'Spend / all orders',
+            },
+            {
+              label: 'True ROAS',
+              value: <>{metrics.trueRoas.toFixed(2)}x</>,
+              valueClassName: 'text-brand-600 dark:text-brand-400',
+              title: 'Delivered revenue / spend',
+            },
+          ]}
+        />
+      ) : (
+        <OverviewStatStripSkeleton count={4} />
+      )}
 
-      <DeferredSection resolve={leaderboard} skeleton="inline">
-        {(lb) => {
-          const highCpaBuyers = lb.filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0);
+      {leaderboard ? (
+        (() => {
+          const highCpaBuyers = leaderboard.filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0);
           return viewMode !== 'media_buyer' ? (
             <HighCpaWarningBanner
               buyers={highCpaBuyers.map((b: LeaderboardEntry) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
               threshold={HIGH_CPA_THRESHOLD}
             />
           ) : null;
-        }}
-      </DeferredSection>
+        })()
+      ) : secondaryLoading ? (
+        <div className="card !p-4">
+          <InlineLoadingText label="Loading leaderboard…" />
+        </div>
+      ) : null}
 
       <ResponsiveFormPanel open={showAdSpendForm} onClose={() => setShowAdSpendForm(false)}>
         <fetcher.Form method="post" className="card space-y-3" onSubmit={handleLogAdSpendSubmit} noValidate>
@@ -721,20 +818,17 @@ export function MarketingAdSpendPage({
               />
             </div>
             <div>
-              <DeferredSection resolve={products} skeleton="inline">
-                {(resolvedProducts: Product[]) => (
-                  <SearchableSelect
-                    id="marketing-adspend-create-product"
-                    label="Product"
-                    placeholder="Select product..."
-                    required
-                    value={formProductId}
-                    onChange={setFormProductId}
-                    searchPlaceholder="Search products..."
-                    options={resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name }))}
-                  />
-                )}
-              </DeferredSection>
+              <SearchableSelect
+                id="marketing-adspend-create-product"
+                label="Product"
+                placeholder={products.length === 0 && secondaryLoading ? 'Loading products…' : 'Select product...'}
+                required
+                value={formProductId}
+                onChange={setFormProductId}
+                disabled={products.length === 0 && secondaryLoading}
+                searchPlaceholder="Search products..."
+                options={products.map((p: Product) => ({ value: p.id, label: p.name }))}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Spend Amount ({'\u20A6'})</label>
@@ -910,20 +1004,17 @@ export function MarketingAdSpendPage({
                 />
               </div>
               <div>
-                <DeferredSection resolve={products} skeleton="inline">
-                  {(resolvedProducts: Product[]) => (
-                    <SearchableSelect
-                      id="marketing-adspend-edit-product"
-                      label="Product"
-                      placeholder="Select product..."
-                      required
-                      value={editFormProductId}
-                      onChange={setEditFormProductId}
-                      searchPlaceholder="Search products..."
-                      options={resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name }))}
-                    />
-                  )}
-                </DeferredSection>
+                <SearchableSelect
+                  id="marketing-adspend-edit-product"
+                  label="Product"
+                  placeholder={products.length === 0 && secondaryLoading ? 'Loading products…' : 'Select product...'}
+                  required
+                  value={editFormProductId}
+                  onChange={setEditFormProductId}
+                  disabled={products.length === 0 && secondaryLoading}
+                  searchPlaceholder="Search products..."
+                  options={products.map((p: Product) => ({ value: p.id, label: p.name }))}
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-app-fg-muted mb-1">Spend Amount ({'\u20A6'})</label>
@@ -1187,46 +1278,46 @@ export function MarketingAdSpendPage({
                 <StatusBadge status={s.status ?? 'PENDING'} />
               </div>
               <p className="text-sm text-app-fg-muted">
-                <DeferredSection resolve={users} skeleton="inline">
-                  {(resolvedUsers: User[]) => (
-                    <>
-                      {getUserName(s.mediaBuyerId, resolvedUsers)}
-                      {' \u2014 '}
-                      {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </>
-                  )}
-                </DeferredSection>
+                {users.length === 0 && secondaryLoading ? (
+                  <InlineLoadingText />
+                ) : (
+                  <>
+                    {getUserName(s.mediaBuyerId, users)}
+                    {' \u2014 '}
+                    {new Date(s.spendDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </>
+                )}
               </p>
               <p className="text-xs text-app-fg-muted">
-                <DeferredSection resolve={products} skeleton="inline">
-                  {(resolvedProducts: Product[]) => (
-                    <>
-                      Product:{' '}
-                      {s.productId ? (
-                        <Link
-                          to={`/admin/products/${s.productId}`}
-                          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-                        >
-                          {getProductName(s.productId, resolvedProducts)}
-                        </Link>
-                      ) : (
-                        '\u2014'
-                      )}
-                      {' \u00b7 '}
-                      Campaign:{' '}
-                      {s.campaignId ? (
-                        <Link
-                          to={`/admin/marketing/forms?search=${encodeURIComponent(getCampaignName(s.campaignId))}`}
-                          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
-                        >
-                          {getCampaignName(s.campaignId)}
-                        </Link>
-                      ) : (
-                        '\u2014'
-                      )}
-                    </>
-                  )}
-                </DeferredSection>
+                {products.length === 0 && secondaryLoading ? (
+                  <InlineLoadingText />
+                ) : (
+                  <>
+                    Product:{' '}
+                    {s.productId ? (
+                      <Link
+                        to={`/admin/products/${s.productId}`}
+                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                      >
+                        {getProductName(s.productId, products)}
+                      </Link>
+                    ) : (
+                      '\u2014'
+                    )}
+                    {' \u00b7 '}
+                    Campaign:{' '}
+                    {s.campaignId ? (
+                      <Link
+                        to={`/admin/marketing/forms?search=${encodeURIComponent(getCampaignName(s.campaignId))}`}
+                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                      >
+                        {getCampaignName(s.campaignId)}
+                      </Link>
+                    ) : (
+                      '\u2014'
+                    )}
+                  </>
+                )}
               </p>
               <p className="text-xs text-app-fg-muted">
                 Orders in window: {(s.orderCount ?? 0).toLocaleString()}
@@ -1342,35 +1433,34 @@ export function MarketingAdSpendPage({
                       adSpendDetailModal.platform}
                 </p>
               )}
-              <DeferredSection resolve={users} skeleton="inline">
-                {(resolvedUsers: User[]) => (
-                  <p className="text-xs text-brand-500 dark:text-brand-400">
-                    Media buyer: {getUserName(adSpendDetailModal.mediaBuyerId, resolvedUsers)}
+              <p className="text-xs text-brand-500 dark:text-brand-400">
+                Media buyer:{' '}
+                {users.length === 0 && secondaryLoading ? (
+                  <InlineLoadingText />
+                ) : (
+                  <>
+                    {getUserName(adSpendDetailModal.mediaBuyerId, users)}
                     {adSpendDetailModal.status === 'APPROVED' && adSpendDetailModal.approvedBy && (
                       <>
                         {' · '}
-                        Approved by:{' '}
-                        {getUserName(adSpendDetailModal.approvedBy, resolvedUsers)}
+                        Approved by: {getUserName(adSpendDetailModal.approvedBy, users)}
                       </>
                     )}
-                  </p>
+                  </>
                 )}
-              </DeferredSection>
-              <DeferredSection resolve={products} skeleton="inline">
-                {(resolvedProducts: Product[]) => (
-                  <p className="text-xs text-brand-500 dark:text-brand-400">
-                    Product:{' '}
-                    {adSpendDetailModal.productId
-                      ? getProductName(adSpendDetailModal.productId, resolvedProducts)
-                      : '\u2014'}
-                    {' · '}
-                    Campaign:{' '}
-                    {adSpendDetailModal.campaignId
-                      ? getCampaignName(adSpendDetailModal.campaignId)
-                      : '\u2014'}
-                  </p>
+              </p>
+              <p className="text-xs text-brand-500 dark:text-brand-400">
+                Product:{' '}
+                {products.length === 0 && secondaryLoading ? (
+                  <InlineLoadingText />
+                ) : adSpendDetailModal.productId ? (
+                  getProductName(adSpendDetailModal.productId, products)
+                ) : (
+                  '\u2014'
                 )}
-              </DeferredSection>
+                {' · '}
+                Campaign: {adSpendDetailModal.campaignId ? getCampaignName(adSpendDetailModal.campaignId) : '\u2014'}
+              </p>
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={adSpendDetailModal.status ?? 'PENDING'} />
                 {adSpendDetailModal.status === 'APPROVED' && adSpendDetailModal.approvedAt && (
@@ -1406,26 +1496,26 @@ export function MarketingAdSpendPage({
                 {adSpendDetailModal.rejectionReason ? (
                   <p className="text-app-fg">{adSpendDetailModal.rejectionReason}</p>
                 ) : null}
-                <DeferredSection resolve={users} skeleton="inline">
-                  {(resolvedUsers: User[]) => (
-                    <p className="text-xs text-app-fg-muted">
-                      {adSpendDetailModal.rejectedAt
-                        ? new Date(adSpendDetailModal.rejectedAt).toLocaleString('en-NG', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                          })
-                        : null}
-                      {adSpendDetailModal.rejectedBy ? (
-                        <>
-                          {' · '}
-                          By{' '}
-                          {getUserName(adSpendDetailModal.rejectedBy, resolvedUsers)}
-                        </>
-                      ) : null}
-                    </p>
-                  )}
-                </DeferredSection>
+                <p className="text-xs text-app-fg-muted">
+                  {adSpendDetailModal.rejectedAt
+                    ? new Date(adSpendDetailModal.rejectedAt).toLocaleString('en-NG', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })
+                    : null}
+                  {adSpendDetailModal.rejectedBy ? (
+                    <>
+                      {' · '}
+                      By{' '}
+                      {users.length === 0 && secondaryLoading ? (
+                        <InlineLoadingText />
+                      ) : (
+                        getUserName(adSpendDetailModal.rejectedBy, users)
+                      )}
+                    </>
+                  ) : null}
+                </p>
               </div>
             )}
             <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover">

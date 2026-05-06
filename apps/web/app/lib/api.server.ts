@@ -28,8 +28,12 @@ const DEV_NEST_ORIGIN = 'http://127.0.0.1:4444';
 /**
  * Where Node-side `fetch` should send a path.
  * - Explicit `API_URL` / `PUBLIC_API_URL` wins (production + custom dev).
- * - Otherwise in dev: `/trpc/*` → Vite origin so `vite.config` can proxy to Nest; `/auth/*` and anything else → Nest
- *   directly so Remix can own the browser route `GET /auth` without the proxy stealing HTML navigations.
+ * - Otherwise in dev: go direct to Nest for everything.
+ *
+ * We intentionally do NOT route server-side `/trpc/*` through the Vite dev proxy:
+ * when Vite is busy (HMR, SSR errors in unrelated routes, websocket proxy resets),
+ * the proxy hop can stall long enough to trip Remix single-fetch stream timeouts,
+ * which surfaces as "Server Timeout" for deferred loader data.
  */
 function resolveServerApiBase(resolvedPath: string): string {
   const explicit = process.env['API_URL']?.trim() || process.env['PUBLIC_API_URL']?.trim();
@@ -37,7 +41,7 @@ function resolveServerApiBase(resolvedPath: string): string {
   if (process.env['NODE_ENV'] === 'production') {
     return DEV_NEST_ORIGIN;
   }
-  return resolvedPath.startsWith('/trpc') ? DEV_VITE_ORIGIN : DEV_NEST_ORIGIN;
+  return DEV_NEST_ORIGIN;
 }
 
 /** Format a Date as YYYY-MM-DD in local time (avoids UTC offset bugs from toISOString). */

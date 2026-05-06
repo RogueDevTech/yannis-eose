@@ -97,35 +97,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // Daily-counts series for the chart-view trend line. Mirrors the same scope filters the
   // table uses (date range + 3PL location) so the trend matches what the user is reading.
-  const trendInput: {
-    logisticsLocationId?: string;
-    status?: string;
-    statuses?: readonly string[];
-    startDate?: string;
-    endDate?: string;
-  } = {};
-  if (effectiveLogisticsLocationId) trendInput.logisticsLocationId = effectiveLogisticsLocationId;
-  if (status !== 'ALL') trendInput.status = status;
-  if (scopedStatuses) trendInput.statuses = scopedStatuses;
-  if (startDate) trendInput.startDate = startDate;
-  if (endDate) trendInput.endDate = endDate;
-  const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));
-
-  const [ordersRes, countsRes, locationsRes, trendRes] = await Promise.all([
+  const [ordersRes, countsRes, locationsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
       { method: 'GET', cookie },
     ),
-    apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
   ]);
-
-  const dailyCounts = trendRes.ok
-    ? ((trendRes.data as {
-        result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
-      })?.result?.data ?? [])
-    : [];
 
   const ordersData = ordersRes.ok
     ? (ordersRes.data as { result?: { data?: { orders: LogisticsOrder[]; pagination: { total: number; totalPages: number } } } })
@@ -167,7 +146,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     listErrorMessage,
     locations,
     riders: [],
-    dailyCounts,
+    dailyCounts: undefined,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',

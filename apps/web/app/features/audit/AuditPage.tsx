@@ -8,7 +8,6 @@ import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { formatNaira } from '~/lib/format-amount';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -19,6 +18,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TextInput } from '~/components/ui/text-input';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
+import { Spinner } from '~/components/ui/spinner';
 import type { ActorMap, AuditEntry, AuditPageProps } from './types';
 import {
   resolveActor,
@@ -946,7 +946,7 @@ function TimeTravelPanel({
 
 // ── Main Page ───────────────────────────────────────────────────
 
-export function AuditPage({ rows, total, filters, actorNames, error }: AuditPageProps) {
+export function AuditPage({ rows, total, filters, actorIds, error }: AuditPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy();
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
@@ -955,6 +955,39 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState(false);
   const { revalidate, state: revalidatorState } = useRevalidator();
+
+  const actorNamesFetcher = useFetcher<
+    | { ok: true; actorNames: ActorMap }
+    | { ok: false; error: string; actorNames: ActorMap }
+  >();
+  const [actorNames, setActorNames] = useState<ActorMap>({});
+  const [actorNamesError, setActorNamesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!actorIds || actorIds.length === 0) {
+      setActorNames({});
+      setActorNamesError(null);
+      return;
+    }
+    actorNamesFetcher.submit(
+      { userIdsJson: JSON.stringify(actorIds) },
+      { method: 'post', action: '/api/audit-actor-names' },
+    );
+  }, [actorIds.join('|')]);
+
+  useEffect(() => {
+    const d = actorNamesFetcher.data;
+    if (!d) return;
+    if (d.ok) {
+      setActorNames(d.actorNames ?? {});
+      setActorNamesError(null);
+      return;
+    }
+    setActorNames(d.actorNames ?? {});
+    setActorNamesError(d.error ?? 'Failed to resolve actor names');
+  }, [actorNamesFetcher.data]);
+
+  const actorNamesLoading = actorNamesFetcher.state !== 'idle' && Object.keys(actorNames).length === 0;
 
   useEffect(() => {
     if (error) setDismissedError(false);
@@ -1104,72 +1137,64 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
             options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) }))}
             wrapperClassName="w-full sm:w-56"
           />
-          <DeferredSection resolve={actorNames} skeleton="inline">
-            {(resolvedActorNames) => {
-              // Filter dropdown shows actors by their CURRENT identity — when an admin renames
-              // themselves, the filter follows the new name. (Resolved-at-time only matters
-              // when rendering historical rows, not when picking who to filter on now.)
-              const uniqueActors = Object.entries(resolvedActorNames).map(([id, info]) => ({
-                id,
-                name: info.nameNow,
-                role: info.roleNow,
-              }));
-              return uniqueActors.length > 0 ? (
-                <SearchableSelect
-                  id="audit-actor-filter"
-                  value={filters.actorId}
-                  onChange={(v) => updateFilter('actorId', v)}
-                  placeholder="All Users"
-                  searchPlaceholder="Search users..."
-                  options={uniqueActors.map((a) => ({
-                    value: a.id,
-                    label: a.name,
-                    description: ROLE_LABELS[a.role] ?? a.role,
-                  }))}
-                  wrapperClassName="w-full sm:w-72"
-                />
-              ) : (
-                <TextInput
-                  type="text"
-                  placeholder="User UUID..."
-                  value={filters.actorId}
-                  onChange={(e) => updateFilter('actorId', e.target.value)}
-                  wrapperClassName="w-full sm:w-72"
-                />
-              );
-            }}
-          </DeferredSection>
+          {Object.keys(actorNames).length > 0 ? (
+            <SearchableSelect
+              id="audit-actor-filter"
+              value={filters.actorId}
+              onChange={(v) => updateFilter('actorId', v)}
+              placeholder="All Users"
+              searchPlaceholder="Search users..."
+              options={Object.entries(actorNames).map(([id, info]) => ({
+                value: id,
+                label: info.nameNow,
+                description: ROLE_LABELS[info.roleNow] ?? info.roleNow,
+              }))}
+              wrapperClassName="w-full sm:w-72"
+            />
+          ) : actorNamesLoading ? (
+            <div className="flex items-center gap-2 text-xs text-app-fg-muted w-full sm:w-72 py-1">
+              <Spinner className="w-4 h-4" />
+              <span>Loading users…</span>
+            </div>
+          ) : (
+            <TextInput
+              type="text"
+              placeholder="User UUID..."
+              value={filters.actorId}
+              onChange={(e) => updateFilter('actorId', e.target.value)}
+              wrapperClassName="w-full sm:w-72"
+            />
+          )}
         </div>
+        {actorNamesError ? (
+          <p className="text-xs text-danger-600 dark:text-danger-400 mt-2">{actorNamesError}</p>
+        ) : null}
       </div>
 
-      <DeferredSection resolve={actorNames} skeleton="inline">
-        {(resolvedActorNames) => (
-          <LocalExportModal
-            open={showExportModal}
-            onClose={() => setShowExportModal(false)}
-            title="Export Audit Log"
-            description="Choose format and columns for the current audit rows."
-            filenamePrefix="audit-log"
-            rows={rows.map((entry) => ({
-              timestamp: formatDate(entry.validFrom),
-              table: formatAuditTableName(entry.tableName),
-              description: generateAuditDescription(entry, resolvedActorNames),
-              actor: getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom),
-              recordId: entry.recordId,
-              validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
-            }))}
-            columns={[
-              { key: 'timestamp', label: 'Timestamp' },
-              { key: 'table', label: 'Table' },
-              { key: 'description', label: 'Description' },
-              { key: 'actor', label: 'Actor' },
-              { key: 'recordId', label: 'Record ID' },
-              { key: 'validTo', label: 'Valid To' },
-            ]}
-            defaultColumns={['timestamp', 'table', 'description', 'actor', 'recordId', 'validTo']}
-          />
-        )}
-      </DeferredSection>
+      <LocalExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        title="Export Audit Log"
+        description="Choose format and columns for the current audit rows."
+        filenamePrefix="audit-log"
+        rows={rows.map((entry) => ({
+          timestamp: formatDate(entry.validFrom),
+          table: formatAuditTableName(entry.tableName),
+          description: generateAuditDescription(entry, actorNames),
+          actor: getActorDisplay(entry.changedBy, actorNames, entry.validFrom),
+          recordId: entry.recordId,
+          validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
+        }))}
+        columns={[
+          { key: 'timestamp', label: 'Timestamp' },
+          { key: 'table', label: 'Table' },
+          { key: 'description', label: 'Description' },
+          { key: 'actor', label: 'Actor' },
+          { key: 'recordId', label: 'Record ID' },
+          { key: 'validTo', label: 'Valid To' },
+        ]}
+        defaultColumns={['timestamp', 'table', 'description', 'actor', 'recordId', 'validTo']}
+      />
 
       {/* Results count */}
       <p className="text-sm text-app-fg-muted">
@@ -1200,52 +1225,52 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                 header: 'Description',
                 cellClassName:
                   'text-xs text-app-fg-muted max-w-[min(28rem,55vw)] md:max-w-xl lg:max-w-2xl break-words whitespace-normal min-w-0',
-                render: (entry) => (
-                  <DeferredSection resolve={actorNames} skeleton="inline">
-                    {(resolvedActorNames) => (
-                      <AuditDescription entry={entry} actorNames={resolvedActorNames} />
-                    )}
-                  </DeferredSection>
-                ),
+                render: (entry) =>
+                  actorNamesLoading ? (
+                    <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
+                      <Spinner className="w-4 h-4" />
+                      <span>Loading…</span>
+                    </span>
+                  ) : (
+                    <AuditDescription entry={entry} actorNames={actorNames} />
+                  ),
               },
               {
                 key: 'actor',
                 header: 'Actor',
                 nowrap: true,
                 cellClassName: 'text-xs text-app-fg-muted',
-                render: (entry) => (
-                  <DeferredSection resolve={actorNames} skeleton="inline">
-                    {(resolvedActorNames) => {
-                      const display = getActorDisplay(
-                        entry.changedBy,
-                        resolvedActorNames,
-                        entry.validFrom,
-                      );
-                      const known = isActorKnown(entry.changedBy, resolvedActorNames);
-                      if (known && entry.changedBy) {
-                        return (
-                          <Link
-                            to={`/hr/users/${entry.changedBy}`}
-                            className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
-                          >
-                            {display}
-                          </Link>
-                        );
-                      }
-                      return (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })
-                          }
-                          className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
-                        >
-                          {display}
-                        </button>
-                      );
-                    }}
-                  </DeferredSection>
-                ),
+                render: (entry) => {
+                  if (actorNamesLoading) {
+                    return (
+                      <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
+                        <Spinner className="w-4 h-4" />
+                        <span>Loading…</span>
+                      </span>
+                    );
+                  }
+                  const display = getActorDisplay(entry.changedBy, actorNames, entry.validFrom);
+                  const known = isActorKnown(entry.changedBy, actorNames);
+                  if (known && entry.changedBy) {
+                    return (
+                      <Link
+                        to={`/hr/users/${entry.changedBy}`}
+                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2"
+                      >
+                        {display}
+                      </Link>
+                    );
+                  }
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
+                      className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer"
+                    >
+                      {display}
+                    </button>
+                  );
+                },
               },
               {
                 key: 'view',
@@ -1278,36 +1303,45 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
                   </span>
                 </div>
                 <div className="text-sm text-app-fg-muted break-words min-w-0">
-                  <DeferredSection resolve={actorNames} skeleton="inline">
-                    {(resolvedActorNames) => (
-                      <AuditDescription entry={entry} actorNames={resolvedActorNames} />
-                    )}
-                  </DeferredSection>
+                  {actorNamesLoading ? (
+                    <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
+                      <Spinner className="w-4 h-4" />
+                      <span>Loading…</span>
+                    </span>
+                  ) : (
+                    <AuditDescription entry={entry} actorNames={actorNames} />
+                  )}
                 </div>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <DeferredSection resolve={actorNames} skeleton="inline">
-                    {(resolvedActorNames) => {
-                      const display = getActorDisplay(entry.changedBy, resolvedActorNames, entry.validFrom);
-                      const known = isActorKnown(entry.changedBy, resolvedActorNames);
-                      const actorNode = known && entry.changedBy ? (
-                        <Link
-                          to={`/hr/users/${entry.changedBy}`}
-                          className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2 text-sm"
-                        >
-                          {display}
-                        </Link>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
-                          className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer text-sm"
-                        >
-                          {display}
-                        </button>
+                  {(() => {
+                    if (actorNamesLoading) {
+                      return (
+                        <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
+                          <Spinner className="w-4 h-4" />
+                          <span>Loading…</span>
+                        </span>
                       );
-                      return <div className="flex items-center gap-2 flex-wrap">{actorNode}</div>;
-                    }}
-                  </DeferredSection>
+                    }
+                    const display = getActorDisplay(entry.changedBy, actorNames, entry.validFrom);
+                    const known = isActorKnown(entry.changedBy, actorNames);
+                    const actorNode = known && entry.changedBy ? (
+                      <Link
+                        to={`/hr/users/${entry.changedBy}`}
+                        className="text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300 font-medium underline underline-offset-2 text-sm"
+                      >
+                        {display}
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setUnknownActorModal({ changedBy: entry.changedBy, displayName: display })}
+                        className="text-surface-600 hover:text-app-fg dark:hover:text-surface-100 font-medium underline underline-offset-2 cursor-pointer text-sm"
+                      >
+                        {display}
+                      </button>
+                    );
+                    return <div className="flex items-center gap-2 flex-wrap">{actorNode}</div>;
+                  })()}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1329,32 +1363,21 @@ export function AuditPage({ rows, total, filters, actorNames, error }: AuditPage
         <Pagination page={filters.page} totalPages={totalPages} pageParam="page" />
       )}
 
-      {/* Time Travel Panel — uses resolved actorNames */}
-      <DeferredSection resolve={actorNames} skeleton="card">
-        {(resolvedActorNames) => (
-          <TimeTravelPanel
-            actorNames={resolvedActorNames}
-            onPreviewImage={(url) => setPreviewImageUrl(url)}
-          />
-        )}
-      </DeferredSection>
+      {/* Time Travel Panel — actor names loaded post-mount */}
+      <TimeTravelPanel actorNames={actorNames} onPreviewImage={(url) => setPreviewImageUrl(url)} />
 
       {/* Detail Modal — uses resolved actorNames */}
       {selectedEntry && (
-        <DeferredSection resolve={actorNames} skeleton="card">
-          {(resolvedActorNames) => (
-            <DetailModal
-              entry={selectedEntry}
-              actorNames={resolvedActorNames}
-              onClose={() => setSelectedEntry(null)}
-              onUnknownActorClick={(changedBy, displayName) => {
-                setSelectedEntry(null);
-                setUnknownActorModal({ changedBy, displayName });
-              }}
-              onPreviewImage={(url) => setPreviewImageUrl(url)}
-            />
-          )}
-        </DeferredSection>
+        <DetailModal
+          entry={selectedEntry}
+          actorNames={actorNames}
+          onClose={() => setSelectedEntry(null)}
+          onUnknownActorClick={(changedBy, displayName) => {
+            setSelectedEntry(null);
+            setUnknownActorModal({ changedBy, displayName });
+          }}
+          onPreviewImage={(url) => setPreviewImageUrl(url)}
+        />
       )}
 
       {/* Unknown Actor Modal */}

@@ -44,14 +44,9 @@ export interface OrdersAndCounts {
   recentOrders: DashboardData['recentOrders'];
 }
 
-/** What the loader returns — all deferred for navigate-first */
+/** What the loader returns — orders shell deferred; KPIs load post-mount via `/api/dashboard-secondary`. */
 export interface DashboardLoaderData {
   ordersAndCounts: Promise<OrdersAndCounts>;
-  metrics: Promise<DashboardData['metrics']>;
-  profit: Promise<DashboardData['profit']>;
-  totalUsers: Promise<number>;
-  totalProducts: Promise<number>;
-  payoutSummary: Promise<DashboardData['payoutSummary']>;
 }
 
 export interface DashboardFilters {
@@ -60,8 +55,8 @@ export interface DashboardFilters {
   periodAllTime?: boolean;
 }
 
-/** Data shape passed to DashboardPage (ordersAndCounts resolved, rest deferred) */
-export type DashboardPageData = Omit<DashboardLoaderData, 'ordersAndCounts'> & OrdersAndCounts;
+/** Data shape passed to DashboardPage (`ordersAndCounts` resolved in loader; metrics/profit/etc. via context). */
+export type DashboardPageData = OrdersAndCounts;
 
 export interface DashboardPageProps {
   data: DashboardPageData;

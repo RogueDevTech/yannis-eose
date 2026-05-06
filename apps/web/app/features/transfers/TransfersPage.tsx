@@ -3,7 +3,6 @@ import { Button } from '~/components/ui/button';
 import { useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
@@ -27,6 +26,7 @@ import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { Tabs } from '~/components/ui/tabs';
+import { Spinner } from '~/components/ui/spinner';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from './types';
 
 /** Status options shown as filter pills. Order matches the lifecycle. */
@@ -52,6 +52,12 @@ function formatRecordedAt(iso: string | null) {
 export function TransfersPage({ transfers, locations, products, levels, canInitiate = true }: TransfersStreamData) {
   const fetcher = useFetcher();
   const cancelFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const formDataFetcher = useFetcher<{
+    ok: boolean;
+    products: Product[];
+    levels: InventoryLevel[];
+    error: string | null;
+  }>();
   const navigation = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
@@ -152,6 +158,19 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   useEffect(() => {
     setSelectedToLocationId((prev) => (prev === selectedFromLocation ? '' : prev));
   }, [selectedFromLocation]);
+
+  const resolvedProducts = (formDataFetcher.data?.products ?? products ?? []) as Product[];
+  const resolvedLevels = (formDataFetcher.data?.levels ?? levels ?? []) as InventoryLevel[];
+  const formDataLoading =
+    canInitiate && (formDataFetcher.state === 'loading' || (!formDataFetcher.data && (products == null || levels == null)));
+  const formDataError = formDataFetcher.data && !formDataFetcher.data.ok ? formDataFetcher.data.error : null;
+
+  useEffect(() => {
+    if (!canInitiate) return;
+    if (products != null && levels != null) return;
+    if (formDataFetcher.state !== 'idle') return;
+    formDataFetcher.load('/api/transfers-form-data');
+  }, [canInitiate, products, levels, formDataFetcher.state]);
 
   const getLocationName = (id: string) => {
     const loc = locations.find((l: Location) => l.id === id);
@@ -442,21 +461,18 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
             ]}
             controlSize="sm"
           />
-          <DeferredSection resolve={products} skeleton="inline">
-            {(resolvedProducts) => (
-              <FormSelect
-                id="transfer-filter-product"
-                label="Product"
-                value={productFilter}
-                onChange={(e) => updateFilter('productId', e.target.value)}
-                options={[
-                  { value: '', label: 'All products' },
-                  ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
-                ]}
-                controlSize="sm"
-              />
-            )}
-          </DeferredSection>
+          <FormSelect
+            id="transfer-filter-product"
+            label="Product"
+            value={productFilter}
+            onChange={(e) => updateFilter('productId', e.target.value)}
+            options={[
+              { value: '', label: formDataLoading ? 'Loading products…' : 'All products' },
+              ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
+            ]}
+            controlSize="sm"
+            disabled={formDataLoading && resolvedProducts.length === 0}
+          />
         </div>
         {hasFilters && (
           <div className="flex items-center justify-between pt-1">
@@ -483,19 +499,37 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
           aria-labelledby="transfer-form-title"
         >
           <div className="card border-0 shadow-none space-y-4 p-4 sm:p-6">
-            <DeferredSection resolve={products} skeleton="card">
-              {(resolvedProducts) => (
-                <DeferredSection resolve={levels} skeleton="card">
-                  {(resolvedLevels) => {
-                    const activeProducts = resolvedProducts.filter((p: Product) => p.status === 'ACTIVE');
+            {formDataError ? (
+              <div className="card border-danger-200 dark:border-danger-800 bg-danger-50/80 dark:bg-danger-900/20 !p-4">
+                <p className="text-sm font-medium text-danger-800 dark:text-danger-200">Could not load form data</p>
+                <p className="text-sm text-danger-800/80 dark:text-danger-200/80 mt-1">{formDataError}</p>
+                <div className="mt-3">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => formDataFetcher.load('/api/transfers-form-data')}>
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
-                    const getAvailableStock = (productId: string, locationId: string) => {
-                      const level = resolvedLevels.find((l: InventoryLevel) => l.productId === productId && l.locationId === locationId);
-                      return level ? level.stockCount - level.reservedCount : 0;
-                    };
+            {formDataLoading && resolvedProducts.length === 0 ? (
+              <div className="card !p-4">
+                <div className="flex items-center gap-2 text-sm text-app-fg-muted">
+                  <Spinner className="w-4 h-4" />
+                  <span>Loading form data…</span>
+                </div>
+              </div>
+            ) : (() => {
+              const activeProducts = resolvedProducts.filter((p: Product) => p.status === 'ACTIVE');
 
-                    return (
-                      <fetcher.Form method="post" className="space-y-4">
+              const getAvailableStock = (productId: string, locationId: string) => {
+                const level = resolvedLevels.find(
+                  (l: InventoryLevel) => l.productId === productId && l.locationId === locationId,
+                );
+                return level ? level.stockCount - level.reservedCount : 0;
+              };
+
+              return (
+                <fetcher.Form method="post" className="space-y-4">
                         <div className="flex items-center justify-between gap-2">
                           <h3 id="transfer-form-title" className="text-lg font-semibold text-app-fg">
                             Record stock transfer
@@ -629,19 +663,24 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                           </Button>
                         </div>
                       </fetcher.Form>
-                    );
-                  }}
-                </DeferredSection>
-              )}
-            </DeferredSection>
+              );
+            })()}
           </div>
         </Modal>
       )}
 
       <div className="card p-4 sm:p-6">
-        <DeferredSection resolve={products} skeleton="card">
-          {(resolvedProducts) => {
-            const productName = (id: string) => resolvedProducts.find((p: Product) => p.id === id)?.name ?? id.slice(0, 8) + '...';
+        {formDataLoading && resolvedProducts.length === 0 ? (
+          <div className="card !p-4">
+            <div className="flex items-center gap-2 text-sm text-app-fg-muted">
+              <Spinner className="w-4 h-4" />
+              <span>Loading products…</span>
+            </div>
+          </div>
+        ) : (
+          (() => {
+            const productName = (id: string) =>
+              resolvedProducts.find((p: Product) => p.id === id)?.name ?? id.slice(0, 8) + '...';
 
             const columns: CompactTableColumn<Transfer>[] = [
               {
@@ -747,8 +786,8 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 className="overflow-hidden rounded-xl border border-app-border"
               />
             );
-          }}
-        </DeferredSection>
+          })()
+        )}
       </div>
 
       <Modal open={!!viewTransfer} onClose={() => setViewTransfer(null)} maxWidth="max-w-lg" aria-labelledby="transfer-detail-title">
@@ -764,36 +803,34 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 </svg>
               </button>
             </div>
-            <DeferredSection resolve={products} skeleton="card">
-              {(resolvedProducts) => {
-                const prod = resolvedProducts.find((p: Product) => p.id === viewTransfer.productId);
-                const qtyLabel =
-                  viewTransfer.quantityReceived != null && viewTransfer.quantityReceived !== viewTransfer.quantitySent
-                    ? `${viewTransfer.quantityReceived} received (${viewTransfer.quantitySent} sent)`
-                    : String(viewTransfer.quantityReceived ?? viewTransfer.quantitySent);
+            {(() => {
+              const prod = resolvedProducts.find((p: Product) => p.id === viewTransfer.productId);
+              const qtyLabel =
+                viewTransfer.quantityReceived != null && viewTransfer.quantityReceived !== viewTransfer.quantitySent
+                  ? `${viewTransfer.quantityReceived} received (${viewTransfer.quantitySent} sent)`
+                  : String(viewTransfer.quantityReceived ?? viewTransfer.quantitySent);
 
-                return (
-                  <DescriptionList
-                    items={[
-                      { label: 'Product', value: prod?.name ?? viewTransfer.productId },
-                      { label: 'From', value: getLocationName(viewTransfer.fromLocationId) },
-                      { label: 'To', value: getLocationName(viewTransfer.toLocationId) },
-                      { label: 'Quantity', value: qtyLabel },
-                      {
-                        label: 'Recorded',
-                        value: formatRecordedAt(viewTransfer.verifiedAt ?? viewTransfer.createdAt),
-                      },
-                      ...(viewTransfer.shrinkageReason
-                        ? [{ label: 'Shrinkage reason', value: viewTransfer.shrinkageReason }]
-                        : []),
-                      ...(viewTransfer.receiverNotes
-                        ? [{ label: 'Receiver comment', value: viewTransfer.receiverNotes }]
-                        : []),
-                    ]}
-                  />
-                );
-              }}
-            </DeferredSection>
+              return (
+                <DescriptionList
+                  items={[
+                    { label: 'Product', value: prod?.name ?? viewTransfer.productId },
+                    { label: 'From', value: getLocationName(viewTransfer.fromLocationId) },
+                    { label: 'To', value: getLocationName(viewTransfer.toLocationId) },
+                    { label: 'Quantity', value: qtyLabel },
+                    {
+                      label: 'Recorded',
+                      value: formatRecordedAt(viewTransfer.verifiedAt ?? viewTransfer.createdAt),
+                    },
+                    ...(viewTransfer.shrinkageReason
+                      ? [{ label: 'Shrinkage reason', value: viewTransfer.shrinkageReason }]
+                      : []),
+                    ...(viewTransfer.receiverNotes
+                      ? [{ label: 'Receiver comment', value: viewTransfer.receiverNotes }]
+                      : []),
+                  ]}
+                />
+              );
+            })()}
             <p className="text-xs text-app-fg-muted">
               Confirm or dispute receipt in <span className="font-medium text-app-fg">Logistics → Stock Transfer Confirmations</span>.
             </p>

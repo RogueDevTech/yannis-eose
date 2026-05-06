@@ -4,7 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { TransfersPage } from '~/features/transfers/TransfersPage';
-import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from '~/features/transfers/types';
+import type { Transfer, Location, TransfersStreamData } from '~/features/transfers/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Stock Transfers — Yannis EOSE' },
@@ -14,20 +14,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'transfers.read');
   const cookie = getSessionCookie(request);
 
-  // Start all 4 fetches concurrently
+  // Start critical fetches concurrently
   const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
   const locationsPromise = apiRequest<unknown>('/trpc/logistics.listLocations', { method: 'GET', cookie });
-  const productsPromise = apiRequest<unknown>('/trpc/products.list', { method: 'GET', cookie });
-  // The transfer form looks up available stock by `(productId, locationId)` against
-  // this list. Without an explicit `limit`, the API defaults to 20 rows — so any
-  // level past row 20 silently returns 0 and the form shows "Quantity (max: 0)"
-  // even when stock is plenty. Pull up to the schema cap (100) so a typical
-  // multi-product / multi-location org has every row available client-side.
-  const levelsInput = JSON.stringify({ limit: 100 });
-  const levelsPromise = apiRequest<unknown>(
-    `/trpc/inventory.levels?input=${encodeURIComponent(levelsInput)}`,
-    { method: 'GET', cookie },
-  );
 
   // Await only critical: transfers, locations
   const [transfersRes, locationsRes] = await Promise.all([transfersPromise, locationsPromise]);
@@ -52,22 +41,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })) as Location[],
   };
 
-  // Return products, levels as un-awaited promises with .catch() fallback
-  const products = productsPromise.then((res) => {
-    if (!res.ok) return [] as Product[];
-    return (res.data as { result?: { data?: { products: Product[] } } })?.result?.data?.products ?? [];
-  }).catch(() => [] as Product[]);
-
-  const levels = levelsPromise.then((res) => {
-    if (!res.ok) return [] as InventoryLevel[];
-    return (res.data as { result?: { data?: { levels: InventoryLevel[] } } })?.result?.data?.levels ?? [];
-  }).catch(() => [] as InventoryLevel[]);
-
   return {
     transfers: transfersData ?? [],
     locations: locationsData.locations,
-    products,
-    levels,
+    products: null,
+    levels: null,
   };
 }
 

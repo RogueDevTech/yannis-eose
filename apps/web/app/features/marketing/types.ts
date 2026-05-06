@@ -393,10 +393,14 @@ export interface MarketingAdSpendLoaderData {
   mediaBuyersForFilter: Array<{ id: string; name: string }>;
   statusCounts: AdSpendStatusCounts;
   campaigns: Campaign[];
-  metrics: Metrics;
-  leaderboard: LeaderboardEntry[];
-  users: User[];
-  products: Product[];
+  /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
+  metrics: Metrics | null;
+  /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
+  leaderboard: LeaderboardEntry[] | null;
+  /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
+  users: User[] | null;
+  /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
+  products: Product[] | null;
   leaderboardPeriod: 'this_month' | 'all_time';
   filters: MarketingDateFilters;
   viewMode: 'admin' | 'media_buyer';
@@ -409,7 +413,8 @@ export interface MarketingAdSpendLoaderData {
    */
   canApproveAdSpend: boolean;
   /** Grouped accordion view (Phase 17). Groups are page-sliced — pagination is on groups. */
-  groups: AdSpendGroup[];
+  /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
+  groups: AdSpendGroup[] | null;
   groupsTotal: number;
   groupsPage: number;
   groupsTotalPages: number;

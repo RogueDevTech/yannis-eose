@@ -6,15 +6,10 @@ import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage'
 import type { AdSpendStatusFilter, MarketingAdSpendLoaderData } from '~/features/marketing/types';
 import {
   buildLeaderboardInput,
-  emptyMetrics,
   getMarketingRoleFlags,
   parseAdSpend,
   parseAdSpendStatusCounts,
   parseCampaigns,
-  parseLeaderboard,
-  parseMetrics,
-  parseProducts,
-  parseUsers,
   resolveMarketingDateFilters,
   runMarketingAdSpendAction,
 } from '~/lib/marketing-pages.server';
@@ -100,100 +95,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(campaignIdFilter && { campaignId: campaignIdFilter }),
     ...(mediaBuyerIdFilter && { mediaBuyerId: mediaBuyerIdFilter }),
   });
-  const metricsInput = JSON.stringify({
-    ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
-  });
   const campaignsInput = JSON.stringify(isMediaBuyer ? { mediaBuyerId: user.id, page: 1, limit: 20 } : { page: 1, limit: 20 });
   const buyersInputStr = encodeURIComponent(
     JSON.stringify({ page: 1, limit: 100, role: 'MEDIA_BUYER', status: 'ACTIVE' }),
   );
 
   const adSpendP = apiRequest<unknown>(`/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`, { method: 'GET', cookie });
-  const groupedP = apiRequest<unknown>(`/trpc/marketing.listAdSpendGrouped?input=${encodeURIComponent(groupedInput)}`, { method: 'GET', cookie });
   const adSpendCountsP = apiRequest<unknown>(
     `/trpc/marketing.adSpendStatusCounts?input=${encodeURIComponent(countsInput)}`,
     { method: 'GET', cookie },
   );
-  const metricsP = apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, { method: 'GET', cookie });
   const campaignsP = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`, { method: 'GET', cookie });
-  const productsP = apiRequest<unknown>('/trpc/products.list', { method: 'GET', cookie });
   const buyersP = !isMediaBuyer
     ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
     : Promise.resolve({ ok: false, data: null });
 
-  const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
-  const leaderboardP = apiRequest<unknown>(
-    `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
-    { method: 'GET', cookie },
-  ).catch(() => ({ ok: false, data: { result: { data: [] } } }));
-
-  const [adSpendRes, adSpendCountsRes, campaignsRes, groupedRes, buyersRes] = await Promise.all([
+  const [adSpendRes, adSpendCountsRes, campaignsRes, buyersRes] = await Promise.all([
     adSpendP,
     adSpendCountsP,
     campaignsP,
-    groupedP,
     buyersP,
   ]);
-  type GroupedShape = {
-    groups?: Array<{
-      spendDate: string;
-      mediaBuyerId: string;
-      mediaBuyerName: string | null;
-      lineCount: number;
-      totalAmount: string;
-      rolledStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
-      overallOrderCount?: number;
-      overallCpa?: number | null;
-      lines: Array<{
-        id: string;
-        mediaBuyerId: string;
-        mediaBuyerName: string | null;
-        productId: string;
-        productName: string | null;
-        campaignId: string;
-        campaignName: string | null;
-        spendAmount: string;
-        screenshotUrl: string;
-        adUrl: string | null;
-        platform: 'FACEBOOK' | 'TIKTOK' | 'GOOGLE' | 'OTHER';
-        platformCustomLabel?: string | null;
-        spendDate: string;
-        status: 'PENDING' | 'APPROVED' | 'REJECTED';
-        rejectionReason: string | null;
-        approvedAt: string | null;
-        rejectedAt: string | null;
-        createdAt: string;
-        orderCount?: number;
-        indicativeCpa?: number | null;
-      }>;
-    }>;
-    pagination?: { page: number; limit: number; total: number };
-  };
-  const groupedData: GroupedShape = groupedRes.ok
-    ? (((groupedRes.data as { result?: { data?: GroupedShape } })?.result?.data) ?? {})
-    : {};
-  const resolvedGpage = groupedRes.ok ? (groupedData.pagination?.page ?? groupsPage) : groupsPage;
-  if (groupedRes.ok && groupedData.pagination != null && resolvedGpage !== groupsPage) {
-    const next = new URL(request.url);
-    next.searchParams.set('gpage', String(resolvedGpage));
-    throw redirect(next.pathname + next.search);
-  }
-  const groups = (groupedData.groups ?? []).map((g) => ({
-    ...g,
-    overallOrderCount: g.overallOrderCount ?? 0,
-    overallCpa: g.overallCpa ?? null,
-    lines: (g.lines ?? []).map((l) => ({
-      ...l,
-      orderCount: l.orderCount ?? 0,
-      indicativeCpa: l.indicativeCpa ?? null,
-    })),
-  }));
-  const groupsTotal = groupedData.pagination?.total ?? 0;
-  const groupsTotalPages = Math.max(1, Math.ceil(groupsTotal / 20));
-  /** Aligns with API clamp when dataset shrinks (e.g. approve on last page of pending groups). */
-  const groupsPageForUi = resolvedGpage;
+
   const mediaBuyersForFilter =
     buyersRes.ok
       ? (
@@ -208,49 +131,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const statusCounts = parseAdSpendStatusCounts(adSpendCountsRes);
   const totalRows = adSpendData?.pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalRows / AD_SPEND_PER_PAGE));
-
-  // Resolve names for every user ID actually referenced on this page (buyers + approvers),
-  // ignoring pagination and status filters so we still show names for deactivated users.
-  // Much cheaper than fetching the whole user list, and correct at any org size.
-  const userIdsOnPage = new Set<string>();
-  for (const row of adSpendData?.records ?? []) {
-    if (row.mediaBuyerId) userIdsOnPage.add(row.mediaBuyerId);
-    if (row.approvedBy) userIdsOnPage.add(row.approvedBy);
-    if (row.rejectedBy) userIdsOnPage.add(row.rejectedBy);
-  }
-  const usersP = isFundingAdmin && userIdsOnPage.size > 0
-    ? apiRequest<unknown>(
-        `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ userIds: Array.from(userIdsOnPage), limit: 100 }))}`,
-        { method: 'GET', cookie },
-      )
-    : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
-
-  const [metrics, leaderboard, usersData, productsDataRaw] = await Promise.all([
-    metricsP.then(parseMetrics).catch(() => emptyMetrics()),
-    leaderboardP.then((r) => parseLeaderboard(r)).catch(() => []),
-    usersP.then(parseUsers).catch(() => []),
-    productsP.then(parseProducts).catch(() => []),
-  ]);
-
-  // Media buyers only see products that are assigned to them — i.e. referenced by any of
-  // their own campaigns' `productIds`. Admins / HoM still see the full product catalog.
-  // The campaign list was already filtered by `mediaBuyerId = user.id` at fetch time, so
-  // collecting `productIds` from those campaigns yields the right scoping for free.
-  let productsData = productsDataRaw;
-  if (isMediaBuyer) {
-    const allowedProductIds = new Set<string>();
-    const campaignsRaw = (campaignsRes.ok
-      ? (campaignsRes.data as { result?: { data?: { campaigns?: Array<{ productIds?: string[] | null }> } } })?.result?.data?.campaigns
-      : []) ?? [];
-    for (const c of campaignsRaw) {
-      if (Array.isArray(c.productIds)) {
-        for (const id of c.productIds) {
-          if (id) allowedProductIds.add(id);
-        }
-      }
-    }
-    productsData = productsDataRaw.filter((p) => allowedProductIds.has(p.id));
-  }
 
   const data: MarketingAdSpendLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
@@ -270,16 +150,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     mediaBuyersForFilter,
     statusCounts,
     campaigns: parseCampaigns(campaignsRes),
-    metrics,
-    leaderboard,
-    users: usersData,
-    products: productsData,
+    metrics: null,
+    leaderboard: null,
+    users: null,
+    products: null,
     leaderboardPeriod,
     filters,
-    groups,
-    groupsTotal,
-    groupsPage: groupsPageForUi,
-    groupsTotalPages,
+    groups: null,
+    groupsTotal: 0,
+    groupsPage: groupsPage,
+    groupsTotalPages: 1,
   };
 
   return data;
