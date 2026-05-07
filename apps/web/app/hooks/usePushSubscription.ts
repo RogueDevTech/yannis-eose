@@ -58,7 +58,44 @@ export interface UsePushSubscriptionResult {
   unsubscribe: () => Promise<void>;
 }
 
-export function usePushSubscription(): UsePushSubscriptionResult {
+/**
+ * Per-user, per-endpoint memo of the last-saved push subscription payload
+ * stored in `localStorage`. Used by `saveSubscriptionToDb` and the install-mode
+ * heartbeat to skip a redundant POST when nothing has changed.
+ *
+ * The key is scoped by user id so a different account signing in on the same
+ * device still gets its row inserted on first mount even when the browser-level
+ * `PushSubscription` (endpoint/keys) is identical.
+ */
+function pushSubLastSentKey(userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  return `yannis:pushsub:lastSent:${userId}`;
+}
+
+function pushInstallModeLastSentKey(userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  return `yannis:pushsub:lastInstallMode:${userId}`;
+}
+
+function readLocalStorage(key: string | null): string | null {
+  if (!key || typeof localStorage === 'undefined') return null;
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalStorage(key: string | null, value: string): void {
+  if (!key || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* quota or privacy mode — soft-fail, the next mount will retry */
+  }
+}
+
+export function usePushSubscription(userId?: string | null): UsePushSubscriptionResult {
   const [isSupported, setIsSupported] = useState(false);
   const [iosDevice, setIosDevice] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -89,6 +126,8 @@ export function usePushSubscription(): UsePushSubscriptionResult {
 
     // Check if already subscribed, and heartbeat the current install mode so the dashboard
     // tracks installs/uninstalls between sessions without requiring a fresh subscribe.
+    // The heartbeat is guarded by a per-user `localStorage` memo so we don't POST on every
+    // navigation when nothing has changed (the previous behavior added ~1.9s per warm nav).
     navigator.serviceWorker.ready
       .then((registration) => registration.pushManager.getSubscription())
       .then((sub) => {
@@ -96,21 +135,28 @@ export function usePushSubscription(): UsePushSubscriptionResult {
           setIsSubscribed(true);
           const mode = detectInstallMode();
           if (mode !== 'UNKNOWN' && !isMirroring()) {
+            const key = pushInstallModeLastSentKey(userId);
+            const payload = JSON.stringify({ endpoint: sub.endpoint, installMode: mode });
+            if (readLocalStorage(key) === payload) return;
             fetch(`${getBrowserApiBaseUrl()}/trpc/notifications.updatePushInstallMode`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               credentials: 'include',
-              body: JSON.stringify({ endpoint: sub.endpoint, installMode: mode }),
-            }).catch(() => {
-              // Heartbeat is best-effort; next mount will try again.
-            });
+              body: payload,
+            })
+              .then((res) => {
+                if (res.ok) writeLocalStorage(key, payload);
+              })
+              .catch(() => {
+                // Heartbeat is best-effort; next mount will try again.
+              });
           }
         }
       })
       .catch(() => {
         // Service worker not ready yet — ignore
       });
-  }, []);
+  }, [userId]);
 
   // When the user installs the PWA mid-session, the `appinstalled` event fires in the
   // browsing context and `display-mode` flips to `standalone`. Push the updated flag
@@ -124,12 +170,16 @@ export function usePushSubscription(): UsePushSubscriptionResult {
         const registration = await navigator.serviceWorker.ready;
         const sub = await registration.pushManager.getSubscription();
         if (!sub) return;
-        await fetch(`${getBrowserApiBaseUrl()}/trpc/notifications.updatePushInstallMode`, {
+        const key = pushInstallModeLastSentKey(userId);
+        const payload = JSON.stringify({ endpoint: sub.endpoint, installMode: mode });
+        if (readLocalStorage(key) === payload) return;
+        const res = await fetch(`${getBrowserApiBaseUrl()}/trpc/notifications.updatePushInstallMode`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ endpoint: sub.endpoint, installMode: mode }),
+          body: payload,
         });
+        if (res.ok) writeLocalStorage(key, payload);
       } catch {
         // Best-effort.
       }
@@ -154,36 +204,56 @@ export function usePushSubscription(): UsePushSubscriptionResult {
       window.removeEventListener('appinstalled', onInstalled);
       mq.removeEventListener('change', onDisplayModeChange);
     };
-  }, []);
+  }, [userId]);
 
   /**
    * Saves a PushSubscription object to the backend DB.
    * Separated so it can be called both after a new subscribe() and on
    * page-load when permission is already granted but the DB row may be missing.
+   *
+   * Skips the POST entirely when the resolved payload (endpoint + keys + UA + install
+   * mode) is byte-identical to the last successful save for this user — `DashboardLayoutInner`
+   * fires this on every mount, so without the guard a warm nav between admin pages costs
+   * ~1.9s for a write the server would no-op anyway. The cache is per-user so a second
+   * account on the same device still gets its row created on first visit.
    */
-  const saveSubscriptionToDb = useCallback(async (subscription: PushSubscription): Promise<void> => {
-    const raw = subscription.toJSON();
-    if (!raw?.endpoint || !raw.keys?.auth || !raw.keys?.p256dh) return;
-    const apiBase = getBrowserApiBaseUrl();
-    const res = await fetch(`${apiBase}/trpc/notifications.savePushSubscription`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
+  const saveSubscriptionToDb = useCallback(
+    async (subscription: PushSubscription): Promise<void> => {
+      const raw = subscription.toJSON();
+      if (!raw?.endpoint || !raw.keys?.auth || !raw.keys?.p256dh) return;
+      const body = {
         endpoint: raw.endpoint,
         auth: raw.keys.auth,
         p256dh: raw.keys.p256dh,
         userAgent: navigator.userAgent,
         installMode: detectInstallMode(),
-      }),
-    });
-    if (!res.ok) {
-      const errBody = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-      const msg = errBody?.error?.message ?? `Failed to save push subscription (${res.status})`;
-      console.error('[push] savePushSubscription failed:', res.status, msg, errBody);
-      throw new Error(msg);
-    }
-  }, []);
+      };
+      const payload = JSON.stringify(body);
+      const key = pushSubLastSentKey(userId);
+      if (readLocalStorage(key) === payload) return;
+      const apiBase = getBrowserApiBaseUrl();
+      const res = await fetch(`${apiBase}/trpc/notifications.savePushSubscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: payload,
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        const msg = errBody?.error?.message ?? `Failed to save push subscription (${res.status})`;
+        console.error('[push] savePushSubscription failed:', res.status, msg, errBody);
+        throw new Error(msg);
+      }
+      writeLocalStorage(key, payload);
+      // The server upserts the install-mode column on the same row, so keep the
+      // heartbeat memo in sync and avoid a redundant follow-up POST on the next mount.
+      writeLocalStorage(
+        pushInstallModeLastSentKey(userId),
+        JSON.stringify({ endpoint: body.endpoint, installMode: body.installMode }),
+      );
+    },
+    [userId],
+  );
 
   const subscribe = useCallback(async (): Promise<void> => {
     if (!isSupported) throw new Error('Push notifications are not supported in this browser.');
@@ -245,11 +315,23 @@ export function usePushSubscription(): UsePushSubscriptionResult {
       throw new Error(errBody?.error?.message ?? `Failed to remove push subscription (${res.status})`);
     }
 
+    // Clear the per-user save/heartbeat memo so the next subscribe POSTs a fresh row.
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const subKey = pushSubLastSentKey(userId);
+        const modeKey = pushInstallModeLastSentKey(userId);
+        if (subKey) localStorage.removeItem(subKey);
+        if (modeKey) localStorage.removeItem(modeKey);
+      } catch {
+        /* ignore */
+      }
+    }
+
     setIsSubscribed(false);
     if ('Notification' in window) {
       setPermissionState(Notification.permission as PermissionState);
     }
-  }, [isSupported]);
+  }, [isSupported, userId]);
 
   return {
     isSupported,

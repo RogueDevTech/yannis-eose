@@ -7,6 +7,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 
@@ -381,12 +382,12 @@ export function CreateOfflineOrderModal({
                       </div>
                     )}
                     <div className="w-20">
-                      <TextInput
-                        type="number"
+                      <NumberInput
                         label="Qty"
                         min={1}
-                        value={String(item.quantity)}
-                        onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value, 10) || 1)}
+                        fallbackValue={1}
+                        value={Number(item.quantity) || 1}
+                        onValueChange={(n) => updateItem(index, 'quantity', n)}
                         controlSize="sm"
                         wrapperClassName="w-full"
                       />

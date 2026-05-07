@@ -8,6 +8,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { Modal } from '~/components/ui/modal';
 import { FormField } from '~/components/ui/form-field';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { Pagination } from '~/components/ui/pagination';
 import { Spinner } from '~/components/ui/spinner';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -94,6 +95,28 @@ export function MarketingOffersTab({
     }
     return rows;
   }, [offerGroups, filterProductId, offerSearch, archivePatches]);
+
+  // Client-side pagination — backend `marketing.listOfferGroups` does not paginate.
+  // 20 cards/page is the same scale we use across the rest of the app.
+  const OFFERS_PAGE_SIZE = 20;
+  const [offersPage, setOffersPage] = useState(1);
+  const offersTotalPages = Math.max(1, Math.ceil(filteredGroups.length / OFFERS_PAGE_SIZE));
+  const safeOffersPage = Math.min(offersPage, offersTotalPages);
+  const pagedGroups = useMemo(
+    () =>
+      filteredGroups.slice(
+        (safeOffersPage - 1) * OFFERS_PAGE_SIZE,
+        safeOffersPage * OFFERS_PAGE_SIZE,
+      ),
+    [filteredGroups, safeOffersPage],
+  );
+  // Reset to page 1 when filters change.
+  useEffect(() => {
+    setOffersPage(1);
+  }, [filterProductId, offerSearch]);
+  useEffect(() => {
+    if (offersPage > offersTotalPages) setOffersPage(1);
+  }, [offersPage, offersTotalPages]);
 
   // (Create/Edit page now owns product selection + images + price inheritance.)
 
@@ -188,7 +211,7 @@ export function MarketingOffersTab({
         </div>
       ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredGroups.map((g) => {
+        {pagedGroups.map((g) => {
           const first = g.items[0];
           const titleProduct = first?.productName ?? '—';
           const isPatching = isOptimisticPatched(archivePatches, g.id);
@@ -252,6 +275,23 @@ export function MarketingOffersTab({
           );
         })}
       </div>
+      )}
+
+      {!offersLoading && filteredGroups.length > 0 && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4">
+          <p className="text-sm text-app-fg-muted">
+            Showing {(safeOffersPage - 1) * OFFERS_PAGE_SIZE + 1}–
+            {Math.min(safeOffersPage * OFFERS_PAGE_SIZE, filteredGroups.length)} of{' '}
+            {filteredGroups.length}
+            <span className="text-app-fg-muted/90"> · {OFFERS_PAGE_SIZE} per page</span>
+          </p>
+          <Pagination
+            page={safeOffersPage}
+            totalPages={offersTotalPages}
+            onPageChange={setOffersPage}
+            className="sm:justify-end"
+          />
+        </div>
       )}
 
       {viewingOffer ? (

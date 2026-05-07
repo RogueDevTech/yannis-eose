@@ -4,13 +4,9 @@ import type { Request, Response, NextFunction } from 'express';
 import { appRouter } from './routers';
 import { createContext } from './context';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { PermissionsService } from '../permissions/permissions.service';
 import { canViewAllBranches } from '../common/authz';
 import { SessionStoreService } from '../auth/session-store.service';
-import { eq } from 'drizzle-orm';
-import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
-import { DRIZZLE } from '../database/database.module';
+import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
@@ -18,8 +14,7 @@ export class TrpcMiddleware implements NestMiddleware {
 
   constructor(
     @Inject(SessionStoreService) private readonly sessionStore: SessionStoreService,
-    private readonly permissionsService: PermissionsService,
-    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    private readonly userBundleCache: UserBundleCacheService,
   ) {}
 
   async use(req: Request, res: Response, _next: NextFunction) {
@@ -103,29 +98,21 @@ export class TrpcMiddleware implements NestMiddleware {
     const user = await this.sessionStore.getSession(token);
     if (!user) return null;
 
-    const [dbUser] = await this.db
-      .select({
-        roleTemplateId: schema.users.roleTemplateId,
-        scopeGlobal: schema.users.scopeGlobal,
-        scopeOrgWideHead: schema.users.scopeOrgWideHead,
-        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
-        role: schema.users.role,
-      })
-      .from(schema.users)
-      .where(eq(schema.users.id, user.id))
-      .limit(1);
+    // Read DB-derived user facts (role/template/scope flags + permissions) from
+    // the per-user Redis bundle cache (60s TTL with explicit invalidation on writes).
+    // This skips 4 Postgres queries per tRPC call. Session-scoped fields stay on
+    // the session blob and are merged on top below.
+    const bundle = await this.userBundleCache.getOrLoad(user.id);
 
     const merged: SessionUser = {
       ...user,
-      roleTemplateId: dbUser?.roleTemplateId ?? user.roleTemplateId ?? null,
-      scopeGlobal: dbUser?.scopeGlobal ?? user.scopeGlobal ?? false,
-      scopeOrgWideHead: dbUser?.scopeOrgWideHead ?? user.scopeOrgWideHead ?? false,
-      scopeTeamSupervisor: dbUser?.scopeTeamSupervisor ?? user.scopeTeamSupervisor ?? false,
-      role: (dbUser?.role as string | undefined) ?? user.role,
+      role: bundle.role || user.role,
+      roleTemplateId: bundle.roleTemplateId,
+      scopeGlobal: bundle.scopeGlobal,
+      scopeOrgWideHead: bundle.scopeOrgWideHead,
+      scopeTeamSupervisor: bundle.scopeTeamSupervisor,
+      permissions: bundle.permissions,
     };
-
-    const perms = await this.permissionsService.getEffectivePermissions(merged.id);
-    merged.permissions = Array.from(perms);
 
     (req as Request & { user: SessionUser }).user = merged;
 

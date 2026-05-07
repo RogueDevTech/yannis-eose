@@ -16,6 +16,7 @@ import {
 } from '@yannis/shared';
 import type { UsersService } from '../../users/users.service';
 import type { SessionStoreService } from '../../auth/session-store.service';
+import { CacheService } from '../../common/cache/cache.service';
 
 /**
  * Factory pattern: NestJS injects the service, tRPC router consumes it.
@@ -23,6 +24,7 @@ import type { SessionStoreService } from '../../auth/session-store.service';
  */
 let usersServiceInstance: UsersService | null = null;
 let sessionStoreInstance: SessionStoreService | null = null;
+let usersCacheService: CacheService | null = null;
 
 export function setUsersService(service: UsersService) {
   usersServiceInstance = service;
@@ -30,6 +32,15 @@ export function setUsersService(service: UsersService) {
 
 export function setUsersSessionStore(store: SessionStoreService) {
   sessionStoreInstance = store;
+}
+
+export function setUsersCacheService(service: CacheService) {
+  usersCacheService = service;
+}
+
+async function invalidatePermissionsUserMatrixCache(): Promise<void> {
+  if (!usersCacheService) return;
+  await usersCacheService.delPattern('cache:permissions:userMatrix:*').catch(() => {});
 }
 
 /** Exported for cross-router lookups (e.g. HR payout preview access gate). */
@@ -221,7 +232,9 @@ export const usersRouter = router({
     .input(z.intersection(createStaffSchema, z.object({ branchId: z.string().uuid().optional() })))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...createInput } = input;
-      return getUsersService().createStaff(createInput, ctx.user);
+      const res = await getUsersService().createStaff(createInput, ctx.user);
+      await invalidatePermissionsUserMatrixCache();
+      return res;
     }),
 
   /**
@@ -238,7 +251,9 @@ export const usersRouter = router({
     .input(updateStaffSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...updateInput } = input;
-      return getUsersService().update(updateInput, ctx.user);
+      const res = await getUsersService().update(updateInput, ctx.user);
+      await invalidatePermissionsUserMatrixCache();
+      return res;
     }),
 
   /**
@@ -256,7 +271,9 @@ export const usersRouter = router({
   restampPermissions: permissionProcedure('users.staff.update', 'rbac.templates.manage')
     .input(z.object({ userId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
-      return getUsersService().restampPermissions(input.userId, ctx.user);
+      const res = await getUsersService().restampPermissions(input.userId, ctx.user);
+      await invalidatePermissionsUserMatrixCache();
+      return res;
     }),
 
   /**

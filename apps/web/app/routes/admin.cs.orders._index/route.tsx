@@ -31,7 +31,7 @@ const CS_ORDERS_LIVE_EVENTS = [
   'order:transfer_rejected',
 ] as const;
 
-const ORDERS_PER_PAGE = 40;
+const ORDERS_PER_PAGE = 20;
 
 const defaultThisMonth = defaultThisMonthRange;
 
@@ -201,22 +201,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     let csAgentsForFilter: Array<{ agentId: string; agentName: string }> = [];
     let logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }> = [];
     if (showCSAgentColumn) {
-      const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 100 }));
       const [workloadsRes, locationsRes] = await Promise.all([
         apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
           '/trpc/orders.csWorkloads?input=%7B%7D',
           { method: 'GET', cookie },
         ),
-        apiRequest<{ result?: { data?: { locations: Array<{ id: string; name: string; providerName: string | null }> } } }>(
-          `/trpc/logistics.listLocations?input=${locationsInput}`,
+        apiRequest<{ result?: { data?: Array<{ id: string; name: string; providerName: string | null }> } }>(
+          `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
           { method: 'GET', cookie },
         ),
       ]);
       if (workloadsRes.ok && Array.isArray(workloadsRes.data?.result?.data)) {
         csAgentsForFilter = workloadsRes.data.result.data.map((w) => ({ agentId: w.agentId, agentName: w.agentName }));
       }
-      if (locationsRes.ok && Array.isArray(locationsRes.data?.result?.data?.locations)) {
-        logisticsLocationsForBulk = locationsRes.data.result.data.locations.map((loc) => ({
+      if (locationsRes.ok && Array.isArray(locationsRes.data?.result?.data)) {
+        logisticsLocationsForBulk = locationsRes.data.result.data.map((loc) => ({
           id: loc.id,
           name: loc.name,
           providerName: loc.providerName ?? null,

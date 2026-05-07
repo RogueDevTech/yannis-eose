@@ -8,6 +8,7 @@ import type { SessionUser } from '../../common/decorators/current-user.decorator
 import { router, permissionProcedure, authedProcedure } from '../trpc';
 import { resolveRoleTemplateBaselineCodes } from '../../permissions/role-template-baseline';
 import { computeEffectivePermissionsLegacyUnion } from '../../permissions/permissions.service';
+import { CacheService } from '../../common/cache/cache.service';
 
 /** Staff UI for someone else's matrix — or self-service profile (`/admin/profile`). */
 function actorMayViewUserPermissionMatrix(actor: SessionUser, targetUserId: string): boolean {
@@ -21,9 +22,14 @@ function actorMayViewUserPermissionMatrix(actor: SessionUser, targetUserId: stri
 }
 
 let permissionsDbInstance: PostgresJsDatabase<typeof schema> | null = null;
+let permissionsCacheService: CacheService | null = null;
 
 export function setPermissionsDb(db: PostgresJsDatabase<typeof schema>) {
   permissionsDbInstance = db;
+}
+
+export function setPermissionsCacheService(service: CacheService) {
+  permissionsCacheService = service;
 }
 
 function db(): PostgresJsDatabase<typeof schema> {
@@ -127,6 +133,47 @@ export const permissionsRouter = router({
     'rbac.templates.manage',
   ).query(
     async () => {
+      const cacheKey =
+        'cache:permissions:templateBaselines:' +
+        CacheService.hashInput({ version: 1 });
+      const TTL_SECONDS = 60 * 15;
+      if (permissionsCacheService) {
+        return permissionsCacheService.getOrSet(cacheKey, TTL_SECONDS, async () => {
+          const templates = await db()
+            .select({
+              id: schema.roleTemplates.id,
+              key: schema.roleTemplates.key,
+              name: schema.roleTemplates.name,
+              kind: schema.roleTemplates.kind,
+              mappedRole: schema.roleTemplates.mappedRole,
+              locked: schema.roleTemplates.locked,
+            })
+            .from(schema.roleTemplates)
+            .where(and(isNull(schema.roleTemplates.validTo), eq(schema.roleTemplates.status, 'ACTIVE')))
+            .orderBy(asc(schema.roleTemplates.name));
+
+          const rows = await db()
+            .select({
+              templateId: schema.roleTemplatePermissions.roleTemplateId,
+              code: schema.permissions.code,
+            })
+            .from(schema.roleTemplatePermissions)
+            .innerJoin(schema.permissions, eq(schema.roleTemplatePermissions.permissionId, schema.permissions.id))
+            .where(
+              and(isNull(schema.roleTemplatePermissions.validTo), isNull(schema.permissions.validTo)),
+            );
+
+          const byTemplateId = rows.reduce<Record<string, string[]>>((acc, row) => {
+            const bucket = acc[row.templateId] ?? [];
+            bucket.push(canonicalPermissionCode(row.code));
+            acc[row.templateId] = bucket;
+            return acc;
+          }, {});
+
+          return { templates, byTemplateId };
+        });
+      }
+
       const templates = await db()
         .select({
           id: schema.roleTemplates.id,
@@ -181,6 +228,98 @@ export const permissionsRouter = router({
           message: "You do not have access to this user's permission matrix.",
         });
       }
+
+      const USER_MATRIX_TTL_SECONDS = 60 * 5;
+      if (permissionsCacheService) {
+        const cacheKey =
+          'cache:permissions:userMatrix:' +
+          CacheService.hashInput({
+            viewerId: ctx.user.id,
+            viewerRole: ctx.user.role,
+            currentBranchId: ctx.currentBranchId ?? null,
+            targetUserId: input.userId,
+            intent: input.intent,
+          });
+        return permissionsCacheService.getOrSet(cacheKey, USER_MATRIX_TTL_SECONDS, async () => {
+          const [user] = await db()
+            .select({
+              id: schema.users.id,
+              role: schema.users.role,
+              roleTemplateId: schema.users.roleTemplateId,
+            })
+            .from(schema.users)
+            .where(eq(schema.users.id, input.userId))
+            .limit(1);
+
+          if (!user) {
+            return {
+              role: null,
+              roleTemplateId: null,
+              userOverrides: {} as Record<string, boolean>,
+              templateCodes: [] as string[],
+              effectiveCodes: [] as string[],
+            };
+          }
+
+          const overrideRows = await db()
+            .select({
+              code: schema.permissions.code,
+              granted: schema.userPermissions.granted,
+            })
+            .from(schema.userPermissions)
+            .innerJoin(schema.permissions, eq(schema.userPermissions.permissionId, schema.permissions.id))
+            .where(and(eq(schema.userPermissions.userId, input.userId), isNull(schema.userPermissions.validTo)));
+
+          // Shared: resolve template + sparse stamped deltas (`override ?? template default`).
+          let templateId: string | null = user.roleTemplateId;
+          if (!templateId && user.role) {
+            const [fallback] = await db()
+              .select({ id: schema.roleTemplates.id })
+              .from(schema.roleTemplates)
+              .where(
+                and(
+                  eq(schema.roleTemplates.mappedRole, user.role),
+                  eq(schema.roleTemplates.kind, 'SYSTEM'),
+                  isNull(schema.roleTemplates.validTo),
+                ),
+              )
+              .limit(1);
+            templateId = fallback?.id ?? null;
+          }
+          const templateCodesCanon = await resolveRoleTemplateBaselineCodes(
+            db(),
+            templateId,
+            user.role ?? '',
+          );
+          const templateSet = new Set(templateCodesCanon);
+
+          /** Sparse deltas — explicit grants off-template + explicit revokes on-template. */
+          const userOverrides: Record<string, boolean> = {};
+          for (const row of overrideRows) {
+            const code = canonicalPermissionCode(row.code);
+            const inTpl = templateSet.has(code);
+            if (row.granted) {
+              if (!inTpl) userOverrides[code] = true;
+            } else if (inTpl) {
+              userOverrides[code] = false;
+            }
+          }
+
+          const legacyUnion = await computeEffectivePermissionsLegacyUnion(db(), input.userId);
+          const effectiveCodes = [...new Set([...legacyUnion].map((c) => canonicalPermissionCode(c)))].sort((a, b) =>
+            a.localeCompare(b),
+          );
+
+          return {
+            role: user.role,
+            roleTemplateId: user.roleTemplateId,
+            userOverrides,
+            templateCodes: templateCodesCanon,
+            effectiveCodes,
+          };
+        });
+      }
+
       const [user] = await db()
         .select({
           id: schema.users.id,

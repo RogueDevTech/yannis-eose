@@ -37,6 +37,7 @@ import { CartService } from '../cart/cart.service';
 import { PaystackService } from '../payments/paystack.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { CacheService } from '../common/cache/cache.service';
 
 const PENDING_PAYMENT_PREFIX = 'pending_payment:';
 const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
@@ -74,7 +75,15 @@ export class OrdersService {
     private readonly inventoryService: InventoryService,
     private readonly paystackService: PaystackService,
     private readonly branchTeams: BranchTeamsService,
+    private readonly cache: CacheService,
   ) {}
+
+  /** Per-order detail cache key used by `getById`. Kept here so the router-side
+   *  invalidator (`invalidateOrderDetailCache`) can target the same key without
+   *  reaching back into this service. */
+  private static readonly ORDER_DETAIL_CACHE_KEY = (orderId: string) =>
+    `cache:orders:detail:${orderId}`;
+  private static readonly ORDER_DETAIL_CACHE_TTL_SECONDS = 60;
 
   /** HoCS / Admin / `orders.reassign`, or CS team supervisor for same-branch team (supervisor: UNPROCESSED / CS_ASSIGNED only). */
   private async assertCanManualAssignToCs(
@@ -1361,7 +1370,48 @@ export class OrdersService {
   /**
    * Get a single order by ID with masked phone.
    */
-  async getById(orderId: string) {
+  /**
+   * Per-order detail cache key — exposed via the static helper so the tRPC
+   * router can build the same key for explicit invalidation on every order
+   * mutation (transition, update, softDelete, assignToCS, bulkReassign,
+   * scheduleCallback, etc.).
+   */
+  static buildOrderDetailCacheKey(orderId: string): string {
+    return OrdersService.ORDER_DETAIL_CACHE_KEY(orderId);
+  }
+
+  /**
+   * Loads the full order-detail payload (order row, items, call logs, resolved
+   * names, remittance status, pending-request ids, allowed transitions) for a
+   * given order id.
+   *
+   * Wrapped in a 60s Redis cache (`cache:orders:detail:${orderId}`). The base
+   * payload is actor-independent — viewer-specific flags
+   * (`viewerCanEditOrderLinePrices`, `viewerIsCsTeamSupervisor`) are computed
+   * AFTER the cache lookup in the tRPC `orders.getById` procedure, and the
+   * finance-stripping middleware runs after that. The customer phone is
+   * stripped *inside* this method before the cache value is set, so PII never
+   * touches the cache.
+   *
+   * Cache invalidation is explicit: every mutation that changes order state,
+   * assignments, items, or remittance must call `invalidateOrderDetailCache`
+   * in `apps/api/src/trpc/routers/orders.router.ts`.
+   *
+   * Note on serialisation: tRPC v11 in this codebase has no superjson
+   * transformer, so the over-the-wire payload is plain JSON anyway — Date
+   * fields become ISO strings on transit. The cache stores the same JSON
+   * roundtrip; downstream consumers (finance.ensureInvoiceForOrder, etc.)
+   * already accept `string | Date | null` shapes for date columns.
+   */
+  async getById(orderId: string): ReturnType<OrdersService['loadOrderDetailPayload']> {
+    return this.cache.getOrSet(
+      OrdersService.ORDER_DETAIL_CACHE_KEY(orderId),
+      OrdersService.ORDER_DETAIL_CACHE_TTL_SECONDS,
+      () => this.loadOrderDetailPayload(orderId),
+    );
+  }
+
+  private async loadOrderDetailPayload(orderId: string) {
     const rows = await this.db
       .select()
       .from(schema.orders)
@@ -3045,20 +3095,28 @@ export class OrdersService {
       },
     });
 
-    // Timeline event: manually assigned
-    const agentRow = await this.db
-      .select({ name: schema.users.name })
+    // Timeline event: manually assigned (or reassigned if a previous owner existed)
+    const previousCsAgentId = orderRow.assignedCsId;
+    const isReassignment = !!previousCsAgentId && previousCsAgentId !== csAgentId;
+    const namesNeeded = isReassignment ? [csAgentId, previousCsAgentId!] : [csAgentId];
+    const nameRows = await this.db
+      .select({ id: schema.users.id, name: schema.users.name })
       .from(schema.users)
-      .where(eq(schema.users.id, csAgentId))
-      .limit(1);
-    const agentName = agentRow[0]?.name ?? null;
+      .where(inArray(schema.users.id, namesNeeded));
+    const nameById = new Map(nameRows.map((r) => [r.id, r.name]));
+    const agentName = nameById.get(csAgentId) ?? null;
+    const previousAgentName = previousCsAgentId ? nameById.get(previousCsAgentId) ?? null : null;
+    const verb = isReassignment ? 'Reassigned' : 'Assigned';
+    const fromClause = isReassignment ? ` from ${previousAgentName ?? previousCsAgentId}` : '';
     void this.writeTimelineEvent({
       orderId,
-      eventType: 'ORDER_MANUALLY_ASSIGNED',
+      eventType: isReassignment ? 'ORDER_REASSIGNED' : 'ORDER_MANUALLY_ASSIGNED',
       actorId: actor.id,
       actorName: actor.name ?? null,
-      description: `Assigned to ${agentName ?? csAgentId} by ${actor.name ?? 'Head of CS'}`,
-      metadata: { csAgentId },
+      description: `${verb} to ${agentName ?? csAgentId}${fromClause} by ${actor.name ?? 'Head of CS'}`,
+      metadata: isReassignment
+        ? { csAgentId, fromAgentId: previousCsAgentId, toAgentId: csAgentId }
+        : { csAgentId },
       branchId: updated.branchId ?? null,
     });
 

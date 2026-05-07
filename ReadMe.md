@@ -6,7 +6,6 @@ cd apps/web && pnpm dev
 cd apps/edge-worker && pnpm dev
 
 pnpm --filter @yannis/api dev
-
 START NEW DB
 
 pnpm db:migrate:app

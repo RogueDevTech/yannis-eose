@@ -6,6 +6,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { BranchesModule } from '../branches/branches.module';
+import { CacheModule } from '../common/cache/cache.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { BranchesModule } from '../branches/branches.module';
     NotificationsModule,
     InventoryModule,
     BranchesModule,
+    CacheModule,
     forwardRef(() => PaymentsModule),
   ],
   providers: [OrdersService],

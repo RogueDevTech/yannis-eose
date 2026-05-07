@@ -99,8 +99,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
-      '/trpc/logistics.listLocations?input=' +
-        encodeURIComponent(JSON.stringify({ page: 1, limit: 50, status: 'ACTIVE' })),
+      '/trpc/logistics.locationOptions?input=' +
+        encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })),
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(
@@ -141,9 +141,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string; providerName?: string | null }> } } })?.result?.data
+    ? (locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })?.result?.data
     : null;
-  const locations = (locationsData?.locations ?? []).map((l) => ({
+  const locations = (locationsData ?? []).map((l) => ({
     id: l.id,
     name: l.name,
     providerName: l.providerName ?? null,

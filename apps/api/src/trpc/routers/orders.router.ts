@@ -20,11 +20,13 @@ import { OrdersService } from '../../orders/orders.service';
 import type { VoipService } from '../../voip/voip.service';
 import { isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
+import { CacheService } from '../../common/cache/cache.service';
 
 // We need to pass the service instance through context or create it inline.
 // Since tRPC routers in this architecture are static, we use a factory pattern.
 let ordersServiceInstance: OrdersService | null = null;
 let voipServiceInstance: VoipService | null = null;
+let ordersCacheService: CacheService | null = null;
 
 export function setOrdersService(service: OrdersService) {
   ordersServiceInstance = service;
@@ -32,6 +34,53 @@ export function setOrdersService(service: OrdersService) {
 
 export function setVoipService(service: VoipService) {
   voipServiceInstance = service;
+}
+
+export function setOrdersCacheService(service: CacheService) {
+  ordersCacheService = service;
+}
+
+const ORDERS_AGG_TTL_SECONDS = 15;
+
+async function invalidateOrdersAggregatesCache(): Promise<void> {
+  if (!ordersCacheService) return;
+  await ordersCacheService.delPattern('cache:orders:aggregates:*').catch(() => {});
+}
+
+/**
+ * Drop the cached `orders.getById` payload for a single order. Must be called
+ * by every mutation that changes order state, items, assignments, callbacks,
+ * remittances, or any field surfaced in the order-detail UI.
+ *
+ * The cache key is built by `OrdersService.buildOrderDetailCacheKey` so the
+ * service and router stay aligned without exporting the prefix.
+ */
+async function invalidateOrderDetailCache(orderId: string | null | undefined): Promise<void> {
+  if (!ordersCacheService || !orderId) return;
+  await ordersCacheService
+    .del(OrdersService.buildOrderDetailCacheKey(orderId))
+    .catch(() => {});
+}
+
+/**
+ * Drop the cached `orders.getById` payloads for many orders at once — used by
+ * bulk mutations (`bulkTransition`, `bulkReassign`, `bulkAssignToCS`,
+ * `redistributeOrdersFromAgent`, `distributeUnassignedOrders`,
+ * `redistributeCSOrders`).
+ */
+async function invalidateOrderDetailCacheMany(orderIds: ReadonlyArray<string>): Promise<void> {
+  if (!ordersCacheService || orderIds.length === 0) return;
+  await Promise.all(orderIds.map((id) => invalidateOrderDetailCache(id)));
+}
+
+/**
+ * Wipe every per-order detail cache entry. Used as the safe fallback when a
+ * bulk mutation does not return the precise list of touched orders (e.g.
+ * `redistributeCSOrders`, `releaseExpiredLocks`).
+ */
+async function invalidateAllOrderDetailCache(): Promise<void> {
+  if (!ordersCacheService) return;
+  await ordersCacheService.delPattern('cache:orders:detail:*').catch(() => {});
 }
 
 /** Exported for cross-router reads that must share the same `OrdersService` singleton (e.g. finance invoice gates). */
@@ -81,11 +130,13 @@ export const ordersRouter = router({
         (input.source === 'edge-form' ? EDGE_FORM_ACTOR_ID : null);
       const source = input.source === 'edge-form' ? 'edge-form' : undefined;
       const { source: _source, cartId: _cartId, ...orderInput } = input;
-      return getOrdersService().create(
+      const res = await getOrdersService().create(
         { ...orderInput, cartId: input.cartId },
         actorId,
         source,
       );
+      await invalidateOrdersAggregatesCache();
+      return res;
     }),
 
   /**
@@ -98,7 +149,13 @@ export const ordersRouter = router({
     .input(createOfflineOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...offlineInput } = input;
-      return getOrdersService().createOffline(offlineInput, ctx.user.id, branchId ?? ctx.currentBranchId);
+      const res = await getOrdersService().createOffline(
+        offlineInput,
+        ctx.user.id,
+        branchId ?? ctx.currentBranchId,
+      );
+      await invalidateOrdersAggregatesCache();
+      return res;
     }),
 
   /**
@@ -248,7 +305,12 @@ export const ordersRouter = router({
     .input(transitionOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...transitionInput } = input;
-      return getOrdersService().transition(transitionInput, ctx.user);
+      const res = await getOrdersService().transition(transitionInput, ctx.user);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(input.orderId),
+      ]);
+      return res;
     }),
 
   /**
@@ -259,7 +321,12 @@ export const ordersRouter = router({
     .input(updateOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...updateInput } = input;
-      return getOrdersService().update(updateInput, ctx.user);
+      const res = await getOrdersService().update(updateInput, ctx.user);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(input.orderId),
+      ]);
+      return res;
     }),
 
   /**
@@ -270,7 +337,11 @@ export const ordersRouter = router({
     .input(requestOrderLinePriceChangeSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...body } = input;
-      return getOrdersService().requestLinePriceChangeApproval(body, ctx.user);
+      const res = await getOrdersService().requestLinePriceChangeApproval(body, ctx.user);
+      // The cached `pendingOrderLinePriceRequestId` flips after this — drop the
+      // detail cache so the next viewer sees the new pending-request hint.
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
     }),
 
   /**
@@ -281,7 +352,11 @@ export const ordersRouter = router({
     .input(requestOrderDeletionSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, ...body } = input;
-      return getOrdersService().requestOrderDeletionApproval(body, ctx.user);
+      const res = await getOrdersService().requestOrderDeletionApproval(body, ctx.user);
+      // Same reasoning as `requestLinePriceChangeApproval` — the cached
+      // `pendingOrderDeletionRequestId` field flips after the mutation.
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
     }),
 
   /**
@@ -292,7 +367,12 @@ export const ordersRouter = router({
     .input(requestOrderDeletionSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId: _branchId, reason, orderId } = input;
-      return getOrdersService().softDeleteOrder(orderId, ctx.user, { approverNote: reason });
+      const res = await getOrdersService().softDeleteOrder(orderId, ctx.user, { approverNote: reason });
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(orderId),
+      ]);
+      return res;
     }),
 
   /**
@@ -303,7 +383,12 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(assignOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().assignToCS(input.orderId, input.csAgentId, ctx.user);
+      const res = await getOrdersService().assignToCS(input.orderId, input.csAgentId, ctx.user);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(input.orderId),
+      ]);
+      return res;
     }),
 
   /**
@@ -314,12 +399,17 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(bulkReassignSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().bulkReassign(
+      const res = await getOrdersService().bulkReassign(
         input.orderIds,
         input.fromAgentId,
         input.toAgentId,
         ctx.user,
       );
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
     }),
 
   /**
@@ -327,7 +417,9 @@ export const ordersRouter = router({
    * Restricted to Head of CS and SuperAdmin.
    */
   redistributeCSOrders: permissionProcedure('orders.reassign').mutation(async ({ ctx }) => {
-    return getOrdersService().redistributeCSOrders(ctx.user);
+    const res = await getOrdersService().redistributeCSOrders(ctx.user);
+    await Promise.all([invalidateOrdersAggregatesCache(), invalidateAllOrderDetailCache()]);
+    return res;
   }),
 
   /**
@@ -338,7 +430,9 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ agentId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().redistributeOrdersFromAgent(input.agentId, ctx.user);
+      const res = await getOrdersService().redistributeOrdersFromAgent(input.agentId, ctx.user);
+      await Promise.all([invalidateOrdersAggregatesCache(), invalidateAllOrderDetailCache()]);
+      return res;
     }),
 
   /**
@@ -349,7 +443,9 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ branchId: z.string().uuid().optional() }).optional())
     .mutation(async ({ ctx }) => {
-      return getOrdersService().distributeUnassignedOrders(ctx.user);
+      const res = await getOrdersService().distributeUnassignedOrders(ctx.user);
+      await Promise.all([invalidateOrdersAggregatesCache(), invalidateAllOrderDetailCache()]);
+      return res;
     }),
 
   /**
@@ -394,14 +490,38 @@ export const ordersRouter = router({
         .optional(),
     )
     .query(async ({ input, ctx }) => {
-      return getOrdersService().getStatusCounts(
-        input?.mediaBuyerId,
-        input?.startDate,
-        input?.endDate,
-        input?.assignedCsId,
-        input?.logisticsLocationId,
-        orderListBranchId(ctx.user, ctx.currentBranchId),
-        input?.statuses,
+      const effectiveBranchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      if (!ordersCacheService) {
+        return getOrdersService().getStatusCounts(
+          input?.mediaBuyerId,
+          input?.startDate,
+          input?.endDate,
+          input?.assignedCsId,
+          input?.logisticsLocationId,
+          effectiveBranchId,
+          input?.statuses,
+        );
+      }
+
+      const key =
+        'cache:orders:aggregates:statusCounts:' +
+        CacheService.hashInput({
+          branchId: effectiveBranchId,
+          viewerId: ctx.user.id,
+          viewerRole: ctx.user.role,
+          input: input ?? null,
+        });
+
+      return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
+        getOrdersService().getStatusCounts(
+          input?.mediaBuyerId,
+          input?.startDate,
+          input?.endDate,
+          input?.assignedCsId,
+          input?.logisticsLocationId,
+          effectiveBranchId,
+          input?.statuses,
+        ),
       );
     }),
 
@@ -441,17 +561,40 @@ export const ordersRouter = router({
         .optional(),
     )
     .query(async ({ input, ctx }) => {
-      return getOrdersService().getOrdersTimeSeriesByCreated(
-        input?.startDate,
-        input?.endDate,
-        orderListBranchId(ctx.user, ctx.currentBranchId),
-        {
-          mediaBuyerId: input?.mediaBuyerId,
-          csAgentId: input?.assignedCsId,
-          logisticsLocationId: input?.logisticsLocationId,
-          status: input?.status,
-          statuses: input?.statuses,
-        },
+      const effectiveBranchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const filters = {
+        mediaBuyerId: input?.mediaBuyerId,
+        csAgentId: input?.assignedCsId,
+        logisticsLocationId: input?.logisticsLocationId,
+        status: input?.status,
+        statuses: input?.statuses,
+      };
+
+      if (!ordersCacheService) {
+        return getOrdersService().getOrdersTimeSeriesByCreated(
+          input?.startDate,
+          input?.endDate,
+          effectiveBranchId,
+          filters,
+        );
+      }
+
+      const key =
+        'cache:orders:aggregates:timeSeriesByCreated:' +
+        CacheService.hashInput({
+          branchId: effectiveBranchId,
+          viewerId: ctx.user.id,
+          viewerRole: ctx.user.role,
+          input: input ?? null,
+        });
+
+      return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
+        getOrdersService().getOrdersTimeSeriesByCreated(
+          input?.startDate,
+          input?.endDate,
+          effectiveBranchId,
+          filters,
+        ),
       );
     }),
 
@@ -485,7 +628,13 @@ export const ordersRouter = router({
    * Can be called periodically or on-demand.
    */
   releaseExpiredLocks: permissionProcedure('orders.releaseLocks').mutation(async ({ ctx }) => {
-    return getOrdersService().releaseExpiredLocks(ctx.user?.id ?? null);
+    const res = await getOrdersService().releaseExpiredLocks(ctx.user?.id ?? null);
+    // Locks live on the order row (`locked_by`, `locked_at`) and are part of
+    // the cached payload — release applies across many rows so wipe wholesale.
+    if (res.releasedCount > 0) {
+      await invalidateAllOrderDetailCache();
+    }
+    return res;
   }),
 
   /**
@@ -530,7 +679,11 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().revealPhoneForManualCall(input.orderId, ctx.user);
+      const res = await getOrdersService().revealPhoneForManualCall(input.orderId, ctx.user);
+      // May have transitioned UNPROCESSED → CS_ENGAGED inside the service; the
+      // cached payload's status / engagement timestamps are now stale.
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
     }),
 
   // ── VOIP Procedures ────────────────────────────────────────────
@@ -550,7 +703,11 @@ export const ordersRouter = router({
           ctx.user,
         );
       }
-      return getVoipService().initiateCall(input.orderId, ctx.user);
+      const res = await getVoipService().initiateCall(input.orderId, ctx.user);
+      // A new call_log row may exist (and the order may have transitioned).
+      // Both are part of the cached payload — drop it.
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
     }),
 
   /**
@@ -587,10 +744,13 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().scheduleCallback(input.orderId, ctx.user, {
+      const res = await getOrdersService().scheduleCallback(input.orderId, ctx.user, {
         delayMinutes: input.delayMinutes,
         notes: input.notes,
       });
+      // Callback timestamps + status may have changed on the order row.
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
     }),
 
   /**
@@ -629,7 +789,13 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().mergeDuplicate(input.duplicateId, input.originalId, ctx.user);
+      const res = await getOrdersService().mergeDuplicate(input.duplicateId, input.originalId, ctx.user);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(input.duplicateId),
+        invalidateOrderDetailCache(input.originalId),
+      ]);
+      return res;
     }),
 
   /**
@@ -639,7 +805,12 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().dismissDuplicate(input.orderId, ctx.user);
+      const res = await getOrdersService().dismissDuplicate(input.orderId, ctx.user);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(input.orderId),
+      ]);
+      return res;
     }),
 
   // ── Bulk Order Actions ─────────────────────────────────
@@ -659,12 +830,17 @@ export const ordersRouter = router({
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().bulkTransition(
+      const res = await getOrdersService().bulkTransition(
         input.orderIds,
         input.newStatus,
         input.metadata,
         ctx.user,
       );
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
     }),
 
   /**
@@ -706,7 +882,12 @@ export const ordersRouter = router({
           : input.csAgentId
             ? [input.csAgentId]
             : [];
-      return getOrdersService().bulkAssignToCS(input.orderIds, csAgentIds, ctx.user);
+      const res = await getOrdersService().bulkAssignToCS(input.orderIds, csAgentIds, ctx.user);
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
     }),
 
   // ── Order Timeline ─────────────────────────────────────
@@ -740,6 +921,13 @@ export const ordersRouter = router({
     .meta({ branchScopedMutation: true })
     .input(z.object({ orderId: z.string().uuid(), branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getOrdersService().claimOrder(input.orderId, ctx.user);
+      const res = await getOrdersService().claimOrder(input.orderId, ctx.user);
+      // Claim assigns the order + transitions UNPROCESSED → CS_ENGAGED — both
+      // status and assignedCsId fields in the cached payload need refreshing.
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCache(input.orderId),
+      ]);
+      return res;
     }),
 });

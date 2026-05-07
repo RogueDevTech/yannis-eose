@@ -45,6 +45,7 @@ export type NotificationsPromise = Promise<{ notifications: Notification[]; unre
 
 interface DashboardLayoutProps {
   user: {
+    id: string;
     name: string;
     role: string;
     email: string;
@@ -655,7 +656,7 @@ function DashboardLayoutInner({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showPushBanner, setShowPushBanner] = useState(false);
   const [pushEnabling, setPushEnabling] = useState(false);
-  const { subscribe: subscribePush, permissionState, isSupported } = usePushSubscription();
+  const { subscribe: subscribePush, permissionState, isSupported } = usePushSubscription(user?.id ?? null);
   const pushPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { isInstalled } = usePwaInstall();
 

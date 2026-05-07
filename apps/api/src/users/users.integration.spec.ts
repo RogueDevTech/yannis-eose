@@ -25,6 +25,7 @@ import type { AuthService } from '../auth/auth.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { PermissionsService } from '../permissions/permissions.service';
 import type { EventsService } from '../events/events.service';
+import type { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -36,6 +37,11 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
   const notificationsStub = {} as unknown as NotificationsService;
   const permissionsStub = {} as unknown as PermissionsService;
   const eventsStub = { emitToUser: () => undefined } as unknown as EventsService;
+  // Tests in this file only exercise read paths (`UsersService.list`), so the cache
+  // invalidation hook is never called — a no-op stub keeps DI happy.
+  const userBundleCacheStub = {
+    invalidate: async () => undefined,
+  } as unknown as UserBundleCacheService;
 
   beforeEach(async () => {
     await pgClient`BEGIN`;
@@ -75,7 +81,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, homLagos, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub, userBundleCacheStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' },
       { id: homLagos.id, role: 'HEAD_OF_MARKETING' },
@@ -92,7 +98,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, homLagos, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub, userBundleCacheStub);
     const result = await svc.list(
       {
         page: 1,
@@ -114,7 +120,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, mbLagos, mbMain, admin } = await seedTwoBranches();
     await setSessionActor(pgClient, admin.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub, userBundleCacheStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', allBranches: true },
       { id: admin.id, role: 'SUPER_ADMIN' },
@@ -130,7 +136,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, homLagos, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub, userBundleCacheStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', allBranches: true },
       { id: homLagos.id, role: 'HEAD_OF_MARKETING' },
@@ -146,7 +152,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { admin, mbLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, admin.id, null);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub, userBundleCacheStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' },
       { id: admin.id, role: 'SUPER_ADMIN' },
@@ -162,7 +168,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
     const { lagos, main, homLagos, mbMain } = await seedTwoBranches();
     await setSessionActor(pgClient, homLagos.id, lagos.id);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub, userBundleCacheStub);
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', branchId: main.id },
       { id: homLagos.id, role: 'HEAD_OF_MARKETING' },
@@ -193,6 +199,11 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
   } as unknown as PermissionsService;
 
   const eventsStub = { emitToUser: () => undefined } as unknown as EventsService;
+  // `UsersService.createStaff` calls `userBundleCache.invalidate(newUserId)` after the
+  // staff is created. The stub no-ops it so the test only exercises the DB path.
+  const userBundleCacheStub = {
+    invalidate: async () => undefined,
+  } as unknown as UserBundleCacheService;
 
   beforeEach(async () => {
     await pgClient`BEGIN`;
@@ -211,7 +222,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
     const admin = await createTestUser(db as any, { role: 'SUPER_ADMIN' });
     await setSessionActor(pgClient, admin.id, null);
 
-    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub);
+    const svc = new UsersService(db as any, authStub, notificationsStub, permissionsStub, eventsStub, userBundleCacheStub);
 
     // Migration 0108 dropped the singleton DB index; the service no longer
     // throws CONFLICT for duplicate heads. Permissions handle the actual

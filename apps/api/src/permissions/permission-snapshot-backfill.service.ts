@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import type { OnApplicationBootstrap } from '@nestjs/common';
 import { eq, and, isNull, ne, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -6,6 +6,7 @@ import { db as schema } from '@yannis/shared';
 import { canonicalPermissionCode } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.tokens';
 import { PermissionsService } from './permissions.service';
+import { CacheService } from '../common/cache/cache.service';
 
 /**
  * One-time bootstrap: stamp `user_permissions` from the **legacy** effective formula
@@ -22,6 +23,7 @@ export class PermissionSnapshotBackfillService implements OnApplicationBootstrap
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly permissionsService: PermissionsService,
+    @Optional() private readonly cacheService?: CacheService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -104,6 +106,15 @@ export class PermissionSnapshotBackfillService implements OnApplicationBootstrap
     }
 
     await this.db.execute(sql`INSERT INTO _yannis_permission_snapshot_applied (singleton_key) VALUES (1)`);
+
+    // Drop every cached user bundle so any lingering pre-boot cache entries
+    // (from a previous deploy that shared the Redis instance) cannot serve
+    // stale permissions to a freshly-stamped user. Safe even on a virgin
+    // Redis: pattern-DEL is idempotent and the loop is fast.
+    if (this.cacheService) {
+      await this.cacheService.delPattern('cache:auth:userBundle:*');
+    }
+
     this.logger.log(`Permission snapshot backfill complete (${done} users).`);
   }
 }

@@ -10,20 +10,14 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
-  Inject,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
-import { PermissionsService } from '../permissions/permissions.service';
+import { UserBundleCacheService } from './user-bundle-cache.service';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
-import { isAdminLevel } from '../common/authz';
-import { eq } from 'drizzle-orm';
-import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
-import { DRIZZLE } from '../database/database.module';
 
 /**
  * Parent domain for split web/API hosts (e.g. `.example.com`).
@@ -71,8 +65,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
-    private readonly permissionsService: PermissionsService,
-    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    private readonly userBundleCache: UserBundleCacheService,
   ) {}
 
   /**
@@ -288,49 +281,36 @@ export class AuthController {
   /**
    * Returns the current authenticated user's session data.
    * Includes permissions for non-SuperAdmin users (SuperAdmin bypasses all checks).
+   *
+   * Heavy DB-derived fields (role/template/scope, permissions, theme/font preference,
+   * onboarding status) are read from `UserBundleCacheService` (Redis, 60s TTL) so this
+   * endpoint runs at most one cache GET per call. Session-scoped fields
+   * (currentBranchId, branchIds, mirroredBy, mirrorSessionId, logisticsLocationId,
+   * email, name, id) come from `@CurrentUser()` and are merged on top.
+   *
+   * Cache invalidation is explicit: every mutation that changes any cached field
+   * must call `userBundleCache.invalidate(userId)` — see the Pillar 1 invalidation
+   * hooks in users.service.ts and onboarding.service.ts.
    */
   @Post('me')
   @HttpCode(HttpStatus.OK)
   async me(@CurrentUser() user: SessionUser) {
-    const [dbUser] = await this.db
-      .select({
-        roleTemplateId: schema.users.roleTemplateId,
-        scopeGlobal: schema.users.scopeGlobal,
-        scopeOrgWideHead: schema.users.scopeOrgWideHead,
-        scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
-        role: schema.users.role,
-      })
-      .from(schema.users)
-      .where(eq(schema.users.id, user.id))
-      .limit(1);
+    const bundle = await this.userBundleCache.getOrLoad(user.id);
 
-    let merged: SessionUser = {
+    const merged: SessionUser = {
       ...user,
-      roleTemplateId: dbUser?.roleTemplateId ?? user.roleTemplateId ?? null,
-      scopeGlobal: dbUser?.scopeGlobal ?? user.scopeGlobal ?? false,
-      scopeOrgWideHead: dbUser?.scopeOrgWideHead ?? user.scopeOrgWideHead ?? false,
-      scopeTeamSupervisor: dbUser?.scopeTeamSupervisor ?? user.scopeTeamSupervisor ?? false,
-      role: (dbUser?.role as string | undefined) ?? user.role,
+      role: bundle.role || user.role,
+      roleTemplateId: bundle.roleTemplateId,
+      scopeGlobal: bundle.scopeGlobal,
+      scopeOrgWideHead: bundle.scopeOrgWideHead,
+      scopeTeamSupervisor: bundle.scopeTeamSupervisor,
+      permissions: bundle.permissions,
+      appTheme: bundle.appTheme,
+      fontScale: bundle.fontScale,
+      ...(bundle.staffOnboardingStatus !== undefined
+        ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
+        : {}),
     };
-
-    const perms = await this.permissionsService.getEffectivePermissions(merged.id);
-    merged = { ...merged, permissions: Array.from(perms) };
-
-    const appTheme = await this.usersService.getAppThemePreference(merged.id);
-    const fontScale = await this.usersService.getFontScalePreference(merged.id);
-    merged = { ...merged, appTheme, fontScale };
-
-    if (!isAdminLevel(merged)) {
-      const [onbRow] = await this.db
-        .select({ status: schema.staffOnboarding.status })
-        .from(schema.staffOnboarding)
-        .where(eq(schema.staffOnboarding.userId, merged.id))
-        .limit(1);
-      merged = {
-        ...merged,
-        staffOnboardingStatus: onbRow?.status ?? 'NOT_STARTED',
-      };
-    }
 
     return { user: merged };
   }

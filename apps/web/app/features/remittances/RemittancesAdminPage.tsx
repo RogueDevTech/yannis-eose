@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -94,6 +94,26 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     successMessage: 'Transfer recorded',
     skipErrorToast: !!pendingAction,
   });
+
+  // Client-side pagination — backend doesn't paginate transfer remittances yet.
+  const REMITTANCES_PAGE_SIZE = 20;
+  const [remitPage, setRemitPage] = useState(1);
+  const remitTotalPages = Math.max(1, Math.ceil(remittances.length / REMITTANCES_PAGE_SIZE));
+  const safeRemitPage = Math.min(remitPage, remitTotalPages);
+  const pagedRemittances = useMemo(
+    () =>
+      remittances.slice(
+        (safeRemitPage - 1) * REMITTANCES_PAGE_SIZE,
+        safeRemitPage * REMITTANCES_PAGE_SIZE,
+      ),
+    [remittances, safeRemitPage],
+  );
+  useEffect(() => {
+    if (remitPage > remitTotalPages) setRemitPage(1);
+  }, [remitPage, remitTotalPages]);
+  useEffect(() => {
+    setRemitPage(1);
+  }, [remittances.length]);
 
   const sentRemittances = remittances.filter((r) => r.transferStatus === 'IN_TRANSIT');
   const receivedCount = remittances.filter((r) => r.outcomeStatus === 'APPROVED').length;
@@ -419,9 +439,29 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       ) : (
         <CompactTable<TransferConfirmationRecord>
           columns={unifiedColumnsWithActions}
-          rows={remittances}
+          rows={pagedRemittances}
           rowKey={(r) => r.id}
           rowClassName={(r) => (markingId === r.id ? 'opacity-60' : '')}
+          pagination={
+            remittances.length > 0
+              ? {
+                  page: safeRemitPage,
+                  totalPages: remitTotalPages,
+                  onPageChange: setRemitPage,
+                  summary: (
+                    <p className="text-sm text-app-fg-muted">
+                      Showing {(safeRemitPage - 1) * REMITTANCES_PAGE_SIZE + 1}–
+                      {Math.min(safeRemitPage * REMITTANCES_PAGE_SIZE, remittances.length)} of{' '}
+                      {remittances.length}
+                      <span className="text-app-fg-muted/90"> · {REMITTANCES_PAGE_SIZE} per page</span>
+                    </p>
+                  ),
+                  wrapperClassName:
+                    'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
+                  controlsClassName: 'sm:justify-end',
+                }
+              : undefined
+          }
           renderMobileCard={(r) => {
             const isBusy = markingId === r.id || fetcher.state === 'submitting';
             if (isPendingTransfer(r)) {

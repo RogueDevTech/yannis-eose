@@ -16,6 +16,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { Pagination } from '~/components/ui/pagination';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import type {
   MonthlyPayrollGroup,
@@ -223,6 +224,21 @@ export function MonthlyPayrolls({
 
   const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b.name])), [branches]);
 
+  // Client-side pagination over month groups (typically 1 group per calendar month).
+  // 20 groups per page comfortably covers ~1.5 years of payroll history.
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(monthlyPayrolls.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedMonthlyPayrolls = useMemo(
+    () => monthlyPayrolls.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [monthlyPayrolls, safePage],
+  );
+  // Reset to page 1 when the result set shrinks (filter / refetch).
+  useEffect(() => {
+    if (page > totalPages) setPage(1);
+  }, [page, totalPages]);
+
   const [openBatchId, setOpenBatchId] = useState<string | null>(initialBatchId);
   const [batchDetail, setBatchDetail] = useState<BatchDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -331,10 +347,21 @@ export function MonthlyPayrolls({
       )}
 
       {/* Monthly groups */}
-      {monthlyPayrolls.map((group) => (
+      {pagedMonthlyPayrolls.map((group) => (
         <MonthGroup key={group.month} group={group} branchById={branchById} onOpenBatch={(id) => setOpenBatchId(id)} />
       ))}
       </TableLoadingOverlay>
+
+      {monthlyPayrolls.length > 0 && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4">
+          <p className="text-sm text-app-fg-muted">
+            Showing {(safePage - 1) * PAGE_SIZE + 1}–
+            {Math.min(safePage * PAGE_SIZE, monthlyPayrolls.length)} of {monthlyPayrolls.length}
+            <span className="text-app-fg-muted/90"> · {PAGE_SIZE} per page</span>
+          </p>
+          <Pagination page={safePage} totalPages={totalPages} onPageChange={setPage} className="sm:justify-end" />
+        </div>
+      )}
 
       {/* Batch detail modal */}
       {openBatchId && (
