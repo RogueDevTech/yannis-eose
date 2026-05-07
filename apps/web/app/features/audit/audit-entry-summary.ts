@@ -203,7 +203,142 @@ export interface AuditSummaryParts {
   suffix: string;
 }
 
-export function getAuditSummaryParts(entry: AuditEntry, actorNames: ActorMap): AuditSummaryParts {
+function resolveLocationAuditLabel(locationId: string | null, locationNames?: Record<string, string>): string {
+  if (!locationId) return '';
+  const name = locationNames?.[locationId];
+  if (name && name.trim().length > 0) return name;
+  return `${locationId.slice(0, 8)}…`;
+}
+
+/** Parsed description segments for clickable warehouse-transfer audit rows */
+export type AuditDescriptionPiece =
+  | { kind: 'text'; text: string }
+  | { kind: 'link'; text: string; href: string; variant: 'fromLoc' | 'toLoc' | 'transfer' };
+
+function appendWarehouseTransferGeoLinks(
+  pieces: AuditDescriptionPiece[],
+  entry: AuditEntry,
+  fromId: string | null,
+  toId: string | null,
+  locationNames: Record<string, string>,
+  tailQty: string | null,
+): void {
+  pieces.push({ kind: 'text', text: ' from ' });
+  if (fromId) {
+    pieces.push({
+      kind: 'link',
+      text: resolveLocationAuditLabel(fromId, locationNames),
+      href: `/admin/transfers?fromLocationId=${encodeURIComponent(fromId)}`,
+      variant: 'fromLoc',
+    });
+  } else {
+    pieces.push({ kind: 'text', text: 'unknown origin' });
+  }
+  pieces.push({ kind: 'text', text: ' to ' });
+  if (toId) {
+    pieces.push({
+      kind: 'link',
+      text: resolveLocationAuditLabel(toId, locationNames),
+      href: `/admin/transfers?toLocationId=${encodeURIComponent(toId)}`,
+      variant: 'toLoc',
+    });
+  } else {
+    pieces.push({ kind: 'text', text: 'unknown destination' });
+  }
+  if (tailQty) pieces.push({ kind: 'text', text: ` — ${tailQty}` });
+  pieces.push({ kind: 'text', text: '.' });
+  pieces.push({ kind: 'text', text: ' ' });
+  pieces.push({
+    kind: 'link',
+    text: 'Open transfer',
+    href: `/admin/transfers?transferId=${encodeURIComponent(entry.recordId)}`,
+    variant: 'transfer',
+  });
+}
+
+/**
+ * Warehouse transfer rows render as linked segments (locations + open transfer) in the audit UI.
+ */
+export function getAuditDescriptionPieces(
+  entry: AuditEntry,
+  actorNames: ActorMap,
+  locationNames: Record<string, string>,
+): AuditDescriptionPiece[] | null {
+  if (entry.tableName !== 'stock_transfers') return null;
+
+  const data = entry.data;
+  const actor = getActorDisplay(entry.changedBy, actorNames, entry.validFrom);
+  const status = pickStr(data, 'transfer_status', 'transferStatus');
+  const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
+  const fromId = pickStr(data, 'from_location_id', 'fromLocationId');
+  const toId = pickStr(data, 'to_location_id', 'toLocationId');
+  const sentQty = pickNum(data, 'sent_quantity', 'sentQuantity');
+  const receivedQty = pickNum(data, 'received_quantity', 'receivedQuantity');
+  const qtyStr = sentQty != null ? String(sentQty) : '';
+
+  const pieces: AuditDescriptionPiece[] = [];
+
+  if (status === 'RECEIVED') {
+    const received = receivedQty != null ? String(receivedQty) : qtyStr;
+    pieces.push({
+      kind: 'text',
+      text: `${actor} confirmed receipt of a warehouse transfer`,
+    });
+    appendWarehouseTransferGeoLinks(
+      pieces,
+      entry,
+      fromId,
+      toId,
+      locationNames,
+      received ? `${received} units` : null,
+    );
+    return pieces;
+  }
+
+  if (status === 'DISPUTED') {
+    pieces.push({ kind: 'text', text: `${actor} disputed a warehouse transfer` });
+    appendWarehouseTransferGeoLinks(pieces, entry, fromId, toId, locationNames, qtyStr ? `${qtyStr} units` : null);
+    return pieces;
+  }
+
+  if (status === 'CANCELLED') {
+    pieces.push({
+      kind: 'text',
+      text: `${actor} cancelled a warehouse transfer${statusLabel ? ` (${statusLabel})` : ''}`,
+    });
+    appendWarehouseTransferGeoLinks(
+      pieces,
+      entry,
+      fromId,
+      toId,
+      locationNames,
+      qtyStr ? `${qtyStr} units` : null,
+    );
+    return pieces;
+  }
+
+  const verb = entry.action === 'INSERT' ? 'created' : 'updated';
+  const mid = statusLabel ? ` (${statusLabel})` : '';
+  pieces.push({
+    kind: 'text',
+    text: `${actor} ${verb} a warehouse transfer${mid}`,
+  });
+  appendWarehouseTransferGeoLinks(
+    pieces,
+    entry,
+    fromId,
+    toId,
+    locationNames,
+    qtyStr ? `${qtyStr} units` : null,
+  );
+  return pieces;
+}
+
+export function getAuditSummaryParts(
+  entry: AuditEntry,
+  actorNames: ActorMap,
+  locationNames?: Record<string, string>,
+): AuditSummaryParts {
   const data = entry.data;
   const table = entry.tableName;
   const asOf = entry.validFrom;
@@ -365,25 +500,47 @@ export function getAuditSummaryParts(entry: AuditEntry, actorNames: ActorMap): A
     const sentQty = pickNum(data, 'sent_quantity', 'sentQuantity');
     const receivedQty = pickNum(data, 'received_quantity', 'receivedQuantity');
     const qtyStr = sentQty != null ? String(sentQty) : '';
+    const fromId = pickStr(data, 'from_location_id', 'fromLocationId');
+    const toId = pickStr(data, 'to_location_id', 'toLocationId');
+    const fromLm = resolveLocationAuditLabel(fromId, locationNames);
+    const toLm = resolveLocationAuditLabel(toId, locationNames);
+    const routePhrase =
+      fromLm && toLm ? `from ${fromLm} to ${toLm}` : fromLm ? `from ${fromLm}` : toLm ? `to ${toLm}` : '';
+
     if (status === 'RECEIVED') {
       const received = receivedQty != null ? String(receivedQty) : qtyStr;
+      const qtyPart = received ? `${received} units` : '';
+      const detailParts = [routePhrase, qtyPart].filter((p) => p.length > 0);
+      const detail = detailParts.length > 0 ? ` (${detailParts.join(' · ')})` : '';
       return {
-        prefix: `${actor} confirmed receipt of a warehouse transfer`,
-        entityLabel: received ? `${received} units` : null,
+        prefix: `${actor} confirmed receipt of a warehouse transfer${detail}`,
+        entityLabel: null,
         suffix: '.',
       };
     }
     if (status === 'DISPUTED') {
+      const detailParts = [routePhrase, qtyStr ? `${qtyStr} units sent` : ''].filter((p) => p.length > 0);
+      const detail = detailParts.length > 0 ? ` (${detailParts.join(' · ')})` : '';
       return {
-        prefix: `${actor} disputed a warehouse transfer`,
-        entityLabel: qtyStr ? `${qtyStr} units` : null,
+        prefix: `${actor} disputed a warehouse transfer${detail}`,
+        entityLabel: null,
+        suffix: '.',
+      };
+    }
+    if (status === 'CANCELLED') {
+      const detailParts = [routePhrase, qtyStr ? `${qtyStr} units` : ''].filter((p) => p.length > 0);
+      const detail = detailParts.length > 0 ? ` (${detailParts.join(' · ')})` : '';
+      return {
+        prefix: `${actor} cancelled a warehouse transfer${detail}`,
+        entityLabel: null,
         suffix: '.',
       };
     }
     const verb = entry.action === 'INSERT' ? 'created' : 'updated';
     const mid = statusLabel ? ` (${statusLabel})` : '';
     const qtyPart = qtyStr ? ` — ${qtyStr} units` : '';
-    return { prefix: `${actor} ${verb} a warehouse transfer${mid}${qtyPart}.`, entityLabel: null, suffix: '' };
+    const routeSeg = routePhrase ? ` · ${routePhrase}` : '';
+    return { prefix: `${actor} ${verb} a warehouse transfer${mid}${qtyPart}${routeSeg}.`, entityLabel: null, suffix: '' };
   }
 
   if (table === 'logistics_providers') {
@@ -619,8 +776,12 @@ export function getAuditSummaryParts(entry: AuditEntry, actorNames: ActorMap): A
 }
 
 /** Plain sentence for CSV / modal subtitle (quotes entity when present). */
-export function generateAuditDescription(entry: AuditEntry, actorNames: ActorMap): string {
-  const { prefix, entityLabel, suffix } = getAuditSummaryParts(entry, actorNames);
+export function generateAuditDescription(
+  entry: AuditEntry,
+  actorNames: ActorMap,
+  locationNames?: Record<string, string>,
+): string {
+  const { prefix, entityLabel, suffix } = getAuditSummaryParts(entry, actorNames, locationNames);
   const label = entityLabel ? `"${entityLabel}"` : '';
   return prefix + label + suffix;
 }

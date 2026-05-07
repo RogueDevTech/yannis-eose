@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Link, useSearchParams } from '@remix-run/react';
+import { Suspense, useState, useEffect, useMemo } from 'react';
+import { Await, Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
@@ -20,11 +20,30 @@ import {
 } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { Pagination } from '~/components/ui/pagination';
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { ExportModal, type ExportModalPicklists } from '~/components/ui/export-modal';
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from '~/features/orders/types';
+import { DeferredError } from '~/components/ui/deferred-section';
+import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/deferred-skeletons';
+
+/** Status dropdown labels before streamed counts hydrate (same order as full options). */
+const MARKETING_ORDERS_STATUS_OPTIONS_BASE = STATUS_OPTIONS.map((status) => ({
+  value: status,
+  label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+}));
+
+/** Streamed after `orders.list`: counts, metrics, chart series, export picklists + buyer filter options. */
+export type MarketingOrdersSecondaryPayload = {
+  statusCounts: Record<string, number>;
+  cpa: number | null;
+  totalAdSpend: number | null;
+  dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+  marketingExportPicklists?: Partial<ExportModalPicklists>;
+  mediaBuyersForFilter: Array<{ id: string; name: string }>;
+};
 
 interface MarketingOrdersPageProps {
   orders: Order[];
@@ -32,24 +51,15 @@ interface MarketingOrdersPageProps {
   totalPages: number;
   page: number;
   limit: number;
-  statusCounts: Record<string, number>;
+  secondary: Promise<MarketingOrdersSecondaryPayload>;
   statusFilter?: string;
   searchFilter?: string;
   isMediaBuyer: boolean;
   /** Show Media buyer column (HoM and SuperAdmin only). */
   showMediaBuyerColumn?: boolean;
-  /** For "Filter by media buyer" (HoM / Admin / SuperAdmin). */
-  mediaBuyersForFilter?: Array<{ id: string; name: string }>;
-  marketingExportPicklists?: Partial<ExportModalPicklists>;
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
-  /** CPA (Cost Per Acquisition) = Total Ad Spend / Total Orders — from marketing.metrics for current date range. */
-  cpa?: number | null;
-  /** Total approved ad spend in the period — from marketing.metrics. */
-  totalAdSpend?: number | null;
-  /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
-  dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
 }
 
 export function MarketingOrdersPage({
@@ -57,22 +67,16 @@ export function MarketingOrdersPage({
   total,
   totalPages,
   page,
-  limit: _limit,
-  statusCounts,
+  limit,
+  secondary,
   statusFilter,
   searchFilter,
   isMediaBuyer,
   showMediaBuyerColumn = false,
-  mediaBuyersForFilter = [],
-  marketingExportPicklists,
   filters,
   liveEvents,
-  cpa,
-  totalAdSpend: _totalAdSpend,
-  dailyCounts,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
-  const safeTotalPages = Math.max(1, totalPages);
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
@@ -106,20 +110,6 @@ export function MarketingOrdersPage({
     return qs ? `?${qs}` : '?';
   };
 
-  const mediaBuyerFilterOptions = useMemo(
-    () => [
-      { value: 'ALL', label: 'All media buyers' },
-      ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
-    ],
-    [mediaBuyersForFilter],
-  );
-
-  const ordersInPeriodTotal = Object.values(statusCounts).reduce((sum, n) => sum + n, 0);
-  const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
-  const confirmedCount = statusCounts['CONFIRMED'] ?? 0;
-  const deliveredCount = statusCounts['DELIVERED'] ?? 0;
-  const deliveryRate = total > 0 ? ((statusCounts['DELIVERED'] ?? 0) / total * 100).toFixed(1) : '0';
-
   const handleStatusChange = (status: string) => {
     setSelectedStatus(status);
     setSearchParams(buildQueryString({ status, page: 1 }));
@@ -130,20 +120,13 @@ export function MarketingOrdersPage({
     setSearchParams(buildQueryString({ search: searchQuery.trim(), page: 1 }));
   };
 
-  const statusOptions = STATUS_OPTIONS.map((status) => ({
-    value: status,
-    label: status === 'ALL'
-      ? `All Statuses (${ordersInPeriodTotal})`
-      : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
-  }));
-
   const ordersToolbarFilterBadge = useMemo(() => {
     let n = 0;
     if (selectedStatus !== 'ALL') n += 1;
     const mb = searchParams.get('mediaBuyerId') || 'ALL';
-    if (showMediaBuyerColumn && mediaBuyersForFilter.length > 0 && mb !== 'ALL') n += 1;
+    if (showMediaBuyerColumn && mb !== 'ALL') n += 1;
     return n;
-  }, [selectedStatus, showMediaBuyerColumn, mediaBuyersForFilter.length, searchParams]);
+  }, [selectedStatus, showMediaBuyerColumn, searchParams]);
 
   const marketingOrderColumns: CompactTableColumn<Order>[] = useMemo(() => {
     const cols: CompactTableColumn<Order>[] = [
@@ -257,9 +240,21 @@ export function MarketingOrdersPage({
                 >
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
-                <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
-                  Generate report
-                </Button>
+                <Suspense
+                  fallback={
+                    <Button type="button" variant="secondary" size="sm" disabled>
+                      Generate report…
+                    </Button>
+                  }
+                >
+                  <Await resolve={secondary}>
+                    {() => (
+                      <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
+                        Generate report
+                      </Button>
+                    )}
+                  </Await>
+                </Suspense>
                 <PageRefreshButton />
               </>
             }
@@ -285,129 +280,268 @@ export function MarketingOrdersPage({
                 >
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowExportModal(true);
-                  }}
+                <Suspense
+                  fallback={
+                    <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                      Generate report…
+                    </Button>
+                  }
                 >
-                  Generate report
-                </Button>
+                  <Await resolve={secondary}>
+                    {() => (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="w-full justify-center"
+                        onClick={() => {
+                          closeSheet();
+                          setShowExportModal(true);
+                        }}
+                      >
+                        Generate report
+                      </Button>
+                    )}
+                  </Await>
+                </Suspense>
               </>
             )}
           />
         }
       />
 
-      <OverviewStatStrip
-        items={[
-          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
-          { label: 'Unprocessed', value: unprocessedCount, valueClassName: 'text-warning-600 dark:text-warning-400' },
-          { label: 'Confirmed', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-          { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
-          { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
-          {
-            label: 'CPA',
-            value: cpa != null ? <>{'\u20A6'}{Number(cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}</> : '\u2014',
-            valueClassName: 'text-app-fg',
-          },
-        ]}
-      />
+      <Suspense
+        fallback={
+          <>
+            <OverviewStatStrip
+              items={[
+                { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+                { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Delivery Rate', value: <StatValuePulse className="min-w-[3rem]" /> },
+                { label: 'CPA', value: <StatValuePulse className="min-w-[4rem]" /> },
+              ]}
+            />
 
-      <ToolbarFiltersCollapsible
-        badgeCount={ordersToolbarFilterBadge}
-        sheetSubtitle={<span>Status and media buyer apply immediately</span>}
-        searchRow={
-          <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
-            <SearchInput
-              placeholder="Search by customer or order ID..."
-              value={searchQuery}
-              onChange={(val) => setSearchQuery(val)}
-              wrapperClassName="min-w-0 flex-1"
+            <ToolbarFiltersCollapsible
+              badgeCount={ordersToolbarFilterBadge}
+              sheetSubtitle={<span>Status and media buyer apply immediately</span>}
+              searchRow={
+                <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+                  <SearchInput
+                    placeholder="Search by customer or order ID..."
+                    value={searchQuery}
+                    onChange={(val) => setSearchQuery(val)}
+                    wrapperClassName="min-w-0 flex-1"
+                  />
+                  <Button type="submit" variant="secondary" size="sm">
+                    Search
+                  </Button>
+                </form>
+              }
+              desktopInlineFilters={
+                <>
+                  <FormSelect
+                    value={selectedStatus}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
+                    wrapperClassName="w-auto min-w-[11rem]"
+                  />
+                  {showMediaBuyerColumn ? (
+                    <div
+                      className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:w-56"
+                      aria-hidden
+                    />
+                  ) : null}
+                </>
+              }
+              sheetFilterBody={
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                    <FormSelect
+                      value={selectedStatus}
+                      onChange={(e) => handleStatusChange(e.target.value)}
+                      options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                  {showMediaBuyerColumn ? (
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                      <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
+                    </div>
+                  ) : null}
+                </>
+              }
             />
-            <Button type="submit" variant="secondary" size="sm">
-              Search
-            </Button>
-          </form>
-        }
-        desktopInlineFilters={
-          <>
-            <FormSelect
-              value={selectedStatus}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              options={statusOptions}
-              wrapperClassName="w-auto min-w-[11rem]"
-            />
-            {showMediaBuyerColumn && mediaBuyersForFilter.length > 0 ? (
-              <SearchableSelect
-                id="marketing-orders-filter-buyer"
-                value={searchParams.get('mediaBuyerId') || 'ALL'}
-                onChange={(v) => {
-                  setSearchParams((p) => {
-                    const next = new URLSearchParams(p);
-                    next.set('page', '1');
-                    if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                    else next.delete('mediaBuyerId');
-                    return next;
-                  });
-                }}
-                options={mediaBuyerFilterOptions}
-                wrapperClassName="w-full min-w-0 sm:w-56"
-                placeholder="All media buyers"
-                searchPlaceholder="Search buyers…"
-              />
-            ) : null}
           </>
         }
-        sheetFilterBody={
-          <>
-            <div className="space-y-1.5">
-              <span className="text-xs font-medium text-app-fg-muted">Status</span>
-              <FormSelect
-                value={selectedStatus}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                options={statusOptions}
-                wrapperClassName="w-full"
-              />
-            </div>
-            {showMediaBuyerColumn && mediaBuyersForFilter.length > 0 ? (
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
-                <SearchableSelect
-                  id="marketing-orders-filter-buyer-sheet"
-                  value={searchParams.get('mediaBuyerId') || 'ALL'}
-                  onChange={(v) => {
-                    setSearchParams((p) => {
-                      const next = new URLSearchParams(p);
-                      next.set('page', '1');
-                      if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                      else next.delete('mediaBuyerId');
-                      return next;
-                    });
-                  }}
-                  options={mediaBuyerFilterOptions}
-                  wrapperClassName="w-full"
-                  placeholder="All media buyers"
-                  searchPlaceholder="Search buyers…"
+      >
+        <Await resolve={secondary} errorElement={<DeferredError />}>
+          {(ins) => {
+            const mediaBuyerFilterOptions = [
+              { value: 'ALL', label: 'All media buyers' },
+              ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+            ];
+            const statusCounts = ins.statusCounts;
+            const ordersInPeriodTotal = Object.values(statusCounts).reduce((sum, n) => sum + n, 0);
+            const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
+            const confirmedCount = statusCounts['CONFIRMED'] ?? 0;
+            const deliveredCount = statusCounts['DELIVERED'] ?? 0;
+            const deliveryRate =
+              total > 0 ? (((statusCounts['DELIVERED'] ?? 0) / total) * 100).toFixed(1) : '0';
+            const statusOptions = STATUS_OPTIONS.map((status) => ({
+              value: status,
+              label:
+                status === 'ALL'
+                  ? `All Statuses (${ordersInPeriodTotal})`
+                  : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
+            }));
+
+            return (
+              <>
+                <OverviewStatStrip
+                  items={[
+                    { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+                    {
+                      label: 'Unprocessed',
+                      value: unprocessedCount,
+                      valueClassName: 'text-warning-600 dark:text-warning-400',
+                    },
+                    {
+                      label: 'Confirmed',
+                      value: confirmedCount,
+                      valueClassName: 'text-brand-600 dark:text-brand-400',
+                    },
+                    {
+                      label: 'Delivered',
+                      value: deliveredCount,
+                      valueClassName: 'text-success-600 dark:text-success-400',
+                    },
+                    { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
+                    {
+                      label: 'CPA',
+                      value:
+                        ins.cpa != null ? (
+                          <>
+                            {'\u20A6'}
+                            {Number(ins.cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </>
+                        ) : (
+                          '\u2014'
+                        ),
+                      valueClassName: 'text-app-fg',
+                    },
+                  ]}
                 />
-              </div>
-            ) : null}
-          </>
-        }
-      />
+
+                <ToolbarFiltersCollapsible
+                  badgeCount={ordersToolbarFilterBadge}
+                  sheetSubtitle={<span>Status and media buyer apply immediately</span>}
+                  searchRow={
+                    <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+                      <SearchInput
+                        placeholder="Search by customer or order ID..."
+                        value={searchQuery}
+                        onChange={(val) => setSearchQuery(val)}
+                        wrapperClassName="min-w-0 flex-1"
+                      />
+                      <Button type="submit" variant="secondary" size="sm">
+                        Search
+                      </Button>
+                    </form>
+                  }
+                  desktopInlineFilters={
+                    <>
+                      <FormSelect
+                        value={selectedStatus}
+                        onChange={(e) => handleStatusChange(e.target.value)}
+                        options={statusOptions}
+                        wrapperClassName="w-auto min-w-[11rem]"
+                      />
+                      {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
+                        <SearchableSelect
+                          id="marketing-orders-filter-buyer"
+                          value={searchParams.get('mediaBuyerId') || 'ALL'}
+                          onChange={(v) => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('page', '1');
+                              if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                              else next.delete('mediaBuyerId');
+                              return next;
+                            });
+                          }}
+                          options={mediaBuyerFilterOptions}
+                          wrapperClassName="w-full min-w-0 sm:w-56"
+                          placeholder="All media buyers"
+                          searchPlaceholder="Search buyers…"
+                        />
+                      ) : null}
+                    </>
+                  }
+                  sheetFilterBody={
+                    <>
+                      <div className="space-y-1.5">
+                        <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                        <FormSelect
+                          value={selectedStatus}
+                          onChange={(e) => handleStatusChange(e.target.value)}
+                          options={statusOptions}
+                          wrapperClassName="w-full"
+                        />
+                      </div>
+                      {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                          <SearchableSelect
+                            id="marketing-orders-filter-buyer-sheet"
+                            value={searchParams.get('mediaBuyerId') || 'ALL'}
+                            onChange={(v) => {
+                              setSearchParams((p) => {
+                                const next = new URLSearchParams(p);
+                                next.set('page', '1');
+                                if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                                else next.delete('mediaBuyerId');
+                                return next;
+                              });
+                            }}
+                            options={mediaBuyerFilterOptions}
+                            wrapperClassName="w-full"
+                            placeholder="All media buyers"
+                            searchPlaceholder="Search buyers…"
+                          />
+                        </div>
+                      ) : null}
+                    </>
+                  }
+                />
+              </>
+            );
+          }}
+        </Await>
+      </Suspense>
 
       {showChartView ? (
-        <OrdersChartView
-          statusCounts={statusCounts}
-          total={ordersInPeriodTotal}
-          scopeLabel="Marketing orders"
-          dailyCounts={dailyCounts}
-        />
+        <Suspense fallback={<OrdersChartViewShellSkeleton />}>
+          <Await resolve={secondary} errorElement={<DeferredError />}>
+            {(ins) => {
+              const ordersInPeriodTotal = Object.values(ins.statusCounts).reduce((sum, n) => sum + n, 0);
+              return (
+                <OrdersChartView
+                  statusCounts={ins.statusCounts}
+                  total={ordersInPeriodTotal}
+                  scopeLabel="Marketing orders"
+                  dailyCounts={ins.dailyCounts}
+                />
+              );
+            }}
+          </Await>
+        </Suspense>
       ) : (
-      <div className="card p-0 scroll-mt-4 overflow-hidden">
+      <>
+      <div className="card scroll-mt-4 overflow-hidden p-0">
         <div className="px-4 py-3 border-b border-app-border">
           <h2 className="text-lg font-semibold text-app-fg">Orders ({total})</h2>
         </div>
@@ -418,36 +552,47 @@ export function MarketingOrdersPage({
           rowKey={(order) => order.id}
           emptyTitle="No orders match your filters"
           emptyDescription="Try adjusting your status filter or search query"
-          pagination={
-            safeTotalPages > 1
-              ? {
-                  page,
-                  totalPages: safeTotalPages,
-                  pageParam: 'page',
-                  wrapperClassName: 'border-t border-app-border px-4 py-3 flex justify-center',
-                }
-              : undefined
-          }
         />
       </div>
+      {/* Pagination — same layout as CS Orders list; page size is fixed at 20 in the route loader. */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+        <p className="text-sm text-app-fg-muted">
+          {total > 0 ? (
+            <>
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total} orders
+              <span className="text-app-fg-muted/90"> · {limit} per page</span>
+            </>
+          ) : (
+            'No orders'
+          )}
+        </p>
+        <Pagination page={page} totalPages={totalPages} pageParam="page" />
+      </div>
+      </>
       )}
 
-      <ExportModal
-        open={showExportModal}
-        onClose={() => setShowExportModal(false)}
-        config={EXPORT_CONFIGS.marketing_orders}
-        picklists={marketingExportPicklists}
-        initialFilters={{
-          status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
-          search: searchQuery || undefined,
-          mediaBuyerId: searchParams.get('mediaBuyerId') || undefined,
-          ...(dateFilters.periodAllTime
-            ? { periodAllTime: true as const }
-            : dateFilters.startDate && dateFilters.endDate
-              ? { startDate: dateFilters.startDate, endDate: dateFilters.endDate }
-              : {}),
-        }}
-      />
+      <Suspense fallback={null}>
+        <Await resolve={secondary}>
+          {(s) => (
+            <ExportModal
+              open={showExportModal}
+              onClose={() => setShowExportModal(false)}
+              config={EXPORT_CONFIGS.marketing_orders}
+              picklists={s.marketingExportPicklists}
+              initialFilters={{
+                status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
+                search: searchQuery || undefined,
+                mediaBuyerId: searchParams.get('mediaBuyerId') || undefined,
+                ...(dateFilters.periodAllTime
+                  ? { periodAllTime: true as const }
+                  : dateFilters.startDate && dateFilters.endDate
+                    ? { startDate: dateFilters.startDate, endDate: dateFilters.endDate }
+                    : {}),
+              }}
+            />
+          )}
+        </Await>
+      </Suspense>
     </div>
   );
 }

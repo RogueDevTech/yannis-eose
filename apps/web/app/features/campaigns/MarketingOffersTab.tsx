@@ -8,10 +8,17 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { Modal } from '~/components/ui/modal';
 import { FormField } from '~/components/ui/form-field';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { Spinner } from '~/components/ui/spinner';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useToast } from '~/components/ui/toast';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import {
+  applyOptimisticPatches,
+  isOptimisticPatched,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
+import { useFetcherToast } from '~/components/ui/toast';
 import type { OfferGroupRow, Product } from './types';
 
 export interface MarketingOffersTabProps {
@@ -19,6 +26,8 @@ export interface MarketingOffersTabProps {
   offerGroups: OfferGroupRow[];
   offerGroupsLoadError?: string | null;
   canManageOfferTemplates: boolean;
+  /** First fetch of offer summary — show below filters until data is ready. */
+  offersLoading?: boolean;
 }
 
 /**
@@ -30,11 +39,22 @@ export function MarketingOffersTab({
   offerGroups,
   offerGroupsLoadError = null,
   canManageOfferTemplates,
+  offersLoading = false,
 }: MarketingOffersTabProps) {
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const clearFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const clearSurface = useFetcherActionSurface(clearFetcher);
+  const archiveFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const archiveSurface = useFetcherActionSurface(archiveFetcher);
+  useFetcherToast(archiveFetcher.data, { successMessage: 'Offer archived' });
+  const archivePatches = useOptimisticListPatches<OfferGroupRow>(archiveFetcher, (fd, intent) => {
+    if (intent !== 'archiveOfferGroup') return null;
+    const id = fd.get('id')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { status: 'ARCHIVED' } }];
+  });
+  const [archiveTarget, setArchiveTarget] = useState<OfferGroupRow | null>(null);
   const [viewingOffer, setViewingOffer] = useState<OfferGroupRow | null>(null);
 
   const [dismissedOffersError, setDismissedOffersError] = useState(false);
@@ -61,7 +81,7 @@ export function MarketingOffersTab({
   );
 
   const filteredGroups = useMemo(() => {
-    let rows = offerGroups;
+    let rows = applyOptimisticPatches(offerGroups, archivePatches);
     if (filterProductId) {
       rows = rows.filter((g) => g.items.some((it) => it.productId === filterProductId));
     }
@@ -73,7 +93,7 @@ export function MarketingOffersTab({
       });
     }
     return rows;
-  }, [offerGroups, filterProductId, offerSearch]);
+  }, [offerGroups, filterProductId, offerSearch, archivePatches]);
 
   // (Create/Edit page now owns product selection + images + price inheritance.)
 
@@ -103,6 +123,10 @@ export function MarketingOffersTab({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- data reference changes only
   }, [clearFetcher.data, showClearConfirm]);
+
+  useEffect(() => {
+    if (archiveFetcher.data?.success) setArchiveTarget(null);
+  }, [archiveFetcher.data]);
 
   return (
     <div className="space-y-4">
@@ -150,14 +174,32 @@ export function MarketingOffersTab({
         {/* Actions moved to the page header (FormsPage) */}
       </div>
 
+      {offersLoading ? (
+        <div
+          className="rounded-xl border border-app-border bg-app-elevated px-4 py-10 flex flex-col items-center justify-center gap-3 text-center"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <Spinner size="lg" className="text-brand-600" />
+          <p className="text-sm font-medium text-app-fg">Loading offers…</p>
+          <p className="text-xs text-app-fg-muted max-w-sm">
+            Fetching reusable offer packages for this screen. Filters above will apply once loaded.
+          </p>
+        </div>
+      ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {filteredGroups.map((g) => {
           const first = g.items[0];
           const titleProduct = first?.productName ?? '—';
+          const isPatching = isOptimisticPatched(archivePatches, g.id);
+          const isArchived = g.status === 'ARCHIVED';
           return (
             <article
               key={g.id}
-              className="group relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm hover:shadow-md hover:border-app-border transition-all duration-200 flex flex-col min-h-[180px]"
+              className={[
+                'group relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm hover:shadow-md hover:border-app-border transition-all duration-200 flex flex-col min-h-[180px]',
+                isPatching ? 'opacity-60' : '',
+              ].join(' ')}
             >
               <div className="flex items-start justify-between gap-3 mb-2">
                 <h3 className="font-semibold text-app-fg text-base leading-snug line-clamp-2 min-w-0 flex-1">
@@ -181,15 +223,36 @@ export function MarketingOffersTab({
                   <div className="text-xs text-app-fg-muted">+{g.items.length - 3} more</div>
                 ) : null}
               </div>
-              <div className="pt-4 flex justify-end gap-2">
+              <div className="pt-4 flex flex-wrap justify-end gap-2">
                 <TableActionButton type="button" variant="primary" onClick={() => setViewingOffer(g)}>
                   View
                 </TableActionButton>
+                {canManageOfferTemplates && !isArchived ? (
+                  <TableActionButton
+                    to={`/admin/marketing/offers/${g.id}/edit?returnTo=${encodeURIComponent(
+                      '/admin/products?tab=offers',
+                    )}`}
+                    variant="neutral"
+                  >
+                    Edit
+                  </TableActionButton>
+                ) : null}
+                {canManageOfferTemplates && !isArchived ? (
+                  <TableActionButton
+                    type="button"
+                    variant="danger"
+                    onClick={() => setArchiveTarget(g)}
+                    disabled={isPatching}
+                  >
+                    Archive
+                  </TableActionButton>
+                ) : null}
               </div>
             </article>
           );
         })}
       </div>
+      )}
 
       {viewingOffer ? (
         <Modal
@@ -294,6 +357,24 @@ export function MarketingOffersTab({
           const fd = new FormData();
           fd.set('intent', 'clearLegacyOffers');
           clearFetcher.submit(fd, { method: 'post' });
+        }}
+      />
+
+      <ConfirmActionModal
+        open={archiveTarget !== null}
+        onClose={() => setArchiveTarget(null)}
+        error={archiveSurface.errorMatchingIntent('archiveOfferGroup')}
+        title={archiveTarget ? `Archive "${archiveTarget.name}"?` : 'Archive offer?'}
+        description="Archived offers stop appearing on form pickers but stay visible here for history. You can recreate the offer if you need it back."
+        confirmLabel="Archive offer"
+        variant="danger"
+        loading={archiveFetcher.state !== 'idle'}
+        onConfirm={() => {
+          if (!archiveTarget) return;
+          const fd = new FormData();
+          fd.set('intent', 'archiveOfferGroup');
+          fd.set('id', archiveTarget.id);
+          archiveFetcher.submit(fd, { method: 'post' });
         }}
       />
     </div>

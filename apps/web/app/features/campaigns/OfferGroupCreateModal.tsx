@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Button } from '~/components/ui/button';
@@ -85,7 +85,19 @@ export function OfferGroupCreateModal({
 
   const error = inlineError ?? fetcherSurface.errorMatchingIntent('createOfferGroup');
 
+  // Hard guard against rapid double / triple clicks. The button is also
+  // `disabled={submitting}`, but React's state update lags one tick behind a
+  // fast double-click, which previously let two submissions through and
+  // produced duplicate offer groups in the DB. Migration 0122 + the service
+  // pre-check now reject duplicates server-side too — this ref just trims the
+  // round-trip when the user double-clicks.
+  const inFlightRef = useRef(false);
+  useEffect(() => {
+    if (fetcher.state === 'idle') inFlightRef.current = false;
+  }, [fetcher.state]);
+
   const submit = () => {
+    if (inFlightRef.current || submitting) return;
     setInlineError(null);
     const trimmedName = name.trim();
     if (!trimmedName) return setInlineError('Offer name is required.');
@@ -93,6 +105,7 @@ export function OfferGroupCreateModal({
     const nonEmpty = lines.filter((l) => l.label.trim().length > 0);
     if (nonEmpty.length === 0) return setInlineError('Add at least one offer item.');
 
+    inFlightRef.current = true;
     const fd = new FormData();
     fd.set('intent', 'createOfferGroup');
     fd.set('offerGroupName', trimmedName);

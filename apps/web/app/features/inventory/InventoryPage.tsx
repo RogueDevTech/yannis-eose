@@ -41,6 +41,7 @@ import type {
 } from './types';
 import { REASON_LABELS } from './types';
 import { ShipmentsTab } from './ShipmentsTab';
+import { LowStockAlertsDeferredFallback, ReconciliationTableDeferredFallback } from './InventoryDeferredFallbacks';
 
 export function InventoryPage({
   levels,
@@ -684,7 +685,7 @@ export function InventoryPage({
       </DeferredSection>
 
       {activeTab === 'levels' && lowStockAlerts && (
-        <DeferredSection resolve={lowStockAlerts} skeleton="card">
+        <DeferredSection resolve={lowStockAlerts} fallback={<LowStockAlertsDeferredFallback />}>
           {(alerts) => {
             const a = alerts as LowStockAlertsResult;
             if (a.items.length === 0) return null;
@@ -1460,7 +1461,7 @@ function ReconciliationTab({
       </ResponsiveFormPanel>
 
       {/* Reconciliation Table */}
-      <DeferredSection resolve={reconciliations} skeleton="table">
+      <DeferredSection resolve={reconciliations} fallback={<ReconciliationTableDeferredFallback />}>
         {(resolved) => {
           const rows = resolved as Reconciliation[];
           return (

@@ -49,4 +49,6 @@ export interface TransfersStreamData {
   levels: InventoryLevel[] | null;
   /** When false (e.g. TPL view), hide Initiate Transfer button and form */
   canInitiate?: boolean;
+  /** `logistics` — copy tuned for Head of Logistics partner-to-partner moves */
+  transfersPageVariant?: 'stock' | 'logistics';
 }

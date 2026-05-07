@@ -6,6 +6,7 @@ import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 
 export type StaffOnboardingDocumentRow = {
@@ -32,6 +33,13 @@ interface StaffOnboardingDocumentsPageProps {
   sortByParam: string;
   sortOrderParam: string;
   searchParam: string;
+  counts?: {
+    total: number;
+    NOT_STARTED: number;
+    IN_PROGRESS: number;
+    SUBMITTED: number;
+    APPROVED: number;
+  };
 }
 
 const ONBOARDING_OPTIONS = [
@@ -64,6 +72,7 @@ export function StaffOnboardingDocumentsPage({
   sortByParam,
   sortOrderParam,
   searchParam,
+  counts,
 }: StaffOnboardingDocumentsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy();
@@ -137,6 +146,50 @@ export function StaffOnboardingDocumentsPage({
         description="Status of staff HR documents — open a row to review or edit in the full onboarding flow."
         actions={<PageRefreshButton />}
       />
+
+      {counts ? (
+        <OverviewStatStrip
+          items={[
+            {
+              label: 'Total',
+              value: counts.total.toString(),
+              valueClassName: 'text-app-fg',
+            },
+            {
+              label: 'Not started',
+              value: counts.NOT_STARTED.toString(),
+              valueClassName:
+                counts.NOT_STARTED > 0
+                  ? 'text-app-fg-muted'
+                  : 'text-app-fg',
+            },
+            {
+              label: 'In progress',
+              value: counts.IN_PROGRESS.toString(),
+              valueClassName:
+                counts.IN_PROGRESS > 0
+                  ? 'text-warning-600 dark:text-warning-400'
+                  : 'text-app-fg',
+            },
+            {
+              label: 'Submitted',
+              value: counts.SUBMITTED.toString(),
+              valueClassName:
+                counts.SUBMITTED > 0
+                  ? 'text-info-600 dark:text-info-400'
+                  : 'text-app-fg',
+            },
+            {
+              label: 'Approved',
+              value: counts.APPROVED.toString(),
+              valueClassName:
+                counts.APPROVED > 0
+                  ? 'text-success-600 dark:text-success-400'
+                  : 'text-app-fg',
+            },
+          ]}
+        />
+      ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <div className="flex-1 min-w-[12rem]">

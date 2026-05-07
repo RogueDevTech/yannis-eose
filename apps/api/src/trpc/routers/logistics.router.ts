@@ -25,11 +25,26 @@ import { z } from 'zod';
 import { router, authedProcedure, permissionProcedure, middleware } from '../trpc';
 import { LogisticsService } from '../../logistics/logistics.service';
 import { isAdminLevel } from '../../common/authz';
+import { CacheService } from '../../common/cache/cache.service';
 
 let logisticsServiceInstance: LogisticsService | null = null;
+let logisticsCacheService: CacheService | null = null;
 
 export function setLogisticsService(service: LogisticsService) {
   logisticsServiceInstance = service;
+}
+
+export function setLogisticsCacheService(service: CacheService) {
+  logisticsCacheService = service;
+}
+
+const LOGISTICS_OPTIONS_TTL_SECONDS = 60 * 15;
+
+async function invalidateLogisticsOptionsCache(): Promise<void> {
+  if (!logisticsCacheService) return;
+  await logisticsCacheService.delPattern('cache:logistics:options:*').catch(() => {
+    /* fail-open */
+  });
 }
 
 function getLogisticsService(): LogisticsService {
@@ -66,6 +81,41 @@ export const logisticsRouter = router({
       return getLogisticsService().listProviders(input);
     }),
 
+  /**
+   * Minimal provider options for dropdowns / label resolution.
+   */
+  providerOptions: authedProcedure
+    .input(
+      z
+        .object({
+          status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+          kind: z.enum(['THIRD_PARTY', 'WAREHOUSE']).optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      const effective = {
+        status: input?.status ?? 'ACTIVE',
+        kind: input?.kind,
+      } as const;
+
+      if (!logisticsCacheService) {
+        return getLogisticsService().listProviderOptions(effective);
+      }
+
+      const key =
+        'cache:logistics:options:providers:' +
+        CacheService.hashInput({
+          branchId: ctx.currentBranchId ?? null,
+          role: ctx.user.role,
+          status: effective.status,
+          kind: effective.kind ?? null,
+        });
+      return logisticsCacheService.getOrSet(key, LOGISTICS_OPTIONS_TTL_SECONDS, () =>
+        getLogisticsService().listProviderOptions(effective),
+      );
+    }),
+
   getProvider: authedProcedure
     .input(z.object({ providerId: z.string().uuid() }))
     .query(async ({ input }) => {
@@ -75,13 +125,17 @@ export const logisticsRouter = router({
   createProvider: permissionProcedure('logistics.write')
     .input(createProviderSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().createProvider(input, ctx.user.id);
+      const res = await getLogisticsService().createProvider(input, ctx.user.id);
+      await invalidateLogisticsOptionsCache();
+      return res;
     }),
 
   updateProvider: permissionProcedure('logistics.write')
     .input(updateProviderSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().updateProvider(input, ctx.user.id);
+      const res = await getLogisticsService().updateProvider(input, ctx.user.id);
+      await invalidateLogisticsOptionsCache();
+      return res;
     }),
 
   // Locations
@@ -91,16 +145,55 @@ export const logisticsRouter = router({
       return getLogisticsService().listLocations(input);
     }),
 
+  /**
+   * Minimal location options for dropdowns / label resolution.
+   */
+  locationOptions: authedProcedure
+    .input(
+      z
+        .object({
+          status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+          providerKind: z.enum(['THIRD_PARTY', 'WAREHOUSE']).optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      const effective = {
+        status: input?.status ?? 'ACTIVE',
+        providerKind: input?.providerKind,
+      } as const;
+
+      if (!logisticsCacheService) {
+        return getLogisticsService().listLocationOptions(effective);
+      }
+
+      const key =
+        'cache:logistics:options:locations:' +
+        CacheService.hashInput({
+          branchId: ctx.currentBranchId ?? null,
+          role: ctx.user.role,
+          status: effective.status,
+          providerKind: effective.providerKind ?? null,
+        });
+      return logisticsCacheService.getOrSet(key, LOGISTICS_OPTIONS_TTL_SECONDS, () =>
+        getLogisticsService().listLocationOptions(effective),
+      );
+    }),
+
   createLocation: permissionProcedure('logistics.write')
     .input(createLocationSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().createLocation(input, ctx.user.id);
+      const res = await getLogisticsService().createLocation(input, ctx.user.id);
+      await invalidateLogisticsOptionsCache();
+      return res;
     }),
 
   updateLocation: permissionProcedure('logistics.write')
     .input(updateLocationSchema)
     .mutation(async ({ input, ctx }) => {
-      return getLogisticsService().updateLocation(input, ctx.user.id);
+      const res = await getLogisticsService().updateLocation(input, ctx.user.id);
+      await invalidateLogisticsOptionsCache();
+      return res;
     }),
 
   // Escalation & Monitoring

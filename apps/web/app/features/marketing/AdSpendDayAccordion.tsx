@@ -349,52 +349,30 @@ function relativeDateLabel(ymd: string): string {
   return '';
 }
 
-/** Tally of per-line statuses + unique platform / product / ad-url counts. */
+/** Tally of per-line statuses + unique product names (header overview). */
 function summarizeLines(lines: AdSpendGroupLine[]): {
   pending: number;
   approved: number;
   rejected: number;
-  platforms: string[];
   products: string[];
-  adUrlCount: number;
 } {
-  const platforms = new Set<string>();
   const products = new Set<string>();
   let pending = 0;
   let approved = 0;
   let rejected = 0;
-  let adUrlCount = 0;
   for (const line of lines) {
     if (line.status === 'PENDING') pending += 1;
     else if (line.status === 'APPROVED') approved += 1;
     else if (line.status === 'REJECTED') rejected += 1;
-    platforms.add(linePlatformLabel(line));
     if (line.productName) products.add(line.productName);
-    if (line.adUrl) adUrlCount += 1;
   }
   return {
     pending,
     approved,
     rejected,
-    platforms: [...platforms],
     products: [...products],
-    adUrlCount,
   };
 }
-
-/** Color hint for the platform pill — keeps the tile visually busy-but-scannable
- *  without overloading the rest of the badge palette. */
-function platformPillClasses(label: string): string {
-  const lower = label.toLowerCase();
-  if (lower === 'facebook')
-    return 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border-blue-200/60 dark:border-blue-800/60';
-  if (lower === 'tiktok')
-    return 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300 border-fuchsia-200/60 dark:border-fuchsia-800/60';
-  if (lower === 'google')
-    return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/60';
-  return 'bg-app-hover text-app-fg-muted border-app-border';
-}
-
 
 interface AdSpendDayAccordionProps {
   groups: AdSpendGroup[];
@@ -464,10 +442,6 @@ export function AdSpendDayAccordion({
           const summary = summarizeLines(g.lines);
           const relativeLabel = relativeDateLabel(g.spendDate);
           const avgPerLine = g.lineCount > 0 ? Number(g.totalAmount) / g.lineCount : 0;
-          // Show up to 3 platform pills + a "+N" overflow chip. Keeps the
-          // header compact for power users who run 5+ platforms in a day.
-          const platformPills = summary.platforms.slice(0, 3);
-          const platformOverflow = summary.platforms.length - platformPills.length;
           // Show top 2 product names, rest collapses to "+N more".
           const productPreview = summary.products.slice(0, 2).join(', ');
           const productOverflow = summary.products.length - 2;
@@ -487,30 +461,35 @@ export function AdSpendDayAccordion({
                 className="w-full text-left px-4 py-3 hover:bg-app-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
                 aria-expanded={isOpen}
               >
-                {/* Two-row grid:
-                      Row 1 — chevron + date / MB · status / amount
-                      Row 2 — line counts + status breakdown · platform pills · product preview
-                    Mobile collapses both rows but keeps the right-side total prominent. */}
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4">
-                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                    <ChevronIcon open={isOpen} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <span className="font-semibold text-app-fg">{formatDate(g.spendDate)}</span>
-                        {relativeLabel && (
-                          <span className="text-xs uppercase tracking-wider text-app-fg-muted/80 font-medium">
-                            {relativeLabel}
-                          </span>
-                        )}
+                {/* Exactly two rows: (1) date / buyer · period total, (2) counts + products · avg / orders / CPA / rolled status */}
+                <div className="flex items-start gap-2.5 w-full min-w-0">
+                  <ChevronIcon open={isOpen} />
+                  <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+                    <div className="flex items-start justify-between gap-3 min-w-0">
+                      <div className="min-w-0 flex flex-col gap-0.5">
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span className="font-semibold text-app-fg shrink-0">{formatDate(g.spendDate)}</span>
+                          {relativeLabel && (
+                            <span className="text-xs uppercase tracking-wider text-app-fg-muted/80 font-medium shrink-0">
+                              {relativeLabel}
+                            </span>
+                          )}
+                        </div>
                         {showMediaBuyerColumn && g.mediaBuyerName && (
-                          <span className="text-xs text-app-fg-muted">
-                            · <span className="text-app-fg/80">{g.mediaBuyerName}</span>
+                          <span className="block text-sm font-medium text-app-fg leading-snug break-words pr-1">
+                            {g.mediaBuyerName}
                           </span>
                         )}
                       </div>
-                      {/* Row 2: meta strip (counts + breakdown + platforms + products) */}
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                        <span className="inline-flex items-center gap-1 text-app-fg-muted">
+                      <div className="shrink-0 text-right self-start">
+                        <div className="text-base font-semibold text-app-fg tabular-nums leading-tight">
+                          <NairaPrice amount={Number(g.totalAmount)} />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-end justify-between gap-3 min-w-0">
+                      <div className="min-w-0 flex items-center gap-x-2 overflow-x-auto pb-0.5 -mb-0.5 text-xs [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                        <span className="inline-flex items-center gap-1 text-app-fg-muted shrink-0">
                           <span className="font-semibold text-app-fg tabular-nums">{g.lineCount}</span>
                           line{g.lineCount === 1 ? '' : 's'}
                         </span>
@@ -529,21 +508,8 @@ export function AdSpendDayAccordion({
                             <span className="tabular-nums">{summary.rejected}</span> rejected
                           </StatusPill>
                         )}
-                        {platformPills.map((p) => (
-                          <span
-                            key={p}
-                            className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[11px] font-medium ${platformPillClasses(p)}`}
-                          >
-                            {p}
-                          </span>
-                        ))}
-                        {platformOverflow > 0 && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded border border-app-border bg-app-hover text-[11px] font-medium text-app-fg-muted">
-                            +{platformOverflow}
-                          </span>
-                        )}
                         {productPreview && (
-                          <span className="inline-flex items-center gap-1 text-app-fg-muted truncate max-w-[14rem]">
+                          <span className="inline-flex items-center gap-1 text-app-fg-muted min-w-0 max-w-[min(14rem,100%)]">
                             <ProductIcon />
                             <span className="truncate">{productPreview}</span>
                             {productOverflow > 0 && (
@@ -552,33 +518,27 @@ export function AdSpendDayAccordion({
                           </span>
                         )}
                       </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3 shrink-0 sm:flex-col sm:items-end sm:gap-1">
-                    <div className="text-right">
-                      <div className="text-base font-semibold text-app-fg tabular-nums">
-                        <NairaPrice amount={Number(g.totalAmount)} />
-                      </div>
-                      {g.lineCount > 1 && (
-                        <div className="text-[11px] text-app-fg-muted tabular-nums">
-                          avg <NairaPrice amount={avgPerLine} /> / line
-                        </div>
-                      )}
-                      <div className="text-[11px] text-app-fg-muted tabular-nums mt-0.5">
-                        <span className="font-medium text-app-fg/90">{(g.overallOrderCount ?? 0).toLocaleString()}</span>{' '}
-                        orders
-                        {g.overallCpa != null ? (
-                          <>
-                            {' '}
-                            · <NairaPrice amount={g.overallCpa} /> day CPA
-                          </>
-                        ) : (
-                          <span> · CPA —</span>
+                      <div className="shrink-0 flex flex-col items-end gap-0.5 text-right">
+                        {g.lineCount > 1 && (
+                          <div className="text-[11px] text-app-fg-muted tabular-nums leading-tight whitespace-nowrap">
+                            avg <NairaPrice amount={avgPerLine} /> / line
+                          </div>
                         )}
+                        <div className="text-[11px] text-app-fg-muted tabular-nums leading-tight whitespace-nowrap">
+                          <span className="font-medium text-app-fg/90">{(g.overallOrderCount ?? 0).toLocaleString()}</span>{' '}
+                          orders
+                          {g.overallCpa != null ? (
+                            <>
+                              {' '}
+                              · <NairaPrice amount={g.overallCpa} /> day CPA
+                            </>
+                          ) : (
+                            <span> · CPA —</span>
+                          )}
+                        </div>
+                        <StatusBadge status={g.rolledStatus} label={rolledStatusLabel(g.rolledStatus)} />
                       </div>
                     </div>
-                    <StatusBadge status={g.rolledStatus} label={rolledStatusLabel(g.rolledStatus)} />
                   </div>
                 </div>
               </button>

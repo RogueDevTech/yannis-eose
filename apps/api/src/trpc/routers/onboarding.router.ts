@@ -16,6 +16,7 @@
  */
 
 import { TRPCError } from '@trpc/server';
+import { z } from 'zod';
 import {
   updateOnboardingProfileSchema,
   hrUpdateOnboardingSchema,
@@ -85,5 +86,19 @@ export const onboardingRouter = router({
     .input(listStaffOnboardingDocumentsSchema)
     .query(async ({ input, ctx }) => {
       return getService().listStaffDocuments(input, ctx.user, ctx.user.currentBranchId ?? null);
+    }),
+
+  /** Status totals for the HR onboarding overview page top stat strip. */
+  countStaffDocumentsByStatus: authedProcedure
+    .input(
+      z
+        .object({
+          branchId: z.string().uuid().optional(),
+          allBranches: z.boolean().optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      return getService().countStaffDocumentsByStatus(ctx.user, ctx.user.currentBranchId ?? null, input ?? {});
     }),
 });

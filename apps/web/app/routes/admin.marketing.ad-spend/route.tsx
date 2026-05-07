@@ -1,9 +1,11 @@
-import { useLoaderData } from '@remix-run/react';
-import { json, redirect } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { DeferredError } from '~/components/ui/deferred-section';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
-import type { AdSpendStatusFilter, MarketingAdSpendLoaderData } from '~/features/marketing/types';
+import type { AdSpendStatusCounts, AdSpendStatusFilter, Campaign, MarketingAdSpendLoaderData } from '~/features/marketing/types';
 import {
   buildLeaderboardInput,
   getMarketingRoleFlags,
@@ -100,37 +102,59 @@ export async function loader({ request }: LoaderFunctionArgs) {
     JSON.stringify({ page: 1, limit: 100, role: 'MEDIA_BUYER', status: 'ACTIVE' }),
   );
 
-  const adSpendP = apiRequest<unknown>(`/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`, { method: 'GET', cookie });
-  const adSpendCountsP = apiRequest<unknown>(
-    `/trpc/marketing.adSpendStatusCounts?input=${encodeURIComponent(countsInput)}`,
+  const adSpendRes = await apiRequest<unknown>(
+    `/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`,
     { method: 'GET', cookie },
   );
-  const campaignsP = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`, { method: 'GET', cookie });
-  const buyersP = !isMediaBuyer
-    ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
-    : Promise.resolve({ ok: false, data: null });
 
-  const [adSpendRes, adSpendCountsRes, campaignsRes, buyersRes] = await Promise.all([
-    adSpendP,
-    adSpendCountsP,
-    campaignsP,
-    buyersP,
-  ]);
-
-  const mediaBuyersForFilter =
-    buyersRes.ok
-      ? (
-          (
-            buyersRes.data as {
-              result?: { data?: { users?: Array<{ id: string; name: string }> } };
-            }
-          )?.result?.data?.users ?? []
-        ).map((u) => ({ id: u.id, name: u.name }))
-      : [];
   const adSpendData = parseAdSpend(adSpendRes);
-  const statusCounts = parseAdSpendStatusCounts(adSpendCountsRes);
   const totalRows = adSpendData?.pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalRows / AD_SPEND_PER_PAGE));
+
+  const adSpendPicklists = (async (): Promise<{
+    statusCounts: AdSpendStatusCounts;
+    campaigns: Campaign[];
+    mediaBuyersForFilter: Array<{ id: string; name: string }>;
+  }> => {
+    try {
+      const adSpendCountsP = apiRequest<unknown>(
+        `/trpc/marketing.adSpendStatusCounts?input=${encodeURIComponent(countsInput)}`,
+        { method: 'GET', cookie },
+      );
+      const campaignsP = apiRequest<unknown>(
+        `/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`,
+        { method: 'GET', cookie },
+      );
+      const buyersP = !isMediaBuyer
+        ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
+        : Promise.resolve({ ok: false as const, data: null });
+
+      const [adSpendCountsRes, campaignsRes, buyersRes] = await Promise.all([adSpendCountsP, campaignsP, buyersP]);
+
+      const mediaBuyersForFilter =
+        buyersRes.ok
+          ? (
+              (
+                buyersRes.data as {
+                  result?: { data?: { users?: Array<{ id: string; name: string }> } };
+                }
+              )?.result?.data?.users ?? []
+            ).map((u) => ({ id: u.id, name: u.name }))
+          : [];
+
+      return {
+        statusCounts: parseAdSpendStatusCounts(adSpendCountsRes),
+        campaigns: parseCampaigns(campaignsRes),
+        mediaBuyersForFilter,
+      };
+    } catch {
+      return {
+        statusCounts: { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
+        campaigns: [],
+        mediaBuyersForFilter: [],
+      };
+    }
+  })();
 
   const data: MarketingAdSpendLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
@@ -147,9 +171,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productIdFilter,
     campaignIdFilter,
     mediaBuyerIdFilter,
-    mediaBuyersForFilter,
-    statusCounts,
-    campaigns: parseCampaigns(campaignsRes),
     metrics: null,
     leaderboard: null,
     users: null,
@@ -160,9 +181,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     groupsTotal: 0,
     groupsPage: groupsPage,
     groupsTotalPages: 1,
+    adSpendPicklists,
   };
 
-  return data;
+  return defer(data as unknown as Record<string, unknown>);
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -174,8 +196,32 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
+const AD_SPEND_PICKLISTS_FALLBACK: Pick<
+  MarketingAdSpendLoaderData,
+  'statusCounts' | 'campaigns' | 'mediaBuyersForFilter'
+> = {
+  statusCounts: { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
+  campaigns: [],
+  mediaBuyersForFilter: [],
+};
+
 export default function AdminMarketingAdSpendRoute() {
-  const data = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>() as unknown as MarketingAdSpendLoaderData;
+  if (data.adSpendPicklists) {
+    const { adSpendPicklists, ...rest } = data;
+    const sync = rest as Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
+    return (
+      <Suspense
+        fallback={
+          <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />
+        }
+      >
+        <Await resolve={adSpendPicklists} errorElement={<DeferredError />}>
+          {(pick) => <MarketingAdSpendPage {...sync} {...pick} />}
+        </Await>
+      </Suspense>
+    );
+  }
   return (
     <>
       <MarketingAdSpendPage {...data} />

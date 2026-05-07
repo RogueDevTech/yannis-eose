@@ -1,3 +1,4 @@
+import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
@@ -67,30 +68,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
   };
 
-  const [listRes, statsRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/marketing.listMyCrossFunnelAttempts?input=${encodeURIComponent(JSON.stringify(listInput))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      `/trpc/marketing.crossFunnelStats?input=${encodeURIComponent(JSON.stringify(statsInput))}`,
-      { method: 'GET', cookie },
-    ),
-  ]);
+  const listRes = await apiRequest<unknown>(
+    `/trpc/marketing.listMyCrossFunnelAttempts?input=${encodeURIComponent(JSON.stringify(listInput))}`,
+    { method: 'GET', cookie },
+  );
 
-  return {
+  const secondaryPromise = (async (): Promise<CrossFunnelStats> => {
+    try {
+      const statsRes = await apiRequest<unknown>(
+        `/trpc/marketing.crossFunnelStats?input=${encodeURIComponent(JSON.stringify(statsInput))}`,
+        { method: 'GET', cookie },
+      );
+      return parseStats(statsRes);
+    } catch {
+      return { totalAttempts: 0, uniqueCustomers: 0, perProduct: [] };
+    }
+  })();
+
+  return defer({
     list: parseList(listRes),
-    stats: parseStats(statsRes),
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
       periodAllTime,
       productId: productId ?? '',
     },
-  };
+    secondary: secondaryPromise,
+  });
 }
 
 export default function CrossFunnelRoute() {
   const data = useLoaderData<typeof loader>();
-  return <MarketingCrossFunnelPage {...data} />;
+  return (
+    <MarketingCrossFunnelPage list={data.list} secondary={data.secondary} filters={data.filters} />
+  );
 }

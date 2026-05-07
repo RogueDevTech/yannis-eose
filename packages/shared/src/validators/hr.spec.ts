@@ -89,8 +89,16 @@ describe('createCommissionPlanSchema', () => {
     expect(() => createCommissionPlanSchema.parse(baseValid)).not.toThrow();
   });
 
-  it('rejects plan with empty role', () => {
-    expect(() => createCommissionPlanSchema.parse({ ...baseValid, role: '' })).toThrow();
+  it('treats empty role as universal (per-user assignment template)', () => {
+    expect(() => createCommissionPlanSchema.parse({ ...baseValid, role: '' })).not.toThrow();
+    const parsed = createCommissionPlanSchema.parse({ ...baseValid, role: null });
+    expect(parsed.role).toBeNull();
+  });
+
+  it('rejects unknown role value', () => {
+    expect(() =>
+      createCommissionPlanSchema.parse({ ...baseValid, role: 'NOT_A_REAL_ROLE' }),
+    ).toThrow();
   });
 
   it('rejects planName shorter than 2 chars', () => {

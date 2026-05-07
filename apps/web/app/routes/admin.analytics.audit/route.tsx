@@ -1,9 +1,9 @@
-import { json, redirect } from '@remix-run/node';
+import { json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
 import { AuditPage } from '~/features/audit/AuditPage';
-import type { AuditEntry, AuditStreamData } from '~/features/audit/types';
+import type { AuditActorFilterOption, AuditEntry, AuditStreamData } from '~/features/audit/types';
 
 export const meta: MetaFunction = () => [
   { title: 'Audit Trail — Yannis EOSE' },
@@ -31,11 +31,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate && !periodAllTime) input.startDate = new Date(startDate).toISOString();
   if (endDate && !periodAllTime) input.endDate = new Date(endDate).toISOString();
 
-  // Audit log fetch MUST be awaited (rows needed for extracting actorIds)
-  const res = await apiRequest<unknown>(
-    `/trpc/audit.globalLog?input=${encodeURIComponent(JSON.stringify(input))}`,
-    { method: 'GET', cookie },
-  );
+  const encodedLogInput = encodeURIComponent(JSON.stringify(input));
+  const [res, actorOptsRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/audit.globalLog?input=${encodedLogInput}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/audit.actorFilterOptions?input=${encodeURIComponent(JSON.stringify({}))}`, {
+      method: 'GET',
+      cookie,
+    }),
+  ]);
+
+  const actorFilterOptions: AuditActorFilterOption[] =
+    actorOptsRes.ok
+      ? ((actorOptsRes.data as { result?: { data?: AuditActorFilterOption[] } }).result?.data ?? [])
+      : [];
 
   if (!res.ok) {
     const data = res.data as Record<string, unknown> | undefined;
@@ -54,6 +62,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       total: 0,
       filters,
       actorIds: [],
+      actorFilterOptions,
+      locationNames: {},
       error,
     } satisfies AuditStreamData;
   }
@@ -83,10 +93,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const actorIds = [...ids];
 
+  const LOCATION_REF_KEYS = ['from_location_id', 'fromLocationId', 'to_location_id', 'toLocationId'] as const;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+  const locationIdsSet = new Set<string>();
+  for (const row of result.rows) {
+    if (row.tableName !== 'stock_transfers') continue;
+    const data = row.data as Record<string, unknown>;
+    for (const field of LOCATION_REF_KEYS) {
+      const v = data[field];
+      if (typeof v === 'string' && UUID_RE.test(v)) locationIdsSet.add(v);
+    }
+  }
+
+  let locationNames: Record<string, string> = {};
+  const locationIds = [...locationIdsSet];
+  if (locationIds.length > 0) {
+    const locRes = await apiRequest<unknown>(
+      `/trpc/audit.locationNames?input=${encodeURIComponent(JSON.stringify({ locationIds }))}`,
+      { method: 'GET', cookie },
+    );
+    if (locRes.ok) {
+      const locParsed = locRes.data as { result?: { data?: Record<string, string> } };
+      locationNames = locParsed?.result?.data ?? {};
+    }
+  }
+
   return {
     ...result,
     filters,
     actorIds,
+    actorFilterOptions,
+    locationNames,
   } satisfies AuditStreamData;
 }
 
@@ -137,6 +174,8 @@ export default function AuditRoute() {
       total={data.total}
       filters={data.filters}
       actorIds={data.actorIds}
+      actorFilterOptions={data.actorFilterOptions ?? []}
+      locationNames={data.locationNames ?? {}}
       error={data.error}
     />
     </>

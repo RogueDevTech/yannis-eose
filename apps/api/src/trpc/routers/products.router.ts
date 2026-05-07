@@ -7,11 +7,24 @@ import {
   requestProductArchiveSchema,
 } from '@yannis/shared';
 import type { ProductsService } from '../../products/products.service';
+import { CacheService } from '../../common/cache/cache.service';
 
 let productsServiceInstance: ProductsService | null = null;
+let productsCacheService: CacheService | null = null;
 
 export function setProductsService(service: ProductsService) {
   productsServiceInstance = service;
+}
+
+export function setProductsCacheService(service: CacheService) {
+  productsCacheService = service;
+}
+
+async function invalidateProductsOptionsCache(): Promise<void> {
+  if (!productsCacheService) return;
+  await productsCacheService.delPattern('cache:products:options:*').catch(() => {
+    /* fail-open */
+  });
 }
 
 function getProductsService(): ProductsService {
@@ -20,6 +33,8 @@ function getProductsService(): ProductsService {
   }
   return productsServiceInstance;
 }
+
+const PRODUCTS_OPTIONS_TTL_SECONDS = 60 * 15;
 
 export const productsRouter = router({
   /**
@@ -30,6 +45,38 @@ export const productsRouter = router({
     .input(listProductsSchema)
     .query(async ({ input, ctx }) => {
       return getProductsService().list(input, ctx.user.id, ctx.user.role);
+    }),
+
+  /**
+   * Minimal product options for dropdowns / label resolution.
+   * Cacheable (Redis) because the response shape is small and stable.
+   */
+  options: authedProcedure
+    .input(
+      z
+        .object({
+          status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      const effective = { status: input?.status ?? 'ACTIVE' } as const;
+
+      if (!productsCacheService) {
+        return getProductsService().listOptions(effective, ctx.user.id, ctx.user.role);
+      }
+
+      const key =
+        'cache:products:options:' +
+        CacheService.hashInput({
+          status: effective.status,
+          viewerRole: ctx.user.role,
+          viewerId: ctx.user.id, // MEDIA_BUYER catalog scoping can vary per user
+        });
+
+      return productsCacheService.getOrSet(key, PRODUCTS_OPTIONS_TTL_SECONDS, () =>
+        getProductsService().listOptions(effective, ctx.user.id, ctx.user.role),
+      );
     }),
 
   /**
@@ -49,7 +96,9 @@ export const productsRouter = router({
   create: permissionProcedure('products.create')
     .input(createProductSchema)
     .mutation(async ({ input, ctx }) => {
-      return getProductsService().create(input, ctx.user);
+      const res = await getProductsService().create(input, ctx.user);
+      await invalidateProductsOptionsCache();
+      return res;
     }),
 
   /**
@@ -58,7 +107,9 @@ export const productsRouter = router({
   update: permissionProcedure('products.update')
     .input(updateProductSchema)
     .mutation(async ({ input, ctx }) => {
-      return getProductsService().update(input, ctx.user);
+      const res = await getProductsService().update(input, ctx.user);
+      await invalidateProductsOptionsCache();
+      return res;
     }),
 
   /**
@@ -67,7 +118,9 @@ export const productsRouter = router({
   requestArchive: permissionProcedure('products.update')
     .input(requestProductArchiveSchema)
     .mutation(async ({ input, ctx }) => {
-      return getProductsService().requestArchive(input, ctx.user);
+      const res = await getProductsService().requestArchive(input, ctx.user);
+      await invalidateProductsOptionsCache();
+      return res;
     }),
 
   /**

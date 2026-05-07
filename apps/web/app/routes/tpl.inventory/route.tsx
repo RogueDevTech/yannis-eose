@@ -46,11 +46,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie, ...readOpts },
   );
   const productsPromise = apiRequest<unknown>(
-    `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 50, status: 'ACTIVE' }))}`,
+    `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
     { method: 'GET', cookie, ...readOpts },
   );
   const locationsPromise = apiRequest<unknown>(
-    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 20 }))}`,
+    `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
     { method: 'GET', cookie, ...readOpts },
   );
   const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie, ...readOpts });

@@ -319,7 +319,18 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       <PageHeader
         title="Stock Transfer Confirmations"
         description="Confirm in-transit stock transfers when goods arrive at the destination. No receipt upload required."
-        actions={<PageRefreshButton />}
+        actions={
+          <div className="flex items-center gap-2">
+            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+              <DateFilterBar
+                startDate={filters.startDate}
+                endDate={filters.endDate}
+                periodAllTime={filters.periodAllTime}
+              />
+            </div>
+            <PageRefreshButton />
+          </div>
+        }
       />
 
       <OverviewStatStrip
@@ -395,13 +406,6 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
             value={filters.maxQty}
             onChange={(e) => setFilterParam('maxQty', e.target.value)}
           />
-          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-            <DateFilterBar
-              startDate={filters.startDate}
-              endDate={filters.endDate}
-              periodAllTime={filters.periodAllTime}
-            />
-          </div>
           <Button type="button" variant="secondary" size="sm" onClick={clearAllFilters}>
             Clear all filters
           </Button>

@@ -420,6 +420,38 @@ export class ProductsService {
   }
 
   /**
+   * Lightweight product options for dropdowns / label resolution.
+   * Mirrors catalog scoping rules (MEDIA_BUYER restrictions) but returns minimal fields.
+   */
+  async listOptions(
+    input: { status?: 'ACTIVE' | 'INACTIVE' | 'ARCHIVED' },
+    viewerId: string,
+    viewerRole: string,
+  ): Promise<Array<{ id: string; name: string; status: string }>> {
+    const { allowedProductIds } = await this.getCatalogScopeForViewer(viewerId, viewerRole);
+    if (allowedProductIds !== null && allowedProductIds.length === 0) return [];
+
+    const conditions = [];
+    if (allowedProductIds !== null) {
+      conditions.push(inArray(schema.products.id, allowedProductIds));
+    }
+    if (input.status) {
+      conditions.push(eq(schema.products.status, input.status));
+    }
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    return this.db
+      .select({
+        id: schema.products.id,
+        name: schema.products.name,
+        status: schema.products.status,
+      })
+      .from(schema.products)
+      .where(whereClause)
+      .orderBy(asc(schema.products.name));
+  }
+
+  /**
    * Update product details.
    */
   async update(input: UpdateProductInput, actor: SessionUser) {

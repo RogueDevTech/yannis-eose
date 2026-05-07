@@ -304,6 +304,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'logistics.write',
     'logistics.teamOverview',
     'inventory.read',
+    'inventory.transfer',
     'inventory.intake',
     'inventory.verifyTransfer',
     'inventory.lowStockAlerts',
@@ -327,6 +328,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // context still applies in the service).
     'permission_requests.order_line_price.approve',
     'permission_requests.order_deletion.approve',
+    'transfers.read',
   ],
   STOCK_MANAGER: [
     'inventory.read',

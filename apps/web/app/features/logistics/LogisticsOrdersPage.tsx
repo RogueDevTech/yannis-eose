@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { Suspense, useState, useEffect, useMemo } from 'react';
+import { Await, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
@@ -17,6 +17,8 @@ import { S3_FOLDERS } from '~/lib/s3-upload';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { DeferredError } from '~/components/ui/deferred-section';
+import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/deferred-skeletons';
 import { OrdersChartView } from '~/components/ui/orders-chart-view-lazy';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -53,17 +55,31 @@ export interface RiderOption {
   logisticsLocationId: string | null;
 }
 
+/** Streamed after `orders.list` when using `deferredSecondary` (admin logistics + TPL orders). */
+export type LogisticsOrdersDeferredSecondary = {
+  statusCounts: Record<string, number>;
+  locations: Location[];
+  /** TPL orders route — riders for dispatch picklists and row labels. */
+  riders?: RiderOption[];
+  /** TPL — scope-filtered allocate targets; omitted on admin (derived from `locations`). */
+  allocatableLocations?: Location[];
+};
+
 interface LogisticsOrdersPageProps {
   orders: LogisticsOrderRow[];
   total: number;
   totalPages: number;
   page: number;
   limit: number;
-  statusCounts: Record<string, number>;
+  /** Omitted when `deferredSecondary` is used (admin logistics route). */
+  statusCounts?: Record<string, number>;
   statusFilter?: string;
   searchFilter?: string;
   listErrorMessage?: string;
-  locations: Location[];
+  /** Omitted when `deferredSecondary` is used. */
+  locations?: Location[];
+  /** Stream counts + locations (+ optional riders / TPL allocatable list) after `orders.list`. */
+  deferredSecondary?: Promise<LogisticsOrdersDeferredSecondary>;
   /** When provided (e.g. TPL), only these locations in allocate dropdown; else locations where !dispatchLocked */
   allocatableLocations?: Location[];
   riders: RiderOption[];
@@ -143,17 +159,17 @@ function DeliveryDateCell({ date, status }: { date?: string | null; status: stri
   );
 }
 
-export function LogisticsOrdersPage({
+function LogisticsOrdersPageImpl({
   orders,
   total,
   totalPages,
   page,
   limit,
-  statusCounts,
+  statusCounts: statusCountsProp,
   statusFilter,
   searchFilter,
   listErrorMessage,
-  locations,
+  locations: locationsProp,
   allocatableLocations: allocatableLocationsProp,
   riders,
   filters,
@@ -165,7 +181,23 @@ export function LogisticsOrdersPage({
   markInTransitLabel = 'Start Delivery',
   dailyCounts,
   pageDescription = 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
-}: LogisticsOrdersPageProps) {
+  deferredLoading = false,
+}: LogisticsOrdersPageProps & { deferredLoading?: boolean }) {
+  const statusCounts = statusCountsProp ?? {};
+  const locations = locationsProp ?? [];
+
+  const displayOrders = useMemo((): LogisticsOrderRow[] => {
+    const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
+    const locationProviderById = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
+    const riderById = new Map(riders.map((r) => [r.id, r]));
+    return orders.map((o) => ({
+      ...o,
+      locationName: o.logisticsLocationId ? locationNameById.get(o.logisticsLocationId) ?? '—' : '—',
+      locationProviderName: o.logisticsLocationId ? locationProviderById.get(o.logisticsLocationId) ?? null : null,
+      riderName: o.riderId ? riderById.get(o.riderId)?.name ?? '—' : '—',
+    }));
+  }, [orders, locations, riders]);
+
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
   const isFilterLoading = useLoaderRefetchBusy();
@@ -293,9 +325,9 @@ export function LogisticsOrdersPage({
     [selectedStatus],
   );
 
-  const confirmedOrders = orders.filter((o) => o.status === 'CONFIRMED');
-  const allocatedOrders = orders.filter((o) => o.status === 'AGENT_ASSIGNED');
-  const selectedOrders = orders.filter((o) => selectedIds.has(o.id));
+  const confirmedOrders = displayOrders.filter((o) => o.status === 'CONFIRMED');
+  const allocatedOrders = displayOrders.filter((o) => o.status === 'AGENT_ASSIGNED');
+  const selectedOrders = displayOrders.filter((o) => selectedIds.has(o.id));
   const selectedConfirmed = selectedOrders.filter((o) => o.status === 'CONFIRMED');
   const selectedAllocated = selectedOrders.filter((o) => o.status === 'AGENT_ASSIGNED');
   const selectedInTransit = selectedOrders.filter((o) => o.status === 'IN_TRANSIT');
@@ -663,17 +695,31 @@ export function LogisticsOrdersPage({
         />
       </div>
 
-      <OverviewStatStrip
-        tileClassName="min-w-[6rem]"
-        items={[
-          { label: 'Total Orders', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
-          { label: 'Awaiting logistics assignment', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-          { label: 'Agent assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
-          { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400' },
-          { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-          { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
-        ]}
-      />
+      {deferredLoading ? (
+        <OverviewStatStrip
+          tileClassName="min-w-[6rem]"
+          items={[
+            { label: 'Total Orders', value: <StatValuePulse className="min-w-[3rem]" /> },
+            { label: 'Awaiting logistics assignment', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Agent assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Dispatched', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
+          ]}
+        />
+      ) : (
+        <OverviewStatStrip
+          tileClassName="min-w-[6rem]"
+          items={[
+            { label: 'Total Orders', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
+            { label: 'Awaiting logistics assignment', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Agent assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
+          ]}
+        />
+      )}
 
       {/* Bulk action toolbar */}
       {selectedIds.size > 0 && (
@@ -880,7 +926,9 @@ export function LogisticsOrdersPage({
       </div>
 
       {showChartView ? (
-        trendLoading && !trendCounts ? (
+        deferredLoading ? (
+          <OrdersChartViewShellSkeleton />
+        ) : trendLoading && !trendCounts ? (
           <div className="card !p-4">
             <div className="flex items-center gap-2 text-sm text-app-fg-muted">
               <Spinner className="w-4 h-4" />
@@ -901,7 +949,7 @@ export function LogisticsOrdersPage({
           <CompactTable<LogisticsOrderRow>
             withCard={false}
             columns={logisticsOrderColumns}
-            rows={orders}
+            rows={displayOrders}
             rowKey={(o) => o.id}
             rowClassName={(o) => (selectedIds.has(o.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '')}
             selection={{
@@ -916,7 +964,7 @@ export function LogisticsOrdersPage({
                 setBulkResult(null);
               },
               onToggleAll: (selectAll) => {
-                if (selectAll) setSelectedIds(new Set(orders.map((o) => o.id)));
+                if (selectAll) setSelectedIds(new Set(displayOrders.map((o) => o.id)));
                 else setSelectedIds(new Set());
                 setBulkResult(null);
               },
@@ -1025,6 +1073,39 @@ export function LogisticsOrdersPage({
       )}
     </div>
   );
+}
+
+export function LogisticsOrdersPage(props: LogisticsOrdersPageProps) {
+  if (props.deferredSecondary) {
+    const { deferredSecondary, ...rest } = props;
+    return (
+      <Suspense
+        fallback={
+          <LogisticsOrdersPageImpl
+            {...rest}
+            deferredSecondary={undefined}
+            statusCounts={{}}
+            locations={[]}
+            deferredLoading
+          />
+        }
+      >
+        <Await resolve={deferredSecondary} errorElement={<DeferredError />}>
+          {(sec) => (
+            <LogisticsOrdersPageImpl
+              {...rest}
+              deferredSecondary={undefined}
+              statusCounts={sec.statusCounts}
+              locations={sec.locations}
+              riders={sec.riders ?? rest.riders}
+              allocatableLocations={sec.allocatableLocations ?? rest.allocatableLocations}
+            />
+          )}
+        </Await>
+      </Suspense>
+    );
+  }
+  return <LogisticsOrdersPageImpl {...props} />;
 }
 
 // ── Edit Delivery Date Modal ───────────────────────────────────

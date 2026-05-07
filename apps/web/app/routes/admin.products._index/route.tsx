@@ -11,11 +11,11 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { Button } from '~/components/ui/button';
-import { Spinner } from '~/components/ui/spinner';
 import { MarketingOffersTab } from '~/features/campaigns/MarketingOffersTab';
 import { OfferGroupCreateModal } from '~/features/campaigns/OfferGroupCreateModal';
+import { ProductsListDeferredFallback } from '~/features/products/ProductsListDeferredFallback';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
 import type { Product } from '~/features/products/types';
 import type { OfferGroupRow } from '~/features/campaigns/types';
@@ -286,6 +286,24 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
+  if (intent === 'archiveOfferGroup') {
+    await requirePermission(request, 'products.offers');
+    const id = formData.get('id')?.toString() ?? '';
+    if (!id) return json({ error: 'Offer id required' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/marketing.updateOfferGroup', {
+      method: 'POST',
+      cookie,
+      body: { id, status: 'ARCHIVED' },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to archive offer') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
@@ -398,7 +416,7 @@ export default function ProductsRoute() {
         }
       />
 
-      <DeferredSection resolve={overviewPromise} fallback={null}>
+      <DeferredSection resolve={overviewPromise} fallback={<OverviewStatStripSkeleton count={5} />}>
         {([resolved, offersCount]) => (
           <OverviewStatStrip
             items={[
@@ -444,29 +462,19 @@ export default function ProductsRoute() {
           />
 
           {uiTab === 'offers' ? (
-            <>
-              {!offersLoaded && offersFetcher.state !== 'idle' ? (
-                <div className="card !p-4">
-                  <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-                    <Spinner className="w-4 h-4" />
-                    <span>Loading offers…</span>
-                  </div>
-                </div>
-              ) : null}
-
-              <MarketingOffersTab
-                products={offersCache.offersProducts}
-                offerGroups={offersCache.offerGroups}
-                offerGroupsLoadError={offersCache.offerGroupsLoadError}
-                canManageOfferTemplates={true}
-              />
-            </>
+            <MarketingOffersTab
+              products={offersCache.offersProducts}
+              offerGroups={offersCache.offerGroups}
+              offerGroupsLoadError={offersCache.offerGroupsLoadError}
+              canManageOfferTemplates={true}
+              offersLoading={!offersLoaded}
+            />
           ) : null}
         </div>
       ) : null}
 
       {uiTab === 'product' ? (
-        <DeferredSection resolve={data.products} skeleton="table">
+        <DeferredSection resolve={data.products} fallback={<ProductsListDeferredFallback />}>
           {(resolved: ResolvedProductsList) => (
             <ProductsListPage
               products={resolved.products}

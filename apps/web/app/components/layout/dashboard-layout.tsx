@@ -201,6 +201,12 @@ const navStructure: NavGroupDef[] = [
         permission: 'logistics.read',
       },
       {
+        label: 'Partner stock transfers',
+        href: '/admin/logistics/transfers',
+        icon: SidebarIcons.transfers,
+        permission: 'transfers.read',
+      },
+      {
         label: 'Orders',
         labelShort: 'Logistics',
         href: '/admin/logistics/orders',
@@ -549,7 +555,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin',
     '/admin/logistics/orders',
     '/admin/logistics/partners',
-    '/admin/permission-requests',
+    '/admin/logistics/transfers',
     '/admin/logistics/remittances',
   ],
   TPL_MANAGER: [

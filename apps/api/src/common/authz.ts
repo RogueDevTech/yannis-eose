@@ -230,6 +230,58 @@ const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
  *
  * Already-mirroring sessions cannot start a nested mirror (no mirror chains).
  */
+/**
+ * Staff insights on `/hr/users/:id` — orders/payroll/activity bundles, payout preview, and
+ * `hr.listPayouts` when scoped to a `staffId`.
+ *
+ * Mirrors the Remix loader in `hr.users.$id._index/route.tsx` + `requireStaffAccountsAccess`
+ * (see `apps/web/app/lib/api.server.ts` STAFF_ACCOUNTS_PERMISSION_CODES). Keep the two in sync.
+ */
+const STAFF_ACCOUNTS_DIRECTORY_PERMISSIONS = new Set<string>([
+  'users.staff.view',
+  'users.staff.create',
+  'users.staff.update',
+  'users.staff.deactivate',
+  'users.read',
+  'users.create',
+  'users.update',
+  'users.deactivate',
+]);
+
+/**
+ * True when `viewer` may load HR user-detail defer bundles or payout previews for `target`,
+ * excluding the unrestricted `users.getById` read (masked phone only).
+ */
+export function canAccessStaffHrUserDetail(
+  viewer: { id: string; role: string; permissions?: string[] },
+  target: { id: string; role: string },
+): boolean {
+  if (viewer.id === target.id) return true;
+
+  const headOfCSViewingTeam =
+    viewer.role === 'HEAD_OF_CS' && ['CS_AGENT', 'HEAD_OF_CS'].includes(target.role);
+  const headOfMarketingViewingTeam =
+    viewer.role === 'HEAD_OF_MARKETING' &&
+    ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(target.role);
+  const isHoMOrHoCS = viewer.role === 'HEAD_OF_MARKETING' || viewer.role === 'HEAD_OF_CS';
+
+  if (isHoMOrHoCS && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
+    return false;
+  }
+  if (headOfCSViewingTeam || headOfMarketingViewingTeam) return true;
+
+  if (isAdminLevel(viewer)) return true;
+
+  /** Same branch as `requireStaffAccountsAccess` — primary Finance Officer only (not hat-only). */
+  if (viewer.role === 'FINANCE_OFFICER') return true;
+
+  const perms = viewer.permissions ?? [];
+  for (const p of perms) {
+    if (STAFF_ACCOUNTS_DIRECTORY_PERMISSIONS.has(p)) return true;
+  }
+  return false;
+}
+
 export function canMirror(
   actor: {
     id: string;

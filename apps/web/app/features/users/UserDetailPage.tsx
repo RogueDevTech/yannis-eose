@@ -15,7 +15,7 @@ import { humanizeZodIssuesString } from '~/lib/api-error';
 import { formatActivityDescription } from '~/lib/format-activity';
 import { formatNaira } from '~/lib/format-amount';
 import type {
-  UserDetailLoaderData,
+  UserDetailPageProps,
   UserCreateProduct,
   UserCreateLocation,
   UserCreateCommissionPlan,
@@ -25,13 +25,14 @@ import type {
   UserAuditEntry,
   UserMarketingMetrics,
   PendingEmailChange,
-  UserStockMovement,
   UserApprovalRecord,
   UserPushStatus,
   RoleTemplateOption,
   PermissionCatalogItem,
   PermissionCatalogBundle,
   UserOnboardingSummary,
+  StaffPayoutEstimate,
+  UserPaidPayoutSnapshot,
 } from './types';
 import { USER_STATUS_COLORS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
@@ -43,6 +44,8 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Spinner } from '~/components/ui/spinner';
+import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
+import { EmptyState } from '~/components/ui/empty-state';
 
 // ─── Constants ──────────────────────────────────────────
 
@@ -72,21 +75,15 @@ function formatOnboardingTimestamp(iso: string | null): string {
 export function UserDetailPage({
   user,
   roleTemplates,
-  products,
   locations,
   plans,
   recentOrders,
   payouts,
   adjustments,
   auditLog,
-  marketingMetrics,
-  fundingBalance,
   pendingEmailChange,
   financeActivity,
   pushStatus,
-  // activeHeads + branchesList + userEditPermissionOverrides — only consumed by the
-  // edit form, which now lives at /hr/users/:id/edit. The loader still supplies them
-  // (other consumers may share the type), but this page no longer reads them.
   permissionCatalog,
   templatePermissionsById,
   userStampPreview,
@@ -100,14 +97,8 @@ export function UserDetailPage({
   isSelfView = false,
   showOnboardingTab = false,
   viewerCanManageHrOnboarding = false,
-  onboardingSummary,
   usersBasePath = '/hr/users',
-}: Omit<UserDetailLoaderData, 'mirrorUi' | 'permissionCatalog'> & {
-  permissionCatalog?: Promise<PermissionCatalogBundle>;
-  usersBasePath?: string;
-  viewerShowsMirror?: boolean;
-  mirrorSubmitDisabled?: boolean;
-}) {
+}: UserDetailPageProps) {
   const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
   const navigation = useNavigation();
   // Reset Password runs through its own fetcher so the form submission inside the portaled
@@ -127,7 +118,7 @@ export function UserDetailPage({
   // admin-level users keep full Settings access unconditionally.
   const canOpenSettingsTab = isSuperAdmin || (!restrictHeadView) || canEditLimited;
 
-  type TabId = 'overview' | 'orders' | 'payroll' | 'finance' | 'audit';
+  type TabId = 'overview' | 'orders' | 'payroll' | 'earnings' | 'finance' | 'audit';
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
@@ -177,11 +168,16 @@ export function UserDetailPage({
   const showPayrollTab = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'HEAD_OF_CS', 'CS_AGENT', 'TPL_RIDER', 'HR_MANAGER'].includes(user.role);
   // Finance activity tab is visible to the primary Finance Officer role.
   const showFinanceTab = user.role === 'FINANCE_OFFICER';
+  const showOrdersCard = showOrdersTab;
+  const showPayrollCard = showPayrollTab || user.role === 'HR_MANAGER';
+  const showEarningsTab = showPayrollTab;
+  const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
 
   const tabs: { id: TabId; label: string }[] = [
     { id: 'overview', label: 'Overview' },
     ...(showOrdersTab ? [{ id: 'orders' as const, label: 'Orders' }] : []),
     ...(showPayrollTab ? [{ id: 'payroll' as const, label: 'Payroll' }] : []),
+    ...(showEarningsTab ? [{ id: 'earnings' as const, label: 'Earnings outlook' }] : []),
     ...(showFinanceTab ? [{ id: 'finance' as const, label: 'Finance Activity' }] : []),
     { id: 'audit', label: 'Activity' },
     // Settings/edit is now a separate page at /hr/users/:id/edit — see "Edit user" header button.
@@ -192,11 +188,12 @@ export function UserDetailPage({
     const validIds = new Set<TabId>(['overview', 'audit']);
     if (showOrdersTab) validIds.add('orders');
     if (showPayrollTab) validIds.add('payroll');
+    if (showEarningsTab) validIds.add('earnings');
     if (showFinanceTab) validIds.add('finance');
     if (!validIds.has(activeTab)) {
       setActiveTab('overview');
     }
-  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showFinanceTab]);
+  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showEarningsTab, showFinanceTab]);
 
   // Permissions preview state — read-only chip rendering on the Overview tab.
   // The editable form moved to /hr/users/:id/edit; only the preview state lives here now.
@@ -213,52 +210,132 @@ export function UserDetailPage({
   /** True when SSR catalog fetch failed (401/503/etc.) — distinct from an legitimately empty catalog. */
   const [permissionCatalogRequestFailed, setPermissionCatalogRequestFailed] = useState(false);
 
-  const overviewFetcher = useFetcher<{
+  const coreFetcher = useFetcher<{
     ok: boolean;
     products: UserCreateProduct[];
     roleTemplates: RoleTemplateOption[];
     locations: UserCreateLocation[];
     plans: UserCreateCommissionPlan[];
     pendingEmailChange: PendingEmailChange | null;
-    onboardingSummary: UserOnboardingSummary | null;
     pushStatus: UserPushStatus | null;
-    permissionCatalog: PermissionCatalogBundle;
-    templatePermissionsById: Record<string, string[]>;
-    userStampPreview: { userOverrides: Record<string, boolean>; templateCodes: string[]; effectiveCodes: string[] };
     error?: string;
   }>();
+  const onboardingFetcher = useFetcher<
+    | { ok: true; onboardingSummary: UserOnboardingSummary | null }
+    | { ok: false; error?: string }
+  >();
+  const permissionsFetcher = useFetcher<
+    | {
+        ok: true;
+        permissionCatalog: PermissionCatalogBundle;
+        templatePermissionsById: Record<string, string[]>;
+        userStampPreview: {
+          userOverrides: Record<string, boolean>;
+          templateCodes: string[];
+          effectiveCodes: string[];
+        };
+      }
+    | { ok: false; error?: string }
+  >();
+  const marketingFetcher = useFetcher<
+    | {
+        ok: true;
+        marketingMetrics: UserMarketingMetrics | null;
+        fundingBalance: { totalReceived: string; totalSpend: string; balance: string } | null;
+      }
+    | { ok: false; error?: string }
+  >();
   const activityFetcher = useFetcher<{
     ok: boolean;
     recentOrders: { orders: UserOrderSummary[]; total: number };
     payouts: UserPayoutRecord[];
     adjustments: UserAdjustment[];
     auditLog: UserAuditEntry[];
-    marketingMetrics: UserMarketingMetrics | null;
+    financeActivity: { approvals: UserApprovalRecord[]; total: number } | null;
     error?: string;
   }>();
+  const earningsFetcher = useFetcher<{
+    ok: boolean;
+    error?: string;
+    currentMonth?: {
+      periodLabel: string;
+      periodStart: string;
+      periodEnd: string;
+      preview: StaffPayoutEstimate | null;
+    };
+    nextMonth?: {
+      periodLabel: string;
+      periodStart: string;
+      periodEnd: string;
+      preview: StaffPayoutEstimate | null;
+    };
+    lastPaidPayout?: UserPaidPayoutSnapshot | null;
+    generatedAt?: string;
+  }>();
+
+  const needsActivityOnOverview = showOrdersCard || showPayrollCard || showFinanceTab;
 
   useEffect(() => {
-    void overviewFetcher.load(`/api/hr-user-detail-overview-bundle/${user.id}`);
+    void coreFetcher.load(`/api/hr-user-detail-overview-core/${user.id}`);
   }, [user.id]);
 
   useEffect(() => {
-    if (activeTab === 'overview') return;
+    if (!showOnboardingTab) return;
+    void onboardingFetcher.load(`/api/hr-user-detail-onboarding/${user.id}`);
+  }, [showOnboardingTab, user.id]);
+
+  useEffect(() => {
+    if (isSuperAdminProfile) return;
+    void permissionsFetcher.load(`/api/hr-user-detail-permissions/${user.id}`);
+  }, [isSuperAdminProfile, user.id]);
+
+  useEffect(() => {
+    if (!isMarketingRole) return;
+    void marketingFetcher.load(`/api/hr-user-detail-marketing/${user.id}`);
+  }, [isMarketingRole, user.id]);
+
+  useEffect(() => {
+    if (activeTab === 'overview' && !needsActivityOnOverview) return;
     if (activityFetcher.data?.ok) return;
     void activityFetcher.load(`/api/hr-user-detail-activity-bundle/${user.id}`);
-  }, [activeTab, user.id]);
+  }, [activeTab, user.id, needsActivityOnOverview]);
 
-  const overviewBundle = overviewFetcher.data?.ok ? overviewFetcher.data : null;
+  useEffect(() => {
+    if (!showEarningsTab) return;
+    if (activeTab !== 'earnings') return;
+    void earningsFetcher.load(`/api/hr-user-detail-earnings/${user.id}`);
+  }, [activeTab, user.id, showEarningsTab]);
+
+  const coreBundle = coreFetcher.data?.ok ? coreFetcher.data : null;
   const activityBundle = activityFetcher.data?.ok ? activityFetcher.data : null;
 
-  const pendingEmailChangeResolved = overviewBundle?.pendingEmailChange ?? pendingEmailChange;
-  const locationsResolved = overviewBundle?.locations ?? locations;
-  const plansResolved = overviewBundle?.plans ?? plans;
-  const recentOrdersResolved = activityBundle?.recentOrders ?? recentOrders;
-  const payoutsResolved = activityBundle?.payouts ?? payouts;
-  const adjustmentsResolved = activityBundle?.adjustments ?? adjustments;
-  const auditLogResolved = activityBundle?.auditLog ?? auditLog;
-  const marketingMetricsResolved = activityBundle?.marketingMetrics ?? marketingMetrics;
-  const pushStatusResolved = overviewBundle?.pushStatus ?? pushStatus ?? null;
+  const pendingEmailChangeResolved =
+    coreBundle?.pendingEmailChange ?? pendingEmailChange ?? Promise.resolve(null as PendingEmailChange | null);
+  const locationsResolved = coreBundle?.locations ?? locations ?? Promise.resolve([] as UserCreateLocation[]);
+  const plansResolved = coreBundle?.plans ?? plans ?? Promise.resolve([] as UserCreateCommissionPlan[]);
+  const recentOrdersResolved =
+    activityBundle?.recentOrders ??
+    recentOrders ??
+    Promise.resolve({ orders: [] as UserOrderSummary[], total: 0 });
+  const payoutsResolved = activityBundle?.payouts ?? payouts ?? Promise.resolve([] as UserPayoutRecord[]);
+  const adjustmentsResolved =
+    activityBundle?.adjustments ?? adjustments ?? Promise.resolve([] as UserAdjustment[]);
+  const auditLogResolved = activityBundle?.auditLog ?? auditLog ?? Promise.resolve([] as UserAuditEntry[]);
+  const pushStatusResolved =
+    coreBundle?.pushStatus ?? pushStatus ?? Promise.resolve(null as UserPushStatus | null);
+
+  const financeActivityForDeferred: Promise<{ approvals: UserApprovalRecord[]; total: number }> =
+    activityBundle?.financeActivity != null
+      ? Promise.resolve(activityBundle.financeActivity)
+      : financeActivity != null
+        ? financeActivity
+        : Promise.resolve({ approvals: [] as UserApprovalRecord[], total: 0 });
+
+  useEffect(() => {
+    if (coreBundle?.roleTemplates) {
+      setResolvedRoleTemplates(coreBundle.roleTemplates);
+    }
+  }, [coreBundle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,15 +344,15 @@ export function UserDetailPage({
     setStampPreviewEffectiveCodes([]);
     setPermissionCatalogHydrated(false);
     setPermissionCatalogRequestFailed(false);
-    if (overviewBundle) {
-      setResolvedRoleTemplates(overviewBundle.roleTemplates);
-      setResolvedTemplatePermissionsById(overviewBundle.templatePermissionsById);
-      setResolvedPermissionCatalog(overviewBundle.permissionCatalog.items);
-      setPermissionCatalogRequestFailed(overviewBundle.permissionCatalog.requestFailed);
+    if (permissionsFetcher.data && permissionsFetcher.data.ok === true) {
+      const p = permissionsFetcher.data;
+      setResolvedTemplatePermissionsById(p.templatePermissionsById);
+      setResolvedPermissionCatalog(p.permissionCatalog.items);
+      setPermissionCatalogRequestFailed(p.permissionCatalog.requestFailed);
       setPermissionCatalogHydrated(true);
-      setPermissionOverridesLoaded(overviewBundle.userStampPreview.userOverrides);
-      setStampPreviewTemplateCodes(overviewBundle.userStampPreview.templateCodes);
-      setStampPreviewEffectiveCodes(overviewBundle.userStampPreview.effectiveCodes ?? []);
+      setPermissionOverridesLoaded(p.userStampPreview.userOverrides);
+      setStampPreviewTemplateCodes(p.userStampPreview.templateCodes);
+      setStampPreviewEffectiveCodes(p.userStampPreview.effectiveCodes ?? []);
       setStampPreviewHydrated(true);
       return () => {
         cancelled = true;
@@ -343,14 +420,14 @@ export function UserDetailPage({
     permissionCatalog,
     templatePermissionsById,
     userStampPreview,
-    overviewBundle,
+    permissionsFetcher.data,
   ]);
 
   /** True until stamp preview and permission catalog requests settle (do not key off catalog length — failed loads stay []). */
-  const permissionsPreviewLoading = !stampPreviewHydrated || !permissionCatalogHydrated;
+  const permissionsPreviewLoading =
+    !isSuperAdminProfile && (!stampPreviewHydrated || !permissionCatalogHydrated);
 
   // Detail-page-only role flags — used for tab visibility and the right-rail cards.
-  const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
   const isCSRole = ['CS_AGENT', 'HEAD_OF_CS'].includes(user.role);
   // Capacity is only a meaningful number for CS agents + Media Buyers.
   // Drives the read-only badge / InfoField in the Overview, independent of CS-vs-MB role logic elsewhere.
@@ -559,10 +636,6 @@ export function UserDetailPage({
   const initials = user.name.split(' ').map((w) => w.charAt(0).toUpperCase()).slice(0, 2).join('');
   const memberSince = new Date(user.createdAt);
   const tenure = getTimeSince(memberSince);
-
-  // Show Orders/Payroll cards in Overview only for roles that have those tabs
-  const showOrdersCard = showOrdersTab;
-  const showPayrollCard = showPayrollTab || user.role === 'HR_MANAGER';
 
   return (
     <div className="w-full space-y-6">
@@ -795,9 +868,36 @@ export function UserDetailPage({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column — Details */}
           <div className="lg:col-span-2 space-y-6">
-            {showOnboardingTab && onboardingSummary ? (
-              <DeferredSection resolve={onboardingSummary} skeleton="card">
-                {(summary: UserOnboardingSummary | null) => (
+            {showOnboardingTab &&
+            (onboardingFetcher.state === 'loading' ||
+              (onboardingFetcher.state === 'idle' && onboardingFetcher.data == null)) ? (
+              <div
+                className="card space-y-4 animate-pulse border border-app-border bg-app-surface/40"
+                aria-busy="true"
+                aria-label="Loading onboarding"
+              >
+                <div className="h-4 w-40 rounded bg-app-hover" />
+                <div className="h-3 w-full rounded bg-app-hover" />
+                <div className="h-3 w-3/4 rounded bg-app-hover" />
+                <div className="grid grid-cols-2 gap-4 pt-2">
+                  <div className="h-14 rounded-lg bg-app-hover" />
+                  <div className="h-14 rounded-lg bg-app-hover" />
+                </div>
+              </div>
+            ) : null}
+            {showOnboardingTab && onboardingFetcher.data && onboardingFetcher.data.ok === false ? (
+              <div className="card space-y-2 border border-danger-200/60 dark:border-danger-800/40">
+                <p className="text-sm font-medium text-app-fg">Staff onboarding unavailable</p>
+                <p className="text-sm text-app-fg-muted">
+                  {typeof onboardingFetcher.data.error === 'string'
+                    ? onboardingFetcher.data.error
+                    : 'You may not have access to load this summary in this session.'}
+                </p>
+              </div>
+            ) : null}
+            {showOnboardingTab && onboardingFetcher.data?.ok ? (() => {
+              const summary: UserOnboardingSummary | null = onboardingFetcher.data.onboardingSummary;
+              return (
                   <div
                     className={
                       isSelfView
@@ -878,9 +978,8 @@ export function UserDetailPage({
                       </>
                     )}
                   </div>
-                )}
-              </DeferredSection>
-            ) : null}
+              );
+            })() : null}
 
             {/* Account Information */}
             <div className="card space-y-4">
@@ -1003,10 +1102,32 @@ export function UserDetailPage({
               </div>
             )}
 
-            {/* Marketing Metrics — only for marketing roles */}
-            {isMarketingRole && (
-              <DeferredSection resolve={marketingMetricsResolved} skeleton="stat">
-                {(metrics) => metrics && (
+            {/* Marketing Metrics — lazy slice (see `api.hr-user-detail-marketing.$userId`) */}
+            {isMarketingRole &&
+            (marketingFetcher.state === 'loading' ||
+              (marketingFetcher.state === 'idle' && marketingFetcher.data == null)) ? (
+              <div className="card animate-pulse space-y-4 border border-app-border" aria-busy="true" aria-label="Loading marketing performance">
+                <div className="h-4 w-48 rounded bg-app-hover" />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-16 rounded-lg bg-app-hover" />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {isMarketingRole && marketingFetcher.data?.ok === false ? (
+              <div className="card space-y-2 border border-app-border bg-app-hover/40">
+                <p className="text-sm font-medium text-app-fg">Marketing data unavailable</p>
+                <p className="text-sm text-app-fg-muted">
+                  {typeof marketingFetcher.data.error === 'string'
+                    ? marketingFetcher.data.error
+                    : 'Could not load marketing performance.'}
+                </p>
+              </div>
+            ) : null}
+            {isMarketingRole && marketingFetcher.data?.ok ? (() => {
+              const metrics = marketingFetcher.data.marketingMetrics;
+              return metrics ? (
                   <div className="card space-y-4">
                     <h2 className="text-base font-semibold text-app-fg">Marketing Performance</h2>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -1020,14 +1141,13 @@ export function UserDetailPage({
                       <MetricCard label="True ROAS" value={`${Number(metrics.trueRoas).toFixed(2)}x`} accent={metrics.trueRoas >= 2 ? 'success' : metrics.trueRoas >= 1 ? 'warning' : 'danger'} />
                     </div>
                   </div>
-                )}
-              </DeferredSection>
-            )}
+              ) : null;
+            })() : null}
 
-            {/* Funding balance — only for HoM / Media Buyer (disbursement recipients) */}
-            {isMarketingRole && (
-              <DeferredSection resolve={fundingBalance} skeleton="stat">
-                {(balance) => balance && (
+            {/* Funding balance — same lazy marketing slice */}
+            {isMarketingRole && marketingFetcher.data?.ok ? (() => {
+              const balance = marketingFetcher.data.fundingBalance;
+              return balance ? (
                   <div className="card space-y-4 border-brand-200 dark:border-brand-700/50 bg-brand-50/20 dark:bg-brand-900/10">
                     <h2 className="text-base font-semibold text-app-fg">Funding balance</h2>
                     <p className="text-xs text-app-fg-muted">Confirmed funding received minus approved ad spend</p>
@@ -1048,9 +1168,8 @@ export function UserDetailPage({
                       </div>
                     </div>
                   </div>
-                )}
-              </DeferredSection>
-            )}
+              ) : null;
+            })() : null}
 
             {/* Permissions preview — effective capability list (role template ∪ stamped deltas).
                 The "Edit permissions" button opens Settings (sparse matrix / `edit_matrix`). */}
@@ -1134,11 +1253,26 @@ export function UserDetailPage({
             <DeferredSection resolve={payoutsResolved} skeleton="stat">
               {(payoutList) => (
                 <div className="card space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold text-app-fg">Payroll</h3>
-                    <button type="button" onClick={() => setActiveTab('payroll')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
-                      View all
-                    </button>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {showEarningsTab ? (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('earnings')}
+                          className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                        >
+                          Earnings outlook
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('payroll')}
+                        className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                      >
+                        View all
+                      </button>
+                    </div>
                   </div>
                   <p className="text-3xl font-bold text-app-fg">{payoutList.length}</p>
                   <p className="text-xs text-app-fg-muted">Payout records</p>
@@ -1195,7 +1329,7 @@ export function UserDetailPage({
             </DeferredSection>
 
             {/* Push Notification Status — SuperAdmin only */}
-            {isSuperAdmin && pushStatus && (
+            {isSuperAdmin && (
               <DeferredSection resolve={pushStatusResolved} skeleton="stat">
                 {(status: UserPushStatus | null) => (
                   <div className="card space-y-3">
@@ -1348,9 +1482,94 @@ export function UserDetailPage({
         </div>
       )}
 
+      {/* ─── Earnings outlook (deferred: post-mount API only) ─ */}
+      {activeTab === 'earnings' && showEarningsTab && (
+        <div className="space-y-6">
+          <div className="rounded-lg border border-app-border bg-app-hover/40 px-4 py-3 text-xs text-app-fg-muted">
+            <p>
+              These figures are a <strong className="text-app-fg">running estimate</strong> from your attributed
+              orders and commission plan — they update as you deliver. HR still finalises amounts in payroll batches;
+              bonuses and adjustments may change the final payout.
+            </p>
+          </div>
+          {(() => {
+            const ep = earningsFetcher.data;
+            const earningsLoading =
+              earningsFetcher.state === 'loading' || earningsFetcher.state === 'submitting';
+            if (earningsLoading || !ep) {
+              return (
+                <div className="card flex justify-center py-16">
+                  <Spinner />
+                </div>
+              );
+            }
+            if (!ep.ok) {
+              return (
+                <InlineNotification
+                  variant="danger"
+                  message={`Could not load earnings outlook.\n${ep.error ?? 'Try again in a moment.'}`}
+                />
+              );
+            }
+            return (
+            <>
+              <div className="grid gap-6 lg:grid-cols-2">
+                {ep.currentMonth ? (
+                  <EarningsOutlookCard
+                    heading="This month (so far)"
+                    periodLabel={ep.currentMonth.periodLabel}
+                    preview={ep.currentMonth.preview}
+                  />
+                ) : null}
+                {ep.nextMonth ? (
+                  <EarningsOutlookCard
+                    heading="Next calendar month (early outlook)"
+                    periodLabel={ep.nextMonth.periodLabel}
+                    preview={ep.nextMonth.preview}
+                  />
+                ) : null}
+              </div>
+              {ep.lastPaidPayout ? (
+                <div className="card p-4 space-y-2">
+                  <h3 className="text-sm font-semibold text-app-fg">Last paid payroll</h3>
+                  <p className="text-xs text-app-fg-muted">
+                    Period{' '}
+                    {new Date(ep.lastPaidPayout.periodStart).toLocaleDateString('en-NG', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}{' '}
+                    —{' '}
+                    {new Date(ep.lastPaidPayout.periodEnd).toLocaleDateString('en-NG', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </p>
+                  <p className="text-lg font-bold text-app-fg">
+                    {formatNaira(Number(ep.lastPaidPayout.totalPayout))}
+                  </p>
+                  <p className="text-xs text-app-fg-muted">
+                    After Finance marks a batch paid, your next cycle starts fresh in HR payroll — use{' '}
+                    <button
+                      type="button"
+                      className="text-brand-500 hover:text-brand-600 font-medium"
+                      onClick={() => setActiveTab('payroll')}
+                    >
+                      Payroll
+                    </button>{' '}
+                    for full history.
+                  </p>
+                </div>
+              ) : null}
+            </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* ─── Finance Activity Tab ─────────────────────────── */}
-      {activeTab === 'finance' && financeActivity && (
-        <DeferredSection resolve={financeActivity} skeleton="table">
+      {activeTab === 'finance' && showFinanceTab && (
+        <DeferredSection resolve={financeActivityForDeferred} skeleton="table">
           {(data) => (
             <div className="card p-0">
               <div className="px-4 py-3 border-b border-app-border">
@@ -1639,6 +1858,72 @@ function ClockIcon() {
  */
 function auditActivityRowKey(entry: UserAuditEntry, position: number): string {
   return `${entry.tableName}-${entry.id}-${entry.createdAt}-${position}`;
+}
+
+/** Live payroll estimate card — data from `hr.previewPayout` (deferred `/api/hr-user-detail-earnings`). */
+function EarningsOutlookCard({
+  heading,
+  periodLabel,
+  preview,
+}: {
+  heading: string;
+  periodLabel: string;
+  preview: StaffPayoutEstimate | null;
+}) {
+  return (
+    <div className="card p-0 overflow-hidden">
+      <div className="px-4 py-3 border-b border-app-border">
+        <h3 className="text-sm font-semibold text-app-fg">{heading}</h3>
+        <p className="text-xs text-app-fg-muted mt-0.5">{periodLabel}</p>
+      </div>
+      <div className="p-4">
+        {!preview ? (
+          <EmptyState
+            title="No estimate yet"
+            description="If this persists, refresh the tab or contact HR."
+            variant="inline"
+            bordered={false}
+          />
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-app-fg-muted">
+              Plan: <span className="text-app-fg font-medium">{preview.planName}</span>
+            </p>
+            <StatRowGroup divided>
+              <StatRow label="Attributed orders (period)" value={preview.totalOrders.toLocaleString()} />
+              <StatRow label="Delivered" value={preview.deliveredCount.toLocaleString()} />
+              <StatRow label="Returns" value={preview.returnedCount.toLocaleString()} />
+              <StatRow label="Delivery rate" value={`${preview.deliveryRate.toFixed(1)}%`} />
+              <StatRow label="Base salary (estimate)" value="" amount={preview.baseSalary} variant="subtotal" />
+              <StatRow label="Performance bonus (estimate)" value="" amount={preview.performanceBonus} />
+              {preview.penalties > 0 ? (
+                <StatRow
+                  label="Return penalties (estimate)"
+                  value=""
+                  amount={-Math.abs(preview.penalties)}
+                  variant="deduction"
+                />
+              ) : null}
+              {preview.clawbacks > 0 ? (
+                <StatRow
+                  label="Pending clawbacks"
+                  value=""
+                  amount={-Math.abs(preview.clawbacks)}
+                  variant="deduction"
+                />
+              ) : null}
+              <StatRow
+                label="Estimated net (before payroll add-ons)"
+                value=""
+                amount={preview.totalPayout}
+                variant="total"
+              />
+            </StatRowGroup>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /**

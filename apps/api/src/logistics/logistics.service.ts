@@ -275,6 +275,80 @@ export class LogisticsService {
     };
   }
 
+  /**
+   * Lightweight provider options for dropdowns / label resolution.
+   * Returns minimal fields; filtering is intentionally narrow to keep cache key space small.
+   */
+  async listProviderOptions(input: {
+    status?: 'ACTIVE' | 'INACTIVE';
+    kind?: 'THIRD_PARTY' | 'WAREHOUSE';
+  }): Promise<Array<{ id: string; name: string; kind: string; status: string }>> {
+    const conditions = [];
+    if (input.status) conditions.push(eq(schema.logisticsProviders.status, input.status));
+    if (input.kind) conditions.push(eq(schema.logisticsProviders.kind, input.kind));
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    return this.db
+      .select({
+        id: schema.logisticsProviders.id,
+        name: schema.logisticsProviders.name,
+        kind: schema.logisticsProviders.kind,
+        status: schema.logisticsProviders.status,
+      })
+      .from(schema.logisticsProviders)
+      .where(whereClause)
+      .orderBy(asc(schema.logisticsProviders.name));
+  }
+
+  /**
+   * Lightweight location options for dropdowns / label resolution.
+   * Returns minimal fields including provider metadata.
+   */
+  async listLocationOptions(input: {
+    status?: 'ACTIVE' | 'INACTIVE';
+    providerKind?: 'THIRD_PARTY' | 'WAREHOUSE';
+  }): Promise<
+    Array<{
+      id: string;
+      name: string;
+      status: string;
+      providerId: string;
+      providerName: string | null;
+      providerKind: string;
+    }>
+  > {
+    const conditions = [];
+    if (input.status) conditions.push(eq(schema.logisticsLocations.status, input.status));
+    if (input.providerKind) conditions.push(eq(schema.logisticsProviders.kind, input.providerKind));
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const rows = await this.db
+      .select({
+        id: schema.logisticsLocations.id,
+        name: schema.logisticsLocations.name,
+        status: schema.logisticsLocations.status,
+        providerId: schema.logisticsLocations.providerId,
+        providerName: schema.logisticsProviders.name,
+        providerKind: schema.logisticsProviders.kind,
+      })
+      .from(schema.logisticsLocations)
+      .leftJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(whereClause)
+      .orderBy(asc(schema.logisticsLocations.name));
+
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      providerId: r.providerId,
+      providerName: r.providerName ?? null,
+      providerKind: r.providerKind ?? 'THIRD_PARTY',
+    }));
+  }
+
   // ============================================
   // Company-owned warehouses (provider kind WAREHOUSE)
   // ============================================

@@ -41,6 +41,7 @@ import type {
   AdSpendIntervalPreview,
   AdSpendRecord,
   AdSpendGroupLine,
+  AdSpendStatusCounts,
   Campaign,
   LeaderboardEntry,
   MarketingAdSpendLoaderData,
@@ -97,6 +98,13 @@ function hasPositiveSpendAmountInput(raw: string): boolean {
   return !Number.isNaN(n) && n > 0;
 }
 
+const DEFAULT_AD_SPEND_STATUS_COUNTS: AdSpendStatusCounts = {
+  ALL: 0,
+  PENDING: 0,
+  APPROVED: 0,
+  REJECTED: 0,
+};
+
 export function MarketingAdSpendPage({
   adSpend,
   totalAdSpend: _totalRowCount,
@@ -107,13 +115,13 @@ export function MarketingAdSpendPage({
   productIdFilter,
   campaignIdFilter,
   mediaBuyerIdFilter,
-  mediaBuyersForFilter,
-  statusCounts,
+  mediaBuyersForFilter: mediaBuyersForFilterProp,
+  statusCounts: statusCountsProp,
   metrics: initialMetrics,
   leaderboard: initialLeaderboard,
   users: initialUsers,
   products: initialProducts,
-  campaigns,
+  campaigns: campaignsProp,
   filters,
   viewMode = 'admin',
   canApproveAdSpend = false,
@@ -121,7 +129,11 @@ export function MarketingAdSpendPage({
   groupsPage,
   groupsTotalPages,
   currentUserId,
-}: MarketingAdSpendLoaderData) {
+  picklistsLoading = false,
+}: MarketingAdSpendLoaderData & { picklistsLoading?: boolean }) {
+  const statusCounts = statusCountsProp ?? DEFAULT_AD_SPEND_STATUS_COUNTS;
+  const campaigns = campaignsProp ?? [];
+  const mediaBuyersForFilter = mediaBuyersForFilterProp ?? [];
   const dateFilters = filters;
   const [searchParams, setSearchParams] = useSearchParams();
   const fetcher = useFetcher();
@@ -1098,17 +1110,19 @@ export function MarketingAdSpendPage({
             onChange={handleAdSpendStatusChange}
             tabs={AD_SPEND_STATUS_OPTIONS.map((opt) => ({
               value: opt.value,
-              label: `${opt.label}${
-                opt.value === 'ALL'
-                  ? ` (${statusCounts.ALL})`
-                  : opt.value === 'PENDING'
-                    ? ` (${statusCounts.PENDING})`
-                    : opt.value === 'APPROVED'
-                      ? ` (${statusCounts.APPROVED})`
-                      : opt.value === 'REJECTED'
-                        ? ` (${statusCounts.REJECTED})`
-                        : ''
-              }`,
+              label: picklistsLoading
+                ? opt.label
+                : `${opt.label}${
+                    opt.value === 'ALL'
+                      ? ` (${statusCounts.ALL})`
+                      : opt.value === 'PENDING'
+                        ? ` (${statusCounts.PENDING})`
+                        : opt.value === 'APPROVED'
+                          ? ` (${statusCounts.APPROVED})`
+                          : opt.value === 'REJECTED'
+                            ? ` (${statusCounts.REJECTED})`
+                            : ''
+                  }`,
             }))}
           />
         </div>
@@ -1141,31 +1155,45 @@ export function MarketingAdSpendPage({
                 wrapperClassName="w-auto min-w-[12rem]"
                 searchPlaceholder="Search products..."
               />
-              <SearchableSelect
-                id="marketing-adspend-campaign-filter"
-                value={selectedCampaignId}
-                onChange={handleAdSpendCampaignChange}
-                options={[
-                  { value: 'ALL', label: 'All campaigns' },
-                  ...campaigns
-                    .filter((c: Campaign) => c.status === 'ACTIVE')
-                    .map((c: Campaign) => ({ value: c.id, label: c.name })),
-                ]}
-                wrapperClassName="w-auto min-w-[12rem]"
-                searchPlaceholder="Search campaigns..."
-              />
-              {viewMode !== 'media_buyer' && mediaBuyersForFilter.length > 0 ? (
+              {picklistsLoading ? (
+                <div
+                  className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:min-w-[12rem]"
+                  aria-hidden
+                />
+              ) : (
                 <SearchableSelect
-                  id="marketing-adspend-media-buyer-filter"
-                  value={selectedMediaBuyerId}
-                  onChange={handleAdSpendMediaBuyerChange}
+                  id="marketing-adspend-campaign-filter"
+                  value={selectedCampaignId}
+                  onChange={handleAdSpendCampaignChange}
                   options={[
-                    { value: 'ALL', label: 'All media buyers' },
-                    ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                    { value: 'ALL', label: 'All campaigns' },
+                    ...campaigns
+                      .filter((c: Campaign) => c.status === 'ACTIVE')
+                      .map((c: Campaign) => ({ value: c.id, label: c.name })),
                   ]}
                   wrapperClassName="w-auto min-w-[12rem]"
-                  searchPlaceholder="Search media buyers..."
+                  searchPlaceholder="Search campaigns..."
                 />
+              )}
+              {viewMode !== 'media_buyer' && (picklistsLoading || mediaBuyersForFilter.length > 0) ? (
+                picklistsLoading ? (
+                  <div
+                    className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:min-w-[12rem]"
+                    aria-hidden
+                  />
+                ) : (
+                  <SearchableSelect
+                    id="marketing-adspend-media-buyer-filter"
+                    value={selectedMediaBuyerId}
+                    onChange={handleAdSpendMediaBuyerChange}
+                    options={[
+                      { value: 'ALL', label: 'All media buyers' },
+                      ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                    ]}
+                    wrapperClassName="w-auto min-w-[12rem]"
+                    searchPlaceholder="Search media buyers..."
+                  />
+                )
               ) : null}
             </>
           }
@@ -1187,34 +1215,42 @@ export function MarketingAdSpendPage({
               </div>
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-app-fg-muted">Campaign</span>
-                <SearchableSelect
-                  id="marketing-adspend-campaign-filter-sheet"
-                  value={selectedCampaignId}
-                  onChange={handleAdSpendCampaignChange}
-                  options={[
-                    { value: 'ALL', label: 'All campaigns' },
-                    ...campaigns
-                      .filter((c: Campaign) => c.status === 'ACTIVE')
-                      .map((c: Campaign) => ({ value: c.id, label: c.name })),
-                  ]}
-                  wrapperClassName="w-full"
-                  searchPlaceholder="Search campaigns..."
-                />
-              </div>
-              {viewMode !== 'media_buyer' && mediaBuyersForFilter.length > 0 ? (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                {picklistsLoading ? (
+                  <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
+                ) : (
                   <SearchableSelect
-                    id="marketing-adspend-media-buyer-filter-sheet"
-                    value={selectedMediaBuyerId}
-                    onChange={handleAdSpendMediaBuyerChange}
+                    id="marketing-adspend-campaign-filter-sheet"
+                    value={selectedCampaignId}
+                    onChange={handleAdSpendCampaignChange}
                     options={[
-                      { value: 'ALL', label: 'All media buyers' },
-                      ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                      { value: 'ALL', label: 'All campaigns' },
+                      ...campaigns
+                        .filter((c: Campaign) => c.status === 'ACTIVE')
+                        .map((c: Campaign) => ({ value: c.id, label: c.name })),
                     ]}
                     wrapperClassName="w-full"
-                    searchPlaceholder="Search media buyers..."
+                    searchPlaceholder="Search campaigns..."
                   />
+                )}
+              </div>
+              {viewMode !== 'media_buyer' && (picklistsLoading || mediaBuyersForFilter.length > 0) ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                  {picklistsLoading ? (
+                    <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
+                  ) : (
+                    <SearchableSelect
+                      id="marketing-adspend-media-buyer-filter-sheet"
+                      value={selectedMediaBuyerId}
+                      onChange={handleAdSpendMediaBuyerChange}
+                      options={[
+                        { value: 'ALL', label: 'All media buyers' },
+                        ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                      ]}
+                      wrapperClassName="w-full"
+                      searchPlaceholder="Search media buyers..."
+                    />
+                  )}
                 </div>
               ) : null}
             </>

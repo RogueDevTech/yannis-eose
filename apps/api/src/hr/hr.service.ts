@@ -19,6 +19,8 @@ import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
 import { getManageableRolesForViewer } from './payroll-batch.service';
+import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
+import { computeEarningsFromPlanRules, resolveClawbackPerReturnAmount } from './commission-rules-math';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 @Injectable()
@@ -40,7 +42,7 @@ export class HrService {
     if (!manageable) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You are not allowed to manage commission plans.' });
     }
-    if (!manageable.includes(input.role)) {
+    if (input.role != null && !manageable.includes(input.role)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: `You can only create plans for roles in your department: ${manageable.join(', ')}.`,
@@ -51,7 +53,7 @@ export class HrService {
       const rows = await tx
         .insert(schema.commissionPlans)
         .values({
-          role: input.role as typeof schema.commissionPlans.$inferInsert['role'],
+          role: input.role,
           planName: input.planName,
           rules: input.rules,
           effectiveFrom: new Date(input.effectiveFrom),
@@ -78,7 +80,7 @@ export class HrService {
       // Authorize the edit against the EXISTING plan's role — Heads can't take over a plan that's
       // outside their dept just because they know the planId.
       const existingRows = await tx
-        .select({ role: schema.commissionPlans.role })
+        .select({ role: schema.commissionPlans.role, rules: schema.commissionPlans.rules })
         .from(schema.commissionPlans)
         .where(eq(schema.commissionPlans.id, input.planId))
         .limit(1);
@@ -86,7 +88,7 @@ export class HrService {
       if (!existing) {
         throw new TRPCError({ code: 'NOT_FOUND', message: 'Commission plan not found' });
       }
-      if (!manageable.includes(existing.role)) {
+      if (existing.role != null && !manageable.includes(existing.role)) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: `You can only edit plans for roles in your department: ${manageable.join(', ')}.`,
@@ -95,7 +97,14 @@ export class HrService {
 
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
       if (input.planName !== undefined) updateFields['planName'] = input.planName;
-      if (input.rules !== undefined) updateFields['rules'] = input.rules;
+      if (input.rules !== undefined) {
+        const prior = existing.rules;
+        const merged =
+          prior && typeof prior === 'object' && !Array.isArray(prior)
+            ? { ...(prior as Record<string, unknown>), ...(input.rules as Record<string, unknown>) }
+            : input.rules;
+        updateFields['rules'] = merged;
+      }
       if (input.effectiveTo !== undefined) updateFields['effectiveTo'] = new Date(input.effectiveTo);
 
       const rows = await tx
@@ -124,15 +133,19 @@ export class HrService {
     // Heads get only their dept's roles, so we filter by them.
     const isFullScope = viewer.role === 'SUPER_ADMIN' || viewer.role === 'ADMIN' || viewer.role === 'HR_MANAGER';
     if (!isFullScope) {
-      conditions.push(inArray(schema.commissionPlans.role, manageable as typeof schema.commissionPlans.$inferSelect['role'][]));
+      conditions.push(
+        or(isNull(schema.commissionPlans.role), inArray(schema.commissionPlans.role, manageable as never)),
+      );
     }
 
-    if (input.role) {
+    if (input.unassignedRoleOnly) {
+      conditions.push(isNull(schema.commissionPlans.role));
+    } else if (input.role) {
       // Caller filter — must intersect the viewer's manageable set
       if (!isFullScope && !manageable.includes(input.role)) {
         return { plans: [], pagination: { page: input.page, limit: input.limit, total: 0 }, manageableRoles: manageable };
       }
-      conditions.push(eq(schema.commissionPlans.role, input.role as typeof schema.commissionPlans.$inferSelect['role']));
+      conditions.push(eq(schema.commissionPlans.role, input.role as never));
     }
     if (input.activeOnly) {
       conditions.push(
@@ -228,62 +241,20 @@ export class HrService {
       const deliveredCount = deliveredRows[0]?.count ?? 0;
       const totalOrders = totalOrdersRows[0]?.count ?? 0;
       const returnedCount = returnedRows[0]?.count ?? 0;
-      const deliveryRate = totalOrders > 0 ? (deliveredCount / totalOrders) * 100 : 0;
 
-      // Get applicable commission plan — most recent plan for this role
-      const planRows = await tx
-        .select()
-        .from(schema.commissionPlans)
-        .where(
-          and(
-            eq(schema.commissionPlans.role, member.role),
-            lte(schema.commissionPlans.effectiveFrom, periodEnd),
-          ),
-        )
-        .orderBy(desc(schema.commissionPlans.effectiveFrom))
-        .limit(1);
+      const plan = await resolveApplicableCommissionPlan(tx, {
+        commissionPlanId: member.commissionPlanId ?? null,
+        staffRole: member.role,
+        rangeStart: periodStart,
+        rangeEnd: periodEnd,
+      });
+      if (!plan) continue;
 
-      const plan = planRows[0];
-      if (!plan) continue; // No plan configured for this role — skip
-
-      const rules = (plan.rules ?? {}) as {
-        baseSalary?: number;
-        baseThreshold?: number;
-        perOrderRate?: number;
-        deliveryRateThreshold?: number;
-        bonusPerExtraOrder?: number;
-        penaltyPerReturn?: number;
-      };
-
-      // Calculate base salary (earned when orders >= threshold)
-      let baseSalary = 0;
-      if (rules.baseThreshold && deliveredCount >= rules.baseThreshold) {
-        baseSalary = rules.baseSalary ?? 0;
-      }
-
-      // Calculate per-order commission
-      let performanceBonus = 0;
-      if (rules.perOrderRate) {
-        performanceBonus = deliveredCount * rules.perOrderRate;
-      }
-
-      // Bonus for extra orders above threshold
-      if (rules.bonusPerExtraOrder && rules.baseThreshold && deliveredCount > rules.baseThreshold) {
-        performanceBonus += (deliveredCount - rules.baseThreshold) * rules.bonusPerExtraOrder;
-      }
-
-      // Delivery rate bonus: if delivery rate exceeds threshold, add extra
-      if (rules.deliveryRateThreshold && deliveryRate > rules.deliveryRateThreshold && rules.bonusPerExtraOrder) {
-        // Additional 50% bonus on extra orders for high-performing delivery rate
-        const extraOrders = Math.max(0, deliveredCount - (rules.baseThreshold ?? 0));
-        performanceBonus += extraOrders * (rules.bonusPerExtraOrder * 0.5);
-      }
-
-      // Penalty deductions for returned orders (Clawback)
-      let penalties = 0;
-      if (rules.penaltyPerReturn && returnedCount > 0) {
-        penalties = returnedCount * rules.penaltyPerReturn;
-      }
+      const { baseSalary, performanceBonus, penalties } = computeEarningsFromPlanRules(plan.rules, {
+        deliveredCount,
+        totalOrders,
+        returnedCount,
+      });
 
       // Get pending deductions (clawbacks from previous returns)
       const deductionRows = await tx
@@ -467,7 +438,7 @@ export class HrService {
       // Get applicable penalty rate from their commission plans
       for (const staffId of affectedStaff) {
         const userRows = await tx
-          .select({ role: schema.users.role })
+          .select({ role: schema.users.role, commissionPlanId: schema.users.commissionPlanId })
           .from(schema.users)
           .where(eq(schema.users.id, staffId))
           .limit(1);
@@ -475,23 +446,14 @@ export class HrService {
         const role = userRows[0]?.role;
         if (!role) continue;
 
-        const planRows = await tx
-          .select()
-          .from(schema.commissionPlans)
-          .where(
-            and(
-              eq(schema.commissionPlans.role, role),
-              lte(schema.commissionPlans.effectiveFrom, new Date()),
-            ),
-          )
-          .orderBy(desc(schema.commissionPlans.effectiveFrom))
-          .limit(1);
-
-        const plan = planRows[0];
-        const rules = (plan?.rules ?? {}) as { penaltyPerReturn?: number; perOrderRate?: number };
-
-        // Use penalty rate if set, otherwise use per-order rate as the clawback amount
-        const clawbackAmount = rules.penaltyPerReturn ?? rules.perOrderRate ?? 0;
+        const at = new Date();
+        const plan = await resolveApplicableCommissionPlan(tx, {
+          commissionPlanId: userRows[0]?.commissionPlanId ?? null,
+          staffRole: role,
+          rangeStart: at,
+          rangeEnd: at,
+        });
+        const clawbackAmount = resolveClawbackPerReturnAmount(plan?.rules);
         if (clawbackAmount <= 0) continue;
 
         await tx
@@ -580,47 +542,24 @@ export class HrService {
     const deliveredCount = deliveredRows[0]?.count ?? 0;
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
     const returnedCount = returnedRows[0]?.count ?? 0;
-    const deliveryRate = totalOrders > 0 ? (deliveredCount / totalOrders) * 100 : 0;
 
-    // Get plan
-    const planRows = await this.db
-      .select()
-      .from(schema.commissionPlans)
-      .where(
-        and(
-          eq(schema.commissionPlans.role, user.role),
-          lte(schema.commissionPlans.effectiveFrom, end),
-        ),
-      )
-      .orderBy(desc(schema.commissionPlans.effectiveFrom))
-      .limit(1);
+    const plan = await resolveApplicableCommissionPlan(this.db, {
+      commissionPlanId: user.commissionPlanId ?? null,
+      staffRole: user.role,
+      rangeStart: start,
+      rangeEnd: end,
+    });
 
-    const plan = planRows[0];
-    const rules = (plan?.rules ?? {}) as {
-      baseSalary?: number;
-      baseThreshold?: number;
-      perOrderRate?: number;
-      deliveryRateThreshold?: number;
-      bonusPerExtraOrder?: number;
-      penaltyPerReturn?: number;
-    };
-
-    let baseSalary = 0;
-    if (rules.baseThreshold && deliveredCount >= rules.baseThreshold) {
-      baseSalary = rules.baseSalary ?? 0;
-    }
-
-    let performanceBonus = 0;
-    if (rules.perOrderRate) performanceBonus = deliveredCount * rules.perOrderRate;
-    if (rules.bonusPerExtraOrder && rules.baseThreshold && deliveredCount > rules.baseThreshold) {
-      performanceBonus += (deliveredCount - rules.baseThreshold) * rules.bonusPerExtraOrder;
-    }
-    if (rules.deliveryRateThreshold && deliveryRate > rules.deliveryRateThreshold && rules.bonusPerExtraOrder) {
-      const extraOrders = Math.max(0, deliveredCount - (rules.baseThreshold ?? 0));
-      performanceBonus += extraOrders * (rules.bonusPerExtraOrder * 0.5);
-    }
-
-    const penalties = (rules.penaltyPerReturn ?? 0) * returnedCount;
+    const {
+      baseSalary,
+      performanceBonus,
+      penalties,
+      deliveryRate,
+    } = computeEarningsFromPlanRules(plan?.rules, {
+      deliveredCount,
+      totalOrders,
+      returnedCount,
+    });
 
     const pendingClawbacks = await this.db
       .select({ total: sum(schema.earningsAdjustments.amount) })

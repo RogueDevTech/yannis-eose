@@ -32,7 +32,8 @@ export function setUsersSessionStore(store: SessionStoreService) {
   sessionStoreInstance = store;
 }
 
-function getUsersService(): UsersService {
+/** Exported for cross-router lookups (e.g. HR payout preview access gate). */
+export function getUsersService(): UsersService {
   if (!usersServiceInstance) {
     throw new Error('UsersService not initialized. Call setUsersService() first.');
   }

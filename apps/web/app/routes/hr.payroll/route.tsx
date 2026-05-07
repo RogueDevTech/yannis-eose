@@ -1,4 +1,5 @@
 import { useLoaderData } from '@remix-run/react';
+import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import {
@@ -20,6 +21,10 @@ import type {
 } from '~/features/hr/types';
 
 export const meta: MetaFunction = () => [{ title: 'HR & Payroll — Yannis EOSE' }];
+
+/** Parent `/hr` layout skips GET revalidation; payroll list must refresh after `/hr/payroll/generate`. */
+export const shouldRevalidate: ShouldRevalidateFunction = ({ defaultShouldRevalidate }) =>
+  defaultShouldRevalidate;
 
 /**
  * Roles allowed to land on /hr/payroll. HR + admins, Heads of Department (auto-scoped to their
@@ -148,21 +153,6 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) return json({ error: extractError(res, 'Failed to generate batch') }, { status: safeStatus(res.status) });
     return json({ success: true });
-  }
-
-  if (intent === 'previewBatch') {
-    const rawMonth = formData.get('periodMonth')?.toString() ?? '';
-    const periodMonth = /^\d{4}-\d{2}$/.test(rawMonth) ? `${rawMonth}-01` : rawMonth;
-    const res = await apiRequest<unknown>('/trpc/hr.previewBatch', {
-      method: 'POST', cookie,
-      body: {
-        branchId: formData.get('branchId')?.toString() ?? '',
-        department: formData.get('department')?.toString() ?? '',
-        periodMonth,
-      },
-    });
-    if (!res.ok) return json({ error: extractError(res, 'Failed to preview batch') }, { status: safeStatus(res.status) });
-    return json({ success: true, preview: (res.data as { result?: { data?: unknown } })?.result?.data ?? null });
   }
 
   if (intent === 'submitBatch') {

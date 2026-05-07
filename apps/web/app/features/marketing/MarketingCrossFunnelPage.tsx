@@ -1,5 +1,8 @@
-import { Link } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, Link } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { DeferredError } from '~/components/ui/deferred-section';
+import { StatValuePulse } from '~/components/ui/deferred-skeletons';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -35,7 +38,7 @@ interface PageProps {
     limit: number;
     totalPages: number;
   };
-  stats: CrossFunnelStats;
+  secondary: Promise<CrossFunnelStats>;
   filters: { startDate: string; endDate: string; periodAllTime: boolean; productId: string };
 }
 
@@ -53,18 +56,8 @@ function formatDate(iso: string): string {
   }
 }
 
-export function MarketingCrossFunnelPage({ list, stats }: PageProps) {
+export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
-  const statItems = [
-    { label: 'Attempts', value: stats.totalAttempts },
-    { label: 'Unique customers', value: stats.uniqueCustomers },
-    {
-      label: 'Top product',
-      value: stats.perProduct[0]?.productName ?? '—',
-      plainValue: true,
-      valueClassName: 'text-base font-semibold mt-1 truncate max-w-[14rem]',
-    },
-  ];
 
   const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = [
     {
@@ -127,23 +120,71 @@ export function MarketingCrossFunnelPage({ list, stats }: PageProps) {
         }
       />
 
-      <OverviewStatStrip items={statItems} />
+      <Suspense
+        fallback={
+          <>
+            <OverviewStatStrip
+              items={[
+                { label: 'Attempts', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Unique customers', value: <StatValuePulse className="min-w-[2rem]" /> },
+                {
+                  label: 'Top product',
+                  value: <StatValuePulse className="min-w-[10rem] max-w-[14rem]" />,
+                  plainValue: true,
+                },
+              ]}
+            />
+            <Card>
+              <CardHeader title="By product" />
+              <CardBody>
+                <ul className="divide-y divide-app-border">
+                  {[1, 2, 3].map((i) => (
+                    <li key={i} className="flex items-center justify-between gap-4 py-2">
+                      <span className="h-4 flex-1 max-w-[14rem] rounded bg-app-hover animate-pulse" aria-hidden />
+                      <span className="h-4 w-8 rounded bg-app-hover animate-pulse" aria-hidden />
+                    </li>
+                  ))}
+                </ul>
+              </CardBody>
+            </Card>
+          </>
+        }
+      >
+        <Await resolve={secondary} errorElement={<DeferredError />}>
+          {(stats) => (
+            <>
+              <OverviewStatStrip
+                items={[
+                  { label: 'Attempts', value: stats.totalAttempts },
+                  { label: 'Unique customers', value: stats.uniqueCustomers },
+                  {
+                    label: 'Top product',
+                    value: stats.perProduct[0]?.productName ?? '—',
+                    plainValue: true,
+                    valueClassName: 'text-base font-semibold mt-1 truncate max-w-[14rem]',
+                  },
+                ]}
+              />
 
-      {stats.perProduct.length > 0 && (
-        <Card>
-          <CardHeader title="By product" />
-          <CardBody>
-            <ul className="divide-y divide-app-border">
-              {stats.perProduct.map((p) => (
-                <li key={p.productId} className="flex items-center justify-between py-2">
-                  <span>{p.productName ?? '—'}</span>
-                  <span className="font-semibold">{p.attempts}</span>
-                </li>
-              ))}
-            </ul>
-          </CardBody>
-        </Card>
-      )}
+              {stats.perProduct.length > 0 && (
+                <Card>
+                  <CardHeader title="By product" />
+                  <CardBody>
+                    <ul className="divide-y divide-app-border">
+                      {stats.perProduct.map((p) => (
+                        <li key={p.productId} className="flex items-center justify-between py-2">
+                          <span>{p.productName ?? '—'}</span>
+                          <span className="font-semibold">{p.attempts}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardBody>
+                </Card>
+              )}
+            </>
+          )}
+        </Await>
+      </Suspense>
 
       <Card>
         <CardHeader title="Attempts" />

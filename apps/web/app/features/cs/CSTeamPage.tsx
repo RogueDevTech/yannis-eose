@@ -424,12 +424,7 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
       ) : (
         <div className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-app-fg">Team members</h2>
-              <p className="text-sm text-app-fg-muted mt-0.5">
-                Workload, activity, and order counts for the selected period.
-              </p>
-            </div>
+          
           </div>
 
           <div className="card p-0">
