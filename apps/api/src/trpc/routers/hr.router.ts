@@ -9,6 +9,7 @@ import {
   approveAdjustmentSchema,
   setSettlementConfigSchema,
   generateBatchSchema,
+  generateBatchesBulkSchema,
   submitBatchSchema,
   approveBatchSchema,
   rejectBatchSchema,
@@ -16,11 +17,16 @@ import {
   listMonthlyPayrollsSchema,
   getBatchSchema,
   addBatchAdjustmentSchema,
+  canonicalPermissionCode,
 } from '@yannis/shared';
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
+import type { TrpcContext } from '../context';
+import { canAccessStaffHrUserDetail } from '../../common/authz';
 import { HrService } from '../../hr/hr.service';
 import { PayrollBatchService } from '../../hr/payroll-batch.service';
+import { getUsersService } from './users.router';
 
 let hrServiceInstance: HrService | null = null;
 let payrollBatchServiceInstance: PayrollBatchService | null = null;
@@ -45,6 +51,16 @@ function getPayrollBatchService(): PayrollBatchService {
     throw new Error('PayrollBatchService not initialized. Call setPayrollBatchService() first.');
   }
   return payrollBatchServiceInstance;
+}
+
+function assertHasHrRead(user: NonNullable<TrpcContext['user']>) {
+  const codes = new Set((user.permissions ?? []).map((c) => canonicalPermissionCode(c)));
+  if (!codes.has('hr.read')) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'You do not have permission to list organisation-wide payouts.',
+    });
+  }
 }
 
 export const hrRouter = router({
@@ -84,7 +100,19 @@ export const hrRouter = router({
 
   listPayouts: authedProcedure
     .input(listPayoutsSchema)
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      const actor = ctx.user!;
+      if (!input.staffId) {
+        assertHasHrRead(actor);
+      } else {
+        const target = await getUsersService().getById(input.staffId, actor);
+        if (!canAccessStaffHrUserDetail(actor, { id: target.id, role: target.role })) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Not allowed to view payout records for this user.',
+          });
+        }
+      }
       return getHrService().listPayouts(input);
     }),
 
@@ -100,14 +128,24 @@ export const hrRouter = router({
       return getHrService().createClawbackForReturn(input.orderId, ctx.user.id);
     }),
 
-  // Preview
-  previewPayout: permissionProcedure('hr.read')
-    .input(z.object({
-      staffId: z.string().uuid(),
-      periodStart: z.string(),
-      periodEnd: z.string(),
-    }))
-    .query(async ({ input }) => {
+  /** Live estimate from orders vs commission plan — self + staff-directory viewers */
+  previewPayout: authedProcedure
+    .input(
+      z.object({
+        staffId: z.string().uuid(),
+        periodStart: z.string(),
+        periodEnd: z.string(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const actor = ctx.user!;
+      const target = await getUsersService().getById(input.staffId, actor);
+      if (!canAccessStaffHrUserDetail(actor, { id: target.id, role: target.role })) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Not allowed to view payout estimates for this user.',
+        });
+      }
       return getHrService().previewPayout(input.staffId, input.periodStart, input.periodEnd);
     }),
 
@@ -190,6 +228,12 @@ export const hrRouter = router({
     .input(generateBatchSchema)
     .mutation(async ({ input, ctx }) => {
       return getPayrollBatchService().previewBatch(input, ctx.user);
+    }),
+
+  generateBatchesBulk: authedProcedure
+    .input(generateBatchesBulkSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getPayrollBatchService().generateBatchesBulk(input, ctx.user);
     }),
 
   submitBatch: authedProcedure

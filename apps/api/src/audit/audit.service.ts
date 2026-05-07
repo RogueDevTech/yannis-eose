@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import type postgres from 'postgres';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { inArray } from 'drizzle-orm';
+import { and, asc, inArray, ne, sql } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { PG_CLIENT, DRIZZLE } from '../database/database.module';
 import { shouldScopeGlobalAuditToBranch, type GlobalAuditAccessUser } from '../common/authz';
@@ -235,6 +235,63 @@ export class AuditService {
       }
     }
     return map;
+  }
+
+  /**
+   * Resolve logistics location UUIDs to current display names for audit copy
+   * (warehouse transfer descriptions). Scoped the same callers as actor resolution.
+   */
+  async getLocationNameMap(locationIds: string[]): Promise<Record<string, string>> {
+    if (locationIds.length === 0) return {};
+    const uniqueIds = [...new Set(locationIds)];
+    const rows = await this.db
+      .select({ id: schema.logisticsLocations.id, name: schema.logisticsLocations.name })
+      .from(schema.logisticsLocations)
+      .where(inArray(schema.logisticsLocations.id, uniqueIds));
+
+    const map: Record<string, string> = {};
+    for (const r of rows) {
+      map[r.id] = r.name;
+    }
+    return map;
+  }
+
+  /**
+   * Users eligible for “filter by actor” on `/admin/analytics/audit`.
+   *
+   * The UI used to derive this list only from user IDs referenced on the current page of audit
+   * rows (typically ~20 with ~3 actors), which made the picker look broken. Instead we preload
+   * staff in the same branch/org visibility as {@link getGlobalAuditLog} — no `users.read`
+   * required for audit-only viewers.
+   */
+  async listActorFilterOptions(
+    viewer: GlobalAuditAccessUser,
+  ): Promise<Array<{ id: string; name: string; role: string }>> {
+    const scopeToBranch = shouldScopeGlobalAuditToBranch(viewer);
+    const branchId = viewer.currentBranchId ?? null;
+
+    const branchClause =
+      scopeToBranch && branchId
+        ? sql<boolean>`EXISTS (
+            SELECT 1 FROM user_branches ub
+            WHERE ub.user_id = ${schema.users.id} AND ub.branch_id = ${branchId}
+          )`
+        : null;
+
+    const whereClause = branchClause ? and(ne(schema.users.status, 'ARCHIVED'), branchClause) : ne(schema.users.status, 'ARCHIVED');
+
+    const rows = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+      })
+      .from(schema.users)
+      .where(whereClause)
+      .orderBy(asc(schema.users.name))
+      .limit(500);
+
+    return rows;
   }
 
   /**

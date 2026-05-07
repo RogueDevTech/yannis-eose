@@ -3183,6 +3183,27 @@ export class MarketingService {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const productId = this.assertOfferGroupItemsSingleProduct(input.items);
 
+      // Reject duplicate names (case-insensitive, against non-archived rows).
+      // Pre-check inside the transaction so rapid double/triple clicks return a
+      // friendly CONFLICT instead of letting the unique index surface as
+      // INTERNAL_SERVER_ERROR. Migration 0122 enforces this at the DB level too.
+      const conflict = await tx
+        .select({ id: schema.offerGroups.id, name: schema.offerGroups.name })
+        .from(schema.offerGroups)
+        .where(
+          and(
+            ne(schema.offerGroups.status, 'ARCHIVED'),
+            sql`lower(${schema.offerGroups.name}) = lower(${input.name})`,
+          ),
+        )
+        .limit(1);
+      if (conflict[0]) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `An offer named "${conflict[0].name}" already exists. Pick a different name.`,
+        });
+      }
+
       // Verify product exists once (and validate all chosen images are from gallery).
       const [p] = await tx
         .select({ id: schema.products.id, gallery: schema.products.galleryImageUrls, baseSalePrice: schema.products.baseSalePrice })

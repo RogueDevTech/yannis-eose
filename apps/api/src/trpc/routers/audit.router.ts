@@ -116,6 +116,32 @@ export const auditRouter = router({
     }),
 
   /**
+   * Logistics location labels for warehouse transfer audit rows (`from_location_id`, `to_location_id`).
+   */
+  locationNames: authedProcedure
+    .input(z.object({ locationIds: z.array(z.string().uuid()).max(400) }))
+    .query(async ({ input, ctx }) => {
+      const u = ctx.user;
+      if (!canAccessGlobalAuditLog(u)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to resolve audit labels.' });
+      }
+      return getAuditService().getLocationNameMap(input.locationIds);
+    }),
+
+  /** Staff picker for `/admin/analytics/audit` actor filter — org/branch scope matches `globalLog`. */
+  actorFilterOptions: authedProcedure.query(async ({ ctx }) => {
+    const u = ctx.user;
+    if (!canAccessGlobalAuditLog(u)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to load audit filters.' });
+    }
+    return getAuditService().listActorFilterOptions({
+      role: u.role,
+      permissions: u.permissions,
+      currentBranchId: u.currentBranchId,
+    });
+  }),
+
+  /**
    * Mirror Mode session log — separate from temporal audit because mirror sessions are
    * append-only (not row-versioned). Anyone with audit access can see who mirrored whom.
    */

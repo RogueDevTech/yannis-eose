@@ -80,19 +80,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...inventoryReadOpts,
   });
   const productsPromise = apiRequest<unknown>(
-    `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 20, status: 'ACTIVE' }))}`,
+    `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
     { method: 'GET', cookie, ...inventoryReadOpts },
   );
   // Stock intake / inbound shipment targets: company-owned warehouses (provider kind
   // WAREHOUSE), not 3PL partner locations. Dropdowns list sites managed at
   // /admin/inventory/warehouses.
   const locationsPromise = apiRequest<unknown>(
-    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', providerKind: 'WAREHOUSE', limit: 100 }))}`,
+    `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', providerKind: 'WAREHOUSE' }))}`,
     { method: 'GET', cookie, ...inventoryReadOpts },
   );
   /** Resolve labels on stock rows (includes non-warehouse sites — avoids “Unknown location” on 3PL shelves). */
   const displayLocationsPromise = apiRequest<unknown>(
-    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 100 }))}`,
+    `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
     { method: 'GET', cookie, ...inventoryReadOpts },
   );
   const lowStockPromise = apiRequest<unknown>(

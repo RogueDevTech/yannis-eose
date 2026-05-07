@@ -190,6 +190,32 @@ export interface UserPayoutRecord {
   paidAt: string | null;
 }
 
+/** `hr.previewPayout` — live-ish estimate from attributed orders × commission rules (see HR service). */
+export interface StaffPayoutEstimate {
+  staffId: string;
+  staffName: string;
+  role: string;
+  planName: string;
+  deliveredCount: number;
+  totalOrders: number;
+  returnedCount: number;
+  deliveryRate: number;
+  baseSalary: number;
+  performanceBonus: number;
+  penalties: number;
+  clawbacks: number;
+  deductionsTotal: number;
+  totalPayout: number;
+}
+
+/** Narrow shape for last paid row on the earnings outlook card (from `hr.listPayouts`). */
+export interface UserPaidPayoutSnapshot {
+  periodStart: string;
+  periodEnd: string;
+  totalPayout: string;
+  createdAt?: string;
+}
+
 export interface UserAdjustment {
   id: string;
   type: string;
@@ -279,61 +305,60 @@ export type PermissionCatalogBundle = {
   requestFailed: boolean;
 };
 
+/**
+ * Remix `defer` payload for `/hr/users/:id` (and reuse routes like finance staff accounts).
+ * Heavy reads stream client-side from `/api/hr-user-detail-*` resource routes — only shell flags + user row here.
+ */
 export interface UserDetailLoaderData {
   user: UserDetail;
-  roleTemplates?: Promise<RoleTemplateOption[]>;
-  products: Promise<UserCreateProduct[]>;
-  locations: Promise<UserCreateLocation[]>;
-  plans: Promise<UserCreateCommissionPlan[]>;
-  recentOrders: Promise<{ orders: UserOrderSummary[]; total: number }>;
-  payouts: Promise<UserPayoutRecord[]>;
-  adjustments: Promise<UserAdjustment[]>;
-  auditLog: Promise<UserAuditEntry[]>;
-  marketingMetrics: Promise<UserMarketingMetrics | null>;
-  fundingBalance: Promise<{ totalReceived: string; totalSpend: string; balance: string } | null>;
-  pendingEmailChange: Promise<PendingEmailChange | null>;
-  stockMovements: Promise<{ movements: UserStockMovement[]; total: number }> | null;
-  financeActivity: Promise<{ approvals: UserApprovalRecord[]; total: number }> | null;
-  pushStatus?: Promise<UserPushStatus | null>;
-  activeHeads?: Promise<ActiveHeadUser[]>;
-  branchesList?: Promise<Array<{ id: string; name: string; code: string; status: string }>>;
-  permissionCatalog?: Promise<PermissionCatalogBundle>;
-  templatePermissionsById?: Promise<Record<string, string[]>>;
-  /** Overview Permissions card — sparse deltas + template baseline + RBAC union for chips (`intent: stamp_preview`). */
-  userStampPreview?: Promise<{
-    userOverrides: Record<string, boolean>;
-    templateCodes: string[];
-    effectiveCodes: string[];
-  }>;
-  /** Settings PermissionMatrix sparse deltas — template baseline via `listTemplateBaselines` + `intent: edit_matrix`. */
-  userEditPermissionOverrides?: Promise<Record<string, boolean>>;
+  /**
+   * Mirror affordances — deferred promise so first paint does not await `canMirrorToUser`.
+   */
+  mirrorUi: Promise<{ viewerShowsMirror: boolean; mirrorSubmitDisabled: boolean }>;
   canDisburseToThisUser?: boolean;
   isSuperAdmin?: boolean;
   isViewerHeadOfMarketing?: boolean;
   isViewerHeadOfCS?: boolean;
   /**
    * True when the viewer is HoCS/HoM looking at a direct report on the same branch.
-   * Backend enforces which fields they can actually edit (capacity, productIds,
-   * visibleOrderStatuses); this flag tells the UI to show the limited Settings form.
    */
   canEditLimited?: boolean;
   /**
-   * Mirror affordances — nested deferred promise so the loader returns without awaiting
-   * `canMirrorToUser` (avoids Remix single-fetch turbo-stream ~5s timeouts).
-   */
-  mirrorUi: Promise<{ viewerShowsMirror: boolean; mirrorSubmitDisabled: boolean }>;
-  /**
    * True when the viewer is opening their OWN profile (drives /admin/profile).
-   * Hides destructive admin actions (Reset Password, Deactivate, Mirror, Disburse) —
-   * users manage their own credentials in /admin/settings, not from the profile page.
    */
   isSelfView?: boolean;
-  /** False for SuperAdmin / Admin profiles — they don't use the staff onboarding record. When true, Overview shows the onboarding card. */
+  /** False for SuperAdmin / Admin profiles — staff onboarding card hidden. */
   showOnboardingTab?: boolean;
-  /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). Self-view uses `/admin/onboarding` instead. */
+  /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). */
   viewerCanManageHrOnboarding?: boolean;
-  onboardingSummary?: Promise<UserOnboardingSummary | null>;
 }
+
+/**
+ * Props for `UserDetailPage` after `UserDetailPageWithMirror` strips `mirrorUi`.
+ * Optional promises are legacy/test-only fallbacks; production hydrates from resource routes.
+ */
+export type UserDetailPageProps = Omit<UserDetailLoaderData, 'mirrorUi'> & {
+  usersBasePath?: string;
+  viewerShowsMirror?: boolean;
+  mirrorSubmitDisabled?: boolean;
+  roleTemplates?: Promise<RoleTemplateOption[]>;
+  locations?: Promise<UserCreateLocation[]>;
+  plans?: Promise<UserCreateCommissionPlan[]>;
+  recentOrders?: Promise<{ orders: UserOrderSummary[]; total: number }>;
+  payouts?: Promise<UserPayoutRecord[]>;
+  adjustments?: Promise<UserAdjustment[]>;
+  auditLog?: Promise<UserAuditEntry[]>;
+  pendingEmailChange?: Promise<PendingEmailChange | null>;
+  financeActivity?: Promise<{ approvals: UserApprovalRecord[]; total: number }> | null;
+  pushStatus?: Promise<UserPushStatus | null>;
+  permissionCatalog?: Promise<PermissionCatalogBundle>;
+  templatePermissionsById?: Promise<Record<string, string[]>>;
+  userStampPreview?: Promise<{
+    userOverrides: Record<string, boolean>;
+    templateCodes: string[];
+    effectiveCodes: string[];
+  }>;
+};
 
 // ─── Avatar gradient mapping by role ────────────────────
 

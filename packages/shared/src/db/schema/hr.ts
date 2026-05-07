@@ -13,7 +13,8 @@ import { branches } from './branches';
 // Table 17: commission_plans — JSONB commission rules
 export const commissionPlans = pgTable('commission_plans', {
   id: uuidv7Pk(),
-  role: userRoleEnum('role').notNull(),
+  /** When NULL, the plan is not a role default — staff must reference it via `users.commission_plan_id`. */
+  role: userRoleEnum('role'),
   planName: text('plan_name').notNull(),
   rules: jsonb('rules').notNull(),
   effectiveFrom: timestamp('effective_from', { withTimezone: true }).notNull(),

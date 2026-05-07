@@ -461,6 +461,7 @@ The push system has four layers — all must be consistent:
 ### When Building the Third-Party Logistics Module
 - Third-Party Logistics partners get their OWN login and simplified dashboard (not the full internal UI)
 - Dual-Entry Transfer: when Main Warehouse sends 100 units, those units are IN_TRANSIT — NOT available at the 3PL until the 3PL manager clicks Verify and Receive and inputs the actual received quantity
+- **Head of Logistics — partner stock transfers:** HoLogistics holds `inventory.transfer` + `transfers.read` (see `ROLE_PERMISSIONS.HEAD_OF_LOGISTICS` in [permission-catalog.ts](packages/shared/src/rbac/permission-catalog.ts)). They record moves between any two logistics locations from **Logistics → Partner stock transfers** (`/admin/logistics/transfers`; same Remix action/loader + `TransfersPage` as `/admin/transfers`). Stock managers keep the Stock Management sidebar entry.
 - If received qty < sent qty, the system auto-generates a Shrinkage Alert to the CEO and Head of Logistics
 - Local Restock: when a return is marked Sellable by the 3PL, the unit goes directly back into that 3PL local available stock (no return-freight to main warehouse)
 - Rider views live inside `apps/web` at the `/rider/` route group — NOT a separate app. Mobile-optimized layouts with PWA offline sync

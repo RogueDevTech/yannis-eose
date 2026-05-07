@@ -390,9 +390,15 @@ export interface MarketingAdSpendLoaderData {
   /** Narrow to one media buyer (HoM / admin). */
   mediaBuyerIdFilter?: string;
   /** Active MEDIA_BUYER users for the media-buyer filter dropdown (admin view only). */
-  mediaBuyersForFilter: Array<{ id: string; name: string }>;
-  statusCounts: AdSpendStatusCounts;
-  campaigns: Campaign[];
+  mediaBuyersForFilter?: Array<{ id: string; name: string }>;
+  statusCounts?: AdSpendStatusCounts;
+  campaigns?: Campaign[];
+  /** Streamed after `marketing.listAdSpend` — tab counts + campaign / buyer picklists. */
+  adSpendPicklists?: Promise<{
+    statusCounts: AdSpendStatusCounts;
+    campaigns: Campaign[];
+    mediaBuyersForFilter: Array<{ id: string; name: string }>;
+  }>;
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
   metrics: Metrics | null;
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
@@ -421,4 +427,6 @@ export interface MarketingAdSpendLoaderData {
   /** Current user's id — used to gate per-line "Edit" actions on the accordion
    *  (MB can edit their own PENDING/REJECTED rows; moderators can edit any). */
   currentUserId: string;
+  /** True while deferred picklists stream on first paint (route Suspense fallback). */
+  picklistsLoading?: boolean;
 }

@@ -1,20 +1,75 @@
 import { z } from 'zod';
+import { USER_ROLE } from '../enums';
+import type { UserRole } from '../enums';
 
 // ============================================
 // Commission Plan Validators
 // ============================================
 
-export const commissionRulesSchema = z.object({
-  baseSalary: z.number().min(0).optional(),
-  baseThreshold: z.number().int().min(0).optional(),
-  perOrderRate: z.number().min(0).optional(),
-  deliveryRateThreshold: z.number().min(0).max(100).optional(),
-  bonusPerExtraOrder: z.number().min(0).optional(),
-  penaltyPerReturn: z.number().min(0).optional(),
+/** Every assignable PostgreSQL user_role excluding legacy gaps — aligns with Drizzle pgEnum user_role. */
+const USER_ROLE_TUPLE = Object.values(USER_ROLE) as [UserRole, ...UserRole[]];
+
+export const commissionOrderRateTierSchema = z.object({
+  fromOrder: z.number().int().min(1),
+  /** Inclusive ceiling; omit or null = no upper bound. */
+  toOrder: z.number().int().min(1).nullable().optional(),
+  ratePerOrder: z.number().min(0),
 });
 
+export const commissionRulesSchema = z
+  .object({
+    baseSalary: z.number().min(0).optional(),
+    baseThreshold: z.number().int().min(0).optional(),
+    perOrderRate: z.number().min(0).optional(),
+    deliveryRateThreshold: z.number().min(0).max(100).optional(),
+    bonusPerExtraOrder: z.number().min(0).optional(),
+    penaltyPerReturn: z.number().min(0).optional(),
+    /** Multiplier on `bonusPerExtraOrder` inside the delivery-rate accelerator (legacy default 50% = 0.5). */
+    deliveryRateBonusMultiplier: z.number().min(0).max(10).optional(),
+    /** Per-delivered-unit marginal rates. When non-empty, replaces flat `perOrderRate × count`. */
+    orderRateTiers: z.array(commissionOrderRateTierSchema).max(12).optional(),
+    minPerformanceBonus: z.number().min(0).optional(),
+    maxPerformanceBonus: z.number().min(0).optional(),
+  })
+  .superRefine((r, ctx) => {
+    if (r.orderRateTiers?.length && r.perOrderRate != null && r.perOrderRate > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Remove flat per-order rate when using order rate tiers.',
+        path: ['orderRateTiers'],
+      });
+    }
+    const tiers = r.orderRateTiers;
+    if (tiers?.length) {
+      for (let i = 0; i < tiers.length; i += 1) {
+        const t = tiers[i]!;
+        if (t.toOrder != null && t.toOrder < t.fromOrder) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `Tier ${i + 1}: toOrder must be ≥ fromOrder`,
+            path: ['orderRateTiers', i, 'toOrder'],
+          });
+        }
+      }
+    }
+    if (
+      r.minPerformanceBonus != null &&
+      r.maxPerformanceBonus != null &&
+      r.maxPerformanceBonus < r.minPerformanceBonus
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'maxPerformanceBonus cannot be less than minPerformanceBonus',
+        path: ['maxPerformanceBonus'],
+      });
+    }
+  });
+
+export type CommissionRules = z.infer<typeof commissionRulesSchema>;
+
+/** `null`/omit before enum = per-user assignment only (linked from `users.commission_plan_id`). */
 export const createCommissionPlanSchema = z.object({
-  role: z.string().min(1),
+  role: z.preprocess((v: unknown) => (v === '' || v === undefined ? null : v), z.enum(USER_ROLE_TUPLE).nullable()),
   planName: z.string().min(2).max(200),
   rules: commissionRulesSchema,
   effectiveFrom: z.string().date(),
@@ -32,6 +87,8 @@ export type UpdateCommissionPlanInput = z.infer<typeof updateCommissionPlanSchem
 
 export const listCommissionPlansSchema = z.object({
   role: z.string().optional(),
+  /** When true, only plans where `role` IS NULL (per-user templates). */
+  unassignedRoleOnly: z.boolean().optional(),
   activeOnly: z.boolean().default(true),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
@@ -119,6 +176,14 @@ export const generateBatchSchema = z.object({
   periodMonth: periodMonthSchema,
 });
 export type GenerateBatchInput = z.infer<typeof generateBatchSchema>;
+
+/** Fan-out: create missing batches only (skipped if a row already exists for the slot). */
+export const generateBatchesBulkSchema = z.object({
+  branchIds: z.array(z.string().uuid()).min(1).max(50),
+  departments: z.array(payrollDepartmentSchema).min(1).max(4),
+  periodMonth: periodMonthSchema,
+});
+export type GenerateBatchesBulkInput = z.infer<typeof generateBatchesBulkSchema>;
 
 export const submitBatchSchema = z.object({
   batchId: z.string().uuid(),

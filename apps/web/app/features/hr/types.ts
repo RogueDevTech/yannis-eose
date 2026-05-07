@@ -1,6 +1,7 @@
 export interface CommissionPlan {
   id: string;
-  role: string;
+  /** When null this plan applies only via `users.commission_plan_id` (no role default). */
+  role: string | null;
   planName: string;
   rules: Record<string, unknown>;
   effectiveFrom: string;

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -11,6 +11,8 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useFetcherToast } from '~/components/ui/toast';
 import { RoleBadge } from '~/components/ui/role-badge';
+import { Collapsible } from '~/components/ui/collapsible';
+import { RadioGroup } from '~/components/ui/radio-group';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -32,6 +34,14 @@ interface CommissionPlansPageProps {
 
 type PlanStatus = 'ACTIVE' | 'UPCOMING' | 'EXPIRED';
 
+const ROLE_FILTER_UNIVERSAL = '__UNIVERSAL__';
+
+/** Roles whose payroll engine currently auto-credits DELIVERED + pipeline orders from CRM attribution. */
+function planUsesOrderPipelineMetrics(role: string | null | undefined): boolean {
+  if (role == null || role === '') return true;
+  return role === 'CS_AGENT' || role === 'MEDIA_BUYER';
+}
+
 function deriveStatus(plan: CommissionPlan): PlanStatus {
   const now = new Date();
   const from = new Date(plan.effectiveFrom);
@@ -49,6 +59,13 @@ function formatRules(rules: Record<string, unknown>): string {
   if (rules['bonusPerExtraOrder']) parts.push(`Extra: ₦${Number(rules['bonusPerExtraOrder']).toLocaleString('en-NG')}`);
   if (rules['penaltyPerReturn']) parts.push(`Penalty: ₦${Number(rules['penaltyPerReturn']).toLocaleString('en-NG')}`);
   if (rules['deliveryRateThreshold']) parts.push(`Del. rate bonus: >${rules['deliveryRateThreshold']}%`);
+  if (rules['deliveryRateBonusMultiplier'] != null && rules['deliveryRateBonusMultiplier'] !== '') {
+    parts.push(`Del. accel: ×${Number(rules['deliveryRateBonusMultiplier'])}`);
+  }
+  const tiers = rules['orderRateTiers'];
+  if (Array.isArray(tiers) && tiers.length) parts.push(`${tiers.length} tier(s)`);
+  if (rules['minPerformanceBonus']) parts.push(`Min perf: ₦${Number(rules['minPerformanceBonus']).toLocaleString('en-NG')}`);
+  if (rules['maxPerformanceBonus']) parts.push(`Max perf: ₦${Number(rules['maxPerformanceBonus']).toLocaleString('en-NG')}`);
   return parts.length > 0 ? parts.join(' · ') : 'No rules configured';
 }
 
@@ -77,8 +94,9 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
   >((fd, intent) => {
     if (intent !== 'createPlan') return null;
     const planName = fd.get('planName')?.toString().trim();
-    const role = fd.get('role')?.toString().trim();
-    if (!planName || !role) return null;
+    const roleRaw = fd.get('role')?.toString().trim();
+    if (!planName) return null;
+    const role = roleRaw === '' ? null : roleRaw;
     const rules: Record<string, unknown> = {};
     for (const key of [
       'baseSalary',
@@ -97,7 +115,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
       {
         id: optimisticId(),
         planName,
-        role,
+        role: role ?? null,
         rules,
         effectiveFrom: new Date(effectiveFrom).toISOString(),
         effectiveTo: effectiveTo ? new Date(effectiveTo).toISOString() : null,
@@ -109,7 +127,11 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
   const filteredPlans = useMemo(() => {
     const all = [...optimisticPlans, ...plans];
     return all.filter((p) => {
-      if (roleFilter !== 'ALL' && p.role !== roleFilter) return false;
+      if (roleFilter === ROLE_FILTER_UNIVERSAL) {
+        if (p.role != null) return false;
+      } else if (roleFilter !== 'ALL' && p.role !== roleFilter) {
+        return false;
+      }
       if (statusFilter !== 'ALL' && deriveStatus(p) !== statusFilter) return false;
       return true;
     });
@@ -117,7 +139,12 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
 
   // Distinct roles in the loaded set — used to populate the Role filter without showing roles
   // the viewer can't see anyway.
-  const visibleRoles = useMemo(() => Array.from(new Set(plans.map((p) => p.role))), [plans]);
+  const hasUniversalPlans = useMemo(() => plans.some((p) => p.role == null), [plans]);
+  const visibleRoles = useMemo(
+    () =>
+      Array.from(new Set(plans.map((p) => p.role).filter((r): r is string => r != null && r !== ''))),
+    [plans],
+  );
 
   // Success — close the matching modal. Intent filter scopes the close so
   // submitting createPlan never closes the edit modal and vice versa.
@@ -127,7 +154,10 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
   useCloseOnFetcherSuccess(fetcher, handleEditSuccess, { intent: 'updatePlan' });
 
   const canCreate = manageableRoles.length > 0;
-  const canManage = (planRole: string) => manageableRoles.includes(planRole);
+  const canManage = useCallback(
+    (planRole: string | null) => planRole == null || manageableRoles.includes(planRole),
+    [manageableRoles],
+  );
 
   const planColumns: CompactTableColumn<CommissionPlan>[] = useMemo(
     () => [
@@ -149,7 +179,14 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
       {
         key: 'role',
         header: 'Role',
-        render: (plan) => <RoleBadge role={plan.role} />,
+        render: (plan) =>
+          plan.role ? (
+            <RoleBadge role={plan.role} />
+          ) : (
+            <span className="rounded-full border border-app-border px-2 py-0.5 text-2xs font-medium text-app-fg-muted whitespace-nowrap">
+              Per-user only
+            </span>
+          ),
       },
       {
         key: 'status',
@@ -223,7 +260,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         },
       },
     ],
-    [manageableRoles],
+    [canManage],
   );
 
   return (
@@ -232,7 +269,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         title="Commission Plans"
         description={
           canCreate
-            ? `Define how your team earns. ${manageableRoles.length === 1 ? `Limited to ${manageableRoles[0]?.replace(/_/g, ' ')}.` : 'Each plan covers one role.'}`
+            ? 'Define base pay, per-order rules, tiered rates, and accelerators. Role is optional — leave it blank for templates you attach to individual staff profiles.'
             : 'You do not have permission to create or edit commission plans.'
         }
         actions={
@@ -255,7 +292,10 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
             options={[
-              { value: 'ALL', label: 'All roles' },
+              { value: 'ALL', label: 'All plans' },
+              ...(hasUniversalPlans
+                ? [{ value: ROLE_FILTER_UNIVERSAL, label: 'Per-user templates (no role)' }]
+                : []),
               ...visibleRoles.map((r) => ({ value: r, label: r.replace(/_/g, ' ') })),
             ]}
             className="sm:w-56"
@@ -321,11 +361,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         >
           <PlanFormHeader
             title="New Commission Plan"
-            subtitle={
-              manageableRoles.length === 1
-                ? `Will apply to ${manageableRoles[0]?.replace(/_/g, ' ')}.`
-                : 'Plans define base salary, per-order rate, extra-order bonuses, and return penalties for one role.'
-            }
+            subtitle="Optional default role, or a universal template linked from each staff profile under Commission plan."
             onClose={() => {
               if (fetcher.state !== 'idle') return;
               setShowCreate(false);
@@ -333,6 +369,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           />
           <ModalFetcherInlineError message={planSurface.errorMatchingIntent('createPlan')} />
           <PlanForm
+            key="create-plan"
             mode="create"
             manageableRoles={manageableRoles}
             submitting={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'createPlan'}
@@ -356,7 +393,11 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
         >
           <PlanFormHeader
             title={`Edit · ${editPlan.planName}`}
-            subtitle={`Role: ${editPlan.role.replace(/_/g, ' ')} · Effective from ${new Date(editPlan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`}
+            subtitle={`${
+              editPlan.role
+                ? `Role default: ${editPlan.role.replace(/_/g, ' ')}`
+                : 'Per-user template (no role default)'
+            } · Effective from ${new Date(editPlan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`}
             onClose={() => {
               if (fetcher.state !== 'idle') return;
               setEditPlan(null);
@@ -364,6 +405,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           />
           <ModalFetcherInlineError message={planSurface.errorMatchingIntent('updatePlan')} />
           <PlanForm
+            key={editPlan.id}
             mode="edit"
             plan={editPlan}
             manageableRoles={manageableRoles}
@@ -386,17 +428,42 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
           <PlanFormHeader
             title={viewPlan.planName}
             subtitle={
-              <RoleBadge role={viewPlan.role} size="sm" className="mt-1" />
+              viewPlan.role ? (
+                <RoleBadge role={viewPlan.role} size="sm" className="mt-1" />
+              ) : (
+                <span className="mt-1 inline-block rounded-full border border-app-border px-2 py-0.5 text-2xs font-medium text-app-fg-muted">
+                  Per-user assignment only
+                </span>
+              )
             }
             onClose={() => setViewPlan(null)}
           />
 
           <div className="space-y-2">
-            {(['baseSalary','baseThreshold','perOrderRate','bonusPerExtraOrder','penaltyPerReturn','deliveryRateThreshold'] as const).map((key) => {
+            {(
+              [
+                'baseSalary',
+                'baseThreshold',
+                'perOrderRate',
+                'bonusPerExtraOrder',
+                'penaltyPerReturn',
+                'deliveryRateThreshold',
+                'deliveryRateBonusMultiplier',
+                'minPerformanceBonus',
+                'maxPerformanceBonus',
+              ] as const
+            ).map((key) => {
               const value = viewPlan.rules[key];
               if (value == null) return null;
-              const isCurrency = key === 'baseSalary' || key === 'perOrderRate' || key === 'bonusPerExtraOrder' || key === 'penaltyPerReturn';
+              const isCurrency =
+                key === 'baseSalary' ||
+                key === 'perOrderRate' ||
+                key === 'bonusPerExtraOrder' ||
+                key === 'penaltyPerReturn' ||
+                key === 'minPerformanceBonus' ||
+                key === 'maxPerformanceBonus';
               const isPercent = key === 'deliveryRateThreshold';
+              const isMultiplier = key === 'deliveryRateBonusMultiplier';
               const isDeduction = key === 'penaltyPerReturn';
               const label = ({
                 baseSalary: 'Base Salary',
@@ -405,16 +472,38 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
                 bonusPerExtraOrder: 'Extra Order Bonus',
                 penaltyPerReturn: 'Return Penalty',
                 deliveryRateThreshold: 'Delivery Rate Threshold',
+                deliveryRateBonusMultiplier: 'Delivery accel. multiplier',
+                minPerformanceBonus: 'Min performance (₦)',
+                maxPerformanceBonus: 'Max performance (₦)',
               } as const)[key];
               return (
                 <div key={key} className="flex items-center justify-between py-2 px-3 rounded-lg bg-app-hover">
                   <span className="text-sm font-medium text-app-fg">{label}</span>
                   <span className={`text-sm font-semibold ${isDeduction ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}>
-                    {isCurrency ? <><span>{isDeduction ? '-' : ''}</span><NairaPrice amount={Number(value)} /></> : isPercent ? `>${Number(value)}%` : `${Number(value)} orders`}
+                    {isCurrency ? (
+                      <>
+                        <span>{isDeduction ? '-' : ''}</span>
+                        <NairaPrice amount={Number(value)} />
+                      </>
+                    ) : isPercent ? (
+                      `>${Number(value)}%`
+                    ) : isMultiplier ? (
+                      `×${Number(value)}`
+                    ) : (
+                      `${Number(value)} orders`
+                    )}
                   </span>
                 </div>
               );
             })}
+            {Array.isArray(viewPlan.rules['orderRateTiers']) && viewPlan.rules['orderRateTiers'].length ? (
+              <div className="py-2 px-3 rounded-lg bg-app-hover">
+                <span className="text-sm font-medium text-app-fg">Marginal tiers</span>
+                <pre className="mt-2 text-xs text-app-fg-muted whitespace-pre-wrap font-mono">
+                  {JSON.stringify(viewPlan.rules['orderRateTiers'], null, 2)}
+                </pre>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex gap-2">
@@ -471,6 +560,8 @@ function PlanFormHeader({
   );
 }
 
+type TierDraft = { fromOrder: string; toOrder: string; ratePerOrder: string };
+
 function PlanForm({
   mode,
   plan,
@@ -488,10 +579,51 @@ function PlanForm({
 }) {
   const intent = mode === 'create' ? 'createPlan' : 'updatePlan';
   const rules = (plan?.rules ?? {}) as Record<string, unknown>;
+  const onlyRole = manageableRoles.length === 1 ? manageableRoles[0] : null;
+
+  const [assignmentScope, setAssignmentScope] = useState<'dept_default' | 'universal'>('dept_default');
+  const [createRoleDraft, setCreateRoleDraft] = useState('');
+  const [tierRows, setTierRows] = useState<TierDraft[]>([]);
+
+  useEffect(() => {
+    const tr = plan?.rules?.['orderRateTiers'];
+    if (Array.isArray(tr) && tr.length) {
+      setTierRows(
+        tr.map((t: { fromOrder?: number; toOrder?: number | null; ratePerOrder?: number }) => ({
+          fromOrder: String(t.fromOrder ?? 1),
+          toOrder: t.toOrder != null ? String(t.toOrder) : '',
+          ratePerOrder: t.ratePerOrder != null ? String(t.ratePerOrder) : '',
+        })),
+      );
+    } else {
+      setTierRows([]);
+    }
+  }, [plan?.id, plan?.rules]);
+
+  const serializedTiers = useMemo(() => {
+    const normalized = tierRows
+      .map((row) => ({
+        fromOrder: Math.max(1, parseInt(row.fromOrder, 10) || 1),
+        toOrder: row.toOrder.trim() === '' ? null : Math.max(1, parseInt(row.toOrder, 10) || 1),
+        ratePerOrder: Math.max(0, Number(row.ratePerOrder) || 0),
+      }))
+      .filter((t) => t.fromOrder >= 1);
+    return JSON.stringify(normalized);
+  }, [tierRows]);
+
+  const contextualRole: string | null =
+    mode === 'edit'
+      ? plan!.role
+      : onlyRole
+        ? assignmentScope === 'universal'
+          ? null
+          : onlyRole
+        : createRoleDraft || null;
 
   return (
     <fetcher.Form method="post" className="space-y-4">
       <input type="hidden" name="intent" value={intent} />
+      <input type="hidden" name="orderRateTiersJson" value={serializedTiers} />
       {plan && <input type="hidden" name="planId" value={plan.id} />}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -502,36 +634,65 @@ function PlanForm({
           placeholder="e.g. CS Standard Plan"
           defaultValue={plan?.planName ?? ''}
         />
-        {mode === 'create' && manageableRoles.length === 1 ? (
-          <>
-            <input type="hidden" name="role" value={manageableRoles[0]} />
-            <div>
-              <p className="block text-sm font-medium text-app-fg-muted mb-1">Role</p>
-              <p className="input bg-app-hover/40 cursor-not-allowed">{manageableRoles[0]?.replace(/_/g, ' ')}</p>
-            </div>
-          </>
+        {mode === 'create' && onlyRole ? (
+          <div className="space-y-2">
+            <RadioGroup<'dept_default' | 'universal'>
+              name="_commission_plan_assignment"
+              label="Applies as"
+              value={assignmentScope}
+              defaultValue={assignmentScope}
+              layout="vertical"
+              onChange={(v) => setAssignmentScope(v)}
+              options={[
+                {
+                  value: 'dept_default',
+                  label: `Department default (${onlyRole!.replace(/_/g, ' ')})`,
+                  description: 'Every staff member in this role uses this plan unless they have their own assignment.',
+                },
+                {
+                  value: 'universal',
+                  label: 'Per-user template only',
+                  description: 'Pick this plan from each staff profile (Commission plan field). Never auto-selected by role alone.',
+                },
+              ]}
+            />
+            <input type="hidden" name="role" value={assignmentScope === 'universal' ? '' : onlyRole!} />
+          </div>
         ) : mode === 'create' ? (
           <FormSelect
-            label="Role"
+            label="Default role (optional)"
             name="role"
-            required
-            placeholder="Select role…"
-            options={manageableRoles.map((r) => ({ value: r, label: r.replace(/_/g, ' ') }))}
+            defaultValue=""
+            onChange={(e) => setCreateRoleDraft(e.target.value)}
+            options={[
+              { value: '', label: 'None — assign plan on staff profile only' },
+              ...manageableRoles.map((r) => ({ value: r, label: r.replace(/_/g, ' ') })),
+            ]}
           />
         ) : (
-          // Edit: role is locked (changing role would re-attribute every payout — not supported here)
           <div>
-            <p className="block text-sm font-medium text-app-fg-muted mb-1">Role</p>
-            <p className="input bg-app-hover/40 cursor-not-allowed">{plan!.role.replace(/_/g, ' ')}</p>
+            <p className="block text-sm font-medium text-app-fg-muted mb-1">Role default</p>
+            <p className="input bg-app-hover/40 cursor-not-allowed">
+              {plan!.role ? plan!.role.replace(/_/g, ' ') : 'Per-user assignment only'}
+            </p>
+            <p className="text-xs text-app-fg-muted mt-0.5">Create a fresh plan if you must change linkage.</p>
           </div>
         )}
       </div>
+
+      <p className="text-xs text-app-fg-muted -mt-1">
+        {planUsesOrderPipelineMetrics(contextualRole)
+          ? 'Payroll credits delivered + pipeline orders tied to assigned CS reps and media buyers. Other roles typically see zero attributed orders unless you customise base pay.'
+          : 'This preset is optimised for allowances or specialised roles — payroll still counts CS/MB order metrics if you manually attach this plan via the staff profile.'}
+      </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label className="block text-sm font-medium text-app-fg-muted mb-1">Base Salary (₦)</label>
           <AmountInput name="baseSalary" placeholder="0" className="input" defaultValue={rules['baseSalary'] != null ? String(rules['baseSalary']) : ''} />
-          <p className="text-xs text-app-fg-muted mt-0.5">Earned when delivered orders ≥ threshold</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">
+            Earned when delivered orders reach the threshold — leave threshold empty for a guaranteed stipend.
+          </p>
         </div>
         <div>
           <TextInput
@@ -542,22 +703,22 @@ function PlanForm({
             placeholder="20"
             defaultValue={rules['baseThreshold'] != null ? String(rules['baseThreshold']) : ''}
           />
-          <p className="text-xs text-app-fg-muted mt-0.5">Min delivered to earn base salary</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">Minimum delivered orders to unlock base salary</p>
         </div>
         <div>
           <label className="block text-sm font-medium text-app-fg-muted mb-1">Per Order Rate (₦)</label>
           <AmountInput name="perOrderRate" placeholder="0" className="input" defaultValue={rules['perOrderRate'] != null ? String(rules['perOrderRate']) : ''} />
-          <p className="text-xs text-app-fg-muted mt-0.5">Commission per delivered order</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">Flat rate per delivered order (ignored when tiered rates are set)</p>
         </div>
         <div>
           <label className="block text-sm font-medium text-app-fg-muted mb-1">Bonus Per Extra Order (₦)</label>
           <AmountInput name="bonusPerExtraOrder" placeholder="0" className="input" defaultValue={rules['bonusPerExtraOrder'] != null ? String(rules['bonusPerExtraOrder']) : ''} />
-          <p className="text-xs text-app-fg-muted mt-0.5">Extra bonus above threshold</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">Loaded on every order above the base threshold</p>
         </div>
         <div>
           <label className="block text-sm font-medium text-app-fg-muted mb-1">Penalty Per Return (₦)</label>
           <AmountInput name="penaltyPerReturn" placeholder="0" className="input" defaultValue={rules['penaltyPerReturn'] != null ? String(rules['penaltyPerReturn']) : ''} />
-          <p className="text-xs text-app-fg-muted mt-0.5">Deducted per returned order</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">Deducted per returned order (also drives clawbacks)</p>
         </div>
         <div>
           <TextInput
@@ -570,9 +731,119 @@ function PlanForm({
             placeholder="80"
             defaultValue={rules['deliveryRateThreshold'] != null ? String(rules['deliveryRateThreshold']) : ''}
           />
-          <p className="text-xs text-app-fg-muted mt-0.5">Above this = 50% extra bonus</p>
+          <p className="text-xs text-app-fg-muted mt-0.5">When delivery rate exceeds this, an extra accelerator applies to orders above the base threshold</p>
         </div>
       </div>
+
+      <Collapsible
+        trigger={
+          <span className="text-sm font-medium text-app-fg">Advanced — tiered rates &amp; caps</span>
+        }
+        defaultOpen={Boolean(rules['orderRateTiers'] || rules['deliveryRateBonusMultiplier'] || rules['minPerformanceBonus'] || rules['maxPerformanceBonus'])}
+        divided
+        className="rounded-lg border border-app-border px-3 py-2"
+      >
+        <div className="space-y-3 pt-2">
+          <p className="text-xs text-app-fg-muted">
+            Tier rows apply a different ₦ rate to each marginal delivered unit that falls inside the range. Leave “To order” blank for open-ended slabs.
+          </p>
+          {tierRows.length === 0 ? (
+            <p className="text-xs text-app-fg-muted">No tiers — flat per-order pricing applies.</p>
+          ) : (
+            tierRows.map((row, idx) => (
+              <div key={`tier-${idx}`} className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-end">
+                <div className="sm:col-span-3">
+                  <TextInput
+                    label="From unit"
+                    type="number"
+                    min={1}
+                    value={row.fromOrder}
+                    onChange={(e) =>
+                      setTierRows((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, fromOrder: e.target.value } : r)),
+                      )
+                    }
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <TextInput
+                    label="To unit (optional)"
+                    type="number"
+                    min={1}
+                    placeholder="∞"
+                    value={row.toOrder}
+                    onChange={(e) =>
+                      setTierRows((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, toOrder: e.target.value } : r)),
+                      )
+                    }
+                  />
+                </div>
+                <div className="sm:col-span-4">
+                  <label className="block text-sm font-medium text-app-fg-muted mb-1">₦ / unit</label>
+                  <AmountInput
+                    className="input"
+                    value={row.ratePerOrder}
+                    onChange={(v) =>
+                      setTierRows((rows) =>
+                        rows.map((r, i) => (i === idx ? { ...r, ratePerOrder: v } : r)),
+                      )
+                    }
+                  />
+                </div>
+                <div className="sm:col-span-2 flex gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => setTierRows((rows) => rows.filter((_, i) => i !== idx))}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+          <Button type="button" variant="secondary" size="sm" onClick={() => setTierRows((rows) => [...rows, { fromOrder: '1', toOrder: '', ratePerOrder: '' }])}>
+            + Add tier
+          </Button>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-app-border mt-3">
+            <div>
+              <TextInput
+                name="deliveryRateBonusMultiplier"
+                type="number"
+                min={0}
+                max={10}
+                step={0.05}
+                label="Delivery accelerator multiplier"
+                placeholder="0.5 (default)"
+                defaultValue={rules['deliveryRateBonusMultiplier'] != null ? String(rules['deliveryRateBonusMultiplier']) : ''}
+              />
+              <p className="text-xs text-app-fg-muted mt-0.5">Multiplies the bonus component when delivery rate clears the threshold (legacy default = 0.5)</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Min performance (₦)</label>
+              <AmountInput
+                name="minPerformanceBonus"
+                placeholder="0"
+                className="input"
+                defaultValue={rules['minPerformanceBonus'] != null ? String(rules['minPerformanceBonus']) : ''}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-app-fg-muted mb-1">Max performance (₦)</label>
+              <AmountInput
+                name="maxPerformanceBonus"
+                placeholder="0"
+                className="input"
+                defaultValue={rules['maxPerformanceBonus'] != null ? String(rules['maxPerformanceBonus']) : ''}
+              />
+            </div>
+          </div>
+        </div>
+      </Collapsible>
 
       {mode === 'create' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

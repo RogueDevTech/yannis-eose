@@ -4,6 +4,7 @@
 
 export * from './enums/index';
 export * from './validators/index';
+export * from './hr/commission-calc';
 export * from './notifications/config';
 export * from './rbac/permission-codes';
 export * from './rbac/permission-catalog';

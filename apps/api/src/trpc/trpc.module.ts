@@ -8,7 +8,7 @@ import { UsersService } from '../users/users.service';
 import { setUsersService, setUsersSessionStore } from './routers/users.router';
 import { ProductsModule } from '../products/products.module';
 import { ProductsService } from '../products/products.service';
-import { setProductsService } from './routers/products.router';
+import { setProductsCacheService, setProductsService } from './routers/products.router';
 import { ProductCategoriesService } from '../products/product-categories.service';
 import { setProductCategoriesService } from './routers/product-categories.router';
 import { InventoryModule } from '../inventory/inventory.module';
@@ -17,7 +17,7 @@ import { ShipmentsService } from '../inventory/shipments.service';
 import { setInventoryService, setShipmentsService, setLogisticsServiceForInventory } from './routers/inventory.router';
 import { LogisticsModule } from '../logistics/logistics.module';
 import { LogisticsService } from '../logistics/logistics.service';
-import { setLogisticsService } from './routers/logistics.router';
+import { setLogisticsCacheService, setLogisticsService } from './routers/logistics.router';
 import { MarketingModule } from '../marketing/marketing.module';
 import { MarketingService } from '../marketing/marketing.service';
 import { setMarketingService } from './routers/marketing.router';
@@ -58,7 +58,7 @@ import {
 } from './routers/branches.router';
 import { BranchesModule } from '../branches/branches.module';
 import { BranchTeamsService } from '../branches/branch-teams.service';
-import { setMessagingDb } from './routers/messaging.router';
+import { setMessagingDb, setMessagingCacheService } from './routers/messaging.router';
 import { DRIZZLE, DatabaseModule } from '../database/database.module';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { db as schema } from '@yannis/shared';
@@ -128,11 +128,13 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setUsersService(this.usersService);
     setUsersSessionStore(this.sessionStore);
     setProductsService(this.productsService);
+    setProductsCacheService(this.cacheService);
     setProductCategoriesService(this.productCategoriesService);
     setInventoryService(this.inventoryService);
     setShipmentsService(this.shipmentsService);
     setLogisticsServiceForInventory(this.logisticsService);
     setLogisticsService(this.logisticsService);
+    setLogisticsCacheService(this.cacheService);
     setMarketingService(this.marketingService);
     setFinanceService(this.financeService);
     setHrService(this.hrService);
@@ -150,6 +152,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setBranchesSessionStore(this.sessionStore);
     setBranchesNotificationsService(this.notificationsService);
     setMessagingDb(this.db as Parameters<typeof setMessagingDb>[0]);
+    setMessagingCacheService(this.cacheService);
     setDashboardServices({
       orders: this.ordersService,
       finance: this.financeService,

@@ -173,9 +173,8 @@ export function parseCSQueueTabFromSearchParam(
   return tabParam as CSQueueTab;
 }
 
-/** What the loader returns — mix of resolved data + streaming promises */
-export interface CSDashboardStreamData {
-  // Critical (resolved immediately)
+/** Primary queue bundle resolved after shell — streamed via `defer` so the page shell can paint first. */
+export interface CSDashboardCriticalPayload {
   workloads: AgentWorkload[];
   unassignedOrders: CSOrder[];
   unassignedTotal: number;
@@ -187,37 +186,41 @@ export interface CSDashboardStreamData {
    */
   hotSwapOrdersPayload: { forAgentId: string; orders: CSOrder[]; total: number } | null;
   statusCounts: Record<string, number>;
-  /** True when CS_DISPATCH_STRATEGY = 'claim' (no auto-assignment). */
-  isClaimMode?: boolean;
-  /** Max orders a CS agent can hold in claim mode before Claim button is disabled. */
-  claimCap?: number;
   /** Initial cart activity payload rendered on first paint before fetcher refreshes. */
-  initialCartActivity?: {
+  initialCartActivity: {
     activityItems: LiveActivityItem[];
     pendingCarts: PendingCart[];
     abandonedCarts: PendingCart[];
     abandonedPagination?: AbandonedCartPagination;
   };
-  // Deferred (streaming promises)
+  /** Non-empty when any primary-bundle request failed (timeout/API) — avoid silent empty queues. */
+  criticalFetchErrors: string[];
+}
+
+/** Shell props resolved synchronously from settings (before primary queue bundle streams). */
+export interface CSDashboardShell {
+  isClaimMode: boolean;
+  claimCap: number;
+}
+
+/** `/admin/cs/queue` loader — shell first, then streamed primary data + existing deferred slices. */
+export interface CSDashboardPageProps {
+  shell: CSDashboardShell;
+  criticalData: Promise<CSDashboardCriticalPayload>;
   inactiveAgents: Promise<InactiveAgent[]>;
   callbackOrders: Promise<CSOrder[]>;
   flaggedDuplicates: Promise<DuplicatePair[]>;
   leaderboard: Promise<CSLeaderboardEntry[]>;
   leaderboardPeriod: 'this_month' | 'all_time';
   cartStats?: Promise<{ pending: number; abandonedOpen: number }>;
-  /** Deferred claim queue — only populated when isClaimMode is true. */
+  /** Deferred claim queue — only populated when shell.isClaimMode is true. */
   claimQueue?: Promise<CSOrder[]>;
-  pendingCarts?: Promise<PendingCart[]>;
-  abandonedCarts?: Promise<PendingCart[]>;
-  activityItems?: Promise<LiveActivityItem[]>;
-  /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
-  /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
   canCreateOffline?: boolean;
-  /** When true, show Delete button on abandoned carts (HEAD_OF_CS / SuperAdmin). */
   canDeleteCart?: boolean;
-  /** Products list for offline order form (when canCreateOffline). */
-  productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
-  /** Non-empty when any critical queue loader request failed (timeout/API) — avoid silent empty queues. */
-  criticalFetchErrors?: string[];
+  /** Products for offline order modal — loaded in parallel with primary bundle. */
+  productsForOfflineOrder: Promise<
+    Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>
+  >;
 }
+

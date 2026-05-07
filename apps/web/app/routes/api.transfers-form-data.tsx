@@ -18,12 +18,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   try {
     const [productsRes, levelsRes] = await Promise.all([
-      apiRequest<unknown>('/trpc/products.list', opt),
+      apiRequest<unknown>(`/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`, opt),
       apiRequest<unknown>(`/trpc/inventory.levels?input=${encodeURIComponent(levelsInput)}`, opt),
     ]);
 
     const products = productsRes.ok
-      ? ((productsRes.data as { result?: { data?: { products?: Product[] } } })?.result?.data?.products ?? [])
+      ? (((productsRes.data as { result?: { data?: Product[] } })?.result?.data ?? []) as Product[])
       : [];
     const levels = levelsRes.ok
       ? ((levelsRes.data as { result?: { data?: { levels?: InventoryLevel[] } } })?.result?.data?.levels ?? [])

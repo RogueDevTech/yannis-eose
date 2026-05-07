@@ -358,6 +358,7 @@ export type {
 // HR & Payroll validators
 export {
   commissionRulesSchema,
+  commissionOrderRateTierSchema,
   createCommissionPlanSchema,
   updateCommissionPlanSchema,
   listCommissionPlansSchema,
@@ -370,6 +371,7 @@ export {
   payrollDepartmentSchema,
   payrollBatchStatusSchema,
   generateBatchSchema,
+  generateBatchesBulkSchema,
   submitBatchSchema,
   approveBatchSchema,
   rejectBatchSchema,
@@ -380,6 +382,7 @@ export {
 } from './hr';
 
 export type {
+  CommissionRules,
   CreateCommissionPlanInput,
   UpdateCommissionPlanInput,
   ListCommissionPlansInput,
@@ -392,6 +395,7 @@ export type {
   PayrollDepartment,
   PayrollBatchStatus,
   GenerateBatchInput,
+  GenerateBatchesBulkInput,
   SubmitBatchInput,
   ApproveBatchInput,
   RejectBatchInput,

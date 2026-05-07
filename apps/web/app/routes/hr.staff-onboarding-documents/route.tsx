@@ -22,6 +22,22 @@ type ListPayload = {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 };
 
+type CountsPayload = {
+  total: number;
+  NOT_STARTED: number;
+  IN_PROGRESS: number;
+  SUBMITTED: number;
+  APPROVED: number;
+};
+
+const EMPTY_COUNTS: CountsPayload = {
+  total: 0,
+  NOT_STARTED: 0,
+  IN_PROGRESS: 0,
+  SUBMITTED: 0,
+  APPROVED: 0,
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireOnboardingHrPagesAccess(request);
   const cookie = getSessionCookie(request);
@@ -45,10 +61,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const input = parsed.success ? parsed.data : listStaffOnboardingDocumentsSchema.parse({ page, limit });
 
   const inputEnc = encodeURIComponent(JSON.stringify(input));
-  const res = await apiRequest<unknown>(`/trpc/onboarding.listStaffDocuments?input=${inputEnc}`, {
-    method: 'GET',
-    cookie,
-  });
+  const countsInput = encodeURIComponent(
+    JSON.stringify({ allBranches: input.allBranches ?? false }),
+  );
+  const [res, countsRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/onboarding.listStaffDocuments?input=${inputEnc}`, {
+      method: 'GET',
+      cookie,
+    }),
+    apiRequest<unknown>(`/trpc/onboarding.countStaffDocumentsByStatus?input=${countsInput}`, {
+      method: 'GET',
+      cookie,
+    }),
+  ]);
 
   const onboardingParam = input.onboardingStatus;
   const sortByParam = input.sortBy;
@@ -65,6 +90,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const totalCount = pagination?.total ?? 0;
 
+  const countsData = countsRes.ok
+    ? ((countsRes.data as { result?: { data?: CountsPayload } })?.result?.data ?? EMPTY_COUNTS)
+    : EMPTY_COUNTS;
+  const counts: CountsPayload = {
+    total: countsData.total ?? 0,
+    NOT_STARTED: countsData.NOT_STARTED ?? 0,
+    IN_PROGRESS: countsData.IN_PROGRESS ?? 0,
+    SUBMITTED: countsData.SUBMITTED ?? 0,
+    APPROVED: countsData.APPROVED ?? 0,
+  };
+
   return {
     rows,
     page: pagination?.page ?? input.page,
@@ -75,6 +111,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortByParam,
     sortOrderParam,
     searchParam,
+    counts,
   };
 }
 
@@ -91,6 +128,7 @@ export default function StaffOnboardingDocumentsRoute() {
       sortByParam={data.sortByParam}
       sortOrderParam={data.sortOrderParam}
       searchParam={data.searchParam}
+      counts={data.counts}
     />
   );
 }

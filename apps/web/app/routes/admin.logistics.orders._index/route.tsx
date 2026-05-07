@@ -1,4 +1,4 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import {
@@ -95,16 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
-  // Daily-counts series for the chart-view trend line. Mirrors the same scope filters the
-  // table uses (date range + 3PL location) so the trend matches what the user is reading.
-  const [ordersRes, countsRes, locationsRes] = await Promise.all([
-    apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(
-      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
-      { method: 'GET', cookie },
-    ),
-  ]);
+  const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
 
   const ordersData = ordersRes.ok
     ? (ordersRes.data as { result?: { data?: { orders: LogisticsOrder[]; pagination: { total: number; totalPages: number } } } })
@@ -113,38 +104,50 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listErrorMessage = !ordersRes.ok
     ? extractApiErrorMessage(ordersRes.data, 'Could not load logistics orders')
     : undefined;
-  const countsData = countsRes.ok
-    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-    : {};
-  const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
-    : null;
-  const orders = ordersData?.orders ?? [];
+  const ordersRaw = ordersData?.orders ?? [];
   const total = ordersData?.pagination?.total ?? 0;
   const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
-  const locations = locationsData?.locations ?? [];
 
-  const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
-  const locationProviderById = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
+  const placeholderOrders: Array<LogisticsOrder & { locationName: string; locationProviderName: string | null; riderName: string }> =
+    ordersRaw.map((o) => ({
+      ...o,
+      locationName: '—',
+      locationProviderName: null,
+      riderName: '—',
+    }));
 
-  const enrichedOrders: Array<LogisticsOrder & { locationName: string; locationProviderName: string | null; riderName: string }> = orders.map((o) => ({
-    ...o,
-    locationName: o.logisticsLocationId ? locationNameById.get(o.logisticsLocationId) ?? '—' : '—',
-    locationProviderName: o.logisticsLocationId ? locationProviderById.get(o.logisticsLocationId) ?? null : null,
-    riderName: '—',
-  }));
+  const deferredSecondary = (async (): Promise<{ statusCounts: Record<string, number>; locations: Location[] }> => {
+    try {
+      const [countsRes, locationsRes] = await Promise.all([
+        apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(
+          `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
+          { method: 'GET', cookie },
+        ),
+      ]);
+      const countsData = countsRes.ok
+        ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+        : {};
+      const locationsData = locationsRes.ok
+        ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
+        : null;
+      const locations = locationsData?.locations ?? [];
+      return { statusCounts: countsData, locations };
+    } catch {
+      return { statusCounts: {}, locations: [] };
+    }
+  })();
 
-  return {
-    orders: enrichedOrders,
+  return defer({
+    orders: placeholderOrders,
     total,
     totalPages,
     page,
     limit: ORDERS_PER_PAGE,
-    statusCounts: countsData,
     statusFilter: status,
     searchFilter: search ?? '',
     listErrorMessage,
-    locations,
+    deferredSecondary,
     riders: [],
     dailyCounts: undefined,
     filters: {
@@ -157,7 +160,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     allocationOnDetailOnly: true,
     orderDetailBasePath: '/admin/orders',
     pageDescription: 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
-  };
+  });
 }
 
 export async function action({ request }: ActionFunctionArgs) {

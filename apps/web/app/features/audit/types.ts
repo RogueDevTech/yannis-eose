@@ -42,11 +42,22 @@ export interface ActorRecord {
 
 export type ActorMap = Record<string, ActorRecord>;
 
+/** Preloaded `/admin/analytics/audit` actor filter options (SSR). */
+export interface AuditActorFilterOption {
+  id: string;
+  name: string;
+  role: string;
+}
+
 export interface AuditPageProps {
   rows: AuditEntry[];
   total: number;
   filters: AuditFilters;
   actorIds: string[];
+  /** Staff shown in the “filter by actor” picker (scoped like the audit log). */
+  actorFilterOptions: AuditActorFilterOption[];
+  /** Logistics location display names keyed by UUID (SSR-resolved for `stock_transfers` rows). */
+  locationNames: Record<string, string>;
   error?: string;
 }
 
@@ -56,5 +67,7 @@ export interface AuditStreamData {
   total: number;
   filters: AuditFilters;
   actorIds: string[];
+  actorFilterOptions: AuditActorFilterOption[];
+  locationNames: Record<string, string>;
   error?: string;
 }

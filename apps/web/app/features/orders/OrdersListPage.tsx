@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { Link, useFetcher, useSearchParams, useNavigate } from '@remix-run/react';
+import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
+import { Await, Link, useFetcher, useSearchParams, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { DeferredError } from '~/components/ui/deferred-section';
+import { OrdersChartViewShellSkeleton } from '~/components/ui/deferred-skeletons';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -42,6 +44,24 @@ import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
+
+/** Deferred loader bundle for `/admin/cs/orders` (counts, chart series, heat, picklists). */
+export type CsOrdersDeferredSecondary = {
+  statusCounts: Record<string, number>;
+  dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+  scheduleHeat: ScheduleHeatDay[];
+  myWorkload: {
+    agentId: string;
+    agentName: string;
+    capacity: number;
+    pendingCount: number;
+    todayClosesCount?: number;
+    lastActionAt: string | null;
+  } | null;
+  csAgentsForFilter: Array<{ agentId: string; agentName: string }>;
+  logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }>;
+  productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+};
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
 import { isPreferredDeliveryDueToday } from '~/lib/order-delivery-today';
@@ -91,7 +111,7 @@ function bulkTransitionLabel(targetStatus: string): string {
   }
 }
 
-interface OrdersListPageProps {
+export interface OrdersListPageProps {
   orders: Order[];
   total: number;
   totalPages: number;
@@ -138,9 +158,15 @@ interface OrdersListPageProps {
     scheduleKind: ListOrdersScheduleKind | null;
     scheduleDate: string | null;
   };
+  /** CS orders route — streams counts, chart data, heat, and bulk-action picklists after the list paints. */
+  deferredSecondary?: Promise<CsOrdersDeferredSecondary>;
 }
 
-export function OrdersListPage({
+type OrdersListPageImplProps = Omit<OrdersListPageProps, 'deferredSecondary'> & {
+  deferredLoading?: boolean;
+};
+
+function OrdersListPageImpl({
   orders,
   total,
   totalPages,
@@ -164,7 +190,8 @@ export function OrdersListPage({
   dailyCounts,
   scheduleHeat,
   scheduleFilters,
-}: OrdersListPageProps) {
+  deferredLoading = false,
+}: OrdersListPageImplProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const [showChartView, setShowChartView] = useState(false);
@@ -271,8 +298,6 @@ export function OrdersListPage({
 
   // Server-side filtering via URL params; orders are already filtered by loader
   const filteredOrders = orders;
-
-  const enableScheduleCalendar = scheduleHeat !== undefined && scheduleFilters !== undefined;
 
   const scheduleSelectValue =
     scheduleFilters?.scheduleKind === 'callback_due'
@@ -600,8 +625,7 @@ export function OrdersListPage({
     return n;
   }, [selectedStatus, showCSAgentColumn, csAgentsForFilter?.length, searchParams, scheduleFilters?.scheduleKind]);
 
-  const scheduleFilterFields =
-    enableScheduleCalendar && scheduleFilters ? (
+  const scheduleFilterFields = scheduleFilters ? (
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
         <div className="flex min-w-0 flex-col gap-1 sm:flex-1">
           <FormSelect
@@ -774,71 +798,89 @@ export function OrdersListPage({
       />
 
       {/* Status totals — moved above My Workload so the funnel snapshot reads first. */}
-      <OverviewStatStrip
-        items={[
-          { label: 'Total', value: total, valueClassName: 'text-app-fg' },
-          ...statusItems,
-        ]}
-      />
+      {deferredLoading ? (
+        <OverviewStatStripSkeleton count={1 + STATUS_KEYS.length} />
+      ) : (
+        <OverviewStatStrip
+          items={[
+            { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+            ...statusItems,
+          ]}
+        />
+      )}
 
       {/* My workload (CS agent only) */}
-      {isCSAgent && myWorkload && (
-        <div className="card">
-          <h2 className="text-sm font-semibold text-app-fg mb-2">
-            My Workload
-          </h2>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
-              <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
-                {myWorkload.agentName
-                  .split(' ')
-                  .map((n) => n[0])
-                  .join('')
-                  .slice(0, 2)
-                  .toUpperCase()}
-              </span>
+      {isCSAgent && (myWorkload || deferredLoading) && (
+        myWorkload ? (
+          <div className="card">
+            <h2 className="text-sm font-semibold text-app-fg mb-2">
+              My Workload
+            </h2>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center">
+                <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
+                  {myWorkload.agentName
+                    .split(' ')
+                    .map((n) => n[0])
+                    .join('')
+                    .slice(0, 2)
+                    .toUpperCase()}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-app-fg truncate">
+                  {myWorkload.agentName}
+                </p>
+                <p className="text-xs text-app-fg-muted">
+                  Today&apos;s duty: {myWorkload.todayClosesCount ?? 0} / {myWorkload.capacity}
+                  <span className="text-app-fg-muted/80"> (Lagos)</span>
+                </p>
+                <p className="text-[11px] text-app-fg-muted mt-0.5">Pipeline backlog: {myWorkload.pendingCount}</p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-app-fg truncate">
-                {myWorkload.agentName}
-              </p>
-              <p className="text-xs text-app-fg-muted">
-                Today&apos;s duty: {myWorkload.todayClosesCount ?? 0} / {myWorkload.capacity}
-                <span className="text-app-fg-muted/80"> (Lagos)</span>
-              </p>
-              <p className="text-[11px] text-app-fg-muted mt-0.5">Pipeline backlog: {myWorkload.pendingCount}</p>
-            </div>
-          </div>
-          {(() => {
-            const closes = myWorkload.todayClosesCount ?? 0;
-            const dailyPct = myWorkload.capacity > 0 ? (closes / myWorkload.capacity) * 100 : 0;
-            const barColor =
-              dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
-            return (
-              <>
-                <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                    style={{ width: `${Math.min(dailyPct, 100)}%` }}
-                  />
-                </div>
-                <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
-                  <span className="text-xs text-app-fg-muted">
-                    {Math.round(Math.min(dailyPct, 100))}% of daily target
-                  </span>
-                  <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                    {closes >= myWorkload.capacity && (
-                      <span className="text-xs font-medium text-success-600 dark:text-success-400">Target met</span>
-                    )}
-                    {myWorkload.pendingCount >= myWorkload.capacity && (
-                      <span className="text-xs font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
-                    )}
+            {(() => {
+              const closes = myWorkload.todayClosesCount ?? 0;
+              const dailyPct = myWorkload.capacity > 0 ? (closes / myWorkload.capacity) * 100 : 0;
+              const barColor =
+                dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
+              return (
+                <>
+                  <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                      style={{ width: `${Math.min(dailyPct, 100)}%` }}
+                    />
                   </div>
-                </div>
-              </>
-            );
-          })()}
-        </div>
+                  <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
+                    <span className="text-xs text-app-fg-muted">
+                      {Math.round(Math.min(dailyPct, 100))}% of daily target
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      {closes >= myWorkload.capacity && (
+                        <span className="text-xs font-medium text-success-600 dark:text-success-400">Target met</span>
+                      )}
+                      {myWorkload.pendingCount >= myWorkload.capacity && (
+                        <span className="text-xs font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        ) : deferredLoading ? (
+          <div className="card animate-pulse space-y-3" aria-hidden>
+            <div className="h-4 w-28 rounded bg-app-hover" />
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-app-hover shrink-0" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="h-4 w-40 rounded bg-app-hover" />
+                <div className="h-3 w-52 rounded bg-app-hover" />
+              </div>
+            </div>
+            <div className="h-2 w-full rounded-full bg-app-hover" />
+          </div>
+        ) : null
       )}
 
       {/* Bulk Action Toolbar */}
@@ -1033,26 +1075,33 @@ export function OrdersListPage({
                   options={statusOptions}
                   wrapperClassName="w-full min-w-0 sm:w-48"
                 />
-                {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 ? (
-                  <SearchableSelect
-                    id="orders-filter-closer"
-                    value={searchParams.get('csAgentId') || 'ALL'}
-                    onChange={(v) => {
-                      setSelectedIds(new Set());
-                      setBulkResult(null);
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('csAgentId', v);
-                        else next.delete('csAgentId');
-                        return next;
-                      });
-                    }}
-                    options={csAgentOptions}
-                    wrapperClassName="w-full min-w-0 sm:w-48"
-                    placeholder="All closers"
-                    searchPlaceholder="Search closers..."
-                  />
+                {showCSAgentColumn && ((csAgentsForFilter?.length ?? 0) > 0 || deferredLoading) ? (
+                  deferredLoading && !(csAgentsForFilter?.length) ? (
+                    <div
+                      className="h-9 w-full min-w-0 sm:w-48 shrink-0 rounded-md bg-app-hover animate-pulse"
+                      aria-hidden
+                    />
+                  ) : (
+                    <SearchableSelect
+                      id="orders-filter-closer"
+                      value={searchParams.get('csAgentId') || 'ALL'}
+                      onChange={(v) => {
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('csAgentId', v);
+                          else next.delete('csAgentId');
+                          return next;
+                        });
+                      }}
+                      options={csAgentOptions}
+                      wrapperClassName="w-full min-w-0 sm:w-48"
+                      placeholder="All closers"
+                      searchPlaceholder="Search closers..."
+                    />
+                  )
                 ) : null}
               </div>
             </div>
@@ -1084,28 +1133,32 @@ export function OrdersListPage({
                   wrapperClassName="w-full"
                 />
               </div>
-              {showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 ? (
+              {showCSAgentColumn && ((csAgentsForFilter?.length ?? 0) > 0 || deferredLoading) ? (
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Closer</span>
-                  <SearchableSelect
-                    id="orders-filter-closer-sheet"
-                    value={searchParams.get('csAgentId') || 'ALL'}
-                    onChange={(v) => {
-                      setSelectedIds(new Set());
-                      setBulkResult(null);
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('csAgentId', v);
-                        else next.delete('csAgentId');
-                        return next;
-                      });
-                    }}
-                    options={csAgentOptions}
-                    wrapperClassName="w-full"
-                    placeholder="All closers"
-                    searchPlaceholder="Search closers..."
-                  />
+                  {deferredLoading && !(csAgentsForFilter?.length) ? (
+                    <div className="h-9 w-full rounded-md bg-app-hover animate-pulse" aria-hidden />
+                  ) : (
+                    <SearchableSelect
+                      id="orders-filter-closer-sheet"
+                      value={searchParams.get('csAgentId') || 'ALL'}
+                      onChange={(v) => {
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v && v !== 'ALL') next.set('csAgentId', v);
+                          else next.delete('csAgentId');
+                          return next;
+                        });
+                      }}
+                      options={csAgentOptions}
+                      wrapperClassName="w-full"
+                      placeholder="All closers"
+                      searchPlaceholder="Search closers..."
+                    />
+                  )}
                 </div>
               ) : null}
             </>
@@ -1115,7 +1168,7 @@ export function OrdersListPage({
 
       {/* Schedule heat calendar — modal only. The Schedule dropdown's "…on date" options
           open this; the date badge next to the dropdown reopens it to change the day. */}
-      {enableScheduleCalendar && scheduleFilters && scheduleHeat && scheduleCalendarModalOpen ? (
+      {scheduleFilters && scheduleCalendarModalOpen ? (
         <Modal
           open
           onClose={() => setScheduleCalendarModalOpen(false)}
@@ -1145,14 +1198,18 @@ export function OrdersListPage({
               </svg>
             </button>
           </div>
-          {/* Loading overlay — kicks in while the loader is recomputing the heat
-              for the new month (← / → buttons trigger a URL change). The calendar
-              stays mounted under a blur so the user sees the new data fade in
-              instead of a flash of empty cells. */}
-          <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[18rem]">
-            <ScheduleHeatCalendar
+          {deferredLoading && scheduleHeat === undefined ? (
+            <div className="min-h-[18rem] rounded-lg bg-app-hover/80 animate-pulse" aria-hidden />
+          ) : (
+            <>
+              {/* Loading overlay — kicks in while the loader is recomputing the heat
+                  for the new month (← / → buttons trigger a URL change). The calendar
+                  stays mounted under a blur so the user sees the new data fade in
+                  instead of a flash of empty cells. */}
+              <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[18rem]">
+                <ScheduleHeatCalendar
               yearMonth={scheduleFilters.calendarMonth}
-              heat={scheduleHeat}
+              heat={scheduleHeat ?? []}
               selectedDate={scheduleFilters.scheduleDate}
               onSelectDay={(iso) => {
                 setSelectedIds(new Set());
@@ -1204,19 +1261,25 @@ export function OrdersListPage({
                   return next;
                 });
               }}
-            />
-          </TableLoadingOverlay>
+                />
+              </TableLoadingOverlay>
+            </>
+          )}
         </Modal>
       ) : null}
 
       {/* Orders table — replaced with chart view when the user toggles "View data in chart" */}
       {showChartView ? (
-        <OrdersChartView
-          statusCounts={statusCounts}
-          total={total}
-          scopeLabel="CS orders"
-          dailyCounts={dailyCounts}
-        />
+        deferredLoading ? (
+          <OrdersChartViewShellSkeleton />
+        ) : (
+          <OrdersChartView
+            statusCounts={statusCounts}
+            total={total}
+            scopeLabel="CS orders"
+            dailyCounts={dailyCounts}
+          />
+        )
       ) : (
       <TableLoadingOverlay show={isLoaderRefetchBusy}>
         <div className="card p-0">
@@ -1563,4 +1626,43 @@ export function OrdersListPage({
 
     </div>
   );
+}
+
+export function OrdersListPage(props: OrdersListPageProps) {
+  if (props.deferredSecondary) {
+    const { deferredSecondary, ...rest } = props;
+    return (
+      <Suspense
+        fallback={
+          <OrdersListPageImpl
+            {...rest}
+            deferredLoading
+            statusCounts={{}}
+            dailyCounts={undefined}
+            scheduleHeat={undefined}
+            myWorkload={null}
+            csAgentsForFilter={undefined}
+            logisticsLocationsForBulk={[]}
+            productsForOfflineOrder={[]}
+          />
+        }
+      >
+        <Await resolve={deferredSecondary} errorElement={<DeferredError />}>
+          {(sec) => (
+            <OrdersListPageImpl
+              {...rest}
+              statusCounts={sec.statusCounts}
+              dailyCounts={sec.dailyCounts}
+              scheduleHeat={sec.scheduleHeat}
+              myWorkload={sec.myWorkload}
+              csAgentsForFilter={sec.csAgentsForFilter}
+              logisticsLocationsForBulk={sec.logisticsLocationsForBulk}
+              productsForOfflineOrder={sec.productsForOfflineOrder}
+            />
+          )}
+        </Await>
+      </Suspense>
+    );
+  }
+  return <OrdersListPageImpl {...props} />;
 }

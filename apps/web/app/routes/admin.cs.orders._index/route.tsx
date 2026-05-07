@@ -1,4 +1,4 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import {
@@ -13,7 +13,7 @@ import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
-import { OrdersListPage } from '~/features/orders/OrdersListPage';
+import { OrdersListPage, type OrdersListPageProps } from '~/features/orders/OrdersListPage';
 import type { Order } from '~/features/orders/types';
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
@@ -156,115 +156,124 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const heatInputEnc = encodeURIComponent(JSON.stringify(heatInput));
 
-  const offlineProductsP = canCreateOffline
-    ? apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
-        `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
-        { method: 'GET', cookie },
-      )
-    : Promise.resolve({ ok: false as const, data: null });
+  const listRes = await apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie });
 
-  const [res, countsRes, myWorkloadRes, trendRes, heatRes, offlineProductsRes] = await Promise.all([
-    apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
-    isCSAgent ? apiRequest<unknown>('/trpc/orders.myCSWorkload', { method: 'GET', cookie }) : Promise.resolve(null),
-    apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/orders.scheduleCalendarHeat?input=${heatInputEnc}`, { method: 'GET', cookie }),
-    offlineProductsP,
-  ]);
-
-  const dailyCounts = trendRes.ok
-    ? ((trendRes.data as {
-        result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
-      })?.result?.data ?? [])
-    : [];
-
-  const scheduleHeat: ScheduleHeatDay[] = heatRes.ok
-    ? ((heatRes.data as { result?: { data?: ScheduleHeatDay[] } })?.result?.data ?? [])
-    : [];
-
-  const trpcData = res.ok
-    ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
+  const trpcData = listRes.ok
+    ? (listRes.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
     : null;
-  const countsData = countsRes.ok
-    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-    : {};
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
   const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
-  const myWorkload =
-    isCSAgent && myWorkloadRes && (myWorkloadRes as { ok: boolean }).ok
-      ? ((myWorkloadRes as { data?: { result?: { data?: { agentId: string; agentName: string; capacity: number; pendingCount: number; lastActionAt: string | null } } } }).data?.result?.data ??
-        null)
-      : null;
 
-  let csAgentsForFilter: Array<{ agentId: string; agentName: string }> = [];
-  let logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }> = [];
-  if (showCSAgentColumn) {
-    const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 100 }));
-    const [workloadsRes, locationsRes] = await Promise.all([
-      apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
-        '/trpc/orders.csWorkloads?input=%7B%7D',
-        { method: 'GET', cookie },
-      ),
-      apiRequest<{ result?: { data?: { locations: Array<{ id: string; name: string; providerName: string | null }> } } }>(
-        `/trpc/logistics.listLocations?input=${locationsInput}`,
-        { method: 'GET', cookie },
-      ),
+  const deferredSecondary = (async () => {
+    const offlineProductsP = canCreateOffline
+      ? apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
+          `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+          { method: 'GET', cookie },
+        )
+      : Promise.resolve({ ok: false as const, data: null });
+
+    const [countsRes, myWorkloadRes, trendRes, heatRes, offlineProductsRes] = await Promise.all([
+      apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
+      isCSAgent ? apiRequest<unknown>('/trpc/orders.myCSWorkload', { method: 'GET', cookie }) : Promise.resolve(null),
+      apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
+      apiRequest<unknown>(`/trpc/orders.scheduleCalendarHeat?input=${heatInputEnc}`, { method: 'GET', cookie }),
+      offlineProductsP,
     ]);
-    if (workloadsRes.ok && Array.isArray(workloadsRes.data?.result?.data)) {
-      csAgentsForFilter = workloadsRes.data.result.data.map((w) => ({ agentId: w.agentId, agentName: w.agentName }));
-    }
-    if (locationsRes.ok && Array.isArray(locationsRes.data?.result?.data?.locations)) {
-      logisticsLocationsForBulk = locationsRes.data.result.data.locations.map((loc) => ({
-        id: loc.id,
-        name: loc.name,
-        providerName: loc.providerName ?? null,
-      }));
-    }
-  }
 
-  let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
-  if (canCreateOffline && offlineProductsRes.ok) {
-    const pack = offlineProductsRes.data as {
-      result?: { data?: { products: typeof productsForOfflineOrder } };
+    const dailyCounts = trendRes.ok
+      ? ((trendRes.data as {
+          result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
+        })?.result?.data ?? [])
+      : [];
+
+    const scheduleHeat: ScheduleHeatDay[] = heatRes.ok
+      ? ((heatRes.data as { result?: { data?: ScheduleHeatDay[] } })?.result?.data ?? [])
+      : [];
+
+    const myWorkload =
+      isCSAgent && myWorkloadRes && (myWorkloadRes as { ok: boolean }).ok
+        ? ((myWorkloadRes as { data?: { result?: { data?: { agentId: string; agentName: string; capacity: number; pendingCount: number; todayClosesCount?: number; lastActionAt: string | null } } } }).data?.result?.data ??
+          null)
+        : null;
+
+    let csAgentsForFilter: Array<{ agentId: string; agentName: string }> = [];
+    let logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }> = [];
+    if (showCSAgentColumn) {
+      const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE', limit: 100 }));
+      const [workloadsRes, locationsRes] = await Promise.all([
+        apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
+          '/trpc/orders.csWorkloads?input=%7B%7D',
+          { method: 'GET', cookie },
+        ),
+        apiRequest<{ result?: { data?: { locations: Array<{ id: string; name: string; providerName: string | null }> } } }>(
+          `/trpc/logistics.listLocations?input=${locationsInput}`,
+          { method: 'GET', cookie },
+        ),
+      ]);
+      if (workloadsRes.ok && Array.isArray(workloadsRes.data?.result?.data)) {
+        csAgentsForFilter = workloadsRes.data.result.data.map((w) => ({ agentId: w.agentId, agentName: w.agentName }));
+      }
+      if (locationsRes.ok && Array.isArray(locationsRes.data?.result?.data?.locations)) {
+        logisticsLocationsForBulk = locationsRes.data.result.data.locations.map((loc) => ({
+          id: loc.id,
+          name: loc.name,
+          providerName: loc.providerName ?? null,
+        }));
+      }
+    }
+
+    let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
+    if (canCreateOffline && offlineProductsRes.ok) {
+      const pack = offlineProductsRes.data as {
+        result?: { data?: { products: typeof productsForOfflineOrder } };
+      };
+      if (pack?.result?.data?.products) {
+        productsForOfflineOrder = pack.result.data.products;
+      }
+    }
+
+    const countsData = countsRes.ok
+      ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+      : {};
+
+    return {
+      statusCounts: countsData,
+      dailyCounts,
+      scheduleHeat,
+      myWorkload,
+      csAgentsForFilter,
+      logisticsLocationsForBulk,
+      productsForOfflineOrder,
     };
-    if (pack?.result?.data?.products) {
-      productsForOfflineOrder = pack.result.data.products;
-    }
-  }
+  })();
 
-  return {
+  return defer({
     orders: trpcData?.orders ?? [],
     total,
     totalPages,
     page,
     limit: ORDERS_PER_PAGE,
-    statusCounts: countsData,
     statusFilter: status,
     searchFilter: search,
     isCSAgent,
     showCSAgentColumn,
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
     currentUserId: user.id,
-    myWorkload,
-    csAgentsForFilter,
-    logisticsLocationsForBulk,
     canCreateOffline,
-    productsForOfflineOrder,
-    dailyCounts,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
       periodAllTime,
     },
-    scheduleHeat,
     scheduleFilters: {
       calendarMonth,
       scheduleKind: scheduleKind ?? null,
       scheduleDate: scheduleKind === 'delivery_overdue' ? null : (scheduleDate ?? null),
     },
-  };
+    deferredSecondary,
+  } as Record<string, unknown>);
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -456,7 +465,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CSOrdersRoute() {
-  const data = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>() as unknown as OrdersListPageProps;
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
@@ -466,8 +475,6 @@ export default function CSOrdersRoute() {
       {...data}
       userRole={userRole}
       liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
-      canCreateOffline={data.canCreateOffline}
-      productsForOfflineOrder={data.productsForOfflineOrder}
     />
     </>
   );

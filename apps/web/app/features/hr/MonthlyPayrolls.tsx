@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -7,7 +7,6 @@ import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { FormSelect } from '~/components/ui/form-select';
-import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -17,7 +16,7 @@ import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
-import { useFetcherToast } from '~/components/ui/toast';
+import { useFetcherToast, useToast } from '~/components/ui/toast';
 import type {
   MonthlyPayrollGroup,
   PayrollBatch,
@@ -25,24 +24,7 @@ import type {
   BranchOption,
   ViewerInfo,
 } from './types';
-
-const ALL_DEPARTMENTS: PayrollDepartment[] = ['CS', 'MARKETING', 'LOGISTICS', 'HR'];
-
-const DEPT_LABEL: Record<PayrollDepartment, string> = {
-  CS: 'Customer Service',
-  MARKETING: 'Marketing',
-  LOGISTICS: 'Logistics',
-  HR: 'HR & Admin',
-};
-
-const DEPT_OWNER_ROLE: Record<PayrollDepartment, string> = {
-  CS: 'HEAD_OF_CS',
-  MARKETING: 'HEAD_OF_MARKETING',
-  LOGISTICS: 'HEAD_OF_LOGISTICS',
-  HR: 'HR_MANAGER',
-};
-
-const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
+import { ADMIN_ROLES, DEPT_LABEL, DEPT_OWNER_ROLE, ALL_DEPARTMENTS } from './payroll-constants';
 
 function formatMonth(periodMonth: string): string {
   // periodMonth is YYYY-MM-01
@@ -216,17 +198,6 @@ function buildBatchPayoutColumns(args: {
   return cols;
 }
 
-interface PayrollPreview {
-  staffCount: number;
-  totalAmount: number;
-  rows: Array<{
-    staffId: string;
-    staffName: string;
-    staffRole: string;
-    totalPayout: number;
-  }>;
-}
-
 interface MonthlyPayrollsProps {
   monthlyPayrolls: MonthlyPayrollGroup[];
   branches: BranchOption[];
@@ -245,31 +216,16 @@ export function MonthlyPayrolls({
   fetchBatchDetail,
 }: MonthlyPayrollsProps) {
   const fetcher = useFetcher();
-  const previewFetcher = useFetcher<{ success?: boolean; preview?: PayrollPreview; error?: string }>();
   const payrollSurface = useFetcherActionSurface(fetcher);
-  const payrollPreviewSurface = useFetcherActionSurface(previewFetcher);
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { toast } = useToast();
 
-  const [showGenerate, setShowGenerate] = useState(false);
+  const branchById = useMemo(() => new Map(branches.map((b) => [b.id, b.name])), [branches]);
+
   const [openBatchId, setOpenBatchId] = useState<string | null>(initialBatchId);
   const [batchDetail, setBatchDetail] = useState<BatchDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [generateBranchId, setGenerateBranchId] = useState<string>('');
-  const [generateDepartment, setGenerateDepartment] = useState<PayrollDepartment>('CS');
-  const [generatePeriodMonth, setGeneratePeriodMonth] = useState('');
-  const [preview, setPreview] = useState<PayrollPreview | null>(null);
-  // Generate-batch close-on-success uses the shared `useCloseOnFetcherSuccess`
-  // hook with `intent: 'generateBatch'` so the close fires only for THIS
-  // submission, not for other actions sharing this fetcher (approve / reject
-  // / mark paid). See CLAUDE.md → "Modal + Optimistic UI Pattern".
-
-  /** Current month in YYYY-MM, e.g. "2026-04". Refreshes whenever the modal opens so a long-lived
-   *  page that crosses midnight on the 1st of next month still defaults to the new period. */
-  const currentMonth = useMemo(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  }, [showGenerate]);
 
   // Available departments to GENERATE — includes backend-provided prepare access
   const generatableDepartments: PayrollDepartment[] = useMemo(() => {
@@ -290,28 +246,25 @@ export function MonthlyPayrolls({
     return own ? [own] : [];
   }, [viewer, branches]);
 
-  useEffect(() => {
-    if (showGenerate && !generateBranchId) {
-      setGenerateBranchId(generatableBranches[0]?.id ?? '');
-    }
-  }, [showGenerate, generateBranchId, generatableBranches]);
-
-  useEffect(() => {
-    if (!showGenerate) return;
-    const first = generatableDepartments[0];
-    if (first && !generatableDepartments.includes(generateDepartment)) {
-      setGenerateDepartment(first);
-    }
-    if (!generatePeriodMonth) {
-      setGeneratePeriodMonth(currentMonth);
-    }
-  }, [showGenerate, generateDepartment, generatableDepartments, generatePeriodMonth, currentMonth]);
-
-  const payrollFetcherModalOpen = showGenerate || openBatchId != null;
   useFetcherToast(fetcher.data, {
     successMessage: 'Payroll updated',
-    skipErrorToast: payrollFetcherModalOpen,
+    skipErrorToast: openBatchId != null,
   });
+
+  /** One-shot toast after bulk generate redirect from `/hr/payroll/generate`. */
+  const generateSummaryFlash = searchParams.get('generateSummary');
+  useEffect(() => {
+    if (!generateSummaryFlash) return;
+    toast.success(generateSummaryFlash);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('generateSummary');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [generateSummaryFlash, setSearchParams, toast]);
 
   // Open / close detail modal — fetch on open
   useEffect(() => {
@@ -329,7 +282,7 @@ export function MonthlyPayrolls({
       next.set('batchId', openBatchId);
       return next;
     }, { replace: true });
-  }, [openBatchId]);
+  }, [openBatchId, fetchBatchDetail, setSearchParams]);
 
   function closeDetail() {
     setOpenBatchId(null);
@@ -348,29 +301,8 @@ export function MonthlyPayrolls({
     fetchBatchDetail(openBatchId)
       .then((d) => setBatchDetail(d))
       .finally(() => setLoadingDetail(false));
-  }, [openBatchId]);
+  }, [openBatchId, fetchBatchDetail]);
   useCloseOnFetcherSuccess(fetcher, handleBatchDetailRefresh);
-
-  /** Generate-batch lifecycle:
-   *  - Close the modal the instant a `{ success: true }` response lands for the
-   *    `generateBatch` intent (other fetcher actions sharing this `fetcher`
-   *    are filtered out by the hook's intent option).
-   *  - Surface any server `error` inline (e.g. CONFLICT for an already-
-   *    submitted batch) so the user can retry without losing context.
-   *  - Clear the inline error when a fresh generate submission starts. */
-  const handleGenerateSuccess = useCallback(() => {
-    setShowGenerate(false);
-  }, []);
-  useCloseOnFetcherSuccess(fetcher, handleGenerateSuccess, { intent: 'generateBatch' });
-
-  useEffect(() => {
-    if (!showGenerate) return;
-    if (previewFetcher.state !== 'idle') return;
-    const result = previewFetcher.data;
-    if (result?.preview) {
-      setPreview(result.preview);
-    }
-  }, [showGenerate, previewFetcher.state, previewFetcher.data]);
 
   const showGenerateButton = generatableDepartments.length > 0 && generatableBranches.length > 0;
 
@@ -379,9 +311,9 @@ export function MonthlyPayrolls({
       {/* Header actions */}
       {showGenerateButton && (
         <div className="flex flex-wrap gap-2">
-          <Button variant="primary" size="sm" onClick={() => setShowGenerate(true)}>
+          <Link to="/hr/payroll/generate" className="btn-primary btn-sm inline-flex items-center justify-center">
             + Generate Monthly Batch
-          </Button>
+          </Link>
         </div>
       )}
 
@@ -400,141 +332,16 @@ export function MonthlyPayrolls({
 
       {/* Monthly groups */}
       {monthlyPayrolls.map((group) => (
-        <MonthGroup
-          key={group.month}
-          group={group}
-          viewer={viewer}
-          onOpenBatch={(id) => setOpenBatchId(id)}
-        />
+        <MonthGroup key={group.month} group={group} branchById={branchById} onOpenBatch={(id) => setOpenBatchId(id)} />
       ))}
       </TableLoadingOverlay>
-
-      {/* Generate Batch modal — stays open until the server responds. The close-on-success effect
-          above (`generate-batch lifecycle`) flips `showGenerate` to false only after fetcher returns
-          `{ success: true }`. On error, the message renders inline so the user can adjust + retry. */}
-      {showGenerate && (
-        <Modal
-          open
-          onClose={() => {
-            // Block backdrop / Esc dismissal while the request is mid-flight so we don't lose feedback.
-            if (fetcher.state !== 'idle') return;
-            setShowGenerate(false);
-            setPreview(null);
-          }}
-          maxWidth="max-w-md"
-          backdropBlur
-          contentClassName="p-5 space-y-4"
-        >
-          <h3 className="text-base font-semibold text-app-fg">Generate Monthly Payroll Batch</h3>
-          <p className="text-xs text-app-fg-muted">
-            Auto-derives payouts from delivered orders + commission plans for the selected department and month.
-            Existing DRAFT batches in the same slot are refreshed; submitted batches must be rejected first.
-          </p>
-          <ModalFetcherInlineError message={payrollSurface.errorMatchingIntent('generateBatch')} />
-          <ModalFetcherInlineError message={payrollPreviewSurface.errorMatchingIntent('previewBatch')} />
-          <fetcher.Form method="post" className="space-y-3">
-            <input type="hidden" name="intent" value="generateBatch" />
-            <input type="hidden" name="branchId" value={generateBranchId} />
-            <SearchableSelect
-              id="payroll-generate-branchId"
-              label="Branch"
-              required
-              value={generateBranchId}
-              onChange={setGenerateBranchId}
-              options={generatableBranches.map((b) => ({ value: b.id, label: b.name }))}
-              searchPlaceholder="Search branches..."
-            />
-            <FormSelect
-              label="Department"
-              name="department"
-              required
-              options={generatableDepartments.map((d) => ({ value: d, label: DEPT_LABEL[d] }))}
-              value={generateDepartment}
-              onChange={(e) => {
-                setGenerateDepartment(e.target.value as PayrollDepartment);
-                setPreview(null);
-              }}
-            />
-            <TextInput
-              label="Month"
-              name="periodMonth"
-              type="month"
-              required
-              value={generatePeriodMonth}
-              onChange={(e) => {
-                setGeneratePeriodMonth(e.target.value);
-                setPreview(null);
-              }}
-              hint="Defaults to the current month. Pick another to back-fill or pre-stage."
-            />
-            <div className="rounded-md border border-app-border bg-app-hover p-3 space-y-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={!generateBranchId || !generateDepartment || !generatePeriodMonth}
-                loading={previewFetcher.state === 'submitting'}
-                loadingText="Previewing…"
-                onClick={() =>
-                  previewFetcher.submit(
-                    {
-                      intent: 'previewBatch',
-                      branchId: generateBranchId,
-                      department: generateDepartment,
-                      periodMonth: generatePeriodMonth,
-                    },
-                    { method: 'post' },
-                  )
-                }
-              >
-                Preview roster & expected pay
-              </Button>
-              {preview && (
-                <div className="text-xs text-app-fg-muted space-y-1">
-                  <p>
-                    Staff: <span className="font-medium text-app-fg">{preview.staffCount}</span> · Expected total:{' '}
-                    <span className="font-medium text-app-fg"><NairaPrice amount={preview.totalAmount} /></span>
-                  </p>
-                  <div className="max-h-28 overflow-y-auto pr-1 space-y-0.5">
-                    {preview.rows.slice(0, 8).map((row) => (
-                      <p key={row.staffId}>
-                        {row.staffName} ({row.staffRole.replace(/_/g, ' ')}) — <NairaPrice amount={row.totalPayout} />
-                      </p>
-                    ))}
-                    {preview.rows.length > 8 && <p>…and {preview.rows.length - 8} more</p>}
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="submit"
-                variant="primary"
-                size="sm"
-                loading={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'generateBatch'}
-                loadingText="Generating…"
-              >
-                Generate
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={fetcher.state === 'submitting' && fetcher.formData?.get('intent') === 'generateBatch'}
-                onClick={() => { setShowGenerate(false); setPreview(null); }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </fetcher.Form>
-        </Modal>
-      )}
 
       {/* Batch detail modal */}
       {openBatchId && (
         <BatchDetailModal
           loading={loadingDetail}
           detail={batchDetail}
+          branchById={branchById}
           viewer={viewer}
           fetcher={fetcher}
           payrollSurface={payrollSurface}
@@ -549,11 +356,11 @@ export function MonthlyPayrolls({
 
 function MonthGroup({
   group,
-  viewer,
+  branchById,
   onOpenBatch,
 }: {
   group: MonthlyPayrollGroup;
-  viewer: ViewerInfo;
+  branchById: Map<string, string>;
   onOpenBatch: (id: string) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -586,7 +393,12 @@ function MonthGroup({
       {open && (
         <div className="border-t border-app-border">
           {group.items.map((batch) => (
-            <BatchRow key={batch.id} batch={batch} viewer={viewer} onOpen={() => onOpenBatch(batch.id)} />
+            <BatchRow
+              key={batch.id}
+              batch={batch}
+              branchName={branchById.get(batch.branchId) ?? batch.branchId.slice(0, 8)}
+              onOpen={() => onOpenBatch(batch.id)}
+            />
           ))}
         </div>
       )}
@@ -598,11 +410,11 @@ function MonthGroup({
 
 function BatchRow({
   batch,
-  viewer,
+  branchName,
   onOpen,
 }: {
   batch: PayrollBatch;
-  viewer: ViewerInfo;
+  branchName: string;
   onOpen: () => void;
 }) {
   return (
@@ -614,7 +426,7 @@ function BatchRow({
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-app-fg">{DEPT_LABEL[batch.department]}</p>
         <p className="text-xs text-app-fg-muted">
-          {batch.staffCount} staff · {batch.preparedAt
+          {branchName} · {batch.staffCount} staff · {batch.preparedAt
             ? `prepared ${new Date(batch.preparedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}`
             : 'not yet generated'}
         </p>
@@ -632,6 +444,7 @@ function BatchRow({
 function BatchDetailModal({
   loading,
   detail,
+  branchById,
   viewer,
   fetcher,
   payrollSurface,
@@ -639,6 +452,7 @@ function BatchDetailModal({
 }: {
   loading: boolean;
   detail: BatchDetail | null;
+  branchById: Map<string, string>;
   viewer: ViewerInfo;
   fetcher: ReturnType<typeof useFetcher>;
   payrollSurface: ReturnType<typeof useFetcherActionSurface>;
@@ -684,7 +498,8 @@ function BatchDetailModal({
             {DEPT_LABEL[batch.department]} · {formatMonth(batch.periodMonth)}
           </h3>
           <p className="text-xs text-app-fg-muted mt-0.5">
-            {batch.staffCount} staff · Total <NairaPrice amount={Number(batch.totalAmount)} />
+            {branchById.get(batch.branchId) ?? batch.branchId.slice(0, 8)} · {batch.staffCount} staff · Total{' '}
+            <NairaPrice amount={Number(batch.totalAmount)} />
           </p>
         </div>
         <div className="flex items-center gap-2">

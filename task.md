@@ -3531,3 +3531,124 @@ Out of scope for v1. Capture as a follow-up so we don't forget the trade-off.
 - [ ] Role matrix table in CLAUDE.md includes the new `attendance_mode` field.
 
 **Phase 20 build order:** 20.1 (schema) → 20.2 (backend) → 20.3 (HR config) → 20.4 (user UI) → 20.5 (HR roster) → 20.7 (docs). 20.6 deferred. Don't start 20.4 before 20.3 ships, otherwise users can check in at branches with no shift config and the late flag gets garbage data.
+
+## Phase 21: Storage Asset Reorganization (Go-to-Prod prep)
+
+**Why:** Today every upload lands in one of 6 flat folders at the bucket root (`screenshots/`, `receipts/`, `delivery-proof/`, `invoices/`, `product-images/`, `onboarding-docs/`) with `{folder}/{timestamp}-{random}-{filename}` keys. That worked while we were prototyping. Before prod we need: (1) **access-tier separation** — onboarding NIN/BVN docs and product gallery images cannot share the same bucket policy, (2) **date partitioning** so quarterly listing/backup doesn't need a full-prefix scan once we cross ~100k objects, (3) **lifecycle rules per domain** — invoices stay forever, ad screenshots can age out after 18 months, attendance photos after 90 days, (4) **domain entity prefixes** so "list everything for user X" or "list everything for order Y" is one cheap LIST instead of N filename guesses, and (5) **public-CDN-cacheable vs auth-only split** so product images can be served from a public CDN edge while onboarding docs require short-TTL signed URLs every time.
+
+**Locked decisions (pre-design):**
+- **Three access tiers, encoded as top-level prefixes:** `public/` (anonymous read OK, CDN-cacheable), `private/` (auth-only, signed URL on read), `restricted/` (HR/finance-sensitive, short-TTL signed URLs only). Bucket policies apply at the tier prefix.
+- **Within each tier: domain → date → entity → file.** Ex: `private/ad-screenshots/2026/05/{mediaBuyerId}/{file}`. Date is `YYYY/MM` (not `YYYY-MM-DD` — month-level is enough for listing partitions).
+- **Migration is non-destructive.** Backfill copies (not moves) old keys to new layout. Old keys stay readable until the cutover window closes (30 days after backfill verification). DB columns that store URLs get rewritten in the same migration script.
+- **Filename component stays the same** — `{timestamp}-{random}-{sanitized-name}` — only the folder structure changes.
+- **One bucket, multiple prefixes.** Don't fragment into 3 buckets — bucket count multiplies CORS / IAM / lifecycle config without simplifying anything. R2 lifecycle rules support per-prefix policies.
+
+**Open questions (need a call before Task 21.1):**
+1. **Public CDN distribution.** For `public/`, do we front it with Cloudflare (R2 + CF cache) or stay on direct R2 URLs? Direct R2 has a hot-link bandwidth cost; CF cache is free at our volume. **Default:** CF cache via custom domain `cdn.yannis.app`.
+2. **Should we move call recordings into this layout now or defer to the VOIP migration (Phase 15)?** Call recordings will need their own `restricted/call-recordings/` prefix when Termii/AT lands. **Default:** reserve the prefix in Task 21.1 but don't wire it until Phase 15 ships.
+3. **Org-id top-level prefix?** If we ever go multi-tenant, layout becomes `{orgId}/{tier}/...`. **Default:** skip for v1, single-tenant for now. The migration script is structured so adding `{orgId}` later is a re-prefix, not a re-key.
+
+### Task 21.1 — New folder layout + allowlist
+
+- New constants in [apps/web/app/lib/s3-upload.ts](apps/web/app/lib/s3-upload.ts):
+  ```
+  public/product-images/{productId}/{yyyy}/{mm}/{file}
+  public/form-assets/{campaignId}/{yyyy}/{mm}/{file}             ← reserved, not used yet
+
+  private/ad-screenshots/{yyyy}/{mm}/{mediaBuyerId}/{file}
+  private/delivery-proof/{yyyy}/{mm}/{orderId}/{file}
+  private/funding-receipts/{yyyy}/{mm}/{file}
+  private/cash-remittance-receipts/{yyyy}/{mm}/{file}             ← split from generic 'receipts'
+  private/invoices/{yyyy}/{mm}/{invoiceRef}.pdf
+  private/transfer-remittances/{yyyy}/{mm}/{file}                 ← currently bundled in 'receipts'
+  private/permission-request-attachments/{yyyy}/{mm}/{file}       ← reserved
+
+  restricted/onboarding-docs/{userId}/{docType}/{file}            ← user-id-scoped, no date prefix (small set per user)
+  restricted/call-recordings/{yyyy}/{mm}/{callId}/{file}          ← reserved for Phase 15
+  restricted/attendance-photos/{yyyy}/{mm}/{userId}/{file}        ← reserved for Phase 20.6
+  ```
+- `S3_FOLDERS` becomes a discriminated map keyed by *purpose* (e.g. `AD_SCREENSHOT`, `DELIVERY_PROOF`, `INVOICE_PDF`, `ONBOARDING_DOC`, `PRODUCT_IMAGE`) — caller never builds the path manually.
+- Helper `buildKey(purpose, ctx)` in [apps/web/app/lib/s3-upload.ts](apps/web/app/lib/s3-upload.ts) renders the date + entity sub-prefix from `ctx` (e.g. `{ productId }`, `{ orderId }`, `{ mediaBuyerId }`).
+- Server allowlist in [apps/web/app/routes/api.upload-url/route.tsx](apps/web/app/routes/api.upload-url/route.tsx) accepts `purpose` (not raw `folder`) and computes the prefix server-side. Clients can never inject paths.
+- Soft cutover: server still accepts the legacy 6 raw folder strings during the migration window, both code paths produce keys but new uploads go to the new layout.
+
+**Acceptance Criteria:**
+- [ ] All 11+ live upload sites in `apps/web/app/features/**` switched to passing `purpose` not `folder`.
+- [ ] Server-side prefix construction is canonical (no `folder` string trusted from client).
+- [ ] Old folder names still accepted by the API for the cutover window (rejected after Task 21.4).
+- [ ] Unit test on `buildKey()` covering each purpose + a missing-context case.
+
+### Task 21.2 — Bucket policies + lifecycle rules
+
+- IAM / R2 bucket policy:
+  - `public/*` — anonymous GET allowed; PUT requires auth.
+  - `private/*` — GET requires presigned URL or authed origin; PUT requires presigned URL.
+  - `restricted/*` — GET requires presigned URL with TTL ≤ 5 minutes; no public access ever.
+- Lifecycle rules (apply per top-level prefix):
+  | Prefix | Transition | Expiration |
+  |---|---|---|
+  | `public/product-images/*` | none | none (forever) |
+  | `private/ad-screenshots/*` | Glacier @ 90d | delete @ 18mo |
+  | `private/delivery-proof/*` | none | none (legal proof) |
+  | `private/funding-receipts/*` | Glacier @ 180d | delete @ 7y |
+  | `private/cash-remittance-receipts/*` | Glacier @ 180d | delete @ 7y |
+  | `private/invoices/*` | none | none (legal) |
+  | `private/transfer-remittances/*` | Glacier @ 180d | delete @ 7y |
+  | `restricted/onboarding-docs/*` | none | none (HR forever) |
+  | `restricted/attendance-photos/*` | none | delete @ 90d |
+- Cloudflare CDN: configure `cdn.yannis.app` to cache `public/*` aggressively (1y immutable headers — keys are content-addressable via timestamp+random suffix, no rewrite hazard).
+- Documented in `docs/RUNBOOK.md` under a new "Storage" section.
+
+**Acceptance Criteria:**
+- [ ] Bucket policies applied and verified with curl: anonymous GET on `public/foo.jpg` succeeds, on `private/foo.jpg` returns 403.
+- [ ] `restricted/*` GETs without a signed URL return 403 even with valid IAM creds.
+- [ ] Lifecycle rules visible in R2 console and tested with a fixture object dated 91+ days ago (in staging).
+- [ ] CDN cache hit rate > 90% on product images after 24h warm.
+
+### Task 21.3 — Backfill script
+
+- New script `packages/shared/scripts/storage-backfill.ts`:
+  - For each old folder (`screenshots/`, `receipts/`, `delivery-proof/`, `invoices/`, `product-images/`, `onboarding-docs/`), list all objects.
+  - For each object, derive the new key:
+    - `screenshots/*` → `private/ad-screenshots/{yyyy}/{mm}/_legacy/{filename}` (we don't have the mediaBuyerId from a flat key — drop into `_legacy` sub-folder so the new layout is preserved going forward but we don't lie about provenance).
+    - `receipts/*` → split based on URL referrer in DB lookup: rows in `marketing_funding.receipt_url` → `private/funding-receipts/`, rows in `delivery_remittances.receipt_url` → `private/cash-remittance-receipts/`, fallback → `private/funding-receipts/_legacy/`.
+    - `delivery-proof/*` → look up the `orders` row that points at the URL; if found, prefix `{orderId}`; else `_legacy`.
+    - `invoices/*` → keep `invoiceRef` from filename if present, else `_legacy`.
+    - `product-images/*` → look up `products`/`offer_groups` row that points at the URL; if found, prefix `{productId}`; else `_legacy`.
+    - `onboarding-docs/*` → look up the `staff_onboarding` row that owns the URL; if found, prefix `{userId}`; else WARN (this should not happen — onboarding docs without an owner row is a data integrity issue worth flagging).
+  - Copy old → new (S3 `CopyObject`, R2 supports it). Old key stays in place.
+  - Update DB column holding the URL: rewrite `https://.../old-key` → `https://.../new-key`. Wrap in transaction.
+  - Idempotent: if new key already exists with same `etag`, skip.
+  - `--dry-run` flag prints actions without copying.
+  - `--from=screenshots` flag to backfill one folder at a time so we can stop and verify between domains.
+
+**Acceptance Criteria:**
+- [ ] Dry-run on staging logs the full plan (count per source folder + estimated copy bytes).
+- [ ] Wet run on staging: every URL in the relevant DB columns now points at the new layout, and the new keys are GET-able with the right signed URL TTL for their tier.
+- [ ] Old keys still readable (not deleted yet — that's Task 21.4).
+- [ ] Re-running the script is a no-op (idempotency).
+
+### Task 21.4 — Cutover + cleanup
+
+- Production runbook step: deploy the new app, run `storage-backfill.ts --wet` for each folder, verify with sampled DB checks (`SELECT receipt_url FROM marketing_funding LIMIT 20`) that no row still points at the old layout.
+- After 30-day soak window with no observed 404s on old keys (CloudWatch / R2 access logs), tighten the API allowlist in [api.upload-url/route.tsx](apps/web/app/routes/api.upload-url/route.tsx) to reject the legacy 6 raw folder strings.
+- Final cleanup script `packages/shared/scripts/storage-purge-legacy.ts` deletes objects under the 6 old root folders — guarded by a `--confirm-yes-i-have-backups` flag.
+
+**Acceptance Criteria:**
+- [ ] No DB column references a legacy `https://.../{old-folder}/...` URL.
+- [ ] CloudWatch / R2 access logs show 0 GETs against legacy prefixes for 30 consecutive days.
+- [ ] Legacy prefix purge script runs to 0 remaining objects.
+- [ ] CLAUDE.md "What NOT To Do" section gains a line: "Do NOT use the legacy flat folder names (`screenshots/`, `receipts/`, etc.). Use `purpose`-keyed `S3_FOLDERS` from `s3-upload.ts` so the new layout is enforced."
+
+### Task 21.5 — Docs + memory
+
+- CLAUDE.md: new section "Storage Asset Layout" with the 3-tier prefix table + the lifecycle rule table.
+- Memory: `project_storage_layout.md` covering the locked decisions (3 tiers, date partitioning at YYYY/MM, entity sub-prefix where available, no multi-tenant prefix in v1).
+- README.md gets one paragraph in "Tech Stack" explaining the 3-tier model so new contributors don't reach for the old `S3_FOLDERS.RECEIPTS` constant.
+
+**Acceptance Criteria:**
+- [ ] CLAUDE.md updated.
+- [ ] Memory indexed.
+- [ ] README.md tech-stack section mentions the tier model.
+
+**Phase 21 build order:** 21.1 (new layout + allowlist, additive) → 21.2 (bucket policies + lifecycle, applied to new prefixes only) → 21.3 (backfill script, run dry on staging first) → 21.4 (cutover + cleanup, 30-day soak) → 21.5 (docs). All five are required for go-to-prod; do not skip 21.4 — leaving legacy keys live forever defeats the lifecycle-rule cost savings.

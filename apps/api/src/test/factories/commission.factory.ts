@@ -9,7 +9,8 @@ import { db as schema } from '@yannis/shared';
 export async function createTestCommissionPlan(
   db: PostgresJsDatabase<typeof schema>,
   overrides: {
-    role?: string;
+    /** Omit for default CS_AGENT — pass `null` for universal (per-user) templates. */
+    role?: string | null;
     baseSalary?: number;
     baseThreshold?: number;
     perOrderRate?: number;
@@ -29,7 +30,10 @@ export async function createTestCommissionPlan(
   };
 
   const [inserted] = await db.insert(schema.commissionPlans).values({
-    role: (overrides.role ?? 'CS_AGENT') as (typeof schema.commissionPlans.$inferInsert)['role'],
+    role:
+      overrides.role === undefined
+        ? ('CS_AGENT' as (typeof schema.commissionPlans.$inferInsert)['role'])
+        : (overrides.role as (typeof schema.commissionPlans.$inferInsert)['role'] | null),
     planName: `Test Plan ${randomUUID().slice(0, 8)}`,
     rules,
     effectiveFrom: new Date('2026-01-01'),

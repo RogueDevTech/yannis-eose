@@ -31,14 +31,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const viewer = await requireStaffAccountsAccess(request);
   const cookie = getSessionCookie(request);
 
-  const productsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20, sortBy: 'name', sortOrder: 'asc' }));
-  const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
+  const productsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
+  const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
   const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
     await Promise.all([
-    apiRequest<unknown>(`/trpc/products.list?input=${productsInput}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/logistics.listLocations?input=${locationsInput}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/products.options?input=${productsInput}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/logistics.locationOptions?input=${locationsInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie }),

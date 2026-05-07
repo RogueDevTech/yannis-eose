@@ -58,19 +58,38 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'createPlan') {
-    const rules: Record<string, number> = {};
+    const rules: Record<string, unknown> = {};
     const baseSalary = formData.get('baseSalary')?.toString();
     const baseThreshold = formData.get('baseThreshold')?.toString();
     const perOrderRate = formData.get('perOrderRate')?.toString();
     const bonusPerExtraOrder = formData.get('bonusPerExtraOrder')?.toString();
     const penaltyPerReturn = formData.get('penaltyPerReturn')?.toString();
     const deliveryRateThreshold = formData.get('deliveryRateThreshold')?.toString();
+    const deliveryRateBonusMultiplier = formData.get('deliveryRateBonusMultiplier')?.toString();
+    const minPerformanceBonus = formData.get('minPerformanceBonus')?.toString();
+    const maxPerformanceBonus = formData.get('maxPerformanceBonus')?.toString();
+    const orderRateTiersJson = formData.get('orderRateTiersJson')?.toString()?.trim();
+
     if (baseSalary) rules['baseSalary'] = Number(baseSalary);
     if (baseThreshold) rules['baseThreshold'] = Number(baseThreshold);
     if (perOrderRate) rules['perOrderRate'] = Number(perOrderRate);
     if (bonusPerExtraOrder) rules['bonusPerExtraOrder'] = Number(bonusPerExtraOrder);
     if (penaltyPerReturn) rules['penaltyPerReturn'] = Number(penaltyPerReturn);
     if (deliveryRateThreshold) rules['deliveryRateThreshold'] = Number(deliveryRateThreshold);
+    if (deliveryRateBonusMultiplier)
+      rules['deliveryRateBonusMultiplier'] = Number(deliveryRateBonusMultiplier);
+    if (minPerformanceBonus) rules['minPerformanceBonus'] = Number(minPerformanceBonus);
+    if (maxPerformanceBonus) rules['maxPerformanceBonus'] = Number(maxPerformanceBonus);
+    if (orderRateTiersJson) {
+      try {
+        const parsedUnknown: unknown = JSON.parse(orderRateTiersJson);
+        if (Array.isArray(parsedUnknown) && parsedUnknown.length > 0) {
+          rules['orderRateTiers'] = parsedUnknown;
+        }
+      } catch {
+        // malformed JSON — omit; server rejects if partial body is invalid
+      }
+    }
 
     const res = await apiRequest<unknown>('/trpc/hr.createPlan', {
       method: 'POST',
@@ -93,11 +112,33 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'updatePlan') {
     // Optional rules — only include keys the user typed something into. Unset fields stay as-is
     // server-side because we send the rules object only when at least one key is present.
-    const rules: Record<string, number> = {};
-    const fields = ['baseSalary', 'baseThreshold', 'perOrderRate', 'bonusPerExtraOrder', 'penaltyPerReturn', 'deliveryRateThreshold'] as const;
+    const rules: Record<string, unknown> = {};
+    const fields = [
+      'baseSalary',
+      'baseThreshold',
+      'perOrderRate',
+      'bonusPerExtraOrder',
+      'penaltyPerReturn',
+      'deliveryRateThreshold',
+      'deliveryRateBonusMultiplier',
+      'minPerformanceBonus',
+      'maxPerformanceBonus',
+    ] as const;
     for (const f of fields) {
       const v = formData.get(f)?.toString();
       if (v !== undefined && v !== '') rules[f] = Number(v);
+    }
+
+    const orderRateTiersJson = formData.get('orderRateTiersJson')?.toString()?.trim();
+    if (orderRateTiersJson) {
+      try {
+        const parsedUnknown: unknown = JSON.parse(orderRateTiersJson);
+        if (Array.isArray(parsedUnknown)) {
+          rules['orderRateTiers'] = parsedUnknown;
+        }
+      } catch {
+        // ignore malformed
+      }
     }
 
     const body: Record<string, unknown> = { planId: formData.get('planId')?.toString() ?? '' };

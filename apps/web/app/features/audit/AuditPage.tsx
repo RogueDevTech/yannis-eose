@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -19,7 +19,7 @@ import { CompactTable, CompactTableActionButton, type CompactTableColumn } from 
 import { TextInput } from '~/components/ui/text-input';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { Spinner } from '~/components/ui/spinner';
-import type { ActorMap, AuditEntry, AuditPageProps } from './types';
+import type { ActorMap, AuditActorFilterOption, AuditEntry, AuditPageProps } from './types';
 import {
   resolveActor,
   getActorDisplay,
@@ -29,6 +29,8 @@ import {
   formatAuditTableName,
   getAuditSummaryParts,
   generateAuditDescription,
+  getAuditDescriptionPieces,
+  type AuditDescriptionPiece,
 } from './audit-entry-summary';
 
 // ── Polling config ───────────────────────────────────────────────
@@ -404,6 +406,38 @@ function UnknownActorModal({
   );
 }
 
+function auditPieceLinkClass(variant: 'fromLoc' | 'toLoc' | 'transfer'): string {
+  switch (variant) {
+    case 'fromLoc':
+      return 'font-medium underline underline-offset-2 text-violet-600 hover:text-violet-800 dark:text-violet-400 dark:hover:text-violet-300';
+    case 'toLoc':
+      return 'font-medium underline underline-offset-2 text-teal-600 hover:text-teal-800 dark:text-teal-400 dark:hover:text-teal-300';
+    case 'transfer':
+      return 'font-medium underline underline-offset-2 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-300';
+  }
+}
+
+function describeAuditPieces(pieces: AuditDescriptionPiece[]): ReactNode {
+  return (
+    <>
+      {pieces.map((p, idx) =>
+        p.kind === 'link' ? (
+          <Link key={idx} to={p.href} className={auditPieceLinkClass(p.variant)}>
+            {p.text}
+          </Link>
+        ) : (
+          <span key={idx}>{p.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+function stockTransferAuditRowClass(entry: AuditEntry): string {
+  if (entry.tableName !== 'stock_transfers') return '';
+  return 'border-l-[3px] border-l-teal-500/90 bg-teal-500/[0.06] dark:bg-teal-500/[0.09]';
+}
+
 function getEntityLink(tableName: string, recordId: string, data?: Record<string, unknown>): string | null {
   switch (tableName) {
     case 'users':
@@ -412,6 +446,8 @@ function getEntityLink(tableName: string, recordId: string, data?: Record<string
       return `/admin/orders/${recordId}`;
     case 'products':
       return `/admin/products/${recordId}`;
+    case 'stock_transfers':
+      return `/admin/transfers?transferId=${encodeURIComponent(recordId)}`;
     case 'mirror_sessions': {
       // Click-through goes to the user that was mirrored, not the mirror_sessions row id.
       const targetId = data?.['target_id'];
@@ -425,11 +461,18 @@ function getEntityLink(tableName: string, recordId: string, data?: Record<string
 function AuditDescription({
   entry,
   actorNames,
+  locationNames,
 }: {
   entry: AuditEntry;
   actorNames: ActorMap;
+  locationNames: Record<string, string>;
 }) {
-  const { prefix, entityLabel, suffix } = getAuditSummaryParts(entry, actorNames);
+  const warePieces = getAuditDescriptionPieces(entry, actorNames, locationNames);
+  if (warePieces) {
+    return <span className="break-words whitespace-normal text-app-fg">{describeAuditPieces(warePieces)}</span>;
+  }
+
+  const { prefix, entityLabel, suffix } = getAuditSummaryParts(entry, actorNames, locationNames);
   const href = getEntityLink(entry.tableName, entry.recordId, entry.data);
 
   if (href && entityLabel) {
@@ -631,12 +674,14 @@ function OffersDisplay({ value }: { value: unknown }) {
 function DetailModal({
   entry,
   actorNames,
+  locationNames,
   onClose,
   onUnknownActorClick,
   onPreviewImage,
 }: {
   entry: AuditEntry;
   actorNames: ActorMap;
+  locationNames: Record<string, string>;
   onClose: () => void;
   onUnknownActorClick?: (changedBy: string | null, displayName: string) => void;
   onPreviewImage?: (url: string) => void;
@@ -663,7 +708,7 @@ function DetailModal({
               Record Detail
             </h3>
             <p className="text-sm text-app-fg mt-1 max-w-xl leading-snug">
-              {generateAuditDescription(entry, actorNames)}
+              {generateAuditDescription(entry, actorNames, locationNames)}
             </p>
             <p className="text-xs text-app-fg-muted mt-1">
               {formatAuditTableName(entry.tableName)} &middot; {entry.recordId.slice(0, 8)}...
@@ -946,7 +991,15 @@ function TimeTravelPanel({
 
 // ── Main Page ───────────────────────────────────────────────────
 
-export function AuditPage({ rows, total, filters, actorIds, error }: AuditPageProps) {
+export function AuditPage({
+  rows,
+  total,
+  filters,
+  actorIds,
+  actorFilterOptions,
+  locationNames,
+  error,
+}: AuditPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy();
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
@@ -988,6 +1041,35 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
   }, [actorNamesFetcher.data]);
 
   const actorNamesLoading = actorNamesFetcher.state !== 'idle' && Object.keys(actorNames).length === 0;
+
+  const actorPickerOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string; description: string }>();
+
+    const pushServer = (o: AuditActorFilterOption) =>
+      map.set(o.id, { value: o.id, label: o.name, description: ROLE_LABELS[o.role] ?? o.role });
+    actorFilterOptions.forEach(pushServer);
+
+    for (const [id, info] of Object.entries(actorNames)) {
+      if (!map.has(id)) {
+        map.set(id, {
+          value: id,
+          label: info.nameNow,
+          description: ROLE_LABELS[info.roleNow] ?? info.roleNow,
+        });
+      }
+    }
+
+    const selected = filters.actorId?.trim();
+    if (selected && !map.has(selected)) {
+      map.set(selected, {
+        value: selected,
+        label: `${selected.slice(0, 8)}…`,
+        description: 'Not in preload list — paste UUID or widen scope',
+      });
+    }
+
+    return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
+  }, [actorFilterOptions, actorNames, filters.actorId]);
 
   useEffect(() => {
     if (error) setDismissedError(false);
@@ -1124,10 +1206,8 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
         />
       )}
 
-      {/* Filters — Actor dropdown streams in via DeferredSection. Same horizontal flex
-          layout as the Orders page filter bar so controls flow inline instead of stacking
-          into a 4-col grid. Date filter is intentionally not here — it lives in the
-          PageHeader top-right pill above. */}
+      {/* Filters — Actor list is SSR-preloaded (`audit.actorFilterOptions`); names on the page
+          are merged in client-side after `audit.actorNames`. */}
       <div className="card">
         <div className="flex flex-col sm:flex-row gap-3">
           <FormSelect
@@ -1137,21 +1217,17 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
             options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) }))}
             wrapperClassName="w-full sm:w-56"
           />
-          {Object.keys(actorNames).length > 0 ? (
+          {actorPickerOptions.length > 0 ? (
             <SearchableSelect
               id="audit-actor-filter"
               value={filters.actorId}
               onChange={(v) => updateFilter('actorId', v)}
               placeholder="All Users"
-              searchPlaceholder="Search users..."
-              options={Object.entries(actorNames).map(([id, info]) => ({
-                value: id,
-                label: info.nameNow,
-                description: ROLE_LABELS[info.roleNow] ?? info.roleNow,
-              }))}
+              searchPlaceholder="Search users…"
+              options={actorPickerOptions}
               wrapperClassName="w-full sm:w-72"
             />
-          ) : actorNamesLoading ? (
+          ) : actorFilterOptions.length === 0 && actorIds.length > 0 && actorNamesLoading ? (
             <div className="flex items-center gap-2 text-xs text-app-fg-muted w-full sm:w-72 py-1">
               <Spinner className="w-4 h-4" />
               <span>Loading users…</span>
@@ -1159,7 +1235,7 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
           ) : (
             <TextInput
               type="text"
-              placeholder="User UUID..."
+              placeholder="User UUID…"
               value={filters.actorId}
               onChange={(e) => updateFilter('actorId', e.target.value)}
               wrapperClassName="w-full sm:w-72"
@@ -1180,7 +1256,7 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
         rows={rows.map((entry) => ({
           timestamp: formatDate(entry.validFrom),
           table: formatAuditTableName(entry.tableName),
-          description: generateAuditDescription(entry, actorNames),
+          description: generateAuditDescription(entry, actorNames, locationNames),
           actor: getActorDisplay(entry.changedBy, actorNames, entry.validFrom),
           recordId: entry.recordId,
           validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
@@ -1210,6 +1286,7 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
             withCard={false}
             rows={rows}
             rowKey={(entry, idx) => `${entry.recordId}-${entry.validFrom}-${idx}`}
+            rowClassName={(entry) => stockTransferAuditRowClass(entry)}
             emptyTitle="No audit entries found"
             emptyDescription="Try adjusting your filters."
             columns={[
@@ -1232,7 +1309,7 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
                       <span>Loading…</span>
                     </span>
                   ) : (
-                    <AuditDescription entry={entry} actorNames={actorNames} />
+                    <AuditDescription entry={entry} actorNames={actorNames} locationNames={locationNames} />
                   ),
               },
               {
@@ -1295,7 +1372,7 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
             rows.map((entry, idx) => (
               <div
                 key={`${entry.recordId}-${entry.validFrom}-${idx}`}
-                className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3"
+                className={`rounded-lg border border-app-border bg-app-elevated p-4 space-y-3 ${stockTransferAuditRowClass(entry)}`}
               >
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs text-app-fg-muted">
@@ -1309,7 +1386,7 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
                       <span>Loading…</span>
                     </span>
                   ) : (
-                    <AuditDescription entry={entry} actorNames={actorNames} />
+                    <AuditDescription entry={entry} actorNames={actorNames} locationNames={locationNames} />
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1371,6 +1448,7 @@ export function AuditPage({ rows, total, filters, actorIds, error }: AuditPagePr
         <DetailModal
           entry={selectedEntry}
           actorNames={actorNames}
+          locationNames={locationNames}
           onClose={() => setSelectedEntry(null)}
           onUnknownActorClick={(changedBy, displayName) => {
             setSelectedEntry(null);

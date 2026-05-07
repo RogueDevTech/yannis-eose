@@ -1,5 +1,5 @@
 import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import {
   apiRequest,
@@ -15,6 +15,8 @@ import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import {
   type AgentWorkload,
+  type CSDashboardCriticalPayload,
+  type CSDashboardPageProps,
   type InactiveAgent,
   type CSOrder,
   type DuplicatePair,
@@ -24,6 +26,9 @@ import {
   type AbandonedCartPagination,
   ABANDONED_CARTS_PAGE_SIZE,
 } from '~/features/cs/types';
+
+/** Remix `useLoaderData` + `defer()` inference — align with what we return from `loader`. */
+type CSQueueDeferredLoaderData = Omit<CSDashboardPageProps, 'liveEvents'>;
 
 /** SuperAdmin / org-wide heads often have `currentBranchId: null`; tRPC requires explicit `branchId` on branch-scoped mutations. */
 function branchIdFromForm(formData: FormData): string | undefined {
@@ -82,27 +87,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
       )
     : Promise.resolve({ ok: false as const, status: 503, data: {} });
 
-  const productsP = apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
-    `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
+  /** Parallel with primary bundle — offline-order modal only; does not block first paint. */
+  const productsP = apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>(
+    `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
     { method: 'GET', cookie },
   );
-  const settingsP = apiRequest<unknown>(`/trpc/settings.getSystemSettings`, { method: 'GET', cookie });
 
-  // ── Critical data: single parallel batch (products + CS dispatch settings + queue slices) ──
-  const [
-    productsRes,
-    dispatchSettingRes,
-    workloadsRes,
-    unassignedRes,
-    statusCountsRes,
-    activeOrdersRes,
-    activityRes,
-    pendingRes,
-    abandonedRes,
-    hotSwapOrdersRes,
-  ] = await Promise.all([
-    productsP,
-    settingsP,
+  // ── Shell: dispatch settings only (fast path — tabs + claim queue wiring) ──
+  const dispatchSettingRes = await apiRequest<unknown>(`/trpc/settings.getSystemSettings`, { method: 'GET', cookie });
+  const settingsData = (dispatchSettingRes.data as { result?: { data?: Array<{ key: string; value: Record<string, unknown> }> } })?.result?.data ?? [];
+  const dispatchSetting = settingsData.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
+  const isClaimMode = dispatchSetting?.value?.strategy === 'claim';
+  const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
+  const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
+
+  const productsForOfflineOrder = productsP
+    .then((productsRes) => {
+      if (productsRes.ok && Array.isArray(productsRes.data?.result?.data)) {
+        return productsRes.data.result!.data!;
+      }
+      return [];
+    })
+    .catch(() => [] as Array<{ id: string; name: string }>);
+
+  // ── Primary queue bundle: streamed — does not block HTML shell (overview / strips / tables) ──
+  const criticalDataPromise = Promise.all([
     apiRequest<unknown>('/trpc/orders.csWorkloads', { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 20 }))}`,
@@ -128,19 +137,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     ),
     hotSwapOrdersP,
-  ]);
-
-  let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
-  if (productsRes.ok && productsRes.data?.result?.data?.products) {
-    productsForOfflineOrder = productsRes.data.result.data.products;
-  }
-
-  const settingsData = (dispatchSettingRes.data as { result?: { data?: Array<{ key: string; value: Record<string, unknown> }> } })?.result?.data ?? [];
-  const dispatchSetting = settingsData.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
-  const isClaimMode = dispatchSetting?.value?.strategy === 'claim';
-  const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
-  const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
-
+  ]).then(
+    ([workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes, activityRes, pendingRes, abandonedRes, hotSwapOrdersRes]) => {
   const workloads = workloadsRes.ok
     ? (workloadsRes.data as { result?: { data?: AgentWorkload[] } })?.result?.data ?? []
     : [];
@@ -183,7 +181,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const criticalFetchErrors: string[] = [];
-  if (!productsRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Products catalog', productsRes));
   if (!dispatchSettingRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Dispatch settings', dispatchSettingRes));
   if (!workloadsRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Team workloads', workloadsRes));
   if (!unassignedRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Unassigned queue', unassignedRes));
@@ -196,7 +193,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     criticalFetchErrors.push(describeApiFetchFailure('Hot swap orders', hotSwapOrdersRes));
   }
 
-  const criticalData = {
+  return {
     workloads,
     unassignedOrders: unassignedData?.orders ?? [],
     unassignedTotal: unassignedData?.pagination?.total ?? 0,
@@ -204,15 +201,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     activeTotal: activeData?.pagination?.total ?? 0,
     hotSwapOrdersPayload,
     statusCounts,
-    isClaimMode,
-    claimCap,
     initialCartActivity: {
       activityItems,
       pendingCarts,
       abandonedCarts,
       abandonedPagination,
     },
+    criticalFetchErrors,
   };
+    },
+  );
 
   // ── Non-critical: deferred (stream to client) ──────────────
   const inactiveAgents: Promise<InactiveAgent[]> = apiRequest<unknown>(
@@ -263,9 +261,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : { pending: 0, abandonedOpen: 0 },
   ).catch(() => ({ pending: 0, abandonedOpen: 0 }));
 
-  return {
-    criticalData,
-    criticalFetchErrors,
+  return defer({
+    shell: { isClaimMode, claimCap },
+    criticalData: criticalDataPromise,
     inactiveAgents,
     callbackOrders,
     flaggedDuplicates,
@@ -276,7 +274,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateOffline,
     canDeleteCart,
     productsForOfflineOrder,
-  };
+  } as unknown as Record<string, unknown>);
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -590,13 +588,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CSQueueRoute() {
-  const data = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>() as unknown as CSQueueDeferredLoaderData;
   usePageRefreshOnEvent([...CS_QUEUE_LIVE_EVENTS]);
   return (
     <>
     <CSDashboardPage
-      {...data.criticalData}
-      criticalFetchErrors={data.criticalFetchErrors}
+      shell={data.shell}
+      criticalData={data.criticalData as Promise<CSDashboardCriticalPayload>}
       liveEvents={[...CS_QUEUE_LIVE_EVENTS]}
       inactiveAgents={data.inactiveAgents}
       callbackOrders={data.callbackOrders}

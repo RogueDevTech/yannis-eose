@@ -6,6 +6,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
   GenerateBatchInput,
+  GenerateBatchesBulkInput,
   SubmitBatchInput,
   ApproveBatchInput,
   RejectBatchInput,
@@ -22,6 +23,8 @@ import { isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schema';
+import { resolveApplicableCommissionPlan } from './commission-plan-resolution';
+import { computeEarningsFromPlanRules } from './commission-rules-math';
 
 /**
  * Maps the four payroll departments to the staff roles each contains.
@@ -229,71 +232,179 @@ export class PayrollBatchService {
         batchId = row.id;
       }
 
-      // Pull staff in this department on this branch
-      const departmentRoles = DEPARTMENT_ROLES[input.department];
-      const staff = await tx
-        .select()
-        .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.status, 'ACTIVE'),
-            eq(schema.users.primaryBranchId, input.branchId),
-            inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
-          ),
+      const { generated, totalAmount } = await this.synthesizeDraftBatchContent(
+        tx,
+        batchId,
+        input.branchId,
+        input.department,
+        periodStart,
+        periodEnd,
+      );
+      return { batchId, generated, totalAmount };
+    });
+  }
+
+  /**
+   * Create DRAFT batches for every (branchId × department) slot that has no row yet.
+   * Existing slots (any status, including DRAFT) are skipped — use `generateBatch` to refresh a single DRAFT.
+   */
+  async generateBatchesBulk(input: GenerateBatchesBulkInput, actor: SessionUser) {
+    const periodStart = new Date(`${input.periodMonth}T00:00:00.000Z`);
+    const periodEnd = new Date(periodStart);
+    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+    periodEnd.setUTCMilliseconds(periodEnd.getUTCMilliseconds() - 1);
+
+    const created: Array<{ batchId: string; branchId: string; department: PayrollDepartment }> =
+      [];
+    const skipped: Array<{
+      branchId: string;
+      department: PayrollDepartment;
+      reason: 'FORBIDDEN' | 'EXISTS';
+      status?: PayrollBatchStatus;
+    }> = [];
+
+    for (const branchId of input.branchIds) {
+      for (const department of input.departments as PayrollDepartment[]) {
+        if (!(await this.canPrepareDept(actor, branchId, department))) {
+          skipped.push({ branchId, department, reason: 'FORBIDDEN' });
+          continue;
+        }
+
+        const run = await withActorAndBranch(
+          this.db,
+          { id: actor.id, currentBranchId: branchId },
+          async (tx) => {
+            const existing = (
+              await tx
+                .select()
+                .from(schema.payrollBatches)
+                .where(
+                  and(
+                    eq(schema.payrollBatches.branchId, branchId),
+                    eq(schema.payrollBatches.periodMonth, input.periodMonth),
+                    eq(schema.payrollBatches.department, department),
+                  ),
+                )
+                .limit(1)
+            )[0];
+            if (existing) {
+              return {
+                skipped: true as const,
+                status: existing.status as PayrollBatchStatus,
+              };
+            }
+
+            const inserted = await tx
+              .insert(schema.payrollBatches)
+              .values({
+                branchId,
+                periodMonth: input.periodMonth,
+                department,
+                status: 'DRAFT',
+                preparedBy: actor.id,
+                preparedAt: new Date(),
+              })
+              .returning({ id: schema.payrollBatches.id });
+            const row = inserted[0];
+            if (!row?.id)
+              throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create batch' });
+
+            await this.synthesizeDraftBatchContent(
+              tx,
+              row.id,
+              branchId,
+              department,
+              periodStart,
+              periodEnd,
+            );
+            return { skipped: false as const, batchId: row.id };
+          },
         );
 
-      const generatedPayouts: PayoutRow[] = [];
-
-      // CEO directive 2026-04-26: every active staff member in (branch × dept) gets a payout row,
-      // even if the commission plan is missing or computes to zero. This gives HR a full roster to
-      // review + adjust manually before submitting. Previously we skipped staff with no plan,
-      // which left them invisible in the batch.
-      for (const member of staff) {
-        const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd))
-          ?? { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
-        const inserted = await tx
-          .insert(schema.payoutRecords)
-          .values({
-            batchId,
-            staffId: member.id,
-            periodStart,
-            periodEnd,
-            baseSalary: sql`${computed.baseSalary.toFixed(2)}::numeric`,
-            performanceBonus: sql`${computed.performanceBonus.toFixed(2)}::numeric`,
-            addOnsTotal: sql`${computed.addOnsTotal.toFixed(2)}::numeric`,
-            deductionsTotal: sql`${computed.deductionsTotal.toFixed(2)}::numeric`,
-            totalPayout: sql`${computed.totalPayout.toFixed(2)}::numeric`,
-            status: 'DRAFT',
-          })
-          .returning({ id: schema.payoutRecords.id });
-        const payoutId = inserted[0]?.id;
-        if (!payoutId) continue;
-        generatedPayouts.push({ staffId: member.id, ...computed });
-
-        // Re-link any pending unattached clawbacks/adjustments for this staff to this payout
-        await tx
-          .update(schema.earningsAdjustments)
-          .set({ payoutId })
-          .where(
-            and(
-              eq(schema.earningsAdjustments.staffId, member.id),
-              isNull(schema.earningsAdjustments.payoutId),
-            ),
-          );
+        if ('skipped' in run && run.skipped) {
+          skipped.push({
+            branchId,
+            department,
+            reason: 'EXISTS',
+            status: run.status,
+          });
+        } else if ('batchId' in run) {
+          created.push({ batchId: run.batchId, branchId, department });
+        }
       }
+    }
 
-      const totalAmount = generatedPayouts.reduce((acc, p) => acc + p.totalPayout, 0);
-      await tx
-        .update(schema.payrollBatches)
-        .set({
-          staffCount: generatedPayouts.length,
-          totalAmount: sql`${totalAmount.toFixed(2)}::numeric`,
-          updatedAt: new Date(),
+    const summaryMessage = `Created ${created.length} batch${created.length === 1 ? '' : 'es'} · skipped ${skipped.length}`;
+    return { created, skipped, summaryMessage };
+  }
+
+  /** Insert payout rows into an existing draft batch shell and update rollup totals (caller wipes old payouts when refreshing). */
+  private async synthesizeDraftBatchContent(
+    tx: TxLike,
+    batchId: string,
+    branchId: string,
+    department: PayrollDepartment,
+    periodStart: Date,
+    periodEnd: Date,
+  ): Promise<{ generated: number; totalAmount: number }> {
+    const departmentRoles = DEPARTMENT_ROLES[department];
+    const staff = await tx
+      .select()
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.status, 'ACTIVE'),
+          eq(schema.users.primaryBranchId, branchId),
+          inArray(schema.users.role, departmentRoles as unknown as typeof schema.users.$inferSelect['role'][]),
+        ),
+      );
+
+    const generatedPayouts: PayoutRow[] = [];
+
+    for (const member of staff) {
+      const computed = (await this.computePayoutForMember(tx, member, periodStart, periodEnd))
+        ?? { baseSalary: 0, performanceBonus: 0, addOnsTotal: 0, deductionsTotal: 0, totalPayout: 0 };
+      const inserted = await tx
+        .insert(schema.payoutRecords)
+        .values({
+          batchId,
+          staffId: member.id,
+          periodStart,
+          periodEnd,
+          baseSalary: sql`${computed.baseSalary.toFixed(2)}::numeric`,
+          performanceBonus: sql`${computed.performanceBonus.toFixed(2)}::numeric`,
+          addOnsTotal: sql`${computed.addOnsTotal.toFixed(2)}::numeric`,
+          deductionsTotal: sql`${computed.deductionsTotal.toFixed(2)}::numeric`,
+          totalPayout: sql`${computed.totalPayout.toFixed(2)}::numeric`,
+          status: 'DRAFT',
         })
-        .where(eq(schema.payrollBatches.id, batchId));
+        .returning({ id: schema.payoutRecords.id });
+      const payoutId = inserted[0]?.id;
+      if (!payoutId) continue;
+      generatedPayouts.push({ staffId: member.id, ...computed });
 
-      return { batchId, generated: generatedPayouts.length, totalAmount };
-    });
+      await tx
+        .update(schema.earningsAdjustments)
+        .set({ payoutId })
+        .where(
+          and(
+            eq(schema.earningsAdjustments.staffId, member.id),
+            isNull(schema.earningsAdjustments.payoutId),
+          ),
+        );
+    }
+
+    const totalAmount = generatedPayouts.reduce((acc, p) => acc + p.totalPayout, 0);
+    await tx
+      .update(schema.payrollBatches)
+      .set({
+        staffCount: generatedPayouts.length,
+        totalAmount: sql`${totalAmount.toFixed(2)}::numeric`,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.payrollBatches.id, batchId));
+
+    return { generated: generatedPayouts.length, totalAmount };
   }
 
   async previewBatch(input: GenerateBatchInput, actor: SessionUser) {
@@ -311,7 +422,12 @@ export class PayrollBatchService {
     return withActorAndBranch(this.db, { id: actor.id, currentBranchId: input.branchId }, async (tx) => {
       const departmentRoles = DEPARTMENT_ROLES[input.department];
       const staff = await tx
-        .select({ id: schema.users.id, name: schema.users.name, role: schema.users.role })
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          role: schema.users.role,
+          commissionPlanId: schema.users.commissionPlanId,
+        })
         .from(schema.users)
         .where(
           and(
@@ -359,7 +475,7 @@ export class PayrollBatchService {
    */
   private async computePayoutForMember(
     tx: TxLike,
-    member: { id: string; role: string },
+    member: { id: string; role: string; commissionPlanId?: string | null },
     periodStart: Date,
     periodEnd: Date,
   ): Promise<Omit<PayoutRow, 'staffId'> | null> {
@@ -399,49 +515,24 @@ export class PayrollBatchService {
     const deliveredCount = deliveredRows[0]?.count ?? 0;
     const totalOrders = totalOrdersRows[0]?.count ?? 0;
     const returnedCount = returnedRows[0]?.count ?? 0;
-    const deliveryRate = totalOrders > 0 ? (deliveredCount / totalOrders) * 100 : 0;
 
-    const planRows = await tx
-      .select()
-      .from(schema.commissionPlans)
-      .where(
-        and(
-          eq(schema.commissionPlans.role, member.role as typeof schema.commissionPlans.$inferSelect['role']),
-          lte(schema.commissionPlans.effectiveFrom, periodEnd),
-        ),
-      )
-      .orderBy(desc(schema.commissionPlans.effectiveFrom))
-      .limit(1);
-    const plan = planRows[0];
+    const plan = await resolveApplicableCommissionPlan(tx, {
+      commissionPlanId: member.commissionPlanId ?? null,
+      staffRole: member.role,
+      rangeStart: periodStart,
+      rangeEnd: periodEnd,
+    });
     if (!plan) return null;
 
-    const rules = (plan.rules ?? {}) as {
-      baseSalary?: number;
-      baseThreshold?: number;
-      perOrderRate?: number;
-      deliveryRateThreshold?: number;
-      bonusPerExtraOrder?: number;
-      penaltyPerReturn?: number;
-    };
-
-    let baseSalary = 0;
-    if (rules.baseThreshold && deliveredCount >= rules.baseThreshold) {
-      baseSalary = rules.baseSalary ?? 0;
-    } else if (!rules.baseThreshold && rules.baseSalary) {
-      // Plans with a base but no threshold (e.g. fixed-salary HR/admin staff)
-      baseSalary = rules.baseSalary;
-    }
-    let performanceBonus = 0;
-    if (rules.perOrderRate) performanceBonus = deliveredCount * rules.perOrderRate;
-    if (rules.bonusPerExtraOrder && rules.baseThreshold && deliveredCount > rules.baseThreshold) {
-      performanceBonus += (deliveredCount - rules.baseThreshold) * rules.bonusPerExtraOrder;
-    }
-    if (rules.deliveryRateThreshold && deliveryRate > rules.deliveryRateThreshold && rules.bonusPerExtraOrder) {
-      const extraOrders = Math.max(0, deliveredCount - (rules.baseThreshold ?? 0));
-      performanceBonus += extraOrders * (rules.bonusPerExtraOrder * 0.5);
-    }
-
-    const penalties = (rules.penaltyPerReturn ?? 0) * returnedCount;
+    const {
+      baseSalary,
+      performanceBonus,
+      penalties,
+    } = computeEarningsFromPlanRules(plan.rules, {
+      deliveredCount,
+      totalOrders,
+      returnedCount,
+    });
 
     const pendingClawbackRows = await tx
       .select({ total: sum(schema.earningsAdjustments.amount) })

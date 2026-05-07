@@ -1,4 +1,4 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
@@ -13,7 +13,8 @@ export const meta: MetaFunction = () => [
 
 const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed'] as const;
 
-const ORDERS_PER_PAGE = 40;
+/** Fixed page size for this table (not configurable via `?limit=` — URL param ignored). */
+const ORDERS_PER_PAGE = 20;
 
 const getDefaultThisMonthRange = defaultThisMonthRange;
 
@@ -84,39 +85,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const productsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }));
   const campaignsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }));
 
-  const [res, countsRes, metricsRes, trendRes, buyersRes, productsRes, campaignsRes] = await Promise.all([
-    apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputStr}`, { method: 'GET', cookie }),
-    loadMarketingExportPicklists
-      ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
-      : Promise.resolve(null),
-    loadMarketingExportPicklists
-      ? apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie })
-      : Promise.resolve(null),
-    loadMarketingExportPicklists
-      ? apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${campaignsInputStr}`, { method: 'GET', cookie })
-      : Promise.resolve(null),
-  ]);
+  /** Only this blocks the first loader chunk — everything else streams via `defer`. */
+  const res = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, { method: 'GET', cookie });
 
   const trpcData = res.ok
     ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
     : null;
-
-  const countsData = countsRes.ok
-    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-    : {};
-
-  const metricsData = metricsRes.ok
-    ? (metricsRes.data as { result?: { data?: { cpa: number; totalSpend: number } } })?.result?.data
-    : null;
-
-  const dailyCounts = trendRes.ok
-    ? ((trendRes.data as {
-        result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
-      })?.result?.data ?? [])
-    : [];
 
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
@@ -126,37 +100,97 @@ export async function loader({ request }: LoaderFunctionArgs) {
     customerPhoneDisplay: '',
   }));
 
-  let marketingExportPicklists: Partial<ExportModalPicklists> | undefined;
-  if (loadMarketingExportPicklists && buyersRes?.ok && productsRes?.ok && campaignsRes?.ok) {
-    const usersPayload = (buyersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data;
-    const productsPayload = (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data;
-    const campaignsPayload = (campaignsRes.data as { result?: { data?: { campaigns: Array<{ id: string; name: string }> } } })?.result?.data;
-    marketingExportPicklists = {
-      mediaBuyers: (usersPayload?.users ?? []).map((u) => ({ id: u.id, name: u.name })),
-      products: (productsPayload?.products ?? []).map((p) => ({ id: p.id, name: p.name })),
-      campaigns: (campaignsPayload?.campaigns ?? []).map((c) => ({ id: c.id, name: c.name })),
-    };
-  }
-  const mediaBuyersForFilter = marketingExportPicklists?.mediaBuyers ?? [];
+  const secondaryPromise = (async (): Promise<{
+    statusCounts: Record<string, number>;
+    cpa: number | null;
+    totalAdSpend: number | null;
+    dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+    marketingExportPicklists?: Partial<ExportModalPicklists>;
+    mediaBuyersForFilter: Array<{ id: string; name: string }>;
+  }> => {
+    try {
+      const [
+        countsRes,
+        metricsRes,
+        trendRes,
+        buyersRes,
+        productsRes,
+        campaignsRes,
+      ] = await Promise.all([
+        apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputStr}`, { method: 'GET', cookie }),
+        loadMarketingExportPicklists
+          ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
+          : Promise.resolve(null),
+        loadMarketingExportPicklists
+          ? apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie })
+          : Promise.resolve(null),
+        loadMarketingExportPicklists
+          ? apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${campaignsInputStr}`, { method: 'GET', cookie })
+          : Promise.resolve(null),
+      ]);
 
-  return {
+      const countsData = countsRes.ok
+        ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+        : {};
+
+      const metricsData = metricsRes.ok
+        ? (metricsRes.data as { result?: { data?: { cpa: number; totalSpend: number } } })?.result?.data
+        : null;
+
+      const dailyCounts = trendRes.ok
+        ? ((trendRes.data as {
+            result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
+          })?.result?.data ?? [])
+        : [];
+
+      let marketingExportPicklists: Partial<ExportModalPicklists> | undefined;
+      if (loadMarketingExportPicklists && buyersRes?.ok && productsRes?.ok && campaignsRes?.ok) {
+        const usersPayload = (buyersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data;
+        const productsPayload = (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data;
+        const campaignsPayload = (campaignsRes.data as { result?: { data?: { campaigns: Array<{ id: string; name: string }> } } })?.result?.data;
+        marketingExportPicklists = {
+          mediaBuyers: (usersPayload?.users ?? []).map((u) => ({ id: u.id, name: u.name })),
+          products: (productsPayload?.products ?? []).map((p) => ({ id: p.id, name: p.name })),
+          campaigns: (campaignsPayload?.campaigns ?? []).map((c) => ({ id: c.id, name: c.name })),
+        };
+      }
+      const mediaBuyersForFilter = marketingExportPicklists?.mediaBuyers ?? [];
+
+      return {
+        statusCounts: countsData,
+        cpa: metricsData?.cpa ?? null,
+        totalAdSpend: metricsData?.totalSpend ?? null,
+        dailyCounts,
+        marketingExportPicklists,
+        mediaBuyersForFilter,
+      };
+    } catch {
+      return {
+        statusCounts: {},
+        cpa: null,
+        totalAdSpend: null,
+        dailyCounts: [],
+        marketingExportPicklists: undefined,
+        mediaBuyersForFilter: [],
+      };
+    }
+  })();
+
+  return defer({
     orders,
     total,
     totalPages,
     page,
     limit: ORDERS_PER_PAGE,
-    statusCounts: countsData,
     statusFilter: status,
     searchFilter: search,
     isMediaBuyer,
     showMediaBuyerColumn,
-    mediaBuyersForFilter,
-    marketingExportPicklists,
     filters,
-    cpa: metricsData?.cpa ?? null,
-    totalAdSpend: metricsData?.totalSpend ?? null,
-    dailyCounts,
-  };
+    secondary: secondaryPromise,
+  });
 }
 
 export async function action({ request }: ActionFunctionArgs) {

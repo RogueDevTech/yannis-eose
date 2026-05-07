@@ -18,6 +18,37 @@ import { eq, and, desc, or, isNull } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
+import { CacheService } from '../../common/cache/cache.service';
+
+/** Injected from {@link TrpcModule}; Redis cache for {@link messagingRouter}.templates.list */
+let messagingCacheService: CacheService | null = null;
+
+export function setMessagingCacheService(service: CacheService) {
+  messagingCacheService = service;
+}
+
+async function invalidateMessageTemplatesListCache(): Promise<void> {
+  if (!messagingCacheService) return;
+  await messagingCacheService.delPattern('cache:messaging:templates:list:*').catch(() => {
+    /* fail-open */
+  });
+}
+
+function messageTemplatesListCacheKey(
+  ctx: { user: { role: string; currentBranchId?: string | null } },
+  input: { channel?: 'SMS' | 'WHATSAPP' | 'WHATSAPP_GROUP'; includeArchived?: boolean } | undefined,
+): string {
+  const adminClass = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+  const scope = adminClass ? 'admin' : `branch:${ctx.user.currentBranchId ?? 'none'}`;
+  const hash = CacheService.hashInput({
+    scope,
+    channel: input?.channel ?? null,
+    includeArchived: input?.includeArchived ?? false,
+  });
+  return `cache:messaging:templates:list:${hash}`;
+}
+
+const MESSAGE_TEMPLATES_LIST_TTL_SECONDS = 45;
 
 // Factory-injected DB
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
@@ -120,36 +151,46 @@ export const messagingRouter = router({
       }).optional(),
     )
     .query(async ({ input, ctx }) => {
-      const db = getDb();
-      const conditions: Parameters<typeof and>[0][] = [];
+      const cacheKey = messageTemplatesListCacheKey(ctx, input);
 
-      // Filter by status
-      if (!input?.includeArchived) {
-        conditions.push(eq(schema.messageTemplates.status, 'ACTIVE'));
+      const fetchList = async () => {
+        const db = getDb();
+        const conditions: Parameters<typeof and>[0][] = [];
+
+        // Filter by status
+        if (!input?.includeArchived) {
+          conditions.push(eq(schema.messageTemplates.status, 'ACTIVE'));
+        }
+
+        // Filter by channel if specified
+        if (input?.channel) {
+          conditions.push(eq(schema.messageTemplates.channel, input.channel));
+        }
+
+        // Branch scoping: non-admin viewers see their own branch's templates plus
+        // org-wide defaults (`branch_id IS NULL`, seeded by MessageTemplateSeedService).
+        // Admin-class sees everything.
+        if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.currentBranchId) {
+          const branchOrGlobal = or(
+            eq(schema.messageTemplates.branchId, ctx.user.currentBranchId),
+            isNull(schema.messageTemplates.branchId),
+          );
+          if (branchOrGlobal) conditions.push(branchOrGlobal);
+        }
+
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+        return db
+          .select()
+          .from(schema.messageTemplates)
+          .where(whereClause)
+          .orderBy(desc(schema.messageTemplates.createdAt));
+      };
+
+      if (!messagingCacheService) {
+        return fetchList();
       }
 
-      // Filter by channel if specified
-      if (input?.channel) {
-        conditions.push(eq(schema.messageTemplates.channel, input.channel));
-      }
-
-      // Branch scoping: non-admin viewers see their own branch's templates plus
-      // org-wide defaults (`branch_id IS NULL`, seeded by MessageTemplateSeedService).
-      // Admin-class sees everything.
-      if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') && ctx.user.currentBranchId) {
-        const branchOrGlobal = or(
-          eq(schema.messageTemplates.branchId, ctx.user.currentBranchId),
-          isNull(schema.messageTemplates.branchId),
-        );
-        if (branchOrGlobal) conditions.push(branchOrGlobal);
-      }
-
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-      return db
-        .select()
-        .from(schema.messageTemplates)
-        .where(whereClause)
-        .orderBy(desc(schema.messageTemplates.createdAt));
+      return messagingCacheService.getOrSet(cacheKey, MESSAGE_TEMPLATES_LIST_TTL_SECONDS, fetchList);
     }),
 
   /**
@@ -179,6 +220,7 @@ export const messagingRouter = router({
         branchId: ctx.user.currentBranchId ?? null,
         status: 'ACTIVE',
       });
+      await invalidateMessageTemplatesListCache();
       return { success: true };
     }),
 
@@ -234,6 +276,7 @@ export const messagingRouter = router({
         .update(schema.messageTemplates)
         .set(updates)
         .where(eq(schema.messageTemplates.id, input.templateId));
+      await invalidateMessageTemplatesListCache();
       return { success: true };
     }),
 

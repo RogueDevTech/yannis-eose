@@ -1,10 +1,11 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import type { ComponentProps } from 'react';
 import { useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
-import { LogisticsOrdersPage, type LogisticsOrderRow } from '~/features/logistics/LogisticsOrdersPage';
+import { LogisticsOrdersPage, type RiderOption } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
@@ -84,65 +85,76 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
-  const [ordersRes, countsRes, locationsRes, ridersRes] = await Promise.all([
-    apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(
-      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
-  ]);
+  const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
 
   const ordersData = ordersRes.ok
     ? (ordersRes.data as { result?: { data?: { orders: Array<Record<string, unknown>>; pagination: { total: number; totalPages: number } } } })
         ?.result?.data
     : null;
-  const countsData = countsRes.ok
-    ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-    : {};
-  const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
-    : null;
-  const ridersData = ridersRes.ok
-    ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })
-        ?.result?.data ?? []
-    : [];
 
   const orders = ordersData?.orders ?? [];
   const total = ordersData?.pagination?.total ?? 0;
   const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
-  const locations = locationsData?.locations ?? [];
 
-  const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
-  const locationProviderById = new Map(locations.map((l) => [l.id, l.providerName ?? null]));
-  const riderById = new Map(ridersData.map((r) => [r.id, r]));
-
-  const enrichedOrders = orders.map((o: Record<string, unknown>) => ({
+  const placeholderOrders = orders.map((o: Record<string, unknown>) => ({
     ...o,
-    locationName: o.logisticsLocationId ? locationNameById.get(o.logisticsLocationId as string) ?? '—' : '—',
-    locationProviderName: o.logisticsLocationId ? locationProviderById.get(o.logisticsLocationId as string) ?? null : null,
-    riderName: o.riderId ? riderById.get(o.riderId as string)?.name ?? '—' : '—',
-  }));
+    locationName: '—',
+    locationProviderName: null as string | null,
+    riderName: '—',
+  })) as ComponentProps<typeof LogisticsOrdersPage>['orders'];
 
-  // TPL: only their location can be selected for allocate; admin uses all locations
-  const allocatableLocations =
-    effectiveLogisticsLocationId
-      ? locations.filter((l) => l.id === effectiveLogisticsLocationId)
-      : locations.filter((l) => !l.dispatchLocked);
+  const deferredSecondary = (async (): Promise<{
+    statusCounts: Record<string, number>;
+    locations: Location[];
+    riders: RiderOption[];
+    allocatableLocations: Location[];
+  }> => {
+    try {
+      const [countsRes, locationsRes, ridersRes] = await Promise.all([
+        apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(
+          `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
+          { method: 'GET', cookie },
+        ),
+        apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
+      ]);
 
-  return {
-    orders: enrichedOrders,
+      const countsData = countsRes.ok
+        ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+        : {};
+      const locationsData = locationsRes.ok
+        ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
+        : null;
+      const locations = locationsData?.locations ?? [];
+      const ridersData = ridersRes.ok
+        ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })
+            ?.result?.data ?? []
+        : [];
+      const riders: RiderOption[] = ridersData.map((r) => ({
+        id: r.id,
+        name: r.name,
+        logisticsLocationId: r.logisticsLocationId ?? null,
+      }));
+      const allocatableLocations = effectiveLogisticsLocationId
+        ? locations.filter((l) => l.id === effectiveLogisticsLocationId)
+        : locations.filter((l) => !l.dispatchLocked);
+
+      return { statusCounts: countsData, locations, riders, allocatableLocations };
+    } catch {
+      return { statusCounts: {}, locations: [], riders: [], allocatableLocations: [] };
+    }
+  })();
+
+  return defer({
+    orders: placeholderOrders,
     total,
     totalPages,
     page,
     limit: ORDERS_PER_PAGE,
-    statusCounts: countsData,
     statusFilter: status,
     searchFilter: search ?? '',
-    locations,
-    allocatableLocations,
-    riders: ridersData,
+    deferredSecondary,
+    riders: [],
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
@@ -156,7 +168,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     markInTransitLabel: 'Mark In Transit',
     pageDescription:
       'Use View to open an order at your hub, or Resolve order on a confirmed row for the fast path (delivery date, receipt, and handoff).',
-  };
+  } as Record<string, unknown>);
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -494,11 +506,11 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function TplOrdersRoute() {
-  const data = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>() as unknown as ComponentProps<typeof LogisticsOrdersPage>;
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
     <>
-      <LogisticsOrdersPage {...data} orders={data.orders as LogisticsOrderRow[]} />
+      <LogisticsOrdersPage {...data} />
     </>
   );
 }

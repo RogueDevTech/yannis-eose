@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -49,7 +49,14 @@ function formatRecordedAt(iso: string | null) {
   });
 }
 
-export function TransfersPage({ transfers, locations, products, levels, canInitiate = true }: TransfersStreamData) {
+export function TransfersPage({
+  transfers,
+  locations,
+  products,
+  levels,
+  canInitiate = true,
+  transfersPageVariant = 'stock',
+}: TransfersStreamData) {
   const fetcher = useFetcher();
   const cancelFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const formDataFetcher = useFetcher<{
@@ -67,6 +74,35 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedFromLocation, setSelectedFromLocation] = useState('');
   const [selectedToLocationId, setSelectedToLocationId] = useState('');
+  const openedFromUrlRef = useRef<string | null>(null);
+
+  const stripTransferIdFromUrl = useCallback(() => {
+    if (!searchParams.has('transferId')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('transferId');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const dismissTransferModal = useCallback(() => {
+    setViewTransfer(null);
+    stripTransferIdFromUrl();
+  }, [stripTransferIdFromUrl]);
+
+  /** Deep-link from audit (`?transferId=`) — opens the detail sheet once transfers load */
+  useEffect(() => {
+    const id = searchParams.get('transferId')?.trim() ?? '';
+    if (!id) {
+      openedFromUrlRef.current = null;
+      return;
+    }
+    if (transfers.length === 0) return;
+    if (openedFromUrlRef.current === id) return;
+    const hit = transfers.find((t) => t.id === id);
+    if (hit) {
+      setViewTransfer(hit);
+      openedFromUrlRef.current = id;
+    }
+  }, [searchParams, transfers]);
 
   const cancelSubmitting = cancelFetcher.state !== 'idle';
   const [cancelInlineError, setCancelInlineError] = useState<string | null>(null);
@@ -82,7 +118,8 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
     setCancelTarget(null);
     setCancelReason('');
     setViewTransfer(null);
-  }, []);
+    stripTransferIdFromUrl();
+  }, [stripTransferIdFromUrl]);
   useCloseOnFetcherSuccess(cancelFetcher, handleCancelSuccess);
 
   const submitCancel = () => {
@@ -101,7 +138,9 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const [dismissedError, setDismissedError] = useState(false);
-  useFetcherToast(fetcher.data, { successMessage: 'Transfer recorded' });
+  useFetcherToast(fetcher.data, {
+    successMessage: transfersPageVariant === 'logistics' ? 'Transfer requested' : 'Transfer recorded',
+  });
 
   useEffect(() => {
     if (actionError) setDismissedError(false);
@@ -167,10 +206,18 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
   useEffect(() => {
     if (!canInitiate) return;
-    if (products != null && levels != null) return;
+    // Loader already streamed products + levels — no side-load needed.
+    if (Array.isArray(products) && Array.isArray(levels)) return;
+    // Already fetched (success OR failure) — bail. Without this guard the
+    // effect re-fires every time `formDataFetcher.state` flips back to
+    // `idle`, because the `products` prop never updates after the
+    // `/api/transfers-form-data` call (the response lands on
+    // `formDataFetcher.data`, not on the loader props). That re-fire loop
+    // is what made the Product dropdown spin "Loading products…" forever.
+    if (formDataFetcher.data) return;
     if (formDataFetcher.state !== 'idle') return;
     formDataFetcher.load('/api/transfers-form-data');
-  }, [canInitiate, products, levels, formDataFetcher.state]);
+  }, [canInitiate, products, levels, formDataFetcher.state, formDataFetcher.data]);
 
   const getLocationName = (id: string) => {
     const loc = locations.find((l: Location) => l.id === id);
@@ -308,16 +355,30 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
     updateFilter('status', value);
   };
 
+  const pageTitle =
+    transfersPageVariant === 'logistics' ? 'Partner stock transfers' : 'Stock transfers';
+  const pageDescription =
+    transfersPageVariant === 'logistics'
+      ? 'Request stock moves from one logistics location to another (including between 3PL partners). Sent transfers stay In transit until the receiving location confirms receipt under Logistics → Stock Transfer Confirmations.'
+      : 'Send stock between locations. Transfers stay on this list as In transit until the destination confirms receipt (Logistics → Stock Transfer Confirmations).';
+
+  const initiateTransferCta =
+    transfersPageVariant === 'logistics' ? '+ Request transfer' : '+ Record transfer';
+  const modalTransferTitle =
+    transfersPageVariant === 'logistics' ? 'Request stock transfer' : 'Record stock transfer';
+  const saveTransferSubmitLabel =
+    transfersPageVariant === 'logistics' ? 'Submit transfer request' : 'Save transfer';
+
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Stock Transfers"
-        description="Send stock between locations. Transfers stay on this list as In transit until the destination confirms receipt (Logistics → Stock Transfer Confirmations)."
+        title={pageTitle}
+        description={pageDescription}
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Stock transfers tools"
+            sheetTitle={`${pageTitle} — tools`}
             sheetSubtitle={<span>Date range and new transfer</span>}
-            triggerAriaLabel="Stock transfers toolbar and date range"
+            triggerAriaLabel={`${pageTitle} toolbar and date range`}
             desktop={
               <>
                 <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -338,7 +399,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                       setShowForm(true);
                     }}
                   >
-                    + Record transfer
+                    {initiateTransferCta}
                   </Button>
                 )}
                 <PageRefreshButton />
@@ -367,7 +428,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                       setShowForm(true);
                     }}
                   >
-                    + Record transfer
+                    {initiateTransferCta}
                   </Button>
                 )}
               </>
@@ -532,7 +593,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                 <fetcher.Form method="post" className="space-y-4">
                         <div className="flex items-center justify-between gap-2">
                           <h3 id="transfer-form-title" className="text-lg font-semibold text-app-fg">
-                            Record stock transfer
+                            {modalTransferTitle}
                           </h3>
                           <button
                             type="button"
@@ -644,9 +705,11 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                             size="sm"
                             disabled={!selectedProductId || !selectedFromLocation || !selectedToLocationId}
                             loading={fetcher.state === 'submitting'}
-                            loadingText="Saving..."
+                            loadingText={
+                              transfersPageVariant === 'logistics' ? 'Submitting…' : 'Saving…'
+                            }
                           >
-                            Save transfer
+                            {saveTransferSubmitLabel}
                           </Button>
                           <Button
                             type="button"
@@ -761,7 +824,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
 
             return (
               <CompactTable<Transfer>
-                caption="Stock transfers"
+                caption={pageTitle}
                 columns={columns}
                 rows={filteredTransfers}
                 rowKey={(t) => {
@@ -790,14 +853,14 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
         )}
       </div>
 
-      <Modal open={!!viewTransfer} onClose={() => setViewTransfer(null)} maxWidth="max-w-lg" aria-labelledby="transfer-detail-title">
+      <Modal open={!!viewTransfer} onClose={dismissTransferModal} maxWidth="max-w-lg" aria-labelledby="transfer-detail-title">
         {viewTransfer && (
           <div className="card border-0 shadow-none space-y-4 p-4 sm:p-6">
             <div className="flex items-center justify-between gap-2">
               <h3 id="transfer-detail-title" className="text-lg font-semibold text-app-fg">
                 Transfer details
               </h3>
-              <button type="button" onClick={() => setViewTransfer(null)} className="text-app-fg-muted hover:text-app-fg shrink-0" aria-label="Close">
+              <button type="button" onClick={dismissTransferModal} className="text-app-fg-muted hover:text-app-fg shrink-0" aria-label="Close">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -848,7 +911,7 @@ export function TransfersPage({ transfers, locations, products, levels, canIniti
                   Cancel transfer
                 </Button>
               )}
-              <Button type="button" variant="secondary" size="sm" onClick={() => setViewTransfer(null)}>
+              <Button type="button" variant="secondary" size="sm" onClick={dismissTransferModal}>
                 Close
               </Button>
             </div>

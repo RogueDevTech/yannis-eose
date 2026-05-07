@@ -640,4 +640,63 @@ export class OnboardingService {
       },
     };
   }
+
+  /**
+   * Status counts for the HR onboarding documents page top stats. Branch +
+   * user-status scoping mirrors `listStaffDocuments` so the numbers are
+   * consistent with what HR sees in the table when no onboarding-status filter
+   * is active. Search and the onboarding-status filter itself are intentionally
+   * NOT applied — these are the totals that DO NOT change as you filter.
+   */
+  async countStaffDocumentsByStatus(
+    actor: SessionUser,
+    currentBranchId: string | null,
+    opts: { branchId?: string; allBranches?: boolean } = {},
+  ): Promise<{ total: number; NOT_STARTED: number; IN_PROGRESS: number; SUBMITTED: number; APPROVED: number }> {
+    if (!this.canManageAnyOnboarding(actor)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'You do not have permission to view staff onboarding records.',
+      });
+    }
+
+    const conditions = [ne(schema.users.status, 'DEACTIVATED')];
+
+    const canViewAllBranches =
+      actor.role === 'SUPER_ADMIN' ||
+      (actor.permissions ?? []).includes(canonicalPermissionCode('branches.manage'));
+    const skipBranchScope = opts.allBranches === true && canViewAllBranches;
+    const branchFilter = skipBranchScope ? opts.branchId : (opts.branchId ?? currentBranchId ?? undefined);
+
+    if (branchFilter) {
+      conditions.push(
+        sql<boolean>`EXISTS (
+          SELECT 1
+          FROM user_branches ub
+          WHERE ub.user_id = ${schema.users.id}
+            AND ub.branch_id = ${branchFilter}
+        )`,
+      );
+    }
+
+    const effectiveStatusSql = sql<string>`COALESCE(${schema.staffOnboarding.status}::text, 'NOT_STARTED')`;
+    const whereClause = and(...conditions);
+
+    const rows = await this.db
+      .select({ status: effectiveStatusSql, count: count() })
+      .from(schema.users)
+      .leftJoin(schema.staffOnboarding, eq(schema.users.id, schema.staffOnboarding.userId))
+      .where(whereClause)
+      .groupBy(effectiveStatusSql);
+
+    const counts = { NOT_STARTED: 0, IN_PROGRESS: 0, SUBMITTED: 0, APPROVED: 0 };
+    let total = 0;
+    for (const r of rows) {
+      const n = Number(r.count ?? 0);
+      total += n;
+      const k = r.status as keyof typeof counts;
+      if (k in counts) counts[k] = n;
+    }
+    return { total, ...counts };
+  }
 }
