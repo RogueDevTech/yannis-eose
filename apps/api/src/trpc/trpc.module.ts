@@ -2,10 +2,10 @@ import { Inject, Module, type MiddlewareConsumer, type NestModule, type OnModule
 import { TrpcMiddleware } from './trpc.middleware';
 import { OrdersModule } from '../orders/orders.module';
 import { OrdersService } from '../orders/orders.service';
-import { setOrdersService } from './routers/orders.router';
+import { setOrdersCacheService, setOrdersService, setVoipService } from './routers/orders.router';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
-import { setUsersService, setUsersSessionStore } from './routers/users.router';
+import { setUsersCacheService, setUsersService, setUsersSessionStore } from './routers/users.router';
 import { ProductsModule } from '../products/products.module';
 import { ProductsService } from '../products/products.service';
 import { setProductsCacheService, setProductsService } from './routers/products.router';
@@ -37,7 +37,6 @@ import { AuditService } from '../audit/audit.service';
 import { setAuditService } from './routers/audit.router';
 import { VoipModule } from '../voip/voip.module';
 import { VoipService } from '../voip/voip.service';
-import { setVoipService } from './routers/orders.router';
 import { setDashboardServices } from './routers/dashboard.router';
 import { setVoipServiceForRouter } from './routers/voip.router';
 import { SettingsModule } from '../settings/settings.module';
@@ -52,6 +51,7 @@ import { PermissionRequestsService } from '../permission-requests/permission-req
 import { setPermissionRequestsService } from './routers/permission-requests.router';
 import {
   setBranchesDb,
+  setBranchesCacheService,
   setBranchesSessionStore,
   setBranchesNotificationsService,
   setBranchTeamsService,
@@ -70,12 +70,13 @@ import { setCacheService } from './routers/dashboard.router';
 import { ReportsModule } from '../reports/reports.module';
 import { ReportsService } from '../reports/reports.service';
 import { setReportsService } from './routers/reports.router';
-import { setRoleTemplatesService } from './routers/role-templates.router';
+import { setRoleTemplatesCacheService, setRoleTemplatesService } from './routers/role-templates.router';
 import { RoleTemplatesService } from '../permissions/role-templates.service';
-import { setPermissionsDb } from './routers/permissions.router';
+import { setPermissionsCacheService, setPermissionsDb } from './routers/permissions.router';
 import { OnboardingModule } from '../onboarding/onboarding.module';
 import { OnboardingService } from '../onboarding/onboarding.service';
 import { setOnboardingService } from './routers/onboarding.router';
+import { setSettingsCacheService } from './routers/settings.router';
 
 @Module({
   imports: [
@@ -125,8 +126,10 @@ export class TrpcModule implements NestModule, OnModuleInit {
     // Inject NestJS service instances into tRPC routers
     setPermissionRequestsService(this.permissionRequestsService);
     setOrdersService(this.ordersService);
+    setOrdersCacheService(this.cacheService);
     setUsersService(this.usersService);
     setUsersSessionStore(this.sessionStore);
+    setUsersCacheService(this.cacheService);
     setProductsService(this.productsService);
     setProductsCacheService(this.cacheService);
     setProductCategoriesService(this.productCategoriesService);
@@ -146,8 +149,10 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setVoipServiceForRouter(this.voipService);
     setSettingsService(this.settingsService);
     setSettingsDb(this.db as Parameters<typeof setSettingsDb>[0]);
+    setSettingsCacheService(this.cacheService);
     setCartService(this.cartService);
     setBranchesDb(this.db as Parameters<typeof setBranchesDb>[0]);
+    setBranchesCacheService(this.cacheService);
     setBranchTeamsService(this.branchTeamsService);
     setBranchesSessionStore(this.sessionStore);
     setBranchesNotificationsService(this.notificationsService);
@@ -163,7 +168,9 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setCacheService(this.cacheService);
     setReportsService(this.reportsService);
     setRoleTemplatesService(this.roleTemplatesService);
+    setRoleTemplatesCacheService(this.cacheService);
     setPermissionsDb(this.db as Parameters<typeof setPermissionsDb>[0]);
+    setPermissionsCacheService(this.cacheService);
     setOnboardingService(this.onboardingService);
   }
 

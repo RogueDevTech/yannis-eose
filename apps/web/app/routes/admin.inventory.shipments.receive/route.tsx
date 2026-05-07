@@ -31,31 +31,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const actorPerms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
 
   const productsPromise = apiRequest<unknown>(
-    `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ limit: 100, status: 'ACTIVE' }))}`,
+    `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
     { method: 'GET', cookie, ...readOpts },
   );
 
   // Stock intake / inbound shipment targets: company-owned warehouses only.
   const locationsPromise = apiRequest<unknown>(
-    `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', providerKind: 'WAREHOUSE', limit: 100 }))}`,
+    `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', providerKind: 'WAREHOUSE' }))}`,
     { method: 'GET', cookie, ...readOpts },
   );
 
   const [productsRes, locationsRes] = await Promise.all([productsPromise, locationsPromise]);
 
   const productsData = productsRes.ok
-    ? ((productsRes.data as { result?: { data?: { products: { id: string; name: string }[] } } })?.result?.data ??
-        null)
+    ? ((productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? null)
     : null;
 
   const locationsData = locationsRes.ok
     ? ((locationsRes.data as {
-        result?: { data?: { locations: { id: string; name: string; providerName?: string | null }[] } };
+        result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> };
       })?.result?.data ?? null)
     : null;
 
-  const products: ProductOption[] = (productsData?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
-  const locations: LocationOption[] = (locationsData?.locations ?? []).map((l) => ({
+  const products: ProductOption[] = (productsData ?? []).map((p) => ({ id: p.id, name: p.name }));
+  const locations: LocationOption[] = (locationsData ?? []).map((l) => ({
     id: l.id,
     name: l.name,
     providerName: l.providerName ?? null,

@@ -326,6 +326,31 @@ export function TransfersPage({
     return true;
   });
 
+  // Client-side pagination — backend `inventory.transfers` does not paginate;
+  // 20/page keeps the table light without losing the existing date/status filters.
+  const TRANSFERS_PAGE_SIZE = 20;
+  const [transfersPage, setTransfersPage] = useState(1);
+  const transfersTotalPages = Math.max(
+    1,
+    Math.ceil(filteredTransfers.length / TRANSFERS_PAGE_SIZE),
+  );
+  const safeTransfersPage = Math.min(transfersPage, transfersTotalPages);
+  const pagedTransfers = useMemo(
+    () =>
+      filteredTransfers.slice(
+        (safeTransfersPage - 1) * TRANSFERS_PAGE_SIZE,
+        safeTransfersPage * TRANSFERS_PAGE_SIZE,
+      ),
+    [filteredTransfers, safeTransfersPage],
+  );
+  // Reset when the filtered set shrinks past the current page or filters change.
+  useEffect(() => {
+    if (transfersPage > transfersTotalPages) setTransfersPage(1);
+  }, [transfersPage, transfersTotalPages]);
+  useEffect(() => {
+    setTransfersPage(1);
+  }, [statusFilter]);
+
   const summaryStatusCounts = useMemo(() => {
     const counts: Record<string, number> = {
       PENDING: 0,
@@ -826,7 +851,7 @@ export function TransfersPage({
               <CompactTable<Transfer>
                 caption={pageTitle}
                 columns={columns}
-                rows={filteredTransfers}
+                rows={pagedTransfers}
                 rowKey={(t) => {
                   const o = t as Transfer & {
                     outcomeStatus?: string;
@@ -847,6 +872,26 @@ export function TransfersPage({
                 }
                 withCard={false}
                 className="overflow-hidden rounded-xl border border-app-border"
+                pagination={
+                  filteredTransfers.length > 0
+                    ? {
+                        page: safeTransfersPage,
+                        totalPages: transfersTotalPages,
+                        onPageChange: setTransfersPage,
+                        summary: (
+                          <p className="text-sm text-app-fg-muted">
+                            Showing {(safeTransfersPage - 1) * TRANSFERS_PAGE_SIZE + 1}–
+                            {Math.min(safeTransfersPage * TRANSFERS_PAGE_SIZE, filteredTransfers.length)} of{' '}
+                            {filteredTransfers.length}
+                            <span className="text-app-fg-muted/90"> · {TRANSFERS_PAGE_SIZE} per page</span>
+                          </p>
+                        ),
+                        wrapperClassName:
+                          'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
+                        controlsClassName: 'sm:justify-end',
+                      }
+                    : undefined
+                }
               />
             );
           })()

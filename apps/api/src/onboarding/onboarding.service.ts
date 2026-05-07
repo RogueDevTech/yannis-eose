@@ -12,6 +12,7 @@ import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CacheService } from '../common/cache/cache.service';
 
 /**
  * Staff Onboarding service — record-keeping for HR profile data.
@@ -31,7 +32,17 @@ export class OnboardingService {
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly notifications: NotificationsService,
+    private readonly cache: CacheService,
   ) {}
+
+  /**
+   * Drop the cached `auth:userBundle` blob for `userId` so the next tRPC call
+   * re-reads `staffOnboardingStatus` (and the rest of the bundle) from the DB.
+   * Onboarding status is part of the bundle for non-admin-class users.
+   */
+  private async invalidateUserBundle(userId: string): Promise<void> {
+    await this.cache.del(`cache:auth:userBundle:${userId}`);
+  }
 
   private actorHasPermission(actor: SessionUser, code: string): boolean {
     const required = canonicalPermissionCode(code);
@@ -256,6 +267,10 @@ export class OnboardingService {
         .where(eq(schema.users.id, targetUserId))
         .limit(1);
 
+      // Onboarding status may have flipped NOT_STARTED → IN_PROGRESS — drop the
+      // cached user bundle so /auth/me returns the new status on the next call.
+      await this.invalidateUserBundle(targetUserId);
+
       return {
         ...onboardingRow,
         payoutBankName: userBank?.payoutBankName ?? null,
@@ -365,6 +380,10 @@ export class OnboardingService {
       };
     });
 
+    // Status flipped IN_PROGRESS → SUBMITTED. Drop the cached user bundle so
+    // /auth/me returns the new status on the next call.
+    await this.invalidateUserBundle(targetUserId);
+
     // Notify HR_MANAGERs that there's a new onboarding awaiting review. Best-
     // effort — never block the submission on notification failure.
     this.notifications.enqueueCreateForRole('HR_MANAGER', {
@@ -428,6 +447,11 @@ export class OnboardingService {
         .returning();
       return updated!;
     });
+
+    // Status flipped SUBMITTED → APPROVED. Drop the cached user bundle so the
+    // staff member's /auth/me returns the new status on their next call (the
+    // login onboarding nudge can finally be suppressed).
+    await this.invalidateUserBundle(targetUserId);
 
     this.notifications.enqueueCreate({
       userId: targetUserId,
@@ -502,6 +526,10 @@ export class OnboardingService {
         .returning();
       return row!;
     });
+
+    // Status flipped SUBMITTED → IN_PROGRESS. Drop the cached user bundle so
+    // the staff's /auth/me reflects the unlock on their next call.
+    await this.invalidateUserBundle(targetUserId);
 
     this.notifications.enqueueCreate({
       userId: targetUserId,

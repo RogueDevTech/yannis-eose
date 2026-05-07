@@ -8,12 +8,14 @@ import type { SessionStoreService } from '../../auth/session-store.service';
 import type { NotificationsService } from '../../notifications/notifications.service';
 import type { BranchTeamsService } from '../../branches/branch-teams.service';
 import { canMirror } from '../../common/authz';
+import { CacheService } from '../../common/cache/cache.service';
 
 // Service instances injected via factory pattern
 let drizzleInstance: PostgresJsDatabase<typeof schema> | null = null;
 let sessionStoreInstance: SessionStoreService | null = null;
 let notificationsServiceInstance: NotificationsService | null = null;
 let branchTeamsServiceInstance: BranchTeamsService | null = null;
+let branchesCacheService: CacheService | null = null;
 
 export function setBranchesDb(db: PostgresJsDatabase<typeof schema>) {
   drizzleInstance = db;
@@ -29,6 +31,17 @@ export function setBranchesNotificationsService(service: NotificationsService) {
 
 export function setBranchTeamsService(service: BranchTeamsService) {
   branchTeamsServiceInstance = service;
+}
+
+export function setBranchesCacheService(service: CacheService) {
+  branchesCacheService = service;
+}
+
+const BRANCHES_LIST_TTL_SECONDS = 60 * 15;
+
+async function invalidateBranchesListCache(): Promise<void> {
+  if (!branchesCacheService) return;
+  await branchesCacheService.delPattern('cache:branches:list:*').catch(() => {});
 }
 
 function getDb(): PostgresJsDatabase<typeof schema> {
@@ -91,21 +104,53 @@ export const branchesRouter = router({
    */
   list: authedProcedure.query(async ({ ctx }) => {
     const db = getDb();
-    if ((ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN')) {
-      return db.select().from(schema.branches);
+    const isAdmin = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+    if (!branchesCacheService) {
+      if (isAdmin) {
+        return db.select().from(schema.branches);
+      }
+      const memberships = await db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.userId, ctx.user.id));
+      if (memberships.length === 0) return [];
+      const branchIds: string[] = memberships.map((m) => m.branchId);
+      return db
+        .select()
+        .from(schema.branches)
+        .where(
+          branchIds.length === 1
+            ? eq(schema.branches.id, branchIds[0]!)
+            : inArray(schema.branches.id, branchIds),
+        );
     }
-    const memberships = await db
-      .select({ branchId: schema.userBranches.branchId })
-      .from(schema.userBranches)
-      .where(eq(schema.userBranches.userId, ctx.user.id));
-    if (memberships.length === 0) return [];
-    const branchIds: string[] = memberships.map((m) => m.branchId);
-    return db
-      .select()
-      .from(schema.branches)
-      .where(
-        branchIds.length === 1 ? eq(schema.branches.id, branchIds[0]!)         : inArray(schema.branches.id, branchIds),
-      );
+
+    const key =
+      'cache:branches:list:' +
+      CacheService.hashInput({
+        viewerId: ctx.user.id,
+        isAdmin,
+      });
+
+    return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, async () => {
+      if (isAdmin) {
+        return db.select().from(schema.branches);
+      }
+      const memberships = await db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.userId, ctx.user.id));
+      if (memberships.length === 0) return [];
+      const branchIds: string[] = memberships.map((m) => m.branchId);
+      return db
+        .select()
+        .from(schema.branches)
+        .where(
+          branchIds.length === 1
+            ? eq(schema.branches.id, branchIds[0]!)
+            : inArray(schema.branches.id, branchIds),
+        );
+    });
   }),
 
   /**
@@ -263,6 +308,7 @@ export const branchesRouter = router({
           settings: input.settings ?? null,
         })
         .returning();
+      await invalidateBranchesListCache();
       return rows[0];
     }),
 
@@ -289,6 +335,7 @@ export const branchesRouter = router({
         .set(updateFields)
         .where(eq(schema.branches.id, input.branchId))
         .returning();
+      await invalidateBranchesListCache();
       return rows[0];
     }),
 
@@ -329,6 +376,7 @@ export const branchesRouter = router({
         roleInBranch: (input.roleInBranch as (typeof schema.userBranches.$inferInsert)['roleInBranch']) ?? null,
         isPrimary: input.isPrimary ?? false,
       });
+      await invalidateBranchesListCache();
 
       const branchRows = await db
         .select({ name: schema.branches.name })
@@ -386,6 +434,7 @@ export const branchesRouter = router({
         .returning({ userId: schema.userBranches.userId });
 
       if (removed[0]) {
+        await invalidateBranchesListCache();
         notifications
           .create({
             userId: input.userId,

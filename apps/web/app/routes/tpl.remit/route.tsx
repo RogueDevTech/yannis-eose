@@ -20,8 +20,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const [remittancesRes, productsRes, locationsRes, deliveryRemittancesRes, eligibleOrdersRes] = await Promise.all([
     apiRequest<unknown>('/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/products.list?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/logistics.listLocations?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' })), { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/products.options?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/logistics.locationOptions?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' + encodeURIComponent(JSON.stringify({})), { method: 'GET', cookie }),
   ]);
@@ -30,10 +30,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ? (remittancesRes.data as { result?: { data?: { records: RemittanceRecord[] } } })?.result?.data
     : null;
   const productsData = productsRes.ok
-    ? (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data
+    ? (productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data
     : null;
   const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string; providerName?: string | null }> } } })?.result?.data
+    ? (locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })?.result?.data
     : null;
   const deliveryRemittancesData = deliveryRemittancesRes.ok
     ? (deliveryRemittancesRes.data as { result?: { data?: { records: DeliveryRemittanceRecord[] } } })?.result?.data
@@ -45,8 +45,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     remittances: remittancesData?.records ?? [],
-    products: productsData?.products ?? [],
-    locations: (locationsData?.locations ?? []).map((l) => ({
+    products: productsData ?? [],
+    locations: (locationsData ?? []).map((l) => ({
       id: l.id,
       name: l.name,
       providerName: l.providerName ?? null,

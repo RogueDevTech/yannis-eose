@@ -7,7 +7,7 @@ import { detectBrowser, getDeniedSteps } from '~/lib/push-denied-steps';
  * Device-level Web Push subscription (browser permission + service worker).
  * Shown on Settings → Push notifications for all authenticated users.
  */
-export function SettingsPushPanel() {
+export function SettingsPushPanel({ userId }: { userId?: string | null }) {
   const {
     isSupported,
     isSubscribed,
@@ -16,7 +16,7 @@ export function SettingsPushPanel() {
     unsubscribe,
     isIOS,
     isStandalone,
-  } = usePushSubscription();
+  } = usePushSubscription(userId);
 
   const browser = useMemo(() => detectBrowser(), []);
   const deniedSteps = useMemo(() => getDeniedSteps(browser), [browser]);

@@ -15,6 +15,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
+import { OrderDetailSkeleton } from '~/features/orders/OrderDetailSkeleton';
 import type {
   CallLogEntry,
   OrderDetail,
@@ -783,7 +784,7 @@ export default function OrderDetailRoute() {
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
-    <DeferredSection resolve={orderDetail} skeleton="card">
+    <DeferredSection resolve={orderDetail} fallback={<OrderDetailSkeleton />}>
       {(data) =>
         'loadError' in data && typeof data.loadError === 'string' ? (
           <div className="card text-center py-12">

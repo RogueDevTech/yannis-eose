@@ -88,6 +88,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       new BranchTeamsService(db as any),
+      {} as any,
     );
 
     const logisticsStatuses = ['CONFIRMED', 'AGENT_ASSIGNED', 'DELIVERED'] as const;
@@ -429,6 +430,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       new BranchTeamsService(db as any),
+      {} as any,
     );
 
     const actor = {
@@ -475,6 +477,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       new BranchTeamsService(db as any),
+      {} as any,
     );
     const actor = {
       id: supervisor.id,
@@ -505,6 +508,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       new BranchTeamsService(db as any),
+      {} as any,
     );
 
     const listResult = await ordersService.list(
@@ -532,6 +536,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       new BranchTeamsService(db as any),
+      {} as any,
     );
 
     const listA = await ordersService.list(
@@ -566,6 +571,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       new BranchTeamsService(db as any),
+      {} as any,
     );
 
     const filtered = await ordersService.list(

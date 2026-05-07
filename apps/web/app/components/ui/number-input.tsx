@@ -1,0 +1,144 @@
+import { forwardRef, useEffect, useState } from 'react';
+import { TextInput } from './text-input';
+
+type TextInputProps = React.ComponentProps<typeof TextInput>;
+
+type Coerce = 'integer' | 'decimal';
+
+interface NumberInputProps
+  extends Omit<TextInputProps, 'value' | 'onChange' | 'defaultValue' | 'type' | 'inputMode'> {
+  /** Current numeric value. */
+  value: number;
+  /**
+   * Fired with the final clamped numeric value once the user has finished editing
+   * (on blur, on Enter, or after a programmatic clamp). Never fires mid-typing
+   * with a half-typed value — the displayed text can be empty without forcing
+   * the parent state to snap back.
+   */
+  onValueChange: (value: number) => void;
+  /** Minimum accepted value. Clamped on blur. */
+  min?: number;
+  /** Maximum accepted value. Clamped on blur. */
+  max?: number;
+  /**
+   * Value to use if the user blurs an empty / invalid field.
+   * Defaults to `min` (or `0` when no min is set).
+   */
+  fallbackValue?: number;
+  /** Integer (default) or decimal. Decimal allows `.` while typing. */
+  coerce?: Coerce;
+  /**
+   * Number of decimals when rendering a decimal value back to the field
+   * (only used after blur / external change). Default: max 4 fraction digits.
+   */
+  maxFractionDigits?: number;
+}
+
+/**
+ * Drop-in replacement for `<TextInput type="number">` that **does not** force
+ * the field back to a fallback value on every keystroke.
+ *
+ * Why this exists: the old pattern
+ *
+ * ```ts
+ * onChange={(e) => {
+ *   const n = parseInt(e.target.value, 10);
+ *   setQty(Number.isFinite(n) && n > 0 ? n : 1);
+ * }}
+ * ```
+ *
+ * snaps the displayed value back to `1` the instant the user clears the field
+ * (because `parseInt('', 10)` is `NaN`). The visible workaround was "type a
+ * digit first, then delete the leading 1." NumberInput keeps an internal
+ * string state and only commits a parsed number on blur/Enter/programmatic
+ * change, so an empty input stays empty while the user is editing.
+ */
+export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
+  (
+    {
+      value,
+      onValueChange,
+      min,
+      max,
+      fallbackValue,
+      coerce = 'integer',
+      maxFractionDigits = 4,
+      onBlur,
+      onKeyDown,
+      ...rest
+    },
+    ref,
+  ) => {
+    const formatNumber = (n: number): string => {
+      if (!Number.isFinite(n)) return '';
+      if (coerce === 'integer') return String(Math.trunc(n));
+      // Avoid scientific notation + trailing zeros the user didn't type.
+      const fixed = n.toFixed(maxFractionDigits);
+      return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed;
+    };
+
+    const [text, setText] = useState<string>(() => formatNumber(value));
+
+    // Sync display when `value` changes from outside (parent reset, programmatic
+    // clamp, optimistic update). We only resync if the parsed text differs from
+    // the new value — preserves trailing decimals and leading zeros while typing.
+    useEffect(() => {
+      const parsed = parseFinite(text, coerce);
+      if (parsed === null || parsed !== value) {
+        setText(formatNumber(value));
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- formatNumber + parseFinite are stable
+    }, [value, coerce]);
+
+    const commit = (raw: string) => {
+      const parsed = parseFinite(raw, coerce);
+      const fb = fallbackValue ?? min ?? 0;
+      let next = parsed === null ? fb : parsed;
+      if (typeof min === 'number' && next < min) next = min;
+      if (typeof max === 'number' && next > max) next = max;
+      // Round to integer if integer mode (in case the user typed "3.7" in an int field).
+      if (coerce === 'integer') next = Math.trunc(next);
+      setText(formatNumber(next));
+      if (next !== value) onValueChange(next);
+    };
+
+    return (
+      <TextInput
+        ref={ref}
+        {...rest}
+        type="text"
+        inputMode={coerce === 'integer' ? 'numeric' : 'decimal'}
+        value={text}
+        onChange={(e) => {
+          const raw = e.target.value;
+          // Allow empty + typing — only filter characters that can never be
+          // part of a number for the chosen mode. We don't validate here;
+          // commit() does the clamp/coerce on blur.
+          const allowed =
+            coerce === 'integer'
+              ? raw.replace(/[^\d-]/g, '')
+              : raw.replace(/[^\d.\-]/g, '');
+          setText(allowed);
+        }}
+        onBlur={(e) => {
+          commit(e.currentTarget.value);
+          onBlur?.(e);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            commit(e.currentTarget.value);
+          }
+          onKeyDown?.(e);
+        }}
+      />
+    );
+  },
+);
+NumberInput.displayName = 'NumberInput';
+
+function parseFinite(raw: string, coerce: Coerce): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed === '-' || trimmed === '.') return null;
+  const n = coerce === 'integer' ? parseInt(trimmed, 10) : parseFloat(trimmed);
+  return Number.isFinite(n) ? n : null;
+}

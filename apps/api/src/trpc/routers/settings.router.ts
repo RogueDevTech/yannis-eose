@@ -17,6 +17,7 @@ import { router, authedProcedure, permissionProcedure, publicProcedure } from '.
 import type { SettingsService } from '../../settings/settings.service';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { CacheService } from '../../common/cache/cache.service';
 
 function resolveDefaultAppTheme(raw: Record<string, unknown> | null): AppThemeId {
   const merged = { defaultAppTheme: 'system' as const, ...(raw ?? {}) };
@@ -26,6 +27,7 @@ function resolveDefaultAppTheme(raw: Record<string, unknown> | null): AppThemeId
 
 let settingsServiceInstance: SettingsService | null = null;
 let settingsDbInstance: PostgresJsDatabase<typeof schema> | null = null;
+let settingsCacheService: CacheService | null = null;
 
 export function setSettingsService(service: SettingsService) {
   settingsServiceInstance = service;
@@ -33,6 +35,17 @@ export function setSettingsService(service: SettingsService) {
 
 export function setSettingsDb(db: PostgresJsDatabase<typeof schema>) {
   settingsDbInstance = db;
+}
+
+export function setSettingsCacheService(service: CacheService) {
+  settingsCacheService = service;
+}
+
+async function invalidateSystemSettingsCache(): Promise<void> {
+  if (!settingsCacheService) return;
+  await settingsCacheService.delPattern('cache:settings:systemSettings*').catch(() => {
+    /* fail-open */
+  });
 }
 
 function getSettingsDb(): PostgresJsDatabase<typeof schema> {
@@ -90,6 +103,7 @@ export const settingsRouter = router({
         { defaultAppTheme: input.defaultAppTheme },
         ctx.user.id,
       );
+      await invalidateSystemSettingsCache();
       return { success: true };
     }),
 
@@ -98,7 +112,10 @@ export const settingsRouter = router({
    * Any authenticated user can read (CS pages need to know the mode).
    */
   getSystemSettings: authedProcedure.query(async () => {
-    return getSettingsService().getAll();
+    const key = 'cache:settings:systemSettings:v1';
+    const TTL_SECONDS = 60;
+    if (!settingsCacheService) return getSettingsService().getAll();
+    return settingsCacheService.getOrSet(key, TTL_SECONDS, () => getSettingsService().getAll());
   }),
 
   /**
@@ -134,6 +151,7 @@ export const settingsRouter = router({
         { enabledTypes: input.enabledTypes },
         ctx.user.id,
       );
+      await invalidateSystemSettingsCache();
       return { success: true };
     }),
 
@@ -145,6 +163,7 @@ export const settingsRouter = router({
     .input(updateSystemSettingSchema)
     .mutation(async ({ input, ctx }) => {
       await getSettingsService().set(input.key, input.value, ctx.user.id);
+      await invalidateSystemSettingsCache();
       return { success: true };
     }),
 });

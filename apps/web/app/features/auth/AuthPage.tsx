@@ -11,7 +11,13 @@ const mobileInput =
 export function AuthPage({ needsSetup, redirectTo }: AuthPageProps) {
   const actionData = useActionData<AuthActionData>();
   const navigation = useNavigation();
-  const isSubmitting = navigation.state === 'submitting';
+  // Stay in loading state through BOTH the submit phase and the post-action
+  // redirect/loader phase, so the Sign in button doesn't visibly "go idle"
+  // for the few hundred ms between the auth action returning and the
+  // dashboard's loader resolving — that gap was confusing users into
+  // thinking the click didn't take. `formData` is set during 'submitting'
+  // AND stays set during the 'loading' phase that follows a form redirect.
+  const isSubmitting = navigation.state !== 'idle' && navigation.formData != null;
 
   return (
     <div className="flex min-h-screen">

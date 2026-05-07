@@ -12,7 +12,27 @@ export type ClientConfigPayload = {
   effectiveFontScale: string;
 };
 
-export async function fetchClientConfig(): Promise<ClientConfigPayload | null> {
+/**
+ * Module-level dedupe + 30s in-memory cache for `settings.getClientConfig`.
+ *
+ * `useServerAppThemeSync` and `useServerFontScaleSync` are mounted side by
+ * side in `root.tsx` and BOTH call `fetchClientConfig()` once on login —
+ * with no coordination, the same network request was firing twice (~2.4s
+ * each). The in-flight singleton makes concurrent callers share one response;
+ * the small TTL covers React StrictMode double-mount + back/forward
+ * navigations within the same session without tying us to a longer cache that
+ * would mask theme/font preference updates from another tab.
+ *
+ * Reset hook: callers that mutate the underlying preference (e.g. theme or
+ * font scale) can call `invalidateClientConfigCache()` to drop the next
+ * fetch, but in practice the per-page redirect/refresh covers it.
+ */
+const CLIENT_CONFIG_CACHE_TTL_MS = 30_000;
+let cachedClientConfig: ClientConfigPayload | null = null;
+let cachedClientConfigAt = 0;
+let inFlightClientConfig: Promise<ClientConfigPayload | null> | null = null;
+
+async function loadClientConfig(): Promise<ClientConfigPayload | null> {
   const base = getBrowserApiBaseUrl();
   if (!base) return null;
   const url = `${base}/trpc/settings.getClientConfig?input=${encodeURIComponent(JSON.stringify({}))}`;
@@ -26,6 +46,29 @@ export async function fetchClientConfig(): Promise<ClientConfigPayload | null> {
   }
 }
 
+export async function fetchClientConfig(): Promise<ClientConfigPayload | null> {
+  if (cachedClientConfig && Date.now() - cachedClientConfigAt < CLIENT_CONFIG_CACHE_TTL_MS) {
+    return cachedClientConfig;
+  }
+  if (inFlightClientConfig) return inFlightClientConfig;
+
+  inFlightClientConfig = loadClientConfig().finally(() => {
+    inFlightClientConfig = null;
+  });
+  const result = await inFlightClientConfig;
+  if (result) {
+    cachedClientConfig = result;
+    cachedClientConfigAt = Date.now();
+  }
+  return result;
+}
+
+/** Drop the in-memory client-config cache so the next caller hits the network. */
+export function invalidateClientConfigCache(): void {
+  cachedClientConfig = null;
+  cachedClientConfigAt = 0;
+}
+
 /** Persists theme for the logged-in user; no-op on failure (e.g. logged out). */
 export async function postUpdateMyAppTheme(appTheme: AppThemeId): Promise<void> {
   const base = getBrowserApiBaseUrl();
@@ -37,6 +80,9 @@ export async function postUpdateMyAppTheme(appTheme: AppThemeId): Promise<void> 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appTheme }),
     });
+    // Drop the cached client config so a same-session re-read pulls the new
+    // preference (matches the server-side `userBundleCache` invalidation).
+    invalidateClientConfigCache();
   } catch {
     /* no-op */
   }
@@ -53,6 +99,7 @@ export async function postUpdateMyFontScale(fontScale: FontScaleId): Promise<voi
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fontScale }),
     });
+    invalidateClientConfigCache();
   } catch {
     /* no-op */
   }

@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, forwardRef } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import * as bcrypt from 'bcrypt';
 import { randomBytes, randomUUID } from 'crypto';
@@ -15,6 +15,7 @@ import type {
 import { canonicalPermissionCode, mergePermissionSnapshot } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { AuthService } from '../auth/auth.service';
+import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 import { withActor } from '../common/db/with-actor';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PermissionsService } from '../permissions/permissions.service';
@@ -36,6 +37,8 @@ export class UsersService {
     private readonly notificationsService: NotificationsService,
     private readonly permissionsService: PermissionsService,
     private readonly eventsService: EventsService,
+    @Inject(forwardRef(() => UserBundleCacheService))
+    private readonly userBundleCache: UserBundleCacheService,
   ) {}
 
   private defaultScopeForRole(role: string): { scopeGlobal: boolean; scopeOrgWideHead: boolean } {
@@ -593,6 +596,11 @@ export class UsersService {
 
       return createdUser;
     });
+
+    // Drop the cached user bundle (perms + role/scope/template) so the next
+    // tRPC call by this user picks up the freshly stamped permissions
+    // immediately instead of waiting up to the 60s TTL.
+    void this.userBundleCache.invalidate(user.id);
 
     // Send invite email with login credentials (non-blocking)
     const loginUrl = process.env['APP_URL'] ?? 'http://localhost:4001';
@@ -1423,6 +1431,10 @@ export class UsersService {
       await this.authService.killUserSessions(input.userId);
     }
 
+    // Role / template / scope / permission overrides may have changed — drop
+    // the cached user bundle so the next tRPC call sees the latest snapshot.
+    void this.userBundleCache.invalidate(input.userId);
+
     const afterProductIds =
       input.productIds !== undefined
         ? [...new Set(input.productIds)].sort()
@@ -1493,7 +1505,7 @@ export class UsersService {
     userId: string,
     actor: SessionUser,
   ): Promise<{ stampedGranted: number; stampedRevoked: number; templateBaselineCount: number }> {
-    return withActor(this.db, actor, async (tx) => {
+    const result = await withActor(this.db, actor, async (tx) => {
       const [target] = await tx
         .select({
           id: schema.users.id,
@@ -1592,6 +1604,12 @@ export class UsersService {
         templateBaselineCount: templateCodes.length,
       };
     });
+
+    // Permissions snapshot was rewritten — drop the cached user bundle so the
+    // next tRPC call sees the new snapshot.
+    void this.userBundleCache.invalidate(userId);
+
+    return result;
   }
 
   /**
@@ -1647,6 +1665,11 @@ export class UsersService {
     });
 
     await this.authService.killUserSessions(userId);
+
+    // Drop the cached user bundle so any in-flight tRPC call from a still-mounted
+    // browser tab can't slip through with cached permissions before the session
+    // gets force-cleared by the socket event below.
+    void this.userBundleCache.invalidate(userId);
 
     // Tell any open browser tabs the user has to log out immediately. The
     // session is already revoked server-side (above) — Remix loaders + tRPC
@@ -2090,7 +2113,7 @@ export class UsersService {
    * Persists the current user's appearance theme. `null` = follow org default (`client_ui_config`).
    */
   async updateMyAppTheme(appTheme: string | null, actor: SessionUser): Promise<{ appTheme: string | null }> {
-    return withActor(this.db, actor, async (tx) => {
+    const result = await withActor(this.db, actor, async (tx) => {
       const [row] = await tx
         .update(schema.users)
         .set({ appTheme, updatedAt: new Date() })
@@ -2103,6 +2126,11 @@ export class UsersService {
 
       return { appTheme: row.appTheme ?? null };
     });
+
+    // Theme is part of the cached bundle — drop it so /auth/me returns fresh.
+    void this.userBundleCache.invalidate(actor.id);
+
+    return result;
   }
 
   /** Current saved font scale preference from DB (null = base). */
@@ -2131,6 +2159,9 @@ export class UsersService {
       }
       return r;
     });
+
+    // Font scale is part of the cached bundle — drop it so /auth/me returns fresh.
+    void this.userBundleCache.invalidate(actor.id);
 
     return { fontScale: row.fontScale ?? null };
   }

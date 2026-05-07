@@ -23,6 +23,7 @@ import { OrderTimeline } from '~/components/ui/order-timeline';
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
 import { FormSelect } from '~/components/ui/form-select';
+import { NumberInput } from '~/components/ui/number-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -1926,6 +1927,7 @@ export function OrderDetailPage({
                 just clutters the post-delivery view. */}
             {canEditOrder &&
               canPerformCSActionsOnOrder &&
+              order.assignedCsId &&
               order.status !== 'DELIVERED' &&
               order.status !== 'REMITTED' &&
               order.status !== 'CANCELLED' &&
@@ -2837,38 +2839,30 @@ export function OrderDetailPage({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-app-fg-muted mb-1">Quantity</label>
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
-                        className="input w-full"
+                        fallbackValue={1}
                         value={item.quantity}
-                        onChange={(e) => {
-                          const v = parseInt(e.target.value, 10);
-                          if (!Number.isNaN(v) && v >= 1) {
-                            setEditedItems((prev) =>
-                              prev.map((p, i) => (i === index ? { ...p, quantity: v } : p)),
-                            );
-                          }
-                        }}
+                        onValueChange={(v) =>
+                          setEditedItems((prev) =>
+                            prev.map((p, i) => (i === index ? { ...p, quantity: v } : p)),
+                          )
+                        }
                         aria-label={`Quantity for ${item.productName ?? 'item'}`}
                       />
                     </div>
                     <div>
                       <label className="block text-xs text-app-fg-muted mb-1">Unit price (&#8358;)</label>
-                      <input
-                        type="number"
+                      <NumberInput
+                        coerce="decimal"
                         min={0}
-                        step={0.01}
-                        className="input w-full"
+                        fallbackValue={0}
                         value={item.unitPrice}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value);
-                          if (!Number.isNaN(v) && v >= 0) {
-                            setEditedItems((prev) =>
-                              prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
-                            );
-                          }
-                        }}
+                        onValueChange={(v) =>
+                          setEditedItems((prev) =>
+                            prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
+                          )
+                        }
                         aria-label={`Unit price for ${item.productName ?? 'item'}`}
                       />
                     </div>

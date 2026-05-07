@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -54,10 +54,25 @@ const STATUS_TABS: Array<{ value: '' | PayrollBatchStatus; label: string }> = [
   { value: 'PAID', label: 'Paid' },
 ];
 
+const PAGE_SIZE = 20;
+
 export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePayoutPageProps) {
   const [, setSearchParams] = useSearchParams();
   const [showExportModal, setShowExportModal] = useState(false);
   const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const [page, setPage] = useState(1);
+
+  // Reset to page 1 whenever the result set changes (status tab switch, refetch).
+  useEffect(() => {
+    setPage(1);
+  }, [batches.length, status]);
+
+  const totalPages = Math.max(1, Math.ceil(batches.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedBatches = useMemo(
+    () => batches.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [batches, safePage],
+  );
 
   const totalPending = useMemo(
     () => batches.filter((b) => b.status === 'PENDING_FINANCE').reduce((acc, b) => acc + Number(b.totalAmount), 0),
@@ -210,13 +225,32 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
           </div>
           <CompactTable<PayrollBatch>
             columns={batchColumns}
-            rows={batches}
+            rows={pagedBatches}
             rowKey={(b) => b.id}
             withCard={false}
             loading={isLoaderRefetchBusy}
             loadingVariant="overlay"
             emptyTitle="No payroll batches in this queue"
             emptyDescription="When HR forwards payroll to finance, batches appear here for payout processing."
+            pagination={
+              batches.length > 0
+                ? {
+                    page: safePage,
+                    totalPages,
+                    onPageChange: setPage,
+                    summary: (
+                      <p className="text-sm text-app-fg-muted">
+                        Showing {(safePage - 1) * PAGE_SIZE + 1}–
+                        {Math.min(safePage * PAGE_SIZE, batches.length)} of {batches.length}
+                        <span className="text-app-fg-muted/90"> · {PAGE_SIZE} per page</span>
+                      </p>
+                    ),
+                    wrapperClassName:
+                      'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
+                    controlsClassName: 'sm:justify-end',
+                  }
+                : undefined
+            }
           />
         </div>
 

@@ -19,6 +19,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
 import { TextInput } from '~/components/ui/text-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { RadioGroup } from '~/components/ui/radio-group';
@@ -626,14 +627,14 @@ export function InventoryPage({
           <thresholdFetcher.Form method="post" className="space-y-4">
             <input type="hidden" name="intent" value="updateLowStockThreshold" />
             <div className="flex items-center gap-3">
-              <TextInput
+              <NumberInput
                 id="low-stock-threshold-input"
                 name="lowStockThreshold"
-                type="number"
                 min={1}
                 max={10000}
+                fallbackValue={1}
                 value={draftThreshold}
-                onChange={(e) => setDraftThreshold(Math.max(1, Math.min(10000, parseInt(e.target.value, 10) || 1)))}
+                onValueChange={setDraftThreshold}
                 wrapperClassName="w-32"
               />
               <span className="text-xs text-app-fg-muted">units</span>

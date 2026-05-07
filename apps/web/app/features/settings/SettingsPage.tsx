@@ -18,6 +18,7 @@ import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fe
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { FormSelect } from '~/components/ui/form-select';
 
 type OrgDefaultTheme = (typeof APP_THEME_IDS)[number];
@@ -30,6 +31,7 @@ function parseOrgDefaultTheme(raw: unknown): OrgDefaultTheme {
 }
 
 interface SettingsUser {
+  id: string;
   name: string;
   email: string;
   role: string;
@@ -852,7 +854,7 @@ export function SettingsPage({
         </div>
       )}
 
-      {activeTab === 'push' && <SettingsPushPanel />}
+      {activeTab === 'push' && <SettingsPushPanel userId={user?.id ?? null} />}
 
       {/* System Tab — grouped form: toggle VOIP, CS distribution then submit once */}
       {activeTab === 'system' && (
@@ -1032,13 +1034,13 @@ export function SettingsPage({
                         An agent cannot claim new orders if they already have this many unconfirmed orders. Enforced server-side.
                       </p>
                       <div className="flex items-center gap-3">
-                        <TextInput
+                        <NumberInput
                           id="claim-cap-input"
-                          type="number"
                           min={1}
                           max={20}
+                          fallbackValue={2}
                           value={localClaimCap}
-                          onChange={(e) => setLocalClaimCap(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 2)))}
+                          onValueChange={setLocalClaimCap}
                           wrapperClassName="w-24"
                         />
                         <span className="text-xs text-app-fg-muted">orders (1–20)</span>
@@ -1086,18 +1088,14 @@ export function SettingsPage({
                       The True ROAS multiple that maps to a perfect 1.0 profitability score.
                     </p>
                     <div className="flex items-center gap-2">
-                      <TextInput
+                      <NumberInput
                         id="profit-target-roas"
-                        type="number"
-                        step="0.1"
+                        coerce="decimal"
                         min={0.1}
                         max={50}
+                        fallbackValue={3}
                         value={localProfitabilityTarget}
-                        onChange={(e) =>
-                          setLocalProfitabilityTarget(
-                            Math.max(0.1, Math.min(50, parseFloat(e.target.value) || 3)),
-                          )
-                        }
+                        onValueChange={setLocalProfitabilityTarget}
                         wrapperClassName="w-28"
                       />
                       <span className="text-xs text-app-fg-muted">x</span>
@@ -1111,18 +1109,14 @@ export function SettingsPage({
                       At/above this ROAS the buyer is shown in green; below it, red.
                     </p>
                     <div className="flex items-center gap-2">
-                      <TextInput
+                      <NumberInput
                         id="profit-green-threshold"
-                        type="number"
-                        step="0.1"
+                        coerce="decimal"
                         min={0.1}
                         max={50}
+                        fallbackValue={2.5}
                         value={localProfitabilityThreshold}
-                        onChange={(e) =>
-                          setLocalProfitabilityThreshold(
-                            Math.max(0.1, Math.min(50, parseFloat(e.target.value) || 2.5)),
-                          )
-                        }
+                        onValueChange={setLocalProfitabilityThreshold}
                         wrapperClassName="w-28"
                       />
                       <span className="text-xs text-app-fg-muted">x</span>

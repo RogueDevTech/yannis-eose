@@ -7,6 +7,7 @@ import { Button } from '~/components/ui/button';
 import { PageNotification } from '~/components/ui/page-notification';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -298,16 +299,14 @@ export default function EditOfferRoute() {
                     }
                     placeholder="Buy 1 get 1 free"
                   />
-                  <TextInput
+                  <NumberInput
                     label="Qty"
-                    inputMode="numeric"
-                    value={String(it.quantity)}
-                    onChange={(e) => {
-                      const n = parseInt(e.target.value, 10);
-                      setLines((p) =>
-                        p.map((x, i) => (i === idx ? { ...x, quantity: Number.isFinite(n) && n > 0 ? n : 1 } : x)),
-                      );
-                    }}
+                    min={1}
+                    fallbackValue={1}
+                    value={it.quantity}
+                    onValueChange={(n) =>
+                      setLines((p) => p.map((x, i) => (i === idx ? { ...x, quantity: n } : x)))
+                    }
                   />
                   <TextInput
                     label="Total price (₦)"
