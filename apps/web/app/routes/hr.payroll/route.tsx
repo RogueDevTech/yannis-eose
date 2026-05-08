@@ -1,7 +1,7 @@
-import { useLoaderData } from '@remix-run/react';
-import type { ShouldRevalidateFunction } from '@remix-run/react';
-import { json, redirect } from '@remix-run/node';
-import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
+import { defer, json, redirect } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { useLoaderData, Await, type ShouldRevalidateFunction } from '@remix-run/react';
 import {
   apiRequest,
   getCurrentUser,
@@ -11,6 +11,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { HRPage } from '~/features/hr/HRPage';
+import { MonthlyPayrollsLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type {
   Adjustment,
   HRUser,
@@ -65,6 +66,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw redirect('/admin');
   }
 
+  const pageData = (async (): Promise<HRStreamData> => {
   // Critical: monthly batches + branches (the default view)
   // Secondary: adjustments + users (only mounted for HR/Finance via the Adjustments tab)
   const [monthlyRes, branchesRes, adjustmentsRes, usersRes] = await Promise.all([
@@ -106,6 +108,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     viewer,
     initialBatchId,
   } satisfies HRStreamData;
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -220,15 +225,21 @@ function extractError(res: { data: unknown }, fallback: string): string {
 }
 
 export default function HRRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <HRPage
-      adjustments={data.adjustments}
-      users={data.users}
-      monthlyPayrolls={data.monthlyPayrolls}
-      branches={data.branches}
-      viewer={data.viewer}
-      initialBatchId={data.initialBatchId}
-    />
+    <Suspense fallback={<MonthlyPayrollsLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <HRPage
+            adjustments={data.adjustments}
+            users={data.users}
+            monthlyPayrolls={data.monthlyPayrolls}
+            branches={data.branches}
+            viewer={data.viewer}
+            initialBatchId={data.initialBatchId}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

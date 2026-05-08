@@ -1914,6 +1914,21 @@ export class OrdersService {
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
     }
+    if (input.supervisorScope) {
+      const { csUserIds, mediaBuyerIds } = input.supervisorScope;
+      // Supervisor "my team only" scope (Phase B) — OR across the two dimensions:
+      // assigned to a CS team agent OR created by a supervised MB. Both lists also
+      // include the actor's own id so a supervisor sees their own work.
+      const orParts = [];
+      if (csUserIds.length > 0) orParts.push(inArray(schema.orders.assignedCsId, csUserIds));
+      if (mediaBuyerIds.length > 0) orParts.push(inArray(schema.orders.mediaBuyerId, mediaBuyerIds));
+      if (orParts.length === 0) {
+        conditions.push(sql`FALSE`);
+      } else {
+        const combined = or(...orParts);
+        if (combined) conditions.push(combined);
+      }
+    }
     if (input.campaignId) {
       conditions.push(eq(schema.orders.campaignId, input.campaignId));
     }
@@ -1951,7 +1966,12 @@ export class OrdersService {
     }
     if (input.endDate) {
       const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
+      // Bare `YYYY-MM-DD` is interpreted as start-of-day; bump to 23:59:59.999
+      // so the inclusive day filter actually covers the whole calendar day.
+      // ISO datetimes (`YYYY-MM-DDTHH:MM[:SS]`) carry an explicit moment from
+      // the new time-aware filter — leave them as-is so the user gets the
+      // exact upper bound they picked.
+      if (!input.endDate.includes('T')) end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.createdAt, end));
     }
     if (branchId) {
@@ -2040,13 +2060,64 @@ export class OrdersService {
       csUsers.forEach((u) => assignedCsNames.set(u.id, u.name));
     }
 
+    // Surface "primary product" + form name on each row so the orders table can show
+    // a Product column for everyone and a Form column for marketing views without
+    // forcing an N+1 fetch from the client. Two batched queries:
+    //   1) all order_items for this page → lowest-id row per order = primary line
+    //   2) campaign names for distinct campaignIds on the page
+    const orderIds = orders.map((o) => o.id);
+    const primaryItemByOrder = new Map<string, { productId: string; productName: string | null; itemCount: number }>();
+    if (orderIds.length > 0) {
+      const items = await this.db
+        .select({
+          orderId: schema.orderItems.orderId,
+          itemId: schema.orderItems.id,
+          productId: schema.orderItems.productId,
+          productName: schema.products.name,
+        })
+        .from(schema.orderItems)
+        .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+        .where(inArray(schema.orderItems.orderId, orderIds))
+        .orderBy(asc(schema.orderItems.orderId), asc(schema.orderItems.id));
+      // Reduce to the first item per order (by lowest id) + total count.
+      const seen = new Set<string>();
+      for (const item of items) {
+        const oid = item.orderId;
+        if (!oid) continue;
+        const cur = primaryItemByOrder.get(oid);
+        if (!cur) {
+          primaryItemByOrder.set(oid, { productId: item.productId, productName: item.productName, itemCount: 1 });
+          seen.add(oid);
+        } else {
+          cur.itemCount += 1;
+        }
+      }
+    }
+
+    const campaignIds = [...new Set(orders.map((o) => o.campaignId).filter(Boolean))] as string[];
+    let campaignNames: Map<string, string> = new Map();
+    if (campaignIds.length > 0) {
+      const camps = await this.db
+        .select({ id: schema.campaigns.id, name: schema.campaigns.name })
+        .from(schema.campaigns)
+        .where(inArray(schema.campaigns.id, campaignIds));
+      camps.forEach((c) => campaignNames.set(c.id, c.name));
+    }
+
     return {
-      orders: orders.map((order) => ({
-        ...order,
-        customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
-        mediaBuyerName: order.mediaBuyerId ? mediaBuyerNames.get(order.mediaBuyerId) ?? null : null,
-        assignedCsName: order.assignedCsId ? assignedCsNames.get(order.assignedCsId) ?? null : null,
-      })),
+      orders: orders.map((order) => {
+        const primary = primaryItemByOrder.get(order.id);
+        return {
+          ...order,
+          customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
+          mediaBuyerName: order.mediaBuyerId ? mediaBuyerNames.get(order.mediaBuyerId) ?? null : null,
+          assignedCsName: order.assignedCsId ? assignedCsNames.get(order.assignedCsId) ?? null : null,
+          primaryProductId: primary?.productId ?? null,
+          primaryProductName: primary?.productName ?? null,
+          itemCount: primary?.itemCount ?? 0,
+          campaignName: order.campaignId ? campaignNames.get(order.campaignId) ?? null : null,
+        };
+      }),
       pagination: {
         page: input.page,
         limit: input.limit,
@@ -2078,6 +2149,18 @@ export class OrdersService {
     if (branchId) base.push(eq(schema.orders.branchId, branchId));
     if (input.assignedCsId) base.push(eq(schema.orders.assignedCsId, input.assignedCsId));
     if (input.mediaBuyerId) base.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+    if (input.supervisorScope) {
+      const { csUserIds, mediaBuyerIds } = input.supervisorScope;
+      const orParts = [];
+      if (csUserIds.length > 0) orParts.push(inArray(schema.orders.assignedCsId, csUserIds));
+      if (mediaBuyerIds.length > 0) orParts.push(inArray(schema.orders.mediaBuyerId, mediaBuyerIds));
+      if (orParts.length === 0) {
+        base.push(sql`FALSE`);
+      } else {
+        const combined = or(...orParts);
+        if (combined) base.push(combined);
+      }
+    }
     if (input.status) base.push(eq(schema.orders.status, input.status));
 
     const deliveryWhere = and(
@@ -3488,7 +3571,7 @@ export class OrdersService {
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      if (!endDate.includes('T')) end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.createdAt, end));
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -3866,7 +3949,8 @@ export class OrdersService {
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      // Skip the end-of-day bump for ISO datetimes — see listOrders for full reasoning.
+      if (!endDate.includes('T')) end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.createdAt, end));
     }
     if (branchId) conditions.push(eq(schema.orders.branchId, branchId));

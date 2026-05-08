@@ -218,7 +218,7 @@ export function MonthlyPayrolls({
 }: MonthlyPayrollsProps) {
   const fetcher = useFetcher();
   const payrollSurface = useFetcherActionSurface(fetcher);
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
 

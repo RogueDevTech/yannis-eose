@@ -1,22 +1,21 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Link, useFetcher, useLoaderData } from '@remix-run/react';
 import * as React from 'react';
+import { Await, Link, useFetcher, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
-import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Button } from '~/components/ui/button';
 import { MarketingOffersTab } from '~/features/campaigns/MarketingOffersTab';
 import { OfferGroupCreateModal } from '~/features/campaigns/OfferGroupCreateModal';
-import { ProductsListDeferredFallback } from '~/features/products/ProductsListDeferredFallback';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
+import { ProductsHubLoadingShell } from '~/features/products/ProductsDeferredLoadingShells';
 import type { Product } from '~/features/products/types';
 import type { OfferGroupRow } from '~/features/campaigns/types';
 
@@ -42,8 +41,7 @@ type OffersSummaryApiResponse = OffersSummaryApiOk | OffersSummaryApiErr;
 type ProductsLoaderData = {
   /** URL tab hint for direct-link SSR; UI switching is client-side. */
   initialTab: 'product' | 'offers';
-  products: Promise<ResolvedProductsList>;
-  offerGroupsCount: Promise<number>;
+  pageData: Promise<{ products: ResolvedProductsList; offerGroupsCount: number }>;
   canEditProduct: boolean;
   canCreateProduct: boolean;
   canInstantArchiveProduct: boolean;
@@ -174,10 +172,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
         .catch(() => 0)
     : Promise.resolve(0);
 
+  const pageData = Promise.all([productsPromise, offerGroupsCountPromise] as const).then(
+    ([products, offerGroupsCount]) => ({ products, offerGroupsCount }),
+  );
+
   return defer({
     initialTab,
-    products: productsPromise,
-    offerGroupsCount: offerGroupsCountPromise,
+    pageData,
     canEditProduct,
     canCreateProduct,
     canInstantArchiveProduct,
@@ -307,8 +308,12 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
-export default function ProductsRoute() {
-  const data = useLoaderData<ProductsLoaderData>();
+function ProductsRouteInner(
+  data: Omit<ProductsLoaderData, 'pageData'> & {
+    products: ResolvedProductsList;
+    offerGroupsCount: number;
+  },
+) {
   const [uiTab, setUiTab] = React.useState<'product' | 'offers'>(data.initialTab);
   const [showCreateOffer, setShowCreateOffer] = React.useState(false);
 
@@ -379,10 +384,8 @@ export default function ProductsRoute() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const overviewPromise = React.useMemo(
-    () => Promise.all([data.products, data.offerGroupsCount] as const),
-    [data.products, data.offerGroupsCount],
-  );
+  const resolved = data.products;
+  const offersCount = data.offerGroupsCount;
 
   return (
     <div className="space-y-4">
@@ -416,26 +419,22 @@ export default function ProductsRoute() {
         }
       />
 
-      <DeferredSection resolve={overviewPromise} fallback={<OverviewStatStripSkeleton count={5} />}>
-        {([resolved, offersCount]) => (
-          <OverviewStatStrip
-            items={[
-              { label: 'Products', value: resolved.total, valueClassName: 'text-app-fg' },
-              {
-                label: 'Active',
-                value: resolved.products.filter((p) => p.status === 'ACTIVE').length,
-                valueClassName: 'text-success-600 dark:text-success-400',
-              },
-              {
-                label: 'Categories',
-                value: new Set(resolved.products.map((p) => p.category).filter(Boolean)).size,
-                valueClassName: 'text-app-fg',
-              },
-              { label: 'Offers available', value: offersCount, valueClassName: 'text-app-fg' },
-            ]}
-          />
-        )}
-      </DeferredSection>
+      <OverviewStatStrip
+        items={[
+          { label: 'Products', value: resolved.total, valueClassName: 'text-app-fg' },
+          {
+            label: 'Active',
+            value: resolved.products.filter((p) => p.status === 'ACTIVE').length,
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+          {
+            label: 'Categories',
+            value: new Set(resolved.products.map((p) => p.category).filter(Boolean)).size,
+            valueClassName: 'text-app-fg',
+          },
+          { label: 'Offers available', value: offersCount, valueClassName: 'text-app-fg' },
+        ]}
+      />
 
       <Tabs
         value={uiTab}
@@ -474,21 +473,38 @@ export default function ProductsRoute() {
       ) : null}
 
       {uiTab === 'product' ? (
-        <DeferredSection resolve={data.products} fallback={<ProductsListDeferredFallback />}>
-          {(resolved: ResolvedProductsList) => (
-            <ProductsListPage
-              products={resolved.products}
-              total={resolved.total}
-              page={resolved.page}
-              totalPages={resolved.totalPages}
-              productsLoadError={resolved.loadError}
-              canEditProduct={data.canEditProduct}
-              canCreateProduct={data.canCreateProduct}
-              canInstantArchiveProduct={data.canInstantArchiveProduct}
-            />
-          )}
-        </DeferredSection>
+        <ProductsListPage
+          products={resolved.products}
+          total={resolved.total}
+          page={resolved.page}
+          totalPages={resolved.totalPages}
+          productsLoadError={resolved.loadError}
+          canEditProduct={data.canEditProduct}
+          canCreateProduct={data.canCreateProduct}
+          canInstantArchiveProduct={data.canInstantArchiveProduct}
+        />
       ) : null}
     </div>
+  );
+}
+
+export default function ProductsRoute() {
+  const data = useLoaderData<ProductsLoaderData>();
+  return (
+    <React.Suspense fallback={<ProductsHubLoadingShell initialTab={data.initialTab} />}>
+      <Await resolve={data.pageData}>
+        {({ products, offerGroupsCount }) => (
+          <ProductsRouteInner
+            initialTab={data.initialTab}
+            canEditProduct={data.canEditProduct}
+            canCreateProduct={data.canCreateProduct}
+            canInstantArchiveProduct={data.canInstantArchiveProduct}
+            canManageOffers={data.canManageOffers}
+            products={products}
+            offerGroupsCount={offerGroupsCount}
+          />
+        )}
+      </Await>
+    </React.Suspense>
   );
 }

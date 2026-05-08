@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { Suspense } from 'react';
+import { json, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
@@ -13,6 +14,7 @@ import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import type { DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
 import { DeliveryRemittanceDetailPage } from '~/features/finance/DeliveryRemittanceDetailPage';
+import { DeliveryRemittanceDetailLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [
   { title: 'Cash Remittance Detail — Finance — Yannis EOSE' },
@@ -27,48 +29,52 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Remittance ID required', { status: 400 });
   }
 
-  const [detailRes, usersRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/logistics.getDeliveryRemittance?input=${encodeURIComponent(
-        JSON.stringify({ deliveryRemittanceId: remittanceId }),
-      )}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: USERS_LIST_MAX_LIMIT }))}`,
-      { method: 'GET', cookie },
-    ),
-  ]);
+  const detailShell = { remittanceId };
 
-  if (!detailRes.ok) {
-    throw new Response('Remittance not found', { status: safeStatus(detailRes.status) });
-  }
+  const pageData = (async () => {
+    const [detailRes, usersRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/logistics.getDeliveryRemittance?input=${encodeURIComponent(
+          JSON.stringify({ deliveryRemittanceId: remittanceId }),
+        )}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: USERS_LIST_MAX_LIMIT }))}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
 
-  const detail =
-    (detailRes.data as { result?: { data?: DeliveryRemittanceDetail } })?.result?.data ?? null;
-  if (!detail) {
-    throw new Response('Remittance not found', { status: 404 });
-  }
+    if (!detailRes.ok) {
+      throw new Response('Remittance not found', { status: safeStatus(detailRes.status) });
+    }
 
-  const usersData = usersRes.ok
-    ? (
-        usersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } }
-      )?.result?.data?.users
-    : null;
-  const userMap: Record<string, string> = {};
-  if (usersData) {
-    for (const u of usersData) userMap[u.id] = u.name;
-  }
+    const detail =
+      (detailRes.data as { result?: { data?: DeliveryRemittanceDetail } })?.result?.data ?? null;
+    if (!detail) {
+      throw new Response('Remittance not found', { status: 404 });
+    }
 
-  // Phase 21 — Mark Received / Dispute buttons honour `finance.cashRemittance.markReceived`
-  // alongside the legacy `finance.approve` and admin-class. Same gate the API enforces.
-  const userPerms = (user?.permissions ?? []).map((p) => canonicalPermissionCode(p));
-  const hasApprovePermission =
-    isAdminLevel(user) ||
-    userPerms.includes(canonicalPermissionCode('finance.approve')) ||
-    userPerms.includes(canonicalPermissionCode('finance.cashRemittance.markReceived'));
+    const usersData = usersRes.ok
+      ? (
+          usersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } }
+        )?.result?.data?.users
+      : null;
+    const userMap: Record<string, string> = {};
+    if (usersData) {
+      for (const u of usersData) userMap[u.id] = u.name;
+    }
 
-  return { detail, hasApprovePermission, userMap };
+    const userPerms = (user?.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const hasApprovePermission =
+      isAdminLevel(user) ||
+      userPerms.includes(canonicalPermissionCode('finance.approve')) ||
+      userPerms.includes(canonicalPermissionCode('finance.cashRemittance.markReceived'));
+
+    return { detail, hasApprovePermission, userMap };
+  })();
+
+  return defer({ detailShell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -121,12 +127,18 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AdminFinanceDeliveryRemittanceDetailRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { detailShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <DeliveryRemittanceDetailPage
-      detail={data.detail}
-      hasApprovePermission={data.hasApprovePermission}
-      userMap={data.userMap}
-    />
+    <Suspense fallback={<DeliveryRemittanceDetailLoadingShell remittanceId={detailShell.remittanceId} />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <DeliveryRemittanceDetailPage
+            detail={data.detail}
+            hasApprovePermission={data.hasApprovePermission}
+            userMap={data.userMap}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

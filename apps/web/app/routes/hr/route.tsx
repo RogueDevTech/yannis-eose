@@ -1,10 +1,12 @@
+import { Suspense } from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
-import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import { Await, useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
 import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { DashboardLayout } from '~/components/layout/dashboard-layout';
 import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
+import { normalizeRouteErrorData } from '~/lib/network-error';
 
 interface Notification {
   id: string;
@@ -59,7 +61,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => ({ notifications: [] as Notification[], unreadCount: 0, total: 0 }));
 
-  return defer({ user, notifications: notificationsPromise });
+  // Fetch user's branches for the branch switcher (non-blocking, streamed alongside notifications).
+  // Must mirror the /admin layout — without this, /hr/* pages silently hide the switcher.
+  const branchesPromise = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
+    .then((res) => {
+      if (!res.ok) return [] as Array<{ id: string; name: string; code: string }>;
+      const data = (res.data as { result?: { data?: Array<{ id: string; name: string; code: string }> } })?.result?.data;
+      return data ?? [];
+    })
+    .catch(() => [] as Array<{ id: string; name: string; code: string }>);
+
+  return defer({ user, notifications: notificationsPromise, branches: branchesPromise });
 }
 
 /**
@@ -122,14 +134,32 @@ export async function action({ request }: ActionFunctionArgs) {
  * Child routes render inside the <Outlet /> within DashboardLayout.
  */
 export default function AdminLayout() {
-  const { user, notifications } = useLoaderData<typeof loader>();
+  const { user, notifications, branches } = useLoaderData<typeof loader>();
 
   return (
-    <DashboardLayout
-      user={user}
-      notificationsPromise={notifications}
-      notificationsActionUrl="/hr"
-    />
+    <Suspense
+      fallback={
+        <DashboardLayout
+          user={user}
+          branches={[]}
+          branchesHydrationReady={false}
+          notificationsPromise={notifications}
+          notificationsActionUrl="/hr"
+        />
+      }
+    >
+      <Await resolve={branches}>
+        {(resolvedBranches) => (
+          <DashboardLayout
+            user={user}
+            branches={resolvedBranches}
+            branchesHydrationReady
+            notificationsPromise={notifications}
+            notificationsActionUrl="/hr"
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }
 
@@ -147,7 +177,7 @@ export function ErrorBoundary() {
       error={error}
       isResponse={isResponse}
       status={status}
-      errorData={isResponse ? error.data : undefined}
+      errorData={isResponse ? normalizeRouteErrorData(error.data) : undefined}
     />
   );
 }

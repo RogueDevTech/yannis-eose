@@ -22,6 +22,9 @@ export interface User {
   payoutAccountName?: string | null;
   payoutAccountNumber?: string | null;
   payoutBankCode?: string | null;
+  /** Probation status — drives the Probation badge in user lists. */
+  isProbation?: boolean;
+  probationUntil?: string | null;
 }
 
 export const ROLE_COLORS: Record<string, string> = {
@@ -165,6 +168,15 @@ export interface UserDetail {
   loginCount?: number;
   /** Most recent successful sign-in timestamp. */
   lastLoginAt?: string | null;
+  /** Probation status — full role permissions, but eligible for PII-scrub termination. */
+  isProbation?: boolean;
+  probationStartedAt?: string | null;
+  probationStartedBy?: string | null;
+  probationUntil?: string | null;
+  /** Stamped only when this user was scrubbed via the probation termination flow. */
+  terminatedAt?: string | null;
+  terminatedBy?: string | null;
+  originalRole?: string | null;
   createdAt: string;
   updatedAt: string;
   branchMemberships?: UserBranchMembership[];
@@ -331,6 +343,11 @@ export interface UserDetailLoaderData {
   showOnboardingTab?: boolean;
   /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). */
   viewerCanManageHrOnboarding?: boolean;
+  /**
+   * Viewer can set/unset/extend/terminate probation on this user.
+   * True only when viewer is SUPER_ADMIN or HR_MANAGER AND target is probation-eligible.
+   */
+  canManageProbation?: boolean;
 }
 
 /**

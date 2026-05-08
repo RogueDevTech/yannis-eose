@@ -2,6 +2,7 @@ import {
   updateInvoiceStatusSchema,
   listInvoicesSchema,
   profitReportSchema,
+  profitByShipmentSchema,
   createApprovalRequestSchema,
   processApprovalSchema,
   listApprovalRequestsSchema,
@@ -105,6 +106,13 @@ export const financeRouter = router({
     .input(profitReportSchema)
     .query(async ({ input }) => {
       return getFinanceService().getProfitReport(input);
+    }),
+
+  /** Per-shipment unit economics — costs in vs estimated revenue from sold qty. */
+  profitByShipment: permissionProcedure('finance.read')
+    .input(profitByShipmentSchema)
+    .query(async ({ input }) => {
+      return getFinanceService().getProfitByShipment(input);
     }),
 
   overview: permissionProcedure('finance.read')

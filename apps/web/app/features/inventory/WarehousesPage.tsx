@@ -82,7 +82,7 @@ export function WarehousesPage({
 }: WarehousesPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
-  const isRefetching = useLoaderRefetchBusy();
+  const isRefetching = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [showCreate, setShowCreate] = useState(false);

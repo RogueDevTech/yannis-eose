@@ -17,12 +17,11 @@ import { Button } from '~/components/ui/button';
 import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
-import { RouteLoader } from '~/components/ui/route-loader';
-import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
+import { BranchesCatalogProvider } from '~/contexts/branches-catalog-context';
 import { OnboardingNudge } from './onboarding-nudge';
 import { canAccessGlobalAuditLog, isAdminLevel } from '~/lib/rbac';
 import {
@@ -65,6 +64,11 @@ interface DashboardLayoutProps {
   notificationsActionUrl?: string;
   /** Available branches for the branch switcher. Only shown when length > 1. */
   branches?: Array<{ id: string; name: string; code: string }>;
+  /**
+   * False while `/admin` layout is still streaming `branches.list` — branch switcher shows a
+   * skeleton and org-wide branch guard does not attach submit interception yet.
+   */
+  branchesHydrationReady?: boolean;
 }
 
 interface NavItemDef {
@@ -650,6 +654,7 @@ function DashboardLayoutInner({
   notificationsPromise,
   notificationsActionUrl: _notificationsActionUrl = '/admin',
   branches,
+  branchesHydrationReady = true,
 }: DashboardLayoutProps) {
   const { onboardingGate } = useLoginModalGate();
   const [collapsed, setCollapsed] = useState(false);
@@ -924,6 +929,7 @@ function DashboardLayoutInner({
         onPruneServerKnown={pruneServerKnown}
         onClearRealtimeNotifications={clearRealtimeNotifications}
         branches={branches}
+        branchesHydrationReady={branchesHydrationReady}
         currentBranchId={user?.currentBranchId}
         mirroredBy={user?.mirroredBy ?? null}
       />
@@ -1121,22 +1127,13 @@ function DashboardLayoutInner({
       <PullToRefresh>
         <div className="p-4 lg:p-6">
           <div
-            className={`relative transition-all duration-300 ${isRouteLoading ? 'min-h-[calc(100vh-var(--header-height)-3rem)]' : ''}`}
+            className="relative transition-all duration-300"
             aria-busy={isRouteLoading}
             aria-live="polite"
           >
-            {isRouteLoading && (
-              <div className="absolute inset-0 z-20 bg-app-canvas p-4 lg:p-6">
-                {navigation.location?.pathname === '/admin/cs/queue' ? (
-                  <CSOverviewSkeleton />
-                ) : (
-                  <RouteLoader />
-                )}
-              </div>
-            )}
-            <div className={isRouteLoading ? 'absolute inset-0 opacity-0 pointer-events-none' : ''}>
+            <BranchesCatalogProvider value={branches ?? []}>
               <Outlet />
-            </div>
+            </BranchesCatalogProvider>
           </div>
         </div>
       </PullToRefresh>
@@ -1214,6 +1211,7 @@ export function DashboardLayout(props: DashboardLayoutProps) {
           role={props.user?.role}
           currentBranchId={props.user?.currentBranchId ?? null}
           branches={props.branches ?? []}
+          branchesHydrationReady={props.branchesHydrationReady ?? true}
         >
           <LoginModalGateProvider value={{ onboardingGate, setOnboardingGate }}>
             <DashboardLayoutInner {...props} />

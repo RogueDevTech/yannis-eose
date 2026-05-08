@@ -398,7 +398,7 @@ export function DisbursementsPage({
 }: DisbursementsPageData) {
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isFilterLoading = useLoaderRefetchBusy();
+  const isFilterLoading = useLoaderRefetchBusy().busy;
   const [showForm, setShowForm] = useState(!!preselectedReceiverId);
   // Read the pending URL while the loader revalidates — same pattern as the
   // marketing funding page. Without this, `mainTab` only flips when the loader

@@ -1,19 +1,18 @@
-import { json, redirect } from '@remix-run/node';
+import * as React from 'react';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useActionData, useLoaderData, useSearchParams } from '@remix-run/react';
+import { Await, useActionData, useLoaderData, useSearchParams } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { ProductEditPage } from '~/features/products/ProductEditPage';
 import { ProductViewPage } from '~/features/products/ProductViewPage';
 import type { Product } from '~/features/products/types';
+import { ProductDetailLoadingShell } from '~/features/products/ProductsDeferredLoadingShells';
 
-export const meta: MetaFunction<typeof loader> = ({ data, location }) => {
-  if (!data?.product) return [{ title: 'Product — Yannis EOSE' }];
+export const meta: MetaFunction<typeof loader> = ({ location }) => {
   const mode = new URLSearchParams(location?.search ?? '').get('mode');
   const inEditMode = mode === 'edit';
-  return [
-    { title: inEditMode ? `${data.product.name} — Edit Product` : `${data.product.name} — Yannis EOSE` },
-  ];
+  return [{ title: inEditMode ? 'Edit Product — Yannis EOSE' : 'Product — Yannis EOSE' }];
 };
 
 interface CategoryOption {
@@ -90,38 +89,42 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Product ID required', { status: 400 });
   }
 
-  const [productRes, categoriesRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/products.getById?input=${encodeURIComponent(JSON.stringify({ productId }))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>('/trpc/productCategories.listActive', { method: 'GET', cookie }),
-  ]);
+  const pageData = (async (): Promise<LoaderData> => {
+    const [productRes, categoriesRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/products.getById?input=${encodeURIComponent(JSON.stringify({ productId }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>('/trpc/productCategories.listActive', { method: 'GET', cookie }),
+    ]);
 
-  if (!productRes.ok) {
-    throw new Response('Product not found', { status: 404 });
-  }
+    if (!productRes.ok) {
+      throw new Response('Product not found', { status: 404 });
+    }
 
-  const productData = productRes.data as { result?: { data?: Record<string, unknown> } };
-  const apiProduct = productData?.result?.data;
+    const productData = productRes.data as { result?: { data?: Record<string, unknown> } };
+    const apiProduct = productData?.result?.data;
 
-  if (!apiProduct) {
-    throw new Response('Product not found', { status: 404 });
-  }
+    if (!apiProduct) {
+      throw new Response('Product not found', { status: 404 });
+    }
 
-  let categories: CategoryOption[] = [];
-  if (categoriesRes.ok) {
-    const catData = categoriesRes.data as { result?: { data?: CategoryOption[] } };
-    categories = catData?.result?.data ?? [];
-  }
+    let categories: CategoryOption[] = [];
+    if (categoriesRes.ok) {
+      const catData = categoriesRes.data as { result?: { data?: CategoryOption[] } };
+      categories = catData?.result?.data ?? [];
+    }
 
-  const product = mapApiProductToProduct(apiProduct);
-  const canEditProduct =
-    user.role === 'SUPER_ADMIN' ||
-    user.role === 'ADMIN' ||
-    (user.permissions ?? []).map(canonicalPerm).includes('products.update');
+    const product = mapApiProductToProduct(apiProduct);
+    const canEditProduct =
+      user.role === 'SUPER_ADMIN' ||
+      user.role === 'ADMIN' ||
+      (user.permissions ?? []).map(canonicalPerm).includes('products.update');
 
-  return { product, categories, canEditProduct } satisfies LoaderData;
+    return { product, categories, canEditProduct };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -187,8 +190,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
   return redirect(`/admin/products/${productId}`, { status: 303 });
 }
 
-export default function ProductDetailRoute() {
-  const { product, categories, canEditProduct } = useLoaderData<LoaderData>();
+function ProductDetailBody({
+  product,
+  categories,
+  canEditProduct,
+}: LoaderData) {
   const actionData = useActionData<typeof action>();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get('mode');
@@ -210,4 +216,15 @@ export default function ProductDetailRoute() {
   }
 
   return <ProductViewPage product={product} canEditProduct={canEditProduct} />;
+}
+
+export default function ProductDetailRoute() {
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <React.Suspense fallback={<ProductDetailLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <ProductDetailBody {...data} />}
+      </Await>
+    </React.Suspense>
+  );
 }

@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { Suspense } from 'react';
+import { json, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData, useFetcher } from '@remix-run/react';
+import { Await, useLoaderData, useFetcher } from '@remix-run/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -20,6 +21,7 @@ import {
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { CSMessageTemplatesLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Message Templates — Yannis EOSE' }];
 
@@ -57,28 +59,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, TEMPLATE_ACCESS);
   const cookie = getSessionCookie(request);
 
-  const res = await apiRequest<{ result?: { data?: MessageTemplate[] } }>(
-    '/trpc/messaging.templates.list?input=%7B%22includeArchived%22%3Atrue%7D',
-    { method: 'GET', cookie },
-  );
+  const pageData = (async () => {
+    const res = await apiRequest<{ result?: { data?: MessageTemplate[] } }>(
+      '/trpc/messaging.templates.list?input=%7B%22includeArchived%22%3Atrue%7D',
+      { method: 'GET', cookie },
+    );
 
-  const templates: MessageTemplate[] = res.ok ? (res.data?.result?.data ?? []) : [];
-  // Phase 21 — `messaging.templates.update` lets a custom role edit any template
-  // without inheriting HEAD_OF_CS or admin-class.
-  const userPerms = ((user as { permissions?: string[] }).permissions ?? []).map((p) =>
-    canonicalPermissionCode(p),
-  );
-  const canEditAnyTemplate =
-    user.role === 'SUPER_ADMIN' ||
-    user.role === 'ADMIN' ||
-    user.role === 'HEAD_OF_CS' ||
-    userPerms.includes(canonicalPermissionCode('messaging.templates.update'));
-  return {
-    templates,
-    currentUserId: user.id,
-    currentUserRole: user.role,
-    canEditAnyTemplate,
-  };
+    const templates: MessageTemplate[] = res.ok ? (res.data?.result?.data ?? []) : [];
+    const userPerms = ((user as { permissions?: string[] }).permissions ?? []).map((p) =>
+      canonicalPermissionCode(p),
+    );
+    const canEditAnyTemplate =
+      user.role === 'SUPER_ADMIN' ||
+      user.role === 'ADMIN' ||
+      user.role === 'HEAD_OF_CS' ||
+      userPerms.includes(canonicalPermissionCode('messaging.templates.update'));
+    return {
+      templates,
+      currentUserId: user.id,
+      canEditAnyTemplate,
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -309,8 +312,15 @@ function BodyEditor({
   );
 }
 
-export default function MessageTemplatesRoute() {
-  const { templates, currentUserId, canEditAnyTemplate } = useLoaderData<typeof loader>();
+function MessageTemplatesPage({
+  templates,
+  currentUserId,
+  canEditAnyTemplate,
+}: {
+  templates: MessageTemplate[];
+  currentUserId: string;
+  canEditAnyTemplate: boolean;
+}) {
   const fetcher = useFetcher();
   const templateSurface = useFetcherActionSurface(fetcher);
   // Heads / Admins / `messaging.templates.update` holders can edit any template.
@@ -712,5 +722,22 @@ export default function MessageTemplatesRoute() {
         </Modal>
       )}
     </div>
+  );
+}
+
+export default function MessageTemplatesRoute() {
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<CSMessageTemplatesLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <MessageTemplatesPage
+            templates={data.templates}
+            currentUserId={data.currentUserId}
+            canEditAnyTemplate={data.canEditAnyTemplate}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

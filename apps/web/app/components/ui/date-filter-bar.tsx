@@ -6,6 +6,16 @@ import { useSearchParams, useNavigation, useLocation } from '@remix-run/react';
 export interface DateFilterBarProps {
   startDate?: string;
   endDate?: string;
+  /**
+   * Optional `HH:MM` portion of the start cutoff. When present, paired with
+   * `startDate` it represents a precise moment instead of whole-day "00:00".
+   * Loaders that want time precision read `startTime` from search params and
+   * concatenate `${startDate}T${startTime}` into a Date. Loaders that don't
+   * care simply ignore this param — the start-of-day default still works.
+   */
+  startTime?: string;
+  /** Same as `startTime`, but for the end cutoff. */
+  endTime?: string;
   periodAllTime?: boolean;
   /**
    * `inline` — compact text control (default).
@@ -17,45 +27,64 @@ export interface DateFilterBarProps {
 /** Stable fingerprint of date-related query params (ignores page, sort, etc.). */
 function dateFilterSearchSignature(sp: URLSearchParams): string {
   if (sp.get('period') === 'all_time') return 'all_time';
-  return `range:${sp.get('startDate') ?? ''}:${sp.get('endDate') ?? ''}`;
+  return `range:${sp.get('startDate') ?? ''}:${sp.get('endDate') ?? ''}:${sp.get('startTime') ?? ''}:${sp.get('endTime') ?? ''}`;
+}
+
+/** HH:MM regex — accepts "00:00" through "23:59" (both 1-digit and 2-digit). */
+function isValidHHMM(t: string): boolean {
+  return /^([01]?\d|2[0-3]):([0-5]\d)$/.test(t);
 }
 
 function toYMD(d: Date): string {
   return d.toISOString().split('T')[0]!;
 }
 
-function formatPeriodLabel(startDate: string, endDate: string, periodAllTime: boolean): string {
+function formatPeriodLabel(
+  startDate: string,
+  endDate: string,
+  periodAllTime: boolean,
+  startTime: string = '',
+  endTime: string = '',
+): string {
   if (periodAllTime) return 'All time';
   if (!startDate || !endDate) return 'This month';
+  const hasTime = !!startTime || !!endTime;
+  // When time is part of the filter, presets ("Today", "This month") no longer
+  // describe what the user actually picked — fall through to the explicit
+  // "from–to" rendering below.
   const now = new Date();
   const today = toYMD(now);
-  if (startDate === endDate) {
+  if (!hasTime && startDate === endDate) {
     if (startDate === today) return 'Today';
     const yesterday = toYMD(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
     if (startDate === yesterday) return 'Yesterday';
     return new Date(startDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' });
   }
-  // Check if range is "last week" (Mon–Sun of previous week)
-  const day = now.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const thisMonday = new Date(now);
-  thisMonday.setDate(now.getDate() + mondayOffset);
-  const lastMonday = new Date(thisMonday);
-  lastMonday.setDate(thisMonday.getDate() - 7);
-  const lastSunday = new Date(lastMonday);
-  lastSunday.setDate(lastMonday.getDate() + 6);
-  const lastWeekStart = toYMD(lastMonday);
-  const lastWeekEnd = toYMD(lastSunday);
-  if (startDate === lastWeekStart && endDate === lastWeekEnd) return 'Last week';
+  // Preset matching only applies to whole-day ranges (no time refinement).
+  if (!hasTime) {
+    const day = now.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    const thisMonday = new Date(now);
+    thisMonday.setDate(now.getDate() + mondayOffset);
+    const lastMonday = new Date(thisMonday);
+    lastMonday.setDate(thisMonday.getDate() - 7);
+    const lastSunday = new Date(lastMonday);
+    lastSunday.setDate(lastMonday.getDate() + 6);
+    const lastWeekStart = toYMD(lastMonday);
+    const lastWeekEnd = toYMD(lastSunday);
+    if (startDate === lastWeekStart && endDate === lastWeekEnd) return 'Last week';
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    if (startDate === toYMD(firstOfMonth) && endDate === toYMD(lastOfMonth)) return 'This month';
+    const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    if (startDate === toYMD(firstOfLastMonth) && endDate === toYMD(lastOfLastMonth)) return 'Last month';
+  }
   const s = new Date(startDate);
   const e = new Date(endDate);
-  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  if (startDate === toYMD(firstOfMonth) && endDate === toYMD(lastOfMonth)) return 'This month';
-  const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-  if (startDate === toYMD(firstOfLastMonth) && endDate === toYMD(lastOfLastMonth)) return 'Last month';
-  return `${s.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} – ${e.toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  const startBit = `${s.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}${startTime ? ` ${startTime}` : ''}`;
+  const endBit = `${e.toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}${endTime ? ` ${endTime}` : ''}`;
+  return `${startBit} – ${endBit}`;
 }
 
 type DatePreset = 'today' | 'yesterday' | 'last_week' | 'this_month' | 'last_month';
@@ -121,6 +150,8 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
 export function DateFilterBar({
   startDate = '',
   endDate = '',
+  startTime = '',
+  endTime = '',
   periodAllTime = false,
   triggerLayout = 'inline',
 }: DateFilterBarProps) {
@@ -135,6 +166,8 @@ export function DateFilterBar({
   // Draft state used only inside the modal; applied to URL only on Done
   const [draftStart, setDraftStart] = useState(startDate);
   const [draftEnd, setDraftEnd] = useState(endDate);
+  const [draftStartTime, setDraftStartTime] = useState(startTime);
+  const [draftEndTime, setDraftEndTime] = useState(endTime);
   const [draftPeriodAllTime, setDraftPeriodAllTime] = useState(periodAllTime);
 
   // When modal opens, init draft from current props (URL state)
@@ -142,9 +175,11 @@ export function DateFilterBar({
     if (modalOpen) {
       setDraftStart(startDate);
       setDraftEnd(endDate);
+      setDraftStartTime(startTime);
+      setDraftEndTime(endTime);
       setDraftPeriodAllTime(periodAllTime);
     }
-  }, [modalOpen, startDate, endDate, periodAllTime]);
+  }, [modalOpen, startDate, endDate, startTime, endTime, periodAllTime]);
 
   // Close only once the URL reflects the applied filter and Remix has finished this transition.
   // Do not key off `navigation.state === 'idle'` alone: layouts using `defer()` can go idle before
@@ -161,9 +196,16 @@ export function DateFilterBar({
 
   const applyDraftToUrl = () => {
     const params = new URLSearchParams(searchParams);
+    // Time is always allowed when a date range is set; the URL only carries it if
+    // the user actually typed a valid HH:MM. All-time period strips it entirely.
+    const includeTime = !draftPeriodAllTime;
+    const safeStartTime = includeTime && draftStartTime && isValidHHMM(draftStartTime) ? draftStartTime : '';
+    const safeEndTime = includeTime && draftEndTime && isValidHHMM(draftEndTime) ? draftEndTime : '';
     if (draftPeriodAllTime) {
       params.delete('startDate');
       params.delete('endDate');
+      params.delete('startTime');
+      params.delete('endTime');
       params.set('period', 'all_time');
       pendingSignatureRef.current = 'all_time';
     } else {
@@ -172,7 +214,11 @@ export function DateFilterBar({
       else params.delete('startDate');
       if (draftEnd) params.set('endDate', draftEnd);
       else params.delete('endDate');
-      pendingSignatureRef.current = `range:${draftStart}:${draftEnd}`;
+      if (safeStartTime) params.set('startTime', safeStartTime);
+      else params.delete('startTime');
+      if (safeEndTime) params.set('endTime', safeEndTime);
+      else params.delete('endTime');
+      pendingSignatureRef.current = `range:${draftStart}:${draftEnd}:${safeStartTime}:${safeEndTime}`;
     }
     params.set('page', '1');
     params.set('eligiblePage', '1');
@@ -181,6 +227,10 @@ export function DateFilterBar({
   };
 
   const setDraftPreset = (preset: DatePreset | 'all_time') => {
+    // Presets are whole-day by definition — clearing time keeps the displayed
+    // label consistent ("Today" vs "Today 09:00–17:00").
+    setDraftStartTime('');
+    setDraftEndTime('');
     if (preset === 'all_time') {
       setDraftStart('');
       setDraftEnd('');
@@ -202,6 +252,8 @@ export function DateFilterBar({
   const clearDraft = () => {
     setDraftStart('');
     setDraftEnd('');
+    setDraftStartTime('');
+    setDraftEndTime('');
     setDraftPeriodAllTime(false);
   };
 
@@ -209,8 +261,8 @@ export function DateFilterBar({
     if (!isSubmitting) setModalOpen(false);
   };
 
-  const hasDraftDates = Boolean(draftStart || draftEnd) && !draftPeriodAllTime;
-  const periodLabel = formatPeriodLabel(startDate, endDate, periodAllTime);
+  const hasDraftDates = Boolean(draftStart || draftEnd || draftStartTime || draftEndTime) && !draftPeriodAllTime;
+  const periodLabel = formatPeriodLabel(startDate, endDate, periodAllTime, startTime, endTime);
   const activeDraftId = getActiveDraftSelectionId(draftStart, draftEnd, draftPeriodAllTime);
   /** Custom date inputs are hidden by default. They auto-open if the current draft is
    *  already a non-preset range (e.g. user reopens the modal after picking custom dates),
@@ -303,35 +355,51 @@ export function DateFilterBar({
                 </Button>
               </div>
               {customOpen && (
-                <div
-                  className={[
-                    'flex flex-col gap-3 rounded-lg border-2 p-3 transition-colors',
-                    activeDraftId === 'custom'
-                      ? 'border-brand-500 bg-brand-500/5'
-                      : 'border-app-border',
-                  ].join(' ')}
-                >
+                <div className="flex flex-col gap-3 p-1">
                   <h4 className="text-xs font-medium text-app-fg-muted">Custom date</h4>
                   <div>
                     <label className="block text-xs font-medium text-app-fg-muted mb-1">From</label>
-                    <input
-                      type="date"
-                      value={draftStart}
-                      onChange={(e) => setDraftCustomDate(e.target.value, draftEnd)}
-                      className="input text-sm w-full"
-                      disabled={draftPeriodAllTime}
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={draftStart}
+                        onChange={(e) => setDraftCustomDate(e.target.value, draftEnd)}
+                        className="input text-sm flex-1 min-w-0"
+                        disabled={draftPeriodAllTime}
+                      />
+                      <input
+                        type="time"
+                        value={draftStartTime}
+                        onChange={(e) => setDraftStartTime(e.target.value)}
+                        className="input text-sm w-28"
+                        disabled={draftPeriodAllTime}
+                        aria-label="Start time"
+                      />
+                    </div>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-app-fg-muted mb-1">To</label>
-                    <input
-                      type="date"
-                      value={draftEnd}
-                      onChange={(e) => setDraftCustomDate(draftStart, e.target.value)}
-                      className="input text-sm w-full"
-                      disabled={draftPeriodAllTime}
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={draftEnd}
+                        onChange={(e) => setDraftCustomDate(draftStart, e.target.value)}
+                        className="input text-sm flex-1 min-w-0"
+                        disabled={draftPeriodAllTime}
+                      />
+                      <input
+                        type="time"
+                        value={draftEndTime}
+                        onChange={(e) => setDraftEndTime(e.target.value)}
+                        className="input text-sm w-28"
+                        disabled={draftPeriodAllTime}
+                        aria-label="End time"
+                      />
+                    </div>
                   </div>
+                  <p className="text-[11px] text-app-fg-muted">
+                    Time is optional. Leave blank for whole-day filters; pages that read time narrow to the exact window.
+                  </p>
                 </div>
               )}
               {(hasDraftDates || draftPeriodAllTime) && (

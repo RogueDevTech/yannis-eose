@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { RemitPage } from '~/features/remittances/RemitPage';
@@ -9,6 +10,7 @@ import type {
   DeliveryRemittanceRecord,
   DeliveryRemittanceEligibleOrder,
 } from '~/features/remittances/RemitPage';
+import { TplRemitLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [
   { title: 'Remit to warehouse — Yannis EOSE' },
@@ -18,43 +20,47 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.remit' });
   const cookie = getSessionCookie(request);
 
-  const [remittancesRes, productsRes, locationsRes, deliveryRemittancesRes, eligibleOrdersRes] = await Promise.all([
-    apiRequest<unknown>('/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/products.options?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/logistics.locationOptions?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' + encodeURIComponent(JSON.stringify({})), { method: 'GET', cookie }),
-  ]);
+  const pageData = (async () => {
+    const [remittancesRes, productsRes, locationsRes, deliveryRemittancesRes, eligibleOrdersRes] = await Promise.all([
+      apiRequest<unknown>('/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/products.options?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/logistics.locationOptions?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' + encodeURIComponent(JSON.stringify({})), { method: 'GET', cookie }),
+    ]);
 
-  const remittancesData = remittancesRes.ok
-    ? (remittancesRes.data as { result?: { data?: { records: RemittanceRecord[] } } })?.result?.data
-    : null;
-  const productsData = productsRes.ok
-    ? (productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data
-    : null;
-  const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })?.result?.data
-    : null;
-  const deliveryRemittancesData = deliveryRemittancesRes.ok
-    ? (deliveryRemittancesRes.data as { result?: { data?: { records: DeliveryRemittanceRecord[] } } })?.result?.data
-    : null;
-  const eligibleOrdersPayload = eligibleOrdersRes.ok
-    ? (eligibleOrdersRes.data as { result?: { data?: { orders: DeliveryRemittanceEligibleOrder[] } } })?.result
-        ?.data
-    : null;
+    const remittancesData = remittancesRes.ok
+      ? (remittancesRes.data as { result?: { data?: { records: RemittanceRecord[] } } })?.result?.data
+      : null;
+    const productsData = productsRes.ok
+      ? (productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data
+      : null;
+    const locationsData = locationsRes.ok
+      ? (locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })?.result?.data
+      : null;
+    const deliveryRemittancesData = deliveryRemittancesRes.ok
+      ? (deliveryRemittancesRes.data as { result?: { data?: { records: DeliveryRemittanceRecord[] } } })?.result?.data
+      : null;
+    const eligibleOrdersPayload = eligibleOrdersRes.ok
+      ? (eligibleOrdersRes.data as { result?: { data?: { orders: DeliveryRemittanceEligibleOrder[] } } })?.result
+          ?.data
+      : null;
 
-  return {
-    remittances: remittancesData?.records ?? [],
-    products: productsData ?? [],
-    locations: (locationsData ?? []).map((l) => ({
-      id: l.id,
-      name: l.name,
-      providerName: l.providerName ?? null,
-    })),
-    userLocationId: user.logisticsLocationId ?? null,
-    deliveryRemittances: deliveryRemittancesData?.records ?? [],
-    eligibleOrders: eligibleOrdersPayload?.orders ?? [],
-  };
+    return {
+      remittances: remittancesData?.records ?? [],
+      products: productsData ?? [],
+      locations: (locationsData ?? []).map((l) => ({
+        id: l.id,
+        name: l.name,
+        providerName: l.providerName ?? null,
+      })),
+      userLocationId: user.logisticsLocationId ?? null,
+      deliveryRemittances: deliveryRemittancesData?.records ?? [],
+      eligibleOrders: eligibleOrdersPayload?.orders ?? [],
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -130,15 +136,21 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function TplRemitRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <RemitPage
-      remittances={data.remittances}
-      products={data.products}
-      locations={data.locations}
-      userLocationId={data.userLocationId}
-      deliveryRemittances={data.deliveryRemittances}
-      eligibleOrders={data.eligibleOrders}
-    />
+    <Suspense fallback={<TplRemitLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <RemitPage
+            remittances={data.remittances}
+            products={data.products}
+            locations={data.locations}
+            userLocationId={data.userLocationId}
+            deliveryRemittances={data.deliveryRemittances}
+            eligibleOrders={data.eligibleOrders}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

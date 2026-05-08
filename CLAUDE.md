@@ -636,6 +636,55 @@ Files to know: [apps/api/src/hr/payroll-batch.service.ts](apps/api/src/hr/payrol
 - Effective perms = template ∪ legacy `role_permissions` ∪ user overrides (see `PermissionsService`).
 - After catalog changes: `pnpm --filter @yannis/shared db:seed-permissions`; audit: `pnpm --filter @yannis/shared db:audit-permission-coverage`.
 
+### Exports — permission-first, two-key gated (locked CEO directive 2026-05)
+
+CSV / XLSX downloads across the platform are gated by **per-domain export codes**, not inline role checks. The CEO directive: any user can be granted export rights for a specific domain via the standard user permission overrides without a code change.
+
+**Codes** (in [permission-catalog.ts](packages/shared/src/rbac/permission-catalog.ts)):
+
+| Code | Surfaces |
+|---|---|
+| `orders.export` | `/admin/orders`, `/admin/cs/orders`, `/admin/marketing/orders`, `/admin/logistics/orders`, CS team report |
+| `inventory.export` | `/admin/inventory` Stock Levels + Movements, shipment lines |
+| `marketing.export` | Marketing team performance, ad-spend, funding ledger |
+| `finance.export` | Disbursements, delivery remittances, P&L, invoices, finance payout docs |
+| `hr.export` | Payroll batch payout documents (sensitive — includes bank fields) |
+| `audit.export` | Audit trail CSV |
+
+**Default template grants:** SUPER_ADMIN / ADMIN inherit all via `ALL_PERMISSION_CODES`. Otherwise:
+- `BRANCH_ADMIN` → all 6 (owns the branch end-to-end)
+- `HEAD_OF_MARKETING` → `marketing.export` + `orders.export`
+- `HEAD_OF_CS` → `orders.export`
+- `HEAD_OF_LOGISTICS` → `orders.export` + `inventory.export`
+- `STOCK_MANAGER` → `inventory.export`
+- `FINANCE_OFFICER` (and Finance hat via `hasFinanceAccess`) → `finance.export` + `orders.export` + `audit.export`
+- `HR_MANAGER` → `hr.export`
+- `MEDIA_BUYER` / `CS_AGENT` → **none by default** — strictly opt-in via per-user overrides
+
+**Server-side gate** — every export procedure in [reports.service.ts](apps/api/src/reports/reports.service.ts) calls **`ensureExportPermission(user, readPermission, exportPermission)`** which is a **two-key check**:
+1. The user must hold the underlying read code for the domain (`orders.read`, `inventory.read`, `cs.teamOverview`, `marketing.teamOverview`, `marketing.orders`, `finance.disburse`, `finance.read`).
+2. The user must hold the per-domain export code.
+
+This prevents granting `orders.export` to someone who can't read CS-team data and having them download it via the cs_team report. SuperAdmin bypasses both checks.
+
+**Frontend gate** — every page that surfaces an Export / Generate report / Download button computes a `canExport` flag in its loader:
+
+```ts
+const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
+const canExport =
+  isAdminLevel(user) || userPerms.includes(canonicalPermissionCode('orders.export'));
+```
+
+The Page component takes `canExport?: boolean` and wraps every Export trigger in `{canExport && (...)}`. The button never renders for users without the code.
+
+**Do NOT:**
+- Do NOT gate Export buttons on inline role checks (`isAdminLevel(user) || user.role === 'STOCK_MANAGER'`). The whole point of the per-domain codes is to deputize without code edits.
+- Do NOT collapse the six codes into a single `data.export`. Different exports leak different categories of data (orders carry customer PII, payroll carries bank accounts, audit carries security events) — a mega-permission is too coarse.
+- Do NOT call `ensurePermission(user, 'orders.read')` in a report procedure. Use `ensureExportPermission(user, 'orders.read', 'orders.export')` so granting only the read code doesn't open a download path.
+- Do NOT auto-grant `marketing.export` / `orders.export` to MEDIA_BUYER or CS_AGENT in the catalog. They're strictly opt-in by design — Heads grant them per-user via the User Detail → Permission Overrides UI when they trust someone with download rights to customer / spend data.
+
+**After catalog changes** (adding a new export code or shifting defaults): `pnpm --filter @yannis/shared db:seed-permissions` THEN `pnpm --filter @yannis/api run run-permission-backfill:standalone -- --force` so existing user `user_permissions` snapshots pick up the new grants. Without the backfill, existing users keep the perm set they were stamped with.
+
 ---
 
 ## RBAC Role Matrix
@@ -733,6 +782,7 @@ If a UI pattern appears in **2 or more places**, it must be a shared component i
 | Status badge (generic) | `<StatusBadge />` |
 | Order status badge | `<OrderStatusBadge />` |
 | User role chip | `<RoleBadge role={role} />` (consistent dept-color palette across the app — never hand-roll `badge-info` for roles) |
+| Bucket / tally pill (label + count) | `<CountPill tone="warning" label="Pending" count={5} />` — neutral pill, colored leading dot, count chip on the right. Use for status tallies, filter chips, summary roll-ups (NOT for individual-record state) |
 | Order ID + copy button | `<OrderIdBadge />` (renders truncated ID + click-to-copy of the full UUID; pass `linkTo` to wrap as a link, `uppercase`/`ellipsis=""` to match existing variants) |
 | ₦ price display | `<NairaPrice />` |
 | Filter pills / toggle group | `<FilterPills />` |
@@ -927,7 +977,8 @@ If the server rejects the patch the overlay never applies (because `awaitSuccess
 ### Remix / frontend data loading (perceived performance)
 Independent of API latency, the **web app feels slow** when loaders or components do the wrong work. Lock these in:
 
-- **Avoid loader waterfalls** — sequential `await` in a `loader` (A finishes, then B starts) adds round-trip time before first paint. Fetch independent data with **`Promise.all`** (or parallel `trpc` calls) so work runs together. Use **`defer` / `<Await>`** only for clearly secondary content (e.g. heavy chart after shell), not for everything by default.
+- **Deferred loading shells (platform-wide)** — Non-trivial admin / HR / TPL / rider / dashboard routes return `defer({ <route>Shell, pageData })` where `pageData` is a promise (typically an async IIFE) that resolves the full payload. The route default export wraps the page in `<Suspense fallback={<…LoadingShell … />}><Await resolve={pageData}>{(data) => <Page … />}</Await></Suspense>`. Loading shells live in `features/<module>/*DeferredLoadingShells.tsx` (or a colocated `*LoadingShell.tsx`) and mirror real chrome: `PageHeader`, `DateFilterBar`, tabs, disabled primary CTAs, and pulse placeholders for stats/tables (`OverviewStatStripSkeleton`, `CompactTable` patterns) — **never** a blank centered spinner. **`NavProgressBar`** (layout-mounted) is the cross-route loading signal; **do not** reintroduce a global route-transition overlay.
+- **Avoid loader waterfalls** — sequential `await` in a `loader` (A finishes, then B starts) adds round-trip time before first paint. Fetch independent data with **`Promise.all`** (or parallel `trpc` calls) so work runs together. Inside `pageData`, parallelize independent API calls. Use **`defer` / `<Await>`** for the deferred payload; keep URL-derived shell props sync in the deferred object for the `Suspense` fallback.
 - **Keep loader payloads tight** — return only fields the route needs. Do not pass giant nested graphs “for convenience”; add a narrow procedure or query shape. Large JSON over the wire + hydration cost shows up as jank even when the DB was fast.
 - **Paginate list UIs** — table routes should drive **`page` / `limit` / cursor** from **search params** and pass them to the API. Rendering an unbounded `.map()` over thousands of rows (or shipping that many in one loader) blocks the main thread and blows transfer size. Prefer **`<CompactTable />` + `<Pagination />`** (see UI table) with server-backed slices.
 - **Refetch discipline** — filter/sort/pagination changes should re-run the loader; use **`<TableLoadingOverlay />` + `useLoaderRefetchBusy()`** and **`NavProgressBar`** so users see progress without swapping the whole page for a blank spinner.
@@ -980,6 +1031,7 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 ## What NOT To Do
 
 - Do NOT create **loader waterfalls** (serial `await` for independent fetches), return **oversized loader payloads** (“convenience” graphs the route doesn’t need), or ship **unbounded lists** without URL-driven pagination and a paged API — see **Remix / frontend data loading** under Code Quality Standards. Spinner-only fixes mask the problem.
+- Do NOT add a **global route-transition overlay** (`RouteLoader`, path-based skeleton flash, etc.) on top of dashboard/TPL/rider layouts — in-route **`defer` + `Suspense` + module loading shells** own first paint; **`NavProgressBar`** covers cross-route progress.
 - Do NOT use localStorage or sessionStorage for anything security-sensitive. Sessions live in Redis
 - Do NOT expose raw **customer** phone numbers in any API response, log, or error message — ever. The Lead Fortress pillar applies to `orders.customer_phone`, `cart_submissions.phone`, and any other PII column tied to leads. **Staff** phone numbers (`users.phone`) are different: they are contact info for HR/admins/heads to reach their team. The mask helper in `apps/api/src/users/users.service.ts::resolveStaffPhone` returns the raw phone to authorized viewers (self, admin-class, HR, heads viewing their direct-report role; or anyone with `users.read` / `hr.read` permission) and the masked form to other authenticated users — do not blanket-mask `users.phone`.
 - Do NOT use auto-incrementing IDs — use UUIDv7
@@ -1046,6 +1098,8 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 - Do NOT use `LIKE … INCLUDING ALL` to clone a table that has UNIQUE indexes if the clone is meant to hold multiple rows per the unique tuple. INCLUDING ALL copies UNIQUE INDEXES too — and unique indexes are NOT constraints, so the constraint-stripping loop in audit migrations doesn't catch them. Either use `INCLUDING DEFAULTS` (skip indexes) and recreate the lookup indexes you actually want, OR follow up with `DROP INDEX IF EXISTS …_unique_idx` like migration 0068 had to. The `payroll_batches_history` UPDATE-blowup was caused by exactly this oversight.
 - Do NOT skip a payout row for a staff member when generating a batch — even if their commission plan is missing or computes to zero. CEO directive 2026-04-26: every active staff member in (branch × dept) MUST appear in the batch with a default-zero payout so HR has a complete roster to review and adjust manually. The previous "if (!computed) continue;" left people invisible in the batch; replace any future similar shortcut with the always-insert default-zero pattern in `payroll-batch.service.ts::generateBatch`.
 - Do NOT render a user role as `badge-info` (or any single-color badge). Use `<RoleBadge role={role} />` from [apps/web/app/components/ui/role-badge.tsx](apps/web/app/components/ui/role-badge.tsx) — it picks a consistent department color (red admin / blue CS / amber marketing / green logistics / indigo finance / purple HR) so role chips are scannable across pages. Hand-rolled `badge-info` makes every role look identical and was flagged 2026-04-26 on `/hr/plans`. The component lives in the table at "User role chip" → see "UI Component Reuse Rules".
+- Do NOT use [`<CountPill>`](apps/web/app/components/ui/count-pill.tsx) for single-record state (e.g. an order row's `DELIVERED` badge) — it's for **bucket counts** only (filter rows, tab badges with counts, status roll-ups in summary headers). The neutral chrome + small dot is calm when 3+ pills sit next to each other but loses the "scan-and-see" affordance solid-color [`<StatusBadge>`](apps/web/app/components/ui/status-badge.tsx) gives a long table. Conversely, do NOT hand-roll `(label + count)` summary pills — `<CountPill>` is the canonical shape and the `tone` slot covers `neutral | brand | info | warning | success | danger`.
+- Do NOT gate Export buttons on inline role checks (`isAdminLevel(user) || user.role === 'STOCK_MANAGER'`). Exports are **permission-first** via per-domain codes: `orders.export`, `inventory.export`, `marketing.export`, `finance.export`, `hr.export`, `audit.export`. Loaders compute `canExport: isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('xxx.export'))` and pages hide the button when `canExport === false`. Server uses [`ReportsService.ensureExportPermission(user, readPerm, exportPerm)`](apps/api/src/reports/reports.service.ts) — a two-key gate that requires both the underlying read permission AND the export code (so granting `orders.export` to a user who can't read CS-team data doesn't open a side door). Default template grants land via `ROLE_PERMISSIONS` in [permission-catalog.ts](packages/shared/src/rbac/permission-catalog.ts): admin-class + Heads + Stock Manager get their domain's export by default; MEDIA_BUYER and CS_AGENT are strictly opt-in via per-user permission overrides.
 - Do NOT remove the `successCallbackUrl` field from `formConfigSchema` (or rename it) without updating both [apps/edge-worker/src/index.ts](apps/edge-worker/src/index.ts) (the form's `data-success-callback` attribute + the redirect block in `submitOrder().then()`) AND the form-builder UI in [apps/web/app/features/campaigns/CampaignsPage.tsx](apps/web/app/features/campaigns/CampaignsPage.tsx). The field is OPTIONAL — when missing/empty the form falls back to the inline success message; when set it redirects to the Media Buyer's funnel thank-you page. Paystack `authorizationUrl` always wins over the callback URL so payment flows aren't broken. The validator enforces a full http(s) URL — partial paths are rejected.
 - Do NOT render the `<DateFilterBar />` bare on a page. Always wrap it in the standard pill chrome: `<div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">` so the filter has visual presence. Bare it renders as a tiny text-xs button that disappears into toolbars (this was the bug on `/admin/cs/orders` flagged 2026-04-26).
 - Do NOT bypass the bulk-assign `intent` on the CS queue when an HoCS picks multiple unassigned cards. The `bulkAssignToCS` intent in [apps/web/app/routes/admin.cs.queue/route.tsx](apps/web/app/routes/admin.cs.queue/route.tsx) calls `orders.bulkAssignToCS` (the existing tRPC procedure). The card UI uses a Set-based selection state and a separate fetcher; do NOT collapse it into the legacy single-`assign` intent loop because the bulk procedure is atomic + emits one Socket.io event, while looping single-assign produces N events and N retry windows.

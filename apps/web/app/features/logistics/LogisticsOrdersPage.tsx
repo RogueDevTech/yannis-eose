@@ -200,7 +200,7 @@ function LogisticsOrdersPageImpl({
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
-  const isFilterLoading = useLoaderRefetchBusy();
+  const isFilterLoading = useLoaderRefetchBusy().busy;
   const trendFetcher = useFetcher<{
     ok: boolean;
     dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;

@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { DeferredSection } from '~/components/ui/deferred-section';
 import { APP_THEME_IDS } from '@yannis/shared';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -69,30 +70,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
     myNotificationPrefs = data?.result?.data ?? null;
   }
 
-  let notificationEmailConfig: NotificationEmailConfig | null = null;
-  let voipState: VoipState | null = null;
+  // Wave B — admin-only (streams after General tab shell: org email toggles + VOIP picker data)
+  const adminPanelData: Promise<{
+    notificationEmailConfig: NotificationEmailConfig | null;
+    voipState: VoipState | null;
+  }> = isAdmin
+    ? Promise.all([
+        apiRequest<unknown>('/trpc/settings.getNotificationEmailConfig', { method: 'GET', cookie }),
+        apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
+        apiRequest<unknown>('/trpc/voip.listProviders', { method: 'GET', cookie }),
+      ]).then(([configRes, activeRes, listRes]) => {
+        let notificationEmailConfig: NotificationEmailConfig | null = null;
+        if (configRes.ok) {
+          const data = configRes.data as { result?: { data?: NotificationEmailConfig } };
+          notificationEmailConfig = data?.result?.data ?? null;
+        }
+        const active = activeRes.ok
+          ? (activeRes.data as { result?: { data?: VoipActive } })?.result?.data ?? null
+          : null;
+        const list = listRes.ok
+          ? (listRes.data as { result?: { data?: VoipProviderInfo[] } })?.result?.data ?? null
+          : null;
+        const voipState = active && list ? { active, providers: list } : null;
+        return { notificationEmailConfig, voipState };
+      })
+    : Promise.resolve({ notificationEmailConfig: null, voipState: null });
 
-  // Wave B — admin-only slices in one parallel batch (notification email config + VOIP).
-  if (isAdmin) {
-    const [configRes, activeRes, listRes] = await Promise.all([
-      apiRequest<unknown>('/trpc/settings.getNotificationEmailConfig', { method: 'GET', cookie }),
-      apiRequest<unknown>('/trpc/voip.isEnabled', { method: 'GET', cookie }),
-      apiRequest<unknown>('/trpc/voip.listProviders', { method: 'GET', cookie }),
-    ]);
-    if (configRes.ok) {
-      const data = configRes.data as { result?: { data?: NotificationEmailConfig } };
-      notificationEmailConfig = data?.result?.data ?? null;
-    }
-    const active = activeRes.ok
-      ? (activeRes.data as { result?: { data?: VoipActive } })?.result?.data ?? null
-      : null;
-    const list = listRes.ok
-      ? (listRes.data as { result?: { data?: VoipProviderInfo[] } })?.result?.data ?? null
-      : null;
-    if (active && list) voipState = { active, providers: list };
-  }
-
-  return { user, systemSettings, notificationEmailConfig, voipState, myNotificationPrefs };
+  return defer({ user, systemSettings, myNotificationPrefs, adminPanelData });
 }
 
 interface VoipActive {
@@ -371,17 +375,18 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function SettingsIndexRoute() {
-  const { user, systemSettings, notificationEmailConfig, voipState, myNotificationPrefs } =
-    useLoaderData<typeof loader>();
+  const { user, systemSettings, myNotificationPrefs, adminPanelData } = useLoaderData<typeof loader>();
   return (
-    <>
-    <SettingsPage
-      user={user}
-      systemSettings={systemSettings}
-      notificationEmailConfig={notificationEmailConfig}
-      voipState={voipState}
-      myNotificationPrefs={myNotificationPrefs}
-    />
-    </>
+    <DeferredSection resolve={adminPanelData} skeleton="card">
+      {({ notificationEmailConfig, voipState }) => (
+        <SettingsPage
+          user={user}
+          systemSettings={systemSettings}
+          notificationEmailConfig={notificationEmailConfig}
+          voipState={voipState}
+          myNotificationPrefs={myNotificationPrefs}
+        />
+      )}
+    </DeferredSection>
   );
 }

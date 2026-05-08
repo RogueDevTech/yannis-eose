@@ -1,8 +1,12 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { apiRequest, getCurrentUser, getSessionCookie, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { isAdminLevel } from '~/lib/rbac';
 import { AuditPage } from '~/features/audit/AuditPage';
+import { AuditLoadingShell } from '~/features/audit/AuditLoadingShell';
 import type { AuditActorFilterOption, AuditEntry, AuditStreamData } from '~/features/audit/types';
 
 export const meta: MetaFunction = () => [
@@ -12,6 +16,10 @@ export const meta: MetaFunction = () => [
 export async function loader({ request }: LoaderFunctionArgs) {
   await requireGlobalAuditAccess(request);
   const cookie = getSessionCookie(request);
+  const user = await getCurrentUser(request);
+  const userPerms = (user?.permissions ?? []).map((p) => canonicalPermissionCode(p));
+  const canExport =
+    !!user && (isAdminLevel(user) || userPerms.includes(canonicalPermissionCode('audit.export')));
   const url = new URL(request.url);
 
   const tableName = url.searchParams.get('tableName') || '';
@@ -24,6 +32,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const filters = { tableName, actorId, startDate, endDate, periodAllTime, page, limit };
 
+  const auditShell = {
+    filters: {
+      tableName,
+      actorId,
+      startDate,
+      endDate,
+      periodAllTime,
+    },
+  };
+
+  const pageData = (async (): Promise<AuditStreamData> => {
   // Build tRPC input
   const input: Record<string, unknown> = { page, limit };
   if (tableName) input.tableName = tableName;
@@ -125,6 +144,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     actorFilterOptions,
     locationNames,
   } satisfies AuditStreamData;
+  })();
+
+  return defer({ auditShell, pageData, canExport });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -165,19 +187,24 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AuditRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { auditShell, pageData, canExport } = useLoaderData<typeof loader>();
 
   return (
-    <>
-    <AuditPage
-      rows={data.rows}
-      total={data.total}
-      filters={data.filters}
-      actorIds={data.actorIds}
-      actorFilterOptions={data.actorFilterOptions ?? []}
-      locationNames={data.locationNames ?? {}}
-      error={data.error}
-    />
-    </>
+    <Suspense fallback={<AuditLoadingShell filters={auditShell.filters} />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <AuditPage
+            rows={data.rows}
+            total={data.total}
+            filters={data.filters}
+            actorIds={data.actorIds}
+            actorFilterOptions={data.actorFilterOptions ?? []}
+            locationNames={data.locationNames ?? {}}
+            error={data.error}
+            canExport={canExport}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

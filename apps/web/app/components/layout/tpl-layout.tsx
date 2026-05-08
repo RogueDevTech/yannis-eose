@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react';
 import { NavLink, Form, useLocation, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
-import { RouteLoader } from '~/components/ui/route-loader';
 import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { SidebarIcons } from './sidebar';
 import { useAppTheme } from '~/hooks/useAppTheme';
@@ -347,18 +346,11 @@ export function TplLayout({
 
         <main className="flex-1 p-4 lg:p-6 pb-[var(--bottom-nav-height)] md:pb-6">
           <div
-            className={`relative transition-all duration-300 ${isRouteLoading ? 'min-h-[60vh]' : ''}`}
+            className="relative transition-all duration-300"
             aria-busy={isRouteLoading}
             aria-live="polite"
           >
-            {isRouteLoading && (
-              <div className="absolute inset-0 z-20 bg-app-canvas p-4 lg:p-6">
-                <RouteLoader />
-              </div>
-            )}
-            <div className={isRouteLoading ? 'absolute inset-0 opacity-0 pointer-events-none' : ''}>
-              {children}
-            </div>
+            {children}
           </div>
         </main>
         <BottomNav

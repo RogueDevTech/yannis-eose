@@ -100,6 +100,26 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ ok: true });
   }
 
+  if (intent === 'revealAbandonedPhone') {
+    const cartId = formData.get('cartId');
+    if (!cartId || typeof cartId !== 'string') {
+      return json({ ok: false, error: 'Missing cartId' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>(
+      '/trpc/cart.revealPhoneForAbandoned',
+      { method: 'POST', cookie, body: { cartId } },
+    );
+    if (!res.ok) {
+      return json({ ok: false, error: 'Failed to reveal phone' }, { status: 500 });
+    }
+    const data = (res.data as { result?: { data?: { phone?: string; isDialable?: boolean } } })?.result?.data;
+    return json({
+      ok: true,
+      phone: data?.phone ?? '',
+      isDialable: !!data?.isDialable,
+    });
+  }
+
   return json({ ok: false, error: 'Unknown intent' }, { status: 400 });
 }
 

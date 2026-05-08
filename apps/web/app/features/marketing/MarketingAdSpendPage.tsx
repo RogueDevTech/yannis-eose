@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { createAdSpendLogFormSchema, updateAdSpendSchema } from '@yannis/shared/validators';
 import { PageNotification } from '~/components/ui/page-notification';
-import { HighCpaWarningBanner } from '~/features/marketing/HighCpaWarningBanner';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -80,8 +80,6 @@ function adSpendRowCanEdit(s: AdSpendRecord): boolean {
   return st === 'PENDING' || st === 'REJECTED';
 }
 
-const HIGH_CPA_THRESHOLD = 5000;
-
 function InlineLoadingText({ label = 'Loading…' }: { label?: string }) {
   return (
     <span className="inline-flex items-center gap-2 text-xs text-app-fg-muted">
@@ -140,7 +138,7 @@ export function MarketingAdSpendPage({
   const secondaryFetcher = useFetcher<SecondaryResponse>();
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
-  const isFilterLoading = useLoaderRefetchBusy();
+  const isFilterLoading = useLoaderRefetchBusy().busy;
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [selectedProductId, setSelectedProductId] = useState(productIdFilter || 'ALL');
@@ -723,12 +721,13 @@ export function MarketingAdSpendPage({
                     periodAllTime={dateFilters.periodAllTime}
                   />
                 </div>
-                <Link
+                <BranchScopedLink
                   to="/admin/marketing/ad-spend/new"
+                  actionLabel="adding ad spend"
                   className="btn-primary btn-sm inline-flex items-center justify-center shrink-0"
                 >
                   + Add Expense
-                </Link>
+                </BranchScopedLink>
                 <PageRefreshButton />
               </>
             }
@@ -742,13 +741,14 @@ export function MarketingAdSpendPage({
                     triggerLayout="blockCenter"
                   />
                 </div>
-                <Link
+                <BranchScopedLink
                   to="/admin/marketing/ad-spend/new"
+                  actionLabel="adding ad spend"
                   onClick={() => closeSheet()}
                   className="btn-primary btn-sm w-full justify-center inline-flex items-center"
                 >
                   + Add Expense
-                </Link>
+                </BranchScopedLink>
               </>
             )}
           />
@@ -791,21 +791,10 @@ export function MarketingAdSpendPage({
         <OverviewStatStripSkeleton count={4} />
       )}
 
-      {leaderboard ? (
-        (() => {
-          const highCpaBuyers = leaderboard.filter((b: LeaderboardEntry) => b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0);
-          return viewMode !== 'media_buyer' ? (
-            <HighCpaWarningBanner
-              buyers={highCpaBuyers.map((b: LeaderboardEntry) => ({ mediaBuyerId: b.mediaBuyerId, name: b.name, cpa: b.cpa }))}
-              threshold={HIGH_CPA_THRESHOLD}
-            />
-          ) : null;
-        })()
-      ) : secondaryLoading ? (
-        <div className="card !p-4">
-          <InlineLoadingText label="Loading leaderboard…" />
-        </div>
-      ) : null}
+      {/* High-CPA warning banner removed (CEO directive 2026-05-08) — the
+          inline alert added an extra render path on every page load without
+          changing what an MB or HoM does next. The Profitability column on
+          the leaderboard already surfaces the same signal in context. */}
 
       <ResponsiveFormPanel open={showAdSpendForm} onClose={() => setShowAdSpendForm(false)}>
         <fetcher.Form method="post" className="card space-y-3" onSubmit={handleLogAdSpendSubmit} noValidate>

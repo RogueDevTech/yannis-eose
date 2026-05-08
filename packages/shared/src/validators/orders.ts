@@ -255,13 +255,28 @@ export const listOrdersSchema = z
     statuses: z.array(orderStatusSchema).min(1).optional(),
     assignedCsId: z.string().uuid().optional(),
     mediaBuyerId: z.string().uuid().optional(),
+    /**
+     * Server-injected supervisor scope (OR semantics). When set, the list returns rows
+     * where `assignedCsId IN csUserIds` OR `mediaBuyerId IN mediaBuyerIds`. Each set
+     * always contains the supervisor's own id so they still see their own work.
+     * Routers populate this; the UI never sends it.
+     */
+    supervisorScope: z
+      .object({
+        csUserIds: z.array(z.string().uuid()).max(2000),
+        mediaBuyerIds: z.array(z.string().uuid()).max(2000),
+      })
+      .optional(),
     campaignId: z.string().uuid().optional(),
     productId: z.string().uuid().optional(),
     riderId: z.string().uuid().optional(),
     logisticsLocationId: z.string().uuid().optional(),
     search: z.string().optional(),
-    startDate: z.string().date().optional(),
-    endDate: z.string().date().optional(),
+    // Accept either `YYYY-MM-DD` (whole-day default) OR `YYYY-MM-DDTHH:MM[:SS]`
+    // (precise moment from the time-aware DateFilterBar). API service detects the
+    // `T` and skips the end-of-day bump for ISO datetimes.
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
     scheduleKind: listOrdersScheduleKindSchema.optional(),
     /** Required when scheduleKind is callback_on_day or delivery_on_day (YYYY-MM-DD). */
     scheduleDate: z.string().date().optional(),
@@ -303,6 +318,12 @@ export const scheduleCalendarHeatSchema = z.object({
   yearMonth: z.string().regex(/^\d{4}-\d{2}$/, 'Expected YYYY-MM'),
   assignedCsId: z.string().uuid().optional(),
   mediaBuyerId: z.string().uuid().optional(),
+  supervisorScope: z
+    .object({
+      csUserIds: z.array(z.string().uuid()).max(2000),
+      mediaBuyerIds: z.array(z.string().uuid()).max(2000),
+    })
+    .optional(),
   status: orderStatusSchema.optional(),
 });
 

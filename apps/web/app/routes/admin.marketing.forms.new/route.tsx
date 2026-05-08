@@ -1,7 +1,13 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import {
+  apiRequest,
+  ensureBranchScopeOrRedirect,
+  getSessionCookie,
+  requirePermission,
+  safeStatus,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
 import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreatePage';
@@ -16,7 +22,12 @@ import type { OfferGroupRow } from '~/features/campaigns/types';
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'marketing.campaigns');
+  const user = await requirePermission(request, 'marketing.campaigns');
+  // Pre-flight branch picker safety net — redirect deep links / bookmarked URLs
+  // back to the parent list with `?branchPickerNext=` so the modal opens before
+  // the user invests time in the builder.
+  const guard = ensureBranchScopeOrRedirect(request, user, '/admin/marketing/forms');
+  if (guard) return guard;
   const cookie = getSessionCookie(request);
 
   const offerGroupsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 250 }));

@@ -57,7 +57,7 @@ function formatDate(iso: string): string {
 }
 
 export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
 
   const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = [
     {

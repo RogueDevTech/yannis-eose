@@ -17,6 +17,29 @@ function maskPhone(phoneHash: string): string {
   return `${phoneHash.slice(0, 4)}****${phoneHash.slice(-4)}`;
 }
 
+/**
+ * Mask a real customer phone for display in CS lists.
+ * Pillar 2 — full number is never sent to the browser; only `0803****1234`
+ * (first 4 + last 4 digits, asterisks in the middle) so a rep can confirm
+ * they're calling the right person while the raw value stays server-side.
+ */
+function maskRealPhone(phone: string): string {
+  const digits = phone.replace(/\D+/g, '');
+  if (digits.length <= 8) return '****';
+  return `${digits.slice(0, 4)}****${digits.slice(-4)}`;
+}
+
+/**
+ * Best-effort masked display from whatever the cart row holds. Prefers the
+ * raw phone (newly captured carts) and falls back to the phone-hash mask for
+ * legacy rows that have no raw phone yet.
+ */
+function maskCartPhone(rawPhone: string | null, phoneHash: string): string {
+  const trimmed = rawPhone?.trim();
+  if (trimmed) return maskRealPhone(trimmed);
+  return maskPhone(phoneHash);
+}
+
 @Injectable()
 export class CartService {
   constructor(
@@ -44,11 +67,14 @@ export class CartService {
       mediaBuyerId?: string;
       customerName: string;
       customerPhoneHash: string;
+      /** Raw phone — captured for CS reveal-to-call when the cart drops off. */
+      customerPhone?: string;
       productId: string;
       offerLabel?: string;
     },
     actorId?: string | null,
   ) {
+    const trimmedPhone = input.customerPhone?.trim() || null;
     const run = async (db: CartDbOrTx) => {
       // Upsert key: campaign_id + phone_hash — one active PENDING cart per person per campaign.
       const existing = await db
@@ -73,6 +99,10 @@ export class CartService {
             productId: input.productId,
             offerLabel: input.offerLabel ?? null,
             mediaBuyerId: input.mediaBuyerId ?? existingRow.mediaBuyerId,
+            // Keep an existing phone if the new payload missed it (older Edge Worker
+            // builds, partial form retries) — only overwrite when caller actually
+            // sent something usable.
+            customerPhone: trimmedPhone ?? existingRow.customerPhone,
             updatedAt: now,
           })
           .where(eq(schema.cartAbandonments.id, existingRow.id));
@@ -86,6 +116,7 @@ export class CartService {
           mediaBuyerId: input.mediaBuyerId ?? null,
           customerName: input.customerName,
           customerPhoneHash: input.customerPhoneHash,
+          customerPhone: trimmedPhone,
           productId: input.productId,
           offerLabel: input.offerLabel ?? null,
           status: 'PENDING',
@@ -246,6 +277,7 @@ export class CartService {
       id: string;
       customerName: string;
       customerPhoneHash: string;
+      customerPhone: string | null;
       productId: string;
       productName: string | null;
       campaignId: string;
@@ -257,6 +289,7 @@ export class CartService {
         ca.id,
         ca.customer_name   AS "customerName",
         ca.customer_phone_hash AS "customerPhoneHash",
+        ca.customer_phone  AS "customerPhone",
         ca.product_id      AS "productId",
         p.name             AS "productName",
         ca.campaign_id     AS "campaignId",
@@ -274,7 +307,7 @@ export class CartService {
     return rows.map((r) => ({
       id: r.id,
       customerName: r.customerName,
-      customerPhoneDisplay: maskPhone(r.customerPhoneHash),
+      customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash),
       productId: r.productId,
       productName: r.productName ?? null,
       campaignId: r.campaignId,
@@ -322,6 +355,7 @@ export class CartService {
         id: schema.cartAbandonments.id,
         customerName: schema.cartAbandonments.customerName,
         customerPhoneHash: schema.cartAbandonments.customerPhoneHash,
+        customerPhone: schema.cartAbandonments.customerPhone,
         productId: schema.cartAbandonments.productId,
         productName: schema.products.name,
         campaignId: schema.cartAbandonments.campaignId,
@@ -341,7 +375,7 @@ export class CartService {
       items: rows.map((r) => ({
         id: r.id,
         customerName: r.customerName,
-        customerPhoneDisplay: maskPhone(r.customerPhoneHash),
+        customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash),
         productId: r.productId,
         productName: r.productName ?? null,
         campaignId: r.campaignId,
@@ -497,6 +531,58 @@ export class CartService {
         .returning({ id: schema.cartAbandonments.id });
     });
     return { deleted: result.length > 0 };
+  }
+
+  /**
+   * Reveal the raw customer phone for a single dropped-off cart so a CS rep
+   * can dial / SMS / WhatsApp the customer (CEO directive 2026-05-08).
+   *
+   * Pillar 2: phone is never broadcast in lists — only this single-shot,
+   * actor-audited reveal returns the raw value, and only for ABANDONED rows.
+   * Pre-directive carts have `customerPhone = NULL` and return
+   * `{ phone: '', isDialable: false }` so the UI can render a friendly
+   * "phone wasn't captured" message.
+   */
+  async revealPhoneForAbandonedCart(
+    cartId: string,
+    actorId: string,
+  ): Promise<{ phone: string; isDialable: boolean }> {
+    const rows = await this.db
+      .select({
+        id: schema.cartAbandonments.id,
+        status: schema.cartAbandonments.status,
+        customerPhone: schema.cartAbandonments.customerPhone,
+      })
+      .from(schema.cartAbandonments)
+      .where(eq(schema.cartAbandonments.id, cartId))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) {
+      throw new Error('Cart not found');
+    }
+    // Only ABANDONED carts are surfaced in the dropped-off backlog. PENDING
+    // carts are still being filled (we don't out them); CONVERTED rows have
+    // a real order whose own reveal flow already covers it.
+    if (row.status !== 'ABANDONED') {
+      return { phone: '', isDialable: false };
+    }
+
+    const phone = row.customerPhone?.trim() ?? '';
+    if (!phone) {
+      return { phone: '', isDialable: false };
+    }
+
+    // Audit the reveal as a write so the action shows up in the actor's
+    // activity timeline. The cart row itself isn't mutated — set_config
+    // attribution on the tx is enough; nothing to commit.
+    await withActor(this.db, { id: actorId }, async (tx) => {
+      await tx.execute(
+        sql`SELECT 1 FROM cart_abandonments WHERE id = ${cartId} LIMIT 1`,
+      );
+    });
+
+    return { phone, isDialable: true };
   }
 
   /**

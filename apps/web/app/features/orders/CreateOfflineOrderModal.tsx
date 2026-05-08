@@ -240,11 +240,17 @@ export function CreateOfflineOrderModal({
             <div>
               <TextInput
                 type="tel"
+                inputMode="numeric"
                 label="Customer phone *"
                 required
                 value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
+                // Strip non-digit characters at the keystroke (allow `+` for
+                // international, dashes/spaces for formatting). Letters never
+                // make it into state — matches the form-builder phone field.
+                onChange={(e) => setCustomerPhone(e.target.value.replace(/[^\d+\-\s()]/g, ''))}
                 placeholder="e.g. 08012345678"
+                pattern="[0-9+\-\s()]*"
+                title="Numbers only"
               />
             </div>
           </div>

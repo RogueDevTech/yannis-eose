@@ -999,9 +999,10 @@ export function AuditPage({
   actorFilterOptions,
   locationNames,
   error,
+  canExport = false,
 }: AuditPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const isFilterLoading = useLoaderRefetchBusy();
+  const isFilterLoading = useLoaderRefetchBusy().busy;
   const [selectedEntry, setSelectedEntry] = useState<AuditEntry | null>(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [unknownActorModal, setUnknownActorModal] = useState<{ changedBy: string | null; displayName: string } | null>(null);
@@ -1158,7 +1159,7 @@ export function AuditPage({
                 </div>
                 <PageRefreshButton />
                 <PollingStatusIndicator state={pollState} countdown={countdown} />
-                {rows.length > 0 && (
+                {rows.length > 0 && canExport && (
                   <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                     Generate report
                   </Button>
@@ -1178,7 +1179,7 @@ export function AuditPage({
                 <div className="flex justify-center">
                   <PollingStatusIndicator state={pollState} countdown={countdown} />
                 </div>
-                {rows.length > 0 && (
+                {rows.length > 0 && canExport && (
                   <Button
                     variant="secondary"
                     size="sm"

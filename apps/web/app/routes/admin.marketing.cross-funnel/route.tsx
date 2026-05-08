@@ -1,8 +1,10 @@
 import { defer } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
 import { MarketingCrossFunnelPage } from '~/features/marketing/MarketingCrossFunnelPage';
+import { MarketingCrossFunnelLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type {
   CrossFunnelAttemptRow,
   CrossFunnelStats,
@@ -68,6 +70,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
   };
 
+  const filters = {
+    startDate: startDate ?? '',
+    endDate: endDate ?? '',
+    periodAllTime,
+    productId: productId ?? '',
+  };
+
+  const pageData = (async () => {
   const listRes = await apiRequest<unknown>(
     `/trpc/marketing.listMyCrossFunnelAttempts?input=${encodeURIComponent(JSON.stringify(listInput))}`,
     { method: 'GET', cookie },
@@ -85,21 +95,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   })();
 
-  return defer({
+  return {
     list: parseList(listRes),
-    filters: {
-      startDate: startDate ?? '',
-      endDate: endDate ?? '',
-      periodAllTime,
-      productId: productId ?? '',
-    },
     secondary: secondaryPromise,
+    filters,
+  };
+  })();
+
+  return defer({
+    crossFunnelShell: { filters },
+    pageData,
   });
 }
 
 export default function CrossFunnelRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { crossFunnelShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <MarketingCrossFunnelPage list={data.list} secondary={data.secondary} filters={data.filters} />
+    <Suspense fallback={<MarketingCrossFunnelLoadingShell {...crossFunnelShell} />}>
+      <Await resolve={pageData}>
+        {(p) => <MarketingCrossFunnelPage list={p.list} secondary={p.secondary} filters={p.filters} />}
+      </Await>
+    </Suspense>
   );
 }

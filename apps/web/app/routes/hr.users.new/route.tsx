@@ -1,8 +1,10 @@
-import { useLoaderData } from '@remix-run/react';
-import { json, redirect } from '@remix-run/node';
+import { useLoaderData, Await } from '@remix-run/react';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
 import {
   apiRequest,
+  ensureBranchScopeOrRedirect,
   getSessionCookie,
   requireStaffAccountsAccess,
   safeStatus,
@@ -10,6 +12,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
+import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type {
   UserCreateProduct,
   UserCreateLocation,
@@ -29,8 +32,14 @@ export const meta: MetaFunction = () => [
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const viewer = await requireStaffAccountsAccess(request);
+  // Pre-flight branch picker safety net — see ensureBranchScopeOrRedirect docs.
+  // This route is shared between /hr/users/new and /admin/finance/staff-accounts/new
+  // (they both use the same module). We fall back to /hr/users for org-wide heads.
+  const guard = ensureBranchScopeOrRedirect(request, viewer, '/hr/users');
+  if (guard) return guard;
   const cookie = getSessionCookie(request);
 
+  const pageData = (async (): Promise<UserCreateLoaderData> => {
   const productsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
@@ -117,6 +126,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     templatePermissionsById,
     defaultMembershipBranchId,
   };
+  })();
+
+  return defer({ pageData });
 }
 
 // ─── Action ─────────────────────────────────────────────
@@ -157,6 +169,11 @@ export async function action({ request }: ActionFunctionArgs) {
   // Section 4: Contact
   const phone = formData.get('phone')?.toString() || undefined;
 
+  // Probation flag — server-side eligibility check (PROBATION_INELIGIBLE_ROLES) rejects
+  // ADMIN / SUPER_ADMIN. Default review window is 90 days.
+  const isProbation = formData.get('isProbation') === 'true';
+  const probationUntilStr = formData.get('probationUntil')?.toString().trim();
+
   const permissionOverridesRaw = formData.get('permissionOverrides')?.toString();
 
   // Build request body (password is auto-generated on the backend)
@@ -171,6 +188,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (capacityStr) body.capacity = parseInt(capacityStr, 10) || 10;
   if (logisticsLocationId) body.logisticsLocationId = logisticsLocationId;
+  if (isProbation) {
+    body.isProbation = true;
+    if (probationUntilStr) body.probationUntil = probationUntilStr;
+  }
   try {
     if (productIdsStr) body.productIds = JSON.parse(productIdsStr);
   } catch {
@@ -244,6 +265,12 @@ export async function action({ request }: ActionFunctionArgs) {
 // ─── Component ──────────────────────────────────────────
 
 export default function NewUserRoute() {
-  const data = useLoaderData<typeof loader>() as UserCreateLoaderData;
-  return <UserCreatePage {...data} />;
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<UserCreateEditLoadingShell mode="create" />}>
+      <Await resolve={pageData}>
+        {(data) => <UserCreatePage {...data} />}
+      </Await>
+    </Suspense>
+  );
 }

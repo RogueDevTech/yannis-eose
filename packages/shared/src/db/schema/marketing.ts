@@ -147,6 +147,17 @@ export const adSpendLogs = pgTable('ad_spend_logs', {
   platform: adPlatformEnum('platform').default('FACEBOOK').notNull(),
   /** When `platform` is OTHER, Media Buyer–supplied label (e.g. Snapchat). Otherwise null. */
   platformCustomLabel: text('platform_custom_label'),
+  /**
+   * Manual order-split entered by the Media Buyer when creating the batch.
+   * The Add Expense modal asks for the form's total order count from the
+   * system, then has the MB split that total across each line — sum of
+   * line.attributed_order_count must equal the system total. Used to compute
+   * per-line CPA (= spend / attributed_order_count) at view time.
+   *
+   * 0 means "not yet split" — pre-directive rows fall back to the snapshot
+   * interval calc so historical reports stay valid.
+   */
+  attributedOrderCount: integer('attributed_order_count').default(0).notNull(),
   spendDate: timestamp('spend_date', { withTimezone: true }).notNull(),
   status: adSpendStatusEnum('status').default('PENDING').notNull(),
   approvedAt: timestamp('approved_at', { withTimezone: true }),

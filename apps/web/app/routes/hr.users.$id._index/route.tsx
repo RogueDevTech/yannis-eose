@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
@@ -14,9 +15,8 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { actorUserIdsMatch, canEditUser, isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
-import { DeferredSection } from '~/components/ui/deferred-section';
-import { Spinner } from '~/components/ui/spinner';
 import { UserDetailPage } from '~/features/users/UserDetailPage';
+import { UserDetailShellSkeleton } from '~/features/users/UserDetailShellSkeleton';
 import type { UserDetail, UserDetailLoaderData } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -141,6 +141,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         };
       });
 
+    // Probation management is HR_MANAGER + SUPER_ADMIN only (CEO directive 2026-05-08).
+    // ADMIN intentionally cannot manage probation. Target must also be probation-eligible
+    // (admin-tier users are excluded — see PROBATION_INELIGIBLE_ROLES).
+    const targetEligibleForProbation = !['SUPER_ADMIN', 'ADMIN'].includes(user.role);
+    const viewerCanManageProbationRole =
+      currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'HR_MANAGER';
+    const canManageProbation = !isSelfView && targetEligibleForProbation && viewerCanManageProbationRole;
+
     return {
       user,
       canDisburseToThisUser,
@@ -152,6 +160,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       isSelfView,
       showOnboardingTab,
       viewerCanManageHrOnboarding,
+      canManageProbation,
     } satisfies UserDetailLoaderData;
   })();
 
@@ -476,6 +485,89 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
   }
 
+  // ─── Probation intents ────────────────────────────────────
+  // Authority is enforced server-side (HR_MANAGER + SUPER_ADMIN only). The route
+  // forwards what HR types and trusts the API to reject unauthorized callers.
+
+  if (intent === 'setProbation') {
+    const probationUntilStr = formData.get('probationUntil')?.toString().trim() ?? '';
+    const body: Record<string, unknown> = { userId };
+    if (probationUntilStr) body.probationUntil = probationUntilStr;
+    const res = await apiRequest<unknown>('/trpc/users.setProbation', {
+      method: 'POST',
+      cookie,
+      body,
+      timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to place user on probation') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, message: 'User placed on probation.' });
+  }
+
+  if (intent === 'extendProbation') {
+    const probationUntil = formData.get('probationUntil')?.toString().trim() ?? '';
+    if (!probationUntil) {
+      return json({ error: 'Pick a new probation review date.' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/users.extendProbation', {
+      method: 'POST',
+      cookie,
+      body: { userId, probationUntil },
+      timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update probation date') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, message: 'Probation review date updated.' });
+  }
+
+  if (intent === 'markProbationPermanent') {
+    const res = await apiRequest<unknown>('/trpc/users.markProbationPermanent', {
+      method: 'POST',
+      cookie,
+      body: { userId },
+      timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to mark user permanent') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, message: 'Probation cleared. User is now permanent.' });
+  }
+
+  if (intent === 'terminateProbation') {
+    const reason = formData.get('reason')?.toString().trim() ?? '';
+    const confirmName = formData.get('confirmName')?.toString().trim() ?? '';
+    if (reason.length < 10) {
+      return json({ error: 'Termination reason must be at least 10 characters.' }, { status: 400 });
+    }
+    if (!confirmName) {
+      return json({ error: 'Type the user name to confirm termination.' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/users.terminateProbation', {
+      method: 'POST',
+      cookie,
+      body: { userId, reason, confirmName },
+      timeoutMs: USER_WRITE_ACTION_TIMEOUT_MS,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to terminate probation user') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return redirect('/hr/users');
+  }
+
   // Mirror Mode — view the app as this user (read-only). Permission gate is enforced
   // server-side in AuthService.startMirror; this just forwards the cookie + target id and
   // bounces to /admin so the freshly-mirrored session takes effect immediately.
@@ -494,20 +586,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 // ─── Component ──────────────────────────────────────────
-
-function UserDetailDeferredFallback() {
-  return (
-    <div
-      className="flex min-h-[min(60vh,560px)] flex-col items-center justify-center gap-3 rounded-xl border border-app-border bg-app-surface/40 px-4"
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-    >
-      <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
-      <p className="text-sm text-app-fg-muted">Loading user…</p>
-    </div>
-  );
-}
 
 export function UserDetailPageWithMirror({
   data,
@@ -539,23 +617,25 @@ export function UserDetailPageWithMirror({
 export default function UserDetailRoute() {
   const { userDetail } = useLoaderData<typeof loader>();
   return (
-    <DeferredSection resolve={userDetail} fallback={<UserDetailDeferredFallback />}>
-      {(data) =>
-        'notFound' in data && data.notFound ? (
-          <div className="card text-center py-12">
-            <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
-            <h2 className="text-xl font-bold text-app-fg">User not found</h2>
-            <p className="mt-2 text-sm text-app-fg-muted">
-              The user you're looking for doesn't exist or has been removed.
-            </p>
-            <a href="/hr/users" className="btn-primary mt-4 inline-block">
-              Back to Users
-            </a>
-          </div>
-        ) : (
-          <UserDetailPageWithMirror data={data as UserDetailLoaderData} />
-        )
-      }
-    </DeferredSection>
+    <Suspense fallback={<UserDetailShellSkeleton />}>
+      <Await resolve={userDetail}>
+        {(data) =>
+          'notFound' in data && data.notFound ? (
+            <div className="card text-center py-12">
+              <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+              <h2 className="text-xl font-bold text-app-fg">User not found</h2>
+              <p className="mt-2 text-sm text-app-fg-muted">
+                The user you're looking for doesn't exist or has been removed.
+              </p>
+              <a href="/hr/users" className="btn-primary mt-4 inline-block">
+                Back to Users
+              </a>
+            </div>
+          ) : (
+            <UserDetailPageWithMirror data={data as UserDetailLoaderData} />
+          )
+        }
+      </Await>
+    </Suspense>
   );
 }

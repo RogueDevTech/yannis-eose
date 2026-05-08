@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { useEffect } from 'react';
-import { useSubmit } from '@remix-run/react';
+import { useLocation, useNavigate, useSubmit } from '@remix-run/react';
 import { BranchContextRequiredModal } from '~/components/ui/branch-context-required-modal';
 import { isOrgWideDepartmentHead } from '~/lib/rbac';
 
@@ -10,6 +10,13 @@ interface BranchScopeGuardContextValue {
   requiresBranchSelection: boolean;
   ensureBranchForAction: (opts: {
     actionLabel?: string;
+    /**
+     * Optional destination to navigate to after the user picks a branch and
+     * /admin/branches/switch redirects. Used by `BranchScopedLink` so a single
+     * click on "+ New Form" can resolve to (1) pick branch (2) land on the
+     * builder, instead of forcing a re-click.
+     */
+    nextHref?: string;
     onProceed?: (branchId: string) => void;
   }) => boolean;
 }
@@ -51,17 +58,24 @@ export function BranchScopeGuardProvider({
   role,
   currentBranchId,
   branches,
+  branchesHydrationReady = true,
   children,
 }: {
   role: string | undefined;
   currentBranchId: string | null | undefined;
   branches: BranchInfo[];
+  /** When false (e.g. streaming `branches.list` on `/admin`), skip org-wide submit interception. */
+  branchesHydrationReady?: boolean;
   children: React.ReactNode;
 }) {
   const submit = useSubmit();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [actionLabel, setActionLabel] = useState<string>('this action');
+  const [nextHref, setNextHref] = useState<string | null>(null);
+  const consumedBranchPickerNextRef = useRef<string | null>(null);
 
   // Only prompt when there's an actual choice to make — an org-wide head
   // viewing All Branches with MULTIPLE branches in their roster. If they
@@ -69,19 +83,21 @@ export function BranchScopeGuardProvider({
   // to pick) and `ensureBranchForAction`'s fallback below auto-uses that
   // sole branch on every mutation.
   const needsOrgWideBranchPick =
+    branchesHydrationReady &&
     isOrgWideDepartmentHead({ role: role ?? '' }) &&
     currentBranchId == null &&
     branches.length > 1;
   const requiresBranchSelection = needsOrgWideBranchPick;
 
   const ensureBranchForAction = useCallback<BranchScopeGuardContextValue['ensureBranchForAction']>(
-    ({ actionLabel: label, onProceed }) => {
+    ({ actionLabel: label, nextHref: next, onProceed }) => {
       if (!requiresBranchSelection) {
         const fallbackBranch = currentBranchId ?? branches[0]?.id ?? '';
         if (fallbackBranch && onProceed) onProceed(fallbackBranch);
         return true;
       }
       setActionLabel(label ?? 'this action');
+      setNextHref(next ?? null);
       setSelectedBranchId((prev) => prev || branches[0]?.id || '');
       setOpen(true);
       return false;
@@ -89,8 +105,43 @@ export function BranchScopeGuardProvider({
     [requiresBranchSelection, currentBranchId, branches],
   );
 
+  // Server-side safety net: when a loader detected the user lacks branch
+  // scope and redirected to a parent list with `?branchPickerNext=<dest>`,
+  // auto-open the modal here with that destination preselected so the
+  // single round-trip (pick branch -> switch -> land on dest) is preserved
+  // even for deep links / bookmarks / search-modal jumps.
   useEffect(() => {
-    if (!requiresBranchSelection) return;
+    if (!branchesHydrationReady || !requiresBranchSelection) return;
+    const params = new URLSearchParams(location.search);
+    const next = params.get('branchPickerNext');
+    if (!next) return;
+    const consumeKey = `${location.pathname}?${next}`;
+    if (consumedBranchPickerNextRef.current === consumeKey) return;
+    consumedBranchPickerNextRef.current = consumeKey;
+    setActionLabel('this action');
+    setNextHref(next);
+    setSelectedBranchId((prev) => prev || branches[0]?.id || '');
+    setOpen(true);
+    // Strip the param from the URL so a subsequent close + reopen of the
+    // page doesn't re-trigger the modal endlessly.
+    params.delete('branchPickerNext');
+    const cleaned = params.toString();
+    navigate(`${location.pathname}${cleaned ? `?${cleaned}` : ''}${location.hash}`, {
+      replace: true,
+      preventScrollReset: true,
+    });
+  }, [
+    branchesHydrationReady,
+    requiresBranchSelection,
+    location.pathname,
+    location.search,
+    location.hash,
+    navigate,
+    branches,
+  ]);
+
+  useEffect(() => {
+    if (!branchesHydrationReady || !requiresBranchSelection) return;
 
     const onSubmitCapture = (event: Event) => {
       const submitEvent = event as SubmitEvent;
@@ -121,7 +172,7 @@ export function BranchScopeGuardProvider({
 
     document.addEventListener('submit', onSubmitCapture, true);
     return () => document.removeEventListener('submit', onSubmitCapture, true);
-  }, [branches, requiresBranchSelection, role]);
+  }, [branches, requiresBranchSelection, role, branchesHydrationReady]);
 
   const value = useMemo<BranchScopeGuardContextValue>(
     () => ({ requiresBranchSelection, ensureBranchForAction }),
@@ -136,15 +187,25 @@ export function BranchScopeGuardProvider({
         branches={branches}
         selectedBranchId={selectedBranchId}
         actionLabel={actionLabel}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          setOpen(false);
+          setNextHref(null);
+        }}
         onSelectedBranchChange={setSelectedBranchId}
         onSwitchBranch={() => {
           if (!selectedBranchId) return;
-          submit(
-            { intent: 'switchBranch', branchId: selectedBranchId },
-            { method: 'post', action: '/admin/branches/switch' },
-          );
+          // The /admin/branches/switch action redirects to `next` when present
+          // (after a same-origin path safety check), so the user lands
+          // directly on the originally-clicked destination once the new
+          // branch context is hot in Redis.
+          const payload: Record<string, string> = {
+            intent: 'switchBranch',
+            branchId: selectedBranchId,
+          };
+          if (nextHref) payload.next = nextHref;
+          submit(payload, { method: 'post', action: '/admin/branches/switch' });
           setOpen(false);
+          setNextHref(null);
         }}
       />
     </BranchScopeGuardContext.Provider>

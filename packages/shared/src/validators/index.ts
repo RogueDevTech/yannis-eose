@@ -55,6 +55,14 @@ export {
   searchUsersForPushTargetSchema,
   resetPasswordSchema,
   processEmailChangeSchema,
+  PROBATION_INELIGIBLE_ROLES,
+  isRoleProbationEligible,
+  DEFAULT_PROBATION_DAYS,
+  defaultProbationUntilFromNow,
+  setProbationSchema,
+  extendProbationSchema,
+  markProbationPermanentSchema,
+  terminateProbationSchema,
 } from './users';
 
 export type {
@@ -66,6 +74,10 @@ export type {
   SearchUsersForPushTargetInput,
   ResetPasswordInput,
   ProcessEmailChangeInput,
+  SetProbationInput,
+  ExtendProbationInput,
+  MarkProbationPermanentInput,
+  TerminateProbationInput,
 } from './users';
 
 // Product validators
@@ -216,6 +228,7 @@ export {
   rejectAdSpendSchema,
   updateAdSpendSchema,
   previewAdSpendIntervalSchema,
+  campaignOrderTotalForBatchSchema,
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
   listOfferTemplatesSchema,
@@ -257,6 +270,7 @@ export type {
   RejectAdSpendInput,
   UpdateAdSpendInput,
   PreviewAdSpendIntervalInput,
+  CampaignOrderTotalForBatchInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
   ListOfferTemplatesInput,
@@ -283,6 +297,7 @@ export {
   listApprovalRequestsSchema,
   setBudgetSchema,
   profitReportSchema,
+  profitByShipmentSchema,
 } from './finance';
 
 export type {
@@ -293,6 +308,7 @@ export type {
   ListApprovalRequestsInput,
   SetBudgetInput,
   ProfitReportInput,
+  ProfitByShipmentInput,
   ProductProfitBreakdownRow,
 } from './finance';
 

@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
@@ -12,6 +13,7 @@ import {
   StaffOnboardingPage,
   type OnboardingRecord,
 } from '~/features/onboarding/StaffOnboardingPage';
+import { UserOnboardingLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Staff Onboarding — Yannis EOSE' }];
 
@@ -21,6 +23,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!userId) throw new Response('Missing user id', { status: 400 });
   const cookie = getSessionCookie(request);
 
+  const pageData = (async () => {
   const [onboardingRes, userRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/onboarding.get?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
@@ -79,6 +82,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     subject: { id: user.id, name: user.name, role: user.role },
     approverName,
   };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -140,15 +146,21 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function HrOnboardingRoute() {
-  const { record, subject, approverName } = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <StaffOnboardingPage
-      mode="hr"
-      subject={subject}
-      record={record as OnboardingRecord}
-      actionUrl={`/hr/users/${subject.id}/onboarding`}
-      showBackToProfile
-      approverName={approverName}
-    />
+    <Suspense fallback={<UserOnboardingLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <StaffOnboardingPage
+            mode="hr"
+            subject={data.subject}
+            record={data.record as OnboardingRecord}
+            actionUrl={`/hr/users/${data.subject.id}/onboarding`}
+            showBackToProfile
+            approverName={data.approverName}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

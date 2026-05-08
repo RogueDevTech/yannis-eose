@@ -1,4 +1,5 @@
-import { OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { csOrdersStatPulseStripItems } from '~/features/cs/CSDeferredLoadingShells';
 
 /**
  * Data-region skeleton only — use under a real page header so chrome stays visible while queue bundle streams.
@@ -6,7 +7,7 @@ import { OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 export function CSQueueDataSkeleton() {
   return (
     <div className="space-y-4">
-      <OverviewStatStripSkeleton count={8} />
+      <OverviewStatStrip items={csOrdersStatPulseStripItems()} />
 
       {/* Live carts card */}
       <div className="card">

@@ -1,9 +1,11 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { RemittancesAdminPage } from '~/features/remittances/RemittancesAdminPage';
+import { LogisticsRemittancesLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { TransferConfirmationRecord } from '~/features/remittances/RemittancesAdminPage';
 
 export const meta: MetaFunction = () => [
@@ -13,7 +15,9 @@ export const meta: MetaFunction = () => [
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'logistics.write');
   const cookie = getSessionCookie(request);
-  const url = new URL(request.url);
+
+  const pageData = (async () => {
+    const url = new URL(request.url);
   const status = (url.searchParams.get('status') ?? '').trim();
   const locationId = (url.searchParams.get('locationId') ?? '').trim();
   const search = (url.searchParams.get('search') ?? '').trim().toLowerCase();
@@ -111,22 +115,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
   ).sort((a, b) => a.localeCompare(b));
 
-  return {
-    remittances: filteredRemittances,
-    locations,
-    senderOptions,
-    filters: {
-      status: normalizedStatus,
-      locationId,
-      search: (url.searchParams.get('search') ?? '').trim(),
-      sender: (url.searchParams.get('sender') ?? '').trim(),
-      minQty: minQtyRaw,
-      maxQty: maxQtyRaw,
-      startDate,
-      endDate,
-      periodAllTime,
-    },
-  };
+    return {
+      remittances: filteredRemittances,
+      locations,
+      senderOptions,
+      filters: {
+        status: normalizedStatus,
+        locationId,
+        search: (url.searchParams.get('search') ?? '').trim(),
+        sender: (url.searchParams.get('sender') ?? '').trim(),
+        minQty: minQtyRaw,
+        maxQty: maxQtyRaw,
+        startDate,
+        endDate,
+        periodAllTime,
+      },
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -167,15 +174,19 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AdminLogisticsRemittancesRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-    <RemittancesAdminPage
-      remittances={data.remittances}
-      locations={data.locations ?? []}
-      senderOptions={data.senderOptions ?? []}
-      filters={data.filters}
-    />
-    </>
+    <Suspense fallback={<LogisticsRemittancesLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <RemittancesAdminPage
+            remittances={data.remittances}
+            locations={data.locations ?? []}
+            senderOptions={data.senderOptions ?? []}
+            filters={data.filters}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

@@ -1,12 +1,14 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import type { ComponentProps } from 'react';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type RiderOption } from '~/features/logistics/LogisticsOrdersPage';
 import type { Location } from '~/features/logistics/types';
+import { TplOrdersLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [
   { title: 'Orders — Yannis EOSE' },
@@ -85,30 +87,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
-  const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
+  const tplOrdersShell = {
+    filters: {
+      startDate: startDate ?? '',
+      endDate: endDate ?? '',
+      periodAllTime,
+    },
+  };
 
-  const ordersData = ordersRes.ok
-    ? (ordersRes.data as { result?: { data?: { orders: Array<Record<string, unknown>>; pagination: { total: number; totalPages: number } } } })
-        ?.result?.data
-    : null;
+  const pageData = (async () => {
+    const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
 
-  const orders = ordersData?.orders ?? [];
-  const total = ordersData?.pagination?.total ?? 0;
-  const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+    const ordersData = ordersRes.ok
+      ? (ordersRes.data as { result?: { data?: { orders: Array<Record<string, unknown>>; pagination: { total: number; totalPages: number } } } })
+          ?.result?.data
+      : null;
 
-  const placeholderOrders = orders.map((o: Record<string, unknown>) => ({
-    ...o,
-    locationName: '—',
-    locationProviderName: null as string | null,
-    riderName: '—',
-  })) as ComponentProps<typeof LogisticsOrdersPage>['orders'];
+    const listErrorMessage = !ordersRes.ok
+      ? extractApiErrorMessage(ordersRes.data, 'Could not load orders')
+      : undefined;
 
-  const deferredSecondary = (async (): Promise<{
-    statusCounts: Record<string, number>;
-    locations: Location[];
-    riders: RiderOption[];
-    allocatableLocations: Location[];
-  }> => {
+    const orders = ordersData?.orders ?? [];
+    const total = ordersData?.pagination?.total ?? 0;
+    const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+
+    const placeholderOrders = orders.map((o: Record<string, unknown>) => ({
+      ...o,
+      locationName: '—',
+      locationProviderName: null as string | null,
+      riderName: '—',
+    })) as ComponentProps<typeof LogisticsOrdersPage>['orders'];
+
+    let statusCounts: Record<string, number> = {};
+    let locations: Location[] = [];
+    let riders: RiderOption[] = [];
+    let allocatableLocations: Location[] = [];
     try {
       const [countsRes, locationsRes, ridersRes] = await Promise.all([
         apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
@@ -119,56 +132,62 @@ export async function loader({ request }: LoaderFunctionArgs) {
         apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
       ]);
 
-      const countsData = countsRes.ok
+      statusCounts = countsRes.ok
         ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
         : {};
       const locationsData = locationsRes.ok
         ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
         : null;
-      const locations = locationsData?.locations ?? [];
+      locations = locationsData?.locations ?? [];
       const ridersData = ridersRes.ok
         ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })
             ?.result?.data ?? []
         : [];
-      const riders: RiderOption[] = ridersData.map((r) => ({
+      riders = ridersData.map((r) => ({
         id: r.id,
         name: r.name,
         logisticsLocationId: r.logisticsLocationId ?? null,
       }));
-      const allocatableLocations = effectiveLogisticsLocationId
+      allocatableLocations = effectiveLogisticsLocationId
         ? locations.filter((l) => l.id === effectiveLogisticsLocationId)
         : locations.filter((l) => !l.dispatchLocked);
-
-      return { statusCounts: countsData, locations, riders, allocatableLocations };
     } catch {
-      return { statusCounts: {}, locations: [], riders: [], allocatableLocations: [] };
+      statusCounts = {};
+      locations = [];
+      riders = [];
+      allocatableLocations = [];
     }
+
+    return {
+      orders: placeholderOrders,
+      total,
+      totalPages,
+      page,
+      limit: ORDERS_PER_PAGE,
+      statusFilter: status,
+      searchFilter: search ?? '',
+      listErrorMessage,
+      statusCounts,
+      locations,
+      riders,
+      allocatableLocations,
+      filters: {
+        startDate: startDate ?? '',
+        endDate: endDate ?? '',
+        periodAllTime,
+      },
+      isTplManagerScoped: !!effectiveLogisticsLocationId,
+      pageTitle: 'Orders' as const,
+      orderDetailBasePath: '/tpl/orders',
+      allocationOnDetailOnly: true,
+      canEditDeliveryDate: true,
+      markInTransitLabel: 'Mark In Transit',
+      pageDescription:
+        'Use View to open an order at your hub, or Resolve order on a confirmed row for the fast path (delivery date, receipt, and handoff).',
+    } satisfies ComponentProps<typeof LogisticsOrdersPage>;
   })();
 
-  return defer({
-    orders: placeholderOrders,
-    total,
-    totalPages,
-    page,
-    limit: ORDERS_PER_PAGE,
-    statusFilter: status,
-    searchFilter: search ?? '',
-    deferredSecondary,
-    riders: [],
-    filters: {
-      startDate: startDate ?? '',
-      endDate: endDate ?? '',
-      periodAllTime,
-    },
-    isTplManagerScoped: !!effectiveLogisticsLocationId,
-    pageTitle: 'Orders' as const,
-    orderDetailBasePath: '/tpl/orders',
-    allocationOnDetailOnly: true,
-    canEditDeliveryDate: true,
-    markInTransitLabel: 'Mark In Transit',
-    pageDescription:
-      'Use View to open an order at your hub, or Resolve order on a confirmed row for the fast path (delivery date, receipt, and handoff).',
-  } as Record<string, unknown>);
+  return defer({ tplOrdersShell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -506,11 +525,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function TplOrdersRoute() {
-  const data = useLoaderData<typeof loader>() as unknown as ComponentProps<typeof LogisticsOrdersPage>;
+  const { tplOrdersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
-    <>
-      <LogisticsOrdersPage {...data} />
-    </>
+    <Suspense fallback={<TplOrdersLoadingShell filters={tplOrdersShell.filters} />}>
+      <Await resolve={pageData}>
+        {(data) => <LogisticsOrdersPage {...data} />}
+      </Await>
+    </Suspense>
   );
 }

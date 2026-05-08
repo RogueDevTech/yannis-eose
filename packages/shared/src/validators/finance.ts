@@ -64,14 +64,29 @@ export type SetBudgetInput = z.infer<typeof setBudgetSchema>;
 // ============================================
 
 export const profitReportSchema = z.object({
-  startDate: z.string().date().optional(),
-  endDate: z.string().date().optional(),
+  // Accept ISO datetime alongside `YYYY-MM-DD` so the time-aware DateFilterBar
+  // narrows revenue + cost windows to the exact moment the user picked.
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
   groupBy: z.enum(['product', 'campaign', 'mediaBuyer', 'day', 'week', 'month']).default('product'),
   branchId: z.string().uuid().nullish(),
+  /**
+   * Optional Media Buyer filter — restricts revenue (delivered orders by MB)
+   * AND ad spend (logs by MB) to that buyer's slice. Other cost layers
+   * (commission, fulfillment, ops) attribute to all delivered orders, so the
+   * filter narrows what's "their funnel's" without misallocating shared costs.
+   */
+  mediaBuyerId: z.string().uuid().nullish(),
   /** When true with `groupBy: 'product'`, returns `byProduct` rows (extra query — avoid on hot paths like CEO dashboard). */
   includeProductBreakdown: z.boolean().optional(),
 });
 export type ProfitReportInput = z.infer<typeof profitReportSchema>;
+
+/** Per-shipment unit economics — costs in vs revenue out for one inbound shipment. */
+export const profitByShipmentSchema = z.object({
+  shipmentId: z.string().uuid(),
+});
+export type ProfitByShipmentInput = z.infer<typeof profitByShipmentSchema>;
 
 /** Delivered-order lines + product ad spend + proportional shared costs (commission, fulfillment, ops). */
 export interface ProductProfitBreakdownRow {

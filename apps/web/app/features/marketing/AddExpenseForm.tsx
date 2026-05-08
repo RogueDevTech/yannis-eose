@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useActionData, useNavigation, useSubmit } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { TextInput } from '~/components/ui/text-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { AmountInput } from '~/components/ui/amount-input';
@@ -10,18 +11,21 @@ import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upl
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
 import { S3_FOLDERS } from '~/lib/s3-upload';
-import {
-  fetchAdSpendIntervalPreview,
-  type AdSpendIntervalPreviewResult,
-} from '~/lib/trpc-browser';
+import { fetchCampaignOrderTotalForBatch } from '~/lib/trpc-browser';
 import type { Campaign, Product, AdPlatform } from './types';
 import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
 
 interface ExpenseLine {
   uid: string;
-  campaignId: string;
   productId: string;
   spendAmount: string;
+  /**
+   * Manual order-split — MB's portion of the form's actual order count
+   * (CEO directive 2026-05-08). Sum across lines must equal the system total.
+   * Stored as string so the input can hold "" while the user is editing
+   * without snapping back to 0 on every keystroke.
+   */
+  attributedOrderCount: string;
   platform: AdPlatform;
   platformCustomLabel: string;
   adUrl: string;
@@ -29,21 +33,12 @@ interface ExpenseLine {
   uploadState: FileUploadUploadState;
 }
 
-/**
- * `emptyLine` takes a uid produced by the per-component counter (see
- * `AddExpenseForm`). Module-level counters caused an SSR / CSR hydration
- * mismatch — both passes evaluate `emptyLine` in the `useState` initializer
- * but the module-level counter on the client could already be advanced from
- * earlier renders elsewhere, producing `line-2` while the server produced
- * `line-1`. A per-mount ref counter scoped under a `useId()` prefix guarantees
- * stable identifiers on both passes.
- */
 function emptyLine(uid: string): ExpenseLine {
   return {
     uid,
-    campaignId: '',
     productId: '',
     spendAmount: '',
+    attributedOrderCount: '',
     platform: 'FACEBOOK',
     platformCustomLabel: '',
     adUrl: '',
@@ -66,14 +61,14 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
   const submit = useSubmit();
   const navigation = useNavigation();
   const actionData = useActionData<{ error?: string } | undefined>();
-  // `useId()` returns the same prefix on the SSR pass and the hydration pass,
-  // and the per-mount counter ref also resets to 0 on each pass — so the
-  // initial line gets the same uid on both, avoiding hydration mismatches on
-  // every `htmlFor` / `id` / `aria-controls` derived from `line.uid`.
   const idBase = useId();
   const lineCounterRef = useRef(0);
   const newLineUid = () => `${idBase}line-${++lineCounterRef.current}`;
+
+  // Batch-level fields (CEO directive 2026-05-08): one form + one date for the
+  // whole batch, lines split that form's order count.
   const [spendDate, setSpendDate] = useState(todayYmd());
+  const [campaignId, setCampaignId] = useState('');
   const [lines, setLines] = useState<ExpenseLine[]>(() => [emptyLine(newLineUid())]);
 
   const productOptions = useMemo(
@@ -91,15 +86,49 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
     return m;
   }, [campaigns]);
 
+  // Default the line product to the form's only product when the form has one,
+  // so single-product forms (the common case) don't make the MB pick again.
+  const defaultProductIdForCampaign = useMemo(() => {
+    const ids = campaignProductMap.get(campaignId) ?? [];
+    return ids.length === 1 ? ids[0]! : '';
+  }, [campaignProductMap, campaignId]);
+
+  useEffect(() => {
+    if (!defaultProductIdForCampaign) return;
+    setLines((rows) =>
+      rows.map((r) => (r.productId ? r : { ...r, productId: defaultProductIdForCampaign })),
+    );
+  }, [defaultProductIdForCampaign]);
+
+  // Reset a line's product when the form changes (a product carried over from
+  // a previously-picked form might not belong to the new one).
+  const onCampaignChange = (nextCampaignId: string) => {
+    setCampaignId(nextCampaignId);
+    const allowedProductIds = campaignProductMap.get(nextCampaignId) ?? [];
+    setLines((rows) =>
+      rows.map((r) =>
+        allowedProductIds.length === 0 || allowedProductIds.includes(r.productId)
+          ? r
+          : {
+              ...r,
+              productId: allowedProductIds.length === 1 ? allowedProductIds[0]! : '',
+            },
+      ),
+    );
+  };
+
+  const productOptionsForLine = useMemo(() => {
+    if (!campaignId) return productOptions;
+    const allowed = campaignProductMap.get(campaignId) ?? [];
+    if (allowed.length === 0) return productOptions;
+    return productOptions.filter((p) => allowed.includes(p.value));
+  }, [productOptions, campaignProductMap, campaignId]);
+
   const updateLine = (uid: string, patch: Partial<ExpenseLine>) => {
     setLines((rows) => {
       const idx = rows.findIndex((r) => r.uid === uid);
       if (idx === -1) return rows;
       const target = rows[idx]!;
-      // Bail out when the patch already matches the row's current values —
-      // returning the same `rows` reference prevents a needless re-render.
-      // Defensive: catches inline-arrow callbacks (e.g. FileUpload's onUploadStateChange)
-      // that fire `('idle')` on mount when the row is already 'idle'.
       const patchKeys = Object.keys(patch) as Array<keyof ExpenseLine>;
       const isNoOp = patchKeys.every((k) => target[k] === patch[k]);
       if (isNoOp) return rows;
@@ -108,17 +137,52 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
       return next;
     });
   };
-  const addLine = () => setLines((rows) => [...rows, emptyLine(newLineUid())]);
+  const addLine = () =>
+    setLines((rows) => [
+      ...rows,
+      { ...emptyLine(newLineUid()), productId: defaultProductIdForCampaign },
+    ]);
   const removeLine = (uid: string) =>
     setLines((rows) => (rows.length === 1 ? rows : rows.filter((r) => r.uid !== uid)));
 
-  const onCampaignChange = (uid: string, campaignId: string) => {
-    const prodIds = campaignProductMap.get(campaignId) ?? [];
-    const auto = prodIds.length === 1 ? prodIds[0]! : '';
-    updateLine(uid, { campaignId, productId: auto });
-  };
+  // ── System order count for the picked form ───────────────────────────────
+  // Pulled 300ms after (campaign, date) settle. The MB must split this number
+  // exactly across their lines; the server enforces it on submit.
+  const [systemOrderCount, setSystemOrderCount] = useState<number | null>(null);
+  const [systemLoading, setSystemLoading] = useState(false);
+  const systemKeyRef = useRef('');
+  useEffect(() => {
+    if (!campaignId || !spendDate) {
+      systemKeyRef.current = '';
+      setSystemOrderCount(null);
+      setSystemLoading(false);
+      return;
+    }
+    const key = `${campaignId}|${spendDate}`;
+    if (systemKeyRef.current === key && systemOrderCount != null) return;
+    systemKeyRef.current = key;
+    setSystemLoading(true);
+    const aborter = new AbortController();
+    const timer = setTimeout(() => {
+      fetchCampaignOrderTotalForBatch({ campaignId, spendDate })
+        .then((result) => {
+          if (aborter.signal.aborted) return;
+          setSystemOrderCount(result?.orderCount ?? 0);
+          setSystemLoading(false);
+        })
+        .catch(() => {
+          if (aborter.signal.aborted) return;
+          setSystemLoading(false);
+        });
+    }, 300);
+    return () => {
+      aborter.abort();
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only refetch when key changes
+  }, [campaignId, spendDate]);
 
-  const total = useMemo(
+  const totalSpend = useMemo(
     () =>
       lines.reduce((acc, l) => {
         const n = Number(l.spendAmount.replace(/,/g, ''));
@@ -127,96 +191,46 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
     [lines],
   );
 
-  const allLinesValid = useMemo(
+  const totalSplit = useMemo(
     () =>
-      lines.every((l) => {
-        const amt = Number(l.spendAmount.replace(/,/g, ''));
-        const otherOk = l.platform !== 'OTHER' || l.platformCustomLabel.trim().length > 0;
-        return (
-          l.campaignId &&
-          l.productId &&
-          l.screenshotUrl &&
-          l.uploadState !== 'uploading' &&
-          Number.isFinite(amt) &&
-          amt > 0 &&
-          otherOk
-        );
-      }) && spendDate.length > 0,
-    [lines, spendDate],
+      lines.reduce((acc, l) => {
+        const n = parseInt(l.attributedOrderCount, 10);
+        return acc + (Number.isFinite(n) && n >= 0 ? n : 0);
+      }, 0),
+    [lines],
   );
 
-  // ── Live preview: orders + CPA per line ───────────────────────────────────
-  // For each line where (campaign, product, date) are all set, hit
-  // `marketing.previewAdSpendInterval` 300ms after the last keystroke. The
-  // procedure returns the order count since the last APPROVED spend on
-  // (campaign, product) plus an indicative CPA = spendAmount / max(orderCount,1).
-  // Stored keyed by line.uid so re-ordering / removal stays correct.
-  const [previewByLine, setPreviewByLine] = useState<
-    Record<string, AdSpendIntervalPreviewResult | null>
-  >({});
-  const previewKeyByLine = useRef<Record<string, string>>({});
+  const splitMatchesSystem =
+    systemOrderCount != null && totalSplit === systemOrderCount;
 
-  useEffect(() => {
-    const aborter = new AbortController();
-    const timer = setTimeout(() => {
-      lines.forEach((l) => {
-        if (!l.campaignId || !l.productId || !spendDate) {
-          previewKeyByLine.current[l.uid] = '';
-          setPreviewByLine((prev) => (prev[l.uid] ? { ...prev, [l.uid]: null } : prev));
-          return;
-        }
-        const amt = Number(l.spendAmount.replace(/,/g, ''));
-        const amount = Number.isFinite(amt) && amt > 0 ? amt : undefined;
-        const key = `${l.campaignId}|${l.productId}|${spendDate}|${amount ?? ''}`;
-        if (previewKeyByLine.current[l.uid] === key) return;
-        previewKeyByLine.current[l.uid] = key;
-        fetchAdSpendIntervalPreview({
-          campaignId: l.campaignId,
-          productId: l.productId,
-          spendDate,
-          spendAmount: amount,
-        }).then((result) => {
-          if (aborter.signal.aborted) return;
-          setPreviewByLine((prev) => ({ ...prev, [l.uid]: result }));
-        });
-      });
-    }, 300);
-    return () => {
-      aborter.abort();
-      clearTimeout(timer);
-    };
-  }, [lines, spendDate]);
+  const allLinesValid = useMemo(() => {
+    if (!spendDate || !campaignId) return false;
+    return lines.every((l) => {
+      const amt = Number(l.spendAmount.replace(/,/g, ''));
+      const orders = parseInt(l.attributedOrderCount, 10);
+      const otherOk = l.platform !== 'OTHER' || l.platformCustomLabel.trim().length > 0;
+      return (
+        l.productId &&
+        l.screenshotUrl &&
+        l.uploadState !== 'uploading' &&
+        Number.isFinite(amt) &&
+        amt > 0 &&
+        Number.isFinite(orders) &&
+        orders >= 0 &&
+        otherOk
+      );
+    });
+  }, [lines, spendDate, campaignId]);
 
-  /** Aggregate roll-up for the totals footer. Dedupe by (campaign, product, date)
-   * so two lines targeting the same campaign×product on the same day don't
-   * double-count the same order window. CPA = totalSpend / totalUniqueOrders. */
-  const summary = useMemo(() => {
-    const seen = new Set<string>();
-    let totalOrders = 0;
-    let hasAnyPreview = false;
-    for (const l of lines) {
-      const preview = previewByLine[l.uid];
-      if (!preview) continue;
-      hasAnyPreview = true;
-      const tupleKey = `${l.campaignId}|${l.productId}|${spendDate}`;
-      if (seen.has(tupleKey)) continue;
-      seen.add(tupleKey);
-      totalOrders += preview.orderCount;
-    }
-    return {
-      totalOrders: hasAnyPreview ? totalOrders : null,
-      indicativeCpa:
-        hasAnyPreview && totalOrders > 0 && total > 0 ? total / totalOrders : null,
-    };
-  }, [lines, previewByLine, spendDate, total]);
+  const canSubmit = allLinesValid && splitMatchesSystem;
 
   const handleSubmit = () => {
-    if (!allLinesValid) return;
+    if (!canSubmit) return;
     const payload = lines.map((l) => {
       const base = {
-        campaignId: l.campaignId,
         productId: l.productId,
         spendAmount: Number(l.spendAmount.replace(/,/g, '')),
+        attributedOrderCount: parseInt(l.attributedOrderCount, 10),
         screenshotUrl: l.screenshotUrl,
         platform: l.platform,
         ...(l.adUrl.trim() ? { adUrl: l.adUrl.trim() } : {}),
@@ -229,17 +243,34 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
     const fd = new FormData();
     fd.set('intent', 'createAdSpendBatch');
     fd.set('spendDate', spendDate);
+    fd.set('campaignId', campaignId);
     fd.set('lines', JSON.stringify(payload));
     submit(fd, { method: 'post' });
   };
 
   const error = actionData?.error;
   const busy = navigation.state === 'submitting';
+  const remainingToSplit =
+    systemOrderCount != null ? systemOrderCount - totalSplit : null;
 
   return (
     <div className="space-y-3">
-      <div className="max-w-xs">
-        <FormField label="Date" htmlFor="add-expense-date">
+      {/* Batch-level header — pick form + date once for the whole batch. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <FormField label="Form (campaign)" htmlFor="add-expense-campaign" required>
+          <SearchableSelect
+            id="add-expense-campaign"
+            value={campaignId}
+            onChange={onCampaignChange}
+            options={[
+              { value: '', label: 'Select form' },
+              ...campaigns.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+            searchPlaceholder="Search forms..."
+            required
+          />
+        </FormField>
+        <FormField label="Date" htmlFor="add-expense-date" required>
           <TextInput
             id="add-expense-date"
             type="date"
@@ -250,18 +281,66 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
         </FormField>
       </div>
 
+      {/* System count + split status — the gate the MB must hit before submit. */}
+      <div className="rounded-md bg-app-hover px-3 py-2 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
+        <div className="flex flex-col">
+          <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
+            System order count (this form)
+          </span>
+          <span className="text-base font-semibold tabular-nums inline-flex items-center gap-1.5">
+            {!campaignId ? (
+              <span className="text-app-fg-muted">Pick a form</span>
+            ) : systemLoading ? (
+              <>
+                Calculating <Spinner size="sm" className="text-app-fg-muted" />
+              </>
+            ) : systemOrderCount != null ? (
+              systemOrderCount
+            ) : (
+              '—'
+            )}
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
+            Split so far
+          </span>
+          <span
+            className={[
+              'text-base font-semibold tabular-nums',
+              splitMatchesSystem
+                ? 'text-success-600 dark:text-success-400'
+                : systemOrderCount != null
+                  ? 'text-warning-600 dark:text-warning-400'
+                  : '',
+            ].join(' ')}
+          >
+            {totalSplit}
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
+            Remaining
+          </span>
+          <span className="text-base font-semibold tabular-nums">
+            {remainingToSplit == null ? '—' : remainingToSplit}
+          </span>
+        </div>
+      </div>
+
       <div className="space-y-2">
         {lines.map((line, idx) => {
-          const productOptionsForLine =
-            line.campaignId && (campaignProductMap.get(line.campaignId)?.length ?? 0) > 0
-              ? productOptions.filter((p) => campaignProductMap.get(line.campaignId)!.includes(p.value))
-              : productOptions;
+          const lineSpend = Number(line.spendAmount.replace(/,/g, ''));
+          const lineOrders = parseInt(line.attributedOrderCount, 10);
+          const lineCpa =
+            Number.isFinite(lineSpend) && lineSpend > 0 && Number.isFinite(lineOrders) && lineOrders > 0
+              ? lineSpend / lineOrders
+              : null;
           return (
             <div
               key={line.uid}
               className="rounded-lg border border-app-border bg-app-elevated px-3 py-2.5 space-y-2"
             >
-              {/* Compact header — ad row label + Remove on the right. */}
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-app-fg-muted uppercase tracking-wide">
                   Ads {idx + 1}
@@ -276,24 +355,8 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
                   Remove
                 </Button>
               </div>
-              {/* Two-row, 3-up layout per CEO directive 2026-05-03:
-                    Row 1: Campaign · Product · Amount
-                    Row 2: Platform · Ad URL · Screenshot (compact dropzone)
-                  Falls back to 2-col on sm and 1-col on mobile. */}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                <FormField label="Campaign" htmlFor={`${line.uid}-campaign`} required>
-                  <SearchableSelect
-                    id={`${line.uid}-campaign`}
-                    value={line.campaignId}
-                    onChange={(v) => onCampaignChange(line.uid, v)}
-                    options={[
-                      { value: '', label: 'Select campaign' },
-                      ...campaigns.map((c) => ({ value: c.id, label: c.name })),
-                    ]}
-                    searchPlaceholder="Search campaigns..."
-                    required
-                  />
-                </FormField>
                 <FormField label="Product" htmlFor={`${line.uid}-product`} required>
                   <SearchableSelect
                     id={`${line.uid}-product`}
@@ -311,6 +374,19 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
                     onChange={(v) => updateLine(line.uid, { spendAmount: v })}
                     placeholder="0.00"
                     required
+                  />
+                </FormField>
+                <FormField label="Orders attributed" htmlFor={`${line.uid}-orders`} required>
+                  <NumberInput
+                    id={`${line.uid}-orders`}
+                    min={0}
+                    fallbackValue={0}
+                    value={
+                      line.attributedOrderCount === ''
+                        ? 0
+                        : Number(line.attributedOrderCount) || 0
+                    }
+                    onValueChange={(n) => updateLine(line.uid, { attributedOrderCount: String(n) })}
                   />
                 </FormField>
                 <FormField label="Platform" htmlFor={`${line.uid}-platform`} required>
@@ -363,94 +439,76 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
                   </FormField>
                 )}
               </div>
-              {/* Per-line preview row — orders since last APPROVED spend on
-                  (this campaign × this product) plus indicative CPA for the
-                  line's spend amount. Lights up 300ms after campaign+product
-                  are picked; otherwise prompts the buyer to pick them. */}
-              {(() => {
-                const preview = previewByLine[line.uid];
-                const ready = !!line.campaignId && !!line.productId && !!spendDate;
-                return (
-                  <div className="grid grid-cols-2 gap-3 rounded-md bg-app-hover/60 px-3 py-2 mt-1">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] uppercase tracking-wide text-app-fg-muted">
-                        Orders (since last spend)
-                      </span>
-                      <span className="text-sm font-semibold tabular-nums text-app-fg inline-flex items-center gap-1.5">
-                        {!ready ? (
-                          'Pick campaign + product'
-                        ) : preview ? (
-                          preview.orderCount
-                        ) : (
-                          <>
-                            Calculating <Spinner size="sm" className="text-app-fg-muted" />
-                          </>
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] uppercase tracking-wide text-app-fg-muted">
-                        Indicative CPA (this line)
-                      </span>
-                      <span className="text-sm font-semibold tabular-nums text-app-fg inline-flex items-center gap-1.5">
-                        {!ready ? (
-                          '—'
-                        ) : preview && preview.indicativeCpa != null ? (
-                          <NairaPrice amount={Math.round(preview.indicativeCpa)} />
-                        ) : preview ? (
-                          '—'
-                        ) : (
-                          <>
-                            Calculating <Spinner size="sm" className="text-app-fg-muted" />
-                          </>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })()}
+
+              {/* Per-line CPA computed from the MB's split. */}
+              <div className="grid grid-cols-2 gap-3 rounded-md bg-app-hover/60 px-3 py-2 mt-1">
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                    Orders this line
+                  </span>
+                  <span className="text-sm font-semibold tabular-nums text-app-fg">
+                    {Number.isFinite(lineOrders) && lineOrders >= 0 ? lineOrders : 0}
+                  </span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                    CPA (this line)
+                  </span>
+                  <span className="text-sm font-semibold tabular-nums text-app-fg">
+                    {lineCpa != null ? <NairaPrice amount={Math.round(lineCpa)} /> : '—'}
+                  </span>
+                </div>
+              </div>
             </div>
           );
         })}
       </div>
 
       <Button type="button" variant="secondary" size="sm" onClick={addLine}>
-        + Add another line
+        + Add another ad
       </Button>
 
-      {/* Totals — spend + live order count and indicative CPA. Order rollup
-          dedupes by (campaign, product, date) so two lines for the same key
-          don't double-count the same order window. */}
+      {/* Totals — total spend + roll-up CPA across all ads. */}
       <div className="rounded-md bg-app-hover px-3 py-2 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
         <div className="flex flex-col">
           <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
-            Total spend ({lines.length} line{lines.length === 1 ? '' : 's'})
+            Total spend ({lines.length} ad{lines.length === 1 ? '' : 's'})
           </span>
           <span className="text-base font-semibold tabular-nums">
-            <NairaPrice amount={total} />
+            <NairaPrice amount={totalSpend} />
           </span>
         </div>
         <div className="flex flex-col">
           <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
-            Order count
+            Total orders (split)
           </span>
-          <span className="text-base font-semibold tabular-nums">
-            {summary.totalOrders != null ? summary.totalOrders : '—'}
-          </span>
+          <span className="text-base font-semibold tabular-nums">{totalSplit}</span>
         </div>
         <div className="flex flex-col">
           <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
-            Indicative CPA
+            Blended CPA
           </span>
           <span className="text-base font-semibold tabular-nums">
-            {summary.indicativeCpa != null ? (
-              <NairaPrice amount={Math.round(summary.indicativeCpa)} />
+            {totalSpend > 0 && totalSplit > 0 ? (
+              <NairaPrice amount={Math.round(totalSpend / totalSplit)} />
             ) : (
               '—'
             )}
           </span>
         </div>
       </div>
+
+      {/* Sum-vs-system mismatch hint — surfaces before submit so the MB
+          knows exactly why the button is disabled. */}
+      {campaignId && systemOrderCount != null && !splitMatchesSystem && (
+        <p className="text-sm text-warning-700 dark:text-warning-300">
+          Order split must total {systemOrderCount}. Currently splits to {totalSplit} ·{' '}
+          {totalSplit > systemOrderCount
+            ? `${totalSplit - systemOrderCount} too many`
+            : `${systemOrderCount - totalSplit} remaining`}
+          .
+        </p>
+      )}
 
       {error && <p className="text-sm text-danger-600 dark:text-danger-400">{error}</p>}
 
@@ -459,10 +517,10 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
           type="button"
           variant="primary"
           onClick={handleSubmit}
-          disabled={!allLinesValid || busy}
+          disabled={!canSubmit || busy}
           loading={busy}
         >
-          {busy ? 'Submitting…' : `Submit ${lines.length} line${lines.length === 1 ? '' : 's'}`}
+          {busy ? 'Submitting…' : `Submit ${lines.length} ad${lines.length === 1 ? '' : 's'}`}
         </Button>
       </div>
     </div>

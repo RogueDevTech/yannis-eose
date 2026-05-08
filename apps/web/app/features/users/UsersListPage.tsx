@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams, useFetcher } from '@remix-run/react';
+import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -14,6 +15,7 @@ import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
+import { ProbationBadge } from '~/components/ui/probation-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableActionButton } from '~/components/ui/table-action-button';
@@ -43,7 +45,7 @@ export function UsersListPage({
   const staffAccounts = variant === 'staffAccounts';
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
-  const isFilterLoading = useLoaderRefetchBusy();
+  const isFilterLoading = useLoaderRefetchBusy().busy;
   const safeTotalPages = Math.max(1, totalPages);
   const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
   useFetcherToast(resendFetcher.data, { successMessage: 'Invite re-sent with new credentials' });
@@ -80,13 +82,24 @@ export function UsersListPage({
     let n = 0;
     if (statusParam !== 'ALL') n += 1;
     if (roleParam !== 'ALL') n += 1;
+    if (searchParams.get('probationOnly') === '1') n += 1;
     return n;
-  }, [statusParam, roleParam]);
+  }, [statusParam, roleParam, searchParams]);
+
+  const probationOnly = searchParams.get('probationOnly') === '1';
+  const handleProbationOnlyToggle = (next: boolean) => {
+    const params = new URLSearchParams(searchParams);
+    if (next) params.set('probationOnly', '1');
+    else params.delete('probationOnly');
+    params.set('page', '1');
+    setSearchParams(params, { replace: true });
+  };
 
   const q = searchQuery.trim().toLowerCase();
   const filteredUsers = users.filter((user) => {
     if (statusParam !== 'ALL' && user.status !== statusParam) return false;
     if (roleParam !== 'ALL' && user.role !== roleParam) return false;
+    if (probationOnly && !user.isProbation) return false;
     if (!q) return true;
     if (user.name.toLowerCase().includes(q)) return true;
     if (user.email.toLowerCase().includes(q)) return true;
@@ -185,7 +198,12 @@ export function UsersListPage({
       {
         key: 'role',
         header: 'Role',
-        render: (user) => <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />,
+        render: (user) => (
+          <span className="inline-flex items-center gap-1.5 flex-wrap">
+            <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
+            {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" showDaysRemaining={false} />}
+          </span>
+        ),
       },
       {
         key: 'branches',
@@ -255,17 +273,22 @@ export function UsersListPage({
             desktop={
               <>
                 <PageRefreshButton />
-                <Link to={`${usersBasePath}/new`} className="btn-primary">
+                <BranchScopedLink
+                  to={`${usersBasePath}/new`}
+                  actionLabel="creating a user"
+                  className="btn-primary"
+                >
                   <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                   </svg>
                   {staffAccounts ? 'Add staff' : 'Add User'}
-                </Link>
+                </BranchScopedLink>
               </>
             }
             sheet={({ closeSheet }) => (
-              <Link
+              <BranchScopedLink
                 to={`${usersBasePath}/new`}
+                actionLabel="creating a user"
                 className="btn-primary inline-flex w-full items-center justify-center gap-2"
                 onClick={() => closeSheet()}
               >
@@ -273,7 +296,7 @@ export function UsersListPage({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                 </svg>
                 {staffAccounts ? 'Add staff' : 'Add User'}
-              </Link>
+              </BranchScopedLink>
             )}
           />
         }
@@ -450,6 +473,17 @@ export function UsersListPage({
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                     wrapperClassName="w-full min-w-0 sm:w-48"
                   />
+                  <button
+                    type="button"
+                    onClick={() => handleProbationOnlyToggle(!probationOnly)}
+                    className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap transition-colors ${
+                      probationOnly
+                        ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+                        : 'bg-app-surface border-app-border text-app-fg-muted hover:bg-app-hover'
+                    }`}
+                  >
+                    Probation only
+                  </button>
                 </>
               }
               sheetFilterBody={
@@ -479,6 +513,14 @@ export function UsersListPage({
                       wrapperClassName="w-full"
                     />
                   </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={probationOnly}
+                      onChange={(e) => handleProbationOnlyToggle(e.target.checked)}
+                    />
+                    <span className="text-sm text-app-fg">Show probation users only</span>
+                  </label>
                 </>
               }
             />

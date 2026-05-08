@@ -44,31 +44,51 @@ import { REASON_LABELS } from './types';
 import { ShipmentsTab } from './ShipmentsTab';
 import { LowStockAlertsDeferredFallback, ReconciliationTableDeferredFallback } from './InventoryDeferredFallbacks';
 
-export function InventoryPage({
-  levels,
-  levelsTotals,
-  totalLevels,
-  levelsPage = 1,
-  levelsTotalPages = 1,
-  levelsLimit = 20,
-  levelsProductFilter: serverProductFilter = '', levelsLocationFilter: serverLocationFilter = '',
-  levelsShipmentFilter: serverShipmentFilter = '',
-  levelsSearch: serverSearch = '',
-  levelsSort: serverSort = 'default',
-  displayLocations = [] as LocationOption[],
-  movements: _movements,
-  totalMovements,
-  products,
-  locations,
-  canIntake = false,
-  canAdjust = false,
-  canExport = false,
-  transfers, returnedOrders, reconciliations, locationsWithLock,
-  lowStockThreshold = 10, canEditLowStock = false, lowStockAlerts,
-  shipments = [], totalShipments = 0,
-  levelsLoadError = null,
-  movementsLoadError = null,
-}: InventoryStreamData) {
+export function InventoryPage(props: InventoryStreamData) {
+  if (props.inventoryExtras) {
+    const { inventoryExtras, ...rest } = props;
+    return (
+      <DeferredSection resolve={inventoryExtras} fallback={<LowStockAlertsDeferredFallback />}>
+        {(extras) => (
+          <InventoryPage
+            {...rest}
+            lowStockThreshold={extras.lowStockThreshold}
+            lowStockAlerts={Promise.resolve(extras.lowStockAlerts)}
+            shipments={extras.shipments}
+            totalShipments={extras.totalShipments}
+            warehouses={extras.warehouses}
+          />
+        )}
+      </DeferredSection>
+    );
+  }
+
+  const {
+    levels,
+    levelsTotals,
+    totalLevels,
+    levelsPage = 1,
+    levelsTotalPages = 1,
+    levelsLimit = 20,
+    levelsProductFilter: serverProductFilter = '', levelsLocationFilter: serverLocationFilter = '',
+    levelsShipmentFilter: serverShipmentFilter = '',
+    levelsSearch: serverSearch = '',
+    levelsSort: serverSort = 'default',
+    displayLocations = [] as LocationOption[],
+    movements: _movements,
+    totalMovements,
+    products,
+    locations,
+    canIntake = false,
+    canAdjust = false,
+    canExport = false,
+    transfers, returnedOrders, reconciliations, locationsWithLock,
+    lowStockThreshold = 10, canEditLowStock = false, lowStockAlerts,
+    shipments = [], totalShipments = 0,
+    levelsLoadError = null,
+    movementsLoadError = null,
+  } = props;
+
   const hasTransfers = !!transfers;
   const hasReturns = !!returnedOrders;
 
@@ -119,7 +139,7 @@ export function InventoryPage({
     updateLevelsParam('search', trimmed);
   };
 
-  const isLoadingLevels = useLoaderRefetchBusy();
+  const isLoadingLevels = useLoaderRefetchBusy().busy;
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
   const locationName = (id: string | null) => {

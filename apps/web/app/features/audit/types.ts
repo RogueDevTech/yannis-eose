@@ -59,6 +59,11 @@ export interface AuditPageProps {
   /** Logistics location display names keyed by UUID (SSR-resolved for `stock_transfers` rows). */
   locationNames: Record<string, string>;
   error?: string;
+  /**
+   * When false (default), the Export button is hidden. Server still enforces
+   * `audit.export` on any download attempt.
+   */
+  canExport?: boolean;
 }
 
 /** Streaming-aware loader shape for the audit route */

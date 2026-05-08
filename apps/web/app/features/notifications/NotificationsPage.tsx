@@ -65,7 +65,7 @@ export function NotificationsPage({
   embeddedInTabs = false,
 }: NotificationsPageProps) {
   const [detailNotification, setDetailNotification] = useState<Notification | null>(null);
-  const isFilterLoading = useLoaderRefetchBusy();
+  const isFilterLoading = useLoaderRefetchBusy().busy;
   const { displayUnreadCount, isOptimisticallyRead, markAsRead, markAllRead } = useNotificationsState();
 
   const handleOpenDetail = (n: Notification) => {

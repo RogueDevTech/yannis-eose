@@ -8,8 +8,9 @@ export interface TableLoadingOverlayProps {
 }
 
 /**
- * Wraps a table or card list so URL-driven loader refetches show a centered spinner
- * without unmounting content (no layout jump). Matches Finance → Disbursements UX.
+ * Wraps a table or card list so URL-driven loader refetches show a subtle dim + spinner
+ * placed ~35% from the top of the panel without unmounting content (no layout jump). Used
+ * by `CompactTable` `loadingVariant="overlay"` and list pages that wrap tables manually.
  */
 export function TableLoadingOverlay({ show, children, minHeightClassName = 'min-h-[12rem]' }: TableLoadingOverlayProps) {
   return (
@@ -17,12 +18,12 @@ export function TableLoadingOverlay({ show, children, minHeightClassName = 'min-
       {children}
       {show ? (
         <div
-          className="absolute inset-0 z-10 rounded-[inherit] bg-app-elevated/70 backdrop-blur-[1px]"
+          className="absolute inset-0 z-10 rounded-[inherit] bg-black/36 backdrop-blur-[0.5px] dark:bg-black/52"
           aria-busy="true"
           aria-live="polite"
         >
-          <div className="absolute left-1/2 top-[20%] -translate-x-1/2">
-            <Spinner size="lg" />
+          <div className="pointer-events-none absolute left-1/2 top-[35%] -translate-x-1/2">
+            <Spinner size="lg" className="text-white/85" />
           </div>
         </div>
       ) : null}

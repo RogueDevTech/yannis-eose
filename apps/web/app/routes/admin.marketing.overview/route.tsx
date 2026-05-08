@@ -1,10 +1,12 @@
-import { useLoaderData } from '@remix-run/react';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { defer, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { canViewAllBranches } from '~/lib/rbac';
 import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
 import { MarketingOverviewPage } from '~/features/marketing/MarketingOverviewPage';
+import { MarketingOverviewLoadingShell } from '~/features/marketing/MarketingOverviewLoadingShell';
 import type {
   Metrics,
   LeaderboardEntry,
@@ -144,41 +146,70 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       )
     : Promise.resolve({ ok: false, status: 0, data: null } as { ok: false; status: number; data: null });
-  const [metricsRes, leaderboardRes, balancesRes, recentOrdersRes, liveActivityRes] = await Promise.all([
+  const overviewData = Promise.all([
     metricsP,
     leaderboardP,
     balancesP,
     recentOrdersP,
     liveActivityP,
-  ]);
+  ]).then(([metricsRes, leaderboardRes, balancesRes, recentOrdersRes, liveActivityRes]) => {
+    const metrics = parseMetrics(metricsRes);
+    const leaderboard = parseLeaderboard(leaderboardRes);
+    const balancesList = parseBalancesList(balancesRes);
+    const recentOrders = parseRecentOrders(recentOrdersRes);
+    const liveActivity: LiveActivityItem[] = liveActivityRes.ok
+      ? (liveActivityRes.data as { result?: { data?: LiveActivityItem[] } })?.result?.data ?? []
+      : [];
+    return {
+      metrics,
+      leaderboard,
+      balancesList,
+      recentOrders,
+      liveActivity,
+    };
+  });
 
-  const metrics = parseMetrics(metricsRes);
-  const leaderboard = parseLeaderboard(leaderboardRes);
-  const balancesList = parseBalancesList(balancesRes);
-  const recentOrders = parseRecentOrders(recentOrdersRes);
-  const liveActivity: LiveActivityItem[] = liveActivityRes.ok
-    ? (liveActivityRes.data as { result?: { data?: LiveActivityItem[] } })?.result?.data ?? []
-    : [];
-
-  return {
-    metrics,
-    leaderboard,
-    balancesList,
+  return defer({
     leaderboardPeriod,
-    recentOrders,
-    liveActivity,
     liveEvents: [...MARKETING_OVERVIEW_LIVE_EVENTS],
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
       periodAllTime,
     },
-  };
+    overviewData,
+  });
 }
 
 export default function MarketingOverviewRoute() {
   const data = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_OVERVIEW_LIVE_EVENTS]);
   usePollingFallback(30_000); // fallback: poll every 30s when socket is disconnected
-  return <MarketingOverviewPage {...data} leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'} />;
+  const leaderboardPeriod = data.leaderboardPeriod as 'this_month' | 'all_time';
+  return (
+    <Suspense
+      fallback={
+        <MarketingOverviewLoadingShell
+          leaderboardPeriod={leaderboardPeriod}
+          filters={data.filters}
+          liveEvents={data.liveEvents}
+        />
+      }
+    >
+      <Await resolve={data.overviewData}>
+        {(payload) => (
+          <MarketingOverviewPage
+            metrics={payload.metrics}
+            leaderboard={payload.leaderboard}
+            balancesList={payload.balancesList}
+            recentOrders={payload.recentOrders}
+            liveActivity={payload.liveActivity}
+            leaderboardPeriod={leaderboardPeriod}
+            filters={data.filters}
+            liveEvents={data.liveEvents}
+          />
+        )}
+      </Await>
+    </Suspense>
+  );
 }

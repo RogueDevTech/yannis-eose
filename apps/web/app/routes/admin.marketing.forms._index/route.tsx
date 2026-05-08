@@ -1,11 +1,13 @@
-import { json, redirect } from '@remix-run/node';
+import { json, redirect, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
 import { userCanManageOfferTemplates } from '~/lib/marketing-offer-tier.server';
 import { FormsPage } from '~/features/campaigns/CampaignsPage';
+import { MarketingFormsLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { Campaign, OfferTemplateListRow, OfferGroupRow, Product, FormsStreamData } from '~/features/campaigns/types';
 
 function parseOfferListRows(payload: unknown): OfferTemplateListRow[] {
@@ -112,12 +114,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
-  const formsPromise = apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${listInputStr}`, {
+  const formsShell = {
+    isMediaBuyer,
+    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
+    currentUserId: user.id,
+    currentUserName: user.name,
+    canManageOfferTemplates: userCanManageOfferTemplates(user),
+  };
+
+  const pageData = (async () => {
+  const formsRes = await apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${listInputStr}`, {
     method: 'GET',
     cookie,
   });
-
-  const [formsRes] = await Promise.all([formsPromise]);
 
   const resultData = formsRes.ok ? (formsRes.data as { result?: { data?: { campaigns: Campaign[]; pagination: { total: number } } } })?.result?.data : null;
   const formsData = resultData ?? null;
@@ -131,12 +140,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     offersListLoadError: null,
     offerGroups: [] as OfferGroupRow[],
     offerGroupsLoadError: null,
-    isMediaBuyer,
-    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
-    currentUserId: user.id,
-    currentUserName: user.name,
-    canManageOfferTemplates: userCanManageOfferTemplates(user),
-  } satisfies FormsStreamData;
+  } satisfies Pick<
+    FormsStreamData,
+    | 'forms'
+    | 'totalForms'
+    | 'products'
+    | 'productsLoadError'
+    | 'allOfferTemplates'
+    | 'offersListLoadError'
+    | 'offerGroups'
+    | 'offerGroupsLoadError'
+  >;
+  })();
+
+  return defer({ formsShell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -185,23 +202,28 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function FormsIndexRoute() {
-  const data = useLoaderData<typeof loader>();
-
+  const { formsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <FormsPage
-      forms={data.forms}
-      totalForms={data.totalForms}
-      products={data.products}
-      productsLoadError={data.productsLoadError}
-      allOfferTemplates={data.allOfferTemplates}
-      offersListLoadError={data.offersListLoadError}
-      offerGroups={data.offerGroups}
-      offerGroupsLoadError={data.offerGroupsLoadError}
-      isMediaBuyer={data.isMediaBuyer}
-      showMediaBuyerColumn={data.showMediaBuyerColumn}
-      currentUserName={data.currentUserName}
-      currentUserId={data.currentUserId}
-      canManageOfferTemplates={data.canManageOfferTemplates}
-    />
+    <Suspense fallback={<MarketingFormsLoadingShell isMediaBuyer={formsShell.isMediaBuyer} />}>
+      <Await resolve={pageData}>
+        {(stream) => (
+          <FormsPage
+            forms={stream.forms}
+            totalForms={stream.totalForms}
+            products={stream.products}
+            productsLoadError={stream.productsLoadError}
+            allOfferTemplates={stream.allOfferTemplates}
+            offersListLoadError={stream.offersListLoadError}
+            offerGroups={stream.offerGroups}
+            offerGroupsLoadError={stream.offerGroupsLoadError}
+            isMediaBuyer={formsShell.isMediaBuyer}
+            showMediaBuyerColumn={formsShell.showMediaBuyerColumn}
+            currentUserName={formsShell.currentUserName}
+            currentUserId={formsShell.currentUserId}
+            canManageOfferTemplates={formsShell.canManageOfferTemplates}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

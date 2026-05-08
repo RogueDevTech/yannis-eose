@@ -1,7 +1,13 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import {
+  apiRequest,
+  ensureBranchScopeOrRedirect,
+  getSessionCookie,
+  requirePermission,
+  safeStatus,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
 import { userCanManageOfferTemplates } from '~/lib/marketing-offer-tier.server';
@@ -77,6 +83,9 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.campaigns');
+  // Pre-flight branch picker safety net — see ensureBranchScopeOrRedirect docs.
+  const guard = ensureBranchScopeOrRedirect(request, user, '/admin/marketing/forms');
+  if (guard) return guard;
   const cookie = getSessionCookie(request);
   const id = params.id;
   if (!id) throw new Response('Missing form id', { status: 400 });

@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useRouteLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { apiRequest, getCurrentUser, getSessionCookie, safeStatus } from '~/lib/api.server';
@@ -8,6 +9,7 @@ import {
   RoleTemplatesPage,
   type PermissionCatalogRow,
 } from '~/features/settings/RoleTemplatesPage';
+import { RoleTemplatesLoadingShell } from '~/features/settings/SettingsDeferredLoadingShells';
 import type { RoleTemplateOption } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [{ title: 'Role templates — Yannis EOSE' }];
@@ -39,6 +41,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const cookie = getSessionCookie(request);
+  const pageData = (async () => {
   const [templatesRes, permRes, baselinesRes] = await Promise.all([
     apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie }),
@@ -63,7 +66,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const templatesPayload = Array.isArray(rawTemplates) ? rawTemplates : [];
   const permPayload = Array.isArray(rawPerms) ? rawPerms : [];
 
-  return json({ templates: templatesPayload, permissions: permPayload, templatePermissionsById });
+  return { templates: templatesPayload, permissions: permPayload, templatePermissionsById };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -130,19 +136,19 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-interface RoleTemplatesLoaderData {
-  templates: RoleTemplateOption[];
-  permissions: PermissionCatalogRow[];
-  templatePermissionsById: Record<string, string[]>;
-}
-
 export default function RoleTemplatesRoute() {
-  const data = useRouteLoaderData('routes/admin.settings.role-templates') as RoleTemplatesLoaderData | undefined;
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <RoleTemplatesPage
-      templates={data?.templates ?? []}
-      permissions={data?.permissions ?? []}
-      templatePermissionsById={data?.templatePermissionsById ?? {}}
-    />
+    <Suspense fallback={<RoleTemplatesLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <RoleTemplatesPage
+            templates={data.templates}
+            permissions={data.permissions}
+            templatePermissionsById={data.templatePermissionsById}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

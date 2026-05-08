@@ -1,9 +1,11 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { LogisticsPage } from '~/features/logistics/LogisticsPage';
+import { LogisticsPartnersLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { Provider, Location, LogisticsStreamData } from '~/features/logistics/types';
 
 export const meta: MetaFunction = () => [
@@ -14,27 +16,37 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'logistics.read');
   const cookie = getSessionCookie(request);
 
-  const providersInput = JSON.stringify({ page: 1, limit: 20, kind: 'THIRD_PARTY' });
-  const locationsInput = JSON.stringify({ page: 1, limit: 20, providerKind: 'THIRD_PARTY' });
-  const providersPromise = apiRequest<unknown>(`/trpc/logistics.listProviders?input=${encodeURIComponent(providersInput)}`, { method: 'GET', cookie });
-  const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(locationsInput)}`, { method: 'GET', cookie });
+  const pageData = (async (): Promise<LogisticsStreamData> => {
+    const providersInput = JSON.stringify({ page: 1, limit: 20, kind: 'THIRD_PARTY' });
+    const locationsInput = JSON.stringify({ page: 1, limit: 20, providerKind: 'THIRD_PARTY' });
+    const providersPromise = apiRequest<unknown>(
+      `/trpc/logistics.listProviders?input=${encodeURIComponent(providersInput)}`,
+      { method: 'GET', cookie },
+    );
+    const locationsPromise = apiRequest<unknown>(
+      `/trpc/logistics.listLocations?input=${encodeURIComponent(locationsInput)}`,
+      { method: 'GET', cookie },
+    );
 
-  const [providersRes, locationsRes] = await Promise.all([providersPromise, locationsPromise]);
+    const [providersRes, locationsRes] = await Promise.all([providersPromise, locationsPromise]);
 
-  const providersData = providersRes.ok
-    ? (providersRes.data as { result?: { data?: { providers: Provider[]; pagination: { total: number } } } })?.result?.data
-    : null;
+    const providersData = providersRes.ok
+      ? (providersRes.data as { result?: { data?: { providers: Provider[]; pagination: { total: number } } } })?.result?.data
+      : null;
 
-  const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Location[]; pagination: { total: number } } } })?.result?.data
-    : null;
+    const locationsData = locationsRes.ok
+      ? (locationsRes.data as { result?: { data?: { locations: Location[]; pagination: { total: number } } } })?.result?.data
+      : null;
 
-  return {
-    providers: providersData?.providers ?? [],
-    totalProviders: providersData?.pagination?.total ?? 0,
-    locations: locationsData?.locations ?? [],
-    totalLocations: locationsData?.pagination?.total ?? 0,
-  } satisfies LogisticsStreamData;
+    return {
+      providers: providersData?.providers ?? [],
+      totalProviders: providersData?.pagination?.total ?? 0,
+      locations: locationsData?.locations ?? [],
+      totalLocations: locationsData?.pagination?.total ?? 0,
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -142,6 +154,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function LogisticsPartnersRoute() {
-  const data = useLoaderData<typeof loader>();
-  return <LogisticsPage {...data} />;
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<LogisticsPartnersLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <LogisticsPage {...data} />}
+      </Await>
+    </Suspense>
+  );
 }

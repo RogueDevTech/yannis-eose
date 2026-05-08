@@ -1,6 +1,8 @@
-import { useLoaderData } from '@remix-run/react';
+import { useLoaderData, Await } from '@remix-run/react';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
 import { UsersListPage } from '~/features/users/UsersListPage';
+import { HRUsersListLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import { loader as usersLoader, action as usersAction } from '../hr.users._index/route';
 
 export const meta: MetaFunction = () => [
@@ -16,12 +18,18 @@ export async function action(args: ActionFunctionArgs) {
 }
 
 export default function FinanceStaffAccountsRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <UsersListPage
-      {...data}
-      usersBasePath="/admin/finance/staff-accounts"
-      variant="staffAccounts"
-    />
+    <Suspense fallback={<HRUsersListLoadingShell staffAccounts />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <UsersListPage
+            {...data}
+            usersBasePath="/admin/finance/staff-accounts"
+            variant="staffAccounts"
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

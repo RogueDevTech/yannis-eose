@@ -8,6 +8,7 @@ import type {
   UpdateInvoiceStatusInput,
   ListInvoicesInput,
   ProfitReportInput,
+  ProfitByShipmentInput,
   ProductProfitBreakdownRow,
   CreateApprovalRequestInput,
   ProcessApprovalInput,
@@ -264,6 +265,11 @@ export class FinanceService {
     if (input.branchId) {
       orderConditions.push(eq(schema.orders.branchId, input.branchId));
     }
+    if (input.mediaBuyerId) {
+      // Optional MB filter — narrows revenue (delivered orders attributed to MB)
+      // AND ad spend (logs by MB) so the report shows that buyer's funnel slice.
+      orderConditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+    }
     orderConditions.push(eq(schema.orders.status, 'DELIVERED'));
     const orderWhere = and(...orderConditions);
 
@@ -274,6 +280,9 @@ export class FinanceService {
     }
     if (input.endDate) {
       adSpendConditions.push(lte(schema.adSpendLogs.spendDate, new Date(input.endDate)));
+    }
+    if (input.mediaBuyerId) {
+      adSpendConditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
     }
     const adSpendWhere = and(...adSpendConditions);
 
@@ -1069,5 +1078,189 @@ export class FinanceService {
   private formatReference(refNumber: number): string {
     const year = new Date().getFullYear();
     return `INV-${year}-${String(refNumber).padStart(4, '0')}`;
+  }
+
+  /**
+   * Per-shipment unit economics (CEO directive 2026-05-08): "what did it cost
+   * to bring this shipment in, and what did we make selling it?"
+   *
+   * Cost side is exact:
+   *  - factoryCost × receivedQty per line
+   *  - allocatedLandingCost (per-line slice of shipments.totalLandingCost)
+   *
+   * Sold side is FIFO-deterministic at the *aggregate* level: each shipment
+   * line links to a `stock_batches` row whose `quantity − remaining_quantity`
+   * tells us how many units from THAT specific batch have been delivered.
+   * We can't yet pin which exact orders consumed those units (no
+   * `order_items.batch_id` link), so revenue is approximated as
+   * `unitsSold × avgDeliveredPrice` where `avgDeliveredPrice` is the
+   * average per-unit revenue across that product's recent delivered orders.
+   * The UI labels this clearly so finance reads it as an estimate, not a
+   * line-item P&L.
+   */
+  async getProfitByShipment(input: ProfitByShipmentInput) {
+    const [shipment] = await this.db
+      .select({
+        id: schema.shipments.id,
+        referenceNumber: schema.shipments.referenceNumber,
+        label: schema.shipments.label,
+        status: schema.shipments.status,
+        supplierName: schema.shipments.supplierName,
+        supplierReference: schema.shipments.supplierReference,
+        totalLandingCost: schema.shipments.totalLandingCost,
+        arrivedAt: schema.shipments.arrivedAt,
+        verifiedAt: schema.shipments.verifiedAt,
+        createdAt: schema.shipments.createdAt,
+      })
+      .from(schema.shipments)
+      .where(eq(schema.shipments.id, input.shipmentId))
+      .limit(1);
+
+    if (!shipment) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Shipment not found' });
+    }
+
+    const lineRows = await this.db
+      .select({
+        id: schema.shipmentLines.id,
+        productId: schema.shipmentLines.productId,
+        productName: schema.products.name,
+        expectedQuantity: schema.shipmentLines.expectedQuantity,
+        receivedQuantity: schema.shipmentLines.receivedQuantity,
+        factoryCost: schema.shipmentLines.factoryCost,
+        allocatedLandingCost: schema.shipmentLines.allocatedLandingCost,
+        batchId: schema.shipmentLines.batchId,
+        batchQuantity: schema.stockBatches.quantity,
+        batchRemainingQuantity: schema.stockBatches.remainingQuantity,
+        baseSalePrice: schema.products.baseSalePrice,
+      })
+      .from(schema.shipmentLines)
+      .leftJoin(schema.products, eq(schema.shipmentLines.productId, schema.products.id))
+      .leftJoin(schema.stockBatches, eq(schema.shipmentLines.batchId, schema.stockBatches.id))
+      .where(eq(schema.shipmentLines.shipmentId, input.shipmentId));
+
+    // Average per-unit delivered price by product — anchors the revenue
+    // estimate. We bound the lookup to the last 90 days so a defunct promo
+    // from a year ago doesn't skew an active product.
+    const productIds = lineRows
+      .map((l) => l.productId)
+      .filter((id): id is string => !!id);
+    let avgPriceByProduct = new Map<string, number>();
+    if (productIds.length > 0) {
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const priceRows = await this.db
+        .select({
+          productId: schema.orderItems.productId,
+          avg: sql<string>`AVG((${schema.orderItems.unitPrice})::numeric)`.as('avg'),
+        })
+        .from(schema.orderItems)
+        .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+        .where(
+          and(
+            inArray(schema.orderItems.productId, productIds),
+            eq(schema.orders.status, 'DELIVERED'),
+            gte(schema.orders.deliveredAt, ninetyDaysAgo),
+          ),
+        )
+        .groupBy(schema.orderItems.productId);
+      avgPriceByProduct = new Map(
+        priceRows.map((r) => [r.productId, Number(r.avg ?? 0)]),
+      );
+    }
+
+    type ShipmentProfitLine = {
+      lineId: string;
+      productId: string | null;
+      productName: string | null;
+      expectedQuantity: number;
+      receivedQuantity: number;
+      factoryCost: number;
+      allocatedLandingCost: number;
+      totalCostIn: number;
+      unitsSold: number;
+      unitsRemaining: number;
+      avgUnitPrice: number;
+      estimatedRevenue: number;
+      estimatedProfit: number;
+    };
+
+    const linesOut: ShipmentProfitLine[] = lineRows.map((l) => {
+      const received = l.receivedQuantity ?? 0;
+      const factoryCost = Number(l.factoryCost ?? 0);
+      const landing = Number(l.allocatedLandingCost ?? 0);
+      const totalCostIn = factoryCost * received + landing;
+      const batchQty = l.batchQuantity ?? 0;
+      const batchRemaining = l.batchRemainingQuantity ?? 0;
+      const unitsSold = Math.max(0, batchQty - batchRemaining);
+      const avgUnitPrice = l.productId
+        ? (avgPriceByProduct.get(l.productId) ?? Number(l.baseSalePrice ?? 0))
+        : 0;
+      const estimatedRevenue = unitsSold * avgUnitPrice;
+      const perUnitCost = received > 0 ? totalCostIn / received : 0;
+      const soldCost = perUnitCost * unitsSold;
+      const estimatedProfit = estimatedRevenue - soldCost;
+      return {
+        lineId: l.id,
+        productId: l.productId ?? null,
+        productName: l.productName ?? null,
+        expectedQuantity: l.expectedQuantity,
+        receivedQuantity: received,
+        factoryCost,
+        allocatedLandingCost: landing,
+        totalCostIn,
+        unitsSold,
+        unitsRemaining: batchRemaining,
+        avgUnitPrice,
+        estimatedRevenue,
+        estimatedProfit,
+      };
+    });
+
+    const totals = linesOut.reduce(
+      (acc, l) => ({
+        receivedQuantity: acc.receivedQuantity + l.receivedQuantity,
+        factoryCostTotal: acc.factoryCostTotal + l.factoryCost * l.receivedQuantity,
+        landingCostTotal: acc.landingCostTotal + l.allocatedLandingCost,
+        totalCostIn: acc.totalCostIn + l.totalCostIn,
+        unitsSold: acc.unitsSold + l.unitsSold,
+        unitsRemaining: acc.unitsRemaining + l.unitsRemaining,
+        estimatedRevenue: acc.estimatedRevenue + l.estimatedRevenue,
+        estimatedProfit: acc.estimatedProfit + l.estimatedProfit,
+      }),
+      {
+        receivedQuantity: 0,
+        factoryCostTotal: 0,
+        landingCostTotal: 0,
+        totalCostIn: 0,
+        unitsSold: 0,
+        unitsRemaining: 0,
+        estimatedRevenue: 0,
+        estimatedProfit: 0,
+      },
+    );
+
+    return {
+      shipment: {
+        id: shipment.id,
+        referenceNumber: shipment.referenceNumber,
+        label: shipment.label,
+        status: shipment.status,
+        supplierName: shipment.supplierName,
+        supplierReference: shipment.supplierReference,
+        totalLandingCost: Number(shipment.totalLandingCost ?? 0),
+        arrivedAt: shipment.arrivedAt,
+        verifiedAt: shipment.verifiedAt,
+        createdAt: shipment.createdAt,
+      },
+      lines: linesOut,
+      totals,
+      /**
+       * Revenue + profit are *estimates* — see service docstring. UI must
+       * render the "estimated" label so finance reads it as a planning
+       * number, not a closed P&L.
+       */
+      revenueIsEstimated: true,
+    };
   }
 }

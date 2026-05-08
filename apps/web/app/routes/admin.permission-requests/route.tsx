@@ -1,12 +1,14 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PermissionRequestsPage } from '~/features/permission-requests/PermissionRequestsPage';
+import { PermissionRequestsLoadingShell } from '~/features/permission-requests/PermissionRequestsLoadingShell';
 import type { PermissionRequest } from '~/features/permission-requests/types';
 
 export const meta: MetaFunction = () => [
@@ -77,6 +79,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const pageRaw = parseInt(url.searchParams.get('page') || '1', 10);
   const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
 
+  const permissionRequestsShell = { status };
+
+  const pageData = (async () => {
   const listInput = encodeURIComponent(JSON.stringify({ status, page, limit: PER_PAGE }));
   const [listRes, countsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/permissionRequests.list?input=${listInput}`, { method: 'GET', cookie }),
@@ -141,6 +146,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     viewerId: user.id,
     status,
   };
+  })();
+
+  return defer({ permissionRequestsShell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -185,32 +193,26 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function PermissionRequestsRoute() {
-  const {
-    requests,
-    total,
-    page,
-    totalPages,
-    limit,
-    statusCounts,
-    canApprove,
-    canApproveProductArchive,
-    canApproveOrderLinePriceChange,
-    viewerId,
-    status,
-  } = useLoaderData<typeof loader>();
+  const { permissionRequestsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <PermissionRequestsPage
-      requests={requests}
-      total={total}
-      page={page}
-      totalPages={totalPages}
-      limit={limit}
-      statusCounts={statusCounts}
-      canApprove={canApprove}
-      canApproveProductArchive={canApproveProductArchive}
-      canApproveOrderLinePriceChange={canApproveOrderLinePriceChange}
-      viewerId={viewerId}
-      activeStatus={status}
-    />
+    <Suspense fallback={<PermissionRequestsLoadingShell activeStatus={permissionRequestsShell.status} />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <PermissionRequestsPage
+            requests={data.requests}
+            total={data.total}
+            page={data.page}
+            totalPages={data.totalPages}
+            limit={data.limit}
+            statusCounts={data.statusCounts}
+            canApprove={data.canApprove}
+            canApproveProductArchive={data.canApproveProductArchive}
+            canApproveOrderLinePriceChange={data.canApproveOrderLinePriceChange}
+            viewerId={data.viewerId}
+            activeStatus={data.status}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

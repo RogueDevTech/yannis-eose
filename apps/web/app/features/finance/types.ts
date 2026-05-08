@@ -92,6 +92,16 @@ export interface FinanceOverviewLoaderData {
   filters: {
     startDate: string;
     endDate: string;
+    /** Optional time refinement — `HH:MM`, sourced from <DateFilterBar>. */
+    startTime?: string;
+    endTime?: string;
+    /** Branch slice — UUID, empty string for "all branches". */
+    branchId?: string;
+    /** Media-buyer slice — UUID, empty string for "all buyers". */
+    mediaBuyerId?: string;
     periodAllTime?: boolean;
   };
+  /** Picklists for the filter bar. Empty arrays when the user can't filter. */
+  branches?: Array<{ id: string; name: string }>;
+  mediaBuyers?: Array<{ id: string; name: string }>;
 }

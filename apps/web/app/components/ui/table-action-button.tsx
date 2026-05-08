@@ -113,7 +113,7 @@ export const TableActionButton = forwardRef<
   }
 
   if ('to' in props && props.to) {
-    const { to, prefetch, replace, state, reloadDocument, preventScrollReset, relative, onClick } = props as LinkActionProps;
+    const { to, prefetch = 'intent', replace, state, reloadDocument, preventScrollReset, relative, onClick } = props as LinkActionProps;
     return (
       <Link
         ref={ref as React.Ref<HTMLAnchorElement>}

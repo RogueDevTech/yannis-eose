@@ -84,7 +84,7 @@ export function LogisticsProviderDetailPage({
 }: LogisticsProviderDetailPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') === 'activity' ? 'activity' : 'overview';
-  const loaderRefetchBusy = useLoaderRefetchBusy({ samePathnameOnly: true });
+  const loaderRefetchBusy = useLoaderRefetchBusy({ samePathnameOnly: true }).busy;
 
   const setTab = useCallback(
     (value: string) => {

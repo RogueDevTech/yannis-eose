@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { CountPill } from '~/components/ui/count-pill';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -428,7 +429,7 @@ export function AdSpendDayAccordion({
       <EmptyState
         variant="card"
         title="No expenses logged in this period"
-        description="Use Add Expense to record today's ad spend lines in one go."
+        description="Use Add Expense to record today's ads in one go."
       />
     );
   }
@@ -441,7 +442,6 @@ export function AdSpendDayAccordion({
           const isOpen = openKeys.has(key);
           const summary = summarizeLines(g.lines);
           const relativeLabel = relativeDateLabel(g.spendDate);
-          const avgPerLine = g.lineCount > 0 ? Number(g.totalAmount) / g.lineCount : 0;
           // Show top 2 product names, rest collapses to "+N more".
           const productPreview = summary.products.slice(0, 2).join(', ');
           const productOverflow = summary.products.length - 2;
@@ -458,58 +458,55 @@ export function AdSpendDayAccordion({
               <button
                 type="button"
                 onClick={() => toggle(key)}
-                className="w-full text-left px-4 py-3 hover:bg-app-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
+                className="w-full text-left px-3 py-2 hover:bg-app-hover transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
                 aria-expanded={isOpen}
               >
-                {/* Exactly two rows: (1) date / buyer · period total, (2) counts + products · avg / orders / CPA / rolled status */}
-                <div className="flex items-start gap-2.5 w-full min-w-0">
+                {/* Compact 2-row header. Row 1: date · relative · MB · ₦ total.
+                    Row 2: ads · status pills · product preview · orders/CPA · rolled status. */}
+                <div className="flex items-center gap-2 w-full min-w-0">
                   <ChevronIcon open={isOpen} />
-                  <div className="min-w-0 flex-1 flex flex-col gap-1.5">
-                    <div className="flex items-start justify-between gap-3 min-w-0">
-                      <div className="min-w-0 flex flex-col gap-0.5">
-                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                          <span className="font-semibold text-app-fg shrink-0">{formatDate(g.spendDate)}</span>
-                          {relativeLabel && (
-                            <span className="text-xs uppercase tracking-wider text-app-fg-muted/80 font-medium shrink-0">
-                              {relativeLabel}
-                            </span>
-                          )}
-                        </div>
-                        {showMediaBuyerColumn && g.mediaBuyerName && (
-                          <span className="block text-sm font-medium text-app-fg leading-snug break-words pr-1">
-                            {g.mediaBuyerName}
+                  <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                    {/* Row 1 */}
+                    <div className="flex items-center justify-between gap-3 min-w-0">
+                      <div className="min-w-0 flex items-center gap-2 truncate text-sm">
+                        <span className="font-semibold text-app-fg shrink-0 truncate">
+                          {formatDate(g.spendDate)}
+                        </span>
+                        {relativeLabel && (
+                          <span className="text-[11px] uppercase tracking-wider text-app-fg-muted/80 font-medium shrink-0">
+                            {relativeLabel}
                           </span>
                         )}
+                        {showMediaBuyerColumn && g.mediaBuyerName && (
+                          <>
+                            <span className="text-app-fg-muted/60 shrink-0">·</span>
+                            <span className="text-app-fg-muted truncate">{g.mediaBuyerName}</span>
+                          </>
+                        )}
                       </div>
-                      <div className="shrink-0 text-right self-start">
-                        <div className="text-base font-semibold text-app-fg tabular-nums leading-tight">
-                          <NairaPrice amount={Number(g.totalAmount)} />
-                        </div>
+                      <div className="shrink-0 text-sm font-semibold text-app-fg tabular-nums leading-tight">
+                        <NairaPrice amount={Number(g.totalAmount)} />
                       </div>
                     </div>
-                    <div className="flex items-end justify-between gap-3 min-w-0">
-                      <div className="min-w-0 flex items-center gap-x-2 overflow-x-auto pb-0.5 -mb-0.5 text-xs [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                        <span className="inline-flex items-center gap-1 text-app-fg-muted shrink-0">
-                          <span className="font-semibold text-app-fg tabular-nums">{g.lineCount}</span>
-                          line{g.lineCount === 1 ? '' : 's'}
+
+                    {/* Row 2 */}
+                    <div className="flex items-center justify-between gap-3 min-w-0 text-xs">
+                      <div className="min-w-0 flex items-center gap-x-1.5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                        <span className="text-app-fg-muted shrink-0">
+                          <span className="font-medium text-app-fg tabular-nums">{g.lineCount}</span>{' '}
+                          ad{g.lineCount === 1 ? '' : 's'}
                         </span>
                         {summary.pending > 0 && (
-                          <StatusPill tone="warning">
-                            <span className="tabular-nums">{summary.pending}</span> pending
-                          </StatusPill>
+                          <CountPill tone="warning" label="Pending" count={summary.pending} />
                         )}
                         {summary.approved > 0 && (
-                          <StatusPill tone="success">
-                            <span className="tabular-nums">{summary.approved}</span> approved
-                          </StatusPill>
+                          <CountPill tone="success" label="Approved" count={summary.approved} />
                         )}
                         {summary.rejected > 0 && (
-                          <StatusPill tone="danger">
-                            <span className="tabular-nums">{summary.rejected}</span> rejected
-                          </StatusPill>
+                          <CountPill tone="danger" label="Rejected" count={summary.rejected} />
                         )}
                         {productPreview && (
-                          <span className="inline-flex items-center gap-1 text-app-fg-muted min-w-0 max-w-[min(14rem,100%)]">
+                          <span className="inline-flex items-center gap-1 text-app-fg-muted min-w-0 max-w-[min(12rem,100%)] shrink">
                             <ProductIcon />
                             <span className="truncate">{productPreview}</span>
                             {productOverflow > 0 && (
@@ -518,25 +515,22 @@ export function AdSpendDayAccordion({
                           </span>
                         )}
                       </div>
-                      <div className="shrink-0 flex flex-col items-end gap-0.5 text-right">
-                        {g.lineCount > 1 && (
-                          <div className="text-[11px] text-app-fg-muted tabular-nums leading-tight whitespace-nowrap">
-                            avg <NairaPrice amount={avgPerLine} /> / line
-                          </div>
-                        )}
-                        <div className="text-[11px] text-app-fg-muted tabular-nums leading-tight whitespace-nowrap">
+                      <div className="shrink-0 flex items-center gap-2 text-app-fg-muted tabular-nums whitespace-nowrap">
+                        <span>
                           <span className="font-medium text-app-fg/90">{(g.overallOrderCount ?? 0).toLocaleString()}</span>{' '}
                           orders
                           {g.overallCpa != null ? (
                             <>
                               {' '}
-                              · <NairaPrice amount={g.overallCpa} /> day CPA
+                              · <NairaPrice amount={g.overallCpa} /> CPA
                             </>
-                          ) : (
-                            <span> · CPA —</span>
-                          )}
-                        </div>
-                        <StatusBadge status={g.rolledStatus} label={rolledStatusLabel(g.rolledStatus)} />
+                          ) : null}
+                        </span>
+                        <StatusBadge
+                          status={g.rolledStatus}
+                          label={rolledStatusLabel(g.rolledStatus)}
+                          size="sm"
+                        />
                       </div>
                     </div>
                   </div>
@@ -608,28 +602,6 @@ function ProductIcon() {
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
     </svg>
-  );
-}
-
-function StatusPill({
-  tone,
-  children,
-}: {
-  tone: 'warning' | 'success' | 'danger';
-  children: React.ReactNode;
-}) {
-  const toneClasses =
-    tone === 'warning'
-      ? 'bg-warning-50 text-warning-700 border-warning-200/70 dark:bg-warning-900/25 dark:text-warning-300 dark:border-warning-800/60'
-      : tone === 'success'
-        ? 'bg-success-50 text-success-700 border-success-200/70 dark:bg-success-900/25 dark:text-success-300 dark:border-success-800/60'
-        : 'bg-danger-50 text-danger-700 border-danger-200/70 dark:bg-danger-900/25 dark:text-danger-300 dark:border-danger-800/60';
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-medium ${toneClasses}`}
-    >
-      {children}
-    </span>
   );
 }
 

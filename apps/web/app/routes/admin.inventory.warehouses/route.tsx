@@ -1,6 +1,7 @@
-import { json, redirect } from '@remix-run/node';
+import { Suspense } from 'react';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getCurrentUser,
@@ -15,6 +16,7 @@ import {
   WarehousesPage,
   type WarehouseRow,
 } from '~/features/inventory/WarehousesPage';
+import { WarehousesListLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Our warehouse — Yannis EOSE' }];
 
@@ -32,98 +34,102 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect(`${next.pathname}${qs ? `?${qs}` : ''}`);
   }
 
-  const user = await getCurrentUser(request);
-  const cookie = getSessionCookie(request);
-
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
   const search = (url.searchParams.get('search') ?? '').trim();
 
-  const listInput: {
-    status: 'ACTIVE';
-    page: number;
-    limit: number;
-    listScope: 'our';
-    search?: string;
-  } = { status: 'ACTIVE', page, limit: WAREHOUSES_PAGE_LIMIT, listScope: 'our' };
-  if (search.length > 0) listInput.search = search;
+  const pageData = (async () => {
+    const user = await getCurrentUser(request);
+    const cookie = getSessionCookie(request);
 
-  const input = JSON.stringify(listInput);
-  const [res, overviewRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/inventory.warehouses.list?input=${encodeURIComponent(input)}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>('/trpc/inventory.warehouses.overview', { method: 'GET', cookie }),
-  ]);
-  let warehouses: WarehouseRow[] = [];
-  let totalWarehouses = 0;
-  if (res.ok) {
-    const data = (res.data as {
-      result?: {
-        data?: {
-          warehouses: Array<
-            Omit<WarehouseRow, 'stockSummary' | 'providerKind' | 'providerName'> & {
-              stockSummary?: WarehouseRow['stockSummary'];
-              providerKind?: string;
-              providerName?: string | null;
-            }
-          >;
-          pagination: { total: number };
-        };
-      };
-    })?.result?.data;
-    const rows = data?.warehouses ?? [];
-    warehouses = rows.map((w) => ({
-      ...w,
-      providerKind: w.providerKind === 'WAREHOUSE' ? 'WAREHOUSE' : 'THIRD_PARTY',
-      providerName: (w.providerName ?? '').trim() || 'Partner',
-      stockSummary: w.stockSummary ?? { totalStock: 0, totalReserved: 0, skuCount: 0 },
-    }));
-    totalWarehouses = data?.pagination?.total ?? 0;
-  }
+    const listInput: {
+      status: 'ACTIVE';
+      page: number;
+      limit: number;
+      listScope: 'our';
+      search?: string;
+    } = { status: 'ACTIVE', page, limit: WAREHOUSES_PAGE_LIMIT, listScope: 'our' };
+    if (search.length > 0) listInput.search = search;
 
-  const totalPages = Math.max(1, Math.ceil(totalWarehouses / WAREHOUSES_PAGE_LIMIT));
-
-  const actorPerms = new Set((user?.permissions ?? []).map((p) => canonicalPermissionCode(p)));
-  const canManage =
-    !!user &&
-    (isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.warehouses.write')));
-
-  const overview = overviewRes.ok
-    ? ((overviewRes.data as {
+    const input = JSON.stringify(listInput);
+    const [res, overviewRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/inventory.warehouses.list?input=${encodeURIComponent(input)}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>('/trpc/inventory.warehouses.overview', { method: 'GET', cookie }),
+    ]);
+    let warehouses: WarehouseRow[] = [];
+    let totalWarehouses = 0;
+    if (res.ok) {
+      const data = (res.data as {
         result?: {
           data?: {
-            activeWarehousesCount: number;
-            warehousesWithAvailableStockCount: number;
-            dispatchLockedCount: number;
-            totalUnits: number;
-            totalReserved: number;
-            totalAvailable: number;
-            skuCount: number;
+            warehouses: Array<
+              Omit<WarehouseRow, 'stockSummary' | 'providerKind' | 'providerName'> & {
+                stockSummary?: WarehouseRow['stockSummary'];
+                providerKind?: string;
+                providerName?: string | null;
+              }
+            >;
+            pagination: { total: number };
           };
         };
-      })?.result?.data ?? null)
-    : null;
+      })?.result?.data;
+      const rows = data?.warehouses ?? [];
+      warehouses = rows.map((w) => ({
+        ...w,
+        providerKind: w.providerKind === 'WAREHOUSE' ? 'WAREHOUSE' : 'THIRD_PARTY',
+        providerName: (w.providerName ?? '').trim() || 'Partner',
+        stockSummary: w.stockSummary ?? { totalStock: 0, totalReserved: 0, skuCount: 0 },
+      }));
+      totalWarehouses = data?.pagination?.total ?? 0;
+    }
 
-  return {
-    warehouses,
-    totalWarehouses,
-    page,
-    limit: WAREHOUSES_PAGE_LIMIT,
-    totalPages,
-    search,
-    canManage,
-    overview: overview ?? {
-      activeWarehousesCount: 0,
-      warehousesWithAvailableStockCount: 0,
-      dispatchLockedCount: 0,
-      totalUnits: 0,
-      totalReserved: 0,
-      totalAvailable: 0,
-      skuCount: 0,
-    },
-  };
+    const totalPages = Math.max(1, Math.ceil(totalWarehouses / WAREHOUSES_PAGE_LIMIT));
+
+    const actorPerms = new Set((user?.permissions ?? []).map((p) => canonicalPermissionCode(p)));
+    const canManage =
+      !!user &&
+      (isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.warehouses.write')));
+
+    const overview = overviewRes.ok
+      ? ((overviewRes.data as {
+          result?: {
+            data?: {
+              activeWarehousesCount: number;
+              warehousesWithAvailableStockCount: number;
+              dispatchLockedCount: number;
+              totalUnits: number;
+              totalReserved: number;
+              totalAvailable: number;
+              skuCount: number;
+            };
+          };
+        })?.result?.data ?? null)
+      : null;
+
+    return {
+      warehouses,
+      totalWarehouses,
+      page,
+      limit: WAREHOUSES_PAGE_LIMIT,
+      totalPages,
+      search,
+      canManage,
+      overview: overview ?? {
+        activeWarehousesCount: 0,
+        warehousesWithAvailableStockCount: 0,
+        dispatchLockedCount: 0,
+        totalUnits: 0,
+        totalReserved: 0,
+        totalAvailable: 0,
+        skuCount: 0,
+      },
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -158,17 +164,23 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function WarehousesRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <WarehousesPage
-      warehouses={data.warehouses}
-      totalWarehouses={data.totalWarehouses}
-      page={data.page}
-      limit={data.limit}
-      totalPages={data.totalPages}
-      search={data.search}
-      canManage={data.canManage}
-      overview={data.overview}
-    />
+    <Suspense fallback={<WarehousesListLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <WarehousesPage
+            warehouses={data.warehouses}
+            totalWarehouses={data.totalWarehouses}
+            page={data.page}
+            limit={data.limit}
+            totalPages={data.totalPages}
+            search={data.search}
+            canManage={data.canManage}
+            overview={data.overview}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

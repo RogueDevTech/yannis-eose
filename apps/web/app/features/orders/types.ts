@@ -13,6 +13,17 @@ export interface Order {
   /** Set in list when available (e.g. marketing orders for HoM/SuperAdmin) */
   mediaBuyerId?: string | null;
   mediaBuyerName?: string | null;
+  /**
+   * "Primary" line item — first order_items row by id. Drives the Product column on
+   * the orders table. Multi-line orders also expose `itemCount` so the cell can
+   * render "Product A · +2 more".
+   */
+  primaryProductId?: string | null;
+  primaryProductName?: string | null;
+  itemCount?: number;
+  /** Form / campaign the order came in from. Used by the Media Buyer view. */
+  campaignId?: string | null;
+  campaignName?: string | null;
 }
 
 export interface CallLogEntry {

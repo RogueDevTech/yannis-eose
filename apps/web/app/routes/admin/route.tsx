@@ -1,10 +1,12 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
-import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import { Await, useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import { Suspense } from 'react';
 import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { DashboardLayout } from '~/components/layout/dashboard-layout';
 import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
+import { normalizeRouteErrorData } from '~/lib/network-error';
 
 interface Notification {
   id: string;
@@ -83,9 +85,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => [] as Array<{ id: string; name: string; code: string }>);
 
-  const [branches] = await Promise.all([branchesPromise]);
-
-  return defer({ user, notifications: notificationsPromise, branches });
+  // Stream branches like notifications — avoids blocking the document on branches.list
+  return defer({ user, notifications: notificationsPromise, branches: branchesPromise });
 }
 
 /**
@@ -176,12 +177,29 @@ export default function AdminLayout() {
   const { user, notifications, branches } = useLoaderData<typeof loader>();
 
   return (
-    <DashboardLayout
-      user={user}
-      branches={branches}
-      notificationsPromise={notifications}
-      notificationsActionUrl="/admin"
-    />
+    <Suspense
+      fallback={
+        <DashboardLayout
+          user={user}
+          branches={[]}
+          branchesHydrationReady={false}
+          notificationsPromise={notifications}
+          notificationsActionUrl="/admin"
+        />
+      }
+    >
+      <Await resolve={branches}>
+        {(resolvedBranches) => (
+          <DashboardLayout
+            user={user}
+            branches={resolvedBranches}
+            branchesHydrationReady
+            notificationsPromise={notifications}
+            notificationsActionUrl="/admin"
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }
 
@@ -199,7 +217,7 @@ export function ErrorBoundary() {
       error={error}
       isResponse={isResponse}
       status={status}
-      errorData={isResponse ? error.data : undefined}
+      errorData={isResponse ? normalizeRouteErrorData(error.data) : undefined}
     />
   );
 }

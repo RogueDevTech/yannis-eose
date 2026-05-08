@@ -1,6 +1,7 @@
 import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Form, Link, useLoaderData, useSearchParams } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, Form, Link, useLoaderData, useSearchParams } from '@remix-run/react';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -18,6 +19,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Pagination } from '~/components/ui/pagination';
+import { WarehouseShipmentsLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Warehouse shipments — Yannis EOSE' }];
 
@@ -75,53 +77,69 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
-  const warehousePromise = apiRequest<unknown>(
-    `/trpc/inventory.warehouses.get?input=${encodeURIComponent(JSON.stringify({ warehouseId }))}`,
-    deferredOpt,
-  );
+  const pageData = (async () => {
+    const listInput: {
+      destinationLocationId: string;
+      page: number;
+      limit: number;
+      search?: string;
+      status?: Exclude<ShipmentStatusFilter, 'ALL'>;
+    } = { destinationLocationId: warehouseId, page, limit: 20 };
 
-  const listInput: {
-    destinationLocationId: string;
-    page: number;
-    limit: number;
-    search?: string;
-    status?: Exclude<ShipmentStatusFilter, 'ALL'>;
-  } = { destinationLocationId: warehouseId, page, limit: 20 };
+    if (rawSearch) listInput.search = rawSearch;
+    if (status !== 'ALL') listInput.status = status;
 
-  if (rawSearch) listInput.search = rawSearch;
-  if (status !== 'ALL') listInput.status = status;
+    const [warehouseRes, shipmentsRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/inventory.warehouses.get?input=${encodeURIComponent(JSON.stringify({ warehouseId }))}`,
+        deferredOpt,
+      ),
+      apiRequest<unknown>(
+        `/trpc/inventory.shipments.list?input=${encodeURIComponent(JSON.stringify(listInput))}`,
+        deferredOpt,
+      ),
+    ]);
 
-  const shipmentsRes = await apiRequest<unknown>(
-    `/trpc/inventory.shipments.list?input=${encodeURIComponent(JSON.stringify(listInput))}`,
-    deferredOpt,
-  );
+    const warehouse = warehouseRes.ok
+      ? ((warehouseRes.data as { result?: { data?: { id: string; name: string; address: string } } })?.result
+          ?.data ?? null)
+      : null;
 
-  const shipmentsData = shipmentsRes.ok
-    ? ((shipmentsRes.data as {
-        result?: {
-          data?: { rows: ShipmentRow[]; pagination: { total: number; totalPages: number } };
-        };
-      })?.result?.data ?? null)
-    : null;
+    const shipmentsData = shipmentsRes.ok
+      ? ((shipmentsRes.data as {
+          result?: {
+            data?: { rows: ShipmentRow[]; pagination: { total: number; totalPages: number } };
+          };
+        })?.result?.data ?? null)
+      : null;
 
-  return defer({
-    warehouseId,
-    page,
-    search: rawSearch,
-    status,
-    rows: shipmentsData?.rows ?? [],
-    total: shipmentsData?.pagination?.total ?? 0,
-    totalPages: shipmentsData?.pagination?.totalPages ?? 1,
-    warehouse: warehousePromise.then((res) => {
-      if (!res.ok) return null;
-      return (res.data as { result?: { data?: { id: string; name: string; address: string } } })?.result
-        ?.data ?? null;
-    }),
-  });
+    return {
+      warehouseId,
+      page,
+      search: rawSearch,
+      status,
+      rows: shipmentsData?.rows ?? [],
+      total: shipmentsData?.pagination?.total ?? 0,
+      totalPages: shipmentsData?.pagination?.totalPages ?? 1,
+      warehouse,
+    };
+  })();
+
+  return defer({ pageData });
 }
 
-export default function WarehouseShipmentsRoute() {
-  const data = useLoaderData<typeof loader>();
+type WarehouseShipmentsPageProps = {
+  warehouseId: string;
+  page: number;
+  search: string;
+  status: ShipmentStatusFilter;
+  rows: ShipmentRow[];
+  total: number;
+  totalPages: number;
+  warehouse: { id: string; name: string; address: string } | null;
+};
+
+function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const columns: CompactTableColumn<ShipmentRow>[] = [
@@ -254,6 +272,17 @@ export default function WarehouseShipmentsRoute() {
         ) : null}
       </Card>
     </div>
+  );
+}
+
+export default function WarehouseShipmentsRoute() {
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<WarehouseShipmentsLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <WarehouseShipmentsPage {...data} />}
+      </Await>
+    </Suspense>
   );
 }
 

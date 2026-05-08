@@ -3,6 +3,7 @@ import { Await, Link, useFetcher, useSearchParams, useNavigate } from '@remix-ru
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { formatOrderTimestamp, formatOrderTimestampShort } from '~/lib/format-date';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -120,7 +121,7 @@ export interface OrdersListPageProps {
   statusCounts: Record<string, number>;
   statusFilter?: string;
   searchFilter?: string;
-  filters?: { startDate: string; endDate: string; periodAllTime: boolean };
+  filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   userRole?: string;
   /** CS agent sees only their assigned orders; when true, title is "My Orders". */
   isCSAgent?: boolean;
@@ -145,8 +146,27 @@ export interface OrdersListPageProps {
   } | null;
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
+  /**
+   * When true, show the Form (campaign) column. Used by the Marketing orders page so
+   * a Media Buyer can see which form an order came in from at a glance — not relevant
+   * to the CS / general orders views.
+   */
+  showCampaignColumn?: boolean;
+  /** Active campaign filter for the Form picker (URL `campaignId`). */
+  campaignFilter?: string;
+  /** Active product filter for the Product picker (URL `productId`). */
+  productFilter?: string;
+  /** Available campaigns for the Form filter dropdown (paired with showCampaignColumn). */
+  campaignsForFilter?: Array<{ id: string; name: string }>;
+  /** Available products for the Product filter dropdown. */
+  productsForFilter?: Array<{ id: string; name: string }>;
   /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
   canCreateOffline?: boolean;
+  /**
+   * When false (default), the Export / Export Selected buttons are hidden.
+   * Server still enforces `orders.export` on the actual download — this is the UI gate.
+   */
+  canExport?: boolean;
   /** Products list for offline order form (when canCreateOffline). */
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
@@ -179,6 +199,11 @@ function OrdersListPageImpl({
   userRole,
   isCSAgent = false,
   showCSAgentColumn = false,
+  showCampaignColumn = false,
+  campaignFilter,
+  productFilter,
+  campaignsForFilter,
+  productsForFilter,
   csAgentsForFilter,
   logisticsLocationsForBulk = [],
   canAssignDirectly = false,
@@ -186,6 +211,7 @@ function OrdersListPageImpl({
   myWorkload = null,
   liveEvents,
   canCreateOffline = false,
+  canExport = false,
   productsForOfflineOrder = [],
   dailyCounts,
   scheduleHeat,
@@ -202,7 +228,7 @@ function OrdersListPageImpl({
 
   const liveState = useLiveIndicator(liveEvents ?? []);
   const navigate = useNavigate();
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showExportModal, setShowExportModal] = useState(false);
@@ -562,6 +588,37 @@ function OrdersListPageImpl({
         ),
       });
     }
+    cols.push({
+      key: 'product',
+      header: 'Product',
+      render: (order) => {
+        const name = order.primaryProductName?.trim();
+        const extra = (order.itemCount ?? 0) > 1 ? ` · +${(order.itemCount ?? 0) - 1} more` : '';
+        return (
+          <span className="text-sm text-app-fg truncate">
+            {name ? (
+              <>
+                {name}
+                {extra ? <span className="text-app-fg-muted">{extra}</span> : null}
+              </>
+            ) : (
+              <span className="text-app-fg-muted">—</span>
+            )}
+          </span>
+        );
+      },
+    });
+    if (showCampaignColumn) {
+      cols.push({
+        key: 'campaign',
+        header: 'Form',
+        render: (order) => (
+          <span className="text-sm text-app-fg-muted truncate">
+            {order.campaignName?.trim() ? order.campaignName : '—'}
+          </span>
+        ),
+      });
+    }
     cols.push(
       {
         key: 'status',
@@ -583,13 +640,8 @@ function OrdersListPageImpl({
         key: 'created',
         header: 'Created',
         render: (order) => (
-          <span className="text-app-fg-muted">
-            {new Date(order.createdAt).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
+          <span className="text-app-fg-muted whitespace-nowrap">
+            {formatOrderTimestamp(order.createdAt)}
           </span>
         ),
       },
@@ -604,7 +656,7 @@ function OrdersListPageImpl({
       },
     );
     return cols;
-  }, [showCSAgentColumn]);
+  }, [showCSAgentColumn, showCampaignColumn]);
 
   const statusOptions = CS_ORDERS_STATUS_DROPDOWN_OPTIONS.map((status) => ({
     value: status,
@@ -622,8 +674,19 @@ function OrdersListPageImpl({
     const agent = searchParams.get('csAgentId') || 'ALL';
     if (showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && agent !== 'ALL') n += 1;
     if (scheduleFilters?.scheduleKind) n += 1;
+    if (productFilter) n += 1;
+    if (showCampaignColumn && campaignFilter) n += 1;
     return n;
-  }, [selectedStatus, showCSAgentColumn, csAgentsForFilter?.length, searchParams, scheduleFilters?.scheduleKind]);
+  }, [
+    selectedStatus,
+    showCSAgentColumn,
+    csAgentsForFilter?.length,
+    searchParams,
+    scheduleFilters?.scheduleKind,
+    productFilter,
+    showCampaignColumn,
+    campaignFilter,
+  ]);
 
   const scheduleFilterFields = scheduleFilters ? (
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
@@ -740,9 +803,11 @@ function OrdersListPageImpl({
                     <span className="sm:hidden">+ Order</span>
                   </Button>
                 )}
-                <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                  Generate report
-                </Button>
+                {canExport && (
+                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                    Generate report
+                  </Button>
+                )}
               </>
             }
             sheet={({ closeSheet }) => (
@@ -772,17 +837,19 @@ function OrdersListPageImpl({
                     Create offline order
                   </Button>
                 )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowExportModal(true);
-                  }}
-                >
-                  Generate report
-                </Button>
+                {canExport && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowExportModal(true);
+                    }}
+                  >
+                    Generate report
+                  </Button>
+                )}
               </>
             )}
             />
@@ -790,6 +857,8 @@ function OrdersListPageImpl({
               <DateFilterBar
                 startDate={filters?.startDate ?? ''}
                 endDate={filters?.endDate ?? ''}
+                startTime={filters?.startTime ?? ''}
+                endTime={filters?.endTime ?? ''}
                 periodAllTime={filters?.periodAllTime ?? false}
               />
             </div>
@@ -965,10 +1034,12 @@ function OrdersListPageImpl({
                   Select orders with same status for bulk transition
                 </span>
               )}
-              {/* Export selected */}
-              <Button variant="secondary" size="sm" onClick={() => setShowSelectedExportModal(true)}>
-                Export Selected
-              </Button>
+              {/* Export selected — same orders.export gate as the full report button. */}
+              {canExport && (
+                <Button variant="secondary" size="sm" onClick={() => setShowSelectedExportModal(true)}>
+                  Export Selected
+                </Button>
+              )}
             </div>
           </div>
           {/* Bulk result summary */}
@@ -1013,7 +1084,7 @@ function OrdersListPageImpl({
           phone: o.customerPhoneDisplay,
           status: o.status,
           amount: o.totalAmount ?? '',
-          created: new Date(o.createdAt).toLocaleDateString(),
+          created: formatOrderTimestamp(o.createdAt),
         }))}
         columns={[
           { key: 'id', label: 'Order ID' },
@@ -1103,6 +1174,54 @@ function OrdersListPageImpl({
                     />
                   )
                 ) : null}
+                {(productsForFilter?.length ?? 0) > 0 ? (
+                  <SearchableSelect
+                    id="orders-filter-product"
+                    value={productFilter || 'ALL'}
+                    onChange={(v) => {
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('productId', v);
+                        else next.delete('productId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All products' },
+                      ...(productsForFilter ?? []).map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                    placeholder="All products"
+                    searchPlaceholder="Search products..."
+                  />
+                ) : null}
+                {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
+                  <SearchableSelect
+                    id="orders-filter-form"
+                    value={campaignFilter || 'ALL'}
+                    onChange={(v) => {
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('campaignId', v);
+                        else next.delete('campaignId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All forms' },
+                      ...(campaignsForFilter ?? []).map((c) => ({ value: c.id, label: c.name })),
+                    ]}
+                    wrapperClassName="w-full min-w-0 sm:w-48"
+                    placeholder="All forms"
+                    searchPlaceholder="Search forms..."
+                  />
+                ) : null}
               </div>
             </div>
           }
@@ -1159,6 +1278,60 @@ function OrdersListPageImpl({
                       searchPlaceholder="Search closers..."
                     />
                   )}
+                </div>
+              ) : null}
+              {(productsForFilter?.length ?? 0) > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                  <SearchableSelect
+                    id="orders-filter-product-sheet"
+                    value={productFilter || 'ALL'}
+                    onChange={(v) => {
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('productId', v);
+                        else next.delete('productId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All products' },
+                      ...(productsForFilter ?? []).map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    wrapperClassName="w-full"
+                    placeholder="All products"
+                    searchPlaceholder="Search products..."
+                  />
+                </div>
+              ) : null}
+              {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Form</span>
+                  <SearchableSelect
+                    id="orders-filter-form-sheet"
+                    value={campaignFilter || 'ALL'}
+                    onChange={(v) => {
+                      setSelectedIds(new Set());
+                      setBulkResult(null);
+                      setSearchParams((p) => {
+                        const next = new URLSearchParams(p);
+                        next.set('page', '1');
+                        if (v && v !== 'ALL') next.set('campaignId', v);
+                        else next.delete('campaignId');
+                        return next;
+                      });
+                    }}
+                    options={[
+                      { value: 'ALL', label: 'All forms' },
+                      ...(campaignsForFilter ?? []).map((c) => ({ value: c.id, label: c.name })),
+                    ]}
+                    wrapperClassName="w-full"
+                    placeholder="All forms"
+                    searchPlaceholder="Search forms..."
+                  />
                 </div>
               ) : null}
             </>
@@ -1358,13 +1531,8 @@ function OrdersListPageImpl({
                         <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
                       </span>
                     </div>
-                    <div className="mt-1 text-xs text-app-fg-muted">
-                      {new Date(order.createdAt).toLocaleDateString('en-NG', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                    <div className="mt-1 text-xs text-app-fg-muted whitespace-nowrap">
+                      {formatOrderTimestampShort(order.createdAt)}
                     </div>
                   </Link>
                   <div className="flex flex-wrap items-center gap-3 border-t border-app-border px-3 pb-3 pt-2">

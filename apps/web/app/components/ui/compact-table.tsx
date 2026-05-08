@@ -132,7 +132,7 @@ export interface CompactTableProps<T> {
   loading?: boolean;
   /**
    * `replace`: spinner only while loading (legacy).
-   * `overlay`: keep rows/empty visible with a dimmed overlay + spinner (filter refetch UX).
+   * `overlay`: keep rows/empty visible under {@link TableLoadingOverlay} (dark scrim + spinner; filter refetch UX).
    */
   loadingVariant?: CompactTableLoadingVariant;
   /** Accessible caption for the desktop `<table>` */

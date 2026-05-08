@@ -3,6 +3,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
+import { formatOrderTimestampShort } from '~/lib/format-date';
 import { StatCard } from '~/components/ui/card';
 import type { TplDashboardData } from './types';
 
@@ -225,7 +226,7 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
                   <p className="font-medium text-app-fg truncate">{order.customerName}</p>
                   <div className="flex items-center gap-2 text-sm text-app-fg-muted">
                     <span>
-                      {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {formatOrderTimestampShort(order.createdAt)}
                     </span>
                     {order.preferredDeliveryDate && (
                       <>
