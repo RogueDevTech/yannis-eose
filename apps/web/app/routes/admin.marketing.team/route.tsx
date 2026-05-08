@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
@@ -216,9 +216,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function MarketingTeamRoute() {
   const { teamShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<MarketingTeamLoadingShell dateFilters={teamShell.dateFilters} />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<MarketingTeamLoadingShell dateFilters={teamShell.dateFilters} />}>
+      {(data) => (
           <MarketingTeamPage
             teamMembers={data.teamMembers}
             fundingSummary={data.fundingSummary}
@@ -234,7 +233,6 @@ export default function MarketingTeamRoute() {
             profitabilityConfig={data.profitabilityConfig}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

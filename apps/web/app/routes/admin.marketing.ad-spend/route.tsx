@@ -3,6 +3,7 @@ import { Await, useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
 import { MarketingAdSpendLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
@@ -228,27 +229,28 @@ export default function AdminMarketingAdSpendRoute() {
     pageData: Promise<MarketingAdSpendLoaderData>;
   };
   return (
-    <Suspense fallback={<MarketingAdSpendLoadingShell {...adSpendShell} />}>
-      <Await resolve={pageData} errorElement={<DeferredError />}>
-        {(data) => {
-          if (data.adSpendPicklists) {
-            const { adSpendPicklists, ...rest } = data;
-            const sync = rest as Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
-            return (
-              <Suspense
-                fallback={
-                  <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />
-                }
-              >
-                <Await resolve={adSpendPicklists} errorElement={<DeferredError />}>
-                  {(pick) => <MarketingAdSpendPage {...sync} {...pick} />}
-                </Await>
-              </Suspense>
-            );
-          }
-          return <MarketingAdSpendPage {...data} />;
-        }}
-      </Await>
-    </Suspense>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<MarketingAdSpendLoadingShell {...adSpendShell} />}
+    >
+      {(data) => {
+        if (data.adSpendPicklists) {
+          const { adSpendPicklists, ...rest } = data;
+          const sync = rest as Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
+          return (
+            <Suspense
+              fallback={
+                <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />
+              }
+            >
+              <Await resolve={adSpendPicklists} errorElement={<DeferredError />}>
+                {(pick) => <MarketingAdSpendPage {...sync} {...pick} />}
+              </Await>
+            </Suspense>
+          );
+        }
+        return <MarketingAdSpendPage {...data} />;
+      }}
+    </CachedAwait>
   );
 }

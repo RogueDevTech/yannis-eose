@@ -661,8 +661,52 @@ function VoipCallPanelWithPolling({
 
 // ── Main Feature Component ───────────────────────────────────────
 
+/**
+ * Apply optimistic patches to the canonical order based on what's in flight on `fetcher`.
+ *
+ * The fetcher carries a single mutation at a time (status transition, CS assignment,
+ * callback schedule). While `fetcher.state === 'submitting' | 'loading'`, we read its
+ * `formData` and overlay the implied patch on top of the server copy so the badge,
+ * assignee, and callback fields flip *immediately* — the user doesn't wait for the
+ * loader revalidation.
+ *
+ * If the server rejects, the next render gets `fetcher.state === 'idle'` AND a `data`
+ * with `error` set: we fall back to the server copy, which renders the unchanged state
+ * just like a non-optimistic flow. Toast surfaces the error.
+ *
+ * Why we do this on a single record rather than via `useOptimisticListPatches`: that
+ * hook is for list rows (keyed by id). Here the unit is a single page-level record;
+ * a derived overlay computed inline is simpler and has zero dependencies.
+ */
+function applyOptimisticOrderPatch<T extends OrderDetail>(
+  serverOrder: T,
+  fetcher: ReturnType<typeof useFetcher>,
+): T {
+  if (fetcher.state === 'idle') return serverOrder;
+  const fd = fetcher.formData;
+  if (!fd) return serverOrder;
+  const intent = fd.get('intent');
+  if (typeof intent !== 'string') return serverOrder;
+
+  if (intent === 'transition') {
+    const newStatus = fd.get('newStatus');
+    if (typeof newStatus !== 'string' || !newStatus) return serverOrder;
+    return { ...serverOrder, status: newStatus };
+  }
+
+  if (intent === 'assignToCS') {
+    const newAssignee = fd.get('csAgentId');
+    if (typeof newAssignee !== 'string' || !newAssignee) return serverOrder;
+    // Auto-bump UNPROCESSED → CS_ASSIGNED to mirror the server transition that fires alongside.
+    const nextStatus = serverOrder.status === 'UNPROCESSED' ? 'CS_ASSIGNED' : serverOrder.status;
+    return { ...serverOrder, assignedCsId: newAssignee, status: nextStatus };
+  }
+
+  return serverOrder;
+}
+
 export function OrderDetailPage({
-  order,
+  order: serverOrder,
   latestCall,
   timeline,
   voipEnabled,
@@ -689,6 +733,25 @@ export function OrderDetailPage({
   const invoiceFetcher = useFetcher<{ ok: boolean; invoice: OrderInvoice | null; error?: string }>();
   const timelineFetcher = useFetcher<{ ok: boolean; timeline: TimelineEvent[]; error?: string }>();
   const revalidator = useRevalidator();
+
+  // Optimistic order: overlay in-flight transition / assignment / callback patches on top of
+  // the server copy. Every downstream `order.status`, `order.assignedCsId`, etc. reads the
+  // patched value, so the UI flips on click and snaps back if the server rejects.
+  const orderAfterFetcher = applyOptimisticOrderPatch(serverOrder, fetcher);
+  const order: OrderDetail = (() => {
+    if (scheduleFetcher.state !== 'idle' && scheduleFetcher.formData) {
+      const fd = scheduleFetcher.formData;
+      if (fd.get('intent') === 'scheduleCallback') {
+        const delayMinRaw = fd.get('delayMinutes');
+        const delayMin = typeof delayMinRaw === 'string' ? parseInt(delayMinRaw, 10) : NaN;
+        if (Number.isFinite(delayMin) && delayMin > 0) {
+          const callbackAt = new Date(Date.now() + delayMin * 60_000).toISOString();
+          return { ...orderAfterFetcher, callbackScheduledAt: callbackAt };
+        }
+      }
+    }
+    return orderAfterFetcher;
+  })();
 
   // Team Live View — broadcast CS agent state to cs-all room.
   const isCSAgent = userRole === 'CS_AGENT';

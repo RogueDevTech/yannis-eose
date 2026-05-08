@@ -1,6 +1,6 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { FinancePage } from '~/features/finance/FinancePage';
 import { FinanceOverviewLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
@@ -132,10 +132,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function FinanceRoute() {
   const { financeShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<FinanceOverviewLoadingShell filters={financeShell.filters} />}>
-      <Await resolve={pageData}>
-        {(data) => <FinancePage data={data} />}
-      </Await>
-    </Suspense>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<FinanceOverviewLoadingShell filters={financeShell.filters} />}
+    >
+      {(data) => <FinancePage data={data} />}
+    </CachedAwait>
   );
 }

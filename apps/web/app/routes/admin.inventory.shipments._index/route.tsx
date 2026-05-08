@@ -1,7 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, Link, useLoaderData } from '@remix-run/react';
+import { Link, useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -260,11 +260,9 @@ function InventoryShipmentsIndexContent(data: {
 export default function InventoryShipmentsIndexRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<ShipmentsListLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => <InventoryShipmentsIndexContent {...data} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<ShipmentsListLoadingShell />}>
+      {(data) => <InventoryShipmentsIndexContent {...data} />}
+    </CachedAwait>
   );
 }
 

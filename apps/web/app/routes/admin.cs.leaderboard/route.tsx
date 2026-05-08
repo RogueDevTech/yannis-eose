@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { CSLeaderboardPage } from '~/features/leaderboards/CSLeaderboardPage';
@@ -66,23 +66,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function CSLeaderboardRoute() {
   const { csLeaderboardShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense
-      fallback={
+    <CachedAwait resolve={pageData} fallback={
         <CSLeaderboardLoadingShell
           filters={csLeaderboardShell.filters}
           leaderboardPeriod={csLeaderboardShell.leaderboardPeriod}
         />
-      }
-    >
-      <Await resolve={pageData}>
-        {(data) => (
+      }>
+      {(data) => (
           <CSLeaderboardPage
             csLeaderboard={data.csLeaderboard}
             leaderboardPeriod={data.leaderboardPeriod}
             filters={data.filters}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

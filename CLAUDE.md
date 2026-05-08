@@ -205,6 +205,90 @@ The fix is ALWAYS to put `SET LOCAL` inside the same drizzle transaction as the 
 
 ---
 
+## Server caching + Postgres pool (locked)
+
+**Authoritative product write-up:** this section + cursor lockfile [.cursor/rules/server-cache-and-pool.mdc](.cursor/rules/server-cache-and-pool.mdc). Three layers protect API latency from network RTT to a remote Postgres: (1) a Redis read-through cache for static reference data, (2) a tuned `postgres-js` connection pool with eager warmup, (3) `*PageBundle` tRPC procedures that consolidate page-level fan-outs.
+
+### Read-through Redis cache
+
+Wrapped via `CacheService.getOrSet(key, ttlSeconds, factory)` ([apps/api/src/common/cache/cache.service.ts](apps/api/src/common/cache/cache.service.ts)). Every wrapped read has a matching `invalidateXxxCache()` helper that mutations call. Cache misses fall through to the factory; cache failures fail-open (warn + execute factory).
+
+**Kill-switch:** `READ_THROUGH_CACHE_ENABLED` (default `true`). When `false`, every `getOrSet` skips Redis and runs the factory — used for one-off benchmarking only. **Do NOT commit `READ_THROUGH_CACHE_ENABLED=false` to any deployable env file.** Setting it to `false` silently regresses simple reads from <50ms back to 1–9s under burst load (observed regression: `branches.list` 27ms → 6.84s, `auth/me` 100ms → 8.29s).
+
+**Currently cached endpoints + TTLs:**
+
+| Endpoint | TTL | Invalidation |
+|---|---|---|
+| `/auth/me` user bundle (role, perms, theme, font scale, onboarding) | 60s | every user / role / template / permissions write |
+| `branches.list` (per viewer) | 15 min | branch CRUD |
+| `roleTemplates.list` | Redis | role-template CRUD |
+| `voip.isEnabled` | 60s | `voip.setEnabled` |
+| `permissions.listCatalog` | 60s (in-memory module-level — immune to env flag) | none (boot-time only writes) |
+| `permissions.listTemplateBaselines` | Redis | role-template / catalog mutations |
+| `settings.getSystemSettings` | 60s | every system settings mutation |
+| `settings.getNotificationEmailConfig` | 5 min | `updateNotificationEmailConfig` |
+| `audit.actorFilterOptions` (org-wide vs branch-scoped) | 5 min | none (5min staleness acceptable) |
+| `users.getMyNotificationPreferences` (per-user) | 5 min | `updateMyNotificationPreferences` |
+| `dashboard.ceoOverview` + time series | 60s | none (60s freshness acceptable) |
+| `messaging.*`, `products.*`, `logistics.*`, `orders.*` (selective) | varies | matching mutations |
+
+**Wiring pattern** (do not deviate when adding a new wrapped endpoint):
+
+1. In the router, add `let xxxCacheService: CacheService | null = null;` + `export function setXxxCacheService(s: CacheService) { xxxCacheService = s; }`.
+2. Wire it in `trpc.module.ts::onModuleInit`: `setXxxCacheService(this.cacheService)`.
+3. Define `async function invalidateXxxCache(...)` next to the cache wrapper. Call it from every mutation that changes the cached data (in the same handler — no fire-and-forget for invalidation).
+4. The query procedure: build a stable `key`, pick a `TTL_SECONDS`, and wrap in `xxxCacheService.getOrSet(key, TTL_SECONDS, fetch)`. Always fall back to direct `fetch()` when the cache service isn't initialised (defensive — production should always have it).
+
+### Postgres pool ([apps/api/src/database/database.module.ts](apps/api/src/database/database.module.ts))
+
+Defaults locked after observed pathologies in dev/prod logs:
+
+| Setting | Value | Why locked |
+|---|---|---|
+| `max` | 30 (env override `PG_MAX_CONNECTIONS`) | At 20, dashboard burst (15+ concurrent HTTP × 4–7 internal queries) saturated the pool → 6–9s queue waits on `branches.list` and `auth/me` |
+| `idle_timeout` | 300s | At 10s, every "idle then click" paid a fresh TCP+TLS handshake (200–500ms to remote Cloud SQL) |
+| `max_lifetime` | 1800s | Defence in depth — rotates connections every 30 min so any drift self-heals |
+| `connect_timeout` | 30s | Cold-start DBs sometimes need >10s |
+| `application_name` | `yannis-api` | Surfaces in `pg_stat_activity` for debugging |
+| Eager warmup | `max` parallel `SELECT 1`s at module init | First user request lands on a fully warm pool — no TLS handshake tax in the user-visible critical path |
+
+**Multi-process deploys** (PM2 cluster, blue/green): set `PG_MAX_CONNECTIONS=10` per process so `processes × 10` stays under the DB's `max_connections` cap. Default of 30 is sized for single-process dev / single-replica prod. Cloud SQL default `max_connections` is ~100; never run a single instance higher than ~30% of that.
+
+**Boot log signal:** `[PgPool] warmed 30 connections in <ms>ms` — confirms warmup ran. Absence indicates the warmup branch was skipped (regression).
+
+### Page bundles (server-side fan-out, single round-trip)
+
+Twelve `*PageBundle` tRPC procedures replace what were 4–14 parallel `apiRequest` calls per Remix loader. Each bundle accepts the consolidated input, runs the constituent service calls in `Promise.all`, returns one payload. Net effect: 1 HTTP round-trip (with auth/middleware paid once) instead of N.
+
+**Bundles in place:**
+- Marketing: `teamPageBundle`, `adSpendPagePicklistsBundle`, `disbursementsPageBundle`, `overviewPageBundle`, `fundingPageBundle`, `ordersPageBundle`
+- Orders: `csTeamPageBundle`, `csOrdersPageBundle`, `tplDashboardBundle`, `tplOrdersPageBundle`
+- Inventory: `inventoryPageBundle` (TPL), `inventoryAdminPageBundle` (admin)
+- Finance: `overviewPageBundle`
+
+**Reading the timing logs** (HTTP request middleware, `apps/api/src/common/http-request-timing.ts`):
+- `total` = HTTP wall-clock (request → response)
+- `db` = cumulative time the request awaited postgres-js (per-request ALS store)
+- `db > total` on a bundle = parallel queries summing more than wall-clock = healthy parallelization
+- `db ≈ total` on a single endpoint = the query itself is slow (look for missing indexes — different problem class)
+- `db = 0ms` with sub-50ms `total` = Redis cache hit (the win)
+
+### Operational commands
+
+- Local benchmark with cache off: `READ_THROUGH_CACHE_ENABLED=false pnpm --filter @yannis/api dev` (one-off only — never commit).
+- Verify cached endpoints: load any admin page twice; second load should show `db: 0ms` on `branches.list`, `notifications.list`, `settings.getSystemSettings`, etc.
+- Verify pool warmup: tail API boot log for `[PgPool] warmed N connections`.
+
+### Do NOT
+
+- Do **NOT** flip `READ_THROUGH_CACHE_ENABLED=false` in any deployable env file. It is a perf-debug switch only.
+- Do **NOT** add a `getOrSet` wrapper without wiring the matching `invalidateXxxCache(...)` into every mutation that changes the cached data. Stale data is the #1 risk this architecture trades for latency; missing invalidation is how it bites.
+- Do **NOT** lower `idle_timeout` back to 10s, remove `max_lifetime`, or remove the boot-time eager warmup. Each was added to remove a specific observed pathology.
+- Do **NOT** revert a Remix loader from a `*PageBundle` call back to N parallel `apiRequest(...)` calls. The bundle is the canonical shape going forward; un-bundling is a regression.
+- Do **NOT** read `db: ≈ total` on a slow endpoint as "the pool is too small" — that pattern means the **query itself** is slow (missing index, expensive plan, etc.). The pool fix only helps when `db > total` (queue wait).
+
+---
+
 ## The Order Lifecycle (The Most Critical State Machine)
 
 This is the heartbeat of the entire system. Every module connects to this flow. Get this wrong and everything breaks.
@@ -982,6 +1066,7 @@ Independent of API latency, the **web app feels slow** when loaders or component
 - **Keep loader payloads tight** — return only fields the route needs. Do not pass giant nested graphs “for convenience”; add a narrow procedure or query shape. Large JSON over the wire + hydration cost shows up as jank even when the DB was fast.
 - **Paginate list UIs** — table routes should drive **`page` / `limit` / cursor** from **search params** and pass them to the API. Rendering an unbounded `.map()` over thousands of rows (or shipping that many in one loader) blocks the main thread and blows transfer size. Prefer **`<CompactTable />` + `<Pagination />`** (see UI table) with server-backed slices.
 - **Refetch discipline** — filter/sort/pagination changes should re-run the loader; use **`<TableLoadingOverlay />` + `useLoaderRefetchBusy()`** and **`NavProgressBar`** so users see progress without swapping the whole page for a blank spinner.
+- **Client-side loader cache (LinkedIn-style instant revisit)** — Read-mostly list pages opt in via [`<CachedAwait>`](apps/web/app/components/ui/cached-await.tsx) (replaces `<Suspense fallback>` + `<Await resolve>`) or [`useCachedLoaderData()`](apps/web/app/hooks/useCachedLoaderData.ts) (replaces `useLoaderData()` on non-deferred routes). Storage is a module-level `Map` in [apps/web/app/lib/loader-cache.ts](apps/web/app/lib/loader-cache.ts) — NOT React state — keyed by `pathname + search`, 5-minute TTL, LRU 30 entries. Cleared on `/auth` mount (logout) so user A's cached data never bleeds into user B's session. SWR contract: cache hit renders instantly, `useRevalidator().revalidate()` fires on mount so fresh data lands within ~300ms; same-page mutations naturally update the cache via Remix's auto-revalidation; cross-page mutations show stale briefly then refresh. **Opt in** for: list/index pages (orders, ad-spend, funding, leaderboards, payroll, etc.). **Do NOT opt in** for: live socket-driven pages (`/admin/cs/queue`, `/admin/marketing/overview`, `/admin/notifications`), detail pages with on-page mutations (`/admin/orders/$id`, every `*/$id` edit page), forms / wizards (`/admin/marketing/forms/$id/builder`, every `*/new`), real-time PWAs (`/rider/*`). When uncertain, default to NOT caching — a stale flash on a sensitive surface is worse than a fresh-loader-every-click. The currently-cached set lives at the call sites; grep `CachedAwait` to enumerate.
 
 Do NOT fix slow pages only by adding spinners — reduce serial loader chains, payload size, and unbounded lists first.
 
@@ -1032,6 +1117,11 @@ If a user belongs to multiple branches, the active branch is stored in their Red
 
 - Do NOT create **loader waterfalls** (serial `await` for independent fetches), return **oversized loader payloads** (“convenience” graphs the route doesn’t need), or ship **unbounded lists** without URL-driven pagination and a paged API — see **Remix / frontend data loading** under Code Quality Standards. Spinner-only fixes mask the problem.
 - Do NOT add a **global route-transition overlay** (`RouteLoader`, path-based skeleton flash, etc.) on top of dashboard/TPL/rider layouts — in-route **`defer` + `Suspense` + module loading shells** own first paint; **`NavProgressBar`** covers cross-route progress.
+- Do NOT wire a **live socket-driven page** ([`/admin/cs/queue`](apps/web/app/routes/admin.cs.queue/route.tsx), [`/admin/marketing/overview`](apps/web/app/routes/admin.marketing.overview/route.tsx), [`/admin/notifications`](apps/web/app/routes/admin.notifications/route.tsx), `/rider/*`), a **mutating detail page** (every `*/$id`), or a **form / wizard** (every `*/new`, every `*/edit`, every builder) into [`<CachedAwait>`](apps/web/app/components/ui/cached-await.tsx) / [`useCachedLoaderData()`](apps/web/app/hooks/useCachedLoaderData.ts). The client cache is for read-mostly list/index views — caching a live queue makes order counts lie until the next socket tick; caching a detail page shows the user a pre-mutation snapshot of what they just edited; caching a form retains stale dropdown options. Default to `<Suspense fallback>` + `<Await>` when uncertain. Cache spec + invalidation contract: [apps/web/app/lib/loader-cache.ts](apps/web/app/lib/loader-cache.ts) — module-level `Map`, 5-min TTL, LRU 30, cleared on `/auth` mount. Do NOT replace the in-memory `Map` with `localStorage` / `sessionStorage` — Pillar 2 (Lead Fortress) bans persisting any loader payload that may carry masked PII to disk-backed browser storage.
+- Do NOT commit `READ_THROUGH_CACHE_ENABLED=false` to any deployable env file. It is a one-off perf-debug switch — when set, every read-through cache wrapper in the codebase silently bypasses Redis and runs the factory against Postgres, regressing simple reads (`branches.list`, `auth/me`, `settings.getSystemSettings`, etc.) from <50ms back to 1–9s under burst load. See **Server caching + Postgres pool** above for the full list of impacted endpoints. Lockfile: [.cursor/rules/server-cache-and-pool.mdc](.cursor/rules/server-cache-and-pool.mdc).
+- Do NOT add a `CacheService.getOrSet(...)` wrapper without also wiring an `invalidateXxxCache(...)` helper into every mutation that changes the cached data. Stale data is the #1 risk the cache architecture accepts; missing invalidation is how it bites. Pattern lives in `branches.router.ts`, `settings.router.ts`, `users.router.ts`, `audit.router.ts` — copy it, don't invent a new one.
+- Do NOT regress the Postgres pool config in `apps/api/src/database/database.module.ts` (`max: 30`, `idle_timeout: 300`, `max_lifetime: 1800`, `application_name: 'yannis-api'`, eager `SELECT 1` warmup at module init). Each value was tuned to remove a specific observed pathology (saturation → 6–9s queue waits, 10s idle close → TLS re-handshake on every burst, cold pool → first-page-load tax). Lower or remove only with measured justification.
+- Do NOT revert a Remix loader from a `*PageBundle` tRPC call back to N parallel `apiRequest(...)` calls. The bundles in `marketing.router.ts`, `orders.router.ts`, `inventory.router.ts`, `finance.router.ts` consolidate page-level fan-outs into one HTTP round-trip — un-bundling is a regression. Add new bundles for new heavy pages following the same pattern.
 - Do NOT use localStorage or sessionStorage for anything security-sensitive. Sessions live in Redis
 - Do NOT expose raw **customer** phone numbers in any API response, log, or error message — ever. The Lead Fortress pillar applies to `orders.customer_phone`, `cart_submissions.phone`, and any other PII column tied to leads. **Staff** phone numbers (`users.phone`) are different: they are contact info for HR/admins/heads to reach their team. The mask helper in `apps/api/src/users/users.service.ts::resolveStaffPhone` returns the raw phone to authorized viewers (self, admin-class, HR, heads viewing their direct-report role; or anyone with `users.read` / `hr.read` permission) and the masked form to other authenticated users — do not blanket-mask `users.phone`.
 - Do NOT use auto-incrementing IDs — use UUIDv7

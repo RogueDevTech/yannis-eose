@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
 import { HRUsersListLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
@@ -97,10 +97,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function UsersRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<HRUsersListLoadingShell staffAccounts={false} />}>
-      <Await resolve={pageData}>
-        {(data) => <UsersListPage {...data} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<HRUsersListLoadingShell staffAccounts={false} />}>
+      {(data) => <UsersListPage {...data} />}
+    </CachedAwait>
   );
 }

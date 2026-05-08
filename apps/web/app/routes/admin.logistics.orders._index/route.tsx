@@ -1,7 +1,7 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import {
   apiRequest,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
@@ -353,10 +353,8 @@ export default function LogisticsOrdersRoute() {
   const { logisticsOrdersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
-    <Suspense fallback={<LogisticsOrdersLoadingShell filters={logisticsOrdersShell.filters} />}>
-      <Await resolve={pageData}>
-        {(data) => <LogisticsOrdersPage {...data} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<LogisticsOrdersLoadingShell filters={logisticsOrdersShell.filters} />}>
+      {(data) => <LogisticsOrdersPage {...data} />}
+    </CachedAwait>
   );
 }

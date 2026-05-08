@@ -1,6 +1,6 @@
 import { defer } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
 import { MarketingCrossFunnelPage } from '~/features/marketing/MarketingCrossFunnelPage';
@@ -111,10 +111,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function CrossFunnelRoute() {
   const { crossFunnelShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<MarketingCrossFunnelLoadingShell {...crossFunnelShell} />}>
-      <Await resolve={pageData}>
-        {(p) => <MarketingCrossFunnelPage list={p.list} secondary={p.secondary} filters={p.filters} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<MarketingCrossFunnelLoadingShell {...crossFunnelShell} />}>
+      {(p) => <MarketingCrossFunnelPage list={p.list} secondary={p.secondary} filters={p.filters} />}
+    </CachedAwait>
   );
 }

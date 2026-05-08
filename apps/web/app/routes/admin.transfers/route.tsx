@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { TransfersPage } from '~/features/transfers/TransfersPage';
 import type { TransfersStreamData } from '~/features/transfers/types';
 import { loadTransfersRouteData, transfersRouteAction } from '~/lib/admin-transfers-route.server';
@@ -17,10 +17,8 @@ export const action = transfersRouteAction;
 export default function TransfersRoute() {
   const { transfersShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<TransfersLoadingShell filters={transfersShell.filters} />}>
-      <Await resolve={pageData}>
-        {(data) => <TransfersPage {...(data as TransfersStreamData)} transfersPageVariant="stock" />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<TransfersLoadingShell filters={transfersShell.filters} />}>
+      {(data) => <TransfersPage {...(data as TransfersStreamData)} transfersPageVariant="stock" />}
+    </CachedAwait>
   );
 }

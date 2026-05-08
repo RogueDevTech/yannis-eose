@@ -1,7 +1,7 @@
 import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
@@ -214,7 +214,8 @@ export default function MarketingOrdersRoute() {
     canExport: ordersShell.canExport,
   };
   return (
-    <Suspense
+    <CachedAwait
+      resolve={listPromise}
       fallback={
         <MarketingOrdersPage
           {...sharedProps}
@@ -225,16 +226,14 @@ export default function MarketingOrdersRoute() {
         />
       }
     >
-      <Await resolve={listPromise}>
-        {(d) => (
-          <MarketingOrdersPage
-            {...sharedProps}
-            orders={d.orders}
-            total={d.total}
-            totalPages={d.totalPages}
-          />
-        )}
-      </Await>
-    </Suspense>
+      {(d) => (
+        <MarketingOrdersPage
+          {...sharedProps}
+          orders={d.orders}
+          total={d.total}
+          totalPages={d.totalPages}
+        />
+      )}
+    </CachedAwait>
   );
 }
