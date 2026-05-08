@@ -66,17 +66,24 @@ describe('createAdSpendLogFormSchema', () => {
 });
 
 describe('createAdSpendBatchSchema', () => {
-  const lineBase = {
+  // Batch payload now requires a top-level `campaignId` (one form per batch)
+  // and each line carries an `attributedOrderCount` for the manual split.
+  // Keep the fixture aligned with createAdSpendBatchObjectSchema.
+  const batchBase = {
+    spendDate: '2026-04-27',
     campaignId: '550e8400-e29b-41d4-a716-446655440001',
+  };
+  const lineBase = {
     productId: '550e8400-e29b-41d4-a716-446655440002',
     spendAmount: 100,
+    attributedOrderCount: 0,
     screenshotUrl: 'https://example.com/a.png',
     platform: 'OTHER' as const,
   };
 
   it('rejects OTHER without custom label on a line', () => {
     const r = createAdSpendBatchSchema.safeParse({
-      spendDate: '2026-04-27',
+      ...batchBase,
       lines: [{ ...lineBase }],
     });
     expect(r.success).toBe(false);
@@ -84,7 +91,7 @@ describe('createAdSpendBatchSchema', () => {
 
   it('accepts OTHER with platformCustomLabel', () => {
     const r = createAdSpendBatchSchema.safeParse({
-      spendDate: '2026-04-27',
+      ...batchBase,
       lines: [{ ...lineBase, platformCustomLabel: 'Taboola' }],
     });
     expect(r.success).toBe(true);
