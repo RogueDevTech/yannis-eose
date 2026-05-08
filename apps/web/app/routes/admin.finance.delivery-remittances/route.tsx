@@ -1,7 +1,7 @@
-import { Suspense } from 'react';
 import { json, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
@@ -281,9 +281,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminFinanceDeliveryRemittancesRoute() {
   const { remittancesShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<DeliveryRemittancesLoadingShell filters={remittancesShell.filters} />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<DeliveryRemittancesLoadingShell filters={remittancesShell.filters} />}>
+      {(data) => (
           <DeliveryRemittancesPage
             remittances={data.remittances}
             pagination={data.pagination}
@@ -299,7 +298,6 @@ export default function AdminFinanceDeliveryRemittancesRoute() {
             canMarkReceived={data.canMarkReceived}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

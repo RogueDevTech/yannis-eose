@@ -804,12 +804,26 @@ function DashboardLayoutInner({
 
   const navGroups = getNavGroupsForUser(user);
   const bottomNavItems = getBottomNavItemsForUser(user);
-  const allNavGroups = getNavGroupsForUser(user, { forMobile: true });
-  const allNavGroupsForModal: BottomNavGroup[] = allNavGroups.map((g) => ({
+
+  // The mobile "More" modal MUST mirror the desktop sidebar exactly — same groups, same items,
+  // same role/permission filtering. We derive it from the same `navGroups` the sidebar uses
+  // (instead of calling `getNavGroupsForUser` again with `forMobile: true`) so any future drift
+  // in that helper can't split desktop and mobile out of sync. Labels swap to `labelShort` here
+  // via a lookup against the source `navStructure`, since `navGroups` has already been label-resolved
+  // for desktop.
+  const navItemDefByHref = new Map(navStructure.flatMap((g) => g.items).map((item) => [item.href, item]));
+  const allNavGroupsForModal: BottomNavGroup[] = navGroups.map((g) => ({
     group: g.group,
-    items: g.items,
+    items: g.items.map((item) => {
+      const def = navItemDefByHref.get(item.href);
+      return {
+        label: def?.labelShort ?? item.label,
+        href: item.href,
+        icon: item.icon,
+      };
+    }),
   }));
-  const allNavItemsForModal: BottomNavItem[] = allNavGroups.flatMap((g) => g.items);
+  const allNavItemsForModal: BottomNavItem[] = allNavGroupsForModal.flatMap((g) => g.items);
   const barItems = bottomNavItems.slice(0, 4);
 
   // Show a global content loader only during real route transitions

@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { resolveMarketingDateFilters, buildLeaderboardInput } from '~/lib/marketing-pages.server';
@@ -134,9 +134,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function CSTeamRoute() {
   const { teamShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<CSTeamLoadingShell dateFilters={teamShell.dateFilters} />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<CSTeamLoadingShell dateFilters={teamShell.dateFilters} />}>
+      {(data) => (
           <CSTeamPage
             teamMembers={data.teamMembers}
             summary={data.summary}
@@ -145,7 +144,6 @@ export default function CSTeamRoute() {
             dateFilters={data.dateFilters}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

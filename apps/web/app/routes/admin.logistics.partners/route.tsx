@@ -1,7 +1,7 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { LogisticsPage } from '~/features/logistics/LogisticsPage';
@@ -156,10 +156,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function LogisticsPartnersRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<LogisticsPartnersLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => <LogisticsPage {...data} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<LogisticsPartnersLoadingShell />}>
+      {(data) => <LogisticsPage {...data} />}
+    </CachedAwait>
   );
 }

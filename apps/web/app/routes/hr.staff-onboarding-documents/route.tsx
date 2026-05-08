@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { listStaffOnboardingDocumentsSchema } from '@yannis/shared';
 import {
   apiRequest,
@@ -125,9 +125,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function StaffOnboardingDocumentsRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<StaffOnboardingDocsLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<StaffOnboardingDocsLoadingShell />}>
+      {(data) => (
           <StaffOnboardingDocumentsPage
             rows={data.rows}
             page={data.page}
@@ -141,7 +140,6 @@ export default function StaffOnboardingDocumentsRoute() {
             counts={data.counts}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

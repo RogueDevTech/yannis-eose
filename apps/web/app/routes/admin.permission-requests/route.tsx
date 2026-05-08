@@ -1,7 +1,7 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
@@ -195,9 +195,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function PermissionRequestsRoute() {
   const { permissionRequestsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<PermissionRequestsLoadingShell activeStatus={permissionRequestsShell.status} />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<PermissionRequestsLoadingShell activeStatus={permissionRequestsShell.status} />}>
+      {(data) => (
           <PermissionRequestsPage
             requests={data.requests}
             total={data.total}
@@ -212,7 +211,6 @@ export default function PermissionRequestsRoute() {
             activeStatus={data.status}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

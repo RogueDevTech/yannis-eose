@@ -1,7 +1,7 @@
 import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -408,10 +408,8 @@ export default function InventoryIndexRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['stock:updated', 'transfer:created']);
   return (
-    <Suspense fallback={<InventoryOverviewLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => <InventoryPage {...(data as InventoryStreamData)} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<InventoryOverviewLoadingShell />}>
+      {(data) => <InventoryPage {...(data as InventoryStreamData)} />}
+    </CachedAwait>
   );
 }

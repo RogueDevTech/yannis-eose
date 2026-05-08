@@ -1,0 +1,55 @@
+---
+description: Server perf — Redis read-through cache + Postgres pool config (locked)
+alwaysApply: true
+---
+
+# Server caching + Postgres pool (locked)
+
+## Non-negotiables
+
+- **`READ_THROUGH_CACHE_ENABLED` defaults to `true`.** Setting it to `false` in any environment other than a one-off benchmark silently disables every read-through cache wrapper in the codebase (`branches.list`, `roleTemplates.list`, `voip.isEnabled`, `permissions.listTemplateBaselines`, `settings.getSystemSettings`, `audit.actorFilterOptions`, `settings.getNotificationEmailConfig`, `users.getMyNotificationPreferences`, `/auth/me` user bundle, dashboard CEO overview, products, logistics, orders, messaging). When disabled: simple reads go from <50ms back to **1–9s** under burst load. **Do not commit `READ_THROUGH_CACHE_ENABLED=false` to any deployable env file.** The kill-switch is a perf-debug tool only.
+- **Postgres pool config in `apps/api/src/database/database.module.ts` is tuned, not arbitrary.** Defaults: `max: 30`, `idle_timeout: 300`, `max_lifetime: 1800`, `connect_timeout: 30`, `application_name: 'yannis-api'`, plus an eager warmup that fires `max` parallel `SELECT 1`s at module init so every slot pays its TCP+TLS handshake before the first user request. **Do not lower `idle_timeout` back to 10s** (was killing connections between dashboard clicks → 200–500ms TLS re-handshake on every burst). **Do not remove the warmup** (cold-pool first-page-load tax was visible to users).
+- **Every cached read MUST have an explicit invalidation hook** wired into every mutation that changes its underlying data. The pattern is `invalidateXxxCache()` helper functions defined alongside the cache wrapper, called from each mutation handler. Stale-data bugs caused by missing invalidation are the #1 risk this architecture trades safety for; the discipline is the price.
+- **Page-loader fan-outs are bundled.** Twelve `*PageBundle` tRPC procedures (in `marketing.router.ts`, `orders.router.ts`, `inventory.router.ts`, `finance.router.ts`) replace what used to be 4–14 parallel HTTP round-trips per page load. **Do not revert a Remix loader to firing the constituent calls separately** — the bundle reduces network/middleware/auth overhead and is the canonical shape going forward.
+
+## Canonical files (do not drift)
+
+| Area | Path |
+|---|---|
+| Cache service + kill-switch | `apps/api/src/common/cache/cache.service.ts` (`isReadThroughCacheEnabled`, `CacheService.getOrSet`) |
+| Postgres pool + warmup | `apps/api/src/database/database.module.ts` |
+| User bundle cache (`/auth/me`) | `apps/api/src/auth/user-bundle-cache.service.ts` |
+| Per-request DB timing proxy | `apps/api/src/database/postgres-db-timing-proxy.ts` |
+| HTTP timing logs (`total` / `db`) | `apps/api/src/common/http-request-timing.ts` |
+| Cache wrapper setters (router-level) | `apps/api/src/trpc/routers/{audit,branches,settings,users,products,orders,logistics,role-templates,permissions,messaging,dashboard}.router.ts` (each exports a `setXxxCacheService` setter wired in `trpc.module.ts::onModuleInit`) |
+| Page bundles | `marketing.{teamPageBundle,adSpendPagePicklistsBundle,disbursementsPageBundle,overviewPageBundle,fundingPageBundle}`, `orders.{csTeamPageBundle,csOrdersPageBundle,tplDashboardBundle,tplOrdersPageBundle}`, `inventory.{inventoryPageBundle,inventoryAdminPageBundle}`, `finance.overviewPageBundle` |
+
+## TTLs (default; override in code only with reason)
+
+| Endpoint | TTL | Invalidation trigger |
+|---|---|---|
+| `/auth/me` user bundle | 60s | every user / role / template / permissions write (see `user-bundle-cache.service.ts` invalidation list) |
+| `branches.list` | 15 min | branch create/update/archive |
+| `roleTemplates.list` | wrapped via Redis | role-template CRUD |
+| `voip.isEnabled` | 60s | `voip.setEnabled` |
+| `permissions.listCatalog` | 60s (in-memory, immune to env flag) | none — boot-time only writes |
+| `permissions.listTemplateBaselines` | wrapped via Redis | role-template / catalog mutations |
+| `settings.getSystemSettings` | 60s | every system settings mutation |
+| `settings.getNotificationEmailConfig` | 5 min | `updateNotificationEmailConfig` |
+| `audit.actorFilterOptions` | 5 min (scoped by org/branch) | none (5min staleness acceptable) |
+| `users.getMyNotificationPreferences` | 5 min (per-user) | `updateMyNotificationPreferences` |
+| `dashboard.ceoOverview` | 60s | none (60s freshness acceptable) |
+
+## Operational rules
+
+- **When wrapping a new cached endpoint:** add a `setXxxCacheService` setter, wire it in `trpc.module.ts::onModuleInit`, define an `invalidateXxxCache(...)` helper, and call it from every mutation that touches the cached data.
+- **Pool sizing for multi-process deploys:** set `PG_MAX_CONNECTIONS=10` per process (4 procs × 10 = 40, well under Cloud SQL's 100-connection default ceiling). Default of 30 is sized for single-process dev / single-replica prod.
+- **Reading the timing logs:** `db > total` on a bundle = parallel queries summing more than wall-clock = healthy. `db ≈ total` on a single endpoint = the query itself is slow (look for missing indexes). `db = 0ms` with sub-50ms `total` = Redis cache hit (the win).
+
+## Do NOT
+
+- Do **NOT** flip `READ_THROUGH_CACHE_ENABLED=false` in any deployable env. It is for one-off benchmarking only.
+- Do **NOT** await N notification creates / external sends on a mutation hot path; use the existing `enqueueCreate*` / `void notifications.create(...).then(...)` pattern (see CLAUDE.md → Push Notification Center).
+- Do **NOT** add a new `getOrSet` wrapper without also wiring the matching `invalidate` call in every mutation that changes the cached data — stale data caused by missing invalidation is the chief risk this architecture accepts.
+- Do **NOT** revert the postgres-js pool config (`max: 30`, `idle_timeout: 300`, `max_lifetime: 1800`, eager warmup) without measuring impact. The defaults were chosen to remove specific observed pathologies (saturation → 6–9s queue waits, idle close → TLS re-handshake on burst).
+- Do **NOT** un-bundle a Remix loader back into N parallel `apiRequest(...)` calls. The `*PageBundle` shape is the canonical pattern.

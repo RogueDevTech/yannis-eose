@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { MarketingLeaderboardPage } from '~/features/leaderboards/MarketingLeaderboardPage';
@@ -74,16 +74,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function MarketingLeaderboardRoute() {
   const { leaderboardShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense
-      fallback={
+    <CachedAwait resolve={pageData} fallback={
         <MarketingLeaderboardLoadingShell
           filters={leaderboardShell.filters}
           leaderboardPeriod={leaderboardShell.leaderboardPeriod}
         />
-      }
-    >
-      <Await resolve={pageData}>
-        {(data) => (
+      }>
+      {(data) => (
           <MarketingLeaderboardPage
             mediaBuyerLeaderboard={data.mediaBuyerLeaderboard}
             leaderboardPeriod={data.leaderboardPeriod}
@@ -91,7 +88,6 @@ export default function MarketingLeaderboardRoute() {
             profitabilityConfig={data.profitabilityConfig}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

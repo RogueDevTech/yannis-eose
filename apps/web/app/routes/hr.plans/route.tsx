@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { useLoaderData, Await } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import {
@@ -173,9 +173,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function PlansRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<CommissionPlansLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<CommissionPlansLoadingShell />}>
+      {(data) => (
           <CommissionPlansPage
             plans={data.plans}
             total={data.total}
@@ -183,7 +182,6 @@ export default function PlansRoute() {
             viewer={data.viewer}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

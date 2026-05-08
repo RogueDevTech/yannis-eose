@@ -112,6 +112,79 @@
     color-scheme: dark;
   }
 
+  /*
+   * Native date / time / datetime-local / month / week inputs in dark themes.
+   *
+   * Two browser quirks the default styles ignore:
+   *   1. The `::-webkit-calendar-picker-indicator` icon (the small calendar/clock
+   *      glyph at the right edge of the input) is dark-on-dark by default and
+   *      effectively invisible against our dark surfaces. `filter: invert(1)`
+   *      flips it to a light glyph; `opacity` gives a subtle hover affordance.
+   *   2. `color-scheme: dark` tells the browser to render the picker POPOVER
+   *      (the calendar / clock dropdown the user opens) in its native dark
+   *      style — without it, clicking the icon flashes a glaring white
+   *      calendar over the dark modal. Chrome / Safari / Edge all honour this;
+   *      Firefox renders an OS-themed popover so it's a no-op there.
+   *
+   * Scoped to the three dark themes (dark / dim / ink). Light themes (light /
+   * soft) keep the browser default (dark icon on light input — already legible).
+   */
+  [data-app-theme='dark'] input[type='date'],
+  [data-app-theme='dark'] input[type='time'],
+  [data-app-theme='dark'] input[type='datetime-local'],
+  [data-app-theme='dark'] input[type='month'],
+  [data-app-theme='dark'] input[type='week'],
+  [data-app-theme='dim'] input[type='date'],
+  [data-app-theme='dim'] input[type='time'],
+  [data-app-theme='dim'] input[type='datetime-local'],
+  [data-app-theme='dim'] input[type='month'],
+  [data-app-theme='dim'] input[type='week'],
+  [data-app-theme='ink'] input[type='date'],
+  [data-app-theme='ink'] input[type='time'],
+  [data-app-theme='ink'] input[type='datetime-local'],
+  [data-app-theme='ink'] input[type='month'],
+  [data-app-theme='ink'] input[type='week'] {
+    color-scheme: dark;
+  }
+
+  [data-app-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='time']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='month']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='week']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='date']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='time']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='month']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='week']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='date']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='time']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='month']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='week']::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.65;
+    cursor: pointer;
+  }
+
+  [data-app-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='time']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='month']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='week']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='date']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='time']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='month']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='week']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='date']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='time']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='month']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='week']::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     @apply w-1.5;

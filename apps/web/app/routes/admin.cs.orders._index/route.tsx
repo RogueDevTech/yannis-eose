@@ -1,7 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData, useRouteLoaderData } from '@remix-run/react';
+import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import {
   apiRequest,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
@@ -539,7 +539,8 @@ export default function CSOrdersRoute() {
   const userRole = parentData?.user?.role;
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
   return (
-    <Suspense
+    <CachedAwait
+      resolve={pageData}
       fallback={
         <CSOrdersLoadingShell
           filters={csOrdersShell.filters!}
@@ -549,16 +550,14 @@ export default function CSOrdersRoute() {
         />
       }
     >
-      <Await resolve={pageData}>
-        {(d) => (
-          <OrdersListPage
-            {...d}
-            statusCounts={{}}
-            userRole={userRole}
-            liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
-          />
-        )}
-      </Await>
-    </Suspense>
+      {(d) => (
+        <OrdersListPage
+          {...d}
+          statusCounts={{}}
+          userRole={userRole}
+          liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
+        />
+      )}
+    </CachedAwait>
   );
 }

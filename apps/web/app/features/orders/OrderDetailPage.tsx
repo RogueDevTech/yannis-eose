@@ -661,8 +661,52 @@ function VoipCallPanelWithPolling({
 
 // ── Main Feature Component ───────────────────────────────────────
 
+/**
+ * Apply optimistic patches to the canonical order based on what's in flight on `fetcher`.
+ *
+ * The fetcher carries a single mutation at a time (status transition, CS assignment,
+ * callback schedule). While `fetcher.state === 'submitting' | 'loading'`, we read its
+ * `formData` and overlay the implied patch on top of the server copy so the badge,
+ * assignee, and callback fields flip *immediately* — the user doesn't wait for the
+ * loader revalidation.
+ *
+ * If the server rejects, the next render gets `fetcher.state === 'idle'` AND a `data`
+ * with `error` set: we fall back to the server copy, which renders the unchanged state
+ * just like a non-optimistic flow. Toast surfaces the error.
+ *
+ * Why we do this on a single record rather than via `useOptimisticListPatches`: that
+ * hook is for list rows (keyed by id). Here the unit is a single page-level record;
+ * a derived overlay computed inline is simpler and has zero dependencies.
+ */
+function applyOptimisticOrderPatch<T extends OrderDetail>(
+  serverOrder: T,
+  fetcher: ReturnType<typeof useFetcher>,
+): T {
+  if (fetcher.state === 'idle') return serverOrder;
+  const fd = fetcher.formData;
+  if (!fd) return serverOrder;
+  const intent = fd.get('intent');
+  if (typeof intent !== 'string') return serverOrder;
+
+  if (intent === 'transition') {
+    const newStatus = fd.get('newStatus');
+    if (typeof newStatus !== 'string' || !newStatus) return serverOrder;
+    return { ...serverOrder, status: newStatus };
+  }
+
+  if (intent === 'assignToCS') {
+    const newAssignee = fd.get('csAgentId');
+    if (typeof newAssignee !== 'string' || !newAssignee) return serverOrder;
+    // Auto-bump UNPROCESSED → CS_ASSIGNED to mirror the server transition that fires alongside.
+    const nextStatus = serverOrder.status === 'UNPROCESSED' ? 'CS_ASSIGNED' : serverOrder.status;
+    return { ...serverOrder, assignedCsId: newAssignee, status: nextStatus };
+  }
+
+  return serverOrder;
+}
+
 export function OrderDetailPage({
-  order,
+  order: serverOrder,
   latestCall,
   timeline,
   voipEnabled,
@@ -689,6 +733,25 @@ export function OrderDetailPage({
   const invoiceFetcher = useFetcher<{ ok: boolean; invoice: OrderInvoice | null; error?: string }>();
   const timelineFetcher = useFetcher<{ ok: boolean; timeline: TimelineEvent[]; error?: string }>();
   const revalidator = useRevalidator();
+
+  // Optimistic order: overlay in-flight transition / assignment / callback patches on top of
+  // the server copy. Every downstream `order.status`, `order.assignedCsId`, etc. reads the
+  // patched value, so the UI flips on click and snaps back if the server rejects.
+  const orderAfterFetcher = applyOptimisticOrderPatch(serverOrder, fetcher);
+  const order: OrderDetail = (() => {
+    if (scheduleFetcher.state !== 'idle' && scheduleFetcher.formData) {
+      const fd = scheduleFetcher.formData;
+      if (fd.get('intent') === 'scheduleCallback') {
+        const delayMinRaw = fd.get('delayMinutes');
+        const delayMin = typeof delayMinRaw === 'string' ? parseInt(delayMinRaw, 10) : NaN;
+        if (Number.isFinite(delayMin) && delayMin > 0) {
+          const callbackAt = new Date(Date.now() + delayMin * 60_000).toISOString();
+          return { ...orderAfterFetcher, callbackScheduledAt: callbackAt };
+        }
+      }
+    }
+    return orderAfterFetcher;
+  })();
 
   // Team Live View — broadcast CS agent state to cs-all room.
   const isCSAgent = userRole === 'CS_AGENT';
@@ -1209,10 +1272,15 @@ export function OrderDetailPage({
 
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left column */}
-          <div className="lg:col-span-2 space-y-4">
+          {/* Left column — `contents` collapses this wrapper on mobile so the
+              cards inside become direct children of the outer grid; combined
+              with `order-N` on individual cards, that lets us mix Order
+              Actions (which lives in the right column source-wise) into the
+              mobile flow without duplicating markup. `lg:block` restores the
+              wrapper at desktop so the original two-column layout is intact. */}
+          <div className="contents lg:block lg:col-span-2 lg:space-y-4">
             {/* Status Timeline */}
-            <div className="card overflow-hidden">
+            <div className="card overflow-hidden order-[-2] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-4">Order Progress</h2>
               <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
                 <div className="flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:grid-cols-5 lg:gap-x-3 lg:gap-y-4">
@@ -1498,8 +1566,10 @@ export function OrderDetailPage({
                   );
             })()}
 
-            {/* Order activity — lifecycle timeline */}
-            <div className="card">
+            {/* Order activity — lifecycle timeline. On mobile this lands LAST
+                (`order-[99]`) so the long, scroll-heavy timeline doesn't bury
+                action affordances above. Restored to source order at lg+. */}
+            <div className="card order-[99] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-1">Order Activity</h2>
               <p className="text-sm text-app-fg-muted mb-3">
                 Every step taken on this order, with who did it and when.
@@ -1584,14 +1654,15 @@ export function OrderDetailPage({
             )}
           </div>
 
-          {/* Right column */}
-          <div className="space-y-4">
+          {/* Right column — see left column note above. `contents` on mobile
+              lets `order-N` reorder cards across columns without duplicating. */}
+          <div className="contents lg:block lg:space-y-4">
             {/* Order Actions — CS / Head of CS only, role-based.
                 CS still owns Adjust/Call/Delete after CS_ENGAGED while goods are pre-delivery so
                 they can manage upsells, delivery-coordination calls, and cancellations.
                 Media Buyers use this page read-only (campaign performance); never show CS actions. */}
             {canEditOrder && userRole !== 'MEDIA_BUYER' && isCSOrHoS && orderAllowsLineItemEdits && (
-              <div className="card">
+              <div className="card order-[-1] lg:order-none">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
                     other than the Assign closer dropdown are suppressed. This forces the

@@ -1,7 +1,7 @@
-import { Suspense } from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import {
   apiRequest,
   getCurrentUser,
@@ -166,9 +166,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function WarehousesRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<WarehousesListLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<WarehousesListLoadingShell />}>
+      {(data) => (
           <WarehousesPage
             warehouses={data.warehouses}
             totalWarehouses={data.totalWarehouses}
@@ -180,7 +179,6 @@ export default function WarehousesRoute() {
             overview={data.overview}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

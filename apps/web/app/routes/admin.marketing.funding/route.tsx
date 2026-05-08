@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
@@ -355,10 +355,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function MarketingFundingRoute() {
   const { fundingShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<MarketingFundingLoadingShell {...fundingShell} />}>
-      <Await resolve={pageData}>
-        {(data) => <MarketingFundingPage {...data} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<MarketingFundingLoadingShell {...fundingShell} />}>
+      {(data) => <MarketingFundingPage {...data} />}
+    </CachedAwait>
   );
 }

@@ -1,7 +1,7 @@
-import { Suspense } from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, Await, type ShouldRevalidateFunction } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import {
   apiRequest,
   getCurrentUser,
@@ -227,9 +227,8 @@ function extractError(res: { data: unknown }, fallback: string): string {
 export default function HRRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<MonthlyPayrollsLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<MonthlyPayrollsLoadingShell />}>
+      {(data) => (
           <HRPage
             adjustments={data.adjustments}
             users={data.users}
@@ -239,7 +238,6 @@ export default function HRRoute() {
             initialBatchId={data.initialBatchId}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

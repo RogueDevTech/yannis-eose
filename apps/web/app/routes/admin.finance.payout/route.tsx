@@ -1,6 +1,6 @@
-import { Suspense } from 'react';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { FinancePayoutPage, type BatchDetail } from '~/features/finance/FinancePayoutPage';
 import { FinancePayoutLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
@@ -55,16 +55,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function AdminFinancePayoutRoute() {
   const { payoutShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<FinancePayoutLoadingShell status={payoutShell.status} />}>
-      <Await resolve={pageData}>
-        {(data) => (
+    <CachedAwait resolve={pageData} fallback={<FinancePayoutLoadingShell status={payoutShell.status} />}>
+      {(data) => (
           <FinancePayoutPage
             batches={data.batches}
             selectedBatch={data.selectedBatch}
             status={data.status as '' | PayrollBatchStatus}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

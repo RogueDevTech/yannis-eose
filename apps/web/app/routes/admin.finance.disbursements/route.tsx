@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import type { ShouldRevalidateFunctionArgs } from '@remix-run/react';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
@@ -314,10 +314,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function DisbursementsRoute() {
   const { disbursementsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<FinanceDisbursementsLoadingShell filters={disbursementsShell.filters} />}>
-      <Await resolve={pageData}>
-        {(data) => <DisbursementsPage {...(data as DisbursementsPageData)} />}
-      </Await>
-    </Suspense>
+    <CachedAwait resolve={pageData} fallback={<FinanceDisbursementsLoadingShell filters={disbursementsShell.filters} />}>
+      {(data) => <DisbursementsPage {...(data as DisbursementsPageData)} />}
+    </CachedAwait>
   );
 }

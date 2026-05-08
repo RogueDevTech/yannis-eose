@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { UserAwareThrottlerGuard } from './common/guards/user-throttler.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { FinanceFieldsInterceptor } from './common/interceptors/finance-fields.interceptor';
 import { RequestTimingModule } from './common/request-timing.module';
@@ -32,8 +33,14 @@ import { OnboardingModule } from './onboarding/onboarding.module';
   imports: [
     RequestTimingModule,
     ScheduleModule.forRoot(),
-    // Rate limiting — 100 requests per 60 seconds per IP
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    // Rate limiting — 200 requests per 60 seconds, bucketed per **user session**
+    // (falls back to per-IP for unauthenticated requests). See
+    // `UserAwareThrottlerGuard` for the architectural rationale: in our SSR
+    // setup every authenticated request reaches the API from the Remix server's
+    // single IP, so per-IP throttling effectively starved one bucket across all
+    // users at once. Per-user lets each session enjoy the full budget while
+    // still capping abuse / runaway loops.
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 200 }]),
     DatabaseModule, AuthModule, TrpcModule, EventsModule,
     OrdersModule, UsersModule, ProductsModule, InventoryModule,
     LogisticsModule, MarketingModule, FinanceModule, HrModule,
@@ -53,10 +60,13 @@ import { OnboardingModule } from './onboarding/onboarding.module';
       provide: APP_GUARD,
       useClass: RolesGuard,
     },
-    // Global ThrottlerGuard — enforces rate limiting (100 req/60s per IP).
+    // Global rate-limit guard — keys by `yannis_session` cookie when present
+    // (per-user budget) and falls back to client IP for unauthenticated routes
+    // (login, forgot-password). See `UserAwareThrottlerGuard` for the rationale
+    // — per-IP buckets fan-in starve under SSR.
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: UserAwareThrottlerGuard,
     },
     // Global AuditInterceptor — injects actor ID into Postgres
     // session for every mutating request.
