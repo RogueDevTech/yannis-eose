@@ -7,7 +7,6 @@ import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOrdersPage, type MarketingOrdersSecondaryPayload } from '~/features/marketing/MarketingOrdersPage';
-import { MarketingOrdersLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { Order } from '~/features/orders/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import type { ExportModalPicklists } from '~/components/ui/export-modal';
@@ -102,97 +101,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     isMediaBuyer,
     showMediaBuyerColumn,
     canExport,
+    page,
+    statusFilter: status,
+    searchFilter: search,
   };
 
-  const pageData = (async () => {
-    const listPromise = apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, {
+  // Defer the orders list — page chrome renders immediately, table swaps from
+  // skeleton rows to real ones when this promise resolves.
+  const listPromise = (async () => {
+    const res = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, {
       method: 'GET',
       cookie,
     });
-
-    const secondaryPromise = (async (): Promise<MarketingOrdersSecondaryPayload> => {
-      try {
-        const [
-          countsRes,
-          metricsRes,
-          trendRes,
-          buyersRes,
-          productsRes,
-          campaignsRes,
-        ] = await Promise.all([
-          apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
-          apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
-          apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputStr}`, { method: 'GET', cookie }),
-          loadMarketingExportPicklists
-            ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
-            : Promise.resolve(null),
-          // Always load products + campaigns — Media Buyers need them for the
-          // Product / Form filter dropdowns even without export access.
-          apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie }),
-          apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${campaignsInputStr}`, { method: 'GET', cookie }),
-        ]);
-
-        const countsData = countsRes.ok
-          ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-          : {};
-
-        const metricsData = metricsRes.ok
-          ? (metricsRes.data as { result?: { data?: { cpa: number; totalSpend: number } } })?.result?.data
-          : null;
-
-        const dailyCounts = trendRes.ok
-          ? ((trendRes.data as {
-              result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
-            })?.result?.data ?? [])
-          : [];
-
-        // Pull products + campaigns out for the always-on Product / Form filter dropdowns.
-        const productsPayload = productsRes?.ok
-          ? (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data
-          : null;
-        const campaignsPayload = campaignsRes?.ok
-          ? (campaignsRes.data as { result?: { data?: { campaigns: Array<{ id: string; name: string }> } } })?.result?.data
-          : null;
-        const productsForFilter = (productsPayload?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
-        const campaignsForFilter = (campaignsPayload?.campaigns ?? []).map((c) => ({ id: c.id, name: c.name }));
-
-        let marketingExportPicklists: Partial<ExportModalPicklists> | undefined;
-        if (loadMarketingExportPicklists && buyersRes?.ok && productsRes?.ok && campaignsRes?.ok) {
-          const usersPayload = (buyersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data;
-          marketingExportPicklists = {
-            mediaBuyers: (usersPayload?.users ?? []).map((u) => ({ id: u.id, name: u.name })),
-            products: productsForFilter,
-            campaigns: campaignsForFilter,
-          };
-        }
-        const mediaBuyersForFilter = marketingExportPicklists?.mediaBuyers ?? [];
-
-        return {
-          statusCounts: countsData,
-          cpa: metricsData?.cpa ?? null,
-          totalAdSpend: metricsData?.totalSpend ?? null,
-          dailyCounts,
-          marketingExportPicklists,
-          mediaBuyersForFilter,
-          productsForFilter,
-          campaignsForFilter,
-        };
-      } catch {
-        return {
-          statusCounts: {},
-          cpa: null,
-          totalAdSpend: null,
-          dailyCounts: [],
-          marketingExportPicklists: undefined,
-          mediaBuyersForFilter: [],
-          productsForFilter: [],
-          campaignsForFilter: [],
-        };
-      }
-    })();
-
-    const [res, secondaryPayload] = await Promise.all([listPromise, secondaryPromise]);
-
     const trpcData = res.ok
       ? (res.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
       : null;
@@ -205,21 +125,95 @@ export async function loader({ request }: LoaderFunctionArgs) {
       customerPhoneDisplay: '',
     }));
 
-    return {
-      orders,
-      total,
-      totalPages,
-      page,
-      limit: ORDERS_PER_PAGE,
-      statusFilter: status,
-      searchFilter: search,
-      secondary: Promise.resolve(secondaryPayload),
-    };
+    return { orders, total, totalPages };
+  })();
+
+  // Secondary streams independently — counts, CPA, picklists for filters.
+  const secondaryPromise = (async (): Promise<MarketingOrdersSecondaryPayload> => {
+    try {
+      const [
+        countsRes,
+        metricsRes,
+        trendRes,
+        buyersRes,
+        productsRes,
+        campaignsRes,
+      ] = await Promise.all([
+        apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputStr}`, { method: 'GET', cookie }),
+        loadMarketingExportPicklists
+          ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
+          : Promise.resolve(null),
+        // Always load products + campaigns — Media Buyers need them for the
+        // Product / Form filter dropdowns even without export access.
+        apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie }),
+        apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${campaignsInputStr}`, { method: 'GET', cookie }),
+      ]);
+
+      const countsData = countsRes.ok
+        ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
+        : {};
+
+      const metricsData = metricsRes.ok
+        ? (metricsRes.data as { result?: { data?: { cpa: number; totalSpend: number } } })?.result?.data
+        : null;
+
+      const dailyCounts = trendRes.ok
+        ? ((trendRes.data as {
+            result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
+          })?.result?.data ?? [])
+        : [];
+
+      // Pull products + campaigns out for the always-on Product / Form filter dropdowns.
+      const productsPayload = productsRes?.ok
+        ? (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data
+        : null;
+      const campaignsPayload = campaignsRes?.ok
+        ? (campaignsRes.data as { result?: { data?: { campaigns: Array<{ id: string; name: string }> } } })?.result?.data
+        : null;
+      const productsForFilter = (productsPayload?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
+      const campaignsForFilter = (campaignsPayload?.campaigns ?? []).map((c) => ({ id: c.id, name: c.name }));
+
+      let marketingExportPicklists: Partial<ExportModalPicklists> | undefined;
+      if (loadMarketingExportPicklists && buyersRes?.ok && productsRes?.ok && campaignsRes?.ok) {
+        const usersPayload = (buyersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data;
+        marketingExportPicklists = {
+          mediaBuyers: (usersPayload?.users ?? []).map((u) => ({ id: u.id, name: u.name })),
+          products: productsForFilter,
+          campaigns: campaignsForFilter,
+        };
+      }
+      const mediaBuyersForFilter = marketingExportPicklists?.mediaBuyers ?? [];
+
+      return {
+        statusCounts: countsData,
+        cpa: metricsData?.cpa ?? null,
+        totalAdSpend: metricsData?.totalSpend ?? null,
+        dailyCounts,
+        marketingExportPicklists,
+        mediaBuyersForFilter,
+        productsForFilter,
+        campaignsForFilter,
+      };
+    } catch {
+      return {
+        statusCounts: {},
+        cpa: null,
+        totalAdSpend: null,
+        dailyCounts: [],
+        marketingExportPicklists: undefined,
+        mediaBuyersForFilter: [],
+        productsForFilter: [],
+        campaignsForFilter: [],
+      };
+    }
   })();
 
   return defer({
     ordersShell,
-    pageData,
+    listPromise,
+    secondaryPromise,
   });
 }
 
@@ -230,35 +224,39 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function MarketingOrdersRoute() {
-  const { ordersShell, pageData } = useLoaderData<typeof loader>();
+  const { ordersShell, listPromise, secondaryPromise } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
+  const sharedProps = {
+    page: ordersShell.page,
+    limit: ORDERS_PER_PAGE,
+    secondary: secondaryPromise,
+    statusFilter: ordersShell.statusFilter,
+    searchFilter: ordersShell.searchFilter,
+    isMediaBuyer: ordersShell.isMediaBuyer,
+    showMediaBuyerColumn: ordersShell.showMediaBuyerColumn,
+    filters: ordersShell.filters,
+    liveEvents: [...MARKETING_ORDERS_LIVE_EVENTS],
+    canExport: ordersShell.canExport,
+  };
   return (
     <Suspense
       fallback={
-        <MarketingOrdersLoadingShell
-          filters={ordersShell.filters}
-          isMediaBuyer={ordersShell.isMediaBuyer}
-          liveEvents={[...MARKETING_ORDERS_LIVE_EVENTS]}
-          showMediaBuyerColumn={ordersShell.showMediaBuyerColumn}
+        <MarketingOrdersPage
+          {...sharedProps}
+          orders={[]}
+          total={0}
+          totalPages={0}
+          deferredLoading
         />
       }
     >
-      <Await resolve={pageData}>
+      <Await resolve={listPromise}>
         {(d) => (
           <MarketingOrdersPage
+            {...sharedProps}
             orders={d.orders}
             total={d.total}
             totalPages={d.totalPages}
-            page={d.page}
-            limit={d.limit}
-            secondary={d.secondary}
-            statusFilter={d.statusFilter}
-            searchFilter={d.searchFilter}
-            isMediaBuyer={ordersShell.isMediaBuyer}
-            showMediaBuyerColumn={ordersShell.showMediaBuyerColumn}
-            filters={ordersShell.filters}
-            liveEvents={[...MARKETING_ORDERS_LIVE_EVENTS]}
-            canExport={ordersShell.canExport}
           />
         )}
       </Await>
