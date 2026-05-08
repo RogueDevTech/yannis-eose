@@ -39,14 +39,16 @@ export function setPayrollBatchService(service: PayrollBatchService) {
   payrollBatchServiceInstance = service;
 }
 
-function getHrService(): HrService {
+/** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
+export function getHrService(): HrService {
   if (!hrServiceInstance) {
     throw new Error('HrService not initialized. Call setHrService() first.');
   }
   return hrServiceInstance;
 }
 
-function getPayrollBatchService(): PayrollBatchService {
+/** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
+export function getPayrollBatchService(): PayrollBatchService {
   if (!payrollBatchServiceInstance) {
     throw new Error('PayrollBatchService not initialized. Call setPayrollBatchService() first.');
   }

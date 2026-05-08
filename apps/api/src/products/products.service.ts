@@ -370,21 +370,27 @@ export class ProductsService {
 
     const total = totalRows[0]?.count ?? 0;
 
-    // Aggregate available stock (sum across all locations) for the listed products in one query.
+    // Per-row enrichment: active offer templates and aggregate available stock. Both look
+    // up by `productId IN (...)` on different tables (`offer_templates` and
+    // `inventory_levels`) and have no dependency on each other, so we run them in parallel
+    // rather than sequentially. On a remote DB this saves a full RTT (~120 ms) per call —
+    // the products list endpoint runs on every dropdown / catalog page open.
     const productIds = rows.map((r) => r.id);
-    const templateMap = await this.loadActiveOfferTemplatesByProductIds(productIds);
+    const [templateMap, stockRows] = await Promise.all([
+      this.loadActiveOfferTemplatesByProductIds(productIds),
+      productIds.length > 0
+        ? this.db
+            .select({
+              productId: schema.inventoryLevels.productId,
+              totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::int`,
+            })
+            .from(schema.inventoryLevels)
+            .where(inArray(schema.inventoryLevels.productId, productIds))
+            .groupBy(schema.inventoryLevels.productId)
+        : Promise.resolve([] as Array<{ productId: string; totalStock: number }>),
+    ]);
     const stockMap = new Map<string, number>();
-    if (productIds.length > 0) {
-      const stockRows = await this.db
-        .select({
-          productId: schema.inventoryLevels.productId,
-          totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)::int`,
-        })
-        .from(schema.inventoryLevels)
-        .where(inArray(schema.inventoryLevels.productId, productIds))
-        .groupBy(schema.inventoryLevels.productId);
-      for (const s of stockRows) stockMap.set(s.productId, Number(s.totalStock) || 0);
-    }
+    for (const s of stockRows) stockMap.set(s.productId, Number(s.totalStock) || 0);
 
     const products = rows.map((r) => ({
       id: r.id,

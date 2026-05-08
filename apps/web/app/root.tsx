@@ -24,7 +24,11 @@ import stylesheet from '~/tailwind.css?url';
 import { getThemeBootScript } from '~/lib/theme';
 import { getFontScaleBootScript } from '~/lib/font-scale';
 import { useScrollToTopOnRouteChange } from '~/hooks/useScrollToTopOnRouteChange';
-import { isNetworkErrorLike, NETWORK_ERROR_MESSAGE, normalizeRouteErrorData } from '~/lib/network-error';
+import {
+  getNetworkErrorCopy,
+  isNetworkErrorLike,
+  normalizeRouteErrorData,
+} from '~/lib/network-error';
 
 declare global {
   interface Window {
@@ -291,15 +295,22 @@ export function ErrorBoundary() {
   const is401 = status === 401;
   const errorPayload = isResponse ? normalizeRouteErrorData(error.data) : error;
   const isNetworkIssue = !is404 && !is401 && isNetworkErrorLike(errorPayload, status);
+  const networkCopy = isNetworkIssue ? getNetworkErrorCopy(errorPayload, status) : null;
 
-  const title = is404 ? 'Page Not Found' : is401 ? 'Session Expired' : isNetworkIssue ? NETWORK_ERROR_MESSAGE.title : 'Something Went Wrong';
+  const title = is404
+    ? 'Page Not Found'
+    : is401
+      ? 'Session Expired'
+      : networkCopy
+        ? networkCopy.title
+        : 'Something Went Wrong';
 
   const description = is404
     ? "The page you're looking for doesn't exist or has been moved."
     : is401
       ? 'Your session has expired. Please sign in again.'
-      : isNetworkIssue
-        ? NETWORK_ERROR_MESSAGE.description
+      : networkCopy
+        ? networkCopy.description
         : 'An unexpected error occurred. Please try refreshing the page.';
 
   return (

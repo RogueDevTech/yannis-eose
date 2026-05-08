@@ -221,9 +221,25 @@ export class FinanceService {
     const offset = (input.page - 1) * input.limit;
 
     const [invoices, totalRows] = await Promise.all([
-      this.db.select().from(schema.invoices).where(whereClause)
+      this.db
+        .select({
+          id: schema.invoices.id,
+          referenceNumber: schema.invoices.referenceNumber,
+          orderId: schema.invoices.orderId,
+          totalAmount: schema.invoices.totalAmount,
+          taxRate: schema.invoices.taxRate,
+          status: schema.invoices.status,
+          dueDate: schema.invoices.dueDate,
+          createdAt: schema.invoices.createdAt,
+          validFrom: schema.invoices.validFrom,
+          validTo: schema.invoices.validTo,
+          modifiedBy: schema.invoices.modifiedBy,
+        })
+        .from(schema.invoices)
+        .where(whereClause)
         .orderBy(desc(schema.invoices.createdAt))
-        .limit(input.limit).offset(offset),
+        .limit(input.limit)
+        .offset(offset),
       this.db.select({ count: count() }).from(schema.invoices).where(whereClause),
     ]);
 

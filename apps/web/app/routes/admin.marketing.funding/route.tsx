@@ -18,11 +18,6 @@ import {
   parseFunding,
   parseFundingDirectionSummary,
   parseFundingRequestsPage,
-  parseFundingRequestStatusCounts,
-  parseFundingStatusCounts,
-  parseUsers,
-  parseBalancesList,
-  parseFundingBalance,
   toDistributingFundingEntries,
   resolveMarketingDateFilters,
   runMarketingFundingAction,
@@ -100,235 +95,92 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const searchRaw = url.searchParams.get('search')?.trim();
   const searchFilter = searchRaw && searchRaw.length > 0 ? searchRaw : undefined;
 
-  // ── Build per-slice query inputs ────────────────────────
-  const dateRange = {
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
+  // ── Single bundled call — replaces 14 parallel HTTP round-trips ────
+  // The `marketing.fundingPageBundle` procedure runs the same conditional
+  // fetch logic (per section, entry type, status) server-side via Promise.all.
+  const bundleInput = encodeURIComponent(
+    JSON.stringify({
+      section: activeSection,
+      entryType: entryTypeFilter,
+      page,
+      limit: PER_PAGE,
+      mergedFetchLimit: MERGED_FETCH_LIMIT,
+      ...(startDate && { startDate }),
+      ...(endDate && { endDate }),
+      ...(transferStatusFilter && { status: transferStatusFilter }),
+      ...(requestStatusFilterUnified && { requestStatus: requestStatusFilterUnified }),
+      ...(searchFilter && { search: searchFilter }),
+    }),
+  );
+  const bundleP = apiRequest<unknown>(
+    `/trpc/marketing.fundingPageBundle?input=${bundleInput}`,
+    { method: 'GET', cookie },
+  );
+
+  const pageData = (async (): Promise<MarketingFundingLoaderData> => {
+  type BundleData = {
+    directionSummary: unknown;
+    users: Array<{ id: string; name: string; email: string; role: string }>;
+    balancesList: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }> | null;
+    fundingBalance: { totalReceived: string; totalSpend: string; balance: string } | null;
+    branches: Array<{ id: string; name: string }>;
+    fundingRequestRecipients: Array<{
+      id: string;
+      name: string;
+      role: string;
+      isFinance: boolean;
+      isPreferred: boolean;
+      branchId: string | null;
+    }>;
+    incomingCounts: { SENT: number; COMPLETED: number; DISPUTED: number; ALL: number };
+    myRequestsCounts: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number };
+    outgoingCounts: { SENT: number; COMPLETED: number; DISPUTED: number; ALL: number } | null;
+    mbRequestsCounts: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number } | null;
+    receivedTransfers: { records: unknown[]; pagination: { total: number; page: number; limit: number } } | null;
+    receivedRequests: { records: unknown[]; pagination: { total: number; page: number; limit: number } } | null;
+    distributingTransfers: { records: unknown[]; pagination: { total: number; page: number; limit: number } } | null;
+    distributingRequests: { records: unknown[]; pagination: { total: number; page: number; limit: number } } | null;
   };
+  const bundleRes = await bundleP;
+  const bundle = bundleRes.ok
+    ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
+    : null;
 
-  // Per-slice count queries (all four run on every load)
-  const incomingCountsInput = JSON.stringify({ receiverId: user.id, ...dateRange });
-  const myRequestsCountsInput = JSON.stringify({ requesterId: user.id, ...dateRange });
-  const outgoingCountsInput = JSON.stringify({ senderId: user.id, ...dateRange });
-  const mbRequestsCountsInput = JSON.stringify({ excludeSelfAsRequester: true, ...dateRange });
+  // Synthesize the response shapes the existing parsers expect so the rest
+  // of this loader stays unchanged. Each parser accepts `{ ok, data }` and
+  // walks `result.data` — wrap our slices accordingly.
+  const wrap = <T,>(value: T | null | undefined) => ({
+    ok: value != null,
+    data: value != null ? { result: { data: value } } : ({} as Record<string, unknown>),
+  });
+  const receivedTransfersRes = wrap(bundle?.receivedTransfers);
+  const receivedRequestsRes = wrap(bundle?.receivedRequests);
+  const distributingTransfersRes = wrap(bundle?.distributingTransfers);
+  const distributingRequestsRes = wrap(bundle?.distributingRequests);
+  const directionSummaryRes = wrap(bundle?.directionSummary);
 
-  // When the unified status filter is exclusive to one entry type — e.g.
-  // PENDING / APPROVED / REJECTED only apply to requests; SENT / COMPLETED /
-  // DISPUTED only apply to transfers — skip fetching the other type entirely.
-  // Without this, `entryStatus=PENDING` would still fetch ALL outgoing transfers
-  // (no transfer-status filter applied) and they push the matching request
-  // off page 1. Hoisted out of the `distributing` branch so the records-
-  // hydration block below can also use it for pagination math.
+  // ── Parse counts ────────────────────────────────────────
+  const incomingCounts = bundle?.incomingCounts ?? { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
+  const myRequestsCounts = bundle?.myRequestsCounts ?? {
+    PENDING: 0,
+    APPROVED: 0,
+    REJECTED: 0,
+    ALL: 0,
+  };
+  const outgoingCounts = canDistribute
+    ? bundle?.outgoingCounts ?? { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 }
+    : { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
+  const mbRequestsCounts = canDistribute
+    ? bundle?.mbRequestsCounts ?? { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 }
+    : { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+
+  // skip flags re-derived locally for the records-hydration math below.
   const isRequestOnlyStatus =
     !!entryStatusParam && (REQUEST_STATUSES as readonly string[]).includes(entryStatusParam);
   const isTransferOnlyStatus =
     !!entryStatusParam && (LEDGER_STATUSES as readonly string[]).includes(entryStatusParam);
   const skipTransfersForStatus = entryTypeFilter !== 'transfer' && isRequestOnlyStatus;
   const skipRequestsForStatus = entryTypeFilter !== 'request' && isTransferOnlyStatus;
-
-  // Both sections render unified tables (transfers + requests merged); both
-  // sides need their record URLs built when the section is active. Legacy
-  // `recordsUrl` is kept as a single-call fallback that the hydration block
-  // ignores — both unified branches use the dual-URL pattern below.
-  let receivedTransfersUrl: string | null = null;
-  let receivedRequestsUrl: string | null = null;
-  let distributingTransfersUrl: string | null = null;
-  let distributingRequestsUrl: string | null = null;
-
-  if (activeSection === 'received') {
-    // Section 1 — "Funds I've Received" unified table. Fetch both incoming
-    // transfers AND my outbound requests so the merged feed has both rows.
-    // `entryTypeFilter` and `entryStatus` filters narrow the fetch the same
-    // way they do for distributing — request-only status skips the transfer
-    // call, transfer-only status skips the request call.
-    const transferInput =
-      entryTypeFilter === 'request' || skipTransfersForStatus
-        ? null
-        : JSON.stringify({
-            page: entryTypeFilter === 'transfer' ? page : 1,
-            limit: entryTypeFilter === 'transfer' ? PER_PAGE : MERGED_FETCH_LIMIT,
-            receiverId: user.id,
-            ...dateRange,
-            ...(transferStatusFilter ? { status: transferStatusFilter } : {}),
-            ...(searchFilter && { search: searchFilter }),
-          });
-    const requestInput =
-      entryTypeFilter === 'transfer' || skipRequestsForStatus
-        ? null
-        : JSON.stringify({
-            page: entryTypeFilter === 'request' ? page : 1,
-            limit: entryTypeFilter === 'request' ? PER_PAGE : MERGED_FETCH_LIMIT,
-            requesterId: user.id,
-            ...dateRange,
-            ...(requestStatusFilterUnified ? { status: requestStatusFilterUnified } : {}),
-            ...(searchFilter && { search: searchFilter }),
-          });
-    receivedTransfersUrl = transferInput
-      ? `/trpc/marketing.listFunding?input=${encodeURIComponent(transferInput)}`
-      : null;
-    receivedRequestsUrl = requestInput
-      ? `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(requestInput)}`
-      : null;
-  } else if (activeSection === 'distributing') {
-    // Distributing section renders one unified table (UnifiedDistributingTable) for
-    // BOTH tabs — `tab=transfers` and `tab=requests` are visual/state hints, not
-    // separate datasets. Both transfers and request URLs must be populated so the
-    // merged-entries builder below can paginate them together.
-    // `entryTypeFilter` (?entryType=transfer|request) is the actual filter knob.
-    // `skipTransfersForStatus` / `skipRequestsForStatus` are computed above so
-    // a request-only status (e.g. PENDING) doesn't pull all transfers.
-    const transferInput =
-      entryTypeFilter === 'request' || skipTransfersForStatus
-        ? null
-        : JSON.stringify({
-            page: entryTypeFilter === 'transfer' ? page : 1,
-            limit: entryTypeFilter === 'transfer' ? PER_PAGE : MERGED_FETCH_LIMIT,
-            senderId: user.id,
-            ...dateRange,
-            ...(transferStatusFilter ? { status: transferStatusFilter } : {}),
-            ...(searchFilter && { search: searchFilter }),
-          });
-    const requestInput =
-      entryTypeFilter === 'transfer' || skipRequestsForStatus
-        ? null
-        : JSON.stringify({
-            page: entryTypeFilter === 'request' ? page : 1,
-            limit: entryTypeFilter === 'request' ? PER_PAGE : MERGED_FETCH_LIMIT,
-            excludeSelfAsRequester: true,
-            ...dateRange,
-            ...(requestStatusFilterUnified ? { status: requestStatusFilterUnified } : {}),
-            ...(searchFilter && { search: searchFilter }),
-          });
-    distributingTransfersUrl = transferInput
-      ? `/trpc/marketing.listFunding?input=${encodeURIComponent(transferInput)}`
-      : null;
-    distributingRequestsUrl = requestInput
-      ? `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(requestInput)}`
-      : null;
-  }
-
-  // ── Supporting fetches ──────────────────────────────────
-  const directionSummaryInput = JSON.stringify(dateRange);
-  const directionSummaryP = apiRequest<unknown>(
-    `/trpc/marketing.fundingByDirectionSummary?input=${encodeURIComponent(directionSummaryInput)}`,
-    { method: 'GET', cookie },
-  );
-
-  const usersP = isFundingAdmin
-    ? apiRequest<unknown>('/trpc/users.list', { method: 'GET', cookie })
-    : Promise.resolve({ ok: true, data: { result: { data: { users: [] } } } });
-
-  // Resolve active branch name for the "Showing Media Buyers in <branch>" hint in the
-  // Send Funding modal. `branches.list` is cheap (one row per branch the caller belongs to,
-  // or all branches for SuperAdmin/Admin) and is already a hot endpoint elsewhere.
-  const branchesP = user.currentBranchId
-    ? apiRequest<{ result?: { data?: Array<{ id: string; name: string }> } }>(
-        '/trpc/branches.list',
-        { method: 'GET', cookie },
-      )
-    : Promise.resolve({ ok: false as const, data: {} });
-
-  const balancesListP: Promise<ReturnType<typeof parseBalancesList> | undefined> = isFundingAdmin
-    ? apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie })
-        .then(parseBalancesList)
-        .catch(() => undefined)
-    : Promise.resolve(undefined);
-
-  const showFundingBalance = user.role === 'MEDIA_BUYER' || user.role === 'HEAD_OF_MARKETING';
-  const fundingBalanceP = showFundingBalance
-    ? apiRequest<unknown>(
-        `/trpc/marketing.getFundingBalance?input=${encodeURIComponent(JSON.stringify({ userId: user.id }))}`,
-        { method: 'GET', cookie },
-      )
-    : Promise.resolve({ ok: false as const, data: {} });
-
-  // Recipient candidates for the Request Funding modal (migration 0106). Only
-  // fetched when the caller can request funding so we don't pay the cost
-  // for read-only viewers (Finance/Admin etc.).
-  const fundingRequestRecipientsP = canRequestFunding
-    ? apiRequest<unknown>('/trpc/marketing.listFundingRequestRecipients', { method: 'GET', cookie })
-    : Promise.resolve({ ok: false as const, data: {} });
-
-  const incomingCountsP = apiRequest<unknown>(
-    `/trpc/marketing.fundingStatusCounts?input=${encodeURIComponent(incomingCountsInput)}`,
-    { method: 'GET', cookie },
-  );
-  const myRequestsCountsP = apiRequest<unknown>(
-    `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(myRequestsCountsInput)}`,
-    { method: 'GET', cookie },
-  );
-  const outgoingCountsP = canDistribute
-    ? apiRequest<unknown>(
-        `/trpc/marketing.fundingStatusCounts?input=${encodeURIComponent(outgoingCountsInput)}`,
-        { method: 'GET', cookie },
-      )
-    : Promise.resolve({ ok: false as const, data: {} });
-  const mbRequestsCountsP = canDistribute
-    ? apiRequest<unknown>(
-        `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(mbRequestsCountsInput)}`,
-        { method: 'GET', cookie },
-      )
-    : Promise.resolve({ ok: false as const, data: {} });
-
-  const receivedTransfersP =
-    activeSection === 'received' && receivedTransfersUrl
-      ? apiRequest<unknown>(receivedTransfersUrl, { method: 'GET', cookie })
-      : Promise.resolve({ ok: true as const, data: {} });
-  const receivedRequestsP =
-    activeSection === 'received' && receivedRequestsUrl
-      ? apiRequest<unknown>(receivedRequestsUrl, { method: 'GET', cookie })
-      : Promise.resolve({ ok: true as const, data: {} });
-  const distributingTransfersP =
-    activeSection === 'distributing' && distributingTransfersUrl
-      ? apiRequest<unknown>(distributingTransfersUrl, { method: 'GET', cookie })
-      : Promise.resolve({ ok: true as const, data: {} });
-  const distributingRequestsP =
-    activeSection === 'distributing' && distributingRequestsUrl
-      ? apiRequest<unknown>(distributingRequestsUrl, { method: 'GET', cookie })
-      : Promise.resolve({ ok: true as const, data: {} });
-
-  const pageData = (async (): Promise<MarketingFundingLoaderData> => {
-  const [
-    receivedTransfersRes,
-    receivedRequestsRes,
-    incomingCountsRes,
-    myRequestsCountsRes,
-    outgoingCountsRes,
-    mbRequestsCountsRes,
-    directionSummaryRes,
-    usersRes,
-    balancesList,
-    fundingBalanceRes,
-    distributingTransfersRes,
-    distributingRequestsRes,
-    branchesRes,
-    fundingRequestRecipientsRes,
-  ] = await Promise.all([
-    receivedTransfersP,
-    receivedRequestsP,
-    incomingCountsP,
-    myRequestsCountsP,
-    outgoingCountsP,
-    mbRequestsCountsP,
-    directionSummaryP,
-    usersP,
-    balancesListP,
-    fundingBalanceP,
-    distributingTransfersP,
-    distributingRequestsP,
-    branchesP,
-    fundingRequestRecipientsP,
-  ]);
-
-  // ── Parse counts ────────────────────────────────────────
-  const incomingCounts = parseFundingStatusCounts(incomingCountsRes);
-  const myRequestsCounts = parseFundingRequestStatusCounts(myRequestsCountsRes);
-  const outgoingCounts = canDistribute
-    ? parseFundingStatusCounts(outgoingCountsRes)
-    : { SENT: 0, COMPLETED: 0, DISPUTED: 0, ALL: 0 };
-  const mbRequestsCounts = canDistribute
-    ? parseFundingRequestStatusCounts(mbRequestsCountsRes)
-    : { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
 
   // ── Empty slices (for inactive tabs — counts populated, records empty) ──
   const emptyTransfers = (counts: FundingSliceData['statusCounts']): FundingSliceData => ({
@@ -438,45 +290,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   }
 
+  const showFundingBalance = user.role === 'MEDIA_BUYER' || user.role === 'HEAD_OF_MARKETING';
   const directionSummary = parseFundingDirectionSummary(directionSummaryRes);
-  const fundingBalance = showFundingBalance ? parseFundingBalance(fundingBalanceRes) : undefined;
-  const usersList = parseUsers(usersRes);
+  const fundingBalance = showFundingBalance ? bundle?.fundingBalance ?? undefined : undefined;
+  const usersList = bundle?.users ?? [];
+  const balancesList = isFundingAdmin ? bundle?.balancesList ?? undefined : undefined;
+  const fundingRequestRecipients = canRequestFunding ? bundle?.fundingRequestRecipients ?? [] : [];
 
-  // Funding request recipient candidates (migration 0106 — empty array when the
-  // current user can't request funding, since the list isn't fetched in that
-  // case).
-  const fundingRequestRecipients: Array<{
-    id: string;
-    name: string;
-    role: string;
-    isFinance: boolean;
-    isPreferred: boolean;
-    branchId: string | null;
-  }> = canRequestFunding && fundingRequestRecipientsRes.ok
-    ? ((fundingRequestRecipientsRes.data as {
-        result?: {
-          data?: Array<{
-            id: string;
-            name: string;
-            role: string;
-            isFinance: boolean;
-            isPreferred: boolean;
-            branchId: string | null;
-          }>;
-        };
-      }).result?.data ?? [])
-    : [];
-
-  // Resolve active branch name from the branches.list payload — null if the user has
+  // Resolve active branch name from the bundle's branches list — null if the user has
   // no active branch (admin in global view) or the branch can't be found in the response.
   let activeBranchName: string | null = null;
-  if (user.currentBranchId && branchesRes.ok) {
-    const branchesData = (branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })
-      .result?.data;
-    if (Array.isArray(branchesData)) {
-      const match = branchesData.find((b) => b.id === user.currentBranchId);
-      activeBranchName = match?.name ?? null;
-    }
+  if (user.currentBranchId && bundle?.branches) {
+    const match = bundle.branches.find((b) => b.id === user.currentBranchId);
+    activeBranchName = match?.name ?? null;
   }
 
   const data: MarketingFundingLoaderData = {

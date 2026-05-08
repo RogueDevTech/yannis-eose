@@ -39,75 +39,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? user.logisticsLocationId
       : undefined;
 
-    const countsInput: Record<string, unknown> = {};
-    if (startDate) countsInput.startDate = startDate;
-    if (endDate) countsInput.endDate = endDate;
-    if (locationId) countsInput.logisticsLocationId = locationId;
-
-    const listInput: Record<string, unknown> = {
-      page: 1,
-      limit: 8,
-      sortBy: 'preferredDeliveryDate',
-      sortOrder: 'asc',
-      ...(startDate && { startDate }),
-      ...(endDate && { endDate }),
+    // Single bundled call — replaces 4 parallel tRPC HTTP round-trips.
+    const bundleInput = encodeURIComponent(
+      JSON.stringify({
+        recentLimit: 8,
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate }),
+        ...(locationId && { logisticsLocationId: locationId }),
+      }),
+    );
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/orders.tplDashboardBundle?input=${bundleInput}`,
+      { method: 'GET', cookie },
+    );
+    type BundleData = {
+      recentOrders: Array<{
+        id: string;
+        customerName: string;
+        status: string;
+        totalAmount: string | null;
+        createdAt: string;
+        preferredDeliveryDate: string | null;
+      }>;
+      statusCounts: Record<string, number>;
+      totalOrders: number;
+      inTransitTransfers: number;
+      returnsQueue: number;
     };
-    if (locationId) listInput.logisticsLocationId = locationId;
-
-    const ordersPromise = apiRequest<unknown>(
-      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(listInput))}`,
-      { method: 'GET', cookie },
-    );
-    const countsPromise = apiRequest<unknown>(
-      `/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify(countsInput))}`,
-      { method: 'GET', cookie },
-    );
-    const transfersPromise = apiRequest<unknown>(
-      '/trpc/inventory.transfers',
-      { method: 'GET', cookie },
-    );
-    const returnedPromise = apiRequest<unknown>(
-      '/trpc/inventory.returnedOrders',
-      { method: 'GET', cookie },
-    );
-
-    const [ordersRes, countsRes, transfersRes, returnedRes] = await Promise.all([
-      ordersPromise,
-      countsPromise,
-      transfersPromise,
-      returnedPromise,
-    ]);
-
-    const ordersData = ordersRes.ok
-      ? (ordersRes.data as { result?: { data?: { orders: Array<Record<string, unknown>>; pagination: { total: number } } } })?.result?.data
+    const bundle = bundleRes.ok
+      ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
       : null;
-    const countsData = countsRes.ok
-      ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-      : {};
-
-    const transfers = transfersRes.ok
-      ? (transfersRes.data as { result?: { data?: Array<{ transferStatus: string }> } })?.result?.data ?? []
-      : [];
-
-    const returnedOrders = returnedRes.ok
-      ? (returnedRes.data as { result?: { data?: Array<Record<string, unknown>> } })?.result?.data ?? []
-      : [];
-
-    const inTransitTransfers = transfers.filter((t) => t.transferStatus === 'IN_TRANSIT').length;
 
     return {
-      recentOrders: (ordersData?.orders ?? []).map((o) => ({
-        id: o.id as string,
-        customerName: o.customerName as string,
-        status: o.status as string,
-        totalAmount: o.totalAmount as string | null,
-        createdAt: o.createdAt as string,
-        preferredDeliveryDate: (o.preferredDeliveryDate as string) ?? null,
-      })),
-      orderCounts: countsData,
-      totalOrders: ordersData?.pagination?.total ?? 0,
-      inTransitTransfers,
-      returnsQueue: returnedOrders.length,
+      recentOrders: bundle?.recentOrders ?? [],
+      orderCounts: bundle?.statusCounts ?? {},
+      totalOrders: bundle?.totalOrders ?? 0,
+      inTransitTransfers: bundle?.inTransitTransfers ?? 0,
+      returnsQueue: bundle?.returnsQueue ?? 0,
       filters: { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime },
     } satisfies TplDashboardData;
   })();

@@ -66,15 +66,6 @@ function buildOrdersQuery(
   return `/admin/marketing/orders?${params.toString()}`;
 }
 
-function memberInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 const TEAM_SORT_BY_OPTIONS = [
   { value: 'name', label: 'Name' },
   { value: 'balance', label: 'Balance' },
@@ -149,18 +140,13 @@ export function MarketingTeamPage({
         key: 'member',
         header: 'Member',
         render: (m) => (
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">{memberInitials(m.name)}</span>
-            </div>
-            <Link
-              to={`/hr/users/${m.userId}`}
-              prefetch="intent"
-              className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400"
-            >
-              {m.name}
-            </Link>
-          </div>
+          <Link
+            to={`/hr/users/${m.userId}`}
+            prefetch="intent"
+            className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400"
+          >
+            {m.name}
+          </Link>
         ),
       },
       {

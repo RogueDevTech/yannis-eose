@@ -150,9 +150,25 @@ export class LogisticsService {
     const offset = (input.page - 1) * input.limit;
 
     const [providers, totalRows] = await Promise.all([
-      this.db.select().from(schema.logisticsProviders).where(whereClause)
+      this.db
+        .select({
+          id: schema.logisticsProviders.id,
+          name: schema.logisticsProviders.name,
+          contactInfo: schema.logisticsProviders.contactInfo,
+          coverageArea: schema.logisticsProviders.coverageArea,
+          kind: schema.logisticsProviders.kind,
+          status: schema.logisticsProviders.status,
+          createdAt: schema.logisticsProviders.createdAt,
+          updatedAt: schema.logisticsProviders.updatedAt,
+          validFrom: schema.logisticsProviders.validFrom,
+          validTo: schema.logisticsProviders.validTo,
+          modifiedBy: schema.logisticsProviders.modifiedBy,
+        })
+        .from(schema.logisticsProviders)
+        .where(whereClause)
         .orderBy(desc(schema.logisticsProviders.createdAt))
-        .limit(input.limit).offset(offset),
+        .limit(input.limit)
+        .offset(offset),
       this.db.select({ count: count() }).from(schema.logisticsProviders).where(whereClause),
     ]);
 

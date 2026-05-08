@@ -30,118 +30,90 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const pageData = (async (): Promise<InventoryStreamData> => {
     const locationId = user.role === 'TPL_MANAGER' && user.logisticsLocationId ? user.logisticsLocationId : undefined;
-    const levelsInput = locationId
-      ? { locationId, page: 1, limit: 100 }
-      : { page: 1, limit: 100 };
-    const movementsInput = locationId
-      ? { locationId, page: 1, limit: 50 }
-      : { page: 1, limit: 50 };
 
     const readOpts = { timeoutMs: DEFERRED_LOADER_TIMEOUT_MS } as const;
 
-    const levelsPromise = apiRequest<unknown>(
-      `/trpc/inventory.levels?input=${encodeURIComponent(JSON.stringify(levelsInput))}`,
+    // Single bundled call — replaces 7 parallel tRPC HTTP round-trips
+    // (levels + movements + products.options + locationOptions + transfers +
+    // returnedOrders + reconciliations). Same fan-out runs server-side.
+    const bundleInput = encodeURIComponent(
+      JSON.stringify({
+        ...(locationId && { locationId }),
+        levelsPage: 1,
+        levelsLimit: 100,
+        movementsPage: 1,
+        movementsLimit: 50,
+      }),
+    );
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/inventory.inventoryPageBundle?input=${bundleInput}`,
       { method: 'GET', cookie, ...readOpts },
     );
-    const movementsPromise = apiRequest<unknown>(
-      `/trpc/inventory.movements?input=${encodeURIComponent(JSON.stringify(movementsInput))}`,
-      { method: 'GET', cookie, ...readOpts },
-    );
-    const productsPromise = apiRequest<unknown>(
-      `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
-      { method: 'GET', cookie, ...readOpts },
-    );
-    const locationsPromise = apiRequest<unknown>(
-      `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
-      { method: 'GET', cookie, ...readOpts },
-    );
-    const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie, ...readOpts });
-    const returnedPromise = apiRequest<unknown>('/trpc/inventory.returnedOrders', { method: 'GET', cookie, ...readOpts });
-    const reconciliationsPromise = apiRequest<unknown>('/trpc/inventory.reconciliations', { method: 'GET', cookie, ...readOpts });
 
-    const [levelsRes, movementsRes, productsRes, locationsRes, transfersRes, returnedRes] = await Promise.all([
-      levelsPromise,
-      movementsPromise,
-      productsPromise,
-      locationsPromise,
-      transfersPromise,
-      returnedPromise,
-    ]);
+    type BundleData = {
+      levels: {
+        levels: InventoryLevel[];
+        totals?: { totalStock: number; totalReserved: number };
+        pagination: { total: number };
+      };
+      movements: { movements: StockMovement[]; pagination: { total: number } };
+      products: { products: { id: string; name: string }[] };
+      locations: {
+        locations: Array<{
+          id: string;
+          name: string;
+          address: string;
+          dispatchLocked?: boolean;
+          status: string;
+          providerName?: string | null;
+        }>;
+      };
+      transfers: Transfer[];
+      returnedOrders: ReturnedOrder[];
+      reconciliations: Reconciliation[];
+    };
+    const bundle = bundleRes.ok
+      ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
+      : null;
 
     let levelsLoadError: string | null = null;
     let movementsLoadError: string | null = null;
-
-    const levelsData = levelsRes.ok
-      ? (levelsRes.data as {
-          result?: {
-            data?: {
-              levels: InventoryLevel[];
-              totals?: { totalStock: number; totalReserved: number };
-              pagination: { total: number };
-            };
-          };
-        })?.result?.data
-      : null;
-    if (!levelsRes.ok) {
-      levelsLoadError = describeApiFetchFailure('Stock levels', levelsRes);
+    if (!bundleRes.ok) {
+      levelsLoadError = describeApiFetchFailure('Stock levels', bundleRes);
+      movementsLoadError = describeApiFetchFailure('Movement history', bundleRes);
     }
 
-    const movementsData = movementsRes.ok
-      ? (movementsRes.data as { result?: { data?: { movements: StockMovement[]; pagination: { total: number } } } })?.result?.data
-      : null;
-    if (!movementsRes.ok) {
-      movementsLoadError = describeApiFetchFailure('Movement history', movementsRes);
-    }
+    const products: ProductOption[] = (bundle?.products?.products ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+    }));
 
-    let products: ProductOption[] = [];
-    if (productsRes.ok) {
-      const data = (productsRes.data as { result?: { data?: { products: { id: string; name: string }[] } } })?.result?.data;
-      products = (data?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
-    }
-
-    let locations: LocationOption[] = [];
-    let locationsWithLock: LocationWithLock[] = [];
-    if (locationsRes.ok) {
-      const data = (locationsRes.data as { result?: { data?: { locations: Array<{ id: string; name: string; address: string; dispatchLocked?: boolean; status: string; providerName?: string | null }> } } })?.result?.data;
-      locations = (data?.locations ?? []).map((l) => ({
-        id: l.id,
-        name: l.name,
-        providerName: l.providerName ?? null,
-      }));
-      locationsWithLock = (data?.locations ?? []).map((l) => ({
-        id: l.id,
-        name: l.name,
-        address: l.address ?? '',
-        dispatchLocked: l.dispatchLocked ?? false,
-        status: l.status,
-      }));
-    }
-
-    const transfersData = transfersRes.ok
-      ? (transfersRes.data as { result?: { data?: Transfer[] } })?.result?.data ?? []
-      : [];
-
-    const returnedData = returnedRes.ok
-      ? (returnedRes.data as { result?: { data?: ReturnedOrder[] } })?.result?.data ?? []
-      : [];
-
-    const reconciliationsRes = await reconciliationsPromise;
-    const reconciliations: Reconciliation[] = reconciliationsRes.ok
-      ? (reconciliationsRes.data as { result?: { data?: Reconciliation[] } })?.result?.data ?? []
-      : [];
+    const locationRows = bundle?.locations?.locations ?? [];
+    const locations: LocationOption[] = locationRows.map((l) => ({
+      id: l.id,
+      name: l.name,
+      providerName: l.providerName ?? null,
+    }));
+    const locationsWithLock: LocationWithLock[] = locationRows.map((l) => ({
+      id: l.id,
+      name: l.name,
+      address: l.address ?? '',
+      dispatchLocked: l.dispatchLocked ?? false,
+      status: l.status,
+    }));
 
     return {
-      levels: levelsData?.levels ?? [],
-      levelsTotals: levelsData?.totals ?? { totalStock: 0, totalReserved: 0 },
-      totalLevels: levelsData?.pagination?.total ?? 0,
-      movements: movementsData?.movements ?? [],
-      totalMovements: movementsData?.pagination?.total ?? 0,
+      levels: bundle?.levels?.levels ?? [],
+      levelsTotals: bundle?.levels?.totals ?? { totalStock: 0, totalReserved: 0 },
+      totalLevels: bundle?.levels?.pagination?.total ?? 0,
+      movements: bundle?.movements?.movements ?? [],
+      totalMovements: bundle?.movements?.pagination?.total ?? 0,
       products,
       locations,
       canIntake: false,
-      transfers: transfersData,
-      returnedOrders: returnedData,
-      reconciliations,
+      transfers: bundle?.transfers ?? [],
+      returnedOrders: bundle?.returnedOrders ?? [],
+      reconciliations: bundle?.reconciliations ?? [],
       locationsWithLock,
       levelsLoadError,
       movementsLoadError,

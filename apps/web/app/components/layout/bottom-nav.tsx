@@ -141,7 +141,7 @@ export function BottomNavMoreModal({
                         <NavLink
                           to={item.href}
                           end={item.href === '/admin' || item.href === '/tpl'}
-                          prefetch="intent"
+                          prefetch="render"
                           onClick={onClose}
                           className={`flex items-center gap-3 px-4 py-3 text-left text-sm ${
                             isActive(currentPathname, item.href)
@@ -164,7 +164,7 @@ export function BottomNavMoreModal({
                   <NavLink
                     to={item.href}
                     end={item.href === '/admin' || item.href === '/tpl'}
-                    prefetch="intent"
+                    prefetch="render"
                     onClick={onClose}
                     className={`flex items-center gap-3 px-4 py-3 text-left text-sm ${
                       isActive(currentPathname, item.href)
@@ -248,7 +248,7 @@ export function BottomNav({
               key={item.href}
               to={item.href}
               end={item.href === '/admin' || item.href === '/tpl'}
-              prefetch="intent"
+              prefetch="render"
               className={({ isPending }) => {
                 const on = active || isPending;
                 return [

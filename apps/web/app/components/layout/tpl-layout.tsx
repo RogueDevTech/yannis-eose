@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { NavLink, Form, useLocation, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
+import { SlowConnectionToast } from '~/components/ui/slow-connection-toast';
 import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { SidebarIcons } from './sidebar';
 import { useAppTheme } from '~/hooks/useAppTheme';
@@ -107,6 +108,7 @@ export function TplLayout({
   return (
     <div className="min-h-screen w-full bg-app-canvas text-app-fg">
       <NavProgressBar />
+      <SlowConnectionToast />
       {/* Constrained content: max 1200px, centered */}
       <div className="mx-auto w-full max-w-tpl min-h-screen flex flex-col">
         {/* Header + nav: fixed on mobile (same as admin), in-flow on md+ */}
@@ -167,7 +169,7 @@ export function TplLayout({
             <div className="flex items-center gap-2 lg:gap-3 flex-shrink-0">
               <NavLink
                 to="/tpl/notifications"
-                prefetch="intent"
+                prefetch="render"
                 className={() => {
                   const active = isActiveFromPath(effectivePath, '/tpl/notifications');
                   return `relative p-1.5 rounded-lg transition-colors ${
@@ -327,7 +329,7 @@ export function TplLayout({
                   key={item.href}
                   to={item.href}
                   end={item.href === '/tpl'}
-                  prefetch="intent"
+                  prefetch="render"
                   onClick={closeMobileNav}
                   className={() =>
                     `px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors flex-shrink-0 ${

@@ -11,24 +11,6 @@ export const meta: MetaFunction = () => [
   { title: 'Team Analysis — Yannis EOSE' },
 ];
 
-function parseBalancesList(res: { ok: boolean; status: number; data: unknown }): FundingBalanceRow[] {
-  const raw = res.data as Record<string, unknown> | undefined;
-  if (raw && typeof raw === 'object' && 'error' in raw) return [];
-  if (!res.ok) return [];
-  if (!raw || typeof raw !== 'object') return [];
-  const result = raw.result as { data?: FundingBalanceRow[]; json?: FundingBalanceRow[] } | undefined;
-  const data = result?.data ?? result?.json ?? (Array.isArray(raw.result) ? raw.result : undefined);
-  return Array.isArray(data) ? data : [];
-}
-
-function parseUsersList(res: { ok: boolean; data: unknown }): Array<{ id: string; name: string; role: string }> {
-  if (!res.ok) return [];
-  const raw = res.data as Record<string, unknown> | undefined;
-  const result = raw?.result as { data?: { users?: Array<{ id: string; name: string; role: string }> } } | undefined;
-  const users = result?.data?.users;
-  return Array.isArray(users) ? users : [];
-}
-
 function toBalanceRows(users: Array<{ id: string; name: string; role: string }>): FundingBalanceRow[] {
   return users.map((u) => ({
     userId: u.id,
@@ -38,13 +20,6 @@ function toBalanceRows(users: Array<{ id: string; name: string; role: string }>)
     totalSpend: '0',
     balance: '0',
   }));
-}
-
-function parseFundingSummary(res: { ok: boolean; data: unknown }) {
-  const data = res.ok
-    ? (res.data as { result?: { data?: { totalSent: string; totalCompleted: string; totalDisputed: string } } })?.result?.data
-    : null;
-  return data ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -64,33 +39,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const teamShell = { dateFilters: filters, leaderboardPeriod };
 
   const pageData = (async () => {
-  const [balancesRes, summaryRes, leaderboardRes, profitabilityRes] = await Promise.all([
-    apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
-    apiRequest<unknown>(
-      `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>('/trpc/marketing.profitabilityConfig', { method: 'GET', cookie }),
-  ]);
-  const profitabilityConfig = profitabilityRes.ok
-    ? (profitabilityRes.data as { result?: { data?: { targetRoas: number; greenThreshold: number } } })
-        ?.result?.data ?? { targetRoas: 3, greenThreshold: 2.5 }
-    : { targetRoas: 3, greenThreshold: 2.5 };
-  redirectIfUnauthorized(balancesRes, new URL(request.url).pathname);
-  let teamMembers = parseBalancesList(balancesRes);
-  const fundingSummary = parseFundingSummary(summaryRes);
+  // One bundle endpoint replaces the original 4 parallel calls (and the optional
+  // 2-call MB+HoM fallback when balances are empty). All four fans out in
+  // parallel on the API side; the wire trip happens once.
+  const bundleInput = encodeURIComponent(JSON.stringify(leaderboardInput));
+  const bundleRes = await apiRequest<unknown>(
+    `/trpc/marketing.teamPageBundle?input=${bundleInput}`,
+    { method: 'GET', cookie },
+  );
+  redirectIfUnauthorized(bundleRes, new URL(request.url).pathname);
 
-  if (teamMembers.length === 0 && (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_MARKETING')) {
-    const listInput = (input: { role: string }) =>
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ role: input.role, limit: 20 }))}`;
-    const [mbRes, homRes] = await Promise.all([
-      apiRequest<unknown>(listInput({ role: 'MEDIA_BUYER' }), { method: 'GET', cookie }),
-      apiRequest<unknown>(listInput({ role: 'HEAD_OF_MARKETING' }), { method: 'GET', cookie }),
-    ]);
-    const mediaBuyers = parseUsersList(mbRes);
-    const heads = parseUsersList(homRes);
-    const merged = [...heads, ...mediaBuyers].sort((a, b) => a.name.localeCompare(b.name));
+  type BundleData = {
+    balances: FundingBalanceRow[];
+    fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+    leaderboard: LeaderboardEntry[];
+    profitabilityConfig: { targetRoas: number; greenThreshold: number };
+    usersFallback: Array<{ id: string; name: string; role: string }> | null;
+  };
+  const bundle = bundleRes.ok
+    ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
+    : null;
+
+  const profitabilityConfig = bundle?.profitabilityConfig ?? { targetRoas: 3, greenThreshold: 2.5 };
+  let teamMembers: FundingBalanceRow[] = bundle?.balances ?? [];
+  const fundingSummary = bundle?.fundingSummary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
+
+  if (teamMembers.length === 0 && bundle?.usersFallback?.length) {
+    const merged = [...bundle.usersFallback].sort((a, b) => a.name.localeCompare(b.name));
     teamMembers = toBalanceRows(merged);
   }
 
@@ -102,9 +77,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     trueRoas: number;
     profitabilityScore: number | null;
   };
-  const leaderboard: LeaderboardEntry[] = leaderboardRes.ok
-    ? (leaderboardRes.data as { result?: { data?: LeaderboardEntry[] } })?.result?.data ?? []
-    : [];
+  const leaderboard: LeaderboardEntry[] = bundle?.leaderboard ?? [];
   const metricsByUser = new Map(
     leaderboard.map((e) => [
       e.mediaBuyerId,

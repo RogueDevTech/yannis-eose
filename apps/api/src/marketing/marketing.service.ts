@@ -33,6 +33,7 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
 
@@ -233,6 +234,283 @@ export class MarketingService {
     return `${y}-${m}-${d}`;
   }
 
+  private adSpendLineSnapshotKey(
+    mediaBuyerId: string,
+    campaignId: string,
+    productId: string,
+    spendYmd: string,
+  ): string {
+    return `${mediaBuyerId}|${campaignId}|${productId}|${spendYmd}`;
+  }
+
+  private orderIntervalCountGroupKey(parts: {
+    mediaBuyerId: string;
+    campaignId: string;
+    productId: string;
+    branchId?: string | null;
+    windowStartExclusiveMs: number | null;
+  }): string {
+    return `${parts.mediaBuyerId}|${parts.campaignId}|${parts.productId}|${parts.branchId ?? ''}|${parts.windowStartExclusiveMs ?? 'null'}`;
+  }
+
+  private windowExclusiveFromApprovedPrior(priorSpend: Date | null | undefined): Date | null {
+    if (!priorSpend) return null;
+    const y = priorSpend.getUTCFullYear();
+    const m = priorSpend.getUTCMonth();
+    const d = priorSpend.getUTCDate();
+    return new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
+  }
+
+  private async countOrdersInAdSpendIntervalWindow(params: {
+    mediaBuyerId: string;
+    campaignId: string;
+    productId: string;
+    windowStartExclusive: Date | null;
+    branchId?: string | null;
+  }): Promise<number> {
+    const now = new Date();
+    const hasProductLine = exists(
+      this.db
+        .select({ id: schema.orderItems.id })
+        .from(schema.orderItems)
+        .where(
+          and(
+            eq(schema.orderItems.orderId, schema.orders.id),
+            eq(schema.orderItems.productId, params.productId),
+          ),
+        ),
+    );
+    const orderConditions: SQL[] = [
+      eq(schema.orders.mediaBuyerId, params.mediaBuyerId),
+      eq(schema.orders.campaignId, params.campaignId),
+      hasProductLine,
+      lte(schema.orders.createdAt, now),
+    ];
+    if (params.windowStartExclusive) {
+      orderConditions.push(gt(schema.orders.createdAt, params.windowStartExclusive));
+    }
+    if (params.branchId) {
+      orderConditions.push(eq(schema.orders.branchId, params.branchId));
+    }
+    const [countRow] = await this.db
+      .select({ c: count() })
+      .from(schema.orders)
+      .where(and(...orderConditions));
+    return Number(countRow?.c ?? 0);
+  }
+
+  private async batchFetchAdSpendPriorSpendDates(
+    keys: Array<{ mediaBuyerId: string; campaignId: string; productId: string; spendYmd: string }>,
+  ): Promise<Map<string, Date | null>> {
+    const out = new Map<string, Date | null>();
+    if (keys.length === 0) return out;
+
+    const dedup = new Map<string, (typeof keys)[number]>();
+    for (const k of keys) {
+      const sk = this.adSpendLineSnapshotKey(k.mediaBuyerId, k.campaignId, k.productId, k.spendYmd);
+      dedup.set(sk, k);
+    }
+    const unique = [...dedup.values()];
+    const chunkSize = 40;
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const chunk = unique.slice(i, i + chunkSize);
+      const valuesSql = sql.join(
+        chunk.map(
+          (k) =>
+            sql`(${k.mediaBuyerId}::uuid, ${k.campaignId}::uuid, ${k.productId}::uuid, ${k.spendYmd}::date)`,
+        ),
+        sql`, `,
+      );
+      const rows = await this.db.execute<{
+        media_buyer_id: string;
+        campaign_id: string;
+        product_id: string;
+        spend_day: string;
+        prior_spend_date: Date | string | null;
+      }>(sql`
+        SELECT
+          k.mb AS media_buyer_id,
+          k.campaign AS campaign_id,
+          k.product AS product_id,
+          k.spend_day::text AS spend_day,
+          prior.spend_date AS prior_spend_date
+        FROM (
+          VALUES ${valuesSql}
+        ) AS k(mb, campaign, product, spend_day)
+        LEFT JOIN LATERAL (
+          SELECT spend_date
+          FROM ad_spend_logs
+          WHERE media_buyer_id = k.mb
+            AND campaign_id = k.campaign
+            AND product_id = k.product
+            AND status = 'APPROVED'
+            AND spend_date::date < k.spend_day
+          ORDER BY spend_date DESC, created_at DESC
+          LIMIT 1
+        ) prior ON true
+      `);
+      const list = Array.from(
+        rows as unknown as Iterable<{
+          media_buyer_id: string;
+          campaign_id: string;
+          product_id: string;
+          spend_day: string;
+          prior_spend_date: Date | string | null;
+        }>,
+      );
+      for (const r of list) {
+        const sk = this.adSpendLineSnapshotKey(
+          r.media_buyer_id,
+          r.campaign_id,
+          r.product_id,
+          r.spend_day,
+        );
+        const p = r.prior_spend_date;
+        out.set(sk, p == null ? null : p instanceof Date ? p : new Date(p));
+      }
+    }
+    return out;
+  }
+
+  private async batchAdSpendIntervalSnapshots(
+    rows: Array<{
+      mediaBuyerId: string;
+      campaignId: string;
+      productId: string;
+      spendYmd: string;
+      spendAmount: number;
+    }>,
+    branchCampaignIds: string[] | null,
+    branchId?: string | null,
+  ): Promise<
+    Map<
+      string,
+      {
+        orderCount: number;
+        priorSpendDate: string | null;
+        windowStartExclusive: string | null;
+        indicativeCpa: number | null;
+      }
+    >
+  > {
+    const zeroSnap = () => ({
+      orderCount: 0,
+      priorSpendDate: null as string | null,
+      windowStartExclusive: null as string | null,
+      indicativeCpa: null as number | null,
+    });
+    const out = new Map<
+      string,
+      {
+        orderCount: number;
+        priorSpendDate: string | null;
+        windowStartExclusive: string | null;
+        indicativeCpa: number | null;
+      }
+    >();
+    if (rows.length === 0) return out;
+
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      for (const r of rows) {
+        const k = this.adSpendLineSnapshotKey(r.mediaBuyerId, r.campaignId, r.productId, r.spendYmd);
+        out.set(k, zeroSnap());
+      }
+      return out;
+    }
+
+    const priorFetch: typeof rows = [];
+    for (const r of rows) {
+      const k = this.adSpendLineSnapshotKey(r.mediaBuyerId, r.campaignId, r.productId, r.spendYmd);
+      if (branchCampaignIds && !branchCampaignIds.includes(r.campaignId)) {
+        out.set(k, zeroSnap());
+        continue;
+      }
+      priorFetch.push(r);
+    }
+
+    const priors = await this.batchFetchAdSpendPriorSpendDates(
+      priorFetch.map((r) => ({
+        mediaBuyerId: r.mediaBuyerId,
+        campaignId: r.campaignId,
+        productId: r.productId,
+        spendYmd: r.spendYmd,
+      })),
+    );
+
+    const countJobs = new Map<
+      string,
+      {
+        mediaBuyerId: string;
+        campaignId: string;
+        productId: string;
+        windowStartExclusive: Date | null;
+        branchId?: string | null;
+      }
+    >();
+
+    for (const r of priorFetch) {
+      const k = this.adSpendLineSnapshotKey(r.mediaBuyerId, r.campaignId, r.productId, r.spendYmd);
+      const priorDate = priors.get(k) ?? null;
+      const win = this.windowExclusiveFromApprovedPrior(priorDate);
+      const gk = this.orderIntervalCountGroupKey({
+        mediaBuyerId: r.mediaBuyerId,
+        campaignId: r.campaignId,
+        productId: r.productId,
+        branchId,
+        windowStartExclusiveMs: win ? win.getTime() : null,
+      });
+      if (!countJobs.has(gk)) {
+        countJobs.set(gk, {
+          mediaBuyerId: r.mediaBuyerId,
+          campaignId: r.campaignId,
+          productId: r.productId,
+          windowStartExclusive: win,
+          branchId,
+        });
+      }
+    }
+
+    const countResults = new Map<string, number>();
+    await Promise.all(
+      [...countJobs.entries()].map(async ([gk, job]) => {
+        const c = await this.countOrdersInAdSpendIntervalWindow(job);
+        countResults.set(gk, c);
+      }),
+    );
+
+    for (const r of rows) {
+      const k = this.adSpendLineSnapshotKey(r.mediaBuyerId, r.campaignId, r.productId, r.spendYmd);
+      if (out.has(k)) continue;
+
+      const priorDate = priors.get(k) ?? null;
+      const win = this.windowExclusiveFromApprovedPrior(priorDate);
+      const gk = this.orderIntervalCountGroupKey({
+        mediaBuyerId: r.mediaBuyerId,
+        campaignId: r.campaignId,
+        productId: r.productId,
+        branchId,
+        windowStartExclusiveMs: win ? win.getTime() : null,
+      });
+      const orderCount = countResults.get(gk) ?? 0;
+      const spendAmt = r.spendAmount;
+      const indicativeCpa =
+        spendAmt !== undefined && spendAmt > 0 ? spendAmt / Math.max(orderCount, 1) : null;
+      const priorSpendDate =
+        priorDate != null
+          ? `${priorDate.getUTCFullYear()}-${String(priorDate.getUTCMonth() + 1).padStart(2, '0')}-${String(priorDate.getUTCDate()).padStart(2, '0')}`
+          : null;
+
+      out.set(k, {
+        orderCount,
+        priorSpendDate,
+        windowStartExclusive: win ? win.toISOString() : null,
+        indicativeCpa,
+      });
+    }
+
+    return out;
+  }
+
   /**
    * Orders (all statuses) for buyer + campaign + product since the UTC calendar day after the
    * latest APPROVED prior spend strictly before `spendDate`, through now. Indicative CPA =
@@ -247,13 +525,18 @@ export class MarketingService {
     spendDate: string;
     spendAmount: number;
     branchId?: string | null;
+    /** When supplied, avoids re-querying campaigns for the branch (list / batch paths). */
+    branchCampaignIds?: string[] | null;
   }): Promise<{
     orderCount: number;
     priorSpendDate: string | null;
     windowStartExclusive: string | null;
     indicativeCpa: number | null;
   }> {
-    const branchCampaignIds = await this.getBranchCampaignIds(params.branchId);
+    const branchCampaignIds =
+      params.branchCampaignIds !== undefined
+        ? params.branchCampaignIds
+        : await this.getBranchCampaignIds(params.branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return { orderCount: 0, priorSpendDate: null, windowStartExclusive: null, indicativeCpa: null };
     }
@@ -281,43 +564,14 @@ export class MarketingService {
       .limit(1);
 
     const priorSpend = prior?.spendDate;
-    let windowStartExclusive: Date | null = null;
-    if (priorSpend) {
-      const y = priorSpend.getUTCFullYear();
-      const m = priorSpend.getUTCMonth();
-      const d = priorSpend.getUTCDate();
-      windowStartExclusive = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
-    }
-
-    const now = new Date();
-    const hasProductLine = exists(
-      this.db
-        .select({ id: schema.orderItems.id })
-        .from(schema.orderItems)
-        .where(
-          and(eq(schema.orderItems.orderId, schema.orders.id), eq(schema.orderItems.productId, params.productId)),
-        ),
-    );
-
-    const orderConditions: SQL[] = [
-      eq(schema.orders.mediaBuyerId, params.mediaBuyerId),
-      eq(schema.orders.campaignId, params.campaignId),
-      hasProductLine,
-      lte(schema.orders.createdAt, now),
-    ];
-    if (windowStartExclusive) {
-      orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
-    }
-    if (params.branchId) {
-      orderConditions.push(eq(schema.orders.branchId, params.branchId));
-    }
-
-    const [countRow] = await this.db
-      .select({ c: count() })
-      .from(schema.orders)
-      .where(and(...orderConditions));
-
-    const orderCount = Number(countRow?.c ?? 0);
+    const windowStartExclusive = this.windowExclusiveFromApprovedPrior(priorSpend);
+    const orderCount = await this.countOrdersInAdSpendIntervalWindow({
+      mediaBuyerId: params.mediaBuyerId,
+      campaignId: params.campaignId,
+      productId: params.productId,
+      windowStartExclusive,
+      branchId: params.branchId,
+    });
     const spendAmt = params.spendAmount;
     const indicativeCpa =
       spendAmt !== undefined && spendAmt > 0 ? spendAmt / Math.max(orderCount, 1) : null;
@@ -649,12 +903,15 @@ export class MarketingService {
     void branchId;
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
-      const searchOr = or(
-        ilike(fundingSender.name, `%${searchTrimmed}%`),
-        ilike(fundingReceiver.name, `%${searchTrimmed}%`),
-        ilike(schema.marketingFunding.id, `%${searchTrimmed}%`),
-      );
-      if (searchOr) conditions.push(searchOr);
+      if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
+        conditions.push(eq(schema.marketingFunding.id, searchTrimmed));
+      } else {
+        const searchOr = or(
+          ilike(fundingSender.name, `%${searchTrimmed}%`),
+          ilike(fundingReceiver.name, `%${searchTrimmed}%`),
+        );
+        if (searchOr) conditions.push(searchOr);
+      }
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -713,12 +970,15 @@ export class MarketingService {
     void branchId;
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
-      const searchOr = or(
-        ilike(fundingSender.name, `%${searchTrimmed}%`),
-        ilike(fundingReceiver.name, `%${searchTrimmed}%`),
-        ilike(schema.marketingFunding.id, `%${searchTrimmed}%`),
-      );
-      if (searchOr) conditions.push(searchOr);
+      if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
+        conditions.push(eq(schema.marketingFunding.id, searchTrimmed));
+      } else {
+        const searchOr = or(
+          ilike(fundingSender.name, `%${searchTrimmed}%`),
+          ilike(fundingReceiver.name, `%${searchTrimmed}%`),
+        );
+        if (searchOr) conditions.push(searchOr);
+      }
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -2233,6 +2493,7 @@ export class MarketingService {
       spendDate: input.spendDate,
       spendAmount: input.spendAmount ?? 0,
       branchId,
+      branchCampaignIds,
     });
   }
 
@@ -2313,14 +2574,17 @@ export class MarketingService {
     }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
-      const searchOr = or(
-        ilike(buyer.name, `%${searchTrimmed}%`),
-        ilike(prod.name, `%${searchTrimmed}%`),
-        ilike(camp.name, `%${searchTrimmed}%`),
-        ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
-        ilike(schema.adSpendLogs.platformCustomLabel, `%${searchTrimmed}%`),
-      );
-      if (searchOr) conditions.push(searchOr);
+      if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
+        conditions.push(eq(schema.adSpendLogs.id, searchTrimmed));
+      } else {
+        const searchOr = or(
+          ilike(buyer.name, `%${searchTrimmed}%`),
+          ilike(prod.name, `%${searchTrimmed}%`),
+          ilike(camp.name, `%${searchTrimmed}%`),
+          ilike(schema.adSpendLogs.platformCustomLabel, `%${searchTrimmed}%`),
+        );
+        if (searchOr) conditions.push(searchOr);
+      }
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -2353,21 +2617,27 @@ export class MarketingService {
         .where(whereClause),
     ]);
 
-    // One snapshot query per row (limit ≤ 100). Batched SQL could reduce round-trips later.
-    const enriched = await Promise.all(
-      records.map(async (r) => {
-        const spendYmd = this.spendDateToYmd(r.spendDate);
-        const snap = await this.getAdSpendIntervalSnapshot({
-          mediaBuyerId: r.mediaBuyerId,
-          campaignId: r.campaignId,
-          productId: r.productId,
-          spendDate: spendYmd,
-          spendAmount: Number(r.spendAmount),
-          branchId,
-        });
-        return { ...r, orderCount: snap.orderCount, indicativeCpa: snap.indicativeCpa };
-      }),
+    const snapshotKeys = records.map((r) => ({
+      mediaBuyerId: r.mediaBuyerId,
+      campaignId: r.campaignId,
+      productId: r.productId,
+      spendYmd: this.spendDateToYmd(r.spendDate),
+      spendAmount: Number(r.spendAmount),
+    }));
+    const snapshotMap = await this.batchAdSpendIntervalSnapshots(
+      snapshotKeys,
+      branchCampaignIds,
+      branchId,
     );
+    const enriched = records.map((r) => {
+      const spendYmd = this.spendDateToYmd(r.spendDate);
+      const sk = this.adSpendLineSnapshotKey(r.mediaBuyerId, r.campaignId, r.productId, spendYmd);
+      const snap = snapshotMap.get(sk) ?? {
+        orderCount: 0,
+        indicativeCpa: null,
+      };
+      return { ...r, orderCount: snap.orderCount, indicativeCpa: snap.indicativeCpa };
+    });
 
     return {
       records: enriched,
@@ -2436,19 +2706,109 @@ export class MarketingService {
     }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
-      const searchOr = or(
-        ilike(buyer.name, `%${searchTrimmed}%`),
-        ilike(prod.name, `%${searchTrimmed}%`),
-        ilike(camp.name, `%${searchTrimmed}%`),
-        ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
-        ilike(schema.adSpendLogs.platformCustomLabel, `%${searchTrimmed}%`),
-      );
-      if (searchOr) conditions.push(searchOr);
+      if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
+        conditions.push(eq(schema.adSpendLogs.id, searchTrimmed));
+      } else {
+        const searchOr = or(
+          ilike(buyer.name, `%${searchTrimmed}%`),
+          ilike(prod.name, `%${searchTrimmed}%`),
+          ilike(camp.name, `%${searchTrimmed}%`),
+          ilike(schema.adSpendLogs.platformCustomLabel, `%${searchTrimmed}%`),
+        );
+        if (searchOr) conditions.push(searchOr);
+      }
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const spendDayUtc = sql`(${schema.adSpendLogs.spendDate} AT TIME ZONE 'UTC')::date`;
 
-    const records = await this.db
+    const groupedFrom = this.db
+      .select({
+        spendDay: sql<string>`${spendDayUtc}`.mapWith(String),
+        mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
+      })
+      .from(schema.adSpendLogs)
+      .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
+      .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
+      .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
+      .where(whereClause)
+      .groupBy(spendDayUtc, schema.adSpendLogs.mediaBuyerId)
+      .as('ad_spend_group_keys');
+
+    const [totalRow] = await this.db.select({ c: count() }).from(groupedFrom);
+    const total = Number(totalRow?.c ?? 0);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const pageSafe = Math.min(Math.max(1, page), totalPages);
+    const start = (pageSafe - 1) * limit;
+
+    const pageGroupRows = await this.db
+      .select({
+        spendDay: sql<string>`${spendDayUtc}`.mapWith(String),
+        mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
+        mediaBuyerName: sql<string>`MAX(${buyer.name})`.mapWith(String),
+        lineCount: count(),
+        totalAmount: sum(schema.adSpendLogs.spendAmount),
+        pendingLines: sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'PENDING' THEN 1 ELSE 0 END), 0)::int`.mapWith(
+          Number,
+        ),
+        approvedLines: sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'APPROVED' THEN 1 ELSE 0 END), 0)::int`.mapWith(
+          Number,
+        ),
+        rejectedLines: sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'REJECTED' THEN 1 ELSE 0 END), 0)::int`.mapWith(
+          Number,
+        ),
+      })
+      .from(schema.adSpendLogs)
+      .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
+      .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
+      .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
+      .where(whereClause)
+      .groupBy(spendDayUtc, schema.adSpendLogs.mediaBuyerId)
+      .orderBy(desc(spendDayUtc), sql`MAX(${buyer.name})`)
+      .limit(limit)
+      .offset(start);
+
+    if (pageGroupRows.length === 0) {
+      return {
+        groups: [],
+        pagination: { page: pageSafe, limit, total },
+      };
+    }
+
+    const tupleOrParts = pageGroupRows.map((g) =>
+      and(eq(schema.adSpendLogs.mediaBuyerId, g.mediaBuyerId), sql`${spendDayUtc} = ${g.spendDay}::date`),
+    );
+    const tupleOr: SQL | undefined =
+      tupleOrParts.length === 0
+        ? undefined
+        : tupleOrParts.length === 1
+          ? tupleOrParts[0]
+          : or(...(tupleOrParts as [SQL, ...SQL[]]));
+    const lineWhere =
+      tupleOr == null ? whereClause : whereClause ? and(whereClause, tupleOr) : tupleOr;
+
+    type LineRow = {
+      id: string;
+      mediaBuyerId: string;
+      mediaBuyerName: string | null;
+      productId: string;
+      productName: string | null;
+      campaignId: string;
+      campaignName: string | null;
+      spendAmount: string;
+      screenshotUrl: string;
+      adUrl: string | null;
+      platform: string;
+      platformCustomLabel: string | null;
+      spendDate: Date;
+      status: string;
+      rejectionReason: string | null;
+      approvedAt: Date | null;
+      rejectedAt: Date | null;
+      createdAt: Date;
+    };
+
+    const lineRows = await this.db
       .select({
         id: schema.adSpendLogs.id,
         mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
@@ -2473,121 +2833,112 @@ export class MarketingService {
       .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
       .leftJoin(prod, eq(schema.adSpendLogs.productId, prod.id))
       .leftJoin(camp, eq(schema.adSpendLogs.campaignId, camp.id))
-      .where(whereClause)
+      .where(lineWhere)
       .orderBy(desc(schema.adSpendLogs.spendDate));
 
-    type Line = (typeof records)[number];
-    const byKey = new Map<
-      string,
-      {
-        spendDate: string;
-        mediaBuyerId: string;
-        mediaBuyerName: string | null;
-        lines: Line[];
-      }
-    >();
-    for (const row of records) {
+    const linesByGroup = new Map<string, LineRow[]>();
+    for (const row of lineRows) {
       const ymd = this.spendDateToYmd(row.spendDate);
-      const key = `${ymd}::${row.mediaBuyerId}`;
-      const existing = byKey.get(key);
-      if (existing) {
-        existing.lines.push(row);
-      } else {
-        byKey.set(key, {
-          spendDate: ymd,
-          mediaBuyerId: row.mediaBuyerId,
-          mediaBuyerName: row.mediaBuyerName,
-          lines: [row],
-        });
-      }
+      const gk = `${ymd}::${row.mediaBuyerId}`;
+      const arr = linesByGroup.get(gk) ?? [];
+      arr.push(row as LineRow);
+      linesByGroup.set(gk, arr);
     }
 
-    const allGroups = Array.from(byKey.values()).map((g) => {
-      const totalAmount = g.lines.reduce((acc, l) => acc + Number(l.spendAmount), 0);
-      const statuses = new Set(g.lines.map((l) => l.status));
-      let rolledStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
-      if (statuses.has('PENDING')) rolledStatus = 'PENDING';
-      else if (statuses.size === 1 && statuses.has('APPROVED')) rolledStatus = 'APPROVED';
-      else if (statuses.size === 1 && statuses.has('REJECTED')) rolledStatus = 'REJECTED';
-      else rolledStatus = 'MIXED';
-      return {
-        spendDate: g.spendDate,
-        mediaBuyerId: g.mediaBuyerId,
-        mediaBuyerName: g.mediaBuyerName,
-        lineCount: g.lines.length,
-        totalAmount: String(totalAmount),
-        rolledStatus,
-        lines: g.lines,
-      };
-    });
+    const snapshotInputs: Array<{
+      mediaBuyerId: string;
+      campaignId: string;
+      productId: string;
+      spendYmd: string;
+      spendAmount: number;
+    }> = [];
+    for (const row of lineRows) {
+      snapshotInputs.push({
+        mediaBuyerId: row.mediaBuyerId,
+        campaignId: row.campaignId,
+        productId: row.productId,
+        spendYmd: this.spendDateToYmd(row.spendDate),
+        spendAmount: Number(row.spendAmount),
+      });
+    }
+    const snapshotMap = await this.batchAdSpendIntervalSnapshots(
+      snapshotInputs,
+      branchCampaignIds,
+      branchId,
+    );
 
-    allGroups.sort((a, b) => {
-      if (a.spendDate !== b.spendDate) return a.spendDate < b.spendDate ? 1 : -1;
-      return (a.mediaBuyerName ?? '').localeCompare(b.mediaBuyerName ?? '');
-    });
-
-    const total = allGroups.length;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    const pageSafe = Math.min(Math.max(1, page), totalPages);
-    const start = (pageSafe - 1) * limit;
-    const pageGroups = allGroups.slice(start, start + limit);
-
-    const groups = await Promise.all(
-      pageGroups.map(async (g) => {
-        const overallOrderCount = await this.countOrdersForMediaBuyerOnUtcDay({
-          mediaBuyerId: g.mediaBuyerId,
-          spendDateYmd: g.spendDate,
+    const overallKey = (spendDay: string, mediaBuyerId: string) => `${spendDay}::${mediaBuyerId}`;
+    const uniqueOverallKeys = [...new Set(pageGroupRows.map((g) => overallKey(g.spendDay, g.mediaBuyerId)))];
+    const overallCounts = new Map<string, number>();
+    await Promise.all(
+      uniqueOverallKeys.map(async (key) => {
+        const sep = key.indexOf('::');
+        const spendDay = sep === -1 ? key : key.slice(0, sep);
+        const mediaBuyerId = sep === -1 ? '' : key.slice(sep + 2);
+        const c = await this.countOrdersForMediaBuyerOnUtcDay({
+          mediaBuyerId,
+          spendDateYmd: spendDay,
           branchId,
         });
-        const totalAmt = Number(g.totalAmount);
-        const overallCpa = overallOrderCount > 0 ? totalAmt / overallOrderCount : null;
-
-        const lines = await Promise.all(
-          g.lines.map(async (line) => {
-            const spendYmd = this.spendDateToYmd(line.spendDate);
-            const snap = await this.getAdSpendIntervalSnapshot({
-              mediaBuyerId: line.mediaBuyerId,
-              campaignId: line.campaignId,
-              productId: line.productId,
-              spendDate: spendYmd,
-              spendAmount: Number(line.spendAmount),
-              branchId,
-            });
-            return {
-              ...line,
-              spendDate: spendYmd,
-              approvedAt:
-                line.approvedAt == null
-                  ? null
-                  : line.approvedAt instanceof Date
-                    ? line.approvedAt.toISOString()
-                    : line.approvedAt,
-              rejectedAt:
-                line.rejectedAt == null
-                  ? null
-                  : line.rejectedAt instanceof Date
-                    ? line.rejectedAt.toISOString()
-                    : line.rejectedAt,
-              createdAt: line.createdAt instanceof Date ? line.createdAt.toISOString() : line.createdAt,
-              orderCount: snap.orderCount,
-              indicativeCpa: snap.indicativeCpa,
-            };
-          }),
-        );
-
-        return {
-          spendDate: g.spendDate,
-          mediaBuyerId: g.mediaBuyerId,
-          mediaBuyerName: g.mediaBuyerName,
-          lineCount: g.lineCount,
-          totalAmount: g.totalAmount,
-          rolledStatus: g.rolledStatus,
-          overallOrderCount,
-          overallCpa,
-          lines,
-        };
+        overallCounts.set(key, c);
       }),
     );
+
+    const groups = pageGroupRows.map((g) => {
+      let rolledStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
+      if (g.pendingLines > 0) rolledStatus = 'PENDING';
+      else if (g.approvedLines === g.lineCount) rolledStatus = 'APPROVED';
+      else if (g.rejectedLines === g.lineCount) rolledStatus = 'REJECTED';
+      else rolledStatus = 'MIXED';
+
+      const gKey = `${g.spendDay}::${g.mediaBuyerId}`;
+      const rawLines = linesByGroup.get(gKey) ?? [];
+      const overallOrderCount = overallCounts.get(gKey) ?? 0;
+      const totalAmt = Number(g.totalAmount);
+      const overallCpa = overallOrderCount > 0 ? totalAmt / overallOrderCount : null;
+
+      const lines = rawLines.map((line) => {
+        const spendYmd = this.spendDateToYmd(line.spendDate);
+        const sk = this.adSpendLineSnapshotKey(
+          line.mediaBuyerId,
+          line.campaignId,
+          line.productId,
+          spendYmd,
+        );
+        const snap = snapshotMap.get(sk) ?? { orderCount: 0, indicativeCpa: null };
+        return {
+          ...line,
+          spendDate: spendYmd,
+          approvedAt:
+            line.approvedAt == null
+              ? null
+              : line.approvedAt instanceof Date
+                ? line.approvedAt.toISOString()
+                : line.approvedAt,
+          rejectedAt:
+            line.rejectedAt == null
+              ? null
+              : line.rejectedAt instanceof Date
+                ? line.rejectedAt.toISOString()
+                : line.rejectedAt,
+          createdAt: line.createdAt instanceof Date ? line.createdAt.toISOString() : line.createdAt,
+          orderCount: snap.orderCount,
+          indicativeCpa: snap.indicativeCpa,
+        };
+      });
+
+      return {
+        spendDate: g.spendDay,
+        mediaBuyerId: g.mediaBuyerId,
+        mediaBuyerName: g.mediaBuyerName,
+        lineCount: g.lineCount,
+        totalAmount: String(g.totalAmount ?? '0'),
+        rolledStatus,
+        overallOrderCount,
+        overallCpa,
+        lines,
+      };
+    });
 
     return {
       groups,
@@ -2632,13 +2983,16 @@ export class MarketingService {
     }
     const searchTrimmed = input.search?.trim();
     if (searchTrimmed) {
-      const searchOr = or(
-        ilike(buyer.name, `%${searchTrimmed}%`),
-        ilike(prod.name, `%${searchTrimmed}%`),
-        ilike(camp.name, `%${searchTrimmed}%`),
-        ilike(schema.adSpendLogs.id, `%${searchTrimmed}%`),
-      );
-      if (searchOr) conditions.push(searchOr);
+      if (trimmedSearchLooksLikeUuid(searchTrimmed)) {
+        conditions.push(eq(schema.adSpendLogs.id, searchTrimmed));
+      } else {
+        const searchOr = or(
+          ilike(buyer.name, `%${searchTrimmed}%`),
+          ilike(prod.name, `%${searchTrimmed}%`),
+          ilike(camp.name, `%${searchTrimmed}%`),
+        );
+        if (searchOr) conditions.push(searchOr);
+      }
     }
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -2790,6 +3144,191 @@ export class MarketingService {
   // Media Buyer Leaderboard & CPA Alerts
   // ============================================
 
+  /**
+   * Order statuses that count as "confirmed or beyond" — orders the CS team has
+   * scheduled (got past CS_ENGAGED). Used for the confirmation-rate KPI.
+   */
+  private static readonly CONFIRMED_OR_BEYOND_STATUSES = [
+    'CONFIRMED',
+    'AGENT_ASSIGNED',
+    'DISPATCHED',
+    'IN_TRANSIT',
+    'DELIVERED',
+    'PARTIALLY_DELIVERED',
+    'RETURNED',
+    'RESTOCKED',
+    'WRITTEN_OFF',
+    'REMITTED',
+  ] as const;
+
+  /** Derive ratio metrics (CPA, true ROAS, delivery/confirmation rate) from raw counts. */
+  private deriveBuyerMetrics(raw: {
+    totalSpend: number;
+    totalOrders: number;
+    deliveredOrders: number;
+    deliveredRevenue: number;
+    confirmedOrders: number;
+  }) {
+    const { totalSpend, totalOrders, deliveredOrders, deliveredRevenue, confirmedOrders } = raw;
+    return {
+      totalSpend,
+      totalOrders,
+      deliveredOrders,
+      deliveredRevenue,
+      confirmedOrders,
+      confirmationRate: totalOrders > 0 ? (confirmedOrders / totalOrders) * 100 : 0,
+      cpa: totalOrders > 0 ? totalSpend / totalOrders : 0,
+      trueRoas: totalSpend > 0 ? deliveredRevenue / totalSpend : 0,
+      deliveryRate: totalOrders > 0 ? (deliveredOrders / totalOrders) * 100 : 0,
+    };
+  }
+
+  /**
+   * Batched performance metrics for many media buyers in a single round-trip.
+   * Replaces the N+1 fanout in `getMediaBuyerLeaderboard` (was 5 queries × N
+   * buyers; now 2 grouped queries regardless of N). Use this whenever you need
+   * metrics for a list of buyers; `getPerformanceMetrics(buyerId)` stays for
+   * single-buyer call sites.
+   *
+   * Returns a Map keyed by `buyerId`. Every buyer in `buyerIds` gets an entry;
+   * buyers with zero spend AND zero orders return zero metrics so the caller
+   * doesn't have to special-case "buyer not in result".
+   *
+   * Date scoping mirrors `getPerformanceMetrics`:
+   *   - `total_spend` filtered by `spend_date` (in WHERE for index selectivity)
+   *   - `total_orders` / `confirmed_orders` filtered by `created_at` (FILTER clause)
+   *   - `delivered_orders` / `delivered_revenue` filtered by `delivered_at` (FILTER clause)
+   * Two date columns on the same table → FILTER clauses instead of split queries.
+   */
+  async getPerformanceMetricsBatched(
+    buyerIds: string[],
+    period: 'this_month' | 'all_time' = 'this_month',
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+  ): Promise<Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>> {
+    if (buyerIds.length === 0) return new Map();
+
+    let periodStart: Date | null = null;
+    let periodEnd: Date | null = null;
+    if (startDate && endDate) {
+      periodStart = new Date(startDate);
+      periodEnd = new Date(endDate);
+      periodEnd.setHours(23, 59, 59, 999);
+    } else if (period === 'this_month') {
+      periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    }
+
+    // If the branch has no campaigns, no buyer can have spend on branch campaigns —
+    // mirror the early-return semantics of the single-buyer version.
+    const branchCampaignIds = await this.getBranchCampaignIds(branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      const zero = this.deriveBuyerMetrics({
+        totalSpend: 0,
+        totalOrders: 0,
+        deliveredOrders: 0,
+        deliveredRevenue: 0,
+        confirmedOrders: 0,
+      });
+      return new Map(buyerIds.map((id) => [id, zero]));
+    }
+
+    // Spend conditions (date in WHERE — single index path on `spend_date`).
+    const spendConditions: SQL[] = [
+      eq(schema.adSpendLogs.status, 'APPROVED'),
+      inArray(schema.adSpendLogs.mediaBuyerId, buyerIds),
+    ];
+    if (branchCampaignIds) {
+      spendConditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+    }
+    if (periodStart) spendConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
+    if (periodEnd) spendConditions.push(lte(schema.adSpendLogs.spendDate, periodEnd));
+
+    // Per-metric date conditions for the orders FILTER clauses. Note: the spread
+    // expression returns `SQL` not `SQL | undefined`, but `and(...empty)` returns
+    // undefined — `?? sql\`true\`` keeps the FILTER tautologically valid when no
+    // date scope is provided (period === 'all_time' with no explicit dates).
+    const inCreatedPeriod: SQL[] = [];
+    if (periodStart) inCreatedPeriod.push(gte(schema.orders.createdAt, periodStart));
+    if (periodEnd) inCreatedPeriod.push(lte(schema.orders.createdAt, periodEnd));
+    const inDeliveredPeriod: SQL[] = [];
+    if (periodStart) inDeliveredPeriod.push(gte(schema.orders.deliveredAt, periodStart));
+    if (periodEnd) inDeliveredPeriod.push(lte(schema.orders.deliveredAt, periodEnd));
+
+    const isDelivered = eq(schema.orders.status, 'DELIVERED');
+    const isConfirmedOrBeyond = inArray(
+      schema.orders.status,
+      [...MarketingService.CONFIRMED_OR_BEYOND_STATUSES],
+    );
+
+    const totalOrdersFilter =
+      inCreatedPeriod.length > 0
+        ? and(...inCreatedPeriod) ?? sql`true`
+        : sql`true`;
+    const confirmedOrdersFilter =
+      inCreatedPeriod.length > 0
+        ? and(isConfirmedOrBeyond, ...inCreatedPeriod) ?? isConfirmedOrBeyond
+        : isConfirmedOrBeyond;
+    const deliveredFilter =
+      inDeliveredPeriod.length > 0
+        ? and(isDelivered, ...inDeliveredPeriod) ?? isDelivered
+        : isDelivered;
+
+    const [spendRows, orderRows] = await Promise.all([
+      this.db
+        .select({
+          mediaBuyerId: schema.adSpendLogs.mediaBuyerId,
+          totalSpend: sum(schema.adSpendLogs.spendAmount).mapWith(Number),
+        })
+        .from(schema.adSpendLogs)
+        .where(and(...spendConditions))
+        .groupBy(schema.adSpendLogs.mediaBuyerId),
+      this.db
+        .select({
+          mediaBuyerId: schema.orders.mediaBuyerId,
+          totalOrders: sql<number>`count(*) FILTER (WHERE ${totalOrdersFilter})`.mapWith(Number),
+          confirmedOrders: sql<number>`count(*) FILTER (WHERE ${confirmedOrdersFilter})`.mapWith(
+            Number,
+          ),
+          deliveredOrders: sql<number>`count(*) FILTER (WHERE ${deliveredFilter})`.mapWith(Number),
+          deliveredRevenue: sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${deliveredFilter}), 0)`.mapWith(
+            Number,
+          ),
+        })
+        .from(schema.orders)
+        .where(inArray(schema.orders.mediaBuyerId, buyerIds))
+        .groupBy(schema.orders.mediaBuyerId),
+    ]);
+
+    const spendByBuyer = new Map<string, number>(
+      spendRows
+        .filter((row): row is typeof row & { mediaBuyerId: string } => row.mediaBuyerId != null)
+        .map((row) => [row.mediaBuyerId, Number(row.totalSpend ?? 0)]),
+    );
+    const orderByBuyer = new Map(
+      orderRows
+        .filter((row): row is typeof row & { mediaBuyerId: string } => row.mediaBuyerId != null)
+        .map((row) => [row.mediaBuyerId, row]),
+    );
+
+    const result = new Map<string, ReturnType<MarketingService['deriveBuyerMetrics']>>();
+    for (const buyerId of buyerIds) {
+      const spend = spendByBuyer.get(buyerId) ?? 0;
+      const orderRow = orderByBuyer.get(buyerId);
+      result.set(
+        buyerId,
+        this.deriveBuyerMetrics({
+          totalSpend: spend,
+          totalOrders: Number(orderRow?.totalOrders ?? 0),
+          deliveredOrders: Number(orderRow?.deliveredOrders ?? 0),
+          deliveredRevenue: Number(orderRow?.deliveredRevenue ?? 0),
+          confirmedOrders: Number(orderRow?.confirmedOrders ?? 0),
+        }),
+      );
+    }
+    return result;
+  }
+
   async getMediaBuyerLeaderboard(
     period: 'this_month' | 'all_time' = 'this_month',
     startDate?: string,
@@ -2813,29 +3352,41 @@ export class MarketingService {
       ? allBuyers.filter((buyer) => branchUserIds.includes(buyer.id))
       : allBuyers;
 
-    const profitability = await this.getProfitabilityConfig();
-    const leaderboard = await Promise.all(
-      eligibleBuyers.map(async (buyer) => {
-        const metrics = await this.getPerformanceMetrics(
-          buyer.id,
-          period,
-          startDate,
-          endDate,
-          branchId,
-        );
-        const profitabilityScore =
-          metrics.totalSpend > 0
-            ? Math.min(1, metrics.trueRoas / profitability.targetRoas)
-            : null;
-        return {
-          mediaBuyerId: buyer.id,
-          name: buyer.name,
-          email: buyer.email,
-          ...metrics,
-          profitabilityScore,
-        };
-      }),
-    );
+    if (eligibleBuyers.length === 0) return [];
+
+    const [profitability, metricsByBuyer] = await Promise.all([
+      this.getProfitabilityConfig(),
+      this.getPerformanceMetricsBatched(
+        eligibleBuyers.map((b) => b.id),
+        period,
+        startDate,
+        endDate,
+        branchId,
+      ),
+    ]);
+
+    const leaderboard = eligibleBuyers.map((buyer) => {
+      const metrics =
+        metricsByBuyer.get(buyer.id) ??
+        this.deriveBuyerMetrics({
+          totalSpend: 0,
+          totalOrders: 0,
+          deliveredOrders: 0,
+          deliveredRevenue: 0,
+          confirmedOrders: 0,
+        });
+      const profitabilityScore =
+        metrics.totalSpend > 0
+          ? Math.min(1, metrics.trueRoas / profitability.targetRoas)
+          : null;
+      return {
+        mediaBuyerId: buyer.id,
+        name: buyer.name,
+        email: buyer.email,
+        ...metrics,
+        profitabilityScore,
+      };
+    });
 
     // Sort by True ROAS descending, then by confirmation rate descending (tiebreaker)
     leaderboard.sort((a, b) => {

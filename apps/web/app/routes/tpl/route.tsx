@@ -109,6 +109,8 @@ export function ErrorBoundary() {
       isResponse={isResponse}
       status={status}
       errorData={isResponse ? normalizeRouteErrorData(error.data) : undefined}
+      homePath="/tpl"
+      homeLabel="Dashboard"
     />
   );
 }

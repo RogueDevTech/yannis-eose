@@ -160,28 +160,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     listInput.scheduleKind = 'callback_on_day';
     listInput.scheduleDate = scheduleDate;
   }
-  const countsInput: { assignedCsId?: string; startDate?: string; endDate?: string } = assignedCsId ? { assignedCsId } : {};
-  if (apiStartDate) countsInput.startDate = apiStartDate;
-  if (apiEndDate) countsInput.endDate = apiEndDate;
-
   const input = encodeURIComponent(JSON.stringify(listInput));
-  const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
-
-  // Daily-counts series for the chart-view trend line. Mirrors the same scope filters the
-  // table uses so the trend matches what the user is reading.
-  const trendInput: { assignedCsId?: string; status?: string; startDate?: string; endDate?: string } = {};
-  if (assignedCsId) trendInput.assignedCsId = assignedCsId;
-  if (status) trendInput.status = status;
-  if (apiStartDate) trendInput.startDate = apiStartDate;
-  if (apiEndDate) trendInput.endDate = apiEndDate;
-  const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));
-
-  const heatInput = {
-    yearMonth: calendarMonth,
-    ...(assignedCsId && { assignedCsId }),
-    ...(status && { status }),
-  };
-  const heatInputEnc = encodeURIComponent(JSON.stringify(heatInput));
 
   const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
 
@@ -240,84 +219,61 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
   const deferredSecondary = (async () => {
-    const offlineProductsP = canCreateOffline
-      ? apiRequest<{ result?: { data?: { products: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> } } }>(
-          `/trpc/products.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }))}`,
-          { method: 'GET', cookie },
-        )
-      : Promise.resolve({ ok: false as const, data: null });
+    // Single bundle endpoint replaces what used to be 5 (or up to 7 for HoCS /
+    // admin) parallel HTTP calls — statusCounts, myCSWorkload (CS_AGENT only),
+    // timeSeriesByCreated, scheduleCalendarHeat, products.list (offline modal),
+    // csWorkloads + logistics.locationOptions (admin column). Same fan-out,
+    // one HTTP round-trip and one auth pass.
+    const bundleInput = encodeURIComponent(
+      JSON.stringify({
+        countsAssignedCsId: assignedCsId,
+        countsStartDate: apiStartDate,
+        countsEndDate: apiEndDate,
+        trendStatus: status,
+        heatYearMonth: calendarMonth,
+        heatStatus: status,
+        isCSAgent,
+        showCSAgentColumn,
+        canCreateOffline,
+      }),
+    );
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/orders.csOrdersPageBundle?input=${bundleInput}`,
+      { method: 'GET', cookie },
+    );
 
-    const [countsRes, myWorkloadRes, trendRes, heatRes, offlineProductsRes] = await Promise.all([
-      apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
-      isCSAgent ? apiRequest<unknown>('/trpc/orders.myCSWorkload', { method: 'GET', cookie }) : Promise.resolve(null),
-      apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputEnc}`, { method: 'GET', cookie }),
-      apiRequest<unknown>(`/trpc/orders.scheduleCalendarHeat?input=${heatInputEnc}`, { method: 'GET', cookie }),
-      offlineProductsP,
-    ]);
-
-    const dailyCounts = trendRes.ok
-      ? ((trendRes.data as {
-          result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
-        })?.result?.data ?? [])
-      : [];
-
-    const scheduleHeat: ScheduleHeatDay[] = heatRes.ok
-      ? ((heatRes.data as { result?: { data?: ScheduleHeatDay[] } })?.result?.data ?? [])
-      : [];
-
-    const myWorkload =
-      isCSAgent && myWorkloadRes && (myWorkloadRes as { ok: boolean }).ok
-        ? ((myWorkloadRes as { data?: { result?: { data?: { agentId: string; agentName: string; capacity: number; pendingCount: number; todayClosesCount?: number; lastActionAt: string | null } } } }).data?.result?.data ??
-          null)
-        : null;
-
-    let csAgentsForFilter: Array<{ agentId: string; agentName: string }> = [];
-    let logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }> = [];
-    if (showCSAgentColumn) {
-      const [workloadsRes, locationsRes] = await Promise.all([
-        apiRequest<{ result?: { data?: Array<{ agentId: string; agentName: string }> } }>(
-          '/trpc/orders.csWorkloads?input=%7B%7D',
-          { method: 'GET', cookie },
-        ),
-        apiRequest<{ result?: { data?: Array<{ id: string; name: string; providerName: string | null }> } }>(
-          `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
-          { method: 'GET', cookie },
-        ),
-      ]);
-      if (workloadsRes.ok && Array.isArray(workloadsRes.data?.result?.data)) {
-        csAgentsForFilter = workloadsRes.data.result.data.map((w) => ({ agentId: w.agentId, agentName: w.agentName }));
-      }
-      if (locationsRes.ok && Array.isArray(locationsRes.data?.result?.data)) {
-        logisticsLocationsForBulk = locationsRes.data.result.data.map((loc) => ({
-          id: loc.id,
-          name: loc.name,
-          providerName: loc.providerName ?? null,
-        }));
-      }
-    }
-
-    let productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }> = [];
-    if (canCreateOffline && offlineProductsRes.ok) {
-      const pack = offlineProductsRes.data as {
-        result?: { data?: { products: typeof productsForOfflineOrder } };
-      };
-      if (pack?.result?.data?.products) {
-        productsForOfflineOrder = pack.result.data.products;
-      }
-    }
-
-    const countsData = countsRes.ok
-      ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-      : {};
+    type BundleData = {
+      statusCounts: Record<string, number>;
+      myWorkload: {
+        agentId: string;
+        agentName: string;
+        capacity: number;
+        pendingCount: number;
+        todayClosesCount?: number;
+        lastActionAt: string | null;
+      } | null;
+      dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+      scheduleHeat: ScheduleHeatDay[];
+      csAgentsForFilter: Array<{ agentId: string; agentName: string }>;
+      logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }>;
+      productsForOfflineOrder: Array<{
+        id: string;
+        name: string;
+        offers?: Array<{ label: string; price: string; qty: number }>;
+      }>;
+    };
+    const bundle = bundleRes.ok
+      ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
+      : null;
 
     return {
-      statusCounts: countsData,
-      dailyCounts,
-      scheduleHeat,
-      myWorkload,
-      csAgentsForFilter,
-      logisticsLocationsForBulk,
-      productsForOfflineOrder,
+      statusCounts: bundle?.statusCounts ?? {},
+      dailyCounts: bundle?.dailyCounts ?? [],
+      scheduleHeat: bundle?.scheduleHeat ?? [],
+      myWorkload: bundle?.myWorkload ?? null,
+      csAgentsForFilter: bundle?.csAgentsForFilter ?? [],
+      logisticsLocationsForBulk: bundle?.logisticsLocationsForBulk ?? [],
+      productsForOfflineOrder: bundle?.productsForOfflineOrder ?? [],
     };
   })();
 

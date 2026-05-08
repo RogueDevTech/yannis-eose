@@ -81,90 +81,70 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const pageData = (async () => {
-  // Start fetches concurrently (extended read timeout — inventory fans out many calls under single-fetch).
-  const levelsPromise = apiRequest<unknown>(
-    `/trpc/inventory.levels?input=${encodeURIComponent(JSON.stringify(levelsInput))}`,
-    { method: 'GET', cookie, ...inventoryReadOpts },
+  // Single bundled call — replaces 9 parallel tRPC HTTP round-trips
+  // (levels + movements + products.options + 2× locationOptions +
+  // settings.getSystemSettings + inventory.lowStockAlerts +
+  // inventory.shipments.list + inventory.warehouses.list). Same fan-out
+  // runs server-side via Promise.all.
+  const bundleInput = encodeURIComponent(
+    JSON.stringify({
+      ...(rawProductFilter && { productId: rawProductFilter }),
+      ...(rawLocationFilter && { locationId: rawLocationFilter }),
+      ...(rawShipmentFilter && { shipmentId: rawShipmentFilter }),
+      ...(rawSearch && { search: rawSearch }),
+      ...(levelsInput.sortBy && { sortBy: levelsInput.sortBy }),
+      ...(levelsInput.sortOrder && { sortOrder: levelsInput.sortOrder }),
+      levelsPage: page,
+      levelsLimit: LEVELS_LIMIT,
+      shipmentsLimit: 100,
+      warehousesLimit: 50,
+    }),
   );
-  const movementsPromise = apiRequest<unknown>('/trpc/inventory.movements', {
-    method: 'GET',
-    cookie,
-    ...inventoryReadOpts,
-  });
-  const productsPromise = apiRequest<unknown>(
-    `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
-    { method: 'GET', cookie, ...inventoryReadOpts },
-  );
-  // Stock intake / inbound shipment targets: company-owned warehouses (provider kind
-  // WAREHOUSE), not 3PL partner locations. Dropdowns list sites managed at
-  // /admin/inventory/warehouses.
-  const locationsPromise = apiRequest<unknown>(
-    `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', providerKind: 'WAREHOUSE' }))}`,
-    { method: 'GET', cookie, ...inventoryReadOpts },
-  );
-  /** Resolve labels on stock rows (includes non-warehouse sites — avoids “Unknown location” on 3PL shelves). */
-  const displayLocationsPromise = apiRequest<unknown>(
-    `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
-    { method: 'GET', cookie, ...inventoryReadOpts },
-  );
-  const lowStockPromise = apiRequest<unknown>(
-    '/trpc/settings.getSystemSettings',
-    { method: 'GET', cookie, ...inventoryReadOpts },
-  );
-  const lowStockAlertsPromise = apiRequest<unknown>(
-    '/trpc/inventory.lowStockAlerts',
+  const bundleRes = await apiRequest<unknown>(
+    `/trpc/inventory.inventoryAdminPageBundle?input=${bundleInput}`,
     { method: 'GET', cookie, ...inventoryReadOpts },
   );
 
-  // Inbound shipments — list page 1 of 20 most recent for the user's scope.
-  // Service auto-scopes by `currentBranchId` for non-admins via the destination location.
-  const shipmentsInput = { page: 1, limit: 100 };
-  const shipmentsPromise = apiRequest<unknown>(
-    `/trpc/inventory.shipments.list?input=${encodeURIComponent(JSON.stringify(shipmentsInput))}`,
-    { method: 'GET', cookie, ...inventoryReadOpts },
-  );
-
-  // Inhouse warehouses — show on the inventory page so warehouse-held stock isn't hidden.
-  const warehousesPromise = apiRequest<unknown>(
-    `/trpc/inventory.warehouses.list?input=${encodeURIComponent(
-      JSON.stringify({ status: 'ACTIVE', listScope: 'our', page: 1, limit: 50 }),
-    )}`,
-    { method: 'GET', cookie, ...inventoryReadOpts },
-  );
-
-  // Await levels (critical for stats)
-  const levelsRes = await levelsPromise;
-
-  let levelsLoadError: string | null = null;
-  const levelsData = levelsRes.ok
-    ? (levelsRes.data as {
-        result?: {
-          data?: {
-            levels: InventoryLevel[];
-            totals?: { totalStock: number; totalReserved: number };
-            pagination: { total: number; totalPages: number };
-          };
-        };
-      })?.result?.data
+  type BundleData = {
+    levels: {
+      levels: InventoryLevel[];
+      totals?: { totalStock: number; totalReserved: number };
+      pagination: { total: number; totalPages: number };
+    };
+    movements: { movements: StockMovement[]; pagination: { total: number } };
+    products: { products: { id: string; name: string }[] };
+    warehouseLocations: { locations: { id: string; name: string; providerName?: string | null }[] };
+    displayLocations: { locations: { id: string; name: string; providerName?: string | null }[] };
+    systemSettings: Array<{ key: string; value: unknown }>;
+    lowStockAlerts: LowStockAlertsResult;
+    shipments: { rows: ShipmentRow[]; pagination: { total: number } } | null;
+    warehouses: {
+      warehouses: Array<{
+        id: string;
+        name: string;
+        address: string;
+        dispatchLocked?: boolean;
+        stockSummary?: { totalStock: number; totalReserved: number; skuCount: number };
+      }>;
+    } | null;
+  };
+  const bundle = bundleRes.ok
+    ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
     : null;
 
-  if (!levelsRes.ok) {
-    levelsLoadError = describeApiFetchFailure('Stock levels', levelsRes);
+  let levelsLoadError: string | null = null;
+  let movementsLoadError: string | null = null;
+  if (!bundleRes.ok) {
+    levelsLoadError = describeApiFetchFailure('Stock levels', bundleRes);
+    movementsLoadError = describeApiFetchFailure('Movement history', bundleRes);
   }
 
-  // Await movements data
-  let movementsLoadError: string | null = null;
-  const movementsData = await movementsPromise.then((movementsRes) => {
-    if (!movementsRes.ok) {
-      movementsLoadError = describeApiFetchFailure('Movement history', movementsRes);
-      return { movements: [] as StockMovement[], total: 0 };
-    }
-    const data = (movementsRes.data as { result?: { data?: { movements: StockMovement[]; pagination: { total: number } } } })?.result?.data;
-    return { movements: data?.movements ?? [], total: data?.pagination?.total ?? 0 };
-  }).catch(() => {
-    movementsLoadError = 'Movement history could not be loaded. Try Reload data.';
-    return { movements: [] as StockMovement[], total: 0 };
-  });
+  const levelsData = bundle?.levels ?? null;
+  const movementsRows = bundle?.movements?.movements ?? [];
+  const movementsData = {
+    movements: movementsRows,
+    total: bundle?.movements?.pagination?.total ?? 0,
+  };
 
   const deliveryOrderIds = Array.from(
     new Set(
@@ -174,6 +154,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
   );
 
+  // Customer name resolution remains a follow-up call because it depends on
+  // movement IDs returned from the bundle. Skipped entirely when no DELIVERY
+  // movements are present in this page slice.
   const deliveryOrderCustomerNameById = new Map<string, string>();
   if (deliveryOrderIds.length > 0) {
     const batchRes = await apiRequest<{
@@ -192,111 +175,53 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  // Products and locations for Receive Shipment (Shipments tab)
-  const [productsRes, locationsRes, displayLocationsRes] = await Promise.all([
-    productsPromise,
-    locationsPromise,
-    displayLocationsPromise,
-  ]);
+  const products: ProductOption[] = (bundle?.products?.products ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+  }));
 
-  let products: ProductOption[] = [];
-  if (productsRes.ok) {
-    const data = (productsRes.data as { result?: { data?: { products: { id: string; name: string }[] } } })?.result?.data;
-    products = (data?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
-  }
-
-  let locations: LocationOption[] = [];
-  if (locationsRes.ok) {
-    const data = (locationsRes.data as {
-      result?: { data?: { locations: { id: string; name: string; providerName?: string | null }[] } };
-    })?.result?.data;
-    locations = (data?.locations ?? []).map((l) => ({
+  const locations: LocationOption[] = (bundle?.warehouseLocations?.locations ?? []).map((l) => ({
+    id: l.id,
+    name: l.name,
+    providerName: l.providerName ?? null,
+  }));
+  const displayLocations: LocationOption[] = (bundle?.displayLocations?.locations ?? []).map(
+    (l) => ({
       id: l.id,
       name: l.name,
       providerName: l.providerName ?? null,
-    }));
-  }
+    }),
+  );
 
-  let displayLocations: LocationOption[] = [];
-  if (displayLocationsRes.ok) {
-    const data = (displayLocationsRes.data as {
-      result?: { data?: { locations: { id: string; name: string; providerName?: string | null }[] } };
-    })?.result?.data;
-    displayLocations = (data?.locations ?? []).map((l) => ({
-      id: l.id,
-      name: l.name,
-      providerName: l.providerName ?? null,
-    }));
-  }
+  // Resolve low-stock threshold from system settings (same selector logic
+  // as before, just sourced from the bundled payload).
+  let lowStockThreshold = 10;
+  const settingsRows = bundle?.systemSettings ?? [];
+  const lowStockRow = settingsRows.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
+  const threshold = (lowStockRow?.value as { threshold?: number } | null)?.threshold;
+  if (typeof threshold === 'number' && threshold > 0) lowStockThreshold = threshold;
 
-  /** Threshold, low-stock banner, shipments strip, warehouses — resolved before first paint of page body. */
-  const extras = await Promise.all([
-    lowStockPromise.catch(() => null),
-    lowStockAlertsPromise.catch(() => ({ ok: false as const, status: 503, data: {} })),
-    shipmentsPromise.catch(() => null),
-    warehousesPromise.catch(() => null),
-  ]).then(([lowStockRes, alertsRes, shipmentsRes, warehousesRes]) => {
-    let lowStockThreshold = 10;
-    if (lowStockRes?.ok) {
-      const settingsRows =
-        (lowStockRes.data as { result?: { data?: { key: string; value: unknown }[] } })?.result?.data ?? [];
-      const row = settingsRows.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
-      const threshold = (row?.value as { threshold?: number } | null)?.threshold;
-      if (typeof threshold === 'number' && threshold > 0) lowStockThreshold = threshold;
-    }
+  const lowStockAlertsData: LowStockAlertsResult =
+    bundle?.lowStockAlerts ?? { threshold: lowStockThreshold, items: [] };
 
-    let lowStockAlertsData: LowStockAlertsResult;
-    if (!alertsRes.ok) {
-      lowStockAlertsData = { threshold: lowStockThreshold, items: [] };
-    } else {
-      const data = (alertsRes.data as {
-        result?: { data?: LowStockAlertsResult };
-      })?.result?.data;
-      lowStockAlertsData = data ?? { threshold: lowStockThreshold, items: [] };
-    }
+  const shipments: ShipmentRow[] = bundle?.shipments?.rows ?? [];
+  const totalShipments = bundle?.shipments?.pagination?.total ?? 0;
 
-    let shipments: ShipmentRow[] = [];
-    let totalShipments = 0;
-    if (shipmentsRes?.ok) {
-      const data = (shipmentsRes.data as {
-        result?: { data?: { rows: ShipmentRow[]; pagination: { total: number } } };
-      })?.result?.data;
-      shipments = data?.rows ?? [];
-      totalShipments = data?.pagination?.total ?? 0;
-    }
+  const warehouses: WarehouseRowLite[] = (bundle?.warehouses?.warehouses ?? []).map((w) => ({
+    id: w.id,
+    name: w.name,
+    address: w.address,
+    dispatchLocked: w.dispatchLocked ?? false,
+    stockSummary: w.stockSummary ?? { totalStock: 0, totalReserved: 0, skuCount: 0 },
+  }));
 
-    let warehouses: WarehouseRowLite[] = [];
-    if (warehousesRes?.ok) {
-      const data = (warehousesRes.data as {
-        result?: {
-          data?: {
-            warehouses: Array<{
-              id: string;
-              name: string;
-              address: string;
-              dispatchLocked?: boolean;
-              stockSummary?: { totalStock: number; totalReserved: number; skuCount: number };
-            }>;
-          };
-        };
-      })?.result?.data;
-      warehouses = (data?.warehouses ?? []).map((w) => ({
-        id: w.id,
-        name: w.name,
-        address: w.address,
-        dispatchLocked: w.dispatchLocked ?? false,
-        stockSummary: w.stockSummary ?? { totalStock: 0, totalReserved: 0, skuCount: 0 },
-      }));
-    }
-
-    return {
-      lowStockThreshold,
-      lowStockAlerts: lowStockAlertsData,
-      shipments,
-      totalShipments,
-      warehouses,
-    };
-  });
+  const extras = {
+    lowStockThreshold,
+    lowStockAlerts: lowStockAlertsData,
+    shipments,
+    totalShipments,
+    warehouses,
+  };
 
   return {
     levels: levelsData?.levels ?? [],
