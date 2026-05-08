@@ -1280,7 +1280,7 @@ export function OrderDetailPage({
               wrapper at desktop so the original two-column layout is intact. */}
           <div className="contents lg:block lg:col-span-2 lg:space-y-4">
             {/* Status Timeline */}
-            <div className="card overflow-hidden order-[-2] lg:order-none">
+            <div className="card overflow-hidden order-[-3] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-4">Order Progress</h2>
               <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
                 <div className="flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:grid-cols-5 lg:gap-x-3 lg:gap-y-4">
@@ -1662,7 +1662,7 @@ export function OrderDetailPage({
                 they can manage upsells, delivery-coordination calls, and cancellations.
                 Media Buyers use this page read-only (campaign performance); never show CS actions. */}
             {canEditOrder && userRole !== 'MEDIA_BUYER' && isCSOrHoS && orderAllowsLineItemEdits && (
-              <div className="card order-[-1] lg:order-none">
+              <div className="card order-[-2] lg:order-none">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
                     other than the Assign closer dropdown are suppressed. This forces the
@@ -2038,6 +2038,10 @@ export function OrderDetailPage({
               order.status !== 'WRITTEN_OFF' &&
               order.status !== 'RESTOCKED' &&
               order.status !== 'PARTIALLY_DELIVERED' && (
+              // Wrapper carries the mobile `order-N` so Customer Communication
+              // lands immediately after Order Actions on stacked layouts. The
+              // panel itself draws no card chrome — wrapper is structural only.
+              <div className="order-[-1] lg:order-none">
               <CSMessagingPanel
                 orderId={order.id}
                 orderBranchId={order.branchId ?? null}
@@ -2068,6 +2072,7 @@ export function OrderDetailPage({
                   )
                 }
               />
+              </div>
             )}
 
             {/* Order Info — dynamic fields: show when value present or alwaysShow */}
