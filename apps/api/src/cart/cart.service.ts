@@ -340,10 +340,8 @@ export class CartService {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
     let page = Math.max(1, Math.floor(opts.page ?? 1));
 
-    const totalRows = await this.db
-      .select({ count: count() })
-      .from(schema.cartAbandonments)
-      .where(eq(schema.cartAbandonments.status, 'ABANDONED'));
+    const abandonedWhere = eq(schema.cartAbandonments.status, 'ABANDONED');
+    const totalRows = await this.db.select({ count: count() }).from(schema.cartAbandonments).where(abandonedWhere);
     const total = Number(totalRows[0]?.count ?? 0);
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     if (totalPages > 0 && page > totalPages) page = totalPages;
@@ -366,7 +364,7 @@ export class CartService {
       .from(schema.cartAbandonments)
       .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
       .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
-      .where(eq(schema.cartAbandonments.status, 'ABANDONED'))
+      .where(abandonedWhere)
       .orderBy(desc(schema.cartAbandonments.updatedAt))
       .limit(limit)
       .offset(offset);

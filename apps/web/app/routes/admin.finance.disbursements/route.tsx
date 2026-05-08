@@ -37,23 +37,9 @@ export function shouldRevalidate({ currentUrl, nextUrl }: ShouldRevalidateFuncti
   return true;
 }
 
-function parseFunding(res: { ok: boolean; data: unknown }) {
-  if (!res.ok) return null;
-  return (res.data as { result?: { data?: { records: DisbursementRecord[]; pagination: { total: number; page: number; limit: number; totalPages?: number } } } })?.result?.data ?? null;
-}
-
-function parseBalancesList(res: { ok: boolean; data: unknown }) {
-  if (!res.ok) return [];
-  const data = (res.data as { result?: { data?: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }> } })?.result?.data;
-  return Array.isArray(data) ? data : [];
-}
-
-function parseSummary(res: { ok: boolean; data: unknown }) {
-  if (!res.ok) return { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
-  const data = (res.data as { result?: { data?: { totalSent: string; totalCompleted: string; totalDisputed: string } } })?.result?.data;
-  return data ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
-}
-
+/** Retry parser kept for the rare `requestsPage` overshoot path that re-queries
+ *  `marketing.listFundingRequests` directly. The other 5 endpoints are served
+ *  by the bundle and don't need standalone parsers anymore. */
 function parseFundingRequests(res: { ok: boolean; data: unknown }): {
   records: FundingRequestRecord[];
   pagination: { page: number; limit: number; total: number };
@@ -68,22 +54,6 @@ function parseFundingRequests(res: { ok: boolean; data: unknown }): {
     records: data?.records ?? [],
     pagination: data?.pagination ?? { page: 1, limit: 20, total: 0 },
   };
-}
-
-function parseUsersList(res: { ok: boolean; data: unknown }): Array<{ id: string; name: string; email: string; role: string }> {
-  if (!res.ok) return [];
-  const data = (res.data as { result?: { data?: { users: Array<{ id: string; name: string; email: string; role: string }> } } })?.result?.data;
-  return data?.users ?? [];
-}
-
-function parseFundingRequestStatusCounts(
-  res: { ok: boolean; data: unknown },
-): { PENDING: number; APPROVED: number; REJECTED: number; ALL: number } {
-  if (!res.ok) return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
-  const data = (res.data as {
-    result?: { data?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number } };
-  })?.result?.data;
-  return data ?? { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -148,43 +118,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
     balancesStatus,
   };
 
-  const listFundingInput: Record<string, unknown> = { page, limit: 20 };
-  if (startDate) listFundingInput.startDate = startDate;
-  if (endDate) listFundingInput.endDate = endDate;
-  if (statusFilter) listFundingInput.status = statusFilter;
-  if (receiverFilter) listFundingInput.receiverId = receiverFilter;
-  if (searchFilter) listFundingInput.search = searchFilter;
-
   const disbursementsShell = { filters };
 
   const pageData = (async (): Promise<DisbursementsPageData> => {
-  const [fundingRes, balancesRes, summaryRes, fundingRequestsRes, fundingRequestsCountsRes, usersListRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/marketing.listFunding?input=${encodeURIComponent(JSON.stringify(listFundingInput))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
-    apiRequest<unknown>(
-      `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(
-        JSON.stringify({ page: requestsPage, limit: TAB_PAGE_LIMIT }),
-      )}`,
-      { method: 'GET', cookie },
-    ),
-    // Status counts across all requests (any requester) so the overview strip
-    // surfaces "Pending Requests: N" with the period scope. Mirror of what the
-    // Marketing → Funding page shows for HoMs.
-    apiRequest<unknown>(
-      `/trpc/marketing.fundingRequestStatusCounts?input=${encodeURIComponent(JSON.stringify({}))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ limit: USERS_LIST_MAX_LIMIT }))}`,
-      { method: 'GET', cookie },
-    ),
-  ]);
+  // Single bundled call — replaces 6 parallel tRPC HTTP round-trips with one.
+  // Backend (`marketing.disbursementsPageBundle`) fans out the same six service
+  // calls in parallel inside a single request handler.
+  const bundleInput = encodeURIComponent(
+    JSON.stringify({
+      page,
+      limit: 20,
+      ...(startDate && { startDate }),
+      ...(endDate && { endDate }),
+      ...(statusFilter && { status: statusFilter }),
+      ...(receiverFilter && { receiverId: receiverFilter }),
+      ...(searchFilter && { search: searchFilter }),
+      requestsPage,
+      requestsLimit: TAB_PAGE_LIMIT,
+      usersLimit: USERS_LIST_MAX_LIMIT,
+    }),
+  );
+  const bundleRes = await apiRequest<unknown>(
+    `/trpc/marketing.disbursementsPageBundle?input=${bundleInput}`,
+    { method: 'GET', cookie },
+  );
+  type BundleData = {
+    funding: { records: DisbursementRecord[]; pagination: { total: number; page: number; limit: number; totalPages?: number } } | null;
+    balances: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>;
+    summary: { totalSent: string; totalCompleted: string; totalDisputed: string };
+    requests: { records: FundingRequestRecord[]; pagination: { page: number; limit: number; total: number } };
+    requestsCounts: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number };
+    users: Array<{ id: string; name: string; email: string; role: string }>;
+  };
+  const bundle = bundleRes.ok
+    ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
+    : null;
 
-  const recipientBalancesAll = parseBalancesList(balancesRes);
+  const recipientBalancesAll = bundle?.balances ?? [];
   const filteredRecipientBalancesAll = recipientBalancesAll.filter((b) => {
     const roleMatch = !balancesRole || balancesRole === 'ALL' || b.role === balancesRole;
     const searchMatch = !balancesSearch || b.name.toLowerCase().includes(balancesSearch.toLowerCase());
@@ -204,9 +174,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     balancesPage * TAB_PAGE_LIMIT,
   );
 
-  const fundingData = parseFunding(fundingRes);
-  const summary = parseSummary(summaryRes);
-  let fundingRequestsResult = parseFundingRequests(fundingRequestsRes);
+  const fundingData = bundle?.funding ?? null;
+  const summary = bundle?.summary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
+  let fundingRequestsResult = bundle?.requests ?? { records: [], pagination: { page: 1, limit: 20, total: 0 } };
   const requestsTotal = Number(fundingRequestsResult.pagination.total);
   let requestsTotalPages = Math.max(1, Math.ceil(requestsTotal / TAB_PAGE_LIMIT));
   if (requestsPageParam > requestsTotalPages && requestsTotal > 0) {
@@ -220,8 +190,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     fundingRequestsResult = parseFundingRequests(retryRes);
   }
   const fundingRequests = fundingRequestsResult.records;
-  const fundingRequestStatusCounts = parseFundingRequestStatusCounts(fundingRequestsCountsRes);
-  const requestersList = parseUsersList(usersListRes);
+  const fundingRequestStatusCounts = bundle?.requestsCounts ?? { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
+  const requestersList = bundle?.users ?? [];
 
   // Finance can only disburse to Head of Marketing. HoM distributes to Media Buyers via Marketing → Funding.
   const users = recipientBalancesAll

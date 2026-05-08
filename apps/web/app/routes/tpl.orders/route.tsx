@@ -61,31 +61,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // TPL_MANAGER: when viewing CONFIRMED, omit location so we see unallocated CONFIRMED orders to allocate to our location
   const useLocationFilter =
     effectiveLogisticsLocationId && !(isTplManager && status === 'CONFIRMED');
-  const listInput = {
-    page,
-    limit: ORDERS_PER_PAGE,
-    status: status === 'ALL' ? undefined : status,
-    ...(scopedStatuses ? { statuses: scopedStatuses } : {}),
-    search: search || undefined,
-    sortBy: 'preferredDeliveryDate' as const,
-    sortOrder: 'asc' as const,
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
-    ...(useLocationFilter && { logisticsLocationId: effectiveLogisticsLocationId }),
-  };
-  const countsInput: {
-    startDate?: string;
-    endDate?: string;
-    logisticsLocationId?: string;
-    statuses?: readonly string[];
-  } = {};
-  if (startDate) countsInput.startDate = startDate;
-  if (endDate) countsInput.endDate = endDate;
-  if (useLocationFilter) countsInput.logisticsLocationId = effectiveLogisticsLocationId;
-  if (scopedStatuses) countsInput.statuses = scopedStatuses;
-
-  const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
-  const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
   const tplOrdersShell = {
     filters: {
@@ -96,20 +71,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-    const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
+    // Single bundled call — replaces 4 parallel tRPC HTTP round-trips
+    // (orders.list + orders.statusCounts + logistics.listLocations + logistics.listRiders).
+    const bundleInput = encodeURIComponent(
+      JSON.stringify({
+        page,
+        limit: ORDERS_PER_PAGE,
+        ...(status !== 'ALL' && { status }),
+        ...(scopedStatuses && { statuses: scopedStatuses }),
+        ...(search && { search }),
+        ...(startDate && { startDate }),
+        ...(endDate && { endDate }),
+        ...(useLocationFilter && { logisticsLocationId: effectiveLogisticsLocationId }),
+      }),
+    );
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/orders.tplOrdersPageBundle?input=${bundleInput}`,
+      { method: 'GET', cookie },
+    );
 
-    const ordersData = ordersRes.ok
-      ? (ordersRes.data as { result?: { data?: { orders: Array<Record<string, unknown>>; pagination: { total: number; totalPages: number } } } })
-          ?.result?.data
+    type BundleData = {
+      orders: Array<Record<string, unknown>>;
+      pagination: { total: number; totalPages: number };
+      statusCounts: Record<string, number>;
+      locations: Location[];
+      riders: Array<{ id: string; name: string; logisticsLocationId: string | null }>;
+    };
+    const bundle = bundleRes.ok
+      ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
       : null;
 
-    const listErrorMessage = !ordersRes.ok
-      ? extractApiErrorMessage(ordersRes.data, 'Could not load orders')
+    const listErrorMessage = !bundleRes.ok
+      ? extractApiErrorMessage(bundleRes.data, 'Could not load orders')
       : undefined;
 
-    const orders = ordersData?.orders ?? [];
-    const total = ordersData?.pagination?.total ?? 0;
-    const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+    const orders = bundle?.orders ?? [];
+    const total = bundle?.pagination?.total ?? 0;
+    const totalPages = bundle?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
     const placeholderOrders = orders.map((o: Record<string, unknown>) => ({
       ...o,
@@ -118,45 +116,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       riderName: '—',
     })) as ComponentProps<typeof LogisticsOrdersPage>['orders'];
 
-    let statusCounts: Record<string, number> = {};
-    let locations: Location[] = [];
-    let riders: RiderOption[] = [];
-    let allocatableLocations: Location[] = [];
-    try {
-      const [countsRes, locationsRes, ridersRes] = await Promise.all([
-        apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
-        apiRequest<unknown>(
-          `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
-          { method: 'GET', cookie },
-        ),
-        apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
-      ]);
-
-      statusCounts = countsRes.ok
-        ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-        : {};
-      const locationsData = locationsRes.ok
-        ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
-        : null;
-      locations = locationsData?.locations ?? [];
-      const ridersData = ridersRes.ok
-        ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })
-            ?.result?.data ?? []
-        : [];
-      riders = ridersData.map((r) => ({
-        id: r.id,
-        name: r.name,
-        logisticsLocationId: r.logisticsLocationId ?? null,
-      }));
-      allocatableLocations = effectiveLogisticsLocationId
-        ? locations.filter((l) => l.id === effectiveLogisticsLocationId)
-        : locations.filter((l) => !l.dispatchLocked);
-    } catch {
-      statusCounts = {};
-      locations = [];
-      riders = [];
-      allocatableLocations = [];
-    }
+    const statusCounts: Record<string, number> = bundle?.statusCounts ?? {};
+    const locations: Location[] = bundle?.locations ?? [];
+    const riders: RiderOption[] = (bundle?.riders ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      logisticsLocationId: r.logisticsLocationId ?? null,
+    }));
+    const allocatableLocations: Location[] = effectiveLogisticsLocationId
+      ? locations.filter((l) => l.id === effectiveLogisticsLocationId)
+      : locations.filter((l) => !l.dispatchLocked);
 
     return {
       orders: placeholderOrders,

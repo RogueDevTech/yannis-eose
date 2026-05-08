@@ -78,6 +78,45 @@ export function getBranchTeamsService(): BranchTeamsService {
   return branchTeamsServiceInstance;
 }
 
+/**
+ * Inline branch list for cross-router bundles. Mirrors `branches.list` (admin
+ * sees all, others see their memberships only) and reuses the same Redis cache.
+ * Exported so `*PageBundle` procedures can avoid a second HTTP round-trip.
+ */
+export async function listBranchesForUser(user: {
+  id: string;
+  role: string;
+}): Promise<Array<{ id: string; name: string; code?: string }>> {
+  const db = getDb();
+  const isAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+
+  const fetchRows = async (): Promise<Array<{ id: string; name: string; code?: string }>> => {
+    if (isAdmin) {
+      return db.select().from(schema.branches);
+    }
+    const memberships = await db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, user.id));
+    if (memberships.length === 0) return [];
+    const branchIds = memberships.map((m) => m.branchId);
+    return db
+      .select()
+      .from(schema.branches)
+      .where(
+        branchIds.length === 1
+          ? eq(schema.branches.id, branchIds[0]!)
+          : inArray(schema.branches.id, branchIds),
+      );
+  };
+
+  if (!branchesCacheService) return fetchRows();
+  const key =
+    'cache:branches:list:' +
+    CacheService.hashInput({ viewerId: user.id, isAdmin });
+  return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, fetchRows);
+}
+
 const CS_OVERVIEW_ROLES = new Set(['CS_AGENT', 'HEAD_OF_CS']);
 const MARKETING_OVERVIEW_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
 const LOGISTICS_OVERVIEW_ROLES = new Set([

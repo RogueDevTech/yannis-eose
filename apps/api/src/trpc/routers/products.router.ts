@@ -27,7 +27,8 @@ async function invalidateProductsOptionsCache(): Promise<void> {
   });
 }
 
-function getProductsService(): ProductsService {
+/** Exported for cross-router lookups (e.g. `marketing.ordersPageBundle`). */
+export function getProductsService(): ProductsService {
   if (!productsServiceInstance) {
     throw new Error('ProductsService not initialized. Call setProductsService() first.');
   }

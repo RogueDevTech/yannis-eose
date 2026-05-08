@@ -861,7 +861,19 @@ export class UsersService {
     ]);
 
     const total = totalRows[0]?.count ?? 0;
-    const membershipsByUser = await this.getUserBranchMemberships(users.map((u) => u.id));
+    // Filter-dropdown callers (Marketing orders' Media-buyer picker, etc.) opt out of
+    // the per-row branch-memberships join via `includeBranchMemberships: false` to drop
+    // one DB round-trip — they only consume `id + name + role` from this endpoint.
+    const includeBranchMemberships = input.includeBranchMemberships !== false;
+    const membershipsByUser = includeBranchMemberships
+      ? await this.getUserBranchMemberships(users.map((u) => u.id))
+      : new Map<string, Array<{
+          branchId: string;
+          branchName: string;
+          branchCode: string;
+          isPrimary: boolean;
+          roleInBranch: string | null;
+        }>>();
 
     return {
       users: users.map((u) => {

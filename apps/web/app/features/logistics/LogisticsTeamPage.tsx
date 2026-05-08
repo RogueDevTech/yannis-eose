@@ -110,30 +110,14 @@ function StatusMixBar({
   );
 }
 
-function providerInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 /** Mobile card row — kept inline since it's not reused elsewhere. */
 function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: string }) {
   return (
     <div className="card p-4">
-      <div className="flex items-center gap-2.5 min-w-0 mb-3">
-        <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-          <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
-            {providerInitials(row.providerName)}
-          </span>
-        </div>
-        <div className="min-w-0">
-          <div className="font-medium text-app-fg truncate">{row.providerName}</div>
-          <div className="text-xs text-app-fg-muted">
-            {row.locationCount} location{row.locationCount === 1 ? '' : 's'} · {row.status}
-          </div>
+      <div className="min-w-0 mb-3">
+        <div className="font-medium text-app-fg truncate">{row.providerName}</div>
+        <div className="text-xs text-app-fg-muted">
+          {row.locationCount} location{row.locationCount === 1 ? '' : 's'} · {row.status}
         </div>
       </div>
 
@@ -257,16 +241,9 @@ export function LogisticsTeamPage({
         key: 'provider',
         header: 'Provider',
         render: (p) => (
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
-                {providerInitials(p.providerName)}
-              </span>
-            </div>
-            <div className="min-w-0">
-              <div className="font-medium text-app-fg truncate">{p.providerName}</div>
-              <div className="text-xs text-app-fg-muted">{p.status}</div>
-            </div>
+          <div className="min-w-0">
+            <div className="font-medium text-app-fg truncate">{p.providerName}</div>
+            <div className="text-xs text-app-fg-muted">{p.status}</div>
           </div>
         ),
       },

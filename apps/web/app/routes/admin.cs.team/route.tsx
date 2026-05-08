@@ -61,30 +61,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const teamShell = { dateFilters: filters };
 
   const pageData = (async () => {
-    const [teamRes, workloadsRes, leaderboardRes, inactiveRes] = await Promise.all([
-      apiRequest<unknown>('/trpc/users.listCSTeam', { method: 'GET', cookie }),
-      apiRequest<unknown>('/trpc/orders.csWorkloads', { method: 'GET', cookie }),
-      apiRequest<unknown>(
-        `/trpc/orders.csLeaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
-        { method: 'GET', cookie },
-      ),
-      apiRequest<unknown>(
-        `/trpc/orders.inactiveAgents?input=${encodeURIComponent(JSON.stringify({ thresholdMinutes: 10 }))}`,
-        { method: 'GET', cookie },
-      ),
-    ]);
+    // One bundle endpoint replaces the previous 4 parallel calls (listCSTeam +
+    // csWorkloads + csLeaderboard + inactiveAgents). The four service calls
+    // still run in parallel server-side.
+    const bundleInput = encodeURIComponent(
+      JSON.stringify({ ...leaderboardInput, inactiveThresholdMinutes: 10 }),
+    );
+    const bundleRes = await apiRequest<unknown>(
+      `/trpc/orders.csTeamPageBundle?input=${bundleInput}`,
+      { method: 'GET', cookie },
+    );
+    redirectIfUnauthorized(bundleRes, new URL(request.url).pathname);
 
-    redirectIfUnauthorized(teamRes, new URL(request.url).pathname);
-    const list = parseCSTeamList(teamRes).filter((m) => m.role === 'CS_AGENT');
-    const workloads: AgentWorkload[] = workloadsRes.ok
-      ? (workloadsRes.data as { result?: { data?: AgentWorkload[] } })?.result?.data ?? []
-      : [];
-    const leaderboard: CSLeaderboardEntry[] = leaderboardRes.ok
-      ? (leaderboardRes.data as { result?: { data?: CSLeaderboardEntry[] } })?.result?.data ?? []
-      : [];
-    const inactiveAgents: InactiveAgent[] = inactiveRes.ok
-      ? (inactiveRes.data as { result?: { data?: InactiveAgent[] } })?.result?.data ?? []
-      : [];
+    type TeamRow = ReturnType<typeof parseCSTeamList>[number];
+    type BundleData = {
+      team: TeamRow[];
+      workloads: AgentWorkload[];
+      leaderboard: CSLeaderboardEntry[];
+      inactiveAgents: InactiveAgent[];
+    };
+    const bundle = bundleRes.ok
+      ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
+      : null;
+
+    const list = (bundle?.team ?? []).filter((m) => m.role === 'CS_AGENT');
+    const workloads: AgentWorkload[] = bundle?.workloads ?? [];
+    const leaderboard: CSLeaderboardEntry[] = bundle?.leaderboard ?? [];
+    const inactiveAgents: InactiveAgent[] = bundle?.inactiveAgents ?? [];
 
     const workloadById = new Map(workloads.map((w) => [w.agentId, w]));
     const leaderboardById = new Map(leaderboard.map((e) => [e.agentId, e]));

@@ -42,34 +42,77 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
         } catch {
           // If URL parse fails, use as-is
         }
-        // Aiven and most cloud Postgres require SSL.
+        // Cloud SQL / Aiven / most managed Postgres require SSL.
         //
-        // Pool sizing: env-driven (`PG_MAX_CONNECTIONS`), default 10 — fine
-        // for a single dev process AND comfortably inside Aiven's 22-slot cap
-        // for a single production replica. **In multi-process production
-        // deploys (PM2 cluster, blue/green) set `PG_MAX_CONNECTIONS=3` so
-        // N processes × 3 stays under the 22 cap with headroom for migrations,
-        // backups, and admin psql sessions.** Previous default of 3 was
-        // tuned for 4 parallel processes (12 active slots) but starved
-        // single-process dev where a single page load fires 8+ parallel
-        // tRPC calls × 3 DB queries each — the queue overflowed the 4.7s
-        // loader timeout (504 errors on `permissions.listCatalog`).
+        // ── Pool sizing (`PG_MAX_CONNECTIONS`, default 30) ──────────────────
+        // A single dashboard page-load can fan out 15–20 parallel HTTP requests
+        // (layout + nested loaders), and each bundled procedure spawns 4–7
+        // parallel queries inside `Promise.all`. With `max: 20` the pool was
+        // saturating mid-burst — observed in prod logs as `branches.list` and
+        // `auth/me` jumping from 1s → 6–9s as later queries queued waiting for
+        // a free socket. 30 gives headroom without hitting Cloud SQL's default
+        // 100-connection ceiling.
         //
-        // connect_timeout 30s: remote/cold-start DBs often need more than 10s.
+        // **Multi-process deploys** (PM2 cluster, blue/green): set
+        // `PG_MAX_CONNECTIONS=10` per process so `processes × 10` stays under
+        // the DB's `max_connections` cap. Leave headroom for migrations,
+        // backups, and admin `psql` sessions — never run a single instance
+        // higher than ~30% of `max_connections`.
         //
-        // 2026-05 bump: 10 → 20. The `max: 10` ceiling was queuing requests during
-        // normal multi-user load (one person clicking around + the materialized-view
-        // refresh cron + a background notification fan-out is enough to fill 10 slots
-        // and start serializing). Cloud SQL handles 50–100 connections per instance
-        // comfortably, so 20 is conservative. Override via PG_MAX_CONNECTIONS if
-        // you need more (or less) at deploy time.
-        const poolMax = parseInt(process.env['PG_MAX_CONNECTIONS'] ?? '20', 10);
+        // ── `idle_timeout: 300` (was 10) ────────────────────────────────────
+        // A dashboard user clicks → idles 30s → clicks again. With
+        // `idle_timeout: 10s` every "click again" paid a fresh TCP+TLS
+        // handshake (200–500ms to a remote DB) before the query even started.
+        // 5 minutes keeps connections warm across a normal browsing rhythm
+        // while still rotating sockets eventually so we don't hold them
+        // forever.
+        //
+        // ── `max_lifetime: 1800` (30 min) ───────────────────────────────────
+        // Defence in depth: rotate connections every 30 min so any stale-state
+        // issues (server-side prepared statements drifting, mid-flight network
+        // blips) self-heal without needing a server restart.
+        //
+        // ── `connect_timeout: 30` ───────────────────────────────────────────
+        // Remote / cold-start DBs sometimes need more than the 10s default.
+        //
+        // ── `application_name` ──────────────────────────────────────────────
+        // Surfaces in `pg_stat_activity` so DBAs can identify the app's
+        // connections during incident response without grep-ing IPs.
+        const poolMax = parseInt(process.env['PG_MAX_CONNECTIONS'] ?? '30', 10);
         const raw = postgres(connectionString, {
-          max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 20,
-          idle_timeout: 10,
+          max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 30,
+          idle_timeout: 300,
+          max_lifetime: 1800,
           connect_timeout: 30,
           ssl: { rejectUnauthorized: false },
+          connection: { application_name: 'yannis-api' },
         });
+
+        // Eager pool warmup. Fires `max` parallel `SELECT 1`s on the raw
+        // client at module init so every slot pays its TCP+TLS handshake
+        // BEFORE the first user request — not during it. Fire-and-forget so
+        // the factory returns immediately; warmup typically finishes in
+        // 200–800ms on a remote DB, well before any HTTP traffic arrives.
+        // Failures are logged, not thrown — a failed warmup doesn't block
+        // boot (the next real query will retry the connection naturally).
+        const warmupStart = Date.now();
+        Promise.all(
+          Array.from({ length: Math.max(1, poolMax) }, () => raw`SELECT 1`),
+        )
+          .then(() => {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[PgPool] warmed ${poolMax} connections in ${Date.now() - warmupStart}ms`,
+            );
+          })
+          .catch((err: unknown) => {
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[PgPool] warmup failed (non-fatal — first user requests will retry):',
+              (err as { message?: string })?.message ?? err,
+            );
+          });
+
         return shouldLogHttpRequests() ? wrapPostgresClientForDbTiming(raw) : raw;
       },
     },

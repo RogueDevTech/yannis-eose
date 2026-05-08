@@ -9,7 +9,8 @@ export function setCartService(service: CartService) {
   cartServiceInstance = service;
 }
 
-function getCartService(): CartService {
+/** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
+export function getCartService(): CartService {
   if (!cartServiceInstance) {
     throw new Error('CartService not initialized. Call setCartService() first.');
   }

@@ -378,9 +378,29 @@ export class HrService {
     const offset = (input.page - 1) * input.limit;
 
     const [payouts, totalRows] = await Promise.all([
-      this.db.select().from(schema.payoutRecords).where(whereClause)
+      this.db
+        .select({
+          id: schema.payoutRecords.id,
+          batchId: schema.payoutRecords.batchId,
+          staffId: schema.payoutRecords.staffId,
+          periodStart: schema.payoutRecords.periodStart,
+          periodEnd: schema.payoutRecords.periodEnd,
+          baseSalary: schema.payoutRecords.baseSalary,
+          performanceBonus: schema.payoutRecords.performanceBonus,
+          addOnsTotal: schema.payoutRecords.addOnsTotal,
+          deductionsTotal: schema.payoutRecords.deductionsTotal,
+          totalPayout: schema.payoutRecords.totalPayout,
+          status: schema.payoutRecords.status,
+          createdAt: schema.payoutRecords.createdAt,
+          validFrom: schema.payoutRecords.validFrom,
+          validTo: schema.payoutRecords.validTo,
+          modifiedBy: schema.payoutRecords.modifiedBy,
+        })
+        .from(schema.payoutRecords)
+        .where(whereClause)
         .orderBy(desc(schema.payoutRecords.createdAt))
-        .limit(input.limit).offset(offset),
+        .limit(input.limit)
+        .offset(offset),
       this.db.select({ count: count() }).from(schema.payoutRecords).where(whereClause),
     ]);
 

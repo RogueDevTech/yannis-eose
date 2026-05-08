@@ -115,6 +115,10 @@ export function MarketingOrdersPage({
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
+  // Treat both the initial Suspense fallback AND any same-path loader refetch
+  // (filter / pagination / status change) as "loading" — the table swaps to
+  // skeleton rows in both cases instead of dimming with the overlay spinner.
+  const showSkeletonRows = deferredLoading || isLoaderRefetchBusy;
   const liveState = useLiveIndicator(liveEvents ?? []);
   const [searchParams, remixSetSearchParams] = useSearchParams();
   const setSearchParams = useCallback(
@@ -180,14 +184,14 @@ export function MarketingOrdersPage({
       {
         key: 'id',
         header: 'Order ID',
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
           : (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
       },
       {
         key: 'customer',
         header: 'Customer',
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[9rem] max-w-[min(14rem,100%)]" />
           : (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
       },
@@ -196,7 +200,7 @@ export function MarketingOrdersPage({
       cols.push({
         key: 'mediaBuyer',
         header: 'Media buyer',
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
           : (order) =>
               order.mediaBuyerId ? (
@@ -215,7 +219,7 @@ export function MarketingOrdersPage({
       {
         key: 'product',
         header: 'Product',
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[10rem] max-w-[min(16rem,100%)]" />
           : (order) => {
               const name = order.primaryProductName?.trim();
@@ -234,7 +238,7 @@ export function MarketingOrdersPage({
       {
         key: 'campaign',
         header: 'Form',
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[8rem]" />
           : (order) => (
               <span className="text-sm text-app-fg-muted truncate">
@@ -246,7 +250,7 @@ export function MarketingOrdersPage({
         key: 'amount',
         header: 'Amount',
         align: 'right',
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => (
               <span className="inline-flex w-full justify-end">
                 <TableCellTextPulse className="w-[4.5rem]" />
@@ -261,7 +265,7 @@ export function MarketingOrdersPage({
       {
         key: 'status',
         header: 'Status',
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[5.5rem]" />
           : (order) => <OrderStatusBadge status={order.status} />,
       },
@@ -269,7 +273,7 @@ export function MarketingOrdersPage({
         key: 'created',
         header: 'Created',
         nowrap: true,
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[9rem]" />
           : (order) => (
               <span className="text-app-fg-muted whitespace-nowrap">
@@ -283,7 +287,7 @@ export function MarketingOrdersPage({
         mobileLabel: 'Actions',
         align: 'center',
         tight: true,
-        render: deferredLoading
+        render: showSkeletonRows
           ? () => <CompactTableActionButton disabled>View</CompactTableActionButton>
           : (order) => (
               <CompactTableActionButton to={`/admin/orders/${order.id}`}>View</CompactTableActionButton>
@@ -291,7 +295,7 @@ export function MarketingOrdersPage({
       },
     );
     return cols;
-  }, [showMediaBuyerColumn, deferredLoading]);
+  }, [showMediaBuyerColumn, showSkeletonRows]);
 
   return (
     <div className="space-y-4">
@@ -714,7 +718,7 @@ export function MarketingOrdersPage({
       </Suspense>
 
       {showChartView ? (
-        deferredLoading ? (
+        showSkeletonRows ? (
           <OrdersChartViewShellSkeleton />
         ) : (
           <Suspense fallback={<OrdersChartViewShellSkeleton />}>
@@ -739,7 +743,7 @@ export function MarketingOrdersPage({
         <div className="px-4 py-3 border-b border-app-border">
           <h2 className="text-lg font-semibold text-app-fg inline-flex flex-wrap items-center gap-x-1">
             <span>Orders</span>
-            {deferredLoading ? (
+            {showSkeletonRows ? (
               <span className="inline-flex items-center gap-0.5 text-base font-semibold text-app-fg">
                 <span aria-hidden>(</span>
                 <span
@@ -756,17 +760,15 @@ export function MarketingOrdersPage({
         <CompactTable<Order>
           withCard={false}
           columns={marketingOrderColumns}
-          rows={deferredLoading ? DEFERRED_PLACEHOLDER_ROWS : orders}
+          rows={showSkeletonRows ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}
           emptyTitle="No orders match your filters"
           emptyDescription="Try adjusting your status filter or search query"
-          loading={!deferredLoading && isLoaderRefetchBusy}
-          loadingVariant="overlay"
         />
       </div>
       {/* Pagination — same layout as CS Orders list; page size is fixed at 20 in the route loader. */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        {deferredLoading ? (
+        {showSkeletonRows ? (
           <>
             <p className="text-sm m-0 min-h-[1.25rem] flex items-center">
               <span

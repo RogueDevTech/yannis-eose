@@ -48,6 +48,20 @@ async function invalidateSystemSettingsCache(): Promise<void> {
   });
 }
 
+async function invalidateNotificationEmailConfigCache(): Promise<void> {
+  if (!settingsCacheService) return;
+  await settingsCacheService.del('cache:settings:notificationEmailConfig:v1').catch(() => {
+    /* fail-open */
+  });
+}
+
+/**
+ * Email config TTL — config changes only when SuperAdmin toggles email types
+ * (very rare). 5 minutes is a safe upper bound; mutations also invalidate the
+ * key explicitly via `invalidateNotificationEmailConfigCache()`.
+ */
+const NOTIFICATION_EMAIL_CONFIG_TTL_SECONDS = 300;
+
 function getSettingsDb(): PostgresJsDatabase<typeof schema> {
   if (!settingsDbInstance) {
     throw new Error('Settings DB not initialized. Call setSettingsDb() first.');
@@ -55,7 +69,8 @@ function getSettingsDb(): PostgresJsDatabase<typeof schema> {
   return settingsDbInstance;
 }
 
-function getSettingsService(): SettingsService {
+/** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
+export function getSettingsService(): SettingsService {
   if (!settingsServiceInstance) {
     throw new Error('SettingsService not initialized. Call setSettingsService() first.');
   }
@@ -120,23 +135,31 @@ export const settingsRouter = router({
 
   /**
    * Get notification email config — which types send email.
-   * SuperAdmin only.
+   * SuperAdmin only. Cached for 5 minutes (invalidated on `updateNotificationEmailConfig`).
    */
   getNotificationEmailConfig: permissionProcedure('settings.write').query(async () => {
-    const config = await getSettingsService().get(NOTIFICATION_EMAIL_CONFIG_KEY);
-    const enabledTypes = (config?.['enabledTypes'] as Record<string, boolean>) ?? {};
+    const fetch = async () => {
+      const config = await getSettingsService().get(NOTIFICATION_EMAIL_CONFIG_KEY);
+      const enabledTypes = (config?.['enabledTypes'] as Record<string, boolean>) ?? {};
 
-    const configurable = CONFIGURABLE_EMAIL_TYPES.map((t) => ({
-      ...NOTIFICATION_TYPE_META[t],
-      emailEnabled: enabledTypes[t] ?? false,
-    }));
+      const configurable = CONFIGURABLE_EMAIL_TYPES.map((t) => ({
+        ...NOTIFICATION_TYPE_META[t],
+        emailEnabled: enabledTypes[t] ?? false,
+      }));
 
-    const mandatory = MANDATORY_EMAIL_TYPES.map((t) => ({
-      ...NOTIFICATION_TYPE_META[t],
-      emailEnabled: true,
-    }));
+      const mandatory = MANDATORY_EMAIL_TYPES.map((t) => ({
+        ...NOTIFICATION_TYPE_META[t],
+        emailEnabled: true,
+      }));
 
-    return { configurable, mandatory };
+      return { configurable, mandatory };
+    };
+    if (!settingsCacheService) return fetch();
+    return settingsCacheService.getOrSet(
+      'cache:settings:notificationEmailConfig:v1',
+      NOTIFICATION_EMAIL_CONFIG_TTL_SECONDS,
+      fetch,
+    );
   }),
 
   /**
@@ -152,6 +175,7 @@ export const settingsRouter = router({
         ctx.user.id,
       );
       await invalidateSystemSettingsCache();
+      await invalidateNotificationEmailConfigCache();
       return { success: true };
     }),
 

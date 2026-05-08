@@ -5,6 +5,7 @@ import type Redis from 'ioredis';
 import { db as schema } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { isReadThroughCacheEnabled } from '../common/cache/cache.service';
 
 const REDIS_PREFIX = 'yannis:setting:';
 const CACHE_TTL_SECONDS = 300; // 5 minutes
@@ -67,10 +68,13 @@ export class SettingsService {
    * Checks Redis cache first, falls back to DB, then caches.
    */
   async get(key: string): Promise<Record<string, unknown> | null> {
-    // Check Redis cache
-    const cached = await this.redis.get(`${REDIS_PREFIX}${key}`);
-    if (cached) {
-      return JSON.parse(cached) as Record<string, unknown>;
+    const cacheOn = isReadThroughCacheEnabled();
+
+    if (cacheOn) {
+      const cached = await this.redis.get(`${REDIS_PREFIX}${key}`);
+      if (cached) {
+        return JSON.parse(cached) as Record<string, unknown>;
+      }
     }
 
     // Fallback to DB
@@ -85,13 +89,14 @@ export class SettingsService {
 
     const value = row.value as Record<string, unknown>;
 
-    // Cache in Redis
-    await this.redis.set(
-      `${REDIS_PREFIX}${key}`,
-      JSON.stringify(value),
-      'EX',
-      CACHE_TTL_SECONDS,
-    );
+    if (cacheOn) {
+      await this.redis.set(
+        `${REDIS_PREFIX}${key}`,
+        JSON.stringify(value),
+        'EX',
+        CACHE_TTL_SECONDS,
+      );
+    }
 
     return value;
   }

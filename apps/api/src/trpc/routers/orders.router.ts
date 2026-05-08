@@ -16,6 +16,10 @@ import { TRPCError } from '@trpc/server';
 import { canonicalPermissionCode } from '@yannis/shared';
 import { router, authedProcedure, permissionProcedure, publicProcedure } from '../trpc';
 import { getBranchTeamsService } from './branches.router';
+import { getUsersService } from './users.router';
+import { getProductsService } from './products.router';
+import { getLogisticsService } from './logistics.router';
+import { getInventoryService } from './inventory.router';
 import { OrdersService } from '../../orders/orders.service';
 import type { VoipService } from '../../voip/voip.service';
 import { isAdminLevel } from '../../common/authz';
@@ -715,6 +719,363 @@ export const ordersRouter = router({
         input.endDate,
       ),
     ),
+
+  /**
+   * Single-request bundle for the `/admin/cs/orders` secondary fan-out.
+   *
+   * Replaces up to 7 parallel loader calls — `orders.statusCounts`,
+   * `orders.myCSWorkload` (CS_AGENT only), `orders.timeSeriesByCreated`,
+   * `orders.scheduleCalendarHeat`, `products.list` (offline order modal),
+   * `orders.csWorkloads` (HoCS / Admin column), `logistics.locationOptions`
+   * (HoCS / Admin bulk allocate). Same fan-out, single HTTP round-trip and one
+   * pass through auth + branch resolution.
+   *
+   * Permission gate matches the page (`orders.read`).
+   */
+  csOrdersPageBundle: permissionProcedure('orders.read')
+    .input(
+      z.object({
+        // Counts scope (mirrors orders.statusCounts).
+        countsAssignedCsId: z.string().uuid().optional(),
+        countsStartDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/)
+          .optional(),
+        countsEndDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/)
+          .optional(),
+        // Trend scope (mirrors orders.timeSeriesByCreated). The trend chart can
+        // additionally filter on `status` (e.g. delivered-only line).
+        trendStatus: z.string().optional(),
+        // Schedule heat — yearMonth is YYYY-MM.
+        heatYearMonth: z.string().regex(/^\d{4}-\d{2}$/),
+        heatStatus: z
+          .enum([
+            'UNPROCESSED',
+            'CS_ASSIGNED',
+            'CS_ENGAGED',
+            'CONFIRMED',
+            'CANCELLED',
+            'AGENT_ASSIGNED',
+            'DISPATCHED',
+            'IN_TRANSIT',
+            'DELIVERED',
+            'PARTIALLY_DELIVERED',
+            'RETURNED',
+            'RESTOCKED',
+            'WRITTEN_OFF',
+            'REMITTED',
+          ])
+          .optional(),
+        // Capability flags from the loader.
+        isCSAgent: z.boolean().optional().default(false),
+        showCSAgentColumn: z.boolean().optional().default(false),
+        canCreateOffline: z.boolean().optional().default(false),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const trendFilters = {
+        assignedCsId: input.countsAssignedCsId,
+        status: input.trendStatus,
+      };
+
+      const [
+        statusCounts,
+        myWorkload,
+        dailyCounts,
+        scheduleHeat,
+        csAgentsForFilter,
+        logisticsLocationsForBulk,
+        productsForOfflineOrder,
+      ] = await Promise.all([
+        getOrdersService().getStatusCounts(
+          undefined,
+          input.countsStartDate,
+          input.countsEndDate,
+          input.countsAssignedCsId,
+          undefined,
+          branchId,
+          undefined,
+        ),
+        input.isCSAgent ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
+        getOrdersService().getOrdersTimeSeriesByCreated(
+          input.countsStartDate,
+          input.countsEndDate,
+          branchId,
+          trendFilters,
+        ),
+        getOrdersService().scheduleCalendarHeat(
+          {
+            yearMonth: input.heatYearMonth,
+            assignedCsId: input.countsAssignedCsId,
+            status: input.heatStatus,
+          },
+          branchId,
+        ),
+        // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
+        // — bundle gate is `orders.read` so we re-check before exposing the
+        // agent roster.
+        input.showCSAgentColumn &&
+        (ctx.user.permissions ?? []).includes('orders.csWorkloads')
+          ? getOrdersService().getCSAgentWorkloads(branchId)
+          : Promise.resolve([]),
+        input.showCSAgentColumn
+          ? getLogisticsService().listLocationOptions({ status: 'ACTIVE' })
+          : Promise.resolve([]),
+        input.canCreateOffline
+          ? getProductsService().list(
+              { page: 1, limit: 100, status: 'ACTIVE', sortBy: 'name', sortOrder: 'asc' },
+              ctx.user.id,
+              ctx.user.role,
+            )
+          : Promise.resolve(null),
+      ]);
+
+      return {
+        statusCounts,
+        myWorkload,
+        dailyCounts,
+        scheduleHeat,
+        csAgentsForFilter: (csAgentsForFilter as Array<{ agentId: string; agentName: string }>).map(
+          (w) => ({ agentId: w.agentId, agentName: w.agentName }),
+        ),
+        logisticsLocationsForBulk: (
+          logisticsLocationsForBulk as Array<{ id: string; name: string; providerName: string | null }>
+        ).map((loc) => ({
+          id: loc.id,
+          name: loc.name,
+          providerName: loc.providerName ?? null,
+        })),
+        productsForOfflineOrder: productsForOfflineOrder?.products ?? [],
+      };
+    }),
+
+  /**
+   * Single-request bundle for the `/admin/cs/team` page.
+   *
+   * Replaces 4 parallel loader calls — `users.listCSTeam`,
+   * `orders.csWorkloads`, `orders.csLeaderboard`, `orders.inactiveAgents` — with
+   * a single HTTP round-trip. The four service calls still run in parallel on
+   * the API side. Permission gate matches the page (`cs.teamOverview`).
+   */
+  csTeamPageBundle: permissionProcedure('cs.teamOverview')
+    .input(
+      z.object({
+        period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        inactiveThresholdMinutes: z.number().int().min(1).optional().default(10),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
+      const [team, workloads, leaderboard, inactiveAgents] = await Promise.all([
+        getUsersService().listCSTeam(),
+        getOrdersService().getCSAgentWorkloads(branchId),
+        getOrdersService().getCSAgentLeaderboard(
+          input.period,
+          input.startDate,
+          input.endDate,
+        ),
+        getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes),
+      ]);
+      return { team, workloads, leaderboard, inactiveAgents };
+    }),
+
+  /**
+   * Single-request bundle for the `/tpl` 3PL dashboard.
+   *
+   * Replaces 4 parallel loader calls — `orders.list`, `orders.statusCounts`,
+   * `inventory.transfers`, `inventory.returnedOrders` — with one HTTP round-trip.
+   * Same fan-out runs server-side via `Promise.all`. Permission gate is
+   * `authedProcedure` because the page is reachable by any 3PL-side user; we
+   * scope visibility through the location filter the same way the standalone
+   * calls do.
+   */
+  tplDashboardBundle: authedProcedure
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        logisticsLocationId: z.string().uuid().optional(),
+        recentLimit: z.number().int().min(1).max(50).default(8),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const locationFilter = input.logisticsLocationId;
+
+      const listInput: Parameters<typeof OrdersService.prototype.list>[0] = {
+        page: 1,
+        limit: input.recentLimit,
+        sortBy: 'preferredDeliveryDate',
+        sortOrder: 'asc',
+        ...(input.startDate && { startDate: input.startDate }),
+        ...(input.endDate && { endDate: input.endDate }),
+        ...(locationFilter && { logisticsLocationId: locationFilter }),
+      };
+
+      const [ordersResult, statusCounts, transfers, returnedOrders] =
+        await Promise.all([
+          getOrdersService().list(listInput, branchId),
+          getOrdersService().getStatusCounts(
+            undefined,
+            input.startDate,
+            input.endDate,
+            undefined,
+            locationFilter,
+            branchId,
+            undefined,
+          ),
+          getInventoryService().listTransfers(undefined),
+          getInventoryService().listReturnedOrders(locationFilter),
+        ]);
+
+      const inTransitTransfers = (transfers as Array<{ transferStatus: string }>).filter(
+        (t) => t.transferStatus === 'IN_TRANSIT',
+      ).length;
+
+      type RecentOrder = {
+        id: string;
+        customerName: string;
+        status: string;
+        totalAmount: string | null;
+        createdAt: string | Date;
+        preferredDeliveryDate: string | Date | null;
+      };
+      const recentOrders = (ordersResult.orders as Array<RecentOrder>).map((o) => ({
+        id: o.id,
+        customerName: o.customerName,
+        status: o.status,
+        totalAmount: o.totalAmount,
+        createdAt: o.createdAt,
+        preferredDeliveryDate: o.preferredDeliveryDate,
+      }));
+
+      return {
+        recentOrders,
+        statusCounts,
+        totalOrders: ordersResult.pagination?.total ?? 0,
+        inTransitTransfers,
+        returnsQueue: (returnedOrders as Array<unknown>).length,
+      };
+    }),
+
+  /**
+   * Single-request bundle for `/tpl/orders` (the 3PL Orders page).
+   *
+   * Replaces 4 parallel loader calls — `orders.list`, `orders.statusCounts`,
+   * `logistics.listLocations`, `logistics.listRiders` — with one HTTP
+   * round-trip. Same fan-out runs server-side. Permission gate matches
+   * the page (caller must hold `logistics.read` OR be a TPL_MANAGER).
+   */
+  tplOrdersPageBundle: authedProcedure
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(100).default(40),
+        status: z
+          .enum([
+            'UNPROCESSED',
+            'CS_ASSIGNED',
+            'CS_ENGAGED',
+            'CONFIRMED',
+            'CANCELLED',
+            'AGENT_ASSIGNED',
+            'DISPATCHED',
+            'IN_TRANSIT',
+            'DELIVERED',
+            'PARTIALLY_DELIVERED',
+            'RETURNED',
+            'RESTOCKED',
+            'WRITTEN_OFF',
+            'REMITTED',
+          ])
+          .optional(),
+        statuses: z
+          .array(
+            z.enum([
+              'UNPROCESSED',
+              'CS_ASSIGNED',
+              'CS_ENGAGED',
+              'CONFIRMED',
+              'CANCELLED',
+              'AGENT_ASSIGNED',
+              'DISPATCHED',
+              'IN_TRANSIT',
+              'DELIVERED',
+              'PARTIALLY_DELIVERED',
+              'RETURNED',
+              'RESTOCKED',
+              'WRITTEN_OFF',
+              'REMITTED',
+            ]),
+          )
+          .optional(),
+        search: z.string().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        logisticsLocationId: z.string().uuid().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const perms = ctx.user.permissions ?? [];
+      const isTplManager = ctx.user.role === 'TPL_MANAGER';
+      if (
+        !isAdminLevel(ctx.user) &&
+        !isTplManager &&
+        !perms.includes('logistics.read')
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'logistics.read required' });
+      }
+
+      const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+
+      const listInput: Parameters<typeof OrdersService.prototype.list>[0] = {
+        page: input.page,
+        limit: input.limit,
+        sortBy: 'preferredDeliveryDate',
+        sortOrder: 'asc',
+        ...(input.status && { status: input.status }),
+        ...(input.statuses?.length && { statuses: input.statuses }),
+        ...(input.search && { search: input.search }),
+        ...(input.startDate && { startDate: input.startDate }),
+        ...(input.endDate && { endDate: input.endDate }),
+        ...(input.logisticsLocationId && { logisticsLocationId: input.logisticsLocationId }),
+      };
+
+      const [ordersResult, statusCounts, locationsResult, ridersResult] =
+        await Promise.all([
+          getOrdersService().list(listInput, branchId),
+          getOrdersService().getStatusCounts(
+            undefined,
+            input.startDate,
+            input.endDate,
+            undefined,
+            input.logisticsLocationId,
+            branchId,
+            input.statuses?.length ? input.statuses : undefined,
+          ),
+          getLogisticsService().listLocations({ page: 1, limit: 20, status: 'ACTIVE' }),
+          getLogisticsService().listRiders(),
+        ]);
+
+      return {
+        orders: ordersResult.orders,
+        pagination: ordersResult.pagination,
+        statusCounts,
+        locations: (locationsResult as { locations?: unknown[] }).locations ?? [],
+        riders: (ridersResult as Array<{ id: string; name: string; logisticsLocationId: string | null }>).map(
+          (r) => ({
+            id: r.id,
+            name: r.name,
+            logisticsLocationId: r.logisticsLocationId ?? null,
+          }),
+        ),
+      };
+    }),
 
   // ── Manual Call (Relaxed Mode) ──────────────────────────────────
 

@@ -59,6 +59,22 @@ function colorForMs(ms: number, good: number, warn: number): string {
   return ansi.red;
 }
 
+/**
+ * Format a duration in ms with a human-friendly unit. Reads as `1234ms` while
+ * the request is short, and `1.23s` / `12.5s` once the request crosses the
+ * one-second mark. Doing the conversion in the formatter keeps the rest of the
+ * pipeline in milliseconds (which is what `process.hrtime`/`Date.now` returns
+ * and what the `db` cumulative store accumulates) so we don't have to thread a
+ * unit through every log call site.
+ */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms.toFixed(0)}ms`;
+  const seconds = ms / 1000;
+  // 1.00s … 9.99s gets two decimals; 10s+ drops to one decimal because the
+  // tens digit already conveys the magnitude well enough for log scanning.
+  return seconds < 10 ? `${seconds.toFixed(2)}s` : `${seconds.toFixed(1)}s`;
+}
+
 const RULE = `${ansi.dim}--------------${ansi.reset}`;
 
 export function formatHttpRequestLogLine(input: {
@@ -73,8 +89,8 @@ export function formatHttpRequestLogLine(input: {
   const totalColor = colorForMs(totalMs, t.totalGoodMs, t.totalWarnMs);
   const dbColor = colorForMs(dbMs, t.dbGoodMs, t.dbWarnMs);
   const path = url.length > 200 ? `${url.slice(0, 197)}…` : url;
-  const totalStr = `${totalMs.toFixed(0)}ms`;
-  const dbStr = `${dbMs.toFixed(0)}ms`;
+  const totalStr = formatDuration(totalMs);
+  const dbStr = formatDuration(dbMs);
 
   return [
     RULE,

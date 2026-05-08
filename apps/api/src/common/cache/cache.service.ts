@@ -15,11 +15,34 @@ import { REDIS } from '../../database/database.module';
  *   await cache.set(key, result, ttlSeconds);
  *   return result;
  */
+/**
+ * Read-through cache kill-switch. Set `READ_THROUGH_CACHE_ENABLED=false` to force
+ * every cache read to miss and skip writes — used to benchmark raw endpoint latency
+ * without Redis masking the underlying query cost. Does NOT affect Redis-as-state
+ * (sessions, dispatch queue, dedup keys, rate limiting).
+ *
+ * Exported so the few ad-hoc Redis-as-cache callers outside `CacheService`
+ * (SettingsService, voip.isEnabled, UserBundleCacheService) can honour the flag
+ * with a one-line inline check.
+ */
+export function isReadThroughCacheEnabled(): boolean {
+  const raw = process.env.READ_THROUGH_CACHE_ENABLED;
+  if (raw == null) return true;
+  const v = raw.trim().toLowerCase();
+  return v !== 'false' && v !== '0' && v !== 'no' && v !== 'off';
+}
+
 @Injectable()
 export class CacheService {
   private readonly logger = new Logger(CacheService.name);
 
-  constructor(@Inject(REDIS) private readonly redis: Redis) {}
+  constructor(@Inject(REDIS) private readonly redis: Redis) {
+    if (!isReadThroughCacheEnabled()) {
+      this.logger.warn(
+        'READ_THROUGH_CACHE_ENABLED=false — read-through cache disabled. Every getOrSet/get will miss; perf testing mode.',
+      );
+    }
+  }
 
   /**
    * Stable hash of any JSON-serialisable value — used to build cache keys
@@ -33,6 +56,7 @@ export class CacheService {
   }
 
   async get<T>(key: string): Promise<T | null> {
+    if (!isReadThroughCacheEnabled()) return null;
     try {
       const raw = await this.redis.get(key);
       if (!raw) return null;
@@ -44,6 +68,7 @@ export class CacheService {
   }
 
   async set(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+    if (!isReadThroughCacheEnabled()) return;
     try {
       await this.redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
     } catch (err) {

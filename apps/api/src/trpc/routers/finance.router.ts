@@ -14,6 +14,10 @@ import { TRPCError } from '@trpc/server';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { FinanceService } from '../../finance/finance.service';
 import { getOrdersService } from './orders.router';
+import { getLogisticsService } from './logistics.router';
+import { getPayrollBatchService } from './hr.router';
+import { getUsersService } from './users.router';
+import { listBranchesForUser } from './branches.router';
 import { isAdminLevel } from '../../common/authz';
 
 let financeServiceInstance: FinanceService | null = null;
@@ -22,7 +26,8 @@ export function setFinanceService(service: FinanceService) {
   financeServiceInstance = service;
 }
 
-function getFinanceService(): FinanceService {
+/** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
+export function getFinanceService(): FinanceService {
   if (!financeServiceInstance) {
     throw new Error('FinanceService not initialized. Call setFinanceService() first.');
   }
@@ -188,5 +193,77 @@ export const financeRouter = router({
     }).optional())
     .query(async ({ input }) => {
       return getFinanceService().getFastProfitReport(input?.startDate, input?.endDate);
+    }),
+
+  /**
+   * Single-request bundle for the `/admin/finance/overview` page.
+   *
+   * Replaces 6 parallel loader calls — `finance.profitReport`,
+   * `logistics.listDeliveryRemittances`, `hr.listMonthlyPayrolls`,
+   * `finance.listApprovalRequests`, `branches.list`, and `users.list[MEDIA_BUYER]`
+   * — with one HTTP request. Six fans out via Promise.all server-side, paying
+   * the auth + middleware cost once. Permission gate matches the page.
+   */
+  overviewPageBundle: permissionProcedure('finance.read')
+    .input(
+      z.object({
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        branchId: z.string().uuid().optional(),
+        mediaBuyerId: z.string().uuid().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const profitInput = {
+        groupBy: 'product' as const,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        ...(input.branchId && { branchId: input.branchId }),
+        ...(input.mediaBuyerId && { mediaBuyerId: input.mediaBuyerId }),
+        includeProductBreakdown: true,
+      };
+
+      const [profit, remit, payroll, approvals, branches, buyers] = await Promise.all([
+        getFinanceService().getProfitReport(profitInput),
+        getLogisticsService()
+          .listDeliveryRemittances({ page: 1, limit: 1 }, ctx.user)
+          .catch(() => null),
+        getPayrollBatchService()
+          .listMonthlyPayrolls({ status: 'PENDING_FINANCE' as const }, ctx.user)
+          .catch(() => null),
+        getFinanceService()
+          .listApprovalRequests({ status: 'PENDING' as const, page: 1, limit: 1 })
+          .catch(() => null),
+        listBranchesForUser(ctx.user).catch(() => [] as Array<{ id: string; name: string }>),
+        // Finance Overview "by media buyer" panel only needs id + name + role
+        // — skip the branch-memberships join.
+        getUsersService()
+          .list(
+            {
+              page: 1,
+              limit: 200,
+              role: 'MEDIA_BUYER',
+              status: 'ACTIVE',
+              sortBy: 'createdAt',
+              sortOrder: 'desc',
+              includeBranchMemberships: false,
+            },
+            ctx.user,
+            ctx.currentBranchId,
+          )
+          .catch(() => null),
+      ]);
+
+      return {
+        profit,
+        remittanceSummary:
+          (remit as { summary?: Record<string, string | number> } | null)?.summary ?? null,
+        payrollBatchCount:
+          (payroll as { batches?: unknown[] } | null)?.batches?.length ?? 0,
+        approvalsPendingCount:
+          (approvals as { pagination?: { total?: number } } | null)?.pagination?.total ?? 0,
+        branches: (branches ?? []).map((b) => ({ id: b.id, name: b.name })),
+        mediaBuyers: buyers ? (buyers.users ?? []).map((u) => ({ id: u.id, name: u.name })) : [],
+      };
     }),
 });

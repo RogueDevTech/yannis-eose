@@ -11,8 +11,6 @@ import {
   buildLeaderboardInput,
   getMarketingRoleFlags,
   parseAdSpend,
-  parseAdSpendStatusCounts,
-  parseCampaigns,
   resolveMarketingDateFilters,
   runMarketingAdSpendAction,
 } from '~/lib/marketing-pages.server';
@@ -88,19 +86,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(mediaBuyerIdFilter && { mediaBuyerId: mediaBuyerIdFilter }),
   };
   const groupedInput = JSON.stringify(groupedScope);
-  // Status counts share the product filter so the pill counts match the visible list.
-  const countsInput = JSON.stringify({
-    ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
-    ...(startDate && { startDate }),
-    ...(endDate && { endDate }),
-    ...(searchFilter && { search: searchFilter }),
-    ...(productIdFilter && { productId: productIdFilter }),
-    ...(campaignIdFilter && { campaignId: campaignIdFilter }),
-    ...(mediaBuyerIdFilter && { mediaBuyerId: mediaBuyerIdFilter }),
-  });
-  const campaignsInput = JSON.stringify(isMediaBuyer ? { mediaBuyerId: user.id, page: 1, limit: 20 } : { page: 1, limit: 20 });
-  const buyersInputStr = encodeURIComponent(
-    JSON.stringify({ page: 1, limit: 100, role: 'MEDIA_BUYER', status: 'ACTIVE' }),
+  // Picklists bundle input — the bundle procedure self-scopes Media Buyers and
+  // refuses the buyer picklist for non-`users.read` callers, so we forward the
+  // same filter context the legacy 3 individual calls shared (status counts +
+  // listCampaigns + users.list[MEDIA_BUYER]).
+  const picklistsBundleInput = encodeURIComponent(
+    JSON.stringify({
+      ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
+      ...(startDate && { startDate }),
+      ...(endDate && { endDate }),
+      ...(searchFilter && { search: searchFilter }),
+      ...(productIdFilter && { productId: productIdFilter }),
+      ...(campaignIdFilter && { campaignId: campaignIdFilter }),
+      ...(mediaBuyerIdFilter && { mediaBuyerId: mediaBuyerIdFilter }),
+      campaignsLimit: 20,
+    }),
   );
 
   const adSpendShell = {
@@ -125,35 +125,34 @@ export async function loader({ request }: LoaderFunctionArgs) {
     mediaBuyersForFilter: Array<{ id: string; name: string }>;
   }> => {
     try {
-      const adSpendCountsP = apiRequest<unknown>(
-        `/trpc/marketing.adSpendStatusCounts?input=${encodeURIComponent(countsInput)}`,
+      // One request collapses the previous 3 (statusCounts + listCampaigns +
+      // users.list[MEDIA_BUYER]) — same fan-out runs server-side in parallel.
+      const bundleRes = await apiRequest<unknown>(
+        `/trpc/marketing.adSpendPagePicklistsBundle?input=${picklistsBundleInput}`,
         { method: 'GET', cookie },
       );
-      const campaignsP = apiRequest<unknown>(
-        `/trpc/marketing.listCampaigns?input=${encodeURIComponent(campaignsInput)}`,
-        { method: 'GET', cookie },
-      );
-      const buyersP = !isMediaBuyer
-        ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
-        : Promise.resolve({ ok: false as const, data: null });
-
-      const [adSpendCountsRes, campaignsRes, buyersRes] = await Promise.all([adSpendCountsP, campaignsP, buyersP]);
-
-      const mediaBuyersForFilter =
-        buyersRes.ok
-          ? (
-              (
-                buyersRes.data as {
-                  result?: { data?: { users?: Array<{ id: string; name: string }> } };
-                }
-              )?.result?.data?.users ?? []
-            ).map((u) => ({ id: u.id, name: u.name }))
-          : [];
-
+      if (!bundleRes.ok) {
+        return {
+          statusCounts: { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
+          campaigns: [],
+          mediaBuyersForFilter: [],
+        };
+      }
+      const data = (
+        bundleRes.data as {
+          result?: {
+            data?: {
+              adSpendStatusCounts: AdSpendStatusCounts;
+              campaigns: Campaign[];
+              mediaBuyersForFilter: Array<{ id: string; name: string }>;
+            };
+          };
+        }
+      )?.result?.data;
       return {
-        statusCounts: parseAdSpendStatusCounts(adSpendCountsRes),
-        campaigns: parseCampaigns(campaignsRes),
-        mediaBuyersForFilter,
+        statusCounts: data?.adSpendStatusCounts ?? { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
+        campaigns: data?.campaigns ?? [],
+        mediaBuyersForFilter: data?.mediaBuyersForFilter ?? [],
       };
     } catch {
       return {

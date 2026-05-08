@@ -17,7 +17,7 @@ import { Button } from '~/components/ui/button';
 import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
-import { Spinner } from '~/components/ui/spinner';
+import { SlowConnectionToast } from '~/components/ui/slow-connection-toast';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
@@ -898,6 +898,7 @@ function DashboardLayoutInner({
         </div>
       )}
       <NavProgressBar />
+      <SlowConnectionToast />
       <Sidebar
         groups={navGroups}
         collapsed={collapsed}
@@ -1132,18 +1133,6 @@ function DashboardLayoutInner({
             aria-busy={isRouteLoading}
             aria-live="polite"
           >
-            {isRouteLoading ? (
-              <div
-                className="absolute inset-0 z-20 rounded-[inherit] bg-black/36 backdrop-blur-[0.5px] dark:bg-black/52"
-                aria-busy="true"
-                aria-live="polite"
-              >
-                <div className="absolute left-1/2 top-[30%] -translate-x-1/2 flex flex-col items-center gap-2">
-                  <Spinner size="lg" className="text-white/85" />
-                  <span className="text-xs font-medium text-white/80">Loading…</span>
-                </div>
-              </div>
-            ) : null}
             <BranchesCatalogProvider value={branches ?? []}>
               <Outlet />
             </BranchesCatalogProvider>

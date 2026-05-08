@@ -2,13 +2,19 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, authedProcedure } from '../trpc';
 import type { AuditService } from '../../audit/audit.service';
-import { canAccessGlobalAuditLog } from '../../common/authz';
+import { canAccessGlobalAuditLog, shouldScopeGlobalAuditToBranch } from '../../common/authz';
+import { CacheService } from '../../common/cache/cache.service';
 
 // Factory pattern — same as all other routers
 let auditServiceInstance: AuditService | null = null;
+let auditCacheService: CacheService | null = null;
 
 export function setAuditService(service: AuditService) {
   auditServiceInstance = service;
+}
+
+export function setAuditCacheService(service: CacheService) {
+  auditCacheService = service;
 }
 
 function getAuditService(): AuditService {
@@ -17,6 +23,14 @@ function getAuditService(): AuditService {
   }
   return auditServiceInstance;
 }
+
+/**
+ * Cache TTL for the actor filter dropdown. The dropdown lists active staff
+ * names — adding/deactivating staff is rare during a session, so 5 minutes
+ * of staleness is acceptable. The cache key is keyed by scope (org-wide vs
+ * branch-scoped) so admins and scoped viewers don't share entries.
+ */
+const ACTOR_FILTER_TTL_SECONDS = 300;
 
 /**
  * Audit router — `recordHistory` / `timeTravel` stay authed-only (record-scoped by domain loaders).
@@ -128,17 +142,31 @@ export const auditRouter = router({
       return getAuditService().getLocationNameMap(input.locationIds);
     }),
 
-  /** Staff picker for `/admin/analytics/audit` actor filter — org/branch scope matches `globalLog`. */
+  /**
+   * Staff picker for `/admin/analytics/audit` actor filter — org/branch scope matches `globalLog`.
+   *
+   * Cached for 5 minutes keyed by (scope, branchId): the dropdown lists every active staff
+   * member visible to the viewer, which is the same for everyone with the same scope flags
+   * and branch. Adding / deactivating staff is rare and a 5-minute lag on the dropdown is
+   * acceptable — the underlying audit log itself is not cached, only the filter source.
+   */
   actorFilterOptions: authedProcedure.query(async ({ ctx }) => {
     const u = ctx.user;
     if (!canAccessGlobalAuditLog(u)) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to load audit filters.' });
     }
-    return getAuditService().listActorFilterOptions({
-      role: u.role,
-      permissions: u.permissions,
-      currentBranchId: u.currentBranchId,
-    });
+    const fetch = () =>
+      getAuditService().listActorFilterOptions({
+        role: u.role,
+        permissions: u.permissions,
+        currentBranchId: u.currentBranchId,
+      });
+    if (!auditCacheService) return fetch();
+    const scopeToBranch = shouldScopeGlobalAuditToBranch(u);
+    const branchPart =
+      scopeToBranch && u.currentBranchId ? `branch:${u.currentBranchId}` : 'global';
+    const key = `cache:audit:actorFilter:${branchPart}`;
+    return auditCacheService.getOrSet(key, ACTOR_FILTER_TTL_SECONDS, fetch);
   }),
 
   /**

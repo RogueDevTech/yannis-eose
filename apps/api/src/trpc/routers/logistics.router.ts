@@ -47,7 +47,8 @@ async function invalidateLogisticsOptionsCache(): Promise<void> {
   });
 }
 
-function getLogisticsService(): LogisticsService {
+/** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
+export function getLogisticsService(): LogisticsService {
   if (!logisticsServiceInstance) {
     throw new Error('LogisticsService not initialized. Call setLogisticsService() first.');
   }

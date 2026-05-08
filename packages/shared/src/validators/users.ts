@@ -209,6 +209,14 @@ export const listUsersSchema = z.object({
    * silently still scoped to their active branch (the service ignores the opt-in).
    */
   allBranches: z.boolean().optional(),
+  /**
+   * When `false`, skip the per-row branch-memberships join. Defaults to `true` for
+   * backward compatibility (the User Admin page reads memberships per row).
+   * Filter-dropdown callers (Marketing orders' Media-buyer picker, ad-spend buyer
+   * resolver, etc.) that only need `id + name + role` should pass `false` to drop
+   * one DB round-trip from the response.
+   */
+  includeBranchMemberships: z.boolean().optional(),
 });
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;

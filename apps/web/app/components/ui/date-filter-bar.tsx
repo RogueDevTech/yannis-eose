@@ -402,22 +402,24 @@ export function DateFilterBar({
                   </p>
                 </div>
               )}
-              {(hasDraftDates || draftPeriodAllTime) && (
-                <Button type="button" variant="secondary" size="md" className="w-full" onClick={clearDraft}>
-                  Clear
+              <div className="flex items-center gap-2">
+                {(hasDraftDates || draftPeriodAllTime) && (
+                  <Button type="button" variant="secondary" size="md" className="flex-1" onClick={clearDraft}>
+                    Clear
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="md"
+                  className="flex-1"
+                  onClick={applyDraftToUrl}
+                  loading={isSubmitting}
+                  loadingText="Applying..."
+                >
+                  Done
                 </Button>
-              )}
-              <Button
-                type="button"
-                variant="primary"
-                size="md"
-                className="w-full"
-                onClick={applyDraftToUrl}
-                loading={isSubmitting}
-                loadingText="Applying..."
-              >
-                Done
-              </Button>
+              </div>
         </Modal>
       )}
     </>

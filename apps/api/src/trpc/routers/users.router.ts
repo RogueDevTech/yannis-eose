@@ -47,6 +47,19 @@ async function invalidatePermissionsUserMatrixCache(): Promise<void> {
   await usersCacheService.delPattern('cache:permissions:userMatrix:*').catch(() => {});
 }
 
+async function invalidateMyNotificationPreferencesCache(userId: string): Promise<void> {
+  if (!usersCacheService) return;
+  await usersCacheService.del(`cache:users:notificationPrefs:${userId}`).catch(() => {});
+}
+
+/**
+ * Per-user notification preferences TTL — preferences change only when the user
+ * toggles a switch on Settings → Notifications. 5 minutes is a comfortable upper
+ * bound; the mutation also invalidates the key explicitly so the next read after
+ * a toggle is always fresh.
+ */
+const MY_NOTIFICATION_PREFS_TTL_SECONDS = 300;
+
 /** Exported for cross-router lookups (e.g. HR payout preview access gate). */
 export function getUsersService(): UsersService {
   if (!usersServiceInstance) {
@@ -160,25 +173,35 @@ export const usersRouter = router({
    * Get the calling user's notification preferences along with the catalog of types
    * relevant to their role (used to render the Settings → Notifications toggles).
    * Mandatory types are filtered OUT — they cannot be toggled.
+   *
+   * Cached per-user for 5 minutes (invalidated on `updateMyNotificationPreferences`).
    */
   getMyNotificationPreferences: authedProcedure.query(async ({ ctx }) => {
-    const prefs = await getUsersService().getMyNotificationPreferences(ctx.user.id);
-    const relevantTypes = getRelevantNotificationTypesForRole(ctx.user.role);
-    const mandatory = new Set<string>(MANDATORY_EMAIL_TYPES);
-    const items = relevantTypes
-      .filter((t) => !mandatory.has(t))
-      .map((t) => {
-        const meta = NOTIFICATION_TYPE_META[t];
-        const explicit = prefs[t];
-        return {
-          type: t,
-          label: meta.label,
-          description: meta.description,
-          category: meta.category,
-          enabled: explicit !== false, // default ON unless explicitly disabled
-        };
-      });
-    return { items, preferences: prefs };
+    const fetch = async () => {
+      const prefs = await getUsersService().getMyNotificationPreferences(ctx.user.id);
+      const relevantTypes = getRelevantNotificationTypesForRole(ctx.user.role);
+      const mandatory = new Set<string>(MANDATORY_EMAIL_TYPES);
+      const items = relevantTypes
+        .filter((t) => !mandatory.has(t))
+        .map((t) => {
+          const meta = NOTIFICATION_TYPE_META[t];
+          const explicit = prefs[t];
+          return {
+            type: t,
+            label: meta.label,
+            description: meta.description,
+            category: meta.category,
+            enabled: explicit !== false, // default ON unless explicitly disabled
+          };
+        });
+      return { items, preferences: prefs };
+    };
+    if (!usersCacheService) return fetch();
+    return usersCacheService.getOrSet(
+      `cache:users:notificationPrefs:${ctx.user.id}`,
+      MY_NOTIFICATION_PREFS_TTL_SECONDS,
+      fetch,
+    );
   }),
 
   /**
@@ -189,7 +212,9 @@ export const usersRouter = router({
   updateMyNotificationPreferences: authedProcedure
     .input(updateMyNotificationPreferencesSchema)
     .mutation(async ({ input, ctx }) => {
-      return getUsersService().updateMyNotificationPreferences(input.preferences, ctx.user);
+      const result = await getUsersService().updateMyNotificationPreferences(input.preferences, ctx.user);
+      await invalidateMyNotificationPreferencesCache(ctx.user.id);
+      return result;
     }),
 
   /**

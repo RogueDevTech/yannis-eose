@@ -2,6 +2,7 @@ import { redirect } from '@remix-run/node';
 import { isNetworkErrorLike } from './network-error';
 import { canAccessGlobalAuditLog, isAdminLevel, isOrgWideDepartmentHead } from './rbac';
 import { canonicalPermissionCode } from './permission-codes';
+import { decodeSessionBundleCookie } from './session-bundle-cookie.server';
 
 /**
  * Server-side API helper for Remix loaders/actions.
@@ -83,8 +84,15 @@ export function defaultTodayRange(): { startDate: string; endDate: string } {
  */
 export const DEFAULT_READ_API_TIMEOUT_MS = 10_000;
 
-/** `/auth/me` can run on layout revalidation after tab resume — slightly longer than default to reduce false timeouts. */
-const AUTH_ME_TIMEOUT_MS = 15_000;
+/**
+ * `/auth/me` runs on every protected route loader. The bound is generous because:
+ * - Slow networks (3G / patchy Wi-Fi / VPN) need 10–20s for a single request to clear.
+ * - First request after `UserBundleCacheService` cache miss does extra DB work.
+ * - One quiet retry on fetch failure (see `apiRequest`) needs headroom too.
+ * Set higher than read defaults so a slow auth check doesn't tip the user into the
+ * "Connection Issue" modal for what was just a slow network.
+ */
+const AUTH_ME_TIMEOUT_MS = 30_000;
 
 /**
  * Default `apiRequest` budget for POST/PUT/PATCH/DELETE when `timeoutMs` is omitted.
@@ -122,6 +130,13 @@ interface ApiOptions {
    * will not be retried. Defaults to allowing one retry for GET only.
    */
   disableNetworkRetry?: boolean;
+  /**
+   * Force one retry on fetch error (TCP / DNS / network) even for non-GET methods.
+   * Use ONLY for idempotent POSTs like `/auth/me` (session lookup). Most POSTs are
+   * mutations and must NOT retry — they could double-submit (e.g. payment, order
+   * creation, fund disbursement).
+   */
+  forceFetchRetry?: boolean;
 }
 
 interface ApiResponse<T> {
@@ -166,7 +181,9 @@ export async function apiRequest<T = unknown>(
   const { method = 'GET', body, cookie } = options;
   const timeoutMs = options.timeoutMs ?? defaultTimeoutForMethod(method);
   const mUpper = (method ?? 'GET').toUpperCase();
-  const allowFetchRetry = mUpper === 'GET' && !options.disableNetworkRetry;
+  const allowFetchRetry =
+    options.forceFetchRetry === true ||
+    (mUpper === 'GET' && !options.disableNetworkRetry);
 
   // tRPC GET queries need ?input={} even when all fields are optional,
   // otherwise Zod receives undefined instead of an object and fails.
@@ -265,26 +282,195 @@ function isTransientAuthMeFailure(status: number): boolean {
   );
 }
 
-function throwSessionCheckUnavailable(): never {
+/**
+ * Classify the upstream failure into a specific code so the UI can show a
+ * targeted message (timeout vs unreachable vs server error vs rate-limited)
+ * instead of a generic "API unavailable".
+ *
+ * Reads:
+ * - `upstreamStatus` — what `/auth/me` (or whichever endpoint) returned
+ * - `upstreamReason` — the synthetic message `apiRequest` set on fetch failures
+ *   ("API request timed out" | "API unreachable") OR any error string from the API
+ */
+type ApiUnavailableCode =
+  | 'API_TIMEOUT'
+  | 'API_UNREACHABLE'
+  | 'API_RATE_LIMITED'
+  | 'API_UPSTREAM_ERROR';
+
+function classifyTransientFailure(
+  upstreamStatus: number,
+  upstreamReason: string | undefined,
+): ApiUnavailableCode {
+  const reason = (upstreamReason ?? '').toLowerCase();
+  if (upstreamStatus === 504 || upstreamStatus === 408 || reason.includes('timed out')) {
+    return 'API_TIMEOUT';
+  }
+  if (upstreamStatus === 429) return 'API_RATE_LIMITED';
+  if (upstreamStatus === 503 || reason.includes('unreachable') || reason.includes('econnrefused')) {
+    return 'API_UNREACHABLE';
+  }
+  return 'API_UPSTREAM_ERROR';
+}
+
+function describeCode(code: ApiUnavailableCode): { title: string; message: string } {
+  switch (code) {
+    case 'API_TIMEOUT':
+      return {
+        title: 'Server is taking too long',
+        message:
+          'The server didn’t respond in time. This is usually a slow network or a hiccup on our end — try again in a moment.',
+      };
+    case 'API_RATE_LIMITED':
+      return {
+        title: 'Too many requests',
+        message:
+          'You’re sending requests faster than the server allows. Wait a few seconds and try again.',
+      };
+    case 'API_UNREACHABLE':
+      return {
+        title: 'Can’t reach the server',
+        message:
+          'We couldn’t connect to the server. Check your internet connection — your session is usually still valid once you’re back online.',
+      };
+    case 'API_UPSTREAM_ERROR':
+    default:
+      return {
+        title: 'Server error',
+        message:
+          'The server returned an error verifying your session. This is usually transient — try again in a few seconds.',
+      };
+  }
+}
+
+function throwSessionCheckUnavailable(detail: {
+  upstreamStatus: number;
+  upstreamReason?: string;
+}): never {
+  const code = classifyTransientFailure(detail.upstreamStatus, detail.upstreamReason);
+  const { title, message } = describeCode(code);
   throw new Response(
     JSON.stringify({
-      message:
-        'We could not reach the server to verify your session. If you were signed in, try refreshing once your connection is stable.',
-      code: 'API_UNAVAILABLE',
+      title,
+      message,
+      code,
+      upstreamStatus: detail.upstreamStatus,
     }),
     { status: 503, headers: { 'Content-Type': 'application/json' } },
   );
 }
 
 /**
+ * Synchronous "must be signed in" gate for loaders that want to defer their
+ * permission check inside a deferred promise.
+ *
+ * Pattern:
+ *
+ *   export async function loader({ request }) {
+ *     // Sync — redirects immediately if no session cookie. Zero network calls.
+ *     requireSessionOrRedirect(request);
+ *
+ *     // ... URL-only sync work (filters, page, etc.)
+ *
+ *     const pageData = (async () => {
+ *       const user = await requirePermission(request, 'X');  // network here, not before defer()
+ *       // ... user-dependent work + API calls
+ *     })();
+ *
+ *     return defer({ pageData });
+ *   }
+ *
+ * The skeleton paints in <16ms because `defer()` returns sync. The full
+ * permission validation runs inside the deferred promise; an unauthorized
+ * user is still caught — `requirePermission` throws a redirect Response,
+ * Remix's `<Await>` handles thrown Responses as redirects (not errors).
+ *
+ * Use this ONLY on page loaders that have a `<Suspense fallback>`. Action /
+ * resource routes still want the synchronous `await requirePermission(...)`.
+ */
+export function requireSessionOrRedirect(request: Request): void {
+  const cookie = getSessionCookie(request);
+  if (!cookie) {
+    const url = new URL(request.url);
+    const destination = url.pathname + (url.search || '');
+    const redirectTo = destination ? `?redirectTo=${encodeURIComponent(destination)}` : '';
+    throw redirect(`/auth${redirectTo}`);
+  }
+}
+
+/**
+ * Per-request memo for `/auth/me` so the parent layout loader + every child
+ * route loader on the same navigation share ONE round-trip instead of N.
+ *
+ * Keyed by `Request` (a unique object per Remix request). The WeakMap entry
+ * is GC'd as soon as the request is finished. No cross-request leakage; no
+ * staleness concerns within a single navigation since the session cookie is
+ * fixed for the duration of the request.
+ *
+ * Stores the in-flight Promise (not just the resolved value) so concurrent
+ * loader calls (Remix runs them in parallel) all await the same fetch.
+ */
+const currentUserCache = new WeakMap<
+  Request,
+  Promise<Awaited<ReturnType<typeof getCurrentUserUncached>>>
+>();
+
+/**
  * Get the current user from the session.
  * Returns null when there is no cookie or the API returns 401 (invalid/expired session).
  * On transient API failures (503/504/5xx from network or server), throws Response(503) so layout
  * loaders do not mis-treat a blip as logout — unless `softNetwork: true`.
+ *
+ * Per-request memoized: repeated calls with the same `Request` reuse the
+ * single in-flight `/auth/me` promise. `softNetwork: true` bypasses the cache
+ * (it changes the contract — caller wants a null on transient failure rather
+ * than a 503 throw).
  */
 export async function getCurrentUser(request: Request, options?: GetCurrentUserOptions) {
+  if (options?.softNetwork) {
+    return getCurrentUserUncached(request, options);
+  }
+  const cached = currentUserCache.get(request);
+  if (cached) return cached;
+  const promise = getCurrentUserUncached(request, options);
+  currentUserCache.set(request, promise);
+  return promise;
+}
+
+async function getCurrentUserUncached(request: Request, options?: GetCurrentUserOptions) {
   const cookie = getSessionCookie(request);
   if (!cookie) return null;
+
+  // FAST PATH — verify the API-signed bundle cookie locally instead of
+  // calling `/auth/me`. Saves a round-trip on every loader as long as the
+  // bundle is fresh (≤ BUNDLE_TTL_SECONDS, currently 60s). The bundle is
+  // re-issued by the API on every successful `/auth/me` so this self-refreshes.
+  // softNetwork callers (e.g. /auth route) skip this — they want a real network
+  // probe to surface API-down state, not a cached optimistic answer.
+  if (!options?.softNetwork) {
+    const bundle = decodeSessionBundleCookie(request);
+    if (bundle) {
+      return {
+        id: bundle.id,
+        email: bundle.email,
+        name: bundle.name,
+        role: bundle.role,
+        roleTemplateId: bundle.roleTemplateId,
+        scopeGlobal: bundle.scopeGlobal,
+        scopeOrgWideHead: bundle.scopeOrgWideHead,
+        scopeTeamSupervisor: bundle.scopeTeamSupervisor,
+        permissions: bundle.permissions,
+        logisticsLocationId: bundle.logisticsLocationId,
+        currentBranchId: bundle.currentBranchId,
+        branchIds: bundle.branchIds,
+        appTheme: bundle.appTheme,
+        mirroredBy: bundle.mirroredBy,
+        ...(bundle.staffOnboardingStatus !== undefined
+          ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
+          : {}),
+      };
+    }
+  }
 
   const res = await apiRequest<{
     user?: {
@@ -307,7 +493,15 @@ export async function getCurrentUser(request: Request, options?: GetCurrentUserO
       /** Staff onboarding packet — `/auth/me` omits for admin-class roles. */
       staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
     };
-  }>('/auth/me', { method: 'POST', cookie, timeoutMs: AUTH_ME_TIMEOUT_MS });
+  }>('/auth/me', {
+    method: 'POST',
+    cookie,
+    timeoutMs: AUTH_ME_TIMEOUT_MS,
+    // `/auth/me` is idempotent (read-only session lookup). Allow one quiet retry
+    // on TCP-level fetch failures so a single dropped packet on slow networks
+    // doesn't surface the "Connection Issue" modal. Mutations stay non-retried.
+    forceFetchRetry: true,
+  });
 
   if (res.ok) {
     const u = res.data.user;
@@ -318,7 +512,14 @@ export async function getCurrentUser(request: Request, options?: GetCurrentUserO
 
   if (isTransientAuthMeFailure(res.status)) {
     if (options?.softNetwork) return null;
-    throwSessionCheckUnavailable();
+    const upstreamReason =
+      typeof res.data === 'object' && res.data && 'error' in res.data
+        ? String((res.data as { error?: unknown }).error ?? '')
+        : undefined;
+    throwSessionCheckUnavailable({
+      upstreamStatus: res.status,
+      upstreamReason,
+    });
   }
 
   return null;

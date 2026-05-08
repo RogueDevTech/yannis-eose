@@ -31,12 +31,18 @@ import {
   createCampaignProcedureSchema,
   updateCampaignSchema,
   listCampaignsSchema,
+  type ListFundingInput,
+  type ListFundingRequestsInput,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
-import { getBranchTeamsService } from './branches.router';
+import { getBranchTeamsService, listBranchesForUser } from './branches.router';
+import { getOrdersService } from './orders.router';
+import { getProductsService } from './products.router';
+import { getUsersService } from './users.router';
+import { getCartService } from './cart.router';
 import { isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
 
@@ -480,6 +486,82 @@ export const marketingRouter = router({
       );
     }),
 
+  /**
+   * Single-request bundle for `/admin/marketing/overview`.
+   *
+   * Replaces 5 parallel HTTP round-trips — `marketing.metrics`,
+   * `marketing.leaderboard`, `marketing.listFundingBalances`, `orders.list`
+   * (recent orders), and `cart.listActivity` — with one request. Same
+   * fan-out runs server-side via `Promise.all`.
+   *
+   * Permission gate matches the page (`marketing.teamOverview`).
+   */
+  overviewPageBundle: permissionProcedure('marketing.teamOverview')
+    .input(
+      z.object({
+        period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        recentOrdersLimit: z.number().int().min(1).max(100).default(20),
+        liveActivityLimit: z.number().int().min(1).max(200).default(60),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
+      const perms = ctx.user.permissions ?? [];
+      const canQueryLiveActivity =
+        isAdminLevel(ctx.user) ||
+        perms.includes('cart.read') ||
+        perms.includes('marketing.read');
+
+      // Live activity scope mirrors the standalone `cart.listActivity` permission gate
+      // and the loader's per-role narrowing logic.
+      type LiveActivityScope = { limit: number; mediaBuyerId?: string; branchId?: string };
+      const liveActivityScope: LiveActivityScope =
+        ctx.user.role === 'MEDIA_BUYER'
+          ? { limit: input.liveActivityLimit, mediaBuyerId: ctx.user.id }
+          : { limit: input.liveActivityLimit };
+
+      const recentOrdersInput = {
+        page: 1,
+        limit: input.recentOrdersLimit,
+        sortBy: 'createdAt' as const,
+        sortOrder: 'desc' as const,
+        ...(input.startDate && { startDate: input.startDate }),
+        ...(input.endDate && { endDate: input.endDate }),
+      };
+
+      const [metrics, leaderboard, balancesList, recentOrders, liveActivity] =
+        await Promise.all([
+          getMarketingService().getPerformanceMetrics(
+            undefined,
+            input.startDate && input.endDate ? 'this_month' : 'all_time',
+            input.startDate,
+            input.endDate,
+            branchId,
+          ),
+          getMarketingService().getMediaBuyerLeaderboard(
+            input.period,
+            input.startDate,
+            input.endDate,
+            branchId,
+          ),
+          getMarketingService().listFundingBalances(ctx.user, branchId),
+          getOrdersService().list(recentOrdersInput, branchId),
+          canQueryLiveActivity
+            ? getCartService().listActivity(liveActivityScope)
+            : Promise.resolve([]),
+        ]);
+
+      return {
+        metrics,
+        leaderboard,
+        balancesList,
+        recentOrders,
+        liveActivity,
+      };
+    }),
+
   checkHighCpa: permissionProcedure('marketing.checkHighCpa')
     .input(z.object({ threshold: z.number().positive() }))
     .query(async ({ input, ctx }) => {
@@ -587,6 +669,606 @@ export const marketingRouter = router({
     .input(listCampaignsSchema)
     .query(async ({ input, ctx }) => {
       return getMarketingService().listCampaigns(input, ctx.currentBranchId);
+    }),
+
+  /**
+   * Single-request bundle for the `/admin/marketing/orders` secondary fan-out.
+   *
+   * Why this exists: the page loader previously made 6 parallel HTTP calls
+   * (orders.statusCounts, marketing.metrics, orders.timeSeriesByCreated,
+   * users.list[MEDIA_BUYER], products.list, marketing.listCampaigns). Each
+   * paid the full HTTP + auth-middleware + session-resolution cost on its own
+   * — even though the user, branch, and permissions were identical for all
+   * six. Collapsing them into one tRPC procedure fans out to the same
+   * services in parallel via Promise.all, but pays the per-request overhead
+   * once. The wall-clock for the page's secondary defer drops from
+   * ~max(slowest endpoint) + N × middleware to ~max(slowest single query) +
+   * 1 × middleware.
+   *
+   * Permission gate matches the page itself (`marketing.orders`) — every role
+   * that can land on `/admin/marketing/orders` (MEDIA_BUYER, HEAD_OF_MARKETING,
+   * SUPER_ADMIN, ADMIN) holds this code.
+   */
+  ordersPageBundle: permissionProcedure('marketing.orders')
+    .input(
+      z.object({
+        // Shared scope — applies to status counts, metrics, daily counts.
+        mediaBuyerId: z.string().uuid().optional(),
+        // Optional status filter for the trend chart only (mirrors timeSeriesByCreated).
+        status: z.string().optional(),
+        // Date window — accept ISO datetime in addition to plain dates so this matches
+        // the regex used by orders.statusCounts / orders.timeSeriesByCreated.
+        startDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/)
+          .optional(),
+        endDate: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/)
+          .optional(),
+        // Only HoM / admin loaders ask for the buyer picklist (Media Buyers don't
+        // have the export modal). When false, the buyers query is skipped.
+        includeMarketingExportPicklists: z.boolean().optional().default(false),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
+      const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists } = input;
+
+      // Defense-in-depth: the original page loader gated the buyer picklist on
+      // `users.list` (which is `permissionProcedure('users.read')`). Calling
+      // `getUsersService().list(...)` directly here bypasses that gate, so we
+      // re-check the caller actually holds `users.read` before honouring
+      // `includeMarketingExportPicklists`. MEDIA_BUYER does NOT hold it; HoM /
+      // admin-class do, which matches the loader's `loadMarketingExportPicklists`
+      // condition (`showMediaBuyerColumn && !isMediaBuyer`).
+      const callerPerms = ctx.user.permissions ?? [];
+      const canSeeBuyerPicklist =
+        includeMarketingExportPicklists &&
+        (isAdminLevel(ctx.user) || callerPerms.includes('users.read'));
+
+      // Six concurrent service calls — same shape as the old loader fan-out, but
+      // running in-process without per-call HTTP / auth overhead.
+      const [
+        statusCounts,
+        metrics,
+        timeSeries,
+        buyersResult,
+        productsResult,
+        campaignsResult,
+      ] = await Promise.all([
+        getOrdersService().getStatusCounts(
+          mediaBuyerId,
+          startDate,
+          endDate,
+          undefined,
+          undefined,
+          branchId,
+        ),
+        getMarketingService().getPerformanceMetrics(
+          mediaBuyerId,
+          startDate && endDate ? 'this_month' : 'all_time',
+          startDate,
+          endDate,
+          branchId,
+        ),
+        getOrdersService().getOrdersTimeSeriesByCreated(startDate, endDate, branchId, {
+          mediaBuyerId,
+          status,
+        }),
+        canSeeBuyerPicklist
+          ? getUsersService().list(
+              {
+                page: 1,
+                limit: 100,
+                role: 'MEDIA_BUYER',
+                status: 'ACTIVE',
+                sortBy: 'createdAt',
+                sortOrder: 'desc',
+                // Picklist consumers only need id + name — skip the membership join.
+                includeBranchMemberships: false,
+              },
+              ctx.user,
+              ctx.currentBranchId,
+            )
+          : Promise.resolve(null),
+        getProductsService().list(
+          {
+            page: 1,
+            limit: 100,
+            status: 'ACTIVE',
+            sortBy: 'name',
+            sortOrder: 'asc',
+          },
+          ctx.user.id,
+          ctx.user.role,
+        ),
+        getMarketingService().listCampaigns(
+          { page: 1, limit: 100, status: 'ACTIVE' },
+          ctx.currentBranchId,
+        ),
+      ]);
+
+      // Slim the picklist payloads down to what the page actually uses (id + name)
+      // so we're not shipping full product / campaign rows over the wire.
+      const productsForFilter = (productsResult.products ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+      }));
+      const campaignsForFilter = (campaignsResult.campaigns ?? []).map((c) => ({
+        id: c.id,
+        name: c.name,
+      }));
+      const mediaBuyersForFilter = buyersResult
+        ? (buyersResult.users ?? []).map((u) => ({ id: u.id, name: u.name }))
+        : [];
+
+      return {
+        statusCounts,
+        metrics: {
+          cpa: metrics.cpa,
+          totalSpend: metrics.totalSpend,
+        },
+        dailyCounts: timeSeries,
+        mediaBuyersForFilter,
+        productsForFilter,
+        campaignsForFilter,
+      };
+    }),
+
+  /**
+   * Single-request bundle for `/admin/marketing/team`.
+   *
+   * Replaces 4 parallel loader calls (listFundingBalances, fundingSummary,
+   * leaderboard, profitabilityConfig) plus an optional 2-call fallback when the
+   * balances list is empty (users.list MEDIA_BUYER + HEAD_OF_MARKETING). One
+   * HTTP request, one auth pass, parallel service calls.
+   *
+   * Permission gate: `marketing.teamOverview` — same as the page route requires.
+   */
+  teamPageBundle: permissionProcedure('marketing.teamOverview')
+    .input(
+      z.object({
+        period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
+
+      const [balances, fundingSummary, leaderboard, profitabilityConfig] = await Promise.all([
+        getMarketingService().listFundingBalances(ctx.user, branchId),
+        getMarketingService().getFundingSummary(branchId),
+        getMarketingService().getMediaBuyerLeaderboard(
+          input.period,
+          input.startDate,
+          input.endDate,
+          branchId,
+        ),
+        getMarketingService().getProfitabilityConfig(),
+      ]);
+
+      // Fallback: when balances is empty AND the caller is admin-class / HoM, the
+      // legacy loader fired two more `users.list` queries to surface MB + HoM as
+      // 0-balance rows. Inline that here so we keep one HTTP round-trip.
+      let usersFallback: Array<{ id: string; name: string; role: string }> | null = null;
+      if (balances.length === 0 && (isAdminLevel(ctx.user) || ctx.user.role === 'HEAD_OF_MARKETING')) {
+        const [mbRes, homRes] = await Promise.all([
+          getUsersService().list(
+            {
+              page: 1,
+              limit: 20,
+              role: 'MEDIA_BUYER',
+              sortBy: 'createdAt',
+              sortOrder: 'desc',
+              includeBranchMemberships: false,
+            },
+            ctx.user,
+            branchId,
+          ),
+          getUsersService().list(
+            {
+              page: 1,
+              limit: 20,
+              role: 'HEAD_OF_MARKETING',
+              sortBy: 'createdAt',
+              sortOrder: 'desc',
+              includeBranchMemberships: false,
+            },
+            ctx.user,
+            branchId,
+          ),
+        ]);
+        usersFallback = [...(homRes.users ?? []), ...(mbRes.users ?? [])].map((u) => ({
+          id: u.id,
+          name: u.name,
+          role: u.role,
+        }));
+      }
+
+      return {
+        balances,
+        fundingSummary,
+        leaderboard,
+        profitabilityConfig,
+        usersFallback,
+      };
+    }),
+
+  /**
+   * Single-request bundle for the `/admin/marketing/ad-spend` page picklists.
+   *
+   * Replaces 3 parallel calls in the loader's `adSpendPicklists` deferred
+   * promise: `marketing.adSpendStatusCounts`, `marketing.listCampaigns`, and
+   * `users.list[MEDIA_BUYER]` (only fetched for non-MB viewers). Page itself is
+   * gated by `marketing.read`; we mirror that here.
+   */
+  adSpendPagePicklistsBundle: permissionProcedure('marketing.read')
+    .input(
+      z.object({
+        // Same shape as adSpendStatusCounts (subset — no date.date enum so we accept
+        // ISO and yyyy-mm-dd both)
+        mediaBuyerId: z.string().uuid().optional(),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        search: z.string().trim().max(200).optional(),
+        productId: z.string().uuid().optional(),
+        campaignId: z.string().uuid().optional(),
+        // The campaigns dropdown — non-paginated for the picker.
+        campaignsLimit: z.number().int().min(1).max(500).optional().default(20),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
+      const isMediaBuyer = ctx.user.role === 'MEDIA_BUYER';
+      const callerPerms = ctx.user.permissions ?? [];
+      const canSeeBuyerPicklist =
+        !isMediaBuyer && (isAdminLevel(ctx.user) || callerPerms.includes('users.read'));
+
+      // Apply MB self-scoping the same way the standalone procedures do.
+      const adSpendCountsScope = {
+        ...input,
+        ...(isMediaBuyer ? { mediaBuyerId: ctx.user.id } : {}),
+      };
+      const campaignsScope: { mediaBuyerId?: string; page: number; limit: number } = {
+        page: 1,
+        limit: input.campaignsLimit,
+        ...(isMediaBuyer ? { mediaBuyerId: ctx.user.id } : {}),
+      };
+
+      const [adSpendStatusCounts, campaigns, buyersResult] = await Promise.all([
+        getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId),
+        getMarketingService().listCampaigns(campaignsScope, branchId),
+        canSeeBuyerPicklist
+          ? getUsersService().list(
+              {
+                page: 1,
+                limit: 100,
+                role: 'MEDIA_BUYER',
+                status: 'ACTIVE',
+                sortBy: 'createdAt',
+                sortOrder: 'desc',
+                includeBranchMemberships: false,
+              },
+              ctx.user,
+              branchId,
+            )
+          : Promise.resolve(null),
+      ]);
+
+      return {
+        adSpendStatusCounts,
+        // Mirror the full Campaign shape the page currently parses out of
+        // `marketing.listCampaigns` — id/name/status, plus productIds for the
+        // Add Expense auto-fill flow.
+        campaigns: campaigns.campaigns ?? [],
+        mediaBuyersForFilter: buyersResult
+          ? (buyersResult.users ?? []).map((u) => ({ id: u.id, name: u.name }))
+          : [],
+      };
+    }),
+
+  /**
+   * Single-request bundle for `/admin/finance/disbursements`.
+   *
+   * Replaces 6 parallel loader calls — `marketing.listFunding`,
+   * `marketing.listFundingBalances`, `marketing.fundingSummary`,
+   * `marketing.listFundingRequests`, `marketing.fundingRequestStatusCounts`, and
+   * `users.list` — with one HTTP request. Same fan-out runs server-side.
+   *
+   * Permission gate matches the page (`finance.disburse`).
+   */
+  disbursementsPageBundle: permissionProcedure('finance.disburse')
+    .input(
+      z.object({
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(100).default(20),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        status: z.enum(['SENT', 'COMPLETED', 'DISPUTED']).optional(),
+        receiverId: z.string().uuid().optional(),
+        search: z.string().trim().max(200).optional(),
+        requestsPage: z.number().int().min(1).default(1),
+        requestsLimit: z.number().int().min(1).max(100).default(20),
+        usersLimit: z.number().int().min(1).max(500).default(200),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
+
+      const listFundingInput = {
+        page: input.page,
+        limit: input.limit,
+        ...(input.startDate && { startDate: input.startDate }),
+        ...(input.endDate && { endDate: input.endDate }),
+        ...(input.status && { status: input.status }),
+        ...(input.receiverId && { receiverId: input.receiverId }),
+        ...(input.search && { search: input.search }),
+      };
+
+      // Mirror the standalone `listFundingRequests`/`fundingRequestStatusCounts`
+      // scoping for non-admin callers (target = caller). Finance / Admin land
+      // here so usually `isAdminClass` is true, but we keep the gate honest.
+      const isAdminClass = isAdminLevel(ctx.user);
+      const requestsInput = {
+        page: input.requestsPage,
+        limit: input.requestsLimit,
+        ...(isAdminClass ? {} : { targetUserId: ctx.user.id }),
+      };
+
+      const [funding, balances, summary, requests, requestsCounts, users] =
+        await Promise.all([
+          getMarketingService().listFunding(listFundingInput, branchId),
+          getMarketingService().listFundingBalances(ctx.user, branchId),
+          getMarketingService().getFundingSummary(branchId),
+          getMarketingService().listFundingRequests(requestsInput, branchId),
+          getMarketingService().fundingRequestStatusCounts(
+            isAdminClass ? {} : { targetUserId: ctx.user.id },
+            ctx.user,
+            branchId,
+          ),
+          // Requesters list — id + name + role only.
+          getUsersService().list(
+            {
+              page: 1,
+              limit: input.usersLimit,
+              sortBy: 'createdAt',
+              sortOrder: 'desc',
+              includeBranchMemberships: false,
+            },
+            ctx.user,
+            branchId,
+          ),
+        ]);
+
+      return {
+        funding,
+        balances,
+        summary,
+        requests,
+        requestsCounts,
+        users: (users.users ?? []).map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: (u as { email?: string }).email ?? '',
+          role: u.role,
+        })),
+      };
+    }),
+
+  /**
+   * Single-request bundle for `/admin/marketing/funding`.
+   *
+   * Replaces up to 14 parallel HTTP round-trips — direction summary, status
+   * counts (incoming + outgoing + my-requests + mb-requests), funding ledger
+   * (received + distributing transfers + requests), funding balance,
+   * balances list, users picklist, branches list, request recipients — with
+   * a single request. All fan-out runs server-side via `Promise.all`.
+   *
+   * Replicates the conditional fetch logic from
+   * `apps/web/app/routes/admin.marketing.funding/route.tsx` so empty slices
+   * stay empty (no wasted DB hits) and admin-only slices only run for
+   * `isFundingAdmin` callers.
+   */
+  fundingPageBundle: permissionProcedure('marketing.read')
+    .input(
+      z.object({
+        section: z.enum(['received', 'distributing']).default('distributing'),
+        entryType: z.enum(['all', 'transfer', 'request']).default('all'),
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(100).default(20),
+        mergedFetchLimit: z.number().int().min(1).max(100).default(100),
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+        status: z.enum(['SENT', 'COMPLETED', 'DISPUTED']).optional(),
+        requestStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
+        search: z.string().trim().min(1).max(200).optional(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const branchId = ctx.currentBranchId;
+      const role = ctx.user.role;
+      const isMediaBuyer = role === 'MEDIA_BUYER';
+      const isFundingAdmin =
+        isAdminLevel(ctx.user) ||
+        role === 'HEAD_OF_MARKETING' ||
+        role === 'FINANCE_OFFICER';
+      const canDistribute = !isMediaBuyer;
+      const canRequestFunding =
+        role === 'MEDIA_BUYER' || role === 'HEAD_OF_MARKETING';
+      const showFundingBalance =
+        role === 'MEDIA_BUYER' || role === 'HEAD_OF_MARKETING';
+
+      // Same skip logic as the loader: if `entryStatus` is request-only
+      // (PENDING/APPROVED/REJECTED), the transfer ledger pull is wasted; same in
+      // reverse for transfer-only statuses.
+      const skipTransfersForStatus =
+        input.entryType !== 'transfer' && !!input.requestStatus && !input.status;
+      const skipRequestsForStatus =
+        input.entryType !== 'request' && !!input.status && !input.requestStatus;
+
+      const dateRange = {
+        ...(input.startDate && { startDate: input.startDate }),
+        ...(input.endDate && { endDate: input.endDate }),
+      };
+      const transferPage = input.entryType === 'transfer' ? input.page : 1;
+      const transferLimit = input.entryType === 'transfer' ? input.limit : input.mergedFetchLimit;
+      const requestPage = input.entryType === 'request' ? input.page : 1;
+      const requestLimit = input.entryType === 'request' ? input.limit : input.mergedFetchLimit;
+
+      type ListFundingArgs = ListFundingInput;
+      type ListFundingRequestsArgs = ListFundingRequestsInput;
+
+      // Build per-section fetch promises. The same MarketingService.listFunding
+      // backs both received (receiverId) and distributing (senderId) paths.
+      const buildTransferInput = (mode: 'received' | 'distributing'): ListFundingArgs | null => {
+        if (input.section !== mode) return null;
+        if (input.entryType === 'request' || skipTransfersForStatus) return null;
+        return {
+          page: transferPage,
+          limit: transferLimit,
+          ...(mode === 'received'
+            ? { receiverId: ctx.user.id }
+            : { senderId: ctx.user.id }),
+          ...dateRange,
+          ...(input.status && { status: input.status }),
+          ...(input.search && { search: input.search }),
+        };
+      };
+      const buildRequestInput = (mode: 'received' | 'distributing'): ListFundingRequestsArgs | null => {
+        if (input.section !== mode) return null;
+        if (input.entryType === 'transfer' || skipRequestsForStatus) return null;
+        return {
+          page: requestPage,
+          limit: requestLimit,
+          ...(mode === 'received'
+            ? { requesterId: ctx.user.id }
+            : { excludeSelfAsRequester: true, callerId: ctx.user.id }),
+          ...dateRange,
+          ...(input.requestStatus && { status: input.requestStatus }),
+          ...(input.search && { search: input.search }),
+        };
+      };
+
+      const receivedTransferInput = buildTransferInput('received');
+      const receivedRequestInput = buildRequestInput('received');
+      const distributingTransferInput = buildTransferInput('distributing');
+      const distributingRequestInput = buildRequestInput('distributing');
+
+      // Run all 14 calls in parallel server-side. Branch list + funding balance
+      // are scoped by user; counts always run; ledger calls are conditional.
+      const [
+        directionSummary,
+        usersResult,
+        balancesList,
+        fundingBalance,
+        branches,
+        fundingRequestRecipients,
+        incomingCounts,
+        myRequestsCounts,
+        outgoingCounts,
+        mbRequestsCounts,
+        receivedTransfers,
+        receivedRequests,
+        distributingTransfers,
+        distributingRequests,
+      ] = await Promise.all([
+        getMarketingService().fundingByDirectionSummary(ctx.user.id, dateRange),
+        isFundingAdmin
+          ? getUsersService().list(
+              {
+                page: 1,
+                limit: 200,
+                sortBy: 'createdAt' as const,
+                sortOrder: 'desc' as const,
+                includeBranchMemberships: false,
+              },
+              ctx.user,
+              branchId,
+            )
+          : Promise.resolve(null),
+        isFundingAdmin
+          ? getMarketingService().listFundingBalances(ctx.user, branchId).catch(() => null)
+          : Promise.resolve(null),
+        showFundingBalance
+          ? getMarketingService().getFundingBalance(ctx.user.id, branchId)
+          : Promise.resolve(null),
+        ctx.currentBranchId
+          ? listBranchesForUser(ctx.user).catch(() => [] as Array<{ id: string; name: string }>)
+          : Promise.resolve([] as Array<{ id: string; name: string }>),
+        canRequestFunding
+          ? getMarketingService()
+              .listFundingRequestRecipients(role as 'MEDIA_BUYER' | 'HEAD_OF_MARKETING', branchId)
+              .catch(() => [] as Array<unknown>)
+          : Promise.resolve([] as Array<unknown>),
+        getMarketingService().fundingStatusCounts(
+          { receiverId: ctx.user.id, ...dateRange },
+          branchId,
+        ),
+        getMarketingService().fundingRequestStatusCounts(
+          { requesterId: ctx.user.id, ...dateRange },
+          ctx.user,
+          branchId,
+        ),
+        canDistribute
+          ? getMarketingService().fundingStatusCounts(
+              { senderId: ctx.user.id, ...dateRange },
+              branchId,
+            )
+          : Promise.resolve(null),
+        canDistribute
+          ? getMarketingService().fundingRequestStatusCounts(
+              { excludeSelfAsRequester: true, ...dateRange },
+              ctx.user,
+              branchId,
+            )
+          : Promise.resolve(null),
+        receivedTransferInput
+          ? getMarketingService().listFunding(receivedTransferInput, branchId)
+          : Promise.resolve(null),
+        receivedRequestInput
+          ? getMarketingService().listFundingRequests(receivedRequestInput, branchId)
+          : Promise.resolve(null),
+        distributingTransferInput
+          ? getMarketingService().listFunding(distributingTransferInput, branchId)
+          : Promise.resolve(null),
+        distributingRequestInput
+          ? getMarketingService().listFundingRequests(distributingRequestInput, branchId)
+          : Promise.resolve(null),
+      ]);
+
+      return {
+        directionSummary,
+        users: usersResult
+          ? (usersResult.users ?? []).map((u) => ({
+              id: u.id,
+              name: u.name,
+              email: (u as { email?: string }).email ?? '',
+              role: u.role,
+            }))
+          : [],
+        balancesList,
+        fundingBalance,
+        branches,
+        fundingRequestRecipients,
+        incomingCounts,
+        myRequestsCounts,
+        outgoingCounts,
+        mbRequestsCounts,
+        receivedTransfers,
+        receivedRequests,
+        distributingTransfers,
+        distributingRequests,
+        // Surface the resolved flags so the loader doesn't re-derive them.
+        flags: {
+          isMediaBuyer,
+          isFundingAdmin,
+          canDistribute,
+          canRequestFunding,
+          showFundingBalance,
+        },
+      };
     }),
 
   // ── Cross-Funnel Attempts (per-MB visibility) ───

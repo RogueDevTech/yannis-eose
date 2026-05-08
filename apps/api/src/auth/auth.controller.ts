@@ -18,6 +18,13 @@ import { UserBundleCacheService } from './user-bundle-cache.service';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
+import {
+  BUNDLE_COOKIE_NAME,
+  BUNDLE_TTL_SECONDS,
+  resolveBundleSecret,
+  signSessionBundle,
+  type SessionBundleInput,
+} from './session-bundle-cookie';
 
 /**
  * Parent domain for split web/API hosts (e.g. `.example.com`).
@@ -58,6 +65,60 @@ function sessionClearCookieOpts(): { path: string; domain?: string; secure?: boo
     ...(domain ? { domain } : {}),
     ...(isProduction ? { secure: true, sameSite: 'strict' as const } : {}),
   };
+}
+
+/**
+ * Build a {@link SessionBundleInput} from a fully-merged `SessionUser`. The
+ * Remix server treats this as the canonical loader-side user representation,
+ * so missing optional fields are normalised to `null` / empty arrays here.
+ */
+function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    roleTemplateId: user.roleTemplateId ?? null,
+    scopeGlobal: user.scopeGlobal === true,
+    scopeOrgWideHead: user.scopeOrgWideHead === true,
+    scopeTeamSupervisor: user.scopeTeamSupervisor === true,
+    logisticsLocationId: user.logisticsLocationId ?? null,
+    permissions: user.permissions ?? [],
+    currentBranchId: user.currentBranchId ?? null,
+    branchIds: user.branchIds ?? [],
+    appTheme: user.appTheme ?? null,
+    fontScale: user.fontScale ?? null,
+    mirroredBy: user.mirroredBy ?? null,
+    mirrorSessionId: user.mirrorSessionId ?? null,
+    ...(user.staffOnboardingStatus !== undefined
+      ? { staffOnboardingStatus: user.staffOnboardingStatus }
+      : {}),
+  };
+}
+
+/**
+ * Sign + set the bundle cookie. Cookie max-age is the same as the session
+ * (so the cookie persists across short network blips); the bundle's payload
+ * carries its own short-lived `exp` so loaders refresh data within ~60s.
+ */
+function setBundleCookie(res: Response, user: SessionUser, sessionTtlSeconds: number): void {
+  const value = signSessionBundle(bundleInputFromSessionUser(user), resolveBundleSecret());
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  const domain = resolvedSessionCookieDomain();
+  res.cookie(BUNDLE_COOKIE_NAME, value, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    // The HTTP cookie outlives the bundle's freshness window — see the file
+    // header in `session-bundle-cookie.ts` for the rationale.
+    maxAge: Math.max(sessionTtlSeconds, BUNDLE_TTL_SECONDS) * 1000,
+    path: '/',
+    ...(domain ? { domain } : {}),
+  });
+}
+
+function clearBundleCookie(res: Response): void {
+  res.clearCookie(BUNDLE_COOKIE_NAME, sessionClearCookieOpts());
 }
 
 @Controller('auth')
@@ -172,6 +233,29 @@ export class AuthController {
 
     res.cookie('yannis_session', token, sessionCookieOpts(ttlSeconds * 1000));
 
+    // Issue an initial bundle so the Remix server can skip its first
+    // `/auth/me` round-trip after login. Permissions/scope/theme are pulled
+    // via the same cache the `/auth/me` handler uses.
+    const bundle = await this.userBundleCache.getOrLoad(user.id);
+    const sessionUser: SessionUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: bundle.role || user.role,
+      roleTemplateId: bundle.roleTemplateId,
+      scopeGlobal: bundle.scopeGlobal,
+      scopeOrgWideHead: bundle.scopeOrgWideHead,
+      scopeTeamSupervisor: bundle.scopeTeamSupervisor,
+      logisticsLocationId: null,
+      permissions: bundle.permissions,
+      appTheme: bundle.appTheme,
+      fontScale: bundle.fontScale,
+      ...(bundle.staffOnboardingStatus !== undefined
+        ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
+        : {}),
+    };
+    setBundleCookie(res, sessionUser, ttlSeconds);
+
     return {
       message: 'Login successful',
       user: {
@@ -193,6 +277,11 @@ export class AuthController {
     }
 
     res.clearCookie('yannis_session', sessionClearCookieOpts());
+    // Bundle is a CACHE on top of the session — clearing the session alone
+    // would leave a stale bundle that decodes to "still logged in" for up to
+    // BUNDLE_TTL_SECONDS. Nuke both so loaders see the user as logged out
+    // immediately and redirect to /auth.
+    clearBundleCookie(res);
     return { message: 'Logged out successfully' };
   }
 
@@ -237,6 +326,7 @@ export class AuthController {
     @Body() body: { targetUserId: string },
     @Req() req: Request,
     @CurrentUser() actor: SessionUser,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const sessionToken = this.extractSessionToken(req);
     if (!sessionToken) {
@@ -255,6 +345,13 @@ export class AuthController {
       ipAddress,
       userAgent,
     });
+
+    // The session's effective identity has changed — re-issue the bundle so
+    // the Remix server reflects the target user (role, permissions, scope,
+    // mirroredBy) on the very next loader. Without this, the original admin
+    // would keep using their cached bundle for up to BUNDLE_TTL_SECONDS.
+    setBundleCookie(res, session as unknown as SessionUser, BUNDLE_TTL_SECONDS * 60);
+
     return {
       message: 'Mirror mode started.',
       user: session,
@@ -266,12 +363,20 @@ export class AuthController {
    */
   @Post('mirror/stop')
   @HttpCode(HttpStatus.OK)
-  async stopMirror(@Req() req: Request, @CurrentUser() current: SessionUser) {
+  async stopMirror(
+    @Req() req: Request,
+    @CurrentUser() current: SessionUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const sessionToken = this.extractSessionToken(req);
     if (!sessionToken) {
       throw new ForbiddenException('No active session.');
     }
     const restored = await this.authService.stopMirror(sessionToken, current);
+
+    // Bundle restored to the original admin identity — see startMirror note.
+    setBundleCookie(res, restored as unknown as SessionUser, BUNDLE_TTL_SECONDS * 60);
+
     return {
       message: 'Exited mirror mode.',
       user: restored,
@@ -294,7 +399,10 @@ export class AuthController {
    */
   @Post('me')
   @HttpCode(HttpStatus.OK)
-  async me(@CurrentUser() user: SessionUser) {
+  async me(
+    @CurrentUser() user: SessionUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const bundle = await this.userBundleCache.getOrLoad(user.id);
 
     const merged: SessionUser = {
@@ -311,6 +419,12 @@ export class AuthController {
         ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
         : {}),
     };
+
+    // Re-issue the lazy bundle cookie so subsequent Remix loaders can decode
+    // locally without another `/auth/me` round-trip until BUNDLE_TTL_SECONDS.
+    // Match the bundle's HTTP TTL to the session lifetime — exact value isn't
+    // critical because the JWT `exp` field controls actual freshness.
+    setBundleCookie(res, merged, BUNDLE_TTL_SECONDS * 60);
 
     return { user: merged };
   }

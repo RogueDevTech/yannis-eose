@@ -22,6 +22,9 @@ import {
 import type { InventoryService } from '../../inventory/inventory.service';
 import type { ShipmentsService } from '../../inventory/shipments.service';
 import type { LogisticsService } from '../../logistics/logistics.service';
+import { getProductsService } from './products.router';
+import { getLogisticsService } from './logistics.router';
+import { getSettingsService } from './settings.router';
 
 let inventoryServiceInstance: InventoryService | null = null;
 let shipmentsServiceInstance: ShipmentsService | null = null;
@@ -39,7 +42,8 @@ export function setLogisticsServiceForInventory(service: LogisticsService) {
   logisticsServiceInstance = service;
 }
 
-function getInventoryService(): InventoryService {
+/** Exported for cross-router lookups (e.g. `*PageBundle` procedures). */
+export function getInventoryService(): InventoryService {
   if (!inventoryServiceInstance) {
     throw new Error('InventoryService not initialized. Call setInventoryService() first.');
   }
@@ -235,6 +239,192 @@ export const inventoryRouter = router({
     .input(z.object({ locationId: z.string().uuid().optional() }))
     .query(async ({ input }) => {
       return getInventoryService().listReconciliations(input.locationId);
+    }),
+
+  /**
+   * Single-request bundle for `/tpl/inventory` and `/admin/inventory` page
+   * loaders. Replaces 7 parallel HTTP round-trips — `inventory.levels`,
+   * `inventory.movements`, `products.options`, `logistics.locationOptions`,
+   * `inventory.transfers`, `inventory.returnedOrders`,
+   * `inventory.reconciliations` — with a single request. Same fan-out runs
+   * server-side via `Promise.all`.
+   *
+   * Permission gate matches the page (`inventory.read`). Per-piece permissions
+   * for `returnedOrders` and `reconciliations` are re-checked inline so the
+   * bundle can no-op those slices for callers without the underlying grant.
+   */
+  inventoryPageBundle: permissionProcedure('inventory.read')
+    .input(
+      z.object({
+        // Levels filter scope.
+        locationId: z.string().uuid().optional(),
+        levelsPage: z.number().int().min(1).default(1),
+        levelsLimit: z.number().int().min(1).max(200).default(100),
+        // Movements filter scope.
+        movementsPage: z.number().int().min(1).default(1),
+        movementsLimit: z.number().int().min(1).max(200).default(50),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const perms = ctx.user.permissions ?? [];
+      const canSeeReturned = perms.includes('inventory.returnedOrders');
+      const canSeeReconciliations = perms.includes('inventory.reconciliations');
+
+      // Match `listInventorySchema` defaults (see `inventory.levels` procedure).
+      const levelsInput = {
+        page: input.levelsPage,
+        limit: input.levelsLimit,
+        sortBy: 'updatedAt' as const,
+        sortOrder: 'desc' as const,
+        ...(input.locationId && { locationId: input.locationId }),
+      };
+      const movementsInput = {
+        page: input.movementsPage,
+        limit: input.movementsLimit,
+        ...(input.locationId && { locationId: input.locationId }),
+      };
+
+      const [
+        levels,
+        movements,
+        products,
+        locations,
+        transfers,
+        returnedOrders,
+        reconciliations,
+      ] = await Promise.all([
+        getInventoryService().listLevels(levelsInput),
+        getInventoryService().listMovements(
+          movementsInput,
+          ctx.user,
+          ctx.currentBranchId ?? null,
+        ),
+        getProductsService().listOptions(
+          { status: 'ACTIVE' },
+          ctx.user.id,
+          ctx.user.role,
+        ),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
+        getInventoryService().listTransfers(undefined),
+        canSeeReturned
+          ? getInventoryService().listReturnedOrders(input.locationId)
+          : Promise.resolve([]),
+        canSeeReconciliations
+          ? getInventoryService().listReconciliations(input.locationId)
+          : Promise.resolve([]),
+      ]);
+
+      return {
+        levels,
+        movements,
+        products,
+        locations,
+        transfers,
+        returnedOrders,
+        reconciliations,
+      };
+    }),
+
+  /**
+   * Single-request bundle for `/admin/inventory` page loader.
+   *
+   * Replaces 9 parallel HTTP round-trips — `inventory.levels`,
+   * `inventory.movements`, `products.options`, `logistics.locationOptions`
+   * (warehouse-only), `logistics.locationOptions` (display labels),
+   * `settings.getSystemSettings`, `inventory.lowStockAlerts`,
+   * `inventory.shipments.list`, and `inventory.warehouses.list` — with one
+   * request. Same fan-out runs server-side via `Promise.all`.
+   *
+   * The `orders.deliveryMovementCustomerNames` follow-up still runs as a
+   * separate request because it depends on the resolved movements payload.
+   */
+  inventoryAdminPageBundle: permissionProcedure('inventory.read')
+    .input(
+      z.object({
+        // Levels filter scope.
+        productId: z.string().uuid().optional(),
+        locationId: z.string().uuid().optional(),
+        shipmentId: z.string().uuid().optional(),
+        search: z.string().trim().min(1).max(100).optional(),
+        sortBy: z.enum(['updatedAt', 'available']).default('updatedAt'),
+        sortOrder: z.enum(['asc', 'desc']).default('desc'),
+        levelsPage: z.number().int().min(1).default(1),
+        levelsLimit: z.number().int().min(1).max(100).default(20),
+        // Shipments page (single-page strip on the page).
+        shipmentsLimit: z.number().int().min(1).max(200).default(100),
+        warehousesLimit: z.number().int().min(1).max(100).default(50),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const levelsInput = {
+        page: input.levelsPage,
+        limit: input.levelsLimit,
+        sortBy: input.sortBy,
+        sortOrder: input.sortOrder,
+        ...(input.productId && { productId: input.productId }),
+        ...(input.locationId && { locationId: input.locationId }),
+        ...(input.shipmentId && { shipmentId: input.shipmentId }),
+        ...(input.search && { search: input.search }),
+      };
+      const movementsInput = {
+        page: 1,
+        limit: 50,
+        sortBy: 'createdAt' as const,
+        sortOrder: 'desc' as const,
+      };
+
+      const [
+        levels,
+        movements,
+        products,
+        warehouseLocations,
+        displayLocations,
+        systemSettings,
+        lowStockAlerts,
+        shipments,
+        warehouses,
+      ] = await Promise.all([
+        getInventoryService().listLevels(levelsInput),
+        getInventoryService().listMovements(
+          movementsInput,
+          ctx.user,
+          ctx.currentBranchId ?? null,
+        ),
+        getProductsService().listOptions(
+          { status: 'ACTIVE' },
+          ctx.user.id,
+          ctx.user.role,
+        ),
+        getLogisticsService().listLocationOptions({
+          status: 'ACTIVE',
+          providerKind: 'WAREHOUSE',
+        }),
+        getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
+        getSettingsService().getAll().catch(() => [] as unknown[]),
+        getInventoryService().getLowStockAlerts().catch(() => ({ threshold: 10, items: [] as unknown[] })),
+        getShipmentsService()
+          .listShipments(
+            { page: 1, limit: input.shipmentsLimit },
+            ctx.user,
+            ctx.currentBranchId ?? null,
+          )
+          .catch(() => null),
+        getLogisticsServiceForInventory()
+          .listWarehouses({ status: 'ACTIVE', listScope: 'our', page: 1, limit: input.warehousesLimit })
+          .catch(() => null),
+      ]);
+
+      return {
+        levels,
+        movements,
+        products,
+        warehouseLocations,
+        displayLocations,
+        systemSettings,
+        lowStockAlerts,
+        shipments,
+        warehouses,
+      };
     }),
 
   /**

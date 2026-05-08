@@ -38,6 +38,7 @@ import { PaystackService } from '../payments/paystack.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { CacheService } from '../common/cache/cache.service';
+import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 
 const PENDING_PAYMENT_PREFIX = 'pending_payment:';
 const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
@@ -1962,9 +1963,7 @@ export class OrdersService {
     }
     if (input.search) {
       const trimmed = input.search.trim();
-      const looksLikeUuid =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
-      if (looksLikeUuid) {
+      if (trimmedSearchLooksLikeUuid(trimmed)) {
         // Fast-path: exact ID match can use the PK index (ILIKE would force a scan).
         conditions.push(eq(schema.orders.id, trimmed));
       } else if (trimmed.length > 0) {
@@ -4004,7 +4003,7 @@ export class OrdersService {
     }
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.createdAt})::date`;
 
-    let query = this.db
+    let createdQuery = this.db
       .select({
         date: dateTrunc,
         orderCount: count(),
@@ -4012,16 +4011,24 @@ export class OrdersService {
       .from(schema.orders)
       .$dynamic();
     if (conditions.length > 0) {
-      query = query.where(and(...conditions));
+      createdQuery = createdQuery.where(and(...conditions));
     }
-    const createdRows = await query.groupBy(dateTrunc).orderBy(asc(dateTrunc));
+
+    // Created-day counts and delivered-day counts touch the same `orders` table but on
+    // independent filters (created_at vs delivered_at) and grouped on different columns,
+    // so we run them in parallel rather than sequentially. On a remote DB (~120 ms RTT)
+    // this halves the wall-clock for the trend chart endpoint that powers the marketing /
+    // CS / logistics order pages — previously the slowest call in the secondary fan-out
+    // because it was a single 1-RTT-per-step waterfall with `db ≈ total`.
+    const [createdRows, delivered] = await Promise.all([
+      createdQuery.groupBy(dateTrunc).orderBy(asc(dateTrunc)),
+      this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra),
+    ]);
 
     const created = createdRows.map((r) => ({
       date: typeof r.date === 'string' ? r.date.split('T')[0]! : (r.date as Date).toISOString().split('T')[0]!,
       orderCount: r.orderCount ?? 0,
     }));
-
-    const delivered = await this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra);
 
     const byDate = new Map<string, { date: string; orderCount: number; deliveredCount: number }>();
     for (const row of created) {

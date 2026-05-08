@@ -520,7 +520,16 @@ export class NotificationsService {
 
       const [notifications, totalRows, unreadRows] = await Promise.all([
         this.db
-          .select()
+          .select({
+            id: schema.notifications.id,
+            userId: schema.notifications.userId,
+            type: schema.notifications.type,
+            title: schema.notifications.title,
+            body: schema.notifications.body,
+            data: schema.notifications.data,
+            read: schema.notifications.read,
+            createdAt: schema.notifications.createdAt,
+          })
           .from(schema.notifications)
           .where(whereClause)
           .orderBy(desc(schema.notifications.createdAt))

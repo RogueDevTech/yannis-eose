@@ -323,7 +323,13 @@ function SidebarNavLink({
       <NavLink
       to={item.href}
       end={item.href === '/admin'}
-      prefetch={item.href.startsWith('/admin/marketing') ? 'render' : 'intent'}
+      // CEO directive 2026-05-08: every sidebar destination prefetches on render
+      // so clicking from anywhere feels instant — by the time the user clicks,
+      // the loader's data is already cached. Trade-off is a small burst of
+      // background HTTP calls on layout mount (acceptable for an admin app on
+      // broadband). `intent`-only previously meant clicks without prior hover
+      // paid the full loader round-trip before the skeleton paints.
+      prefetch="render"
       onClick={onMobileClose}
       className={({ isActive }) => {
         const active = activePathname != null ? isActiveFromPath(activePathname) : isActive;

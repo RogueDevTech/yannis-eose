@@ -6,6 +6,7 @@ import type Redis from 'ioredis';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { isReadThroughCacheEnabled } from '../common/cache/cache.service';
 import { EventsService } from '../events/events.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -64,13 +65,19 @@ export class VoipService {
 
   /** Whether VOIP is enabled at all. Cached in Redis 60s. */
   async isVoipEnabled(): Promise<boolean> {
-    const cached = await this.redis.get(VOIP_ENABLED_CACHE_KEY).catch(() => null);
-    if (cached !== null) return cached === '1';
+    const cacheOn = isReadThroughCacheEnabled();
+
+    if (cacheOn) {
+      const cached = await this.redis.get(VOIP_ENABLED_CACHE_KEY).catch(() => null);
+      if (cached !== null) return cached === '1';
+    }
 
     const setting = await this.settingsService.get(VOIP_ENABLED_KEY);
     const enabled = setting?.['enabled'] === true;
 
-    await this.redis.set(VOIP_ENABLED_CACHE_KEY, enabled ? '1' : '0', 'EX', 60).catch(() => undefined);
+    if (cacheOn) {
+      await this.redis.set(VOIP_ENABLED_CACHE_KEY, enabled ? '1' : '0', 'EX', 60).catch(() => undefined);
+    }
     return enabled;
   }
 
@@ -104,15 +111,21 @@ export class VoipService {
    * Returns the slug only — `getActiveProvider()` resolves it to the implementation.
    */
   async getActiveProviderName(): Promise<VoipProviderName> {
-    const cached = await this.redis.get(VOIP_PROVIDER_CACHE_KEY).catch(() => null);
-    if (cached === 'africas_talking') return cached;
+    const cacheOn = isReadThroughCacheEnabled();
+
+    if (cacheOn) {
+      const cached = await this.redis.get(VOIP_PROVIDER_CACHE_KEY).catch(() => null);
+      if (cached === 'africas_talking') return cached;
+    }
 
     const setting = await this.settingsService.get(VOIP_PROVIDER_KEY);
     const stored = setting?.['provider'];
     const name: VoipProviderName =
       stored === 'africas_talking' ? stored : DEFAULT_PROVIDER;
 
-    await this.redis.set(VOIP_PROVIDER_CACHE_KEY, name, 'EX', 60).catch(() => undefined);
+    if (cacheOn) {
+      await this.redis.set(VOIP_PROVIDER_CACHE_KEY, name, 'EX', 60).catch(() => undefined);
+    }
     return name;
   }
 

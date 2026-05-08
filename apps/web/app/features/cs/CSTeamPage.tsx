@@ -48,17 +48,7 @@ function csRoleLabel(role: string): string {
   return role === 'CS_AGENT' ? 'Closer' : role.replace(/_/g, ' ');
 }
 
-function memberInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-}
-
 function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; embedded?: boolean }) {
-  const initials = memberInitials(member.name);
   const isAgent = member.role === 'CS_AGENT';
   const workload = member.workload;
   const leaderboard = member.leaderboardEntry;
@@ -66,10 +56,7 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
 
   return (
     <div className={embedded ? 'space-y-3' : 'card'}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-          <span className="text-sm font-bold text-brand-600 dark:text-brand-400">{initials}</span>
-        </div>
+      <div className="flex items-start gap-3 mb-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-app-fg truncate">
             {member.name}
@@ -174,14 +161,7 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
         key: 'member',
         header: 'Member',
         render: (member) => (
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
-                {memberInitials(member.name)}
-              </span>
-            </div>
-            <span className="font-medium text-app-fg truncate">{member.name}</span>
-          </div>
+          <span className="font-medium text-app-fg truncate">{member.name}</span>
         ),
       },
       {

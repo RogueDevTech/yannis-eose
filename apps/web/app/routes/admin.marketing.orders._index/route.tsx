@@ -66,31 +66,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ...(endDate && { endDate }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
-  const countsInput: { mediaBuyerId?: string; startDate?: string; endDate?: string } = mediaBuyerId ? { mediaBuyerId } : {};
-  if (startDate) countsInput.startDate = startDate;
-  if (endDate) countsInput.endDate = endDate;
-  const countsInputStr = encodeURIComponent(JSON.stringify(countsInput));
 
-  const metricsInput: { mediaBuyerId?: string; startDate?: string; endDate?: string } = {};
-  if (mediaBuyerId) metricsInput.mediaBuyerId = mediaBuyerId;
-  if (startDate) metricsInput.startDate = startDate;
-  if (endDate) metricsInput.endDate = endDate;
-  const metricsInputStr = encodeURIComponent(JSON.stringify(metricsInput));
-
-  // Daily-counts series for the "Orders over time" trend line on the chart view. Mirrors
-  // the same scope filters as the table so the trend matches what the user is reading.
-  const trendInput: { mediaBuyerId?: string; status?: string; startDate?: string; endDate?: string } = {};
-  if (mediaBuyerId) trendInput.mediaBuyerId = mediaBuyerId;
-  if (status) trendInput.status = status;
-  if (startDate) trendInput.startDate = startDate;
-  if (endDate) trendInput.endDate = endDate;
-  const trendInputStr = encodeURIComponent(JSON.stringify(trendInput));
-
-  const buyersInputStr = encodeURIComponent(
-    JSON.stringify({ page: 1, limit: 100, role: 'MEDIA_BUYER', status: 'ACTIVE' }),
-  );
-  const productsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }));
-  const campaignsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 100, status: 'ACTIVE' }));
+  // Single bundle replaces 6 separate trpc calls (orders.statusCounts,
+  // marketing.metrics, orders.timeSeriesByCreated, users.list, products.list,
+  // marketing.listCampaigns). Same data, one HTTP request → one auth-middleware
+  // pass → one session lookup, with the 6 service calls fanned out in parallel
+  // server-side. See `marketing.ordersPageBundle` for the rationale.
+  const bundleInput: {
+    mediaBuyerId?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    includeMarketingExportPicklists: boolean;
+  } = { includeMarketingExportPicklists: loadMarketingExportPicklists };
+  if (mediaBuyerId) bundleInput.mediaBuyerId = mediaBuyerId;
+  if (status) bundleInput.status = status;
+  if (startDate) bundleInput.startDate = startDate;
+  if (endDate) bundleInput.endDate = endDate;
+  const bundleInputStr = encodeURIComponent(JSON.stringify(bundleInput));
 
   const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const canExport =
@@ -128,69 +121,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return { orders, total, totalPages };
   })();
 
-  // Secondary streams independently — counts, CPA, picklists for filters.
+  // Secondary streams independently — one bundled tRPC call returns counts, CPA,
+  // chart series, and all three filter picklists at once.
   const secondaryPromise = (async (): Promise<MarketingOrdersSecondaryPayload> => {
     try {
-      const [
-        countsRes,
-        metricsRes,
-        trendRes,
-        buyersRes,
-        productsRes,
-        campaignsRes,
-      ] = await Promise.all([
-        apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputStr}`, { method: 'GET', cookie }),
-        apiRequest<unknown>(`/trpc/marketing.metrics?input=${metricsInputStr}`, { method: 'GET', cookie }),
-        apiRequest<unknown>(`/trpc/orders.timeSeriesByCreated?input=${trendInputStr}`, { method: 'GET', cookie }),
-        loadMarketingExportPicklists
-          ? apiRequest<unknown>(`/trpc/users.list?input=${buyersInputStr}`, { method: 'GET', cookie })
-          : Promise.resolve(null),
-        // Always load products + campaigns — Media Buyers need them for the
-        // Product / Form filter dropdowns even without export access.
-        apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie }),
-        apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${campaignsInputStr}`, { method: 'GET', cookie }),
-      ]);
+      const bundleRes = await apiRequest<unknown>(
+        `/trpc/marketing.ordersPageBundle?input=${bundleInputStr}`,
+        { method: 'GET', cookie },
+      );
 
-      const countsData = countsRes.ok
-        ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
-        : {};
-
-      const metricsData = metricsRes.ok
-        ? (metricsRes.data as { result?: { data?: { cpa: number; totalSpend: number } } })?.result?.data
+      const data = bundleRes.ok
+        ? (bundleRes.data as {
+            result?: {
+              data?: {
+                statusCounts: Record<string, number>;
+                metrics: { cpa: number; totalSpend: number };
+                dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+                mediaBuyersForFilter: Array<{ id: string; name: string }>;
+                productsForFilter: Array<{ id: string; name: string }>;
+                campaignsForFilter: Array<{ id: string; name: string }>;
+              };
+            };
+          })?.result?.data
         : null;
 
-      const dailyCounts = trendRes.ok
-        ? ((trendRes.data as {
-            result?: { data?: Array<{ date: string; orderCount: number; deliveredCount?: number }> };
-          })?.result?.data ?? [])
-        : [];
+      const productsForFilter = data?.productsForFilter ?? [];
+      const campaignsForFilter = data?.campaignsForFilter ?? [];
+      const mediaBuyersForFilter = data?.mediaBuyersForFilter ?? [];
 
-      // Pull products + campaigns out for the always-on Product / Form filter dropdowns.
-      const productsPayload = productsRes?.ok
-        ? (productsRes.data as { result?: { data?: { products: Array<{ id: string; name: string }> } } })?.result?.data
-        : null;
-      const campaignsPayload = campaignsRes?.ok
-        ? (campaignsRes.data as { result?: { data?: { campaigns: Array<{ id: string; name: string }> } } })?.result?.data
-        : null;
-      const productsForFilter = (productsPayload?.products ?? []).map((p) => ({ id: p.id, name: p.name }));
-      const campaignsForFilter = (campaignsPayload?.campaigns ?? []).map((c) => ({ id: c.id, name: c.name }));
-
-      let marketingExportPicklists: Partial<ExportModalPicklists> | undefined;
-      if (loadMarketingExportPicklists && buyersRes?.ok && productsRes?.ok && campaignsRes?.ok) {
-        const usersPayload = (buyersRes.data as { result?: { data?: { users: Array<{ id: string; name: string }> } } })?.result?.data;
-        marketingExportPicklists = {
-          mediaBuyers: (usersPayload?.users ?? []).map((u) => ({ id: u.id, name: u.name })),
-          products: productsForFilter,
-          campaigns: campaignsForFilter,
-        };
-      }
-      const mediaBuyersForFilter = marketingExportPicklists?.mediaBuyers ?? [];
+      // The export modal picks from all three picklists; only HoM/admin loaders
+      // actually trigger the buyers query — so the picklist is only present when
+      // the loader asked for it AND the bundle returned buyers.
+      const marketingExportPicklists: Partial<ExportModalPicklists> | undefined =
+        loadMarketingExportPicklists && mediaBuyersForFilter.length > 0
+          ? {
+              mediaBuyers: mediaBuyersForFilter,
+              products: productsForFilter,
+              campaigns: campaignsForFilter,
+            }
+          : undefined;
 
       return {
-        statusCounts: countsData,
-        cpa: metricsData?.cpa ?? null,
-        totalAdSpend: metricsData?.totalSpend ?? null,
-        dailyCounts,
+        statusCounts: data?.statusCounts ?? {},
+        cpa: data?.metrics?.cpa ?? null,
+        totalAdSpend: data?.metrics?.totalSpend ?? null,
+        dailyCounts: data?.dailyCounts ?? [],
         marketingExportPicklists,
         mediaBuyersForFilter,
         productsForFilter,
