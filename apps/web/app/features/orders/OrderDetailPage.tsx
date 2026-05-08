@@ -1272,10 +1272,15 @@ export function OrderDetailPage({
 
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left column */}
-          <div className="lg:col-span-2 space-y-4">
+          {/* Left column — `contents` collapses this wrapper on mobile so the
+              cards inside become direct children of the outer grid; combined
+              with `order-N` on individual cards, that lets us mix Order
+              Actions (which lives in the right column source-wise) into the
+              mobile flow without duplicating markup. `lg:block` restores the
+              wrapper at desktop so the original two-column layout is intact. */}
+          <div className="contents lg:block lg:col-span-2 lg:space-y-4">
             {/* Status Timeline */}
-            <div className="card overflow-hidden">
+            <div className="card overflow-hidden order-[-2] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-4">Order Progress</h2>
               <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
                 <div className="flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:grid-cols-5 lg:gap-x-3 lg:gap-y-4">
@@ -1561,8 +1566,10 @@ export function OrderDetailPage({
                   );
             })()}
 
-            {/* Order activity — lifecycle timeline */}
-            <div className="card">
+            {/* Order activity — lifecycle timeline. On mobile this lands LAST
+                (`order-[99]`) so the long, scroll-heavy timeline doesn't bury
+                action affordances above. Restored to source order at lg+. */}
+            <div className="card order-[99] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-1">Order Activity</h2>
               <p className="text-sm text-app-fg-muted mb-3">
                 Every step taken on this order, with who did it and when.
@@ -1647,14 +1654,15 @@ export function OrderDetailPage({
             )}
           </div>
 
-          {/* Right column */}
-          <div className="space-y-4">
+          {/* Right column — see left column note above. `contents` on mobile
+              lets `order-N` reorder cards across columns without duplicating. */}
+          <div className="contents lg:block lg:space-y-4">
             {/* Order Actions — CS / Head of CS only, role-based.
                 CS still owns Adjust/Call/Delete after CS_ENGAGED while goods are pre-delivery so
                 they can manage upsells, delivery-coordination calls, and cancellations.
                 Media Buyers use this page read-only (campaign performance); never show CS actions. */}
             {canEditOrder && userRole !== 'MEDIA_BUYER' && isCSOrHoS && orderAllowsLineItemEdits && (
-              <div className="card">
+              <div className="card order-[-1] lg:order-none">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
                     other than the Assign closer dropdown are suppressed. This forces the
