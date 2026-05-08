@@ -29,7 +29,25 @@ import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from '~/features/orders/types';
 import { DeferredError } from '~/components/ui/deferred-section';
-import { OrdersChartViewShellSkeleton, StatValuePulse } from '~/components/ui/deferred-skeletons';
+import {
+  OrdersChartViewShellSkeleton,
+  StatValuePulse,
+  TableCellTextPulse,
+} from '~/components/ui/deferred-skeletons';
+
+const DEFERRED_PLACEHOLDER_ROW_COUNT = 10;
+const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(
+  { length: DEFERRED_PLACEHOLDER_ROW_COUNT },
+  (_, i) => ({
+    id: `__marketing_orders_deferred_${i}`,
+    customerName: '',
+    customerPhoneDisplay: '',
+    status: 'UNPROCESSED',
+    totalAmount: null,
+    createdAt: '1970-01-01T00:00:00.000Z',
+    assignedCsId: null,
+  }),
+);
 
 /** Status dropdown labels before streamed counts hydrate (same order as full options). */
 const MARKETING_ORDERS_STATUS_OPTIONS_BASE = STATUS_OPTIONS.map((status) => ({
@@ -71,6 +89,12 @@ interface MarketingOrdersPageProps {
    * enforces `orders.export` on the actual download.
    */
   canExport?: boolean;
+  /**
+   * When true, the page renders its real chrome but swaps row data + pagination
+   * for pulse skeletons — used as the route-level Suspense fallback so the layout
+   * stays mounted while the orders list streams in.
+   */
+  deferredLoading?: boolean;
 }
 
 export function MarketingOrdersPage({
@@ -87,6 +111,7 @@ export function MarketingOrdersPage({
   filters,
   liveEvents,
   canExport = false,
+  deferredLoading = false,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
   const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
@@ -155,81 +180,102 @@ export function MarketingOrdersPage({
       {
         key: 'id',
         header: 'Order ID',
-        render: (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
+        render: deferredLoading
+          ? () => <TableCellTextPulse className="w-[7rem]" />
+          : (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
       },
       {
         key: 'customer',
         header: 'Customer',
-        render: (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+        render: deferredLoading
+          ? () => <TableCellTextPulse className="w-[9rem] max-w-[min(14rem,100%)]" />
+          : (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
       },
     ];
     if (showMediaBuyerColumn) {
       cols.push({
         key: 'mediaBuyer',
         header: 'Media buyer',
-        render: (order) =>
-          order.mediaBuyerId ? (
-            <Link
-              to={`/hr/users/${order.mediaBuyerId}`}
-              className="text-brand-500 hover:text-brand-600 font-medium hover:underline"
-            >
-              {order.mediaBuyerName ?? 'View user'}
-            </Link>
-          ) : (
-            <span className="text-app-fg-muted">—</span>
-          ),
+        render: deferredLoading
+          ? () => <TableCellTextPulse className="w-[7rem]" />
+          : (order) =>
+              order.mediaBuyerId ? (
+                <Link
+                  to={`/hr/users/${order.mediaBuyerId}`}
+                  className="text-brand-500 hover:text-brand-600 font-medium hover:underline"
+                >
+                  {order.mediaBuyerName ?? 'View user'}
+                </Link>
+              ) : (
+                <span className="text-app-fg-muted">—</span>
+              ),
       });
     }
     cols.push(
       {
         key: 'product',
         header: 'Product',
-        render: (order) => {
-          const name = order.primaryProductName?.trim();
-          const extra = (order.itemCount ?? 0) > 1 ? ` · +${(order.itemCount ?? 0) - 1} more` : '';
-          return name ? (
-            <span className="text-sm text-app-fg truncate">
-              {name}
-              {extra ? <span className="text-app-fg-muted">{extra}</span> : null}
-            </span>
-          ) : (
-            <span className="text-app-fg-muted">—</span>
-          );
-        },
+        render: deferredLoading
+          ? () => <TableCellTextPulse className="w-[10rem] max-w-[min(16rem,100%)]" />
+          : (order) => {
+              const name = order.primaryProductName?.trim();
+              const extra =
+                (order.itemCount ?? 0) > 1 ? ` · +${(order.itemCount ?? 0) - 1} more` : '';
+              return name ? (
+                <span className="text-sm text-app-fg truncate">
+                  {name}
+                  {extra ? <span className="text-app-fg-muted">{extra}</span> : null}
+                </span>
+              ) : (
+                <span className="text-app-fg-muted">—</span>
+              );
+            },
       },
       {
         key: 'campaign',
         header: 'Form',
-        render: (order) => (
-          <span className="text-sm text-app-fg-muted truncate">
-            {order.campaignName?.trim() ? order.campaignName : '—'}
-          </span>
-        ),
+        render: deferredLoading
+          ? () => <TableCellTextPulse className="w-[8rem]" />
+          : (order) => (
+              <span className="text-sm text-app-fg-muted truncate">
+                {order.campaignName?.trim() ? order.campaignName : '—'}
+              </span>
+            ),
       },
       {
         key: 'amount',
         header: 'Amount',
         align: 'right',
-        render: (order) => (
-          <span className="font-medium">
-            <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
-          </span>
-        ),
+        render: deferredLoading
+          ? () => (
+              <span className="inline-flex w-full justify-end">
+                <TableCellTextPulse className="w-[4.5rem]" />
+              </span>
+            )
+          : (order) => (
+              <span className="font-medium">
+                <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
+              </span>
+            ),
       },
       {
         key: 'status',
         header: 'Status',
-        render: (order) => <OrderStatusBadge status={order.status} />,
+        render: deferredLoading
+          ? () => <TableCellTextPulse className="w-[5.5rem]" />
+          : (order) => <OrderStatusBadge status={order.status} />,
       },
       {
         key: 'created',
         header: 'Created',
         nowrap: true,
-        render: (order) => (
-          <span className="text-app-fg-muted whitespace-nowrap">
-            {formatOrderTimestamp(order.createdAt)}
-          </span>
-        ),
+        render: deferredLoading
+          ? () => <TableCellTextPulse className="w-[9rem]" />
+          : (order) => (
+              <span className="text-app-fg-muted whitespace-nowrap">
+                {formatOrderTimestamp(order.createdAt)}
+              </span>
+            ),
       },
       {
         key: 'actions',
@@ -237,11 +283,15 @@ export function MarketingOrdersPage({
         mobileLabel: 'Actions',
         align: 'center',
         tight: true,
-        render: (order) => <CompactTableActionButton to={`/admin/orders/${order.id}`}>View</CompactTableActionButton>,
+        render: deferredLoading
+          ? () => <CompactTableActionButton disabled>View</CompactTableActionButton>
+          : (order) => (
+              <CompactTableActionButton to={`/admin/orders/${order.id}`}>View</CompactTableActionButton>
+            ),
       },
     );
     return cols;
-  }, [showMediaBuyerColumn]);
+  }, [showMediaBuyerColumn, deferredLoading]);
 
   return (
     <div className="space-y-4">
@@ -664,51 +714,87 @@ export function MarketingOrdersPage({
       </Suspense>
 
       {showChartView ? (
-        <Suspense fallback={<OrdersChartViewShellSkeleton />}>
-          <Await resolve={secondary} errorElement={<DeferredError />}>
-            {(ins) => {
-              const ordersInPeriodTotal = Object.values(ins.statusCounts).reduce((sum, n) => sum + n, 0);
-              return (
-                <OrdersChartView
-                  statusCounts={ins.statusCounts}
-                  total={ordersInPeriodTotal}
-                  scopeLabel="Marketing orders"
-                  dailyCounts={ins.dailyCounts}
-                />
-              );
-            }}
-          </Await>
-        </Suspense>
+        deferredLoading ? (
+          <OrdersChartViewShellSkeleton />
+        ) : (
+          <Suspense fallback={<OrdersChartViewShellSkeleton />}>
+            <Await resolve={secondary} errorElement={<DeferredError />}>
+              {(ins) => {
+                const ordersInPeriodTotal = Object.values(ins.statusCounts).reduce((sum, n) => sum + n, 0);
+                return (
+                  <OrdersChartView
+                    statusCounts={ins.statusCounts}
+                    total={ordersInPeriodTotal}
+                    scopeLabel="Marketing orders"
+                    dailyCounts={ins.dailyCounts}
+                  />
+                );
+              }}
+            </Await>
+          </Suspense>
+        )
       ) : (
       <>
       <div className="card scroll-mt-4 overflow-hidden p-0">
         <div className="px-4 py-3 border-b border-app-border">
-          <h2 className="text-lg font-semibold text-app-fg">Orders ({total})</h2>
+          <h2 className="text-lg font-semibold text-app-fg inline-flex flex-wrap items-center gap-x-1">
+            <span>Orders</span>
+            {deferredLoading ? (
+              <span className="inline-flex items-center gap-0.5 text-base font-semibold text-app-fg">
+                <span aria-hidden>(</span>
+                <span
+                  className="inline-block h-5 w-9 rounded-md bg-app-border/80 dark:bg-app-border/65 animate-pulse align-middle"
+                  aria-hidden
+                />
+                <span aria-hidden>)</span>
+              </span>
+            ) : (
+              <span>({total})</span>
+            )}
+          </h2>
         </div>
         <CompactTable<Order>
           withCard={false}
           columns={marketingOrderColumns}
-          rows={orders}
+          rows={deferredLoading ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}
           emptyTitle="No orders match your filters"
           emptyDescription="Try adjusting your status filter or search query"
-          loading={isLoaderRefetchBusy}
+          loading={!deferredLoading && isLoaderRefetchBusy}
           loadingVariant="overlay"
         />
       </div>
       {/* Pagination — same layout as CS Orders list; page size is fixed at 20 in the route loader. */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        <p className="text-sm text-app-fg-muted">
-          {total > 0 ? (
-            <>
-              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total} orders
-              <span className="text-app-fg-muted/90"> · {limit} per page</span>
-            </>
-          ) : (
-            'No orders'
-          )}
-        </p>
-        <Pagination page={page} totalPages={totalPages} pageParam="page" />
+        {deferredLoading ? (
+          <>
+            <p className="text-sm m-0 min-h-[1.25rem] flex items-center">
+              <span
+                className="inline-block h-4 w-52 max-w-[90vw] rounded-md bg-app-border/75 dark:bg-app-border/60 animate-pulse sm:w-72"
+                aria-hidden
+              />
+            </p>
+            <div className="flex items-center gap-2 shrink-0" aria-hidden>
+              <span className="inline-block h-8 w-[4.5rem] rounded-lg bg-app-border/65 dark:bg-app-border/55 animate-pulse" />
+              <span className="inline-block h-8 w-28 rounded-lg bg-app-border/65 dark:bg-app-border/55 animate-pulse" />
+              <span className="inline-block h-8 w-[4.5rem] rounded-lg bg-app-border/65 dark:bg-app-border/55 animate-pulse" />
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-app-fg-muted">
+              {total > 0 ? (
+                <>
+                  Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total} orders
+                  <span className="text-app-fg-muted/90"> · {limit} per page</span>
+                </>
+              ) : (
+                'No orders'
+              )}
+            </p>
+            <Pagination page={page} totalPages={totalPages} pageParam="page" />
+          </>
+        )}
       </div>
       </>
       )}

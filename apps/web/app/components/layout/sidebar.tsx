@@ -323,7 +323,7 @@ function SidebarNavLink({
       <NavLink
       to={item.href}
       end={item.href === '/admin'}
-      prefetch="intent"
+      prefetch={item.href.startsWith('/admin/marketing') ? 'render' : 'intent'}
       onClick={onMobileClose}
       className={({ isActive }) => {
         const active = activePathname != null ? isActiveFromPath(activePathname) : isActive;

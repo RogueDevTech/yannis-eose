@@ -1527,25 +1527,32 @@ export class OrdersService {
     const logisticsProviderName = providerRow[0]?.name ?? null;
     const logisticsLocationName = locationRow[0]?.name ?? null;
 
-    // Look up delivery remittance status for this order (if any)
-    const remittanceRow = await this.db
-      .select({
-        remittanceId: schema.deliveryRemittances.id,
-        remittanceStatus: schema.deliveryRemittances.status,
-      })
-      .from(schema.deliveryRemittanceOrders)
-      .innerJoin(
-        schema.deliveryRemittances,
-        eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id),
-      )
-      .where(eq(schema.deliveryRemittanceOrders.orderId, orderId))
-      .limit(1);
+    // Final wave — three independent lookups keyed only on `orderId`:
+    //   1) delivery remittance status for this order (if any),
+    //   2) pending permission_request to change a line price,
+    //   3) pending permission_request to archive (soft-delete) the order.
+    // Previously these ran sequentially (3 RTTs); fanning out collapses them
+    // to a single wall-clock round-trip on the cache-miss detail load.
+    const [remittanceRow, pendingOrderLinePriceRequestId, pendingOrderDeletionRequestId] =
+      await Promise.all([
+        this.db
+          .select({
+            remittanceId: schema.deliveryRemittances.id,
+            remittanceStatus: schema.deliveryRemittances.status,
+          })
+          .from(schema.deliveryRemittanceOrders)
+          .innerJoin(
+            schema.deliveryRemittances,
+            eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id),
+          )
+          .where(eq(schema.deliveryRemittanceOrders.orderId, orderId))
+          .limit(1),
+        this.findPendingOrderLinePriceRequestId(orderId),
+        this.findPendingOrderDeletionRequestId(orderId),
+      ]);
 
     const remittanceStatus = remittanceRow[0]?.remittanceStatus ?? null;
     const remittanceId = remittanceRow[0]?.remittanceId ?? null;
-
-    const pendingOrderLinePriceRequestId = await this.findPendingOrderLinePriceRequestId(orderId);
-    const pendingOrderDeletionRequestId = await this.findPendingOrderDeletionRequestId(orderId);
 
     const { customerPhone: _rawPhone, ...orderSafe } = order;
     return {
@@ -1954,12 +1961,16 @@ export class OrdersService {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
     }
     if (input.search) {
-      conditions.push(
-        or(
-          ilike(schema.orders.customerName, `%${input.search}%`),
-          ilike(schema.orders.id, `%${input.search}%`),
-        ),
-      );
+      const trimmed = input.search.trim();
+      const looksLikeUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
+      if (looksLikeUuid) {
+        // Fast-path: exact ID match can use the PK index (ILIKE would force a scan).
+        conditions.push(eq(schema.orders.id, trimmed));
+      } else if (trimmed.length > 0) {
+        // Customer name substring search (optimize further with pg_trgm index).
+        conditions.push(ilike(schema.orders.customerName, `%${trimmed}%`));
+      }
     }
     if (input.startDate) {
       conditions.push(gte(schema.orders.createdAt, new Date(input.startDate)));
@@ -2024,9 +2035,29 @@ export class OrdersService {
 
     const offset = (input.page - 1) * input.limit;
 
+    // List pages only need a narrow subset of the order row (avoid pulling heavy JSON/text
+    // columns like `items` / `custom_fields` that are used only on detail screens).
+    const ordersListSelect = {
+      id: schema.orders.id,
+      status: schema.orders.status,
+      customerName: schema.orders.customerName,
+      customerPhoneHash: schema.orders.customerPhoneHash,
+      totalAmount: schema.orders.totalAmount,
+      createdAt: schema.orders.createdAt,
+      updatedAt: schema.orders.updatedAt,
+      preferredDeliveryDate: schema.orders.preferredDeliveryDate,
+      assignedCsId: schema.orders.assignedCsId,
+      mediaBuyerId: schema.orders.mediaBuyerId,
+      campaignId: schema.orders.campaignId,
+      branchId: schema.orders.branchId,
+      logisticsProviderId: schema.orders.logisticsProviderId,
+      logisticsLocationId: schema.orders.logisticsLocationId,
+      riderId: schema.orders.riderId,
+    } as const;
+
     const [orders, totalRows] = await Promise.all([
       this.db
-        .select()
+        .select(ordersListSelect)
         .from(schema.orders)
         .where(whereClause)
         .orderBy(...orderByClauses)
@@ -2040,69 +2071,77 @@ export class OrdersService {
 
     const total = totalRows[0]?.count ?? 0;
 
+    // Enrichment fan-out: 3 independent queries that previously ran serially (~4 RTTs to a
+    // remote DB). Now collapsed into one Promise.all batch (1 wall-clock RTT) and the two
+    // `users` lookups (mediaBuyer + assignedCs) merged into a single IN-list query.
+    //   1) users — names for media buyers + assigned CS in one shot
+    //   2) order_items — used to surface the "primary product" + item count per row
+    //   3) campaigns — campaign names for the Form column in marketing views
     const mediaBuyerIds = [...new Set(orders.map((o) => o.mediaBuyerId).filter(Boolean))] as string[];
-    let mediaBuyerNames: Map<string, string> = new Map();
-    if (mediaBuyerIds.length > 0) {
-      const users = await this.db
-        .select({ id: schema.users.id, name: schema.users.name })
-        .from(schema.users)
-        .where(inArray(schema.users.id, mediaBuyerIds));
-      users.forEach((u) => mediaBuyerNames.set(u.id, u.name));
-    }
-
     const assignedCsIds = [...new Set(orders.map((o) => o.assignedCsId).filter(Boolean))] as string[];
-    let assignedCsNames: Map<string, string> = new Map();
-    if (assignedCsIds.length > 0) {
-      const csUsers = await this.db
-        .select({ id: schema.users.id, name: schema.users.name })
-        .from(schema.users)
-        .where(inArray(schema.users.id, assignedCsIds));
-      csUsers.forEach((u) => assignedCsNames.set(u.id, u.name));
-    }
-
-    // Surface "primary product" + form name on each row so the orders table can show
-    // a Product column for everyone and a Form column for marketing views without
-    // forcing an N+1 fetch from the client. Two batched queries:
-    //   1) all order_items for this page → lowest-id row per order = primary line
-    //   2) campaign names for distinct campaignIds on the page
+    const userIdsToLookup = [...new Set([...mediaBuyerIds, ...assignedCsIds])];
     const orderIds = orders.map((o) => o.id);
-    const primaryItemByOrder = new Map<string, { productId: string; productName: string | null; itemCount: number }>();
-    if (orderIds.length > 0) {
-      const items = await this.db
-        .select({
-          orderId: schema.orderItems.orderId,
-          itemId: schema.orderItems.id,
-          productId: schema.orderItems.productId,
-          productName: schema.products.name,
-        })
-        .from(schema.orderItems)
-        .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
-        .where(inArray(schema.orderItems.orderId, orderIds))
-        .orderBy(asc(schema.orderItems.orderId), asc(schema.orderItems.id));
-      // Reduce to the first item per order (by lowest id) + total count.
-      const seen = new Set<string>();
-      for (const item of items) {
-        const oid = item.orderId;
-        if (!oid) continue;
-        const cur = primaryItemByOrder.get(oid);
-        if (!cur) {
-          primaryItemByOrder.set(oid, { productId: item.productId, productName: item.productName, itemCount: 1 });
-          seen.add(oid);
-        } else {
-          cur.itemCount += 1;
-        }
+    const campaignIds = [...new Set(orders.map((o) => o.campaignId).filter(Boolean))] as string[];
+
+    const [usersRes, itemsRes, campsRes] = await Promise.all([
+      userIdsToLookup.length > 0
+        ? this.db
+            .select({ id: schema.users.id, name: schema.users.name })
+            .from(schema.users)
+            .where(inArray(schema.users.id, userIdsToLookup))
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+      orderIds.length > 0
+        ? this.db
+            .select({
+              orderId: schema.orderItems.orderId,
+              itemId: schema.orderItems.id,
+              productId: schema.orderItems.productId,
+              productName: schema.products.name,
+            })
+            .from(schema.orderItems)
+            .leftJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+            .where(inArray(schema.orderItems.orderId, orderIds))
+            .orderBy(asc(schema.orderItems.orderId), asc(schema.orderItems.id))
+        : Promise.resolve(
+            [] as Array<{
+              orderId: string | null;
+              itemId: string;
+              productId: string;
+              productName: string | null;
+            }>,
+          ),
+      campaignIds.length > 0
+        ? this.db
+            .select({ id: schema.campaigns.id, name: schema.campaigns.name })
+            .from(schema.campaigns)
+            .where(inArray(schema.campaigns.id, campaignIds))
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+    ]);
+
+    const userNamesById = new Map<string, string>();
+    for (const u of usersRes) userNamesById.set(u.id, u.name);
+
+    const primaryItemByOrder = new Map<
+      string,
+      { productId: string; productName: string | null; itemCount: number }
+    >();
+    for (const item of itemsRes) {
+      const oid = item.orderId;
+      if (!oid) continue;
+      const cur = primaryItemByOrder.get(oid);
+      if (!cur) {
+        primaryItemByOrder.set(oid, {
+          productId: item.productId,
+          productName: item.productName,
+          itemCount: 1,
+        });
+      } else {
+        cur.itemCount += 1;
       }
     }
 
-    const campaignIds = [...new Set(orders.map((o) => o.campaignId).filter(Boolean))] as string[];
-    let campaignNames: Map<string, string> = new Map();
-    if (campaignIds.length > 0) {
-      const camps = await this.db
-        .select({ id: schema.campaigns.id, name: schema.campaigns.name })
-        .from(schema.campaigns)
-        .where(inArray(schema.campaigns.id, campaignIds));
-      camps.forEach((c) => campaignNames.set(c.id, c.name));
-    }
+    const campaignNames = new Map<string, string>();
+    for (const c of campsRes) campaignNames.set(c.id, c.name);
 
     return {
       orders: orders.map((order) => {
@@ -2110,8 +2149,8 @@ export class OrdersService {
         return {
           ...order,
           customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
-          mediaBuyerName: order.mediaBuyerId ? mediaBuyerNames.get(order.mediaBuyerId) ?? null : null,
-          assignedCsName: order.assignedCsId ? assignedCsNames.get(order.assignedCsId) ?? null : null,
+          mediaBuyerName: order.mediaBuyerId ? userNamesById.get(order.mediaBuyerId) ?? null : null,
+          assignedCsName: order.assignedCsId ? userNamesById.get(order.assignedCsId) ?? null : null,
           primaryProductId: primary?.productId ?? null,
           primaryProductName: primary?.productName ?? null,
           itemCount: primary?.itemCount ?? 0,
@@ -4030,12 +4069,28 @@ export class OrdersService {
   /**
    * Check for inactive CS agents (no action for > 10 min).
    * Returns agent IDs that should receive an inactivity alert.
+   *
+   * Implementation note (perf): previously this issued **one COUNT per agent**
+   * inside a sequential `for` loop, so on a Mac dev box hitting a remote DB
+   * with 12 active agents it spent 12 × ~120ms RTT before returning. Called
+   * from `dashboard.quickOverview` on every admin landing — the latency hit
+   * the SuperAdmin/Admin home page directly.
+   *
+   * The rewrite collapses everything into **2 queries in parallel**:
+   *   1) all active CS_AGENT rows (id, name, lastActionAt),
+   *   2) one grouped COUNT keyed on `assigned_cs_id` for orders in pending
+   *      CS statuses, restricted to the same agent set via `IN (...)`.
+   * Constant 2 RTTs regardless of agent count.
    */
   async getInactiveAgents(thresholdMinutes = 10) {
     const threshold = new Date(Date.now() - thresholdMinutes * 60 * 1000);
 
     const agents = await this.db
-      .select()
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        lastActionAt: schema.users.lastActionAt,
+      })
       .from(schema.users)
       .where(
         and(
@@ -4044,33 +4099,45 @@ export class OrdersService {
         ),
       );
 
-    // Filter agents with pending orders but no recent action
-    const inactive = [];
-    for (const agent of agents) {
-      const pendingRows = await this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(
+    if (agents.length === 0) return [];
+
+    const agentIds = agents.map((a) => a.id);
+    const pendingRows = await this.db
+      .select({
+        agentId: schema.orders.assignedCsId,
+        count: count(),
+      })
+      .from(schema.orders)
+      .where(
         and(
           isNull(schema.orders.deletedAt),
-          eq(schema.orders.assignedCsId, agent.id),
-          or(
-            eq(schema.orders.status, 'UNPROCESSED'),
-            eq(schema.orders.status, 'CS_ASSIGNED'),
-            eq(schema.orders.status, 'CS_ENGAGED'),
-          ),
+          inArray(schema.orders.assignedCsId, agentIds),
+          inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
         ),
-        );
+      )
+      .groupBy(schema.orders.assignedCsId);
 
-      const hasPending = (pendingRows[0]?.count ?? 0) > 0;
+    const pendingByAgent = new Map<string, number>();
+    for (const row of pendingRows) {
+      if (row.agentId) pendingByAgent.set(row.agentId, Number(row.count) || 0);
+    }
+
+    const inactive: Array<{
+      agentId: string;
+      agentName: string;
+      lastActionAt: Date | null;
+      pendingCount: number;
+    }> = [];
+    for (const agent of agents) {
+      const pendingCount = pendingByAgent.get(agent.id) ?? 0;
+      const hasPending = pendingCount > 0;
       const isIdle = !agent.lastActionAt || agent.lastActionAt < threshold;
-
       if (hasPending && isIdle) {
         inactive.push({
           agentId: agent.id,
           agentName: agent.name,
           lastActionAt: agent.lastActionAt,
-          pendingCount: pendingRows[0]?.count ?? 0,
+          pendingCount,
         });
       }
     }
@@ -4081,6 +4148,20 @@ export class OrdersService {
   /**
    * Get CS agent leaderboard — performance metrics for ranking.
    * period: 'this_month' (default) or 'all_time'; optional startDate/endDate override for custom range.
+   *
+   * Implementation note (perf): previously this issued **6 queries per agent**
+   * (engaged, confirmed, cancelled, delivered, call count, avg call duration)
+   * inside a `Promise.all(agents.map(...))`, so leaderboard latency grew
+   * linearly with the active CS_AGENT count and routinely dominated the CS
+   * dashboard load (~22s `db` time observed in dev logs).
+   *
+   * The rewrite collapses everything into **3 grouped aggregations** by
+   * `assigned_cs_id` / `agent_id` using Postgres `FILTER (WHERE …)` clauses:
+   *   1) order metrics by created_at window (engaged / confirmed / cancelled),
+   *   2) delivered metrics by delivered_at window,
+   *   3) call metrics (count + AVG duration of COMPLETED calls).
+   * Total round-trips: 3 (in parallel) regardless of how many agents exist.
+   * Output shape, sort, and counted-status semantics are unchanged.
    */
   async getCSAgentLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
     const useCustomRange = startDate && endDate;
@@ -4102,6 +4183,17 @@ export class OrdersService {
         ),
       );
 
+    if (agents.length === 0) return [];
+    const agentIds = agents.map((a) => a.id);
+
+    // Predicate templates — Postgres `FILTER (WHERE …)` evaluates per row inside
+    // a single grouped aggregate, so we never materialize per-agent subqueries.
+    const confirmedOrBeyond = sql`${schema.orders.status} IN ('CONFIRMED','AGENT_ASSIGNED','DISPATCHED','IN_TRANSIT','DELIVERED','PARTIALLY_DELIVERED','REMITTED','RETURNED','RESTOCKED','WRITTEN_OFF')`;
+    const cancelledStatus = sql`${schema.orders.status} = 'CANCELLED'`;
+    const deliveredOrRemitted = sql`${schema.orders.status} IN ('DELIVERED','REMITTED')`;
+    const callCompleted = sql`${schema.callLogs.callStatus} = 'COMPLETED'`;
+
+    // Date range conditions reused inside each grouped query's WHERE clause.
     const orderDateFilter = periodStart
       ? periodEnd
         ? and(gte(schema.orders.createdAt, periodStart), lte(schema.orders.createdAt, periodEnd))
@@ -4118,113 +4210,98 @@ export class OrdersService {
         : gte(schema.callLogs.startedAt, periodStart)
       : undefined;
 
-    const leaderboard = await Promise.all(
-      agents.map(async (agent) => {
-        const agentId = agent.id;
-        const baseOrderConditions = orderDateFilter
-          ? and(eq(schema.orders.assignedCsId, agentId), orderDateFilter)
-          : eq(schema.orders.assignedCsId, agentId);
-
-        const deliveredOrCompleted = or(eq(schema.orders.status, 'DELIVERED'), eq(schema.orders.status, 'REMITTED'));
-        const deliveredWhere = deliveredDateFilter
-          ? and(
-              eq(schema.orders.assignedCsId, agentId),
-              deliveredOrCompleted,
-              deliveredDateFilter,
-            )
-          : and(
-              eq(schema.orders.assignedCsId, agentId),
-              deliveredOrCompleted,
-            );
-
-        const callLogsWhere = callLogsDateFilter
-          ? and(eq(schema.callLogs.agentId, agentId), callLogsDateFilter)
-          : eq(schema.callLogs.agentId, agentId);
-
-        const callLogsAvgWhere = callLogsDateFilter
-          ? and(
-              eq(schema.callLogs.agentId, agentId),
-              eq(schema.callLogs.callStatus, 'COMPLETED'),
-              callLogsDateFilter,
-            )
-          : and(
-              eq(schema.callLogs.agentId, agentId),
-              eq(schema.callLogs.callStatus, 'COMPLETED'),
-            );
-
-        // Count orders that *passed through* each stage (not just current status).
-        // Any order assigned to this agent counts as "engaged".
-        // Orders that reached CONFIRMED or beyond (except CANCELLED) count as "confirmed".
-        // CANCELLED orders are counted separately.
-        const confirmedOrBeyond = or(
-          eq(schema.orders.status, 'CONFIRMED'),
-          eq(schema.orders.status, 'AGENT_ASSIGNED'),
-          eq(schema.orders.status, 'DISPATCHED'),
-          eq(schema.orders.status, 'IN_TRANSIT'),
-          eq(schema.orders.status, 'DELIVERED'),
-          eq(schema.orders.status, 'PARTIALLY_DELIVERED'),
-          eq(schema.orders.status, 'REMITTED'),
-          eq(schema.orders.status, 'RETURNED'),
-          eq(schema.orders.status, 'RESTOCKED'),
-          eq(schema.orders.status, 'WRITTEN_OFF'),
-        );
-
-        const [engagedRows, confirmedRows, cancelledRows, deliveredRows, callCountRows, avgCallRows] = await Promise.all([
-          // ordersEngaged = all orders assigned to this agent (any status except UNPROCESSED)
-          this.db
-            .select({ count: count() })
-            .from(schema.orders)
-            .where(baseOrderConditions),
-          // ordersConfirmed = orders that reached CONFIRMED or beyond
-          this.db
-            .select({ count: count() })
-            .from(schema.orders)
-            .where(and(baseOrderConditions, confirmedOrBeyond)),
-          this.db
-            .select({ count: count() })
-            .from(schema.orders)
-            .where(and(baseOrderConditions, eq(schema.orders.status, 'CANCELLED'))),
-          this.db
-            .select({ count: count() })
-            .from(schema.orders)
-            .where(deliveredWhere),
-          this.db
-            .select({ count: count() })
-            .from(schema.callLogs)
-            .where(callLogsWhere),
-          this.db
-            .select({
-              avg: sql<number>`COALESCE(AVG(${schema.callLogs.durationSeconds})::numeric, 0)`,
-            })
-            .from(schema.callLogs)
-            .where(callLogsAvgWhere),
-        ]);
-
-        const ordersEngaged = engagedRows[0]?.count ?? 0;
-        const ordersConfirmed = confirmedRows[0]?.count ?? 0;
-        const ordersCancelled = cancelledRows[0]?.count ?? 0;
-        const ordersDelivered = deliveredRows[0]?.count ?? 0;
-        const callsMade = callCountRows[0]?.count ?? 0;
-        const avgCallDurationSeconds = Number(avgCallRows[0]?.avg ?? 0);
-
-        const engagedOrCancelled = ordersConfirmed + ordersCancelled;
-        const confirmationRate = engagedOrCancelled > 0 ? (ordersConfirmed / engagedOrCancelled) * 100 : 0;
-        const deliveryRate = ordersConfirmed > 0 ? (ordersDelivered / ordersConfirmed) * 100 : 0;
-
-        return {
-          agentId,
-          agentName: agent.name,
-          ordersEngaged,
-          ordersConfirmed,
-          ordersCancelled,
-          ordersDelivered,
-          callsMade,
-          confirmationRate,
-          deliveryRate,
-          avgCallDurationSeconds: Math.round(avgCallDurationSeconds),
-        };
-      }),
+    const orderWhere = and(
+      inArray(schema.orders.assignedCsId, agentIds),
+      ...(orderDateFilter ? [orderDateFilter] : []),
     );
+    const deliveredWhere = and(
+      inArray(schema.orders.assignedCsId, agentIds),
+      deliveredOrRemitted,
+      ...(deliveredDateFilter ? [deliveredDateFilter] : []),
+    );
+    const callsWhere = and(
+      inArray(schema.callLogs.agentId, agentIds),
+      ...(callLogsDateFilter ? [callLogsDateFilter] : []),
+    );
+
+    const [orderRows, deliveredRows, callRows] = await Promise.all([
+      this.db
+        .select({
+          agentId: schema.orders.assignedCsId,
+          engaged: sql<number>`COUNT(*)::int`,
+          confirmed: sql<number>`COUNT(*) FILTER (WHERE ${confirmedOrBeyond})::int`,
+          cancelled: sql<number>`COUNT(*) FILTER (WHERE ${cancelledStatus})::int`,
+        })
+        .from(schema.orders)
+        .where(orderWhere)
+        .groupBy(schema.orders.assignedCsId),
+      this.db
+        .select({
+          agentId: schema.orders.assignedCsId,
+          delivered: sql<number>`COUNT(*)::int`,
+        })
+        .from(schema.orders)
+        .where(deliveredWhere)
+        .groupBy(schema.orders.assignedCsId),
+      this.db
+        .select({
+          agentId: schema.callLogs.agentId,
+          callsMade: sql<number>`COUNT(*)::int`,
+          // AVG over only COMPLETED calls (matches the prior callLogsAvgWhere semantics).
+          avgDuration: sql<number>`COALESCE(AVG(${schema.callLogs.durationSeconds}) FILTER (WHERE ${callCompleted}), 0)::numeric`,
+        })
+        .from(schema.callLogs)
+        .where(callsWhere)
+        .groupBy(schema.callLogs.agentId),
+    ]);
+
+    type OrderAgg = { engaged: number; confirmed: number; cancelled: number };
+    const orderByAgent = new Map<string, OrderAgg>();
+    for (const r of orderRows) {
+      if (!r.agentId) continue;
+      orderByAgent.set(r.agentId, {
+        engaged: Number(r.engaged) || 0,
+        confirmed: Number(r.confirmed) || 0,
+        cancelled: Number(r.cancelled) || 0,
+      });
+    }
+    const deliveredByAgent = new Map<string, number>();
+    for (const r of deliveredRows) {
+      if (!r.agentId) continue;
+      deliveredByAgent.set(r.agentId, Number(r.delivered) || 0);
+    }
+    type CallAgg = { callsMade: number; avgDurationSeconds: number };
+    const callsByAgent = new Map<string, CallAgg>();
+    for (const r of callRows) {
+      if (!r.agentId) continue;
+      callsByAgent.set(r.agentId, {
+        callsMade: Number(r.callsMade) || 0,
+        avgDurationSeconds: Number(r.avgDuration) || 0,
+      });
+    }
+
+    const leaderboard = agents.map((agent) => {
+      const ord = orderByAgent.get(agent.id) ?? { engaged: 0, confirmed: 0, cancelled: 0 };
+      const ordersDelivered = deliveredByAgent.get(agent.id) ?? 0;
+      const callAgg = callsByAgent.get(agent.id) ?? { callsMade: 0, avgDurationSeconds: 0 };
+
+      const engagedOrCancelled = ord.confirmed + ord.cancelled;
+      const confirmationRate = engagedOrCancelled > 0 ? (ord.confirmed / engagedOrCancelled) * 100 : 0;
+      const deliveryRate = ord.confirmed > 0 ? (ordersDelivered / ord.confirmed) * 100 : 0;
+
+      return {
+        agentId: agent.id,
+        agentName: agent.name,
+        ordersEngaged: ord.engaged,
+        ordersConfirmed: ord.confirmed,
+        ordersCancelled: ord.cancelled,
+        ordersDelivered,
+        callsMade: callAgg.callsMade,
+        confirmationRate,
+        deliveryRate,
+        avgCallDurationSeconds: Math.round(callAgg.avgDurationSeconds),
+      };
+    });
 
     leaderboard.sort((a, b) => {
       if (b.deliveryRate !== a.deliveryRate) return b.deliveryRate - a.deliveryRate;
@@ -4368,20 +4445,22 @@ export class OrdersService {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS agents can claim orders' });
     }
 
-    // Check claim cap
-    const capSetting = await this.settingsService.get('CS_CLAIM_CAP');
-    const claimCap = typeof capSetting?.cap === 'number' ? capSetting.cap : 2;
-
-    const pendingCounts = await this.db
-      .select({ count: count() })
-      .from(schema.orders)
-      .where(
-        and(
-          eq(schema.orders.assignedCsId, actor.id),
-          inArray(schema.orders.status, ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED']),
+    // Claim-cap setting and the actor's current pending count are independent
+    // — fan them out so the claim flow pays one wall-clock RTT instead of two.
+    const [capSetting, pendingCounts] = await Promise.all([
+      this.settingsService.get('CS_CLAIM_CAP'),
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(
+          and(
+            eq(schema.orders.assignedCsId, actor.id),
+            inArray(schema.orders.status, ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED']),
+          ),
         ),
-      );
+    ]);
 
+    const claimCap = typeof capSetting?.cap === 'number' ? capSetting.cap : 2;
     const currentPending = pendingCounts[0]?.count ?? 0;
     if (currentPending >= claimCap) {
       return { success: false, message: `Claim cap reached (${claimCap} active orders). Confirm or cancel existing orders first.` };
@@ -5335,6 +5414,11 @@ export class OrdersService {
 
   /**
    * Get all flagged duplicate orders for review.
+   *
+   * Batched lookup: previously this issued one `SELECT` per flagged row to fetch its
+   * original (`duplicate_of_id`). Now we collect distinct non-null original ids and
+   * pull them in a single `WHERE id IN (...)` query, then merge in memory. Saves
+   * (N − 1) round-trips on the remote DB.
    */
   async getFlaggedDuplicates() {
     const flagged = await this.db
@@ -5343,28 +5427,28 @@ export class OrdersService {
       .where(eq(schema.orders.isDuplicate, 'FLAGGED'))
       .orderBy(desc(schema.orders.createdAt));
 
-    // For each flagged order, also fetch the original
-    const results = await Promise.all(
-      flagged.map(async (dup) => {
-        let original = null;
-        if (dup.duplicateOfId) {
-          const origRows = await this.db
-            .select()
-            .from(schema.orders)
-            .where(eq(schema.orders.id, dup.duplicateOfId))
-            .limit(1);
-          original = origRows[0]
-            ? { ...origRows[0], customerPhoneDisplay: this.maskPhone(origRows[0].customerPhoneHash) }
-            : null;
-        }
-        return {
-          duplicate: { ...dup, customerPhoneDisplay: this.maskPhone(dup.customerPhoneHash) },
-          original,
-        };
-      }),
-    );
+    if (flagged.length === 0) return [];
 
-    return results;
+    const originalIds = [...new Set(flagged.map((d) => d.duplicateOfId).filter(Boolean))] as string[];
+    const originalById = new Map<string, (typeof flagged)[number]>();
+    if (originalIds.length > 0) {
+      const originalRows = await this.db
+        .select()
+        .from(schema.orders)
+        .where(inArray(schema.orders.id, originalIds));
+      for (const row of originalRows) originalById.set(row.id, row);
+    }
+
+    return flagged.map((dup) => {
+      const origRow = dup.duplicateOfId ? originalById.get(dup.duplicateOfId) ?? null : null;
+      const original = origRow
+        ? { ...origRow, customerPhoneDisplay: this.maskPhone(origRow.customerPhoneHash) }
+        : null;
+      return {
+        duplicate: { ...dup, customerPhoneDisplay: this.maskPhone(dup.customerPhoneHash) },
+        original,
+      };
+    });
   }
 
   /**
