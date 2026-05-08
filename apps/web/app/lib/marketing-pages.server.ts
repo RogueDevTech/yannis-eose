@@ -514,9 +514,10 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
   }
 
   /**
-   * Multi-line "Add Expense" submission. Lines arrive as a JSON-encoded string
-   * in `lines` so we don't have to coordinate `lines[0][campaignId]` etc. style
-   * field-name conventions across the boundary.
+   * Multi-line "Add Expense" submission (CEO directive 2026-05-08). Single
+   * campaignId at the batch level; each line carries `attributedOrderCount`
+   * — the MB's manual split of the campaign's actual order count. Lines
+   * arrive as a JSON-encoded string in `lines`.
    */
   if (intent === 'createAdSpendBatch') {
     const linesRaw = formData.get('lines')?.toString() ?? '';
@@ -524,19 +525,23 @@ export async function runMarketingAdSpendAction(cookie: string, formData: FormDa
     try {
       lines = JSON.parse(linesRaw);
     } catch {
-      return json({ error: 'Invalid expense lines payload' }, { status: 400 });
+      return json({ error: 'Invalid ads payload' }, { status: 400 });
     }
     if (!Array.isArray(lines) || lines.length === 0) {
-      return json({ error: 'Add at least one expense line' }, { status: 400 });
+      return json({ error: 'Add at least one ad' }, { status: 400 });
     }
     const spendDate = formData.get('spendDate')?.toString() ?? '';
     if (!spendDate) {
       return json({ error: 'Date is required' }, { status: 400 });
     }
+    const campaignId = formData.get('campaignId')?.toString() ?? '';
+    if (!campaignId) {
+      return json({ error: 'Form (campaign) is required' }, { status: 400 });
+    }
     const res = await apiRequest<unknown>('/trpc/marketing.createAdSpendBatch', {
       method: 'POST',
       cookie,
-      body: { spendDate, lines },
+      body: { spendDate, campaignId, lines },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to submit ad spend batch') }, { status: safeStatus(res.status) });

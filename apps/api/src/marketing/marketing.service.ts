@@ -16,6 +16,7 @@ import type {
   ListAdSpendGroupedInput,
   AdSpendStatusCountsInput,
   PreviewAdSpendIntervalInput,
+  CampaignOrderTotalForBatchInput,
   UpdateAdSpendInput,
   CreateOfferTemplateInput,
   UpdateOfferTemplateInput,
@@ -331,6 +332,91 @@ export class MarketingService {
       priorSpendDate,
       windowStartExclusive: windowStartExclusive ? windowStartExclusive.toISOString() : null,
       indicativeCpa,
+    };
+  }
+
+  /**
+   * Campaign-level order count for the Add Expense batch flow (CEO directive
+   * 2026-05-08). Unlike `getAdSpendIntervalSnapshot` (which is keyed on
+   * campaign × product), this aggregates orders across all products in the
+   * campaign so the Media Buyer sees one number to split.
+   *
+   * Window: orders created AFTER the most recent APPROVED ad spend on this
+   * campaign (any product) by this MB, up through `spendDate`. When no prior
+   * APPROVED spend exists, the window starts at the campaign's birth.
+   */
+  private async getCampaignOrderTotalSnapshot(params: {
+    mediaBuyerId: string;
+    campaignId: string;
+    spendDate: string;
+    branchId?: string | null;
+  }): Promise<{
+    orderCount: number;
+    priorSpendDate: string | null;
+    windowStartExclusive: string | null;
+  }> {
+    const branchCampaignIds = await this.getBranchCampaignIds(params.branchId);
+    if (branchCampaignIds && branchCampaignIds.length === 0) {
+      return { orderCount: 0, priorSpendDate: null, windowStartExclusive: null };
+    }
+    if (branchCampaignIds && !branchCampaignIds.includes(params.campaignId)) {
+      return { orderCount: 0, priorSpendDate: null, windowStartExclusive: null };
+    }
+
+    const priorDateLt = sql`${schema.adSpendLogs.spendDate}::date < ${params.spendDate}::date`;
+
+    const [prior] = await this.db
+      .select({ spendDate: schema.adSpendLogs.spendDate })
+      .from(schema.adSpendLogs)
+      .where(
+        and(
+          eq(schema.adSpendLogs.mediaBuyerId, params.mediaBuyerId),
+          eq(schema.adSpendLogs.campaignId, params.campaignId),
+          eq(schema.adSpendLogs.status, 'APPROVED'),
+          priorDateLt,
+        ),
+      )
+      .orderBy(desc(schema.adSpendLogs.spendDate), desc(schema.adSpendLogs.createdAt))
+      .limit(1);
+
+    const priorSpend = prior?.spendDate;
+    let windowStartExclusive: Date | null = null;
+    if (priorSpend) {
+      const y = priorSpend.getUTCFullYear();
+      const m = priorSpend.getUTCMonth();
+      const d = priorSpend.getUTCDate();
+      windowStartExclusive = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0));
+    }
+
+    const now = new Date();
+    const orderConditions: SQL[] = [
+      eq(schema.orders.mediaBuyerId, params.mediaBuyerId),
+      eq(schema.orders.campaignId, params.campaignId),
+      lte(schema.orders.createdAt, now),
+    ];
+    if (windowStartExclusive) {
+      orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
+    }
+    if (params.branchId) {
+      orderConditions.push(eq(schema.orders.branchId, params.branchId));
+    }
+
+    const [countRow] = await this.db
+      .select({ c: count() })
+      .from(schema.orders)
+      .where(and(...orderConditions));
+
+    const orderCount = Number(countRow?.c ?? 0);
+
+    const priorSpendDate =
+      priorSpend != null
+        ? `${priorSpend.getUTCFullYear()}-${String(priorSpend.getUTCMonth() + 1).padStart(2, '0')}-${String(priorSpend.getUTCDate()).padStart(2, '0')}`
+        : null;
+
+    return {
+      orderCount,
+      priorSpendDate,
+      windowStartExclusive: windowStartExclusive ? windowStartExclusive.toISOString() : null,
     };
   }
 
@@ -1806,26 +1892,47 @@ export class MarketingService {
     branchId?: string | null,
   ) {
     if (input.lines.length === 0) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Add at least one expense line' });
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Add at least one ad' });
     }
-    // Branch fence: every campaign in the batch must belong to the actor's active branch.
+    // Branch fence: the single campaign must belong to the actor's active branch.
     if (branchId) {
-      const campaignIds = Array.from(new Set(input.lines.map((l) => l.campaignId)));
-      const validCampaigns = await this.db
+      const [validCampaign] = await this.db
         .select({ id: schema.campaigns.id })
         .from(schema.campaigns)
         .where(
           and(
-            inArray(schema.campaigns.id, campaignIds),
+            eq(schema.campaigns.id, input.campaignId),
             eq(schema.campaigns.branchId, branchId),
           ),
-        );
-      if (validCampaigns.length !== campaignIds.length) {
+        )
+        .limit(1);
+      if (!validCampaign) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'One or more campaigns are not in your active branch',
+          message: 'Campaign is not in your active branch',
         });
       }
+    }
+
+    // CEO directive 2026-05-08: Media Buyer manually splits the campaign's
+    // actual order count across the lines they're logging. Sum must equal the
+    // system-computed count for (campaign, MB, spendDate window) — otherwise
+    // we can't trust the per-line CPA.
+    const snapshot = await this.getCampaignOrderTotalSnapshot({
+      mediaBuyerId,
+      campaignId: input.campaignId,
+      spendDate: input.spendDate,
+      branchId,
+    });
+    const totalSplit = input.lines.reduce(
+      (acc, l) => acc + (Number.isFinite(l.attributedOrderCount) ? l.attributedOrderCount : 0),
+      0,
+    );
+    if (totalSplit !== snapshot.orderCount) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Order split must total ${snapshot.orderCount} (the form's order count). Currently splits to ${totalSplit}.`,
+      });
     }
 
     const spendDateAt = new Date(input.spendDate);
@@ -1838,7 +1945,7 @@ export class MarketingService {
             return {
               mediaBuyerId,
               productId: line.productId,
-              campaignId: line.campaignId,
+              campaignId: input.campaignId,
               spendAmount: sql`${String(line.spendAmount)}::numeric`,
               screenshotUrl: line.screenshotUrl,
               spendDate: spendDateAt,
@@ -1846,6 +1953,7 @@ export class MarketingService {
               platformCustomLabel:
                 platform === 'OTHER' && line.platformCustomLabel ? line.platformCustomLabel : null,
               adUrl: line.adUrl ?? null,
+              attributedOrderCount: line.attributedOrderCount,
             };
           }),
         )
@@ -1864,7 +1972,7 @@ export class MarketingService {
     // can scan and triage at a glance instead of clicking through. Falls
     // back to "A Media Buyer" / no campaign when lookups fail (notifications
     // must never block the write).
-    const uniqueCampaignIds = [...new Set(input.lines.map((l) => l.campaignId).filter((id): id is string => !!id))];
+    const uniqueCampaignIds = [input.campaignId];
     const [mbRow, campaignRows] = await Promise.all([
       this.db
         .select({ name: schema.users.name })
@@ -1900,7 +2008,7 @@ export class MarketingService {
         year: 'numeric',
       });
     }
-    const lineWord = input.lines.length === 1 ? 'line' : 'lines';
+    const lineWord = input.lines.length === 1 ? 'ad' : 'ads';
 
     this.notifications.enqueueCreateForRole('HEAD_OF_MARKETING', {
       type: 'marketing:ad_spend_submitted',
@@ -2128,6 +2236,35 @@ export class MarketingService {
     });
   }
 
+  /**
+   * Public counterpart of `getCampaignOrderTotalSnapshot` — used by the new
+   * Add Expense modal so the Media Buyer can see the campaign's actual order
+   * count and split it across the lines they're logging.
+   */
+  async getCampaignOrderTotalForBatch(
+    input: CampaignOrderTotalForBatchInput,
+    mediaBuyerId: string,
+    branchId?: string | null,
+  ) {
+    if (branchId) {
+      const [campaign] = await this.db
+        .select({ id: schema.campaigns.id })
+        .from(schema.campaigns)
+        .where(and(eq(schema.campaigns.id, input.campaignId), eq(schema.campaigns.branchId, branchId)))
+        .limit(1);
+      if (!campaign) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+      }
+    }
+
+    return this.getCampaignOrderTotalSnapshot({
+      mediaBuyerId,
+      campaignId: input.campaignId,
+      spendDate: input.spendDate,
+      branchId,
+    });
+  }
+
   async listAdSpend(input: ListAdSpendInput, branchId?: string | null) {
     const buyer = alias(schema.users, 'ad_spend_list_buyer');
     const prod = alias(schema.products, 'ad_spend_list_product');
@@ -2136,6 +2273,15 @@ export class MarketingService {
     const conditions: SQL[] = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.mediaBuyerIds && input.mediaBuyerIds.length > 0) {
+      conditions.push(inArray(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerIds));
+    } else if (input.mediaBuyerIds && input.mediaBuyerIds.length === 0) {
+      return {
+        records: [],
+        totalSpend: '0',
+        pagination: { page: input.page, limit: input.limit, total: 0 },
+      };
     }
     if (input.productId) {
       conditions.push(eq(schema.adSpendLogs.productId, input.productId));
@@ -2252,6 +2398,14 @@ export class MarketingService {
     const conditions: SQL[] = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.mediaBuyerIds && input.mediaBuyerIds.length > 0) {
+      conditions.push(inArray(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerIds));
+    } else if (input.mediaBuyerIds && input.mediaBuyerIds.length === 0) {
+      return {
+        groups: [],
+        pagination: { page, limit, total: 0 },
+      };
     }
     if (input.productId) {
       conditions.push(eq(schema.adSpendLogs.productId, input.productId));
@@ -2449,6 +2603,11 @@ export class MarketingService {
     const conditions: SQL[] = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerId));
+    }
+    if (input.mediaBuyerIds && input.mediaBuyerIds.length > 0) {
+      conditions.push(inArray(schema.adSpendLogs.mediaBuyerId, input.mediaBuyerIds));
+    } else if (input.mediaBuyerIds && input.mediaBuyerIds.length === 0) {
+      return { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 };
     }
     if (input.productId) {
       conditions.push(eq(schema.adSpendLogs.productId, input.productId));

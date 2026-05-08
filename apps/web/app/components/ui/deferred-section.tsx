@@ -154,14 +154,3 @@ export function DeferredSection<T>({
   );
 }
 
-// ── Multi-Stat Skeleton (for grid of stat cards) ─────────────
-
-export function StatSkeletonGrid({ count = 4 }: { count?: number }) {
-  return (
-    <>
-      {Array.from({ length: count }).map((_, i) => (
-        <StatSkeleton key={i} />
-      ))}
-    </>
-  );
-}

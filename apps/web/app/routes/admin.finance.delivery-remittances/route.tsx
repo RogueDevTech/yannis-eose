@@ -1,11 +1,13 @@
-import { json } from '@remix-run/node';
+import { Suspense } from 'react';
+import { json, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { DeliveryRemittancesPage } from '~/features/finance/DeliveryRemittancesPage';
+import { DeliveryRemittancesLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
 import type { DeliveryRemittanceListItem } from '~/features/finance/DeliveryRemittancesPage';
 import type { EligibleOrder } from '~/features/finance/CashRemittanceCreateModal';
 
@@ -93,6 +95,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const eligibleListInput = JSON.stringify(eligibleListBase);
 
+  const remittancesShell = {
+    filters: {
+      status: statusFilter ?? '',
+      location: locationFilter ?? '',
+      sentBy: sentByFilter ?? '',
+      startDate: startDate ?? '',
+      endDate: endDate ?? '',
+      periodAllTime,
+      eligibleQ: eligibleQ ?? '',
+    },
+    canCreateRemittance,
+    canMarkReceived,
+  };
+
+  const pageData = (async () => {
   const [listRes, locationsRes, usersRes, eligibleListRes] = await Promise.all([
     apiRequest<unknown>(
       '/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify(listInput)),
@@ -209,6 +226,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateRemittance,
     canMarkReceived,
   };
+  })();
+
+  return defer({ remittancesShell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -259,23 +279,27 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AdminFinanceDeliveryRemittancesRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { remittancesShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-      <DeliveryRemittancesPage
-      remittances={data.remittances}
-      pagination={data.pagination}
-      locations={data.locations}
-      filters={data.filters}
-      userMap={data.userMap}
-      sentByOptions={data.sentByOptions}
-      eligibleOrders={data.eligibleOrders}
-      eligiblePagination={data.eligiblePagination}
-      eligibleTotal={data.eligibleTotal}
-      summary={data.summary}
-      canCreateRemittance={data.canCreateRemittance}
-      canMarkReceived={data.canMarkReceived}
-    />
-    </>
+    <Suspense fallback={<DeliveryRemittancesLoadingShell filters={remittancesShell.filters} />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <DeliveryRemittancesPage
+            remittances={data.remittances}
+            pagination={data.pagination}
+            locations={data.locations}
+            filters={data.filters}
+            userMap={data.userMap}
+            sentByOptions={data.sentByOptions}
+            eligibleOrders={data.eligibleOrders}
+            eligiblePagination={data.eligiblePagination}
+            eligibleTotal={data.eligibleTotal}
+            summary={data.summary}
+            canCreateRemittance={data.canCreateRemittance}
+            canMarkReceived={data.canMarkReceived}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

@@ -103,6 +103,8 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'cart.read', resource: 'cart', action: 'read', description: 'View cart abandonment data (CS dashboard)' },
   { code: 'branches.manage', resource: 'branches', action: 'manage', description: 'Create, update, and assign users to branches (SuperAdmin only)' },
   { code: 'branches.view_all', resource: 'branches', action: 'view_all', description: 'View data across all branches (global visibility bypass) — grant sparingly' },
+  { code: 'branches.teams.cs', resource: 'branches.teams', action: 'cs', description: 'Manage CS supervisor teams within a branch (Head of CS)' },
+  { code: 'branches.teams.marketing', resource: 'branches.teams', action: 'marketing', description: 'Manage Marketing supervisor teams within a branch (Head of Marketing)' },
   { code: 'cs.scope.global', resource: 'cs.scope', action: 'global', description: 'Allow CS workflows across all branches' },
   { code: 'marketing.scope.global', resource: 'marketing.scope', action: 'global', description: 'Allow Marketing workflows across all branches' },
   { code: 'logistics.scope.global', resource: 'logistics.scope', action: 'global', description: 'Allow Logistics workflows across all branches' },
@@ -154,6 +156,17 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'permission_requests.product_archive.approve', resource: 'permission_requests.product_archive', action: 'approve', description: 'Approve / reject pending PRODUCT_ARCHIVE requests (locked to SuperAdmin by CEO directive — grant cautiously)' },
   { code: 'permission_requests.order_line_price.approve', resource: 'permission_requests.order_line_price', action: 'approve', description: 'Approve / reject pending ORDER_LINE_PRICE_CHANGE requests (per-order branch / assignee context still applies)' },
   { code: 'permission_requests.order_deletion.approve', resource: 'permission_requests.order_deletion', action: 'approve', description: 'Approve / reject pending ORDER_DELETION requests (per-order branch / assignee context still applies)' },
+
+  // Per-domain export gates. CEO directive: download/CSV/XLSX is permission-first
+  // so admins can deputize export rights to specific users (senior CS, MB, etc.)
+  // without code changes. Holding the read code on a domain is the precondition
+  // for browsing the data; the export code is an *additional* grant on top.
+  { code: 'orders.export', resource: 'orders', action: 'export', description: 'Download CSV / XLSX of orders (CS, marketing, logistics, admin orders pages)' },
+  { code: 'inventory.export', resource: 'inventory', action: 'export', description: 'Download CSV / XLSX of stock levels + movements' },
+  { code: 'marketing.export', resource: 'marketing', action: 'export', description: 'Download CSV / XLSX of ad spend, funding ledger, marketing team performance' },
+  { code: 'finance.export', resource: 'finance', action: 'export', description: 'Download CSV / XLSX of disbursements, delivery remittances, invoices, P&L' },
+  { code: 'hr.export', resource: 'hr', action: 'export', description: 'Download payroll batch payout documents (sensitive — includes bank fields)' },
+  { code: 'audit.export', resource: 'audit', action: 'export', description: 'Download CSV of the audit trail' },
 ];
 
 export const CANONICAL_PERMISSIONS: PermissionCatalogEntry[] = [
@@ -192,6 +205,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'settings.write',
     'branches.manage',
     'branches.manage_users',
+    'branches.teams.cs',
+    'branches.teams.marketing',
     'orders.line_price.edit',
     'orders.confirm.bypass_call_gate',
     'orders.delivery.confirm',
@@ -200,6 +215,14 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // (per-order context check still runs in the service).
     'permission_requests.order_line_price.approve',
     'permission_requests.order_deletion.approve',
+    // Branch admin owns the branch end-to-end and can pull data downloads for
+    // any domain they read (orders + inventory + finance + audit + HR).
+    'orders.export',
+    'inventory.export',
+    'finance.export',
+    'audit.export',
+    'hr.export',
+    'marketing.export',
   ],
   HEAD_OF_MARKETING: [
     'marketing.read',
@@ -222,6 +245,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'mirror.marketing_team',
     'team.supervise_marketing',
     'marketing.scope.global',
+    'marketing.export',
+    'orders.export',
+    'branches.teams.marketing',
   ],
   MEDIA_BUYER: [
     'marketing.read',
@@ -267,6 +293,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // applies in the service so they only act on orders for their team).
     'permission_requests.order_line_price.approve',
     'permission_requests.order_deletion.approve',
+    'orders.export',
+    'branches.teams.cs',
   ],
   CS_AGENT: [
     'orders.read',
@@ -293,6 +321,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // marketing workflows; Finance acts via finance pages only.
     'finance.cashRemittance.create',
     'finance.cashRemittance.markReceived',
+    'finance.export',
+    'orders.export',
+    'audit.export',
   ],
   // Permission inbox: order line price + archive approvals from CS (`permission_requests.*`),
   // plus direct line-price edits via `orders.line_price.edit`. Org-wide scope via
@@ -329,6 +360,8 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'permission_requests.order_line_price.approve',
     'permission_requests.order_deletion.approve',
     'transfers.read',
+    'orders.export',
+    'inventory.export',
   ],
   STOCK_MANAGER: [
     'inventory.read',
@@ -348,6 +381,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'products.offers',
     'categories.read',
     'categories.write',
+    'inventory.export',
   ],
   TPL_MANAGER: [
     'inventory.read',
@@ -383,5 +417,6 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'permission_requests.user_creation.approve',
     'permission_requests.role_change.approve',
     'permission_requests.permission_grant.approve',
+    'hr.export',
   ],
 };

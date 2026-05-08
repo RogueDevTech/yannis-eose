@@ -1,6 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Link, useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, Link, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -17,6 +18,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import type { LocationOption, ProductOption, ShipmentRow } from '~/features/inventory/types';
 import { ShipmentsTab } from '~/features/inventory/ShipmentsTab';
+import { ShipmentsListLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Shipments — Inventory — Yannis EOSE' }];
 
@@ -40,62 +42,65 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return redirect('/admin/inventory/shipments/receive');
   }
 
-  const shipmentsInput = { page, limit: LIMIT };
-  const shipmentsPromise = apiRequest<unknown>(
-    `/trpc/inventory.shipments.list?input=${encodeURIComponent(JSON.stringify(shipmentsInput))}`,
-    { method: 'GET', cookie, ...readOpts },
-  );
+  const pageData = (async () => {
+    const shipmentsInput = { page, limit: LIMIT };
+    const shipmentsPromise = apiRequest<unknown>(
+      `/trpc/inventory.shipments.list?input=${encodeURIComponent(JSON.stringify(shipmentsInput))}`,
+      { method: 'GET', cookie, ...readOpts },
+    );
 
-  const productsPromise = apiRequest<unknown>(
-    `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
-    { method: 'GET', cookie, ...readOpts },
-  );
+    const productsPromise = apiRequest<unknown>(
+      `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
+      { method: 'GET', cookie, ...readOpts },
+    );
 
-  // Stock intake / inbound shipment targets: company-owned warehouses only.
-  const locationsPromise = apiRequest<unknown>(
-    `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', providerKind: 'WAREHOUSE' }))}`,
-    { method: 'GET', cookie, ...readOpts },
-  );
+    const locationsPromise = apiRequest<unknown>(
+      `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE', providerKind: 'WAREHOUSE' }))}`,
+      { method: 'GET', cookie, ...readOpts },
+    );
 
-  const [shipmentsRes, productsRes, locationsRes] = await Promise.all([
-    shipmentsPromise,
-    productsPromise,
-    locationsPromise,
-  ]);
+    const [shipmentsRes, productsRes, locationsRes] = await Promise.all([
+      shipmentsPromise,
+      productsPromise,
+      locationsPromise,
+    ]);
 
-  const shipmentsData = shipmentsRes.ok
-    ? ((shipmentsRes.data as { result?: { data?: { rows: ShipmentRow[]; pagination: { total: number; totalPages: number } } } })
-        ?.result?.data ?? null)
-    : null;
+    const shipmentsData = shipmentsRes.ok
+      ? ((shipmentsRes.data as { result?: { data?: { rows: ShipmentRow[]; pagination: { total: number; totalPages: number } } } })
+          ?.result?.data ?? null)
+      : null;
 
-  const productsData = productsRes.ok
-    ? ((productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? null)
-    : null;
+    const productsData = productsRes.ok
+      ? ((productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? null)
+      : null;
 
-  const locationsData = locationsRes.ok
-    ? ((locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })
-        ?.result?.data ?? null)
-    : null;
+    const locationsData = locationsRes.ok
+      ? ((locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })
+          ?.result?.data ?? null)
+      : null;
 
-  const products: ProductOption[] = (productsData ?? []).map((p) => ({ id: p.id, name: p.name }));
-  const locations: LocationOption[] = (locationsData ?? []).map((l) => ({
-    id: l.id,
-    name: l.name,
-    providerName: l.providerName ?? null,
-  }));
+    const products: ProductOption[] = (productsData ?? []).map((p) => ({ id: p.id, name: p.name }));
+    const locations: LocationOption[] = (locationsData ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      providerName: l.providerName ?? null,
+    }));
 
-  return defer({
-    shipments: shipmentsData?.rows ?? [],
-    totalShipments: shipmentsData?.pagination?.total ?? 0,
-    totalPages: shipmentsData?.pagination?.totalPages ?? 1,
-    page,
-    limit: LIMIT,
-    products,
-    locations,
-    canIntake:
-      isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.intake')),
-    loadError: shipmentsRes.ok ? null : extractApiErrorMessage(shipmentsRes.data, 'Failed to load shipments'),
-  });
+    return {
+      shipments: shipmentsData?.rows ?? [],
+      totalShipments: shipmentsData?.pagination?.total ?? 0,
+      totalPages: shipmentsData?.pagination?.totalPages ?? 1,
+      page,
+      limit: LIMIT,
+      products,
+      locations,
+      canIntake:
+        isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.intake')),
+      loadError: shipmentsRes.ok ? null : extractApiErrorMessage(shipmentsRes.data, 'Failed to load shipments'),
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -199,19 +204,17 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
-export default function InventoryShipmentsIndexRoute() {
-  const data = useLoaderData<typeof loader>() as unknown as {
-    shipments: ShipmentRow[];
-    totalShipments: number;
-    totalPages: number;
-    page: number;
-    limit: number;
-    products: ProductOption[];
-    locations: LocationOption[];
-    canIntake: boolean;
-    loadError: string | null;
-  };
-
+function InventoryShipmentsIndexContent(data: {
+  shipments: ShipmentRow[];
+  totalShipments: number;
+  totalPages: number;
+  page: number;
+  limit: number;
+  products: ProductOption[];
+  locations: LocationOption[];
+  canIntake: boolean;
+  loadError: string | null;
+}) {
   return (
     <div className="space-y-4">
       <PageHeader
@@ -251,6 +254,17 @@ export default function InventoryShipmentsIndexRoute() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function InventoryShipmentsIndexRoute() {
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<ShipmentsListLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <InventoryShipmentsIndexContent {...data} />}
+      </Await>
+    </Suspense>
   );
 }
 

@@ -1,8 +1,10 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { defer, json } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
+import { HRUsersListLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { User } from '~/features/users/types';
 
 export const meta: MetaFunction = () => [
@@ -51,6 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (roleParam && roleParam !== 'ALL') input.role = roleParam;
 
   const inputEnc = encodeURIComponent(JSON.stringify(input));
+  const pageData = (async () => {
   const res = await apiRequest<{ users: User[]; pagination: { total: number; page: number; limit: number; totalPages: number } }>(
     `/trpc/users.list?input=${inputEnc}`,
     {
@@ -86,9 +89,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     statusParam: statusParam ?? 'ALL',
     roleParam: roleParam ?? 'ALL',
   };
+  })();
+
+  return defer({ pageData });
 }
 
 export default function UsersRoute() {
-  const data = useLoaderData<typeof loader>();
-  return <UsersListPage {...data} />;
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<HRUsersListLoadingShell staffAccounts={false} />}>
+      <Await resolve={pageData}>
+        {(data) => <UsersListPage {...data} />}
+      </Await>
+    </Suspense>
+  );
 }

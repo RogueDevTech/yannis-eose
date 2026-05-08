@@ -185,3 +185,36 @@ export async function fetchAdSpendIntervalPreview(
     return null;
   }
 }
+
+export type CampaignOrderTotalForBatchInput = {
+  campaignId: string;
+  spendDate: string;
+};
+export type CampaignOrderTotalForBatchResult = {
+  orderCount: number;
+  priorSpendDate: string | null;
+  windowStartExclusive: string | null;
+};
+
+/**
+ * GET `marketing.campaignOrderTotalForBatch` — used by the Add Expense modal
+ * (CEO directive 2026-05-08). Returns the form's order count the MB must
+ * split across the lines they're logging.
+ */
+export async function fetchCampaignOrderTotalForBatch(
+  input: CampaignOrderTotalForBatchInput,
+): Promise<CampaignOrderTotalForBatchResult | null> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) return null;
+  const url = `${base}/trpc/marketing.campaignOrderTotalForBatch?input=${encodeURIComponent(
+    JSON.stringify({ campaignId: input.campaignId, spendDate: input.spendDate }),
+  )}`;
+  try {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) return null;
+    const json = (await res.json()) as TrpcEnvelope<CampaignOrderTotalForBatchResult>;
+    return json?.result?.data ?? null;
+  } catch {
+    return null;
+  }
+}

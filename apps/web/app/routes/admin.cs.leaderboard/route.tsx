@@ -1,7 +1,9 @@
-import { useLoaderData } from '@remix-run/react';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { CSLeaderboardPage } from '~/features/leaderboards/CSLeaderboardPage';
+import { CSLeaderboardLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 import type { CSLeaderboardEntry } from '~/features/cs/types';
 
 export const meta: MetaFunction = () => [
@@ -32,36 +34,55 @@ export async function loader({ request }: LoaderFunctionArgs) {
     startDate = undefined;
     endDate = undefined;
   }
-  const leaderboardPeriod = periodAllTime ? 'all_time' : 'this_month';
+  const leaderboardPeriodResolved = (periodAllTime ? 'all_time' : 'this_month') as 'this_month' | 'all_time';
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
   const input: { period: 'this_month' | 'all_time'; startDate?: string; endDate?: string } = {
-    period: leaderboardPeriod,
+    period: leaderboardPeriodResolved,
   };
   if (startDate) input.startDate = startDate;
   if (endDate) input.endDate = endDate;
 
-  const csLeaderboard = await apiRequest<unknown>(
-    `/trpc/orders.csLeaderboard?input=${encodeURIComponent(JSON.stringify(input))}`,
-    { method: 'GET', cookie },
-  ).then(parseCSLeaderboard).catch((): CSLeaderboardEntry[] => []);
+  const csLeaderboardShell = { filters, leaderboardPeriod: leaderboardPeriodResolved };
 
-  return {
-    csLeaderboard,
-    leaderboardPeriod,
-    filters,
-  };
+  const pageData = (async () => {
+    const csLeaderboard = await apiRequest<unknown>(
+      `/trpc/orders.csLeaderboard?input=${encodeURIComponent(JSON.stringify(input))}`,
+      { method: 'GET', cookie },
+    )
+      .then(parseCSLeaderboard)
+      .catch((): CSLeaderboardEntry[] => []);
+
+    return {
+      csLeaderboard,
+      leaderboardPeriod: leaderboardPeriodResolved,
+      filters,
+    };
+  })();
+
+  return defer({ csLeaderboardShell, pageData });
 }
 
 export default function CSLeaderboardRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { csLeaderboardShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-    <CSLeaderboardPage
-      csLeaderboard={data.csLeaderboard}
-      leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
-      filters={data.filters}
-    />
-    </>
+    <Suspense
+      fallback={
+        <CSLeaderboardLoadingShell
+          filters={csLeaderboardShell.filters}
+          leaderboardPeriod={csLeaderboardShell.leaderboardPeriod}
+        />
+      }
+    >
+      <Await resolve={pageData}>
+        {(data) => (
+          <CSLeaderboardPage
+            csLeaderboard={data.csLeaderboard}
+            leaderboardPeriod={data.leaderboardPeriod}
+            filters={data.filters}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

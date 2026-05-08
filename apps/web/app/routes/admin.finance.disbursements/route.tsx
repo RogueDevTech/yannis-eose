@@ -1,12 +1,14 @@
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import type { ShouldRevalidateFunctionArgs } from '@remix-run/react';
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
 import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { DisbursementsPage } from '~/features/disbursements/DisbursementsPage';
+import { FinanceDisbursementsLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
 import type { DisbursementRecord, DisbursementsPageData } from '~/features/disbursements/DisbursementsPage';
 import type { FundingRequestRecord } from '~/features/marketing/types';
 
@@ -153,6 +155,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (receiverFilter) listFundingInput.receiverId = receiverFilter;
   if (searchFilter) listFundingInput.search = searchFilter;
 
+  const disbursementsShell = { filters };
+
+  const pageData = (async (): Promise<DisbursementsPageData> => {
   const [fundingRes, balancesRes, summaryRes, fundingRequestsRes, fundingRequestsCountsRes, usersListRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/marketing.listFunding?input=${encodeURIComponent(JSON.stringify(listFundingInput))}`,
@@ -253,6 +258,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     requestsTotalPages,
     requestersList,
   } satisfies DisbursementsPageData;
+  })();
+
+  return defer({ disbursementsShell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -334,10 +342,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function DisbursementsRoute() {
-  const data = useLoaderData<typeof loader>() as DisbursementsPageData;
+  const { disbursementsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-      <DisbursementsPage {...data} />
-    </>
+    <Suspense fallback={<FinanceDisbursementsLoadingShell filters={disbursementsShell.filters} />}>
+      <Await resolve={pageData}>
+        {(data) => <DisbursementsPage {...(data as DisbursementsPageData)} />}
+      </Await>
+    </Suspense>
   );
 }

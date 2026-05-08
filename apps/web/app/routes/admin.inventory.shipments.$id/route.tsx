@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { Suspense } from 'react';
+import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getSessionCookie,
@@ -11,6 +12,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { ShipmentDetailPage } from '~/features/inventory/ShipmentDetailPage';
 import type { ShipmentDetail } from '~/features/inventory/types';
+import { ShipmentDetailLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Shipment — Yannis EOSE' }];
 
@@ -20,19 +22,23 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!shipmentId) throw new Response('Missing shipment id', { status: 400 });
   const cookie = getSessionCookie(request);
 
-  const res = await apiRequest<unknown>(
-    `/trpc/inventory.shipments.get?input=${encodeURIComponent(JSON.stringify({ shipmentId }))}`,
-    { method: 'GET', cookie },
-  );
-  if (!res.ok) {
-    throw new Response('Failed to load shipment', { status: safeStatus(res.status) });
-  }
-  const detail =
-    (res.data as { result?: { data?: ShipmentDetail } })?.result?.data ?? null;
-  if (!detail) {
-    throw new Response('Shipment not found', { status: 404 });
-  }
-  return { detail, shipmentId };
+  const pageData = (async () => {
+    const res = await apiRequest<unknown>(
+      `/trpc/inventory.shipments.get?input=${encodeURIComponent(JSON.stringify({ shipmentId }))}`,
+      { method: 'GET', cookie },
+    );
+    if (!res.ok) {
+      throw new Response('Failed to load shipment', { status: safeStatus(res.status) });
+    }
+    const detail =
+      (res.data as { result?: { data?: ShipmentDetail } })?.result?.data ?? null;
+    if (!detail) {
+      throw new Response('Shipment not found', { status: 404 });
+    }
+    return { detail, shipmentId };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -131,12 +137,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function ShipmentDetailRoute() {
-  const { detail, shipmentId } = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['shipment:updated', 'stock:updated']);
   return (
-    <ShipmentDetailPage
-      data={detail as ShipmentDetail}
-      actionUrl={`/admin/inventory/shipments/${shipmentId}`}
-    />
+    <Suspense fallback={<ShipmentDetailLoadingShell />}>
+      <Await resolve={pageData}>
+        {({ detail, shipmentId }) => (
+          <ShipmentDetailPage
+            data={detail as ShipmentDetail}
+            actionUrl={`/admin/inventory/shipments/${shipmentId}`}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

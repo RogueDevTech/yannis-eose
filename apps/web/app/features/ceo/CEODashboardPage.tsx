@@ -5,6 +5,7 @@ import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis,
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Spinner } from '~/components/ui/spinner';
+import { OrdersChartViewShellSkeleton } from '~/components/ui/deferred-skeletons';
 import { PageHeader } from '~/components/ui/page-header';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -73,7 +74,7 @@ export function CEODashboardPage({
 }: CEODashboardPageProps) {
   const [showChartView, setShowChartView] = useState(false);
   const [_searchParams, setSearchParams] = useSearchParams();
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const fetcher = useFetcher<ChartDataPayload>();
   const refreshFetcher = useFetcher<{
     success?: boolean;
@@ -314,10 +315,7 @@ export function CEODashboardPage({
       {showChartView && (
       <>
       {isChartLoading ? (
-        <div className="card flex flex-col items-center justify-center gap-4 py-20">
-          <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
-          <p className="text-sm font-medium text-app-fg-muted">Loading charts...</p>
-        </div>
+        <OrdersChartViewShellSkeleton />
       ) : (
       <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[24rem]">
       <div>

@@ -1,9 +1,11 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
-import { Outlet, useLoaderData } from '@remix-run/react';
+import { Outlet, useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
 import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { getCurrentUser, getSessionCookie, apiRequest } from '~/lib/api.server';
 import { TplLayout } from '~/components/layout/tpl-layout';
+import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
+import { normalizeRouteErrorData } from '~/lib/network-error';
 
 interface Notification {
   id: string;
@@ -92,5 +94,21 @@ export default function TplLayoutRoute() {
     <TplLayout user={user} notificationsPromise={notifications}>
       <Outlet />
     </TplLayout>
+  );
+}
+
+/** Same resilience UX as `/admin` and `/hr` when a child loader throws (e.g. API restart). */
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const isResponse = isRouteErrorResponse(error);
+  const status = isResponse ? error.status : 500;
+
+  return (
+    <AdminErrorBoundary
+      error={error}
+      isResponse={isResponse}
+      status={status}
+      errorData={isResponse ? normalizeRouteErrorData(error.data) : undefined}
+    />
   );
 }

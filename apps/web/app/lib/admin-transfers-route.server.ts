@@ -1,55 +1,63 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import type { Location, Transfer } from '~/features/transfers/types';
+import { parseTransfersShellDateFilters } from '~/lib/transfers-shell-filters';
 
 export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'transfers.read');
   const cookie = getSessionCookie(request);
-
-  const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
-  const locationsPromise = apiRequest<unknown>('/trpc/logistics.listLocations', { method: 'GET', cookie });
-
-  const [transfersRes, locationsRes] = await Promise.all([transfersPromise, locationsPromise]);
-
-  const transfersData = transfersRes.ok
-    ? (transfersRes.data as { result?: { data?: Transfer[] } })?.result?.data
-    : null;
-
-  const locationsRaw = locationsRes.ok
-    ? (
-        locationsRes.data as {
-          result?: {
-            data?: {
-              locations: {
-                id: string;
-                providerId: string;
-                name: string;
-                address: string;
-                status: string;
-                providerName?: string | null;
-              }[];
-            };
-          };
-        }
-      )?.result?.data?.locations ?? []
-    : [];
-  const locationsData: Location[] = locationsRaw.map((l) => ({
-    id: l.id,
-    providerId: l.providerId,
-    name: l.name,
-    address: l.address,
-    status: l.status,
-    providerName: l.providerName ?? null,
-  }));
-
-  return {
-    transfers: transfersData ?? [],
-    locations: locationsData,
-    products: null,
-    levels: null,
+  const transfersShell = {
+    filters: parseTransfersShellDateFilters(new URL(request.url).searchParams),
   };
+
+  const pageData = (async () => {
+    const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
+    const locationsPromise = apiRequest<unknown>('/trpc/logistics.listLocations', { method: 'GET', cookie });
+
+    const [transfersRes, locationsRes] = await Promise.all([transfersPromise, locationsPromise]);
+
+    const transfersData = transfersRes.ok
+      ? (transfersRes.data as { result?: { data?: Transfer[] } })?.result?.data
+      : null;
+
+    const locationsRaw = locationsRes.ok
+      ? (
+          locationsRes.data as {
+            result?: {
+              data?: {
+                locations: {
+                  id: string;
+                  providerId: string;
+                  name: string;
+                  address: string;
+                  status: string;
+                  providerName?: string | null;
+                }[];
+              };
+            };
+          }
+        )?.result?.data?.locations ?? []
+      : [];
+    const locationsData: Location[] = locationsRaw.map((l) => ({
+      id: l.id,
+      providerId: l.providerId,
+      name: l.name,
+      address: l.address,
+      status: l.status,
+      providerName: l.providerName ?? null,
+    }));
+
+    return {
+      transfers: transfersData ?? [],
+      locations: locationsData,
+      products: null,
+      levels: null,
+    };
+  })();
+
+  return defer({ transfersShell, pageData });
 }
 
 export async function transfersRouteAction({ request }: ActionFunctionArgs) {

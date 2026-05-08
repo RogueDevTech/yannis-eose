@@ -1,7 +1,7 @@
 import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { getSessionCookie, requirePermission } from '~/lib/api.server';
+import { ensureBranchScopeOrRedirect, getSessionCookie, requirePermission } from '~/lib/api.server';
 import {
   getMarketingRoleFlags,
   loadAdSpendExpenseFormData,
@@ -13,6 +13,9 @@ export const meta: MetaFunction = () => [{ title: 'Log expenses — Ads Expense 
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.adSpend');
+  // Pre-flight branch picker safety net — see ensureBranchScopeOrRedirect docs.
+  const guard = ensureBranchScopeOrRedirect(request, user, '/admin/marketing/ad-spend');
+  if (guard) return guard;
   const cookie = getSessionCookie(request);
   if (!cookie) {
     throw redirect(`/auth?redirectTo=${encodeURIComponent(new URL(request.url).pathname)}`);

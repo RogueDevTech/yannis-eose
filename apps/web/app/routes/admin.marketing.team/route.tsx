@@ -1,7 +1,9 @@
-import { useLoaderData } from '@remix-run/react';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
+import { MarketingTeamLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { FundingBalanceRow } from '~/features/marketing/types';
 import { buildLeaderboardInput, resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 
@@ -59,6 +61,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
 
+  const teamShell = { dateFilters: filters, leaderboardPeriod };
+
+  const pageData = (async () => {
   const [balancesRes, summaryRes, leaderboardRes, profitabilityRes] = await Promise.all([
     apiRequest<unknown>('/trpc/marketing.listFundingBalances', { method: 'GET', cookie }),
     apiRequest<unknown>('/trpc/marketing.fundingSummary', { method: 'GET', cookie }),
@@ -230,26 +235,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
     unfilteredCount,
     profitabilityConfig,
   };
+  })();
+
+  return defer({ teamShell, pageData });
 }
 
 export default function MarketingTeamRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { teamShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-    <MarketingTeamPage
-      teamMembers={data.teamMembers}
-      fundingSummary={data.fundingSummary}
-      dateFilters={data.dateFilters}
-      leaderboardPeriod={data.leaderboardPeriod}
-      page={data.page}
-      totalPages={data.totalPages}
-      totalCount={data.totalCount}
-      q={data.q}
-      sortBy={data.sortBy}
-      sortDir={data.sortDir}
-      unfilteredCount={data.unfilteredCount}
-      profitabilityConfig={data.profitabilityConfig}
-    />
-    </>
+    <Suspense fallback={<MarketingTeamLoadingShell dateFilters={teamShell.dateFilters} />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <MarketingTeamPage
+            teamMembers={data.teamMembers}
+            fundingSummary={data.fundingSummary}
+            dateFilters={data.dateFilters}
+            leaderboardPeriod={data.leaderboardPeriod}
+            page={data.page}
+            totalPages={data.totalPages}
+            totalCount={data.totalCount}
+            q={data.q}
+            sortBy={data.sortBy}
+            sortDir={data.sortDir}
+            unfilteredCount={data.unfilteredCount}
+            profitabilityConfig={data.profitabilityConfig}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

@@ -3,10 +3,23 @@
  * and replace only the values / chart regions until `secondary` resolves.
  */
 
+import type { CompactTableColumn } from '~/components/ui/compact-table';
+
+/** Single-line placeholder inside `CompactTable` cells (contrasts on row / card background). */
+export function TableCellTextPulse({ className = '' }: { className?: string }) {
+  return (
+    <span
+      className={`inline-block h-4 max-w-full rounded-md bg-app-border/85 dark:bg-app-border/70 animate-pulse ${className}`}
+      aria-hidden
+    />
+  );
+}
+
+/** Stat tile values sit on `bg-app-hover`; use border-toned bars so the pulse reads as text/figures. */
 export function StatValuePulse({ className = '' }: { className?: string }) {
   return (
     <span
-      className={`inline-block h-7 rounded-md bg-app-hover animate-pulse ${className}`}
+      className={`inline-block h-[1.375rem] min-h-[1.375rem] rounded-md bg-app-border/85 dark:bg-app-border/70 animate-pulse ${className}`}
       aria-hidden
     />
   );
@@ -37,4 +50,38 @@ export function OrdersChartViewShellSkeleton() {
       </div>
     </div>
   );
+}
+
+/** Build `CompactTable` columns with real headers and `TableCellTextPulse` cell bodies (loading shells). */
+export type ShellPulseColumnSpec = {
+  key: string;
+  header: string;
+  align?: 'right' | 'center';
+  pulseClassName?: string;
+};
+
+export function shellPulsePlaceholderRows(prefix: string, rowCount: number): { id: string }[] {
+  return Array.from({ length: rowCount }, (_, i) => ({ id: `__shell_${prefix}_${i}` }));
+}
+
+export function shellPulseCompactTableColumns(
+  specs: ShellPulseColumnSpec[],
+): CompactTableColumn<{ id: string }>[] {
+  return specs.map((s) => ({
+    key: s.key,
+    header: s.header,
+    align: s.align,
+    render: () =>
+      s.align === 'right' ? (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className={s.pulseClassName ?? 'w-[5.5rem]'} />
+        </span>
+      ) : s.align === 'center' ? (
+        <span className="inline-flex w-full justify-center">
+          <TableCellTextPulse className={s.pulseClassName ?? 'w-[5rem]'} />
+        </span>
+      ) : (
+        <TableCellTextPulse className={s.pulseClassName ?? 'w-[7rem]'} />
+      ),
+  }));
 }

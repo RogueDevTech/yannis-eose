@@ -1,6 +1,6 @@
 import { redirect } from '@remix-run/node';
 import { isNetworkErrorLike } from './network-error';
-import { canAccessGlobalAuditLog, isAdminLevel } from './rbac';
+import { canAccessGlobalAuditLog, isAdminLevel, isOrgWideDepartmentHead } from './rbac';
 import { canonicalPermissionCode } from './permission-codes';
 
 /**
@@ -117,6 +117,11 @@ interface ApiOptions {
   cookie?: string;
   /** Override timeout in ms when default {@link DEFAULT_READ_API_TIMEOUT_MS} / mutation budgets are too tight. */
   timeoutMs?: number;
+  /**
+   * When `false`, a single GET that fails at the TCP layer (ECONNREFUSED during API restart, etc.)
+   * will not be retried. Defaults to allowing one retry for GET only.
+   */
+  disableNetworkRetry?: boolean;
 }
 
 interface ApiResponse<T> {
@@ -160,6 +165,8 @@ export async function apiRequest<T = unknown>(
 ): Promise<ApiResponse<T>> {
   const { method = 'GET', body, cookie } = options;
   const timeoutMs = options.timeoutMs ?? defaultTimeoutForMethod(method);
+  const mUpper = (method ?? 'GET').toUpperCase();
+  const allowFetchRetry = mUpper === 'GET' && !options.disableNetworkRetry;
 
   // tRPC GET queries need ?input={} even when all fields are optional,
   // otherwise Zod receives undefined instead of an object and fails.
@@ -177,31 +184,51 @@ export async function apiRequest<T = unknown>(
     headers['Cookie'] = cookie;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const url = `${resolveServerApiBase(resolvedPath)}${resolvedPath}`;
+
+  const doFetch = async (): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
 
   let response: Response;
   try {
-    response = await fetch(`${resolveServerApiBase(resolvedPath)}${resolvedPath}`, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    });
+    response = await doFetch();
   } catch (err) {
-    clearTimeout(timeoutId);
     const isTimeout = err instanceof Error && err.name === 'AbortError';
-    return {
-      ok: false,
-      status: isTimeout ? 504 : 503,
-      data: { error: isTimeout ? 'API request timed out' : 'API unreachable' } as T,
-      setCookies: [],
-    };
-  } finally {
-    clearTimeout(timeoutId);
+    if (allowFetchRetry && !isTimeout) {
+      await new Promise((r) => setTimeout(r, 400));
+      try {
+        response = await doFetch();
+      } catch {
+        return {
+          ok: false,
+          status: 503,
+          data: { error: 'API unreachable' } as T,
+          setCookies: [],
+        };
+      }
+    } else {
+      return {
+        ok: false,
+        status: isTimeout ? 504 : 503,
+        data: { error: isTimeout ? 'API request timed out' : 'API unreachable' } as T,
+        setCookies: [],
+      };
+    }
   }
 
-  const data = await response.json().catch(() => ({})) as T;
+  const data = (await response.json().catch(() => ({}))) as T;
 
   return {
     ok: response.ok,
@@ -272,6 +299,8 @@ export async function getCurrentUser(request: Request, options?: GetCurrentUserO
       permissions?: string[];
       logisticsLocationId?: string | null;
       currentBranchId?: string | null;
+      /** All branches this user has membership in — used by `ensureBranchScopeOrRedirect` to skip the modal for single-branch heads. */
+      branchIds?: string[];
       appTheme?: string | null;
       /** Set when this session is in Mirror Mode — see CLAUDE.md "Mirror Mode". */
       mirroredBy?: { id: string; name: string; role: string } | null;
@@ -353,6 +382,7 @@ export async function requirePermission(
   permissions?: string[];
   logisticsLocationId?: string | null;
   currentBranchId?: string | null;
+  branchIds?: string[];
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
@@ -441,9 +471,11 @@ export async function requireStaffAccountsAccess(
   email: string;
   name: string;
   role: string;
+  scopeOrgWideHead?: boolean;
   permissions?: string[];
   logisticsLocationId?: string | null;
   currentBranchId?: string | null;
+  branchIds?: string[];
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
@@ -498,6 +530,59 @@ export function safeStatus(apiStatus: number): number {
   if (apiStatus === 403) return 403;
   if (apiStatus >= 400 && apiStatus < 500) return apiStatus;
   return 422;
+}
+
+/**
+ * Loader-side safety net for the pre-flight branch picker.
+ *
+ * Returns a `redirect(...)` Response when the active user is an org-wide
+ * department head (HEAD_OF_CS / HEAD_OF_MARKETING / HEAD_OF_LOGISTICS) viewing
+ * "All Branches" (currentBranchId == null) AND belongs to multiple branches.
+ * Returns `null` otherwise so the loader can proceed normally.
+ *
+ * The redirect lands on `fallbackPath` with `?branchPickerNext=<original URL>`.
+ * The shared `BranchScopeGuardProvider` watches that param on mount and
+ * auto-opens the picker modal — selecting a branch then submits to
+ * `/admin/branches/switch` with `next=<original URL>`, which redirects there.
+ *
+ * Usage in a loader:
+ * ```ts
+ * const user = await requirePermission(request, 'marketing.campaigns');
+ * const guard = ensureBranchScopeOrRedirect(request, user, '/admin/marketing/forms');
+ * if (guard) return guard;
+ * // ...rest of loader
+ * ```
+ *
+ * Pairs with the `BranchScopedLink` click handler — the link is the fast
+ * path (no flash of the doomed page); the loader guard is the safety net
+ * for deep links, bookmarks, and search-modal jumps.
+ */
+export function ensureBranchScopeOrRedirect(
+  request: Request,
+  user: {
+    role: string;
+    scopeOrgWideHead?: boolean;
+    currentBranchId?: string | null;
+    branchIds?: string[];
+  },
+  fallbackPath: string,
+): Response | null {
+  if (!isOrgWideDepartmentHead({ role: user.role, scopeOrgWideHead: user.scopeOrgWideHead })) {
+    return null;
+  }
+  if (user.currentBranchId != null) return null;
+  const branchCount = (user.branchIds ?? []).length;
+  if (branchCount <= 1) return null;
+  const url = new URL(request.url);
+  const next = url.pathname + url.search;
+  // Don't redirect-loop: if we're already AT the fallback path with the
+  // param set, just proceed (the provider will surface the modal).
+  if (url.pathname === fallbackPath && url.searchParams.get('branchPickerNext')) {
+    return null;
+  }
+  const dest = new URL(fallbackPath, url.origin);
+  dest.searchParams.set('branchPickerNext', next);
+  return redirect(dest.pathname + (dest.search ? dest.search : ''));
 }
 
 function hasNotAuthenticatedError(data: unknown): boolean {

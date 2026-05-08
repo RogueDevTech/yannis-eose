@@ -1,4 +1,4 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import {
   useLoaderData,
@@ -7,8 +7,9 @@ import {
   Link,
   useNavigate,
   useNavigation,
+  Await,
 } from '@remix-run/react';
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
 import type { Notification } from '~/features/notifications/types';
@@ -22,7 +23,8 @@ import {
   type DeliveryLogEntry,
   type DeliveryLogPagination,
 } from '~/features/notifications/panels/NotificationsDeliveryLogPanel';
-import { Spinner } from '~/components/ui/spinner';
+import { NotificationsTabPanelSkeleton } from '~/features/notifications/NotificationsLoadingShell';
+import { resolveNotificationsTab, type NotificationsTabId } from '~/features/notifications/notifications-tabs';
 
 export const meta: MetaFunction = () => [{ title: 'Notifications — Yannis EOSE' }];
 
@@ -50,28 +52,11 @@ interface FeedListResult {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
 
-const NOTIFICATIONS_TAB_IDS = ['feed', 'broadcast', 'automations', 'log'] as const;
-export type NotificationsTabId = (typeof NOTIFICATIONS_TAB_IDS)[number];
-
 const EMPTY_FEED: FeedListResult = {
   notifications: [],
   unreadCount: 0,
   pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
 };
-
-function resolveNotificationsTab(
-  requested: string | null,
-  canPushAdmin: boolean,
-): NotificationsTabId {
-  const r = requested ?? 'feed';
-  if (!NOTIFICATIONS_TAB_IDS.includes(r as NotificationsTabId)) {
-    return 'feed';
-  }
-  if ((r === 'broadcast' || r === 'automations' || r === 'log') && !canPushAdmin) {
-    return 'feed';
-  }
-  return r as NotificationsTabId;
-}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
@@ -125,51 +110,58 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }),
   );
 
-  let feed: FeedListResult = EMPTY_FEED;
-  let rules: AutomationRule[] = [];
-  let logs: DeliveryLogEntry[] = [];
-  let logPagination: DeliveryLogPagination = {
-    page: 1,
-    limit: logLimit,
-    total: 0,
-    totalPages: 0,
+  const emptyLogBundle = {
+    logs: [] as DeliveryLogEntry[],
+    logPagination: {
+      page: 1,
+      limit: logLimit,
+      total: 0,
+      totalPages: 0,
+    } satisfies DeliveryLogPagination,
   };
 
-  if (tab === 'feed' && user) {
-    const feedRes = await apiRequest<{ result?: { data?: FeedListResult } }>(
-      `/trpc/notifications.list?input=${feedInput}`,
-      { method: 'GET', cookie },
-    );
-    if (feedRes.ok && feedRes.data?.result?.data) {
-      feed = feedRes.data.result.data;
-    }
-  }
+  const feedPromise: Promise<FeedListResult> =
+    tab === 'feed' && user
+      ? apiRequest<{ result?: { data?: FeedListResult } }>(
+          `/trpc/notifications.list?input=${feedInput}`,
+          { method: 'GET', cookie },
+        ).then((feedRes) => {
+          if (feedRes.ok && feedRes.data?.result?.data) return feedRes.data.result.data;
+          return EMPTY_FEED;
+        })
+      : Promise.resolve(EMPTY_FEED);
 
-  if (tab === 'automations') {
-    const rulesRes = await apiRequest<{ result?: { data?: AutomationRule[] } }>(
-      '/trpc/notifications.getAutomationRules',
-      { method: 'GET', cookie },
-    );
-    rules = rulesRes.ok ? (rulesRes.data?.result?.data ?? []) : [];
-  }
+  const rulesPromise: Promise<AutomationRule[]> =
+    tab === 'automations'
+      ? apiRequest<{ result?: { data?: AutomationRule[] } }>(
+          '/trpc/notifications.getAutomationRules',
+          { method: 'GET', cookie },
+        ).then((rulesRes) => (rulesRes.ok ? (rulesRes.data?.result?.data ?? []) : []))
+      : Promise.resolve([]);
 
-  if (tab === 'log') {
-    const logRes = await apiRequest<{
-      result?: { data?: { logs: DeliveryLogEntry[]; pagination: DeliveryLogPagination } };
-    }>(`/trpc/notifications.getPushDeliveryLog?input=${logInput}`, { method: 'GET', cookie });
-    if (logRes.ok && logRes.data?.result?.data) {
-      logs = logRes.data.result.data.logs;
-      logPagination = logRes.data.result.data.pagination;
-    }
-  }
+  const logBundlePromise: Promise<{ logs: DeliveryLogEntry[]; logPagination: DeliveryLogPagination }> =
+    tab === 'log'
+      ? apiRequest<{
+          result?: { data?: { logs: DeliveryLogEntry[]; pagination: DeliveryLogPagination } };
+        }>(`/trpc/notifications.getPushDeliveryLog?input=${logInput}`, { method: 'GET', cookie }).then(
+          (logRes) => {
+            if (logRes.ok && logRes.data?.result?.data) {
+              return {
+                logs: logRes.data.result.data.logs,
+                logPagination: logRes.data.result.data.pagination,
+              };
+            }
+            return emptyLogBundle;
+          },
+        )
+      : Promise.resolve(emptyLogBundle);
 
-  return json({
-    user,
-    tab,
-    feed,
-    rules,
-    logs,
-    logPagination,
+  return defer({
+    notificationsShell: { user, tab },
+    pageData: (async () => {
+      const [feed, rules, logBundle] = await Promise.all([feedPromise, rulesPromise, logBundlePromise]);
+      return { feed, rules, logBundle };
+    })(),
   });
 }
 
@@ -379,19 +371,6 @@ function resolveDisplayNotificationsTab(
   return resolveNotificationsTab(pending, canPushAdmin);
 }
 
-function NotificationsTabPanelSkeleton() {
-  return (
-    <div
-      className="flex min-h-[240px] flex-col items-center justify-center gap-3 rounded-xl border border-app-border bg-app-surface/40 px-4"
-      role="status"
-      aria-live="polite"
-    >
-      <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
-      <p className="text-sm text-app-fg-muted">Loading…</p>
-    </div>
-  );
-}
-
 const LEGACY_HASH_TO_TAB: Record<string, NotificationsTabId> = {
   'notifications-feed': 'feed',
   'notifications-broadcast': 'broadcast',
@@ -400,29 +379,24 @@ const LEGACY_HASH_TO_TAB: Record<string, NotificationsTabId> = {
 };
 
 export default function AdminNotificationsRoute() {
-  // The loader's `intent=searchUsers` early-return is consumed only by useFetcher
-  // (broadcast "One user" picker), never on the page render path. Narrow to the
-  // main tab shape so destructuring `data.tab`, `data.feed`, etc. typechecks.
   const rawData = useLoaderData<typeof loader>();
-  const data = rawData as Exclude<typeof rawData, { users: unknown }>;
+  if ('users' in rawData) return null;
+
+  const { notificationsShell, pageData } = rawData;
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const unreadOnly = searchParams.get('unreadOnly') === 'true';
 
-  const role = data.user?.role ?? '';
+  const role = notificationsShell.user?.role ?? '';
   const canPushAdmin = PUSH_AND_AUTOMATION_ROLES.has(role);
   const displayTab = resolveDisplayNotificationsTab(
     navigation.state,
     navigation.location,
-    data.tab,
+    notificationsShell.tab,
     canPushAdmin,
   );
-  const isPendingTabShell =
-    navigation.state === 'loading' &&
-    navigation.formMethod !== 'POST' &&
-    displayTab !== data.tab;
 
   useEffect(() => {
     if (searchParams.get('tab')) return;
@@ -487,43 +461,43 @@ export default function AdminNotificationsRoute() {
         </nav>
       </div>
 
-      <div aria-busy={isPendingTabShell}>
-        {isPendingTabShell ? (
-          <NotificationsTabPanelSkeleton key={displayTab} />
-        ) : (
-          <>
-            {displayTab === 'feed' && (
-              <div className="space-y-4">
-                <NotificationsPage
-                  notifications={data.feed.notifications as Notification[]}
-                  unreadCount={data.feed.unreadCount}
-                  pagination={data.feed.pagination}
-                  unreadOnlyFilter={unreadOnly}
-                  listRouteSearch={{ tab: 'feed' }}
-                  embeddedInTabs
+      <Suspense fallback={<NotificationsTabPanelSkeleton />}>
+        <Await resolve={pageData}>
+          {({ feed, rules, logBundle }) => (
+            <div>
+              {displayTab === 'feed' && (
+                <div className="space-y-4">
+                  <NotificationsPage
+                    notifications={feed.notifications as Notification[]}
+                    unreadCount={feed.unreadCount}
+                    pagination={feed.pagination}
+                    unreadOnlyFilter={unreadOnly}
+                    listRouteSearch={{ tab: 'feed' }}
+                    embeddedInTabs
+                  />
+                </div>
+              )}
+
+              {displayTab === 'broadcast' && canPushAdmin && notificationsShell.user && (
+                <NotificationsBroadcastPanel actorRole={notificationsShell.user.role ?? ''} />
+              )}
+
+              {displayTab === 'automations' && canPushAdmin && (
+                <NotificationsAutomationsPanel rules={rules} />
+              )}
+
+              {displayTab === 'log' && (
+                <NotificationsDeliveryLogPanel
+                  logs={logBundle.logs}
+                  pagination={logBundle.logPagination}
+                  searchParams={searchParams}
+                  setSearchParams={setSearchParams}
                 />
-              </div>
-            )}
-
-            {displayTab === 'broadcast' && canPushAdmin && data.user && (
-              <NotificationsBroadcastPanel actorRole={data.user.role ?? ''} />
-            )}
-
-            {displayTab === 'automations' && canPushAdmin && (
-              <NotificationsAutomationsPanel rules={data.rules} />
-            )}
-
-            {displayTab === 'log' && (
-              <NotificationsDeliveryLogPanel
-                logs={data.logs}
-                pagination={data.logPagination}
-                searchParams={searchParams}
-                setSearchParams={setSearchParams}
-              />
-            )}
-          </>
-        )}
-      </div>
+              )}
+            </div>
+          )}
+        </Await>
+      </Suspense>
     </div>
   );
 }

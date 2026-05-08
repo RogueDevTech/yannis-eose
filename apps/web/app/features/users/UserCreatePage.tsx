@@ -24,6 +24,7 @@ import { PermissionMatrix } from './PermissionMatrix';
 
 // HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
 import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
+import { isRoleProbationEligible } from '@yannis/shared';
 
 const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
 
@@ -727,6 +728,33 @@ export function UserCreatePage({
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Section 2.5: Probation (create mode, eligible roles only) */}
+        {!isEditMode && selectedRole && isRoleProbationEligible(selectedRole) && (
+          <div className="card space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-app-fg">Probation</h2>
+              <p className="text-xs text-app-fg-muted mt-1">
+                Optional. Probation users carry every permission of their role but can be
+                terminated with a complete PII scrub if they don't meet expectations. Admin tier
+                roles cannot be on probation.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Checkbox name="isProbation" value="true" />
+              <span className="text-sm text-app-fg">Place this user on probation</span>
+            </label>
+            <TextInput
+              id="probationUntil"
+              name="probationUntil"
+              type="date"
+              label="Review date (optional)"
+              defaultValue={new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}
+              hint="Default is 90 days from today. HR will get a 7-day reminder before this date."
+              wrapperClassName="w-full sm:w-64"
+            />
           </div>
         )}
 

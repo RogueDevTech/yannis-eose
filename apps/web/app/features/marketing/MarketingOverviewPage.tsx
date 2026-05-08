@@ -624,14 +624,14 @@ export function MarketingOverviewPage({
           </div>
         ) : (
           (() => {
-            const totalPages = liveOrdersTotalPages;
-            const page = Math.min(liveOrdersPage, totalPages);
-            const start = (page - 1) * pageSize;
-            const rows = localOrders.slice(start, start + pageSize);
+            // Single horizontal-scroll strip — matches the CS Unassigned Queue layout.
+            // Cap at 50 cards client-side to keep the DOM bounded on busy days; users
+            // who want more click "View all" to land on the full table.
+            const rows = localOrders.slice(0, 50);
             return (
               <>
-                {/* Card grid — same density as the CS Live Activities cards. */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {/* Horizontal-scroll strip — same density as the CS Unassigned Queue. */}
+                <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
                   {rows.map((order) => {
                     const isHighlighted = highlightedIds.has(order.id);
                     const statusBadge = STATUS_COLORS[order.status] ?? 'badge';
@@ -641,7 +641,7 @@ export function MarketingOverviewPage({
                         to={`/admin/orders/${order.id}`}
                         prefetch="intent"
                         className={`
-                          group relative block rounded-xl border transition-all duration-200 cursor-pointer
+                          group relative shrink-0 w-64 block rounded-xl border transition-all duration-200 cursor-pointer
                           ${isHighlighted
                             ? 'animate-slide-in-up border-success-400 dark:border-success-500 bg-gradient-to-br from-success-50 to-white dark:from-success-900/20 dark:to-surface-800 shadow-md'
                             : 'bg-app-elevated border-app-border hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
@@ -724,20 +724,12 @@ export function MarketingOverviewPage({
                   })}
                 </div>
 
-                {/* Pagination footer */}
-                <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-app-border">
-                  <span className="text-xs text-app-fg-muted">
-                    {start + 1}–{Math.min(start + pageSize, localOrders.length)} of {localOrders.length} orders
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button type="button" variant="secondary" size="sm" disabled={page <= 1} onClick={() => setLiveOrdersPage((p) => Math.max(1, p - 1))}>
-                      ← Newer
-                    </Button>
-                    <Button type="button" variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setLiveOrdersPage((p) => Math.min(totalPages, p + 1))}>
-                      Older →
-                    </Button>
-                  </div>
-                </div>
+                {localOrders.length > rows.length ? (
+                  <p className="text-[11px] text-app-fg-muted mt-2">
+                    Showing the {rows.length} most recent · {localOrders.length - rows.length} more in the full
+                    table.
+                  </p>
+                ) : null}
               </>
             );
           })()

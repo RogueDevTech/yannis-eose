@@ -120,6 +120,12 @@ export const createStaffSchema = z.object({
     /^(?:0[789]\d{9}|\+234[789]\d{9})$/,
     'Enter a valid Nigerian phone number (e.g. 08031234567 or +2348031234567)',
   ),
+
+  // Probation — when true, the user is created on probation. Default review window is
+  // 90 days unless `probationUntil` is provided. Server-side eligibility check rejects
+  // ADMIN / SUPER_ADMIN. CEO directive 2026-05-08.
+  isProbation: z.boolean().optional(),
+  probationUntil: z.coerce.date().optional(),
 }).superRefine((data, ctx) => {
   // Every non-SuperAdmin user must have at least one branch and a primary branch.
   if (data.role !== 'SUPER_ADMIN' && (!data.branchIds || data.branchIds.length === 0)) {
@@ -238,3 +244,54 @@ export const processEmailChangeSchema = z.object({
 });
 
 export type ProcessEmailChangeInput = z.infer<typeof processEmailChangeSchema>;
+
+// ============================================
+// Probation — set / extend / mark permanent / terminate
+// ============================================
+
+/**
+ * Roles INELIGIBLE for the probation flag. Admin-tier accounts cannot be put on probation
+ * (the CEO's call — placing someone with a deletion window in charge of admin-class
+ * authority is too risky). Service layer + UI both check this list.
+ */
+export const PROBATION_INELIGIBLE_ROLES = ['SUPER_ADMIN', 'ADMIN'] as const;
+
+export function isRoleProbationEligible(role: string): boolean {
+  return !PROBATION_INELIGIBLE_ROLES.includes(role as never);
+}
+
+/** Default probation window when HR doesn't pick a custom date. */
+export const DEFAULT_PROBATION_DAYS = 90;
+
+export function defaultProbationUntilFromNow(now: Date = new Date()): Date {
+  const date = new Date(now);
+  date.setDate(date.getDate() + DEFAULT_PROBATION_DAYS);
+  return date;
+}
+
+export const setProbationSchema = z.object({
+  userId: z.string().uuid(),
+  /** Optional explicit review date; defaults to now + 90 days. */
+  probationUntil: z.coerce.date().optional(),
+});
+export type SetProbationInput = z.infer<typeof setProbationSchema>;
+
+export const extendProbationSchema = z.object({
+  userId: z.string().uuid(),
+  probationUntil: z.coerce.date(),
+});
+export type ExtendProbationInput = z.infer<typeof extendProbationSchema>;
+
+export const markProbationPermanentSchema = z.object({
+  userId: z.string().uuid(),
+});
+export type MarkProbationPermanentInput = z.infer<typeof markProbationPermanentSchema>;
+
+export const terminateProbationSchema = z.object({
+  userId: z.string().uuid(),
+  /** Free-form reason — stored on the permanent `probation_terminations` row. */
+  reason: z.string().min(10, 'Reason must be at least 10 characters').max(500),
+  /** HR types the user's name to confirm — server compares case-insensitively. */
+  confirmName: z.string().min(1),
+});
+export type TerminateProbationInput = z.infer<typeof terminateProbationSchema>;

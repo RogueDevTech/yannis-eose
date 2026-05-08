@@ -15,7 +15,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type { PayrollBatch, PayrollBatchStatus, PayrollDepartment } from '~/features/hr/types';
 
-interface BatchDetail {
+export interface BatchDetail {
   batch: PayrollBatch;
   payouts: Array<{
     id: string;
@@ -59,7 +59,7 @@ const PAGE_SIZE = 20;
 export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePayoutPageProps) {
   const [, setSearchParams] = useSearchParams();
   const [showExportModal, setShowExportModal] = useState(false);
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [page, setPage] = useState(1);
 
   // Reset to page 1 whenever the result set changes (status tab switch, refetch).

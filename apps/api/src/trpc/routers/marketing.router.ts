@@ -18,6 +18,7 @@ import {
   rejectAdSpendSchema,
   updateAdSpendSchema,
   previewAdSpendIntervalSchema,
+  campaignOrderTotalForBatchSchema,
   createOfferTemplateSchema,
   updateOfferTemplateSchema,
   listOfferTemplatesSchema,
@@ -36,6 +37,8 @@ import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService } from './branches.router';
+import { isAdminLevel } from '../../common/authz';
+import type { SessionUser } from '../../common/decorators/current-user.decorator';
 
 let marketingServiceInstance: MarketingService | null = null;
 
@@ -48,6 +51,36 @@ function getMarketingService(): MarketingService {
     throw new Error('MarketingService not initialized. Call setMarketingService() first.');
   }
   return marketingServiceInstance;
+}
+
+/**
+ * Phase B: when a non-admin / non-org-wide caller is a Marketing supervisor on
+ * the active branch, scope ad spend list/count queries to their supervised MBs
+ * (their own id is always included). Skips when the caller already pins a
+ * specific `mediaBuyerId` (e.g. a MEDIA_BUYER seeing their own).
+ */
+async function applyMarketingSupervisorScope<
+  T extends { mediaBuyerId?: string; mediaBuyerIds?: string[] },
+>(
+  ctx: { user: SessionUser; currentBranchId: string | null },
+  input: T,
+): Promise<T> {
+  const branchId = ctx.currentBranchId;
+  if (!branchId) return input;
+  if (input.mediaBuyerId) return input;
+  if (input.mediaBuyerIds) return input;
+  const perms = ctx.user.permissions ?? [];
+  if (perms.includes('marketing.scope.global')) return input;
+  if (isAdminLevel(ctx.user)) return input;
+  const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
+  // Only act when the user is a supervisor on a Marketing team. Pure CS
+  // supervisors don't see the ad spend page — skip.
+  const marketingIdsExcludingSelf = scope.marketingUserIds.filter((id) => id !== ctx.user.id);
+  if (marketingIdsExcludingSelf.length === 0) return input;
+  return {
+    ...input,
+    mediaBuyerIds: scope.marketingUserIds,
+  };
 }
 
 export const marketingRouter = router({
@@ -327,9 +360,10 @@ export const marketingRouter = router({
     .input(listAdSpendSchema)
     .query(async ({ input, ctx }) => {
       // Media Buyers may only see their own ad spend
-      const effectiveInput = ctx.user.role === 'MEDIA_BUYER'
+      let effectiveInput = ctx.user.role === 'MEDIA_BUYER'
         ? { ...input, mediaBuyerId: ctx.user.id }
         : input;
+      effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
       return getMarketingService().listAdSpend(effectiveInput, ctx.currentBranchId);
     }),
 
@@ -341,16 +375,18 @@ export const marketingRouter = router({
   listAdSpendGrouped: authedProcedure
     .input(listAdSpendGroupedSchema)
     .query(async ({ input, ctx }) => {
-      const effectiveInput =
+      let effectiveInput =
         ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
+      effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
       return getMarketingService().listAdSpendGrouped(effectiveInput, ctx.currentBranchId);
     }),
 
   adSpendStatusCounts: authedProcedure
     .input(adSpendStatusCountsSchema)
     .query(async ({ input, ctx }) => {
-      const effectiveInput =
+      let effectiveInput =
         ctx.user.role === 'MEDIA_BUYER' ? { ...input, mediaBuyerId: ctx.user.id } : input;
+      effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
       return getMarketingService().adSpendStatusCounts(effectiveInput, ctx.currentBranchId);
     }),
 
@@ -359,6 +395,21 @@ export const marketingRouter = router({
     .input(previewAdSpendIntervalSchema)
     .query(async ({ input, ctx }) => {
       return getMarketingService().previewAdSpendInterval(input, ctx.user.id, ctx.currentBranchId);
+    }),
+
+  /**
+   * Campaign-level order total for the Add Expense modal split UX
+   * (CEO directive 2026-05-08). Returns the form's order count the MB
+   * must split across their batch lines.
+   */
+  campaignOrderTotalForBatch: permissionProcedure('marketing.adSpend')
+    .input(campaignOrderTotalForBatchSchema)
+    .query(async ({ input, ctx }) => {
+      return getMarketingService().getCampaignOrderTotalForBatch(
+        input,
+        ctx.user.id,
+        ctx.currentBranchId,
+      );
     }),
 
   /** Phase 20: gated by `marketing.adSpend.approve` (HoM + Admin templates). */

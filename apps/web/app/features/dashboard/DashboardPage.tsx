@@ -1,10 +1,12 @@
 import { Link } from '@remix-run/react';
+import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
+import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
 import { isAdminLevel } from '~/lib/rbac';
 import {
@@ -709,7 +711,7 @@ function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] })
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-app-fg truncate">{order.customerName}</p>
                 <p className="text-sm text-app-fg-muted">
-                  {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  {formatOrderTimestampShort(order.createdAt)}
                 </p>
               </div>
               <div className="flex items-center gap-3 ml-3">
@@ -737,9 +739,13 @@ function QuickActionsCard({ role, unprocessed }: { role: string; unprocessed: nu
       <h2 className="text-lg font-semibold text-app-fg mb-4">Quick Actions</h2>
       <div className="space-y-2">
         {actions.map((action) => (
-          <Link
+          // Drop-in BranchScopedLink — for admin-class users (the only role that
+          // currently lands `Add Staff` here) the modal never fires, but if a
+          // future quick action targets a branch-scoped route this guards it.
+          <BranchScopedLink
             key={action.href}
             to={action.href}
+            actionLabel={action.label.toLowerCase()}
             prefetch="intent"
             className="flex items-center gap-3 p-3 rounded-lg hover:bg-app-hover/50 transition-colors"
           >
@@ -750,7 +756,7 @@ function QuickActionsCard({ role, unprocessed }: { role: string; unprocessed: nu
               <p className="text-sm font-medium text-app-fg">{action.label}</p>
               <p className="text-sm text-app-fg-muted">{action.description}</p>
             </div>
-          </Link>
+          </BranchScopedLink>
         ))}
       </div>
     </div>

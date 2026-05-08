@@ -143,7 +143,7 @@ export function DeliveryRemittancesPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigation = useNavigation();
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const { totalPages, page, pageSize } = pagination;
   const {
     totalPages: eligibleTotalPages,

@@ -1,4 +1,4 @@
-import { boolean, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
+import { boolean, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { branchTeamDepartmentEnum } from './enums';
 import { uuidv7Pk, timestampColumns } from './helpers';
 import { branches } from './branches';
@@ -31,5 +31,29 @@ export const branchTeamMembers = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.teamId, t.userId] }),
+  }),
+);
+
+/**
+ * branch_team_settings — per-team key/value overrides (Phase C).
+ * Resolution order at read time (SettingsService.getEffectiveTeamSetting):
+ *   1. enforced system value (system_settings.value where is_enforced = true)
+ *   2. team override (this row)
+ *   3. system default (system_settings.value where is_enforced = false)
+ */
+export const branchTeamSettings = pgTable(
+  'branch_team_settings',
+  {
+    id: uuidv7Pk(),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => branchTeams.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    value: jsonb('value').notNull().$type<Record<string, unknown>>(),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    ...timestampColumns,
+  },
+  (t) => ({
+    teamKeyUnique: uniqueIndex('branch_team_settings_team_key_unique').on(t.teamId, t.key),
   }),
 );

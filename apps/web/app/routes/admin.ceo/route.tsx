@@ -1,6 +1,7 @@
+import { Suspense } from 'react';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
-import { json } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { defer, json } from '@remix-run/node';
+import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   getCurrentUser,
@@ -14,6 +15,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
 import type { CEODashboardData } from '~/features/ceo/types';
+import { CEODashboardSkeleton } from '~/features/ceo/CEODashboardSkeleton';
 
 interface BranchBreakdownRow {
   branchId: string;
@@ -48,36 +50,55 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
   const input = JSON.stringify({ startDate, endDate });
-  const [res, branchBreakdownRes] = await Promise.all([
-    apiRequest<{ result?: { data?: CEODashboardData } }>(
-      `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(input)}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<{ result?: { data?: BranchBreakdownRow[] } }>(
-      `/trpc/dashboard.ceoBranchBreakdown?input=${encodeURIComponent(input)}`,
-      { method: 'GET', cookie },
-    ),
-  ]);
 
-  const data: CEODashboardData = res.ok && res.data?.result?.data
-    ? res.data.result.data
-    : {
-        revenue: 0,
-        trueProfit: 0,
-        margin: 0,
-        costBreakdown: { landedCost: 0, deliveryFee: 0, adSpend: 0, commission: 0, fulfillmentCost: 0, operationalLoss: 0 },
-        orderPipeline: { total: 0, active: 0, delivered: 0, cancelled: 0, returned: 0, statusCounts: {} },
-        marketing: { totalSpend: 0, cpa: 0, roas: 0, deliveryRate: 0 },
-        csTeam: { agentCount: 0, pendingOrders: 0, utilization: 0 },
-        payroll: { totalPaid: 0, totalPending: 0, staffCount: 0 },
-        invoiceSummary: {},
-      };
+  const pageData = (async (): Promise<{
+    data: CEODashboardData;
+    branchBreakdown: BranchBreakdownRow[];
+  }> => {
+    const [res, branchBreakdownRes] = await Promise.all([
+      apiRequest<{ result?: { data?: CEODashboardData } }>(
+        `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(input)}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<{ result?: { data?: BranchBreakdownRow[] } }>(
+        `/trpc/dashboard.ceoBranchBreakdown?input=${encodeURIComponent(input)}`,
+        { method: 'GET', cookie },
+      ),
+    ]);
 
-  const branchBreakdown: BranchBreakdownRow[] = branchBreakdownRes.ok
-    ? (branchBreakdownRes.data?.result?.data ?? [])
-    : [];
+    const data: CEODashboardData =
+      res.ok && res.data?.result?.data
+        ? res.data.result.data
+        : {
+            revenue: 0,
+            trueProfit: 0,
+            margin: 0,
+            costBreakdown: {
+              landedCost: 0,
+              deliveryFee: 0,
+              adSpend: 0,
+              commission: 0,
+              fulfillmentCost: 0,
+              operationalLoss: 0,
+            },
+            orderPipeline: { total: 0, active: 0, delivered: 0, cancelled: 0, returned: 0, statusCounts: {} },
+            marketing: { totalSpend: 0, cpa: 0, roas: 0, deliveryRate: 0 },
+            csTeam: { agentCount: 0, pendingOrders: 0, utilization: 0 },
+            payroll: { totalPaid: 0, totalPending: 0, staffCount: 0 },
+            invoiceSummary: {},
+          };
 
-  return { data, filters, branchBreakdown, canViewAuditLink };
+    const branchBreakdown: BranchBreakdownRow[] = branchBreakdownRes.ok
+      ? (branchBreakdownRes.data?.result?.data ?? [])
+      : [];
+
+    return { data, branchBreakdown };
+  })();
+
+  return defer({
+    ceoShell: { filters, canViewAuditLink },
+    pageData,
+  });
 }
 
 /**
@@ -92,10 +113,9 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'refreshExecutiveData') {
-    const res = await apiRequest<{ result?: { data?: { success: boolean; refreshedAt: string; durationMs: number; failedViews: string[] } } }>(
-      '/trpc/dashboard.refreshExecutiveData',
-      { method: 'POST', cookie, body: {} },
-    );
+    const res = await apiRequest<{
+      result?: { data?: { success: boolean; refreshedAt: string; durationMs: number; failedViews: string[] } };
+    }>('/trpc/dashboard.refreshExecutiveData', { method: 'POST', cookie, body: {} });
     if (!res.ok) {
       return json(
         { success: false, error: extractApiErrorMessage(res.data, 'Failed to refresh executive data') },
@@ -115,16 +135,22 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CEODashboardRoute() {
-  const { data, filters, branchBreakdown, canViewAuditLink } = useLoaderData<typeof loader>();
+  const { ceoShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   return (
-    <CEODashboardPage
-      data={data as CEODashboardData}
-      filters={filters}
-      branchBreakdown={branchBreakdown as BranchBreakdownRow[]}
-      showBackToDashboard
-      canViewAuditLink={canViewAuditLink}
-    />
+    <Suspense fallback={<CEODashboardSkeleton />}>
+      <Await resolve={pageData}>
+        {(p) => (
+          <CEODashboardPage
+            data={p.data as CEODashboardData}
+            filters={ceoShell.filters}
+            branchBreakdown={p.branchBreakdown as BranchBreakdownRow[]}
+            showBackToDashboard
+            canViewAuditLink={ceoShell.canViewAuditLink}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

@@ -40,6 +40,8 @@ interface HeaderProps {
   onPruneServerKnown?: (serverIds: Set<string>) => void;
   onClearRealtimeNotifications?: () => void;
   branches?: BranchInfo[];
+  /** False while admin layout streams branch list — desktop switcher shows a skeleton. */
+  branchesHydrationReady?: boolean;
   currentBranchId?: string | null;
   /**
    * When set, the header renders an "Exit Mirror" pill that posts to /auth/mirror/stop.
@@ -103,6 +105,7 @@ export function Header({
   onPruneServerKnown,
   onClearRealtimeNotifications,
   branches,
+  branchesHydrationReady = true,
   currentBranchId,
   mirroredBy,
 }: HeaderProps) {
@@ -251,7 +254,13 @@ export function Header({
 
       {/* Branch + actions: single row with even gaps (avoids justify-between wedge between branch and bell). */}
       <div className="flex items-center gap-2 lg:gap-3 ml-auto min-w-0">
-        {branches && branches.length > 0 && (
+        {!branchesHydrationReady && (
+          <div
+            className="hidden lg:flex items-center shrink-0 h-9 w-[min(12rem,28vw)] rounded-md bg-app-hover animate-pulse"
+            aria-hidden
+          />
+        )}
+        {branchesHydrationReady && branches && branches.length > 0 && (
           <div className="hidden lg:flex items-center shrink-0">
             <HeaderBranchSwitcher
               branches={branches}

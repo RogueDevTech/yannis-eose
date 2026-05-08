@@ -51,6 +51,11 @@ export const CONFIGURABLE_EMAIL_TYPES = [
   'delivery_remittance:received',
   'account:updated',
   'account:security',
+  'account:probation_assigned',
+  'account:probation_extended',
+  'account:probation_passed',
+  'account:probation_review_due',
+  'account:probation_terminated',
   'approval:permission_request',
 ] as const;
 
@@ -350,6 +355,41 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
     mandatory: false,
     category: 'approvals',
   },
+  'account:probation_assigned': {
+    type: 'account:probation_assigned',
+    label: 'Probation assigned',
+    description: 'User — placed on probation; review window is set',
+    mandatory: false,
+    category: 'account',
+  },
+  'account:probation_extended': {
+    type: 'account:probation_extended',
+    label: 'Probation extended',
+    description: 'User — probation review date was moved',
+    mandatory: false,
+    category: 'account',
+  },
+  'account:probation_passed': {
+    type: 'account:probation_passed',
+    label: 'Probation passed',
+    description: 'User — probation cleared; you are now a permanent staff member',
+    mandatory: false,
+    category: 'account',
+  },
+  'account:probation_review_due': {
+    type: 'account:probation_review_due',
+    label: 'Probation review due',
+    description: 'HR — a probation review window is approaching for one of your staff',
+    mandatory: false,
+    category: 'hr',
+  },
+  'account:probation_terminated': {
+    type: 'account:probation_terminated',
+    label: 'Probation terminated',
+    description: 'HR / SuperAdmin — a probation user was terminated; their PII has been scrubbed',
+    mandatory: false,
+    category: 'hr',
+  },
 };
 
 /**
@@ -370,6 +410,9 @@ export const NOTIFICATION_TYPE_META: Record<NotificationType, NotificationTypeMe
 const COMMON_ACCOUNT_TYPES: NotificationType[] = [
   'account:updated',
   'account:security',
+  'account:probation_assigned',
+  'account:probation_extended',
+  'account:probation_passed',
 ];
 
 const ALL_CONFIGURABLE: NotificationType[] = [...CONFIGURABLE_EMAIL_TYPES];
@@ -481,6 +524,8 @@ export const RELEVANT_NOTIFICATION_TYPES_BY_ROLE: Record<string, NotificationTyp
     'hr:batch_rejected',
     'hr:batch_paid',
     'approval:permission_request',
+    'account:probation_review_due',
+    'account:probation_terminated',
     ...COMMON_ACCOUNT_TYPES,
   ],
 };

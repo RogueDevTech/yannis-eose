@@ -77,7 +77,7 @@ function isPendingTransfer(r: TransferConfirmationRecord): boolean {
 export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
   const fetcherSurface = useFetcherActionSurface(fetcher);
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [quantityReceived, setQuantityReceived] = useState<Record<string, string>>({});

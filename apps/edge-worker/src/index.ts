@@ -102,6 +102,12 @@ interface CartSavePayload {
   mediaBuyerId?: string;
   customerName: string;
   customerPhoneHash: string;
+  /**
+   * Raw phone — set by the form so CS can reveal-to-call dropped-off
+   * customers (CEO directive 2026-05-08). Never echoed back to the browser;
+   * the API stores it for the same audited reveal flow as orders.
+   */
+  customerPhone: string;
   productId: string;
   offerLabel?: string;
 }
@@ -193,7 +199,7 @@ const RATE_LIMIT_WINDOW_SECONDS = 300; // 5 minutes
 const RATE_LIMIT_MAX_REQUESTS = 5;
 const RATE_LIMIT_CAPTCHA_THRESHOLD = 3; // After 3 submissions, require CAPTCHA
 const DEDUP_WINDOW_SECONDS = 21600; // 6 hours
-const CIRCUIT_BREAKER_TIMEOUT_MS = 10000; // 10s production
+const CIRCUIT_BREAKER_TIMEOUT_MS = 20000; // 20s production (slow API/cold start still completes; short timeout caused false "busy" after successful creates)
 const CIRCUIT_BREAKER_TIMEOUT_LOCAL_MS = 30000; // 30s for localhost (cold starts, slow DB)
 const VIRTUAL_BUFFER_PCT = 0.10; // 10% stock buffer
 
@@ -552,7 +558,11 @@ async function forwardToApi(
       isTimeout ? '[edge] orders.create timed out (increase getApiTimeoutMs or check API)' : '[edge] orders.create unreachable:',
       err,
     );
-    return { ok: false, status: 503, data: { error: 'API unreachable' } };
+    return {
+      ok: false,
+      status: 503,
+      data: { error: 'API unreachable', timedOut: isTimeout },
+    };
   }
 }
 
@@ -1141,6 +1151,16 @@ function getFormScript(
 
         submitOrder(orderData).then(function(result) {
           if (result.ok) {
+            // Edge gave up waiting for the API (timeout) but the order may already exist — avoid scary error + repeat submits.
+            if (result.data.pendingConfirmation) {
+              btn.disabled = true;
+              btn.textContent = 'Submitted';
+              msg.className = 'msg msg-info';
+              msg.textContent =
+                result.data.message ||
+                'Your order may still be processing. Please do not submit again while you wait.';
+              return;
+            }
             var authUrl = result.data.authorizationUrl;
             // Already-submitted (dedup hit OR cross-funnel attempt): never redirect to the
             // funnel's thank-you page — that masks the duplicate as a fresh success and is
@@ -1194,10 +1214,9 @@ function getFormScript(
             msg.textContent = 'Network error. Please try again.';
           });
         }).finally(function() {
-          // Don't re-enable when we deliberately locked the form (e.g. alreadySubmitted
-          // dedup hit). The handler that sets that state has already stamped the button
-          // text — leave it alone so the user sees they can't resubmit.
-          if (btn.textContent !== 'Already submitted') {
+          // Don't re-enable when we deliberately locked the form (e.g. alreadySubmitted,
+          // pendingConfirmation after API timeout). Leave button text as stamped.
+          if (btn.textContent !== 'Already submitted' && btn.textContent !== 'Submitted') {
             btn.disabled = false;
             btn.textContent = form.dataset.btnText || 'Submit Order';
           }
@@ -1404,8 +1423,20 @@ function renderCustomFields(
           <input id="${id}" name="${id}" type="email" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="email" ${required} ${placeholder}>
           ${helpHtml}`;
       case 'phone':
+        // Digit-only phone input (CEO directive 2026-05-08): browsers must
+        // surface the numeric keypad on mobile (`type="tel" inputmode="numeric"`),
+        // reject letters at the keystroke level (`oninput` strip), and pattern-match
+        // on submit. Allow `+`, spaces, dashes, and parentheses for formatting; the
+        // server-side validator strips them again before stashing the value.
         return `${labelHtml}
-          <input id="${id}" name="${id}" type="tel" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}>
+          <input id="${id}" name="${id}" type="tel" inputmode="numeric"
+            autocomplete="tel"
+            data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}
+            ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
+            ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}
+            pattern="[0-9+\\-\\s()]*"
+            title="Numbers only"
+            oninput="this.value = this.value.replace(/[^0-9+\\-\\s()]/g, '')">
           ${helpHtml}`;
       case 'number':
         return `${labelHtml}
@@ -1812,6 +1843,7 @@ async function handleCart(request: Request, env: Env): Promise<Response> {
     mediaBuyerId: data.mediaBuyerId,
     customerName: data.customerName,
     customerPhoneHash: phoneHash,
+    customerPhone: data.customerPhone,
     productId: data.productId,
     offerLabel: data.offerLabel,
   };
@@ -2000,7 +2032,18 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
       });
     }
 
-    // QStash also failed — last resort: return a friendly message
+    // QStash also failed — last resort.
+    // If we aborted waiting for the API, the request may still have completed server-side
+    // (common cause of "order exists in CS but form shows an error").
+    const timedOut = (apiResult.data as { timedOut?: boolean })?.timedOut === true;
+    if (timedOut && !isPayOnline) {
+      return corsResponse({
+        success: true,
+        message:
+          'Your order may still be processing. Please do not submit again while you wait. If you do not hear from us shortly, wait a few minutes before trying once more.',
+        pendingConfirmation: true,
+      });
+    }
     return corsResponse(
       { error: 'Our systems are temporarily busy. Please try again in a few moments.' },
       503,

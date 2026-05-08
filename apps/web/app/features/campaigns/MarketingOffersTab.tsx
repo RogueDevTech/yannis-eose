@@ -9,7 +9,6 @@ import { Modal } from '~/components/ui/modal';
 import { FormField } from '~/components/ui/form-field';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
-import { Spinner } from '~/components/ui/spinner';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { useToast } from '~/components/ui/toast';
@@ -21,6 +20,32 @@ import {
 } from '~/hooks/useOptimisticListPatches';
 import { useFetcherToast } from '~/components/ui/toast';
 import type { OfferGroupRow, Product } from './types';
+
+function OffersGridSkeleton() {
+  return (
+    <div
+      className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"
+      aria-busy="true"
+      aria-live="polite"
+    >
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <div
+          key={i}
+          className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm min-h-[180px] animate-pulse flex flex-col space-y-3"
+          aria-hidden
+        >
+          <div className="h-5 w-4/5 rounded bg-app-hover" />
+          <div className="h-3 w-1/2 rounded bg-app-hover" />
+          <div className="h-4 w-full rounded bg-app-hover" />
+          <div className="flex flex-wrap gap-2 pt-2 mt-auto">
+            <div className="h-8 w-20 rounded-lg bg-app-hover" />
+            <div className="h-8 w-24 rounded-lg bg-app-hover" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export interface MarketingOffersTabProps {
   products: Product[];
@@ -198,16 +223,11 @@ export function MarketingOffersTab({
       </div>
 
       {offersLoading ? (
-        <div
-          className="rounded-xl border border-app-border bg-app-elevated px-4 py-10 flex flex-col items-center justify-center gap-3 text-center"
-          aria-busy="true"
-          aria-live="polite"
-        >
-          <Spinner size="lg" className="text-brand-600" />
-          <p className="text-sm font-medium text-app-fg">Loading offers…</p>
-          <p className="text-xs text-app-fg-muted max-w-sm">
-            Fetching reusable offer packages for this screen. Filters above will apply once loaded.
+        <div className="space-y-3">
+          <p className="text-xs text-app-fg-muted">
+            Loading offer packages — filters above will apply once loaded.
           </p>
+          <OffersGridSkeleton />
         </div>
       ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

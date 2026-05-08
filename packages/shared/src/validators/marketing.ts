@@ -166,9 +166,14 @@ export const createAdSpendLogFormSchema = createAdSpendObjectSchema
 export type CreateAdSpendLogFormInput = z.infer<typeof createAdSpendLogFormSchema>;
 
 const adSpendBatchLineSchema = z.object({
-  campaignId: z.string().uuid(),
   productId: z.string().uuid(),
   spendAmount: z.coerce.number().min(0).multipleOf(0.01),
+  /**
+   * Manual order-split entered by the Media Buyer (CEO directive 2026-05-08).
+   * Server validates that the sum across lines equals the form-level order
+   * count the system shows for this (campaign, mediaBuyer, spendDate window).
+   */
+  attributedOrderCount: z.coerce.number().int().min(0),
   screenshotUrl: z.string().url().min(1),
   platform: adPlatformSchema.default('FACEBOOK'),
   platformCustomLabel: platformCustomLabelSchema,
@@ -177,14 +182,22 @@ const adSpendBatchLineSchema = z.object({
 
 const createAdSpendBatchObjectSchema = z.object({
   spendDate: z.string().date(),
+  /** One form (campaign) per batch — every line in `lines` belongs to it. */
+  campaignId: z.string().uuid(),
   lines: z
     .array(adSpendBatchLineSchema)
-    .min(1, 'Add at least one expense line')
+    .min(1, 'Add at least one ad')
     .max(50, 'Up to 50 lines per submission'),
 });
 
 const refineAdSpendBatchLines = (
-  data: { lines: Array<{ platform: AdPlatform; platformCustomLabel?: string | undefined }> },
+  data: {
+    lines: Array<{
+      platform: AdPlatform;
+      platformCustomLabel?: string | undefined;
+      attributedOrderCount: number;
+    }>;
+  },
   ctx: z.RefinementCtx,
 ) => {
   data.lines.forEach((line, i) => {
@@ -196,6 +209,9 @@ const refineAdSpendBatchLines = (
       });
     }
   });
+  // Sum-vs-system-total check happens in the service layer (where we can hit
+  // the DB to look up the form's actual count). This refinement only does
+  // shape-level checks that don't need the DB.
 };
 
 /**
@@ -214,6 +230,8 @@ export const createAdSpendBatchWithBranchSchema = createAdSpendBatchObjectSchema
 
 export const listAdSpendSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),
+  /** Server-side supervisor scoping: limit to ad spend where mediaBuyerId is in this set. */
+  mediaBuyerIds: z.array(z.string().uuid()).max(2000).optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
@@ -228,6 +246,7 @@ export type ListAdSpendInput = z.infer<typeof listAdSpendSchema>;
 /** Grouped accordion (`listAdSpendGrouped`) — same filter dimensions as `listAdSpend`, separate pagination. */
 export const listAdSpendGroupedSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),
+  mediaBuyerIds: z.array(z.string().uuid()).max(2000).optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
@@ -242,6 +261,7 @@ export type ListAdSpendGroupedInput = z.infer<typeof listAdSpendGroupedSchema>;
 /** Scope for ad spend status counts — matches listAdSpend filters except status. */
 export const adSpendStatusCountsSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),
+  mediaBuyerIds: z.array(z.string().uuid()).max(2000).optional(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   startDate: z.string().date().optional(),
@@ -279,6 +299,18 @@ export const previewAdSpendIntervalSchema = z.object({
   spendAmount: z.coerce.number().min(0).multipleOf(0.01).optional(),
 });
 export type PreviewAdSpendIntervalInput = z.infer<typeof previewAdSpendIntervalSchema>;
+
+/**
+ * Form-level order total for the Add Expense modal (CEO directive 2026-05-08).
+ * Returns the count of orders attributed to (campaign, mediaBuyer) that arrived
+ * AFTER the most recent APPROVED ad spend on the same campaign, up to spendDate.
+ * The Media Buyer splits this number across their batch lines.
+ */
+export const campaignOrderTotalForBatchSchema = z.object({
+  campaignId: z.string().uuid(),
+  spendDate: z.string().date(),
+});
+export type CampaignOrderTotalForBatchInput = z.infer<typeof campaignOrderTotalForBatchSchema>;
 
 // ============================================
 // Offer Template Validators
@@ -456,11 +488,17 @@ function customFormAnswerSatisfied(type: FormFieldType, value: unknown): boolean
     case 'text':
     case 'textarea':
     case 'email':
-    case 'phone':
     case 'date':
     case 'dropdown':
     case 'radio':
       return typeof value === 'string' && value.trim().length > 0;
+    case 'phone':
+      // Phone answers must be digits only (allow `+`, spaces, dashes,
+      // parentheses for formatting). At least 4 digits after stripping
+      // formatters — anything shorter isn't a real phone.
+      if (typeof value !== 'string') return false;
+      if (!/^[\d+\-\s()]+$/.test(value.trim())) return false;
+      return value.replace(/\D/g, '').length >= 4;
     case 'number': {
       if (typeof value === 'number' && Number.isFinite(value)) return true;
       if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) return true;

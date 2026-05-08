@@ -7,7 +7,7 @@ import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
-import { DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
+import { AdminQuickDashboardLoadingShell, DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
 import { AdminQuickDashboard, type QuickOverviewData } from '~/features/dashboard/AdminQuickDashboard';
 import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
 
@@ -96,14 +96,15 @@ export default function AdminDashboard() {
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   if (loaderData.variant === 'admin_quick') {
+    const adminRole = role ?? 'ADMIN';
     return (
-      <Suspense fallback={<DashboardSkeleton />}>
+      <Suspense fallback={<AdminQuickDashboardLoadingShell userName={userName} role={adminRole} />}>
         <Await resolve={loaderData.data} errorElement={<DeferredError />}>
           {(data) => (
             <AdminQuickDashboard
               data={data}
               userName={userName}
-              role={role ?? 'ADMIN'}
+              role={adminRole}
             />
           )}
         </Await>

@@ -1,9 +1,11 @@
-import { json } from '@remix-run/node';
+import * as React from 'react';
+import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData, useActionData } from '@remix-run/react';
+import { Await, useLoaderData, useActionData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { CategoriesPage } from '~/features/categories/CategoriesPage';
+import { CategoriesLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 export const meta: MetaFunction = () => [
   { title: 'Product Categories — Yannis EOSE' },
 ];
@@ -33,26 +35,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const search = url.searchParams.get('search') || undefined;
   const status = url.searchParams.get('status') || undefined;
 
-  const input: Record<string, unknown> = { page: 1, limit: 20 };
-  if (search) input.search = search;
-  if (status) input.status = status;
+  const pageData = (async (): Promise<LoaderData> => {
+    const input: Record<string, unknown> = { page: 1, limit: 20 };
+    if (search) input.search = search;
+    if (status) input.status = status;
 
-  const res = await apiRequest<unknown>(
-    `/trpc/productCategories.list?input=${encodeURIComponent(JSON.stringify(input))}`,
-    { method: 'GET', cookie },
-  );
+    const res = await apiRequest<unknown>(
+      `/trpc/productCategories.list?input=${encodeURIComponent(JSON.stringify(input))}`,
+      { method: 'GET', cookie },
+    );
 
-  if (!res.ok) {
-    return { categories: [], total: 0 } satisfies LoaderData;
-  }
+    if (!res.ok) {
+      return { categories: [], total: 0 };
+    }
 
-  const trpcData = res.data as { result?: { data?: { categories: Category[]; pagination: { total: number } } } };
-  const result = trpcData?.result?.data;
+    const trpcData = res.data as { result?: { data?: { categories: Category[]; pagination: { total: number } } } };
+    const result = trpcData?.result?.data;
 
-  return {
-    categories: result?.categories ?? [],
-    total: result?.pagination?.total ?? 0,
-  } satisfies LoaderData;
+    return {
+      categories: result?.categories ?? [],
+      total: result?.pagination?.total ?? 0,
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -120,16 +126,16 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CategoriesRoute() {
-  const { categories, total } = useLoaderData<LoaderData>();
+  const { pageData } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ error?: string | null; success?: boolean }>();
 
   return (
-    <>
-    <CategoriesPage
-      categories={categories}
-      total={total}
-      actionData={actionData}
-    />
-    </>
+    <React.Suspense fallback={<CategoriesLoadingShell />}>
+      <Await resolve={pageData}>
+        {({ categories, total }) => (
+          <CategoriesPage categories={categories} total={total} actionData={actionData} />
+        )}
+      </Await>
+    </React.Suspense>
   );
 }

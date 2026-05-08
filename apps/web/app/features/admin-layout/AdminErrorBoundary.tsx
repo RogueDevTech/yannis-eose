@@ -3,7 +3,7 @@ import { Link, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import type { AdminErrorBoundaryProps } from './types';
 import { applyAppTheme, readStoredThemeId } from '~/lib/theme';
-import { isNetworkErrorLike, NETWORK_ERROR_MESSAGE } from '~/lib/network-error';
+import { isNetworkErrorLike, NETWORK_ERROR_MESSAGE, normalizeRouteErrorData } from '~/lib/network-error';
 
 const AUTO_REFRESH_SECONDS = 10;
 
@@ -85,7 +85,10 @@ export function AdminErrorBoundary({ error: _error, isResponse, status, errorDat
   }
 
   // Generic server error — with countdown progress bar and auto-refresh
-  const isNetworkIssue = isNetworkErrorLike(isResponse ? errorData : _error, status);
+  const isNetworkIssue = isNetworkErrorLike(
+    isResponse ? normalizeRouteErrorData(errorData) : _error,
+    status,
+  );
   return (
     <GenericErrorWithProgressBar
       errorData={isResponse ? errorData : undefined}

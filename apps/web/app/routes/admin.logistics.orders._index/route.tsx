@@ -1,6 +1,7 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
@@ -12,6 +13,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
+import { LogisticsOrdersLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { Order } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
 
@@ -95,28 +97,38 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listInputEnc = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
 
-  const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
+  const logisticsOrdersShell = {
+    filters: {
+      startDate: startDate ?? '',
+      endDate: endDate ?? '',
+      periodAllTime,
+    },
+  };
 
-  const ordersData = ordersRes.ok
-    ? (ordersRes.data as { result?: { data?: { orders: LogisticsOrder[]; pagination: { total: number; totalPages: number } } } })
-        ?.result?.data
-    : null;
-  const listErrorMessage = !ordersRes.ok
-    ? extractApiErrorMessage(ordersRes.data, 'Could not load logistics orders')
-    : undefined;
-  const ordersRaw = ordersData?.orders ?? [];
-  const total = ordersData?.pagination?.total ?? 0;
-  const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+  const pageData = (async () => {
+    const ordersRes = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputEnc}`, { method: 'GET', cookie });
 
-  const placeholderOrders: Array<LogisticsOrder & { locationName: string; locationProviderName: string | null; riderName: string }> =
-    ordersRaw.map((o) => ({
-      ...o,
-      locationName: '—',
-      locationProviderName: null,
-      riderName: '—',
-    }));
+    const ordersData = ordersRes.ok
+      ? (ordersRes.data as { result?: { data?: { orders: LogisticsOrder[]; pagination: { total: number; totalPages: number } } } })
+          ?.result?.data
+      : null;
+    const listErrorMessage = !ordersRes.ok
+      ? extractApiErrorMessage(ordersRes.data, 'Could not load logistics orders')
+      : undefined;
+    const ordersRaw = ordersData?.orders ?? [];
+    const total = ordersData?.pagination?.total ?? 0;
+    const totalPages = ordersData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
 
-  const deferredSecondary = (async (): Promise<{ statusCounts: Record<string, number>; locations: Location[] }> => {
+    const placeholderOrders: Array<LogisticsOrder & { locationName: string; locationProviderName: string | null; riderName: string }> =
+      ordersRaw.map((o) => ({
+        ...o,
+        locationName: '—',
+        locationProviderName: null,
+        riderName: '—',
+      }));
+
+    let statusCounts: Record<string, number> = {};
+    let locations: Location[] = [];
     try {
       const [countsRes, locationsRes] = await Promise.all([
         apiRequest<unknown>(`/trpc/orders.statusCounts?input=${countsInputEnc}`, { method: 'GET', cookie }),
@@ -125,42 +137,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
           { method: 'GET', cookie },
         ),
       ]);
-      const countsData = countsRes.ok
+      statusCounts = countsRes.ok
         ? (countsRes.data as { result?: { data?: Record<string, number> } })?.result?.data ?? {}
         : {};
       const locationsData = locationsRes.ok
         ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
         : null;
-      const locations = locationsData?.locations ?? [];
-      return { statusCounts: countsData, locations };
+      locations = locationsData?.locations ?? [];
     } catch {
-      return { statusCounts: {}, locations: [] };
+      statusCounts = {};
+      locations = [];
     }
+
+    return {
+      orders: placeholderOrders,
+      total,
+      totalPages,
+      page,
+      limit: ORDERS_PER_PAGE,
+      statusFilter: status,
+      searchFilter: search ?? '',
+      listErrorMessage,
+      statusCounts,
+      locations,
+      riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>,
+      dailyCounts: undefined,
+      filters: {
+        startDate: startDate ?? '',
+        endDate: endDate ?? '',
+        periodAllTime,
+      },
+      isTplManagerScoped: !!effectiveLogisticsLocationId,
+      canEditDeliveryDate: false,
+      allocationOnDetailOnly: true,
+      orderDetailBasePath: '/admin/orders',
+      pageDescription: 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
+    };
   })();
 
-  return defer({
-    orders: placeholderOrders,
-    total,
-    totalPages,
-    page,
-    limit: ORDERS_PER_PAGE,
-    statusFilter: status,
-    searchFilter: search ?? '',
-    listErrorMessage,
-    deferredSecondary,
-    riders: [],
-    dailyCounts: undefined,
-    filters: {
-      startDate: startDate ?? '',
-      endDate: endDate ?? '',
-      periodAllTime,
-    },
-    isTplManagerScoped: !!effectiveLogisticsLocationId,
-    canEditDeliveryDate: false,
-    allocationOnDetailOnly: true,
-    orderDetailBasePath: '/admin/orders',
-    pageDescription: 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
-  });
+  return defer({ logisticsOrdersShell, pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -335,11 +350,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function LogisticsOrdersRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { logisticsOrdersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
-    <>
-      <LogisticsOrdersPage {...data} />
-    </>
+    <Suspense fallback={<LogisticsOrdersLoadingShell filters={logisticsOrdersShell.filters} />}>
+      <Await resolve={pageData}>
+        {(data) => <LogisticsOrdersPage {...data} />}
+      </Await>
+    </Suspense>
   );
 }

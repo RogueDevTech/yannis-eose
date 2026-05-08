@@ -197,15 +197,15 @@ export interface CSDashboardCriticalPayload {
   criticalFetchErrors: string[];
 }
 
-/** Shell props resolved synchronously from settings (before primary queue bundle streams). */
+/** Dispatch settings slice — streamed with the layout so claim tabs wire without blocking workloads. */
 export interface CSDashboardShell {
   isClaimMode: boolean;
   claimCap: number;
 }
 
-/** `/admin/cs/queue` loader — shell first, then streamed primary data + existing deferred slices. */
+/** `/admin/cs/queue` loader — shell + primary bundle stream in parallel + existing deferred slices. */
 export interface CSDashboardPageProps {
-  shell: CSDashboardShell;
+  shell: Promise<CSDashboardShell>;
   criticalData: Promise<CSDashboardCriticalPayload>;
   inactiveAgents: Promise<InactiveAgent[]>;
   callbackOrders: Promise<CSOrder[]>;

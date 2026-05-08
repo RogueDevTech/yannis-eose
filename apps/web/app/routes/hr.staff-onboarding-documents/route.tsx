@@ -1,5 +1,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { defer } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { listStaffOnboardingDocumentsSchema } from '@yannis/shared';
 import {
   apiRequest,
@@ -11,6 +13,7 @@ import {
   StaffOnboardingDocumentsPage,
   type StaffOnboardingDocumentRow,
 } from '~/features/hr/StaffOnboardingDocumentsPage';
+import { StaffOnboardingDocsLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Staff onboarding documents — Yannis EOSE' }];
 
@@ -64,6 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const countsInput = encodeURIComponent(
     JSON.stringify({ allBranches: input.allBranches ?? false }),
   );
+  const pageData = (async () => {
   const [res, countsRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/onboarding.listStaffDocuments?input=${inputEnc}`, {
       method: 'GET',
@@ -113,22 +117,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
     searchParam,
     counts,
   };
+  })();
+
+  return defer({ pageData });
 }
 
 export default function StaffOnboardingDocumentsRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <StaffOnboardingDocumentsPage
-      rows={data.rows}
-      page={data.page}
-      totalPages={data.totalPages}
-      totalCount={data.totalCount}
-      pageSize={data.pageSize}
-      onboardingParam={data.onboardingParam}
-      sortByParam={data.sortByParam}
-      sortOrderParam={data.sortOrderParam}
-      searchParam={data.searchParam}
-      counts={data.counts}
-    />
+    <Suspense fallback={<StaffOnboardingDocsLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <StaffOnboardingDocumentsPage
+            rows={data.rows}
+            page={data.page}
+            totalPages={data.totalPages}
+            totalCount={data.totalCount}
+            pageSize={data.pageSize}
+            onboardingParam={data.onboardingParam}
+            sortByParam={data.sortByParam}
+            sortOrderParam={data.sortOrderParam}
+            searchParam={data.searchParam}
+            counts={data.counts}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

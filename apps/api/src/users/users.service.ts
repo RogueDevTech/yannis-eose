@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger, forwardRef } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import * as bcrypt from 'bcrypt';
 import { randomBytes, randomUUID } from 'crypto';
@@ -12,7 +13,18 @@ import type {
   ListUsersInput,
   ResetPasswordInput,
 } from '@yannis/shared';
-import { canonicalPermissionCode, mergePermissionSnapshot } from '@yannis/shared';
+import {
+  canonicalPermissionCode,
+  mergePermissionSnapshot,
+  defaultProbationUntilFromNow,
+  isRoleProbationEligible,
+} from '@yannis/shared';
+import type {
+  SetProbationInput,
+  ExtendProbationInput,
+  MarkProbationPermanentInput,
+  TerminateProbationInput,
+} from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { AuthService } from '../auth/auth.service';
 import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
@@ -525,6 +537,19 @@ export class UsersService {
         }
       }
 
+      // Probation flag — only honoured when the role is eligible. Admin-tier users
+      // can never be on probation (CEO directive 2026-05-08).
+      const wantsProbation = input.isProbation === true;
+      if (wantsProbation && !isRoleProbationEligible(input.role)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Role ${input.role} is not eligible for probation.`,
+        });
+      }
+      const probationUntil = wantsProbation
+        ? input.probationUntil ?? defaultProbationUntilFromNow()
+        : null;
+
       // Insert user with all fields
       const rows = await tx
         .insert(schema.users)
@@ -545,6 +570,10 @@ export class UsersService {
           visibleOrderStatuses: input.visibleOrderStatuses ?? null,
           restrictProductAccess: input.restrictProductAccess ?? false,
           commissionPlanId,
+          isProbation: wantsProbation,
+          probationStartedAt: wantsProbation ? new Date() : null,
+          probationStartedBy: wantsProbation ? actor.id : null,
+          probationUntil,
         })
         .returning({
           id: schema.users.id,
@@ -674,6 +703,13 @@ export class UsersService {
         scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
         loginCount: schema.users.loginCount,
         lastLoginAt: schema.users.lastLoginAt,
+        isProbation: schema.users.isProbation,
+        probationStartedAt: schema.users.probationStartedAt,
+        probationStartedBy: schema.users.probationStartedBy,
+        probationUntil: schema.users.probationUntil,
+        terminatedAt: schema.users.terminatedAt,
+        terminatedBy: schema.users.terminatedBy,
+        originalRole: schema.users.originalRole,
         createdAt: schema.users.createdAt,
         updatedAt: schema.users.updatedAt,
       })
@@ -810,6 +846,8 @@ export class UsersService {
           payoutAccountName: schema.users.payoutAccountName,
           payoutAccountNumber: schema.users.payoutAccountNumber,
           payoutBankCode: schema.users.payoutBankCode,
+          isProbation: schema.users.isProbation,
+          probationUntil: schema.users.probationUntil,
         })
         .from(schema.users)
         .where(whereClause)
@@ -2278,5 +2316,462 @@ export class UsersService {
     });
 
     return { success: true };
+  }
+
+  // ============================================
+  // Probation — set / extend / mark permanent / terminate
+  // ============================================
+  // Authority: SUPER_ADMIN or HR_MANAGER. ADMIN is intentionally NOT included
+  // (CEO directive 2026-05-08 — only HR + SuperAdmin can move probation state).
+
+  /** True when `actor` may set/unset/extend/terminate probation on any user. */
+  private canManageProbation(actor: SessionUser): boolean {
+    return actor.role === 'SUPER_ADMIN' || actor.role === 'HR_MANAGER';
+  }
+
+  private requireProbationAuthority(actor: SessionUser): void {
+    if (!this.canManageProbation(actor)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Only SuperAdmin and HR Manager can manage probation status.',
+      });
+    }
+  }
+
+  private async loadProbationTarget(userId: string) {
+    const [row] = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        email: schema.users.email,
+        role: schema.users.role,
+        status: schema.users.status,
+        primaryBranchId: schema.users.primaryBranchId,
+        isProbation: schema.users.isProbation,
+        probationStartedAt: schema.users.probationStartedAt,
+        probationUntil: schema.users.probationUntil,
+        terminatedAt: schema.users.terminatedAt,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+    }
+    if (row.terminatedAt) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'This user has already been terminated.',
+      });
+    }
+    return row;
+  }
+
+  /**
+   * Compute the live "termination blockers" snapshot. The UI calls this on the
+   * Terminate Probation modal so HR sees exactly which open items must be cleared.
+   * Returned counts must all be zero before `terminateProbation` will succeed.
+   *
+   * Locked rules (CEO directive 2026-05-08):
+   *  - No active orders (any non-terminal CS / dispatch state) assigned to them
+   *  - No scheduled callbacks (callback_scheduled_at IS NOT NULL on any of their assigned orders)
+   *  - No payouts in DRAFT / PENDING_APPROVAL / APPROVED — must all be PAID or REJECTED
+   */
+  async getTerminationBlockers(userId: string, actor: SessionUser) {
+    this.requireProbationAuthority(actor);
+
+    const target = await this.loadProbationTarget(userId);
+    if (!target.isProbation) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'This user is not on probation.',
+      });
+    }
+
+    type OrderStatus = (typeof schema.orders.status.enumValues)[number];
+    type PayoutStatus = (typeof schema.payoutRecords.status.enumValues)[number];
+    const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
+      'UNPROCESSED',
+      'CS_ASSIGNED',
+      'CS_ENGAGED',
+      'CONFIRMED',
+      'AGENT_ASSIGNED',
+      'DISPATCHED',
+      'IN_TRANSIT',
+    ];
+    const OPEN_PAYOUT_STATUSES: PayoutStatus[] = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'];
+
+    const [activeOrderRows, callbackRows, openPayoutRows] = await Promise.all([
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(
+          and(
+            or(
+              eq(schema.orders.assignedCsId, userId),
+              eq(schema.orders.riderId, userId),
+              eq(schema.orders.mediaBuyerId, userId),
+            ),
+            inArray(schema.orders.status, ACTIVE_ORDER_STATUSES),
+            isNull(schema.orders.deletedAt),
+          ),
+        ),
+      this.db
+        .select({ count: count() })
+        .from(schema.orders)
+        .where(
+          and(
+            or(
+              eq(schema.orders.assignedCsId, userId),
+              eq(schema.orders.riderId, userId),
+            ),
+            sql`${schema.orders.callbackScheduledAt} IS NOT NULL`,
+            inArray(schema.orders.status, ACTIVE_ORDER_STATUSES),
+            isNull(schema.orders.deletedAt),
+          ),
+        ),
+      this.db
+        .select({ count: count() })
+        .from(schema.payoutRecords)
+        .where(
+          and(
+            eq(schema.payoutRecords.staffId, userId),
+            inArray(schema.payoutRecords.status, OPEN_PAYOUT_STATUSES),
+          ),
+        ),
+    ]);
+
+    const activeOrderCount = Number(activeOrderRows[0]?.count ?? 0);
+    const pendingCallbackCount = Number(callbackRows[0]?.count ?? 0);
+    const pendingPayoutCount = Number(openPayoutRows[0]?.count ?? 0);
+
+    return {
+      target: {
+        id: target.id,
+        name: target.name,
+        email: target.email,
+        role: target.role,
+        probationStartedAt: target.probationStartedAt,
+        probationUntil: target.probationUntil,
+      },
+      activeOrderCount,
+      pendingCallbackCount,
+      pendingPayoutCount,
+      canTerminate:
+        activeOrderCount === 0 && pendingCallbackCount === 0 && pendingPayoutCount === 0,
+    };
+  }
+
+  /** Place an existing user on probation. Default review window is 90 days. */
+  async setProbation(input: SetProbationInput, actor: SessionUser) {
+    this.requireProbationAuthority(actor);
+    const target = await this.loadProbationTarget(input.userId);
+
+    if (!isRoleProbationEligible(target.role)) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Role ${target.role} is not eligible for probation.`,
+      });
+    }
+    if (target.isProbation) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'User is already on probation.',
+      });
+    }
+
+    const probationUntil = input.probationUntil ?? defaultProbationUntilFromNow();
+    const now = new Date();
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({
+          isProbation: true,
+          probationStartedAt: now,
+          probationStartedBy: actor.id,
+          probationUntil,
+          updatedAt: now,
+        })
+        .where(eq(schema.users.id, target.id));
+    });
+
+    void this.userBundleCache.invalidate(target.id);
+
+    this.notificationsService.enqueueCreate({
+      userId: target.id,
+      type: 'account:probation_assigned',
+      title: 'You are on probation',
+      body: `Your account is on probation until ${probationUntil.toISOString().slice(0, 10)}. Speak to HR if you have questions.`,
+      data: { userId: target.id, probationUntil: probationUntil.toISOString() },
+    });
+
+    return { success: true, probationUntil: probationUntil.toISOString() };
+  }
+
+  /** Move the probation review date later (or earlier — HR's call). */
+  async extendProbation(input: ExtendProbationInput, actor: SessionUser) {
+    this.requireProbationAuthority(actor);
+    const target = await this.loadProbationTarget(input.userId);
+
+    if (!target.isProbation) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'User is not on probation.',
+      });
+    }
+
+    const now = new Date();
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({ probationUntil: input.probationUntil, updatedAt: now })
+        .where(eq(schema.users.id, target.id));
+    });
+
+    this.notificationsService.enqueueCreate({
+      userId: target.id,
+      type: 'account:probation_extended',
+      title: 'Probation review date updated',
+      body: `Your probation review date is now ${input.probationUntil.toISOString().slice(0, 10)}.`,
+      data: { userId: target.id, probationUntil: input.probationUntil.toISOString() },
+    });
+
+    return { success: true };
+  }
+
+  /** Graduate the user off probation — they become a permanent staff member. */
+  async markProbationPermanent(input: MarkProbationPermanentInput, actor: SessionUser) {
+    this.requireProbationAuthority(actor);
+    const target = await this.loadProbationTarget(input.userId);
+
+    if (!target.isProbation) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'User is not on probation.',
+      });
+    }
+
+    const now = new Date();
+    await withActor(this.db, actor, async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({
+          isProbation: false,
+          probationStartedAt: null,
+          probationStartedBy: null,
+          probationUntil: null,
+          updatedAt: now,
+        })
+        .where(eq(schema.users.id, target.id));
+    });
+
+    void this.userBundleCache.invalidate(target.id);
+
+    this.notificationsService.enqueueCreate({
+      userId: target.id,
+      type: 'account:probation_passed',
+      title: 'Probation passed — welcome aboard',
+      body: 'Your probation period has been cleared. You are now a permanent member of the team.',
+      data: { userId: target.id },
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Terminate a probation user.
+   *
+   * 1. Re-validate the blockers list (race protection — UI may have shown a stale snapshot).
+   * 2. Insert a permanent `probation_terminations` row (the carve-out's audit record).
+   * 3. UPDATE the `users` row to scrub PII — the temporal trigger captures the pre-scrub
+   *    snapshot into `users_history` (still containing PII at that point).
+   * 4. Run a SECONDARY scrub against `users_history` to NULL the PII columns on every prior
+   *    version of this user's row. This is the ONE Pillar 4 carve-out — only allowed via
+   *    this exact code path. The non-PII history (id, role, scope, timestamps) survives.
+   * 5. Kill all active sessions in Redis.
+   * 6. Notify HR_MANAGER + SUPER_ADMIN that the termination happened (the user themselves
+   *    is being scrubbed, so there's nobody to notify on the target side).
+   */
+  async terminateProbation(input: TerminateProbationInput, actor: SessionUser) {
+    this.requireProbationAuthority(actor);
+
+    const target = await this.loadProbationTarget(input.userId);
+    if (!target.isProbation) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'User is not on probation.',
+      });
+    }
+
+    if (input.confirmName.trim().toLowerCase() !== target.name.trim().toLowerCase()) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Confirmation name does not match the user.',
+      });
+    }
+
+    // Re-validate blockers under the actor's view (race protection).
+    const blockers = await this.getTerminationBlockers(target.id, actor);
+    if (!blockers.canTerminate) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          `Cannot terminate — open items remain: ` +
+          `${blockers.activeOrderCount} active order(s), ` +
+          `${blockers.pendingCallbackCount} scheduled callback(s), ` +
+          `${blockers.pendingPayoutCount} unpaid payout(s).`,
+      });
+    }
+
+    const anonymizedSequence = Date.now();
+    const anonymizedName = `Terminated probation user #${anonymizedSequence}`;
+    const anonymizedEmail = `terminated-${target.id}@anonymized.local`;
+    const now = new Date();
+
+    await withActor(this.db, actor, async (tx) => {
+      // (2) Permanent record of the termination act — survives the scrub.
+      await tx.insert(schema.probationTerminations).values({
+        userId: target.id,
+        terminatedAt: now,
+        terminatedBy: actor.id,
+        reason: input.reason,
+        originalRole: target.role,
+        originalBranchId: target.primaryBranchId ?? null,
+        blockersResolved: {
+          activeOrderCount: blockers.activeOrderCount,
+          pendingCallbackCount: blockers.pendingCallbackCount,
+          pendingPayoutCount: blockers.pendingPayoutCount,
+          currentMonthPayrollPaid: true,
+        },
+      });
+
+      // (3) Scrub the live row. Temporal trigger captures pre-scrub snapshot into users_history.
+      await tx
+        .update(schema.users)
+        .set({
+          name: anonymizedName,
+          email: anonymizedEmail,
+          phone: null,
+          passwordHash: '__terminated__',
+          payoutBankName: null,
+          payoutAccountName: null,
+          payoutAccountNumber: null,
+          payoutBankCode: null,
+          status: 'DEACTIVATED',
+          isProbation: false,
+          probationStartedAt: null,
+          probationStartedBy: null,
+          probationUntil: null,
+          terminatedAt: now,
+          terminatedBy: actor.id,
+          originalRole: target.role,
+          updatedAt: now,
+        })
+        .where(eq(schema.users.id, target.id));
+
+      // (4) PILLAR 4 CARVE-OUT — scrub PII columns from every users_history row for this user.
+      // Only this code path may mutate users_history. The audit of the act itself lives in
+      // probation_terminations (just inserted above).
+      await tx.execute(sql`
+        UPDATE users_history
+           SET name = NULL,
+               email = NULL,
+               phone = NULL,
+               password_hash = NULL,
+               payout_bank_name = NULL,
+               payout_account_name = NULL,
+               payout_account_number = NULL,
+               payout_bank_code = NULL
+         WHERE id = ${target.id}::uuid
+      `);
+    });
+
+    // (5) Kill open sessions.
+    await this.authService.killUserSessions(target.id);
+    void this.userBundleCache.invalidate(target.id);
+
+    // (6) Notify HR + SuperAdmin (target user no longer has a meaningful identity).
+    const announcementBody =
+      `${target.role} probation user terminated by ${actor.role} on ${now.toISOString().slice(0, 10)}. Reason: ${input.reason}`;
+    this.notificationsService.enqueueCreateForRole('HR_MANAGER', {
+      type: 'account:probation_terminated',
+      title: 'Probation user terminated',
+      body: announcementBody,
+      data: { userId: target.id, terminatedBy: actor.id },
+    });
+    this.notificationsService.enqueueCreateForRole('SUPER_ADMIN', {
+      type: 'account:probation_terminated',
+      title: 'Probation user terminated',
+      body: announcementBody,
+      data: { userId: target.id, terminatedBy: actor.id },
+    });
+
+    this.eventsService.emitToUser(target.id, 'auth:session_revoked', {
+      reason: 'terminated',
+    });
+
+    return { success: true, terminatedAt: now.toISOString() };
+  }
+
+  /**
+   * Cron-driven scan for probation review windows that fall due in the next 7 days.
+   * Fires `account:probation_review_due` once per upcoming window so HR is reminded
+   * to make a decision (Mark Permanent or Terminate) before the window expires.
+   */
+  async sendProbationReviewReminders(): Promise<{ remindersSent: number }> {
+    const horizon = new Date();
+    horizon.setDate(horizon.getDate() + 7);
+
+    const dueRows = await this.db
+      .select({
+        id: schema.users.id,
+        name: schema.users.name,
+        role: schema.users.role,
+        probationUntil: schema.users.probationUntil,
+      })
+      .from(schema.users)
+      .where(
+        and(
+          eq(schema.users.isProbation, true),
+          sql`${schema.users.probationUntil} IS NOT NULL`,
+          sql`${schema.users.probationUntil} <= ${horizon}`,
+          sql`${schema.users.terminatedAt} IS NULL`,
+        ),
+      );
+
+    for (const user of dueRows) {
+      const dueDate = user.probationUntil ? new Date(user.probationUntil).toISOString().slice(0, 10) : 'soon';
+      this.notificationsService.enqueueCreateForRole('HR_MANAGER', {
+        type: 'account:probation_review_due',
+        title: 'Probation review due',
+        body: `${user.name} (${user.role}) — probation review window closes ${dueDate}. Mark permanent or terminate.`,
+        data: { userId: user.id, probationUntil: user.probationUntil?.toISOString() ?? null },
+      });
+    }
+
+    return { remindersSent: dueRows.length };
+  }
+
+  /**
+   * Cron: once a day at 04:00 — fan out probation-review reminders to HR_MANAGER for any
+   * probation user whose review window closes within the next 7 days.
+   *
+   * The reminder is idempotent at the recipient level (notifications dedup happens
+   * downstream in NotificationsService), so re-running on the same day is harmless.
+   */
+  @Cron('0 0 4 * * *')
+  async handleProbationReviewReminders(): Promise<void> {
+    try {
+      const { remindersSent } = await this.sendProbationReviewReminders();
+      if (remindersSent > 0) {
+        this.logger.log(`Probation review reminders dispatched: ${remindersSent}`);
+      }
+    } catch (err) {
+      this.logger.error(
+        `Probation review reminder cron failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }

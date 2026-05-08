@@ -273,6 +273,26 @@ export class BranchTeamsService {
     });
   }
 
+  /**
+   * Combined CS + Marketing supervised IDs for a single actor / branch — used by
+   * list endpoints to scope a supervisor to "data that concerns them only" (orders
+   * **assigned to** their CS team agents AND orders **created by** their MB team).
+   * The actor's own id is always included so a supervisor still sees their own work.
+   */
+  async listSupervisorScopeIds(
+    actorId: string,
+    branchId: string,
+  ): Promise<{ csUserIds: string[]; marketingUserIds: string[]; isSupervisor: boolean }> {
+    const [csIds, marketingIds] = await Promise.all([
+      this.listSupervisedUserIds(actorId, branchId, 'CS'),
+      this.listSupervisedUserIds(actorId, branchId, 'MARKETING'),
+    ]);
+    const csUserIds = [...new Set([actorId, ...csIds])];
+    const marketingUserIds = [...new Set([actorId, ...marketingIds])];
+    const isSupervisor = csIds.length > 0 || marketingIds.length > 0;
+    return { csUserIds, marketingUserIds, isSupervisor };
+  }
+
   /** Supervisee user IDs on this branch for CS or Marketing teams where actor is a supervisor. */
   async listSupervisedUserIds(
     actorId: string,

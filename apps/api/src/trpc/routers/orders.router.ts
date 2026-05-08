@@ -115,6 +115,47 @@ function canAccessDeliveryMovementCustomerNames(user: SessionUser): boolean {
   return (user.permissions ?? []).some((p) => canonicalPermissionCode(p) === inv);
 }
 
+/**
+ * Phase B supervisor scoping: when the viewer is a non-org-wide branch supervisor
+ * on the active branch, restrict the list to:
+ *   - orders **assigned to** their CS team members (assignedCsIds), AND
+ *   - orders **created by** their MB team members (mediaBuyerIds).
+ * Org-wide scope, admin-class, and the role-restricted CS_AGENT / MEDIA_BUYER
+ * paths short-circuit before this helper. Their own id is always in the set so
+ * a supervisor still sees their own work.
+ *
+ * Returns the input unchanged when there's no active branch or the viewer is
+ * not a supervisor on it.
+ */
+type SupervisorScopeInput = {
+  supervisorScope?: { csUserIds: string[]; mediaBuyerIds: string[] };
+};
+
+async function applySupervisorScope<T extends SupervisorScopeInput>(
+  ctx: { user: SessionUser; currentBranchId: string | null },
+  input: T,
+  branchId: string | null,
+): Promise<T> {
+  if (!branchId) return input;
+  if (input.supervisorScope) return input; // explicit override wins
+  const perms = ctx.user.permissions ?? [];
+  const hasOrgWideScope =
+    perms.includes('cs.scope.global') ||
+    perms.includes('marketing.scope.global') ||
+    perms.includes('logistics.scope.global');
+  if (hasOrgWideScope) return input;
+  if (isAdminLevel(ctx.user)) return input;
+  const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
+  if (!scope.isSupervisor) return input;
+  return {
+    ...input,
+    supervisorScope: {
+      csUserIds: scope.csUserIds,
+      mediaBuyerIds: scope.marketingUserIds,
+    },
+  };
+}
+
 export const ordersRouter = router({
   /**
    * Create a new order.
@@ -255,6 +296,10 @@ export const ordersRouter = router({
       if (hasOrdersRead && ctx.user.role === 'CS_AGENT') {
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
+      // Supervisor scoping (Phase B): non-org-wide branch supervisors only see
+      // orders assigned to their CS team agents OR created by their MB team
+      // members. Their own work is always included.
+      effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
       return getOrdersService().list(effectiveInput, branchId);
     }),
 
@@ -293,6 +338,7 @@ export const ordersRouter = router({
       if (hasOrdersRead && ctx.user.role === 'CS_AGENT') {
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
+      effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
       return getOrdersService().scheduleCalendarHeat(effectiveInput, branchId);
     }),
 
@@ -484,8 +530,9 @@ export const ordersRouter = router({
             'WRITTEN_OFF',
             'REMITTED',
           ])).min(1).optional(),
-          startDate: z.string().date().optional(),
-          endDate: z.string().date().optional(),
+          // Accept ISO datetime in addition to date — see listOrdersSchema.
+          startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
+          endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
         })
         .optional(),
     )
@@ -555,8 +602,9 @@ export const ordersRouter = router({
             'WRITTEN_OFF',
             'REMITTED',
           ])).min(1).optional(),
-          startDate: z.string().date().optional(),
-          endDate: z.string().date().optional(),
+          // Accept ISO datetime alongside date — see listOrdersSchema.
+          startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
+          endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
         })
         .optional(),
     )

@@ -1,6 +1,7 @@
-import { useLoaderData } from '@remix-run/react';
-import { json, redirect } from '@remix-run/node';
+import { useLoaderData, Await } from '@remix-run/react';
+import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
 import {
   apiRequest,
   getCurrentUser,
@@ -10,6 +11,7 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { PayrollGeneratePage } from '~/features/hr/PayrollGeneratePage';
+import { GeneratePayrollLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { BranchOption, ViewerInfo } from '~/features/hr/types';
 
 export const meta: MetaFunction = () => [{ title: 'Generate Payroll Batch — Yannis EOSE' }];
@@ -76,10 +78,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     prepareBranchIds: (prepareAccessData?.branches ?? []).map((b) => b.id),
   };
 
-  return json({
+  const pageData = (async () => ({
     branches: branchesData ?? [],
     viewer,
-  });
+  }))();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -169,6 +173,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function HrPayrollGenerateRoute() {
-  const data = useLoaderData<typeof loader>();
-  return <PayrollGeneratePage branches={data.branches} viewer={data.viewer} />;
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<GeneratePayrollLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <PayrollGeneratePage branches={data.branches} viewer={data.viewer} />}
+      </Await>
+    </Suspense>
+  );
 }

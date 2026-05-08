@@ -151,7 +151,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   /** Loader revalidation for this route (date range, section/tab, filters, pagination). */
-  const isFundingRouteLoading = useLoaderRefetchBusy();
+  const isFundingRouteLoading = useLoaderRefetchBusy().busy;
 
   const { section: displaySection, tab: displayTab } = useMemo(() => {
     const pending =

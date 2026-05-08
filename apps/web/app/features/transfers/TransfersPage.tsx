@@ -248,7 +248,7 @@ export function TransfersPage({
   const fromLocationFilter = searchParams.get('fromLocationId') ?? '';
   const toLocationFilter = searchParams.get('toLocationId') ?? '';
   const productFilter = searchParams.get('productId') ?? '';
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
 
   useEffect(() => {
     if (navigation.state === 'idle') {

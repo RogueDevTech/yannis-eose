@@ -1,10 +1,17 @@
-import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
-import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getCurrentUser, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { Suspense } from 'react';
+import { useLoaderData, Await } from '@remix-run/react';
+import { defer, json, redirect } from '@remix-run/node';
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import {
+  apiRequest,
+  getCurrentUser,
+  getSessionCookie,
+  requirePermissionOrRoles,
+  safeStatus,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { redirect } from '@remix-run/node';
 import { CommissionPlansPage } from '~/features/hr/CommissionPlansPage';
+import { CommissionPlansLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type { CommissionPlan } from '~/features/hr/types';
 
 export const meta: MetaFunction = () => [{ title: 'Commission Plans — Yannis EOSE' }];
@@ -28,28 +35,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect('/auth');
 
-  const res = await apiRequest<unknown>(
-    `/trpc/hr.listPlans?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, activeOnly: false }))}`,
-    { method: 'GET', cookie },
-  );
-  const data = res.ok
-    ? (res.data as {
-        result?: {
-          data?: {
-            plans: CommissionPlan[];
-            pagination: { total: number };
-            manageableRoles: string[];
+  const pageData = (async () => {
+    const res = await apiRequest<unknown>(
+      `/trpc/hr.listPlans?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, activeOnly: false }))}`,
+      { method: 'GET', cookie },
+    );
+    const data = res.ok
+      ? (res.data as {
+          result?: {
+            data?: {
+              plans: CommissionPlan[];
+              pagination: { total: number };
+              manageableRoles: string[];
+            };
           };
-        };
-      })?.result?.data
-    : null;
+        })?.result?.data
+      : null;
 
-  return {
-    plans: data?.plans ?? [],
-    total: data?.pagination?.total ?? 0,
-    manageableRoles: data?.manageableRoles ?? [],
-    viewer: { id: user.id, role: user.role },
-  };
+    return {
+      plans: data?.plans ?? [],
+      total: data?.pagination?.total ?? 0,
+      manageableRoles: data?.manageableRoles ?? [],
+      viewer: { id: user.id, role: user.role },
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -160,13 +171,19 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function PlansRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CommissionPlansPage
-      plans={data.plans}
-      total={data.total}
-      manageableRoles={data.manageableRoles}
-      viewer={data.viewer}
-    />
+    <Suspense fallback={<CommissionPlansLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <CommissionPlansPage
+            plans={data.plans}
+            total={data.total}
+            manageableRoles={data.manageableRoles}
+            viewer={data.viewer}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, Link } from '@remix-run/react';
 import { useToast } from '~/components/ui/toast';
+import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -231,11 +232,15 @@ export function FormsPage({
         actions={
           <>
             <PageRefreshButton />
-            <Link to="/admin/marketing/forms/new" prefetch="intent">
+            <BranchScopedLink
+              to="/admin/marketing/forms/new"
+              actionLabel="creating a form"
+              prefetch="intent"
+            >
               <Button variant="primary" size="sm">
                 + New Form
               </Button>
-            </Link>
+            </BranchScopedLink>
           </>
         }
       />
@@ -278,9 +283,13 @@ export function FormsPage({
           {isMediaBuyer ? (
             <p className="text-sm text-info-800 dark:text-info-200">
               You don&apos;t have any forms yet. Only forms you create appear here. Use{' '}
-              <Link to="/admin/marketing/forms/new" className="font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+              <BranchScopedLink
+                to="/admin/marketing/forms/new"
+                actionLabel="creating a form"
+                className="font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+              >
                 + New Form
-              </Link>{' '}
+              </BranchScopedLink>{' '}
               to create one.
             </p>
           ) : uiFormsScope === 'mine' ? (
@@ -290,9 +299,13 @@ export function FormsPage({
           ) : (
             <p className="text-sm text-info-800 dark:text-info-200">
               No forms yet. Use{' '}
-              <Link to="/admin/marketing/forms/new" className="font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+              <BranchScopedLink
+                to="/admin/marketing/forms/new"
+                actionLabel="creating a form"
+                className="font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+              >
                 + New Form
-              </Link>{' '}
+              </BranchScopedLink>{' '}
               to create one.
             </p>
           )}
@@ -348,14 +361,15 @@ export function FormsPage({
                 {ViewIcon}
                 <span>View</span>
               </Button>
-              <Link
+              <BranchScopedLink
                 to={`/admin/marketing/forms/${c.id}/edit`}
+                actionLabel="editing this form"
                 prefetch="intent"
                 className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-app-fg-muted hover:text-app-fg hover:bg-surface-100 dark:hover:bg-surface-800 rounded-lg transition-colors duration-150"
               >
                 {EditIcon}
                 <span>Edit</span>
-              </Link>
+              </BranchScopedLink>
             </div>
           </article>
         ))}

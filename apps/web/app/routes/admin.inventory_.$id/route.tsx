@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
-import { json } from '@remix-run/node';
+import { Suspense, useMemo, useState } from 'react';
+import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Link, useLoaderData, useSearchParams } from '@remix-run/react';
+import { Await, Link, useLoaderData, useSearchParams } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -18,6 +18,7 @@ import { DescriptionList } from '~/components/ui/description-list';
 import { Button } from '~/components/ui/button';
 import type { StockMovement } from '~/features/inventory/types';
 import { MOVEMENT_COLORS, formatMovementReasonForDisplay, formatMovementType } from '~/features/inventory/types';
+import { InventoryLevelDetailLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [
   { title: 'Inventory — Level Detail — Yannis EOSE' },
@@ -76,59 +77,64 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const endDate = url.searchParams.get('endDate')?.trim() || undefined;
 
   const cookie = getSessionCookie(request);
-  const input: Record<string, unknown> = { id, page, limit: PAGE_SIZE };
-  if (startDate) input['startDate'] = startDate;
-  if (endDate) input['endDate'] = endDate;
-  const res = await apiRequest<unknown>(
-    `/trpc/inventory.getLevelById?input=${encodeURIComponent(JSON.stringify(input))}`,
-    { method: 'GET', cookie },
-  );
 
-  if (!res.ok) {
-    return json<LoaderData>({
-      level: null,
-      batches: [],
-      movements: [],
-      total: 0,
-      page: 1,
-      limit: PAGE_SIZE,
-      totalPages: 1,
-      inQty: 0,
-      outQty: 0,
+  const pageData = (async (): Promise<LoaderData> => {
+    const input: Record<string, unknown> = { id, page, limit: PAGE_SIZE };
+    if (startDate) input['startDate'] = startDate;
+    if (endDate) input['endDate'] = endDate;
+    const res = await apiRequest<unknown>(
+      `/trpc/inventory.getLevelById?input=${encodeURIComponent(JSON.stringify(input))}`,
+      { method: 'GET', cookie },
+    );
+
+    if (!res.ok) {
+      return {
+        level: null,
+        batches: [],
+        movements: [],
+        total: 0,
+        page: 1,
+        limit: PAGE_SIZE,
+        totalPages: 1,
+        inQty: 0,
+        outQty: 0,
+        startDate: startDate ?? null,
+        endDate: endDate ?? null,
+      };
+    }
+
+    const data = (res.data as {
+      result?: {
+        data?: {
+          level: LevelHeader;
+          batches: LevelBatch[];
+          movements: StockMovement[];
+          total: number;
+          page: number;
+          limit: number;
+          totalPages: number;
+          inQty: number;
+          outQty: number;
+        };
+      };
+    })?.result?.data;
+
+    return {
+      level: data?.level ?? null,
+      batches: data?.batches ?? [],
+      movements: data?.movements ?? [],
+      total: data?.total ?? 0,
+      page: data?.page ?? page,
+      limit: data?.limit ?? PAGE_SIZE,
+      totalPages: data?.totalPages ?? 1,
+      inQty: data?.inQty ?? 0,
+      outQty: data?.outQty ?? 0,
       startDate: startDate ?? null,
       endDate: endDate ?? null,
-    });
-  }
-
-  const data = (res.data as {
-    result?: {
-      data?: {
-        level: LevelHeader;
-        batches: LevelBatch[];
-        movements: StockMovement[];
-        total: number;
-        page: number;
-        limit: number;
-        totalPages: number;
-        inQty: number;
-        outQty: number;
-      };
     };
-  })?.result?.data;
+  })();
 
-  return json<LoaderData>({
-    level: data?.level ?? null,
-    batches: data?.batches ?? [],
-    movements: data?.movements ?? [],
-    total: data?.total ?? 0,
-    page: data?.page ?? page,
-    limit: data?.limit ?? PAGE_SIZE,
-    totalPages: data?.totalPages ?? 1,
-    inQty: data?.inQty ?? 0,
-    outQty: data?.outQty ?? 0,
-    startDate: startDate ?? null,
-    endDate: endDate ?? null,
-  });
+  return defer({ pageData });
 }
 
 type DirectionFilter = 'all' | 'in' | 'out';
@@ -249,19 +255,18 @@ function auditTrailColumns(
 
 type TabId = 'batches' | 'audit';
 
-export default function InventoryLevelDetailRoute() {
-  const {
-    level,
-    batches,
-    movements,
-    total,
-    page,
-    totalPages,
-    inQty,
-    outQty,
-    startDate,
-    endDate,
-  } = useLoaderData<typeof loader>();
+function InventoryLevelDetailRouteInner({
+  level,
+  batches,
+  movements,
+  total,
+  page,
+  totalPages,
+  inQty,
+  outQty,
+  startDate,
+  endDate,
+}: LoaderData) {
   const [searchParams, setSearchParams] = useSearchParams();
   // URL-driven tab state (so back/forward + deep links work).
   // Default is Movement history (audit) per ops workflow.
@@ -513,6 +518,17 @@ export default function InventoryLevelDetailRoute() {
         onClose={() => setSelectedBatch(null)}
       />
     </div>
+  );
+}
+
+export default function InventoryLevelDetailRoute() {
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<InventoryLevelDetailLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <InventoryLevelDetailRouteInner {...data} />}
+      </Await>
+    </Suspense>
   );
 }
 

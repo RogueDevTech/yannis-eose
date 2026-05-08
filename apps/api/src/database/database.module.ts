@@ -8,6 +8,8 @@ import { MigrationRunnerService } from './migration-runner.service';
 import { PermissionSeedService } from './permission-seed.service';
 import { MessageTemplateSeedService } from './message-template-seed.service';
 import { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
+import { shouldLogHttpRequests } from '../common/http-request-timing';
+import { wrapPostgresClientForDbTiming } from './postgres-db-timing-proxy';
 
 export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
 
@@ -62,12 +64,13 @@ export { DRIZZLE, PG_CLIENT, REDIS } from './database.tokens';
         // comfortably, so 20 is conservative. Override via PG_MAX_CONNECTIONS if
         // you need more (or less) at deploy time.
         const poolMax = parseInt(process.env['PG_MAX_CONNECTIONS'] ?? '20', 10);
-        return postgres(connectionString, {
+        const raw = postgres(connectionString, {
           max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 20,
           idle_timeout: 10,
           connect_timeout: 30,
           ssl: { rejectUnauthorized: false },
         });
+        return shouldLogHttpRequests() ? wrapPostgresClientForDbTiming(raw) : raw;
       },
     },
     {

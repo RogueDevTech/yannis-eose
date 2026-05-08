@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense, useMemo } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { defer, json } from '@remix-run/node';
@@ -13,7 +13,6 @@ import {
   safeStatus,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { DeferredSection } from '~/components/ui/deferred-section';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import { OrderDetailSkeleton } from '~/features/orders/OrderDetailSkeleton';
 import type {
@@ -257,18 +256,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Invoice is loaded client-side after mount (resource route) to keep the main page fast.
 
   return defer({
-    orderDetail: orderDetailPromise,
-    canEditOrder: user.role !== 'MEDIA_BUYER',
-    userRole: user.role,
-    userId: user.id,
-    currentBranchId: user.currentBranchId ?? null,
-    permissions: user.permissions ?? [],
-    csAgentsForAssign: csAgentsForAssign,
-    logisticsLocations,
-    allocatableLocations,
-    allocatableLocationsDeferred,
-    logisticsDispatchTemplates,
-    invoice: undefined,
+    pageData: orderDetailPromise.then((orderDetail) => ({
+      orderDetail,
+      canEditOrder: user.role !== 'MEDIA_BUYER',
+      userRole: user.role,
+      userId: user.id,
+      currentBranchId: user.currentBranchId ?? null,
+      permissions: user.permissions ?? [],
+      csAgentsForAssign: csAgentsForAssign,
+      logisticsLocations,
+      allocatableLocations,
+      allocatableLocationsDeferred,
+      logisticsDispatchTemplates,
+      invoice: undefined,
+    })),
   });
 }
 
@@ -767,70 +768,72 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed', 'order:assigned', 'order:transfer_accepted', 'order:transfer_rejected'] as const;
 
 export default function OrderDetailRoute() {
-  const {
-    orderDetail,
-    canEditOrder,
-    userRole,
-    userId,
-    currentBranchId,
-    permissions,
-    csAgentsForAssign,
-    logisticsLocations,
-    allocatableLocations,
-    allocatableLocationsDeferred,
-    logisticsDispatchTemplates,
-    invoice,
-  } = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
-    <DeferredSection resolve={orderDetail} fallback={<OrderDetailSkeleton />}>
-      {(data) =>
-        'loadError' in data && typeof data.loadError === 'string' ? (
-          <div className="card text-center py-12">
-            <p className="text-6xl font-bold text-warning-500/80 mb-4">!</p>
-            <h2 className="text-xl font-bold text-app-fg">Could not load this order</h2>
-            <p className="mt-2 text-sm text-app-fg-muted max-w-lg mx-auto">{data.loadError}</p>
-            <p className="mt-3 text-xs text-app-fg-muted max-w-md mx-auto">
-              A server or database error can look like a missing order. If you just deployed, run pending
-              migrations on the API database, then redeploy the API.
-            </p>
-            <a href="/admin/cs/orders" className="btn-primary mt-6 inline-block">
-              Back to Orders
-            </a>
-          </div>
-        ) : 'notFound' in data && data.notFound ? (
-          <div className="card text-center py-12">
-            <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
-            <h2 className="text-xl font-bold text-app-fg">Order not found</h2>
-            <p className="mt-2 text-sm text-app-fg-muted">
-              The order you're looking for doesn't exist or has been removed.
-            </p>
-            <a href="/admin/cs/orders" className="btn-primary mt-4 inline-block">
-              Back to Orders
-            </a>
-          </div>
-        ) : (
-          <OrderDetailPage
-            order={(data as OrderDetailStreamData).order}
-            latestCall={(data as OrderDetailStreamData).latestCall}
-            timeline={(data as OrderDetailStreamData).timeline}
-            voipEnabled={(data as OrderDetailStreamData).voipEnabled}
-            voipProviderDisplayName={(data as OrderDetailStreamData).voipProviderDisplayName}
-            canEditOrder={canEditOrder}
-            userRole={userRole}
-            userId={userId}
-            currentBranchId={currentBranchId}
-            permissions={permissions}
-            csAgentsForAssign={csAgentsForAssign}
-            logisticsLocations={logisticsLocations}
-            allocatableLocations={allocatableLocations}
-            allocatableLocationsDeferred={allocatableLocationsDeferred}
-            logisticsDispatchTemplates={logisticsDispatchTemplates}
-            invoice={invoice}
-          />
-        )
-      }
-    </DeferredSection>
+    <Suspense fallback={<OrderDetailSkeleton />}>
+      <Await resolve={pageData}>
+        {({
+          orderDetail,
+          canEditOrder,
+          userRole,
+          userId,
+          currentBranchId,
+          permissions,
+          csAgentsForAssign,
+          logisticsLocations,
+          allocatableLocations,
+          allocatableLocationsDeferred,
+          logisticsDispatchTemplates,
+          invoice,
+        }) =>
+          'loadError' in orderDetail && typeof orderDetail.loadError === 'string' ? (
+            <div className="card text-center py-12">
+              <p className="text-6xl font-bold text-warning-500/80 mb-4">!</p>
+              <h2 className="text-xl font-bold text-app-fg">Could not load this order</h2>
+              <p className="mt-2 text-sm text-app-fg-muted max-w-lg mx-auto">{orderDetail.loadError}</p>
+              <p className="mt-3 text-xs text-app-fg-muted max-w-md mx-auto">
+                A server or database error can look like a missing order. If you just deployed, run pending
+                migrations on the API database, then redeploy the API.
+              </p>
+              <a href="/admin/cs/orders" className="btn-primary mt-6 inline-block">
+                Back to Orders
+              </a>
+            </div>
+          ) : 'notFound' in orderDetail && orderDetail.notFound ? (
+            <div className="card text-center py-12">
+              <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+              <h2 className="text-xl font-bold text-app-fg">Order not found</h2>
+              <p className="mt-2 text-sm text-app-fg-muted">
+                The order you're looking for doesn't exist or has been removed.
+              </p>
+              <a href="/admin/cs/orders" className="btn-primary mt-4 inline-block">
+                Back to Orders
+              </a>
+            </div>
+          ) : (
+            <OrderDetailPage
+              order={(orderDetail as OrderDetailStreamData).order}
+              latestCall={(orderDetail as OrderDetailStreamData).latestCall}
+              timeline={(orderDetail as OrderDetailStreamData).timeline}
+              voipEnabled={(orderDetail as OrderDetailStreamData).voipEnabled}
+              voipProviderDisplayName={(orderDetail as OrderDetailStreamData).voipProviderDisplayName}
+              canEditOrder={canEditOrder}
+              userRole={userRole}
+              userId={userId}
+              currentBranchId={currentBranchId}
+              permissions={permissions}
+              csAgentsForAssign={csAgentsForAssign}
+              logisticsLocations={logisticsLocations}
+              allocatableLocations={allocatableLocations}
+              allocatableLocationsDeferred={allocatableLocationsDeferred}
+              logisticsDispatchTemplates={logisticsDispatchTemplates}
+              invoice={invoice}
+            />
+          )
+        }
+      </Await>
+    </Suspense>
   );
 }

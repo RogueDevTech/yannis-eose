@@ -1,4 +1,4 @@
-import { Suspense, useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
+import { Suspense, lazy, useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
 import { Await, Link, useFetcher, useRevalidator, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -9,23 +9,21 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { Spinner } from '~/components/ui/spinner';
-import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
-import { useFetcherToast } from '~/components/ui/toast';
+import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { DeferredError, DeferredSection } from '~/components/ui/deferred-section';
 import {
   CSCartOverviewStatTileSkeleton,
   CSTabCountBadgeSkeleton,
   CSClaimQueueTabDeferredFallback,
-  CSLeaderboardTabDeferredFallback,
   CSCallbacksTabDeferredFallback,
   CSDuplicatesTabDeferredFallback,
+  CSHotSwapTabSkeleton,
 } from './CSDashboardDeferredFallbacks';
 import { Tabs } from '~/components/ui/tabs';
 import { Checkbox } from '~/components/ui/checkbox';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
-import { EmptyState } from '~/components/ui/empty-state';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
@@ -36,12 +34,24 @@ import {
   LiveActivityDetailModal,
   DetailRow,
 } from '~/components/ui/live-activity-card';
-import { CreateOfflineOrderModal } from '~/features/orders/CreateOfflineOrderModal';
+const CreateOfflineOrderModal = lazy(() =>
+  import('~/features/orders/CreateOfflineOrderModal').then((m) => ({ default: m.CreateOfflineOrderModal })),
+);
+const CSDashboardDuplicatesTabPanel = lazy(() =>
+  import('./CSDashboardDuplicatesTabPanel').then((m) => ({ default: m.CSDashboardDuplicatesTabPanel })),
+);
+const CSDashboardCallbacksTabPanel = lazy(() =>
+  import('./CSDashboardCallbacksTabPanel').then((m) => ({ default: m.CSDashboardCallbacksTabPanel })),
+);
+const CSDashboardHotSwapTabPanel = lazy(() =>
+  import('./CSDashboardHotSwapTabPanel').then((m) => ({ default: m.CSDashboardHotSwapTabPanel })),
+);
 import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
+import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { CSQueueDataSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import {
   parseCSQueueTabFromSearchParam,
@@ -49,10 +59,8 @@ import {
   type CSDashboardPageProps,
   type CSDashboardShell,
   type AgentWorkload,
-  type InactiveAgent,
   type CSOrder,
   type DuplicatePair,
-  type CSLeaderboardEntry,
   type PendingCart,
   type LiveActivityItem,
   type CSQueueTab,
@@ -589,11 +597,11 @@ function CSDashboardPageLoaded({
   shell,
   createOfflineOpen,
   onCreateOfflineOpenChange,
-  inactiveAgents,
+  inactiveAgents: _inactiveAgents,
   callbackOrders,
   flaggedDuplicates,
-  leaderboard,
-  leaderboardPeriod = 'this_month',
+  leaderboard: _leaderboard,
+  leaderboardPeriod: _leaderboardPeriod = 'this_month',
   cartStats,
   claimQueue,
   liveEvents,
@@ -614,8 +622,9 @@ function CSDashboardPageLoaded({
   } = critical;
   const { isClaimMode, claimCap } = shell;
   const adminRouteData = useRouteLoaderData('routes/admin') as
-    | { user?: { currentBranchId?: string | null }; branches?: Array<{ id: string }> }
+    | { user?: { currentBranchId?: string | null } }
     | undefined;
+  const branchesCatalog = useBranchesCatalog();
 
   /** SuperAdmin / org-wide HoCS have no session branch — tRPC requires explicit `branchId` on scoped mutations. */
   function csMutationBranchPayload(ordersForBranch: Array<{ branchId?: string | null }>): Record<string, string> {
@@ -629,13 +638,13 @@ function CSDashboardPageLoaded({
       ),
     ];
     if (fromOrders.length >= 1) return { branchId: fromOrders[0] as string };
-    const fb = adminRouteData?.branches?.[0]?.id;
+    const fb = branchesCatalog[0]?.id;
     return fb ? { branchId: fb } : {};
   }
 
   const fetcher = useFetcher();
   const revalidator = useRevalidator();
-  const isRouteLoaderBusy = useLoaderRefetchBusy();
+  const isRouteLoaderBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
   const abandonedPageFromUrl = useMemo(() => {
     const n = parseInt(searchParams.get('abandonedPage') ?? '1', 10);
@@ -772,93 +781,6 @@ function CSDashboardPageLoaded({
       },
     },
   ], [claimingOrderId, claimFetcher.state, claimFetcher, setClaimingOrderId]);
-
-  const leaderboardColumns = useMemo((): CompactTableColumn<CSLeaderboardEntry>[] => [
-    {
-      key: 'rank',
-      header: '#',
-      render: (_e, index) => (
-        <span className="font-mono text-sm text-app-fg-muted">{index + 1}</span>
-      ),
-    },
-    {
-      key: 'closer',
-      header: 'Closer',
-      render: (e) => (
-        <Link
-          to={`/hr/users/${e.agentId}`}
-          prefetch="intent"
-          className="text-sm font-medium text-brand-500 hover:text-brand-600 hover:underline"
-        >
-          {e.agentName}
-        </Link>
-      ),
-    },
-    {
-      key: 'engaged',
-      header: 'Engaged',
-      align: 'right',
-      render: (e) => <span className="text-right text-sm">{e.ordersEngaged}</span>,
-    },
-    {
-      key: 'confirmed',
-      header: 'Confirmed',
-      align: 'right',
-      render: (e) => (
-        <span className="text-right text-sm text-success-600 dark:text-success-400">{e.ordersConfirmed}</span>
-      ),
-    },
-    {
-      key: 'delivered',
-      header: 'Delivered',
-      align: 'right',
-      render: (e) => (
-        <span className="text-right text-sm font-medium text-brand-600 dark:text-brand-400">{e.ordersDelivered}</span>
-      ),
-    },
-    {
-      key: 'calls',
-      header: 'Calls',
-      align: 'right',
-      render: (e) => <span className="text-right text-sm">{e.callsMade}</span>,
-    },
-    {
-      key: 'confRate',
-      header: 'Conf. Rate',
-      align: 'right',
-      render: (e) => <span className="text-right text-sm">{e.confirmationRate.toFixed(1)}%</span>,
-    },
-    {
-      key: 'delRate',
-      header: 'Del. Rate',
-      align: 'right',
-      render: (e) => (
-        <span
-          className={`text-sm font-bold ${
-            e.deliveryRate >= 70
-              ? 'text-success-600 dark:text-success-400'
-              : e.deliveryRate >= 50
-                ? 'text-warning-600 dark:text-warning-400'
-                : 'text-app-fg'
-          }`}
-        >
-          {e.deliveryRate.toFixed(1)}%
-        </span>
-      ),
-    },
-    {
-      key: 'avgCall',
-      header: 'Avg Call',
-      align: 'right',
-      render: (e) => (
-        <span className="text-right text-sm text-app-fg-muted">
-          {e.avgCallDurationSeconds >= 60
-            ? `${Math.floor(e.avgCallDurationSeconds / 60)}m ${e.avgCallDurationSeconds % 60}s`
-            : `${e.avgCallDurationSeconds}s`}
-        </span>
-      ),
-    },
-  ], []);
 
   /** URL-driven so socket `revalidate()` keeps loading the same closer's orders (see usePageRefreshOnEvent). */
   const hotSwapFrom =
@@ -1079,6 +1001,30 @@ function CSDashboardPageLoaded({
   const abandonedTotalPages =
     abandonedPagination.total === 0 ? 0 : Math.ceil(abandonedPagination.total / abandonedPagination.limit);
   const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const { toast } = useToast();
+  /**
+   * Reveal-and-call fetcher for dropped-off carts. Server returns the raw
+   * phone for ABANDONED rows; the click handler wraps it in a `tel:` link
+   * and pops the OS dialer / WhatsApp Web. Phone is never written to the
+   * card or DOM — only injected into the navigation URL on click.
+   */
+  const revealCartPhoneFetcher = useFetcher<{
+    ok: boolean;
+    phone?: string;
+    isDialable?: boolean;
+    error?: string;
+  }>();
+  const [revealingCartId, setRevealingCartId] = useState<string | null>(null);
+  const revealAbandonedCartPhone = useCallback((cartId: string) => {
+    setRevealingCartId(cartId);
+    const fd = new FormData();
+    fd.set('intent', 'revealAbandonedPhone');
+    fd.set('cartId', cartId);
+    revealCartPhoneFetcher.submit(fd, {
+      method: 'post',
+      action: '/admin/cs/queue/carts',
+    });
+  }, [revealCartPhoneFetcher]);
   const overviewScrollRef = useRef<HTMLDivElement>(null);
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
@@ -1234,6 +1180,30 @@ function CSDashboardPageLoaded({
       cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
     }
   }, [deleteCartFetcher.state, deleteCartFetcher.data]);
+
+  // When the reveal call returns, open `tel:` (and a copy fallback) so the
+  // dropped-off customer is one tap away. Phone never lands in the DOM.
+  useEffect(() => {
+    if (revealCartPhoneFetcher.state !== 'idle' || !revealCartPhoneFetcher.data) return;
+    const data = revealCartPhoneFetcher.data;
+    if (!data.ok) {
+      toast.error('Could not reveal phone', data.error ?? 'Try again in a moment.');
+      setRevealingCartId(null);
+      return;
+    }
+    if (!data.isDialable || !data.phone) {
+      toast.error(
+        "Phone wasn't captured for this cart",
+        'This dropped-off entry was created before phone capture was enabled, so we can\'t reach the customer. Use Clear to remove it.',
+      );
+      setRevealingCartId(null);
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      window.location.href = `tel:${data.phone}`;
+    }
+    setRevealingCartId(null);
+  }, [revealCartPhoneFetcher.state, revealCartPhoneFetcher.data, toast]);
 
   // cart:updated socket event → reload carts fetcher directly (main loader revalidation won't refresh fetcher data)
   useSocketEvent('cart:updated', () => {
@@ -1427,14 +1397,16 @@ function CSDashboardPageLoaded({
         <Suspense fallback={null}>
           <Await resolve={productsForOfflineOrder}>
             {(products) => (
-              <CreateOfflineOrderModal
-                open={createOfflineOpen}
-                onClose={() => { onCreateOfflineOpenChange(false); setCreateOfflinePrefill(null); }}
-                onSuccess={() => { onCreateOfflineOpenChange(false); setCreateOfflinePrefill(null); }}
-                initialCustomerName={createOfflinePrefill?.customerName}
-                products={products}
-                branchId={csMutationBranchPayload(unassignedOrders).branchId}
-              />
+              <Suspense fallback={null}>
+                <CreateOfflineOrderModal
+                  open={createOfflineOpen}
+                  onClose={() => { onCreateOfflineOpenChange(false); setCreateOfflinePrefill(null); }}
+                  onSuccess={() => { onCreateOfflineOpenChange(false); setCreateOfflinePrefill(null); }}
+                  initialCustomerName={createOfflinePrefill?.customerName}
+                  products={products}
+                  branchId={csMutationBranchPayload(unassignedOrders).branchId}
+                />
+              </Suspense>
             )}
           </Await>
         </Suspense>
@@ -2547,188 +2519,37 @@ function CSDashboardPageLoaded({
       )}
 
       {activeTab === 'hotswap' && (
-        <div className="h-[28rem] overflow-auto">
-          <div className="space-y-4">
-          <div className="card">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <h2 className="text-lg font-semibold text-app-fg">Hot Swap</h2>
-              {hotSwapOrderIds.length > 0 && hotSwapTo && (
-                <div className="flex items-center gap-3">
-                  <Button variant="secondary" onClick={() => setHotSwapOrderIds([])}>
-                    Clear Selection
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={handleHotSwap}
-                    disabled={fetcher.state === 'submitting'}
-                    loading={fetcher.state === 'submitting'}
-                    loadingText="Reassigning..."
-                  >
-                    {`Reassign ${hotSwapOrderIds.length} Order${hotSwapOrderIds.length > 1 ? 's' : ''}`}
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div>
-                <SearchableSelect
-                  id="hotswap-from"
-                  label="From closer"
-                  value={hotSwapFrom}
-                  onChange={(v) => {
-                    startHotSwapSearchTransition(() => {
-                      setHotSwapOrderIds([]);
-                      const next = new URLSearchParams(searchParams);
-                      next.delete('from');
-                      if (v) {
-                        next.set('hotSwapFrom', v);
-                        next.set('tab', 'hotswap');
-                      } else {
-                        next.delete('hotSwapFrom');
-                      }
-                      setSearchParams(next, { replace: true });
-                    });
-                  }}
-                  placeholder="Select source closer..."
-                  searchPlaceholder="Search closers..."
-                  options={workloads.map((w: AgentWorkload) => ({
-                    value: w.agentId,
-                    label: `${w.agentName} (${w.pendingCount} orders)`,
-                  }))}
-                />
-              </div>
-              <div>
-                <SearchableSelect
-                  id="hotswap-to"
-                  label="To closer"
-                  value={hotSwapTo}
-                  onChange={setHotSwapTo}
-                  placeholder="Select target closer..."
-                  searchPlaceholder="Search closers..."
-                  options={workloads
-                    .filter((w: AgentWorkload) => w.agentId !== hotSwapFrom)
-                    .map((w: AgentWorkload) => ({
-                      value: w.agentId,
-                      label: `${w.agentName} (${w.pendingCount}/${w.capacity})`,
-                    }))}
-                />
-              </div>
-            </div>
-
-            {hotSwapFrom && (
-              <TableLoadingOverlay show={hotSwapListLoading}>
-            {hotSwapSourceOrders.length > 0 ? (
-              <>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm text-app-fg-muted">
-                    Select orders to reassign ({hotSwapOrderIds.length} selected)
-                    {hotSwapSourceTotal > hotSwapSourceOrders.length ? (
-                      <span className="block text-xs mt-0.5 text-warning-600 dark:text-warning-400">
-                        Showing {hotSwapSourceOrders.length} of {hotSwapSourceTotal} — narrow by reassigning in batches
-                        or use CS Orders with filters for the full list.
-                      </span>
-                    ) : null}
-                  </p>
-                  <button
-                    onClick={selectAllHotSwap}
-                    className="text-sm text-brand-500 hover:text-brand-600 font-medium"
-                  >
-                    Select All ({hotSwapSourceOrders.length})
-                  </button>
-                </div>
-
-                <p className="text-xs text-app-fg-muted mb-2">
-                  Click cards to select — same layout as Unassigned Queue
-                </p>
-                <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
-                  {hotSwapSourceOrders.map((order: CSOrder) => {
-                    const isSelected = hotSwapOrderIds.includes(order.id);
-                    return (
-                      <div
-                        key={order.id}
-                        onClick={() => toggleHotSwapOrder(order.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            toggleHotSwapOrder(order.id);
-                          }
-                        }}
-                        role="checkbox"
-                        aria-checked={isSelected}
-                        tabIndex={0}
-                        className={`group relative shrink-0 w-64 text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                          isSelected
-                            ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
-                            : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
-                        }`}
-                      >
-                        <div
-                          className="absolute top-3 left-3 z-10"
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                        >
-                          <Checkbox
-                            checked={isSelected}
-                            onChange={() => toggleHotSwapOrder(order.id)}
-                          />
-                        </div>
-                        <span className="absolute top-3 right-3 flex h-2.5 w-2.5 pointer-events-none">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-60" />
-                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
-                        </span>
-                        <div className="p-3.5 pl-10 pr-8">
-                          <div className="mb-2">
-                            <OrderStatusBadge status={order.status} />
-                          </div>
-                          <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2 pr-1">
-                            {order.customerName}
-                          </p>
-                          {order.totalAmount ? (
-                            <div className="mb-2">
-                              <NairaPrice
-                                amount={order.totalAmount}
-                                className="text-[11px] font-bold text-app-fg"
-                              />
-                            </div>
-                          ) : null}
-                          <div className="text-[11px] font-medium text-app-fg-muted">
-                            {new Date(order.createdAt).toLocaleString('en-NG', {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </div>
-                          <div className="mt-2 pt-2 border-t border-app-border/80">
-                            <OrderIdBadge
-                              id={order.id}
-                              length={8}
-                              ellipsis=""
-                              textClassName="text-[10px] text-app-fg-muted"
-                              className="inline-flex"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : !hotSwapListLoading ? (
-              <p className="text-sm text-app-fg-muted text-center py-4">
-                No open CS-queue orders for this closer (nothing in Unprocessed / Assigned / Engaged with them as
-                assignee). If you expected more, confirm branch context and that orders are still in the CS stage.
-              </p>
-            ) : (
-              <div className="min-h-[12rem]" aria-hidden />
-            )}
-              </TableLoadingOverlay>
-            )}
-          </div>
-
-          </div>
-        </div>
+        <Suspense fallback={<CSHotSwapTabSkeleton />}>
+          <CSDashboardHotSwapTabPanel
+            hotSwapFrom={hotSwapFrom}
+            hotSwapTo={hotSwapTo}
+            hotSwapOrderIds={hotSwapOrderIds}
+            hotSwapListLoading={hotSwapListLoading}
+            hotSwapSourceOrders={hotSwapSourceOrders}
+            hotSwapSourceTotal={hotSwapSourceTotal}
+            workloads={workloads}
+            fetcherSubmitting={fetcher.state === 'submitting'}
+            onClearSelection={() => setHotSwapOrderIds([])}
+            onReassign={handleHotSwap}
+            onFromCloserChange={(v) => {
+              startHotSwapSearchTransition(() => {
+                setHotSwapOrderIds([]);
+                const next = new URLSearchParams(searchParams);
+                next.delete('from');
+                if (v) {
+                  next.set('hotSwapFrom', v);
+                  next.set('tab', 'hotswap');
+                } else {
+                  next.delete('hotSwapFrom');
+                }
+                setSearchParams(next, { replace: true });
+              });
+            }}
+            onToCloserChange={setHotSwapTo}
+            toggleHotSwapOrder={toggleHotSwapOrder}
+            selectAllHotSwap={selectAllHotSwap}
+          />
+        </Suspense>
       )}
 
       {/* ── Claim Queue Tab ──────────────────────────── */}
@@ -2819,101 +2640,9 @@ function CSDashboardPageLoaded({
       {activeTab === 'callbacks' && (
         <DeferredSection resolve={callbackOrders} fallback={<CSCallbacksTabDeferredFallback />}>
           {(resolvedCallbacks: CSOrder[]) => (
-            <div className="space-y-3">
-              {resolvedCallbacks.length === 0 ? (
-                <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
-                  No callbacks scheduled
-                </div>
-              ) : (
-                <div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <p className="text-xs text-app-fg-muted">
-                      Orders awaiting callback retry after &ldquo;No Answer&rdquo; \u2014 click View for details, Call Now to retry.
-                    </p>
-                  </div>
-                  <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
-                    {resolvedCallbacks.map((order: CSOrder) => {
-                      const isDue = order.callbackScheduledAt && new Date(order.callbackScheduledAt) <= new Date();
-                      const agent = workloads.find((w: AgentWorkload) => w.agentId === order.assignedCsId);
-                      return (
-                        <div
-                          key={order.id}
-                          className={`group relative shrink-0 w-64 rounded-xl border bg-app-elevated transition-all duration-200 ${
-                            isDue
-                              ? 'border-danger-300 dark:border-danger-700 hover:shadow-md hover:border-danger-400 dark:hover:border-danger-600'
-                              : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
-                          }`}
-                        >
-                          <span className="absolute top-3 right-3 flex h-2.5 w-2.5 pointer-events-none">
-                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${
-                              isDue ? 'bg-danger-400' : 'bg-warning-400'
-                            }`} />
-                            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                              isDue ? 'bg-danger-500' : 'bg-warning-500'
-                            }`} />
-                          </span>
-
-                          <div className="p-3.5 pr-8">
-                            <div className="mb-2 flex flex-wrap items-center gap-1">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                                isDue
-                                  ? 'bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400'
-                                  : 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400'
-                              }`}>
-                                {isDue ? 'Due now' : `Attempt ${order.callbackAttempts ?? 0}/3`}
-                              </span>
-                            </div>
-                            <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2 pr-1">
-                              {order.customerName}
-                            </p>
-                            {order.totalAmount ? (
-                              <div className="mb-2">
-                                <span className="text-[11px] font-bold text-app-fg">
-                                  &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
-                                </span>
-                              </div>
-                            ) : null}
-                            {agent ? (
-                              <p className="text-[11px] text-app-fg-muted truncate mb-1">
-                                Closer: {agent.agentName}
-                              </p>
-                            ) : null}
-                            {order.callbackScheduledAt ? (
-                              <div className="text-[11px] font-medium text-app-fg-muted">
-                                {new Date(order.callbackScheduledAt).toLocaleString('en-NG', {
-                                  month: 'short', day: 'numeric',
-                                  hour: '2-digit', minute: '2-digit',
-                                })}
-                              </div>
-                            ) : null}
-                            {order.callbackNotes ? (
-                              <p className="text-[11px] text-app-fg-muted mt-1 italic truncate">
-                                Note: {order.callbackNotes}
-                              </p>
-                            ) : null}
-
-                            <div className="mt-2 pt-2 border-t border-app-border/80 flex flex-wrap items-center gap-2.5">
-                              <Link
-                                to={`/admin/orders/${order.id}`}
-                                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
-                              >
-                                View details
-                              </Link>
-                              <Link
-                                to={`/admin/orders/${order.id}`}
-                                className="text-xs font-medium text-success-600 dark:text-success-400 hover:underline"
-                              >
-                                Call now
-                              </Link>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
+            <Suspense fallback={<CSCallbacksTabDeferredFallback />}>
+              <CSDashboardCallbacksTabPanel orders={resolvedCallbacks} workloads={workloads} />
+            </Suspense>
           )}
         </DeferredSection>
       )}
@@ -2922,114 +2651,14 @@ function CSDashboardPageLoaded({
       {activeTab === 'duplicates' && (
         <DeferredSection resolve={flaggedDuplicates} fallback={<CSDuplicatesTabDeferredFallback />}>
           {(pairs: DuplicatePair[]) => (
-            <div className="h-[28rem] overflow-auto">
-              <div className="space-y-4">
-                <div className="card">
-                  <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-app-fg">Potential duplicates</h2>
-                    <p className="text-sm text-app-fg-muted mt-0.5">
-                      New orders flagged because another non-cancelled order shares the same buyer phone within the last 6
-                      hours. Merge into the original or dismiss if this is a legitimate separate order.
-                    </p>
-                  </div>
-
-                  {pairs.length === 0 ? (
-                    <EmptyState title="No flagged duplicates" description="Nothing needs review right now." />
-                  ) : (
-                    <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
-                      {pairs.map((pair: DuplicatePair) => (
-                        <div
-                          key={pair.duplicate.id}
-                          className="group relative shrink-0 w-64 rounded-xl border border-danger-200 dark:border-danger-800/80 bg-danger-50/40 dark:bg-danger-900/15 transition-all duration-200 hover:shadow-md hover:border-danger-300 dark:hover:border-danger-700"
-                        >
-                          <span className="absolute top-3 right-3 flex h-2.5 w-2.5 pointer-events-none">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-danger-400 opacity-60" />
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-danger-500" />
-                          </span>
-
-                          <div className="p-3.5 pr-8">
-                            <div className="mb-2">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-danger-100 dark:bg-danger-900/35 text-danger-700 dark:text-danger-400">
-                                Flagged duplicate
-                              </span>
-                            </div>
-                            <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2 pr-1">
-                              {pair.duplicate.customerName}
-                            </p>
-                            <p className="text-[11px] text-app-fg truncate mb-1">
-                              <span className="font-mono">{pair.duplicate.customerPhoneDisplay ?? '—'}</span>
-                              {pair.duplicate.totalAmount ? (
-                                <span className="text-app-fg-muted">
-                                  {' · '}₦{Number(pair.duplicate.totalAmount).toLocaleString('en-NG')}
-                                </span>
-                              ) : null}
-                            </p>
-                            <div className="text-[11px] font-medium text-app-fg-muted">
-                              {new Date(pair.duplicate.createdAt).toLocaleString('en-NG', {
-                                month: 'short', day: 'numeric',
-                                hour: '2-digit', minute: '2-digit',
-                              })}
-                            </div>
-                            <div className="text-[11px] text-app-fg-muted mt-1 truncate">
-                              <span className="text-app-fg-muted">Order: </span>
-                              <OrderIdBadge
-                                id={pair.duplicate.id}
-                                length={8}
-                                ellipsis=""
-                                textClassName="text-[10px] text-app-fg-muted"
-                                className="inline-flex"
-                              />
-                            </div>
-                            {pair.original ? (
-                              <div className="text-[11px] text-app-fg-muted mt-0.5 truncate">
-                                <span className="text-app-fg-muted">Original: </span>
-                                <OrderIdBadge
-                                  id={pair.original.id}
-                                  length={8}
-                                  ellipsis=""
-                                  linkTo={`/admin/orders/${pair.original.id}`}
-                                  textClassName="text-[10px] text-brand-500 hover:text-brand-600"
-                                  className="inline-flex"
-                                />
-                              </div>
-                            ) : (
-                              <p className="text-[11px] text-warning-700 dark:text-warning-400 mt-0.5">
-                                Original missing — merge unavailable.
-                              </p>
-                            )}
-
-                            <div className="mt-2 pt-2 border-t border-app-border/80 flex flex-wrap items-center gap-2.5">
-                              <Link
-                                to={`/admin/orders/${pair.duplicate.id}`}
-                                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
-                              >
-                                View
-                              </Link>
-                              <button
-                                type="button"
-                                disabled={!pair.original || fetcher.state !== 'idle'}
-                                onClick={() => setMergeDuplicateConfirm(pair)}
-                                className="text-xs font-medium text-app-fg hover:underline disabled:opacity-50"
-                              >
-                                Merge
-                              </button>
-                              <button
-                                type="button"
-                                disabled={fetcher.state !== 'idle'}
-                                onClick={() => setDismissDuplicateConfirm(pair)}
-                                className="text-xs font-medium text-danger-600 dark:text-danger-400 hover:underline disabled:opacity-50"
-                              >
-                                Dismiss
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            <Suspense fallback={<CSDuplicatesTabDeferredFallback />}>
+              <CSDashboardDuplicatesTabPanel
+                pairs={pairs}
+                fetcherIdle={fetcher.state === 'idle'}
+                onMerge={setMergeDuplicateConfirm}
+                onDismiss={setDismissDuplicateConfirm}
+              />
+            </Suspense>
           )}
         </DeferredSection>
       )}
@@ -3067,8 +2696,11 @@ function CSDashboardPageLoaded({
                           Dropped off
                         </span>
                       </div>
-                      <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2 pr-1">
+                      <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-1 pr-1">
                         {c.customerName}
+                      </p>
+                      <p className="text-[11px] font-mono text-app-fg-muted truncate mb-2">
+                        {c.customerPhoneDisplay}
                       </p>
                       <p className="text-[11px] text-app-fg truncate mb-1">
                         <span className="text-app-fg-muted">Product:</span>{' '}
@@ -3088,6 +2720,20 @@ function CSDashboardPageLoaded({
                       </div>
 
                       <div className="mt-2 pt-2 border-t border-app-border/80 flex flex-wrap items-center gap-2.5">
+                        {canDeleteCart ? (
+                          <button
+                            type="button"
+                            disabled={
+                              revealCartPhoneFetcher.state !== 'idle' && revealingCartId === c.id
+                            }
+                            onClick={() => revealAbandonedCartPhone(c.id)}
+                            className="text-xs font-medium text-success-600 dark:text-success-400 hover:underline disabled:opacity-50"
+                          >
+                            {revealCartPhoneFetcher.state !== 'idle' && revealingCartId === c.id
+                              ? 'Calling…'
+                              : 'Call'}
+                          </button>
+                        ) : null}
                         {canCreateOffline ? (
                           <button
                             type="button"
@@ -3483,6 +3129,15 @@ export function CSDashboardPage({
   canDeleteCart,
 }: CSDashboardPageProps) {
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
+  const queueBundle = useMemo(
+    () =>
+      Promise.all([shell, criticalData]).then(([shellResolved, critical]) => ({
+        shell: shellResolved,
+        critical,
+      })),
+    [shell, criticalData],
+  );
+
   return (
     <div className="space-y-4">
       <CSQueueStaticHeader
@@ -3491,11 +3146,11 @@ export function CSDashboardPage({
         liveEvents={liveEvents}
       />
       <Suspense fallback={<CSQueueDataSkeleton />}>
-        <Await resolve={criticalData} errorElement={<DeferredError />}>
-          {(critical) => (
+        <Await resolve={queueBundle} errorElement={<DeferredError />}>
+          {({ shell: shellResolved, critical }) => (
             <CSDashboardPageLoaded
               critical={critical}
-              shell={shell}
+              shell={shellResolved}
               createOfflineOpen={createOfflineOpen}
               onCreateOfflineOpenChange={setCreateOfflineOpen}
               productsForOfflineOrder={productsForOfflineOrder}

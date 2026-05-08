@@ -1,8 +1,10 @@
-import { useLoaderData } from '@remix-run/react';
-import { json } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { MarketingFundingPage } from '~/features/marketing/MarketingFundingPage';
+import { MarketingFundingLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type {
   FundingRequestStatusFilter,
   FundingSection,
@@ -285,6 +287,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? apiRequest<unknown>(distributingRequestsUrl, { method: 'GET', cookie })
       : Promise.resolve({ ok: true as const, data: {} });
 
+  const pageData = (async (): Promise<MarketingFundingLoaderData> => {
   const [
     receivedTransfersRes,
     receivedRequestsRes,
@@ -500,6 +503,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   return data;
+})();
+
+  return defer({
+    fundingShell: {
+      filters,
+      canDistribute,
+      isMediaBuyer,
+      canRequestFunding,
+      canSendFunding: isFundingAdmin,
+    },
+    pageData,
+  });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -512,10 +527,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function MarketingFundingRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { fundingShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-      <MarketingFundingPage {...data} />
-    </>
+    <Suspense fallback={<MarketingFundingLoadingShell {...fundingShell} />}>
+      <Await resolve={pageData}>
+        {(data) => <MarketingFundingPage {...data} />}
+      </Await>
+    </Suspense>
   );
 }

@@ -1,8 +1,10 @@
-import { useLoaderData } from '@remix-run/react';
-import { json, redirect } from '@remix-run/node';
+import { useLoaderData, Await } from '@remix-run/react';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
 import {
   apiRequest,
+  ensureBranchScopeOrRedirect,
   getSessionCookie,
   requireStaffAccountsAccess,
   safeStatus,
@@ -12,6 +14,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { canEditUser } from '~/lib/rbac';
 import { UserCreatePage, type EditingUser } from '~/features/users/UserCreatePage';
+import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type {
   UserCreateProduct,
   UserCreateLocation,
@@ -30,13 +33,19 @@ export const meta: MetaFunction = () => [{ title: 'Edit User — Yannis EOSE' }]
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const viewer = await requireStaffAccountsAccess(request);
-  const cookie = getSessionCookie(request);
   const userId = params['id'];
 
   if (!userId) {
     throw new Response('User ID required', { status: 400 });
   }
+  // Pre-flight branch picker safety net — see ensureBranchScopeOrRedirect docs.
+  // Fall back to the user's profile so the modal opens with full context, and
+  // switching branch lands the org-wide head right back on /:id/edit.
+  const guard = ensureBranchScopeOrRedirect(request, viewer, `/hr/users/${userId}`);
+  if (guard) return guard;
+  const cookie = getSessionCookie(request);
 
+  const pageData = (async () => {
   const productsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
@@ -198,6 +207,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   };
 
   return { formData, editingUser };
+  })();
+
+  return defer({ pageData });
 }
 
 // ─── Action ─────────────────────────────────────────────
@@ -407,6 +419,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 // ─── Component ──────────────────────────────────────────
 
 export default function EditUserRoute() {
-  const { formData, editingUser } = useLoaderData<typeof loader>();
-  return <UserCreatePage {...formData} editingUser={editingUser} />;
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<UserCreateEditLoadingShell mode="edit" />}>
+      <Await resolve={pageData}>
+        {(data) => <UserCreatePage {...data.formData} editingUser={data.editingUser} />}
+      </Await>
+    </Suspense>
+  );
 }

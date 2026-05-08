@@ -1,9 +1,11 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { SettingsPage } from '~/features/settings/SettingsPage';
+import { TplSettingsLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
 export const meta: MetaFunction = () => [
   { title: 'Settings — Yannis EOSE' },
 ];
@@ -16,20 +18,24 @@ interface SystemSetting {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const user = await getCurrentUser(request);
-  const cookie = getSessionCookie(request);
+  const pageData = (async () => {
+    const user = await getCurrentUser(request);
+    const cookie = getSessionCookie(request);
 
-  let systemSettings: SystemSetting[] = [];
-  const settingsRes = await apiRequest<unknown>(
-    '/trpc/settings.getSystemSettings',
-    { method: 'GET', cookie },
-  );
-  if (settingsRes.ok) {
-    const data = settingsRes.data as { result?: { data?: SystemSetting[] } };
-    systemSettings = data?.result?.data ?? [];
-  }
+    let systemSettings: SystemSetting[] = [];
+    const settingsRes = await apiRequest<unknown>(
+      '/trpc/settings.getSystemSettings',
+      { method: 'GET', cookie },
+    );
+    if (settingsRes.ok) {
+      const data = settingsRes.data as { result?: { data?: SystemSetting[] } };
+      systemSettings = data?.result?.data ?? [];
+    }
 
-  return { user, systemSettings, notificationEmailConfig: null };
+    return { user, systemSettings, notificationEmailConfig: null };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -78,14 +84,18 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function TplSettingsRoute() {
-  const { user, systemSettings, notificationEmailConfig } = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-    <SettingsPage
-      user={user}
-      systemSettings={systemSettings}
-      notificationEmailConfig={notificationEmailConfig}
-    />
-    </>
+    <Suspense fallback={<TplSettingsLoadingShell />}>
+      <Await resolve={pageData}>
+        {({ user, systemSettings, notificationEmailConfig }) => (
+          <SettingsPage
+            user={user}
+            systemSettings={systemSettings}
+            notificationEmailConfig={notificationEmailConfig}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

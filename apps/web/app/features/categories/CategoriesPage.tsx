@@ -290,7 +290,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
     if (actionData?.error) setDismissedError(false);
   }, [actionData?.error]);
   const navigation = useNavigation();
-  const isLoaderRefetchBusy = useLoaderRefetchBusy();
+  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
 
   // Close modal on successful action
   useEffect(() => {

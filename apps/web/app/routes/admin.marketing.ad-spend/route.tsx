@@ -5,6 +5,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
+import { MarketingAdSpendLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { AdSpendStatusCounts, AdSpendStatusFilter, Campaign, MarketingAdSpendLoaderData } from '~/features/marketing/types';
 import {
   buildLeaderboardInput,
@@ -102,6 +103,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     JSON.stringify({ page: 1, limit: 100, role: 'MEDIA_BUYER', status: 'ACTIVE' }),
   );
 
+  const adSpendShell = {
+    filters,
+    viewMode: isMediaBuyer ? ('media_buyer' as const) : ('admin' as const),
+    canApproveAdSpend,
+  };
+
+  const pageData = (async (): Promise<MarketingAdSpendLoaderData> => {
   const adSpendRes = await apiRequest<unknown>(
     `/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`,
     { method: 'GET', cookie },
@@ -184,7 +192,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     adSpendPicklists,
   };
 
-  return defer(data as unknown as Record<string, unknown>);
+  return data;
+})();
+
+  return defer({
+    adSpendShell,
+    pageData,
+  } as unknown as Record<string, unknown>);
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -206,25 +220,36 @@ const AD_SPEND_PICKLISTS_FALLBACK: Pick<
 };
 
 export default function AdminMarketingAdSpendRoute() {
-  const data = useLoaderData<typeof loader>() as unknown as MarketingAdSpendLoaderData;
-  if (data.adSpendPicklists) {
-    const { adSpendPicklists, ...rest } = data;
-    const sync = rest as Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
-    return (
-      <Suspense
-        fallback={
-          <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />
-        }
-      >
-        <Await resolve={adSpendPicklists} errorElement={<DeferredError />}>
-          {(pick) => <MarketingAdSpendPage {...sync} {...pick} />}
-        </Await>
-      </Suspense>
-    );
-  }
+  const { adSpendShell, pageData } = useLoaderData<typeof loader>() as unknown as {
+    adSpendShell: {
+      filters: MarketingAdSpendLoaderData['filters'];
+      viewMode: MarketingAdSpendLoaderData['viewMode'];
+      canApproveAdSpend: boolean;
+    };
+    pageData: Promise<MarketingAdSpendLoaderData>;
+  };
   return (
-    <>
-      <MarketingAdSpendPage {...data} />
-    </>
+    <Suspense fallback={<MarketingAdSpendLoadingShell {...adSpendShell} />}>
+      <Await resolve={pageData} errorElement={<DeferredError />}>
+        {(data) => {
+          if (data.adSpendPicklists) {
+            const { adSpendPicklists, ...rest } = data;
+            const sync = rest as Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
+            return (
+              <Suspense
+                fallback={
+                  <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />
+                }
+              >
+                <Await resolve={adSpendPicklists} errorElement={<DeferredError />}>
+                  {(pick) => <MarketingAdSpendPage {...sync} {...pick} />}
+                </Await>
+              </Suspense>
+            );
+          }
+          return <MarketingAdSpendPage {...data} />;
+        }}
+      </Await>
+    </Suspense>
   );
 }

@@ -116,10 +116,24 @@ export class ReportsService {
     }
   }
 
-  private ensurePermission(user: SessionUser, permission: string): void {
+  /**
+   * Two-key export gate: the user must (a) be able to read the underlying data
+   * AND (b) hold the per-domain export code. This prevents granting `orders.export`
+   * to a user who can't read CS-team data and having them download it via the
+   * cs_team report. SuperAdmin still bypasses everything.
+   */
+  private ensureExportPermission(user: SessionUser, readPermission: string, exportPermission: string): void {
     if (user.role === 'SUPER_ADMIN') return;
-    if ((user.permissions ?? []).includes(permission)) return;
-    throw new TRPCError({ code: 'FORBIDDEN', message: `Missing ${permission}` });
+    const have = user.permissions ?? [];
+    if (!have.includes(readPermission)) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: `Missing ${readPermission}` });
+    }
+    if (!have.includes(exportPermission)) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: `Missing ${exportPermission} — ask an admin to grant export access.`,
+      });
+    }
   }
 
   private async collectOrdersPages(
@@ -147,7 +161,7 @@ export class ReportsService {
   }
 
   private async exportCsOrders(input: Extract<ExportReportInput, { reportKey: 'cs_orders' }>, user: SessionUser, currentBranchId: string | null, date: string) {
-    this.ensurePermission(user, 'orders.read');
+    this.ensureExportPermission(user, 'orders.read', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
     const orders = await this.collectOrdersPages(
       {
@@ -192,7 +206,7 @@ export class ReportsService {
     currentBranchId: string | null,
     date: string,
   ) {
-    this.ensurePermission(user, 'cs.teamOverview');
+    this.ensureExportPermission(user, 'cs.teamOverview', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
     const period: 'this_month' | 'all_time' =
       input.filters?.periodAllTime || (!startDate && !endDate && input.dateRange?.preset === 'all_time')
@@ -271,7 +285,7 @@ export class ReportsService {
     currentBranchId: string | null,
     date: string,
   ) {
-    this.ensurePermission(user, 'marketing.teamOverview');
+    this.ensureExportPermission(user, 'marketing.teamOverview', 'marketing.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
     const period: 'this_month' | 'all_time' =
       input.filters?.periodAllTime || (!startDate && !endDate && input.dateRange?.preset === 'all_time')
@@ -343,7 +357,7 @@ export class ReportsService {
     currentBranchId: string | null,
     date: string,
   ) {
-    this.ensurePermission(user, 'marketing.orders');
+    this.ensureExportPermission(user, 'marketing.orders', 'orders.export');
     const { startDate, endDate } = resolveOrderListDates(input.dateRange, input.filters);
     const orders = await this.collectOrdersPages(
       {
@@ -399,7 +413,7 @@ export class ReportsService {
   }
 
   private async exportDisbursements(input: Extract<ExportReportInput, { reportKey: 'disbursements' }>, user: SessionUser, currentBranchId: string | null, date: string) {
-    this.ensurePermission(user, 'finance.disburse');
+    this.ensureExportPermission(user, 'finance.disburse', 'finance.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
     const all: Awaited<ReturnType<MarketingService['listFunding']>>['records'] = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {
@@ -452,7 +466,7 @@ export class ReportsService {
   }
 
   private async exportInventory(input: Extract<ExportReportInput, { reportKey: 'inventory' }>, user: SessionUser, date: string) {
-    this.ensurePermission(user, 'inventory.read');
+    this.ensureExportPermission(user, 'inventory.read', 'inventory.export');
     if (user.role !== 'SUPER_ADMIN' && !(user.permissions ?? []).includes('inventory.intake')) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Inventory export requires inventory.intake permission' });
     }
@@ -505,7 +519,7 @@ export class ReportsService {
   }
 
   private async exportFinanceInvoices(input: Extract<ExportReportInput, { reportKey: 'finance_invoices' }>, user: SessionUser, date: string) {
-    this.ensurePermission(user, 'finance.read');
+    this.ensureExportPermission(user, 'finance.read', 'finance.export');
     const { startDate, endDate } = resolveDateRange(input.dateRange);
     const all: Awaited<ReturnType<FinanceService['listInvoices']>>['invoices'] = [];
     for (let page = 1; page <= EXPORT_MAX_PAGES; page++) {

@@ -1,7 +1,9 @@
-import { useLoaderData } from '@remix-run/react';
-import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { MarketingLeaderboardPage } from '~/features/leaderboards/MarketingLeaderboardPage';
+import { MarketingLeaderboardLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { LeaderboardEntry } from '~/features/marketing/types';
 
 export const meta: MetaFunction = () => [
@@ -41,6 +43,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (startDate) input.startDate = startDate;
   if (endDate) input.endDate = endDate;
 
+  const leaderboardPeriodResolved = leaderboardPeriod as 'this_month' | 'all_time';
+  const leaderboardShell = { filters, leaderboardPeriod: leaderboardPeriodResolved };
+
+  const pageData = (async () => {
   const [leaderboardRes, profitabilityRes] = await Promise.all([
     apiRequest<unknown>(
       `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(input))}`,
@@ -56,22 +62,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return {
     mediaBuyerLeaderboard,
-    leaderboardPeriod,
+    leaderboardPeriod: leaderboardPeriodResolved,
     filters,
     profitabilityConfig,
   };
+  })();
+
+  return defer({ leaderboardShell, pageData });
 }
 
 export default function MarketingLeaderboardRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { leaderboardShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <>
-    <MarketingLeaderboardPage
-      mediaBuyerLeaderboard={data.mediaBuyerLeaderboard}
-      leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
-      filters={data.filters}
-      profitabilityConfig={data.profitabilityConfig}
-    />
-    </>
+    <Suspense
+      fallback={
+        <MarketingLeaderboardLoadingShell
+          filters={leaderboardShell.filters}
+          leaderboardPeriod={leaderboardShell.leaderboardPeriod}
+        />
+      }
+    >
+      <Await resolve={pageData}>
+        {(data) => (
+          <MarketingLeaderboardPage
+            mediaBuyerLeaderboard={data.mediaBuyerLeaderboard}
+            leaderboardPeriod={data.leaderboardPeriod}
+            filters={data.filters}
+            profitabilityConfig={data.profitabilityConfig}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { useLoaderData } from '@remix-run/react';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
@@ -13,10 +14,12 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
+import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import {
   type AgentWorkload,
   type CSDashboardCriticalPayload,
   type CSDashboardPageProps,
+  type CSDashboardShell,
   type InactiveAgent,
   type CSOrder,
   type DuplicatePair,
@@ -28,7 +31,9 @@ import {
 } from '~/features/cs/types';
 
 /** Remix `useLoaderData` + `defer()` inference — align with what we return from `loader`. */
-type CSQueueDeferredLoaderData = Omit<CSDashboardPageProps, 'liveEvents'>;
+type CSQueueDeferredLoaderData = Omit<CSDashboardPageProps, 'liveEvents' | 'shell'> & {
+  shell: Promise<CSDashboardShell>;
+};
 
 /** SuperAdmin / org-wide heads often have `currentBranchId: null`; tRPC requires explicit `branchId` on branch-scoped mutations. */
 function branchIdFromForm(formData: FormData): string | undefined {
@@ -93,13 +98,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     { method: 'GET', cookie },
   );
 
-  // ── Shell: dispatch settings only (fast path — tabs + claim queue wiring) ──
-  const dispatchSettingRes = await apiRequest<unknown>(`/trpc/settings.getSystemSettings`, { method: 'GET', cookie });
-  const settingsData = (dispatchSettingRes.data as { result?: { data?: Array<{ key: string; value: Record<string, unknown> }> } })?.result?.data ?? [];
-  const dispatchSetting = settingsData.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
-  const isClaimMode = dispatchSetting?.value?.strategy === 'claim';
-  const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
-  const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
+  // ── Shell: dispatch settings — same request is joined into `criticalDataPromise` (one round-trip) ──
+  const dispatchSettingsP = apiRequest<unknown>(`/trpc/settings.getSystemSettings`, { method: 'GET', cookie });
+
+  const shellPromise: Promise<CSDashboardShell> = dispatchSettingsP
+    .then((dispatchSettingRes) => {
+      if (!dispatchSettingRes.ok) return { isClaimMode: false, claimCap: 2 };
+      const settingsData =
+        (dispatchSettingRes.data as {
+          result?: { data?: Array<{ key: string; value: Record<string, unknown> }> };
+        })?.result?.data ?? [];
+      const dispatchSetting = settingsData.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
+      const isClaimMode = dispatchSetting?.value?.strategy === 'claim';
+      const claimCapSetting = settingsData.find((s) => s.key === 'CS_CLAIM_CAP');
+      const claimCap = typeof claimCapSetting?.value?.cap === 'number' ? claimCapSetting.value.cap : 2;
+      return { isClaimMode, claimCap };
+    })
+    .catch(() => ({ isClaimMode: false, claimCap: 2 }));
 
   const productsForOfflineOrder = productsP
     .then((productsRes) => {
@@ -112,6 +127,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   // ── Primary queue bundle: streamed — does not block HTML shell (overview / strips / tables) ──
   const criticalDataPromise = Promise.all([
+    dispatchSettingsP,
     apiRequest<unknown>('/trpc/orders.csWorkloads', { method: 'GET', cookie }),
     apiRequest<unknown>(
       `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 20 }))}`,
@@ -138,7 +154,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
     hotSwapOrdersP,
   ]).then(
-    ([workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes, activityRes, pendingRes, abandonedRes, hotSwapOrdersRes]) => {
+    ([dispatchSettingRes, workloadsRes, unassignedRes, statusCountsRes, activeOrdersRes, activityRes, pendingRes, abandonedRes, hotSwapOrdersRes]) => {
   const workloads = workloadsRes.ok
     ? (workloadsRes.data as { result?: { data?: AgentWorkload[] } })?.result?.data ?? []
     : [];
@@ -181,7 +197,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const criticalFetchErrors: string[] = [];
-  if (!dispatchSettingRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Dispatch settings', dispatchSettingRes));
+  if (!dispatchSettingRes.ok) {
+    criticalFetchErrors.push(describeApiFetchFailure('Dispatch settings', dispatchSettingRes));
+  }
   if (!workloadsRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Team workloads', workloadsRes));
   if (!unassignedRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Unassigned queue', unassignedRes));
   if (!statusCountsRes.ok) criticalFetchErrors.push(describeApiFetchFailure('Pipeline counts', statusCountsRes));
@@ -243,14 +261,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     res.ok ? (res.data as { result?: { data?: CSLeaderboardEntry[] } })?.result?.data ?? [] : [],
   ).catch(() => []);
 
-  // Claim queue — deferred, only relevant in claim mode
-  const claimQueue: Promise<CSOrder[]> = isClaimMode
-    ? apiRequest<unknown>('/trpc/orders.claimQueue', { method: 'GET', cookie })
-        .then((res) =>
-          res.ok ? (res.data as { result?: { data?: CSOrder[] } })?.result?.data ?? [] : [],
-        )
-        .catch(() => [])
-    : Promise.resolve([]);
+  // Claim queue — deferred, only relevant in claim mode (follows streamed shell)
+  const claimQueue: Promise<CSOrder[]> = shellPromise.then(async ({ isClaimMode }) => {
+    if (!isClaimMode) return [] as CSOrder[];
+    const res = await apiRequest<unknown>('/trpc/orders.claimQueue', { method: 'GET', cookie });
+    return res.ok ? (res.data as { result?: { data?: CSOrder[] } })?.result?.data ?? [] : [];
+  });
 
   const cartStats: Promise<{ pending: number; abandonedOpen: number }> = apiRequest<unknown>(
     '/trpc/cart.getStats?input=%7B%7D',
@@ -262,7 +278,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   ).catch(() => ({ pending: 0, abandonedOpen: 0 }));
 
   return defer({
-    shell: { isClaimMode, claimCap },
+    shell: shellPromise,
     criticalData: criticalDataPromise,
     inactiveAgents,
     callbackOrders,
@@ -591,22 +607,22 @@ export default function CSQueueRoute() {
   const data = useLoaderData<typeof loader>() as unknown as CSQueueDeferredLoaderData;
   usePageRefreshOnEvent([...CS_QUEUE_LIVE_EVENTS]);
   return (
-    <>
-    <CSDashboardPage
-      shell={data.shell}
-      criticalData={data.criticalData as Promise<CSDashboardCriticalPayload>}
-      liveEvents={[...CS_QUEUE_LIVE_EVENTS]}
-      inactiveAgents={data.inactiveAgents}
-      callbackOrders={data.callbackOrders}
-      flaggedDuplicates={data.flaggedDuplicates}
-      leaderboard={data.leaderboard}
-      leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
-      cartStats={data.cartStats}
-      claimQueue={data.claimQueue}
-      canCreateOffline={data.canCreateOffline}
-      canDeleteCart={data.canDeleteCart}
-      productsForOfflineOrder={data.productsForOfflineOrder}
-    />
-    </>
+    <Suspense fallback={<CSOverviewSkeleton />}>
+      <CSDashboardPage
+        shell={data.shell}
+        criticalData={data.criticalData as Promise<CSDashboardCriticalPayload>}
+        liveEvents={[...CS_QUEUE_LIVE_EVENTS]}
+        inactiveAgents={data.inactiveAgents}
+        callbackOrders={data.callbackOrders}
+        flaggedDuplicates={data.flaggedDuplicates}
+        leaderboard={data.leaderboard}
+        leaderboardPeriod={data.leaderboardPeriod as 'this_month' | 'all_time'}
+        cartStats={data.cartStats}
+        claimQueue={data.claimQueue}
+        canCreateOffline={data.canCreateOffline}
+        canDeleteCart={data.canDeleteCart}
+        productsForOfflineOrder={data.productsForOfflineOrder}
+      />
+    </Suspense>
   );
 }

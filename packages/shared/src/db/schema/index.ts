@@ -24,6 +24,7 @@ export * from './branch-teams';
 export * from './messaging';
 export * from './auth-sessions';
 export * from './mirror-sessions';
+export * from './probation-terminations';
 export * from './push';
 export * from './staff-onboarding';
 export * from './shipments';

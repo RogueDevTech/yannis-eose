@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
+import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -14,7 +15,9 @@ import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fe
 import { humanizeZodIssuesString } from '~/lib/api-error';
 import { formatActivityDescription } from '~/lib/format-activity';
 import { formatNaira } from '~/lib/format-amount';
+import { formatOrderTimestamp } from '~/lib/format-date';
 import type {
+  UserDetail,
   UserDetailPageProps,
   UserCreateProduct,
   UserCreateLocation,
@@ -36,16 +39,23 @@ import type {
 } from './types';
 import { USER_STATUS_COLORS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
+import { ProbationBadge } from '~/components/ui/probation-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
-import { PermissionsPreview } from './PermissionsPreview';
+const PermissionsPreview = lazy(() =>
+  import('./PermissionsPreview').then((m) => ({ default: m.PermissionsPreview })),
+);
+const UserDetailActivityTabContent = lazy(() =>
+  import('./user-detail-lazy-panels').then((m) => ({ default: m.UserDetailActivityTabContent })),
+);
+const UserDetailEarningsOutlookCard = lazy(() =>
+  import('./user-detail-lazy-panels').then((m) => ({ default: m.UserDetailEarningsOutlookCard })),
+);
 import { useFetcherToast } from '~/components/ui/toast';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Spinner } from '~/components/ui/spinner';
-import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
-import { EmptyState } from '~/components/ui/empty-state';
 
 // ─── Constants ──────────────────────────────────────────
 
@@ -97,6 +107,7 @@ export function UserDetailPage({
   isSelfView = false,
   showOnboardingTab = false,
   viewerCanManageHrOnboarding = false,
+  canManageProbation = false,
   usersBasePath = '/hr/users',
 }: UserDetailPageProps) {
   const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
@@ -471,7 +482,7 @@ export function UserDetailPage({
       nowrap: true,
       render: (order) => (
         <span className="text-sm text-app-fg-muted">
-          {new Date(order.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+          {formatOrderTimestamp(order.createdAt)}
         </span>
       ),
     },
@@ -741,8 +752,9 @@ export function UserDetailPage({
                     )
                   )}
                   {!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited) && (
-                    <Link
+                    <BranchScopedLink
                       to={`/hr/users/${user.id}/edit`}
+                      actionLabel="editing this user"
                       prefetch="intent"
                       className="btn-primary btn-sm flex items-center gap-1.5"
                     >
@@ -750,7 +762,7 @@ export function UserDetailPage({
                         <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                       </svg>
                       Edit user
-                    </Link>
+                    </BranchScopedLink>
                   )}
                   {!isSelfView && (canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
                     <>
@@ -812,6 +824,7 @@ export function UserDetailPage({
           {/* Quick info pills */}
           <div className="flex flex-wrap items-center gap-2 mt-4">
             <RoleBadge role={user.role} label={formatRole(user.role)} />
+            {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} />}
             <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -856,6 +869,11 @@ export function UserDetailPage({
           </p>
         </div>
       </div>
+
+      <ProbationPanel
+        user={user}
+        canManageProbation={canManageProbation}
+      />
 
       <Tabs
         value={activeTab}
@@ -986,13 +1004,14 @@ export function UserDetailPage({
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-app-fg">Account Information</h2>
                 {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                  <Link
+                  <BranchScopedLink
                     to={`/hr/users/${user.id}/edit`}
+                    actionLabel="editing this user"
                     prefetch="intent"
                     className="text-xs text-brand-500 hover:text-brand-600 font-medium"
                   >
                     Edit
-                  </Link>
+                  </BranchScopedLink>
                 )}
               </div>
               <DeferredSection resolve={pendingEmailChangeResolved} skeleton="inline">
@@ -1185,13 +1204,14 @@ export function UserDetailPage({
                     </p>
                   </div>
                   {!restrictHeadView && !isSelfView && (
-                    <Link
+                    <BranchScopedLink
                       to={`/hr/users/${user.id}/edit`}
+                      actionLabel="editing user permissions"
                       prefetch="intent"
                       className="text-xs text-brand-500 hover:text-brand-600 font-medium shrink-0"
                     >
                       Edit permissions
-                    </Link>
+                    </BranchScopedLink>
                   )}
                 </div>
                 {permissionsPreviewLoading ? (
@@ -1204,13 +1224,15 @@ export function UserDetailPage({
                     </div>
                   </div>
                 ) : (
-                  <PermissionsPreview
-                    permissions={resolvedPermissionCatalog}
-                    templateCodes={stampPreviewTemplateCodes}
-                    overrides={permissionOverridesLoaded}
-                    effectiveCodes={stampPreviewEffectiveCodes}
-                    catalogRequestFailed={permissionCatalogRequestFailed}
-                  />
+                  <Suspense fallback={<div className="h-16 rounded bg-app-hover animate-pulse" aria-hidden />}>
+                    <PermissionsPreview
+                      permissions={resolvedPermissionCatalog}
+                      templateCodes={stampPreviewTemplateCodes}
+                      overrides={permissionOverridesLoaded}
+                      effectiveCodes={stampPreviewEffectiveCodes}
+                      catalogRequestFailed={permissionCatalogRequestFailed}
+                    />
+                  </Suspense>
                 )}
               </div>
             )}
@@ -1515,18 +1537,22 @@ export function UserDetailPage({
             <>
               <div className="grid gap-6 lg:grid-cols-2">
                 {ep.currentMonth ? (
-                  <EarningsOutlookCard
-                    heading="This month (so far)"
-                    periodLabel={ep.currentMonth.periodLabel}
-                    preview={ep.currentMonth.preview}
-                  />
+                  <Suspense fallback={<Spinner className="mx-auto my-8" />}>
+                    <UserDetailEarningsOutlookCard
+                      heading="This month (so far)"
+                      periodLabel={ep.currentMonth.periodLabel}
+                      preview={ep.currentMonth.preview}
+                    />
+                  </Suspense>
                 ) : null}
                 {ep.nextMonth ? (
-                  <EarningsOutlookCard
-                    heading="Next calendar month (early outlook)"
-                    periodLabel={ep.nextMonth.periodLabel}
-                    preview={ep.nextMonth.preview}
-                  />
+                  <Suspense fallback={<Spinner className="mx-auto my-8" />}>
+                    <UserDetailEarningsOutlookCard
+                      heading="Next calendar month (early outlook)"
+                      periodLabel={ep.nextMonth.periodLabel}
+                      preview={ep.nextMonth.preview}
+                    />
+                  </Suspense>
                 ) : null}
               </div>
               {ep.lastPaidPayout ? (
@@ -1598,7 +1624,11 @@ export function UserDetailPage({
       {/* ─── Activity / Audit Tab ────────────────────────── */}
       {activeTab === 'audit' && (
         <DeferredSection resolve={auditLogResolved} skeleton="stat">
-          {(entries) => <ActivityTabContent entries={entries} />}
+          {(entries) => (
+            <Suspense fallback={<Spinner className="mx-auto my-8" />}>
+              <UserDetailActivityTabContent entries={entries} />
+            </Suspense>
+          )}
         </DeferredSection>
       )}
 
@@ -1742,6 +1772,317 @@ export function UserDetailPage({
 
 // ─── Sub-components ─────────────────────────────────────
 
+// ─── Probation Panel ─────────────────────────────────────────
+// Renders the probation card with Mark Permanent / Extend / Terminate actions.
+// Visible when:
+//   - target user is on probation, OR
+//   - viewer has authority (HR_MANAGER + SUPER_ADMIN) AND target is probation-eligible
+// Authority check is repeated server-side; UI gating is for affordance only.
+
+function formatDateForInput(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function ProbationPanel({
+  user,
+  canManageProbation,
+}: {
+  user: UserDetail;
+  canManageProbation: boolean;
+}) {
+  const [showSet, setShowSet] = useState(false);
+  const [showExtend, setShowExtend] = useState(false);
+  const [showTerminate, setShowTerminate] = useState(false);
+  const [reason, setReason] = useState('');
+  const [confirmName, setConfirmName] = useState('');
+
+  const setFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
+  const extendFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
+  const permanentFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
+  const terminateFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
+  const blockersFetcher = useFetcher<{
+    activeOrderCount?: number;
+    pendingCallbackCount?: number;
+    pendingPayoutCount?: number;
+    canTerminate?: boolean;
+  }>();
+
+  useFetcherToast(setFetcher.data, { successMessage: 'User placed on probation' });
+  useFetcherToast(extendFetcher.data, { successMessage: 'Probation date updated' });
+  useFetcherToast(permanentFetcher.data, { successMessage: 'Probation cleared' });
+  useFetcherToast(terminateFetcher.data, { successMessage: 'Probation user terminated' });
+
+  // Close modals on success.
+  useEffect(() => {
+    if (setFetcher.state === 'idle' && setFetcher.data?.success) setShowSet(false);
+  }, [setFetcher.state, setFetcher.data?.success]);
+  useEffect(() => {
+    if (extendFetcher.state === 'idle' && extendFetcher.data?.success) setShowExtend(false);
+  }, [extendFetcher.state, extendFetcher.data?.success]);
+
+  // Load blockers when terminate modal opens.
+  useEffect(() => {
+    if (!showTerminate) return;
+    void blockersFetcher.load(`/api/hr-user-detail-probation-blockers/${user.id}`);
+  }, [showTerminate, user.id]);
+
+  const isOnProbation = !!user.isProbation;
+  // Show panel only when relevant: user is on probation, or viewer can promote them onto it.
+  const targetEligible = !['SUPER_ADMIN', 'ADMIN'].includes(user.role);
+  if (!isOnProbation && (!canManageProbation || !targetEligible)) return null;
+
+  const blockers = blockersFetcher.data;
+  const blockerCount =
+    (blockers?.activeOrderCount ?? 0) +
+    (blockers?.pendingCallbackCount ?? 0) +
+    (blockers?.pendingPayoutCount ?? 0);
+  const canTerminate = blockers?.canTerminate === true;
+
+  return (
+    <div
+      className={`card border-l-4 ${
+        isOnProbation
+          ? 'border-l-amber-400 dark:border-l-amber-500 bg-amber-50/30 dark:bg-amber-900/10'
+          : 'border-l-app-border'
+      }`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-app-fg flex items-center gap-2">
+            Probation
+            {isOnProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" />}
+          </h3>
+          {isOnProbation ? (
+            <p className="text-xs text-app-fg-muted mt-1">
+              On probation since{' '}
+              {user.probationStartedAt ? formatOrderTimestamp(user.probationStartedAt) : 'unknown'}.
+              Review {user.probationUntil ? `due ${formatOrderTimestamp(user.probationUntil)}` : 'window not set'}.
+            </p>
+          ) : (
+            <p className="text-xs text-app-fg-muted mt-1">
+              Permanent staff. Probation can be applied retroactively if needed.
+            </p>
+          )}
+        </div>
+        {canManageProbation && (
+          <div className="flex flex-wrap items-center gap-2">
+            {isOnProbation ? (
+              <>
+                <Button size="sm" variant="secondary" onClick={() => setShowExtend(true)}>
+                  Change review date
+                </Button>
+                <permanentFetcher.Form method="post">
+                  <input type="hidden" name="intent" value="markProbationPermanent" />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="primary"
+                    loading={permanentFetcher.state !== 'idle'}
+                    loadingText="Saving..."
+                  >
+                    Mark permanent
+                  </Button>
+                </permanentFetcher.Form>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="text-danger-600 dark:text-danger-400 border-danger-200 dark:border-danger-700"
+                  onClick={() => {
+                    setReason('');
+                    setConfirmName('');
+                    setShowTerminate(true);
+                  }}
+                >
+                  Terminate
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={() => setShowSet(true)}>
+                Place on probation
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {showSet ? (
+        <Modal open onClose={() => setShowSet(false)} contentClassName="p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-app-fg">Place on probation</h2>
+          <setFetcher.Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="setProbation" />
+            <p className="text-sm text-app-fg-muted">
+              The user keeps every permission of their role. Probation enables a complete PII-scrub
+              termination if they don&apos;t meet expectations.
+            </p>
+            <TextInput
+              label="Review date (optional)"
+              name="probationUntil"
+              type="date"
+              defaultValue={formatDateForInput(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())}
+              hint="Default is 90 days from today. HR will get a 7-day reminder before this date."
+            />
+            {setFetcher.data?.error ? (
+              <InlineNotification variant="danger" message={setFetcher.data.error} />
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowSet(false)}>Cancel</Button>
+              <Button type="submit" variant="primary" loading={setFetcher.state !== 'idle'} loadingText="Saving...">
+                Confirm
+              </Button>
+            </div>
+          </setFetcher.Form>
+        </Modal>
+      ) : null}
+
+      {showExtend ? (
+        <Modal open onClose={() => setShowExtend(false)} contentClassName="p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-app-fg">Change probation review date</h2>
+          <extendFetcher.Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="extendProbation" />
+            <TextInput
+              label="New review date"
+              name="probationUntil"
+              type="date"
+              defaultValue={formatDateForInput(user.probationUntil ?? null)}
+              required
+            />
+            {extendFetcher.data?.error ? (
+              <InlineNotification variant="danger" message={extendFetcher.data.error} />
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowExtend(false)}>Cancel</Button>
+              <Button type="submit" variant="primary" loading={extendFetcher.state !== 'idle'} loadingText="Saving...">
+                Save
+              </Button>
+            </div>
+          </extendFetcher.Form>
+        </Modal>
+      ) : null}
+
+      {showTerminate ? (
+        <Modal open onClose={() => setShowTerminate(false)} maxWidth="max-w-xl" contentClassName="p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-app-fg">Terminate probation user</h2>
+          <terminateFetcher.Form method="post" className="space-y-4">
+            <input type="hidden" name="intent" value="terminateProbation" />
+            <InlineNotification
+              variant="danger"
+              message="Permanent action: Terminating scrubs this user's name, email, phone, and bank details from the database (live row + history). Their orders, payouts, and audit attribution stay intact under their UUID. This cannot be undone."
+            />
+
+            <div>
+              <p className="text-xs font-semibold text-app-fg uppercase tracking-wide mb-2">Termination blockers</p>
+              {blockersFetcher.state === 'loading' || blockersFetcher.state === 'submitting' ? (
+                <p className="text-sm text-app-fg-muted flex items-center gap-2">
+                  <Spinner size="sm" /> Checking open items...
+                </p>
+              ) : (
+                <ul className="text-sm space-y-1">
+                  <BlockerRow
+                    label="Active orders assigned"
+                    count={blockers?.activeOrderCount ?? 0}
+                    resolveHref={`/admin/orders?assignedTo=${user.id}`}
+                  />
+                  <BlockerRow
+                    label="Scheduled callbacks"
+                    count={blockers?.pendingCallbackCount ?? 0}
+                  />
+                  <BlockerRow
+                    label="Unpaid payouts (must be PAID/REJECTED)"
+                    count={blockers?.pendingPayoutCount ?? 0}
+                    resolveHref={`/hr/payroll`}
+                  />
+                </ul>
+              )}
+              {blockerCount > 0 ? (
+                <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
+                  Resolve every item above before HR can terminate this user.
+                </p>
+              ) : null}
+            </div>
+
+            <Textarea
+              label="Reason (min 10 chars)"
+              name="reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              required
+              minLength={10}
+              placeholder="Why is this user being terminated?"
+            />
+
+            <TextInput
+              label={`Type "${user.name}" to confirm`}
+              name="confirmName"
+              value={confirmName}
+              onChange={(e) => setConfirmName(e.target.value)}
+              required
+            />
+
+            {terminateFetcher.data?.error ? (
+              <InlineNotification variant="danger" message={terminateFetcher.data.error} />
+            ) : null}
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setShowTerminate(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="danger"
+                disabled={
+                  !canTerminate ||
+                  reason.trim().length < 10 ||
+                  confirmName.trim().toLowerCase() !== user.name.trim().toLowerCase()
+                }
+                loading={terminateFetcher.state !== 'idle'}
+                loadingText="Terminating..."
+              >
+                Terminate user
+              </Button>
+            </div>
+          </terminateFetcher.Form>
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+function BlockerRow({
+  label,
+  count,
+  resolveHref,
+}: {
+  label: string;
+  count: number;
+  resolveHref?: string;
+}) {
+  const cleared = count === 0;
+  return (
+    <li className="flex items-center justify-between gap-2 px-3 py-1.5 rounded bg-app-hover/40">
+      <span className="flex items-center gap-2 text-app-fg">
+        <span
+          className={`w-2 h-2 rounded-full ${cleared ? 'bg-success-500' : 'bg-amber-500'}`}
+        />
+        {label}
+      </span>
+      <span className="flex items-center gap-2 text-xs">
+        <span className={`font-mono ${cleared ? 'text-success-700 dark:text-success-400' : 'text-amber-700 dark:text-amber-400'}`}>
+          {count}
+        </span>
+        {!cleared && resolveHref && (
+          <Link to={resolveHref} className="text-brand-600 dark:text-brand-400 hover:underline">
+            Resolve →
+          </Link>
+        )}
+      </span>
+    </li>
+  );
+}
+
 function InstallModeBadge({
   mode,
   updatedAt,
@@ -1858,120 +2199,4 @@ function ClockIcon() {
  */
 function auditActivityRowKey(entry: UserAuditEntry, position: number): string {
   return `${entry.tableName}-${entry.id}-${entry.createdAt}-${position}`;
-}
-
-/** Live payroll estimate card — data from `hr.previewPayout` (deferred `/api/hr-user-detail-earnings`). */
-function EarningsOutlookCard({
-  heading,
-  periodLabel,
-  preview,
-}: {
-  heading: string;
-  periodLabel: string;
-  preview: StaffPayoutEstimate | null;
-}) {
-  return (
-    <div className="card p-0 overflow-hidden">
-      <div className="px-4 py-3 border-b border-app-border">
-        <h3 className="text-sm font-semibold text-app-fg">{heading}</h3>
-        <p className="text-xs text-app-fg-muted mt-0.5">{periodLabel}</p>
-      </div>
-      <div className="p-4">
-        {!preview ? (
-          <EmptyState
-            title="No estimate yet"
-            description="If this persists, refresh the tab or contact HR."
-            variant="inline"
-            bordered={false}
-          />
-        ) : (
-          <div className="space-y-3">
-            <p className="text-xs text-app-fg-muted">
-              Plan: <span className="text-app-fg font-medium">{preview.planName}</span>
-            </p>
-            <StatRowGroup divided>
-              <StatRow label="Attributed orders (period)" value={preview.totalOrders.toLocaleString()} />
-              <StatRow label="Delivered" value={preview.deliveredCount.toLocaleString()} />
-              <StatRow label="Returns" value={preview.returnedCount.toLocaleString()} />
-              <StatRow label="Delivery rate" value={`${preview.deliveryRate.toFixed(1)}%`} />
-              <StatRow label="Base salary (estimate)" value="" amount={preview.baseSalary} variant="subtotal" />
-              <StatRow label="Performance bonus (estimate)" value="" amount={preview.performanceBonus} />
-              {preview.penalties > 0 ? (
-                <StatRow
-                  label="Return penalties (estimate)"
-                  value=""
-                  amount={-Math.abs(preview.penalties)}
-                  variant="deduction"
-                />
-              ) : null}
-              {preview.clawbacks > 0 ? (
-                <StatRow
-                  label="Pending clawbacks"
-                  value=""
-                  amount={-Math.abs(preview.clawbacks)}
-                  variant="deduction"
-                />
-              ) : null}
-              <StatRow
-                label="Estimated net (before payroll add-ons)"
-                value=""
-                amount={preview.totalPayout}
-                variant="total"
-              />
-            </StatRowGroup>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Activity / audit log tab — paginated 10/page client-side. Loader returns up to 50 entries
- * (UserAuditEntry[]); we slice in-memory because the volume is small and avoiding a server
- * round-trip per page keeps the tab responsive.
- */
-function ActivityTabContent({ entries }: { entries: UserAuditEntry[] }) {
-  const PAGE_SIZE = 10;
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const startIdx = (safePage - 1) * PAGE_SIZE;
-  const paged = entries.slice(startIdx, startIdx + PAGE_SIZE);
-
-  return (
-    <div className="card space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-app-fg">Activity</h3>
-        <span className="text-xs text-app-fg-muted">{entries.length} entries</span>
-      </div>
-      {entries.length > 0 ? (
-        <>
-          <div className="space-y-2">
-            {paged.map((entry, pageIndex) => (
-              <div key={auditActivityRowKey(entry, startIdx + pageIndex)} className="flex items-start gap-2 text-xs">
-                <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-app-fg truncate">{formatActivityDescription(entry)}</p>
-                  <p className="text-app-fg-muted text-[11px] mt-0.5">
-                    {new Date(entry.createdAt).toLocaleDateString("en-NG", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-          {totalPages > 1 && (
-            <div className="pt-2 border-t border-app-border flex items-center justify-between">
-              <p className="text-[11px] text-app-fg-muted">
-                Showing {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, entries.length)} of {entries.length}
-              </p>
-              <Pagination page={safePage} totalPages={totalPages} onPageChange={setPage} />
-            </div>
-          )}
-        </>
-      ) : (
-        <p className="text-xs text-app-fg-muted">No activity recorded yet</p>
-      )}
-    </div>
-  );
 }

@@ -24,7 +24,7 @@ import stylesheet from '~/tailwind.css?url';
 import { getThemeBootScript } from '~/lib/theme';
 import { getFontScaleBootScript } from '~/lib/font-scale';
 import { useScrollToTopOnRouteChange } from '~/hooks/useScrollToTopOnRouteChange';
-import { isNetworkErrorLike, NETWORK_ERROR_MESSAGE } from '~/lib/network-error';
+import { isNetworkErrorLike, NETWORK_ERROR_MESSAGE, normalizeRouteErrorData } from '~/lib/network-error';
 
 declare global {
   interface Window {
@@ -289,7 +289,8 @@ export function ErrorBoundary() {
   const status = isResponse ? error.status : 500;
   const is404 = status === 404;
   const is401 = status === 401;
-  const isNetworkIssue = !is404 && !is401 && isNetworkErrorLike(isResponse ? error.data : error, status);
+  const errorPayload = isResponse ? normalizeRouteErrorData(error.data) : error;
+  const isNetworkIssue = !is404 && !is401 && isNetworkErrorLike(errorPayload, status);
 
   const title = is404 ? 'Page Not Found' : is401 ? 'Session Expired' : isNetworkIssue ? NETWORK_ERROR_MESSAGE.title : 'Something Went Wrong';
 

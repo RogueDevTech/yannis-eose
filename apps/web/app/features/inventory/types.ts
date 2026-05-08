@@ -140,6 +140,17 @@ export interface InventoryStreamData {
   totalShipments?: number;
   /** Inhouse warehouses summary list (so warehouse stock is visible on /admin/inventory). */
   warehouses?: WarehouseRowLite[];
+  /**
+   * When set, streams threshold + low-stock banner + shipments + warehouses after levels/movements paint.
+   * Resolved fields are merged into the page (see `InventoryPage`).
+   */
+  inventoryExtras?: Promise<{
+    lowStockThreshold: number;
+    lowStockAlerts: LowStockAlertsResult;
+    shipments: ShipmentRow[];
+    totalShipments: number;
+    warehouses: WarehouseRowLite[];
+  }>;
   /** Set when `inventory.levels` failed — avoids silent empty state after timeout/API errors. */
   levelsLoadError?: string | null;
   /** Set when `inventory.movements` failed — movement tabs / stats may be incomplete. */

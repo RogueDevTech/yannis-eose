@@ -1,6 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
@@ -14,6 +15,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { OrdersListPage, type OrdersListPageProps } from '~/features/orders/OrdersListPage';
+import { CSOrdersLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 import type { Order } from '~/features/orders/types';
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
@@ -79,6 +81,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
+  // Optional time-of-day refinement from `<DateFilterBar>` (HH:MM, 24-hour).
+  // When present, we combine date+time into an ISO datetime before sending to the
+  // API so the EOD bump (which would otherwise stretch the window to 23:59) is
+  // skipped. Validators still accept the bare date format for back-compat.
+  let startTime = url.searchParams.get('startTime') ?? undefined;
+  let endTime = url.searchParams.get('endTime') ?? undefined;
   const period = url.searchParams.get('period') ?? undefined;
   const periodAllTime = period === 'all_time';
   if (!periodAllTime && !startDate && !endDate) {
@@ -89,7 +97,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (periodAllTime) {
     startDate = undefined;
     endDate = undefined;
+    startTime = undefined;
+    endTime = undefined;
   }
+  // Normalise: a time without a matching date is meaningless.
+  if (!startDate) startTime = undefined;
+  if (!endDate) endTime = undefined;
+  /** Compose an ISO datetime when time is present so the API sees an exact moment.
+   *  Otherwise return the bare YYYY-MM-DD which the API expands to whole-day bounds. */
+  const composeBound = (date: string | undefined, time: string | undefined): string | undefined => {
+    if (!date) return undefined;
+    if (!time) return date;
+    // Use seconds:00 to keep the boundary deterministic.
+    return `${date}T${time}:00`;
+  };
+  const apiStartDate = composeBound(startDate, startTime);
+  const apiEndDate = composeBound(endDate, endTime);
 
   const isCSAgent = user.role === 'CS_AGENT';
   const assignedCsId = isCSAgent ? user.id : csAgentIdParam;
@@ -102,6 +125,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'HEAD_OF_CS' ||
     user.role === 'CS_AGENT' ||
     userPerms.includes(canonicalPermissionCode('orders.createOffline'));
+  const canExport =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    userPerms.includes(canonicalPermissionCode('orders.export'));
 
   // Schedule heat + list both key off callback / preferred delivery dates. The default
   // "this month" strip filters createdAt — that would hide e.g. an April-created order
@@ -119,8 +146,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     status: status || undefined,
     search: search || undefined,
     ...(assignedCsId && { assignedCsId }),
-    ...(!hasScheduleListFilter && startDate && { startDate }),
-    ...(!hasScheduleListFilter && endDate && { endDate }),
+    ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
+    ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
   if (scheduleKind === 'callback_due') {
     listInput.scheduleKind = 'callback_due';
@@ -134,8 +161,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     listInput.scheduleDate = scheduleDate;
   }
   const countsInput: { assignedCsId?: string; startDate?: string; endDate?: string } = assignedCsId ? { assignedCsId } : {};
-  if (startDate) countsInput.startDate = startDate;
-  if (endDate) countsInput.endDate = endDate;
+  if (apiStartDate) countsInput.startDate = apiStartDate;
+  if (apiEndDate) countsInput.endDate = apiEndDate;
 
   const input = encodeURIComponent(JSON.stringify(listInput));
   const countsInputEnc = encodeURIComponent(JSON.stringify(countsInput));
@@ -145,8 +172,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const trendInput: { assignedCsId?: string; status?: string; startDate?: string; endDate?: string } = {};
   if (assignedCsId) trendInput.assignedCsId = assignedCsId;
   if (status) trendInput.status = status;
-  if (startDate) trendInput.startDate = startDate;
-  if (endDate) trendInput.endDate = endDate;
+  if (apiStartDate) trendInput.startDate = apiStartDate;
+  if (apiEndDate) trendInput.endDate = apiEndDate;
   const trendInputEnc = encodeURIComponent(JSON.stringify(trendInput));
 
   const heatInput = {
@@ -156,6 +183,54 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   const heatInputEnc = encodeURIComponent(JSON.stringify(heatInput));
 
+  const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+
+  const csOrdersShell = {
+    filters: {
+      startDate: startDate ?? '',
+      endDate: endDate ?? '',
+      startTime: startTime ?? '',
+      endTime: endTime ?? '',
+      periodAllTime,
+    },
+    scheduleFilters: {
+      calendarMonth,
+      scheduleKind: scheduleKind ?? null,
+      scheduleDate: scheduleKind === 'delivery_overdue' ? null : (scheduleDate ?? null),
+    },
+    isCSAgent,
+    showCSAgentColumn,
+    canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
+    currentUserId: user.id,
+    canCreateOffline,
+    canExport,
+    page,
+    limit: ORDERS_PER_PAGE,
+    statusFilter: status,
+    searchFilter: search,
+  };
+
+  const pageData = (async (): Promise<
+    Pick<
+      OrdersListPageProps,
+      | 'orders'
+      | 'total'
+      | 'totalPages'
+      | 'page'
+      | 'limit'
+      | 'statusFilter'
+      | 'searchFilter'
+      | 'filters'
+      | 'scheduleFilters'
+      | 'isCSAgent'
+      | 'showCSAgentColumn'
+      | 'canAssignDirectly'
+      | 'currentUserId'
+      | 'canCreateOffline'
+      | 'canExport'
+      | 'deferredSecondary'
+    >
+  > => {
   const listRes = await apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie });
 
   const trpcData = listRes.ok
@@ -163,8 +238,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
   const total = trpcData?.pagination?.total ?? 0;
   const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
-
-  const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
 
   const deferredSecondary = (async () => {
     const offlineProductsP = canCreateOffline
@@ -248,7 +321,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   })();
 
-  return defer({
+  return {
     orders: trpcData?.orders ?? [],
     total,
     totalPages,
@@ -261,6 +334,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
     currentUserId: user.id,
     canCreateOffline,
+    canExport,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
@@ -272,6 +346,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       scheduleDate: scheduleKind === 'delivery_overdue' ? null : (scheduleDate ?? null),
     },
     deferredSecondary,
+  };
+  })();
+
+  return defer({
+    csOrdersShell,
+    pageData,
   } as Record<string, unknown>);
 }
 
@@ -464,17 +544,65 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CSOrdersRoute() {
-  const data = useLoaderData<typeof loader>() as unknown as OrdersListPageProps;
+  const { csOrdersShell, pageData } = useLoaderData<typeof loader>() as unknown as {
+    csOrdersShell: {
+      filters: OrdersListPageProps['filters'];
+      scheduleFilters: OrdersListPageProps['scheduleFilters'];
+      isCSAgent: boolean;
+      showCSAgentColumn: boolean;
+      canAssignDirectly: boolean;
+      currentUserId: string;
+      canCreateOffline: boolean;
+      page: number;
+      limit: number;
+      statusFilter?: string;
+      searchFilter?: string;
+    };
+    pageData: Promise<
+      Pick<
+        OrdersListPageProps,
+        | 'orders'
+        | 'total'
+        | 'totalPages'
+        | 'page'
+        | 'limit'
+        | 'statusFilter'
+        | 'searchFilter'
+        | 'filters'
+        | 'scheduleFilters'
+        | 'isCSAgent'
+        | 'showCSAgentColumn'
+        | 'canAssignDirectly'
+        | 'currentUserId'
+        | 'canCreateOffline'
+        | 'deferredSecondary'
+      >
+    >;
+  };
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
   return (
-    <>
-    <OrdersListPage
-      {...data}
-      userRole={userRole}
-      liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
-    />
-    </>
+    <Suspense
+      fallback={
+        <CSOrdersLoadingShell
+          filters={csOrdersShell.filters!}
+          isCSAgent={csOrdersShell.isCSAgent}
+          liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
+          showCSAgentColumn={csOrdersShell.showCSAgentColumn}
+        />
+      }
+    >
+      <Await resolve={pageData}>
+        {(d) => (
+          <OrdersListPage
+            {...d}
+            statusCounts={{}}
+            userRole={userRole}
+            liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
+          />
+        )}
+      </Await>
+    </Suspense>
   );
 }

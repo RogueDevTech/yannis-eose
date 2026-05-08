@@ -1,42 +1,27 @@
-import { useMemo } from 'react';
-import { useLoaderData } from '@remix-run/react';
+import { useMemo, Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { apiRequest, getSessionCookie, getCurrentUser, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { LogisticsOrderDetailPage } from '~/features/logistics/LogisticsOrderDetailPage';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
+import { OrderDetailSkeleton } from '~/features/orders/OrderDetailSkeleton';
 
 export const meta: MetaFunction = () => [
   { title: 'Order — Yannis EOSE' },
 ];
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
-  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
-  const cookie = getSessionCookie(request);
   const orderId = params['id'];
-
   if (!orderId) {
     throw new Response('Order ID required', { status: 400 });
   }
 
-  const [orderRes, locationsRes, ridersRes, allocatableRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>(
-      `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
-      { method: 'GET', cookie },
-    ),
-    apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
-    apiRequest<unknown>(
-      `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-      { method: 'GET', cookie },
-    ).catch(() => ({ ok: false, status: 503, data: {} as unknown })),
-  ]);
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
+  const cookie = getSessionCookie(request);
 
   type RichAllocatableLocation = {
     id: string;
@@ -55,7 +40,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   };
 
   const emptyReturn = {
-    order: null,
+    order: null as OrderDetail | null,
     history: Promise.resolve([]) as Promise<HistoryEntry[]>,
     locations: [] as Location[],
     riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>,
@@ -63,67 +48,86 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     richAllocatableLocations: [] as RichAllocatableLocation[],
   };
 
-  if (!orderRes.ok) {
-    return emptyReturn;
-  }
+  const pageData = (async () => {
+    const [orderRes, locationsRes, ridersRes, allocatableRes] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/orders.getById?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>(
+        `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 20, status: 'ACTIVE' }))}`,
+        { method: 'GET', cookie },
+      ),
+      apiRequest<unknown>('/trpc/logistics.listRiders?input=%7B%7D', { method: 'GET', cookie }),
+      apiRequest<unknown>(
+        `/trpc/orders.listAllocatableLocations?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+        { method: 'GET', cookie },
+      ).catch(() => ({ ok: false, status: 503, data: {} as unknown })),
+    ]);
 
-  const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
-  const order = trpcData?.result?.data ?? null;
-  if (!order) {
-    return emptyReturn;
-  }
-
-  // TPL_MANAGER: only allow orders at their location or CONFIRMED (unallocated) so they can allocate
-  if (user.role === 'TPL_MANAGER' && user.logisticsLocationId) {
-    const atMyLocation = order.logisticsLocationId === user.logisticsLocationId;
-    const unallocatedConfirmed = order.status === 'CONFIRMED' && !order.logisticsLocationId;
-    if (!atMyLocation && !unallocatedConfirmed) {
+    if (!orderRes.ok) {
       return emptyReturn;
     }
-  }
 
-  const locationsData = locationsRes.ok
-    ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
-    : null;
-  const ridersData = ridersRes.ok
-    ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })?.result?.data ?? []
-    : [];
+    const trpcData = orderRes.data as { result?: { data?: OrderDetail } };
+    const order = trpcData?.result?.data ?? null;
+    if (!order) {
+      return emptyReturn;
+    }
 
-  const historyPromise: Promise<HistoryEntry[]> = apiRequest<unknown>(
-    `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 20 }))}`,
-    { method: 'GET', cookie },
-  )
-    .then((historyRes) => {
-      if (!historyRes.ok) return [];
-      const historyData = historyRes.data as { result?: { data?: { rows: HistoryEntry[] } } };
-      return historyData?.result?.data?.rows ?? [];
-    })
-    .catch(() => [] as HistoryEntry[]);
+    if (user.role === 'TPL_MANAGER' && user.logisticsLocationId) {
+      const atMyLocation = order.logisticsLocationId === user.logisticsLocationId;
+      const unallocatedConfirmed = order.status === 'CONFIRMED' && !order.logisticsLocationId;
+      if (!atMyLocation && !unallocatedConfirmed) {
+        return emptyReturn;
+      }
+    }
 
-  const locations = locationsData?.locations ?? [];
-  const allocatableLocations =
-    user.role === 'TPL_MANAGER' && user.logisticsLocationId
-      ? locations.filter((l) => l.id === user.logisticsLocationId)
-      : locations;
+    const locationsData = locationsRes.ok
+      ? (locationsRes.data as { result?: { data?: { locations: Location[] } } })?.result?.data
+      : null;
+    const ridersData = ridersRes.ok
+      ? (ridersRes.data as { result?: { data?: Array<{ id: string; name: string; logisticsLocationId: string | null }> } })?.result?.data ?? []
+      : [];
 
-  const allocatableRich: RichAllocatableLocation[] = allocatableRes.ok
-    ? ((allocatableRes.data as { result?: { data?: Array<RichAllocatableLocation & { providerName?: string | null }> } })?.result?.data ?? []).map(
-        (loc) => ({ ...loc, providerName: loc.providerName ?? null }),
-      )
-    : [];
-  const richAllocatableLocations =
-    user.role === 'TPL_MANAGER' && user.logisticsLocationId
-      ? allocatableRich.filter((l) => l.id === user.logisticsLocationId)
-      : allocatableRich;
+    const historyRows: HistoryEntry[] = await apiRequest<unknown>(
+      `/trpc/audit.recordHistory?input=${encodeURIComponent(JSON.stringify({ tableName: 'orders', recordId: orderId, page: 1, limit: 20 }))}`,
+      { method: 'GET', cookie },
+    )
+      .then((historyRes) => {
+        if (!historyRes.ok) return [];
+        const historyData = historyRes.data as { result?: { data?: { rows: HistoryEntry[] } } };
+        return historyData?.result?.data?.rows ?? [];
+      })
+      .catch(() => [] as HistoryEntry[]);
 
-  return {
-    order,
-    history: historyPromise,
-    locations,
-    riders: ridersData,
-    allocatableLocations,
-    richAllocatableLocations,
-  };
+    const locations = locationsData?.locations ?? [];
+    const allocatableLocations =
+      user.role === 'TPL_MANAGER' && user.logisticsLocationId
+        ? locations.filter((l) => l.id === user.logisticsLocationId)
+        : locations;
+
+    const allocatableRich: RichAllocatableLocation[] = allocatableRes.ok
+      ? ((allocatableRes.data as { result?: { data?: Array<RichAllocatableLocation & { providerName?: string | null }> } })?.result?.data ?? []).map(
+          (loc) => ({ ...loc, providerName: loc.providerName ?? null }),
+        )
+      : [];
+    const richAllocatableLocations =
+      user.role === 'TPL_MANAGER' && user.logisticsLocationId
+        ? allocatableRich.filter((l) => l.id === user.logisticsLocationId)
+        : allocatableRich;
+
+    return {
+      order,
+      history: Promise.resolve(historyRows) as Promise<HistoryEntry[]>,
+      locations,
+      riders: ridersData,
+      allocatableLocations,
+      richAllocatableLocations,
+    };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request, params }: ActionFunctionArgs) {
@@ -256,35 +260,43 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const ORDER_DETAIL_EVENTS = ['order:status_changed'] as const;
 
 export default function TplOrderDetailRoute() {
-  const { order, history, locations, riders, allocatableLocations, richAllocatableLocations } = useLoaderData<typeof loader>();
+  const { pageData } = useLoaderData<typeof loader>();
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
 
-  if (!order) {
-    return (
-      <div className="card text-center py-12">
-        <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
-        <h2 className="text-xl font-bold text-app-fg">Order not found</h2>
-        <p className="mt-2 text-sm text-app-fg-muted">
-          The order you&apos;re looking for doesn&apos;t exist or you don&apos;t have access.
-        </p>
-        <a href="/tpl/orders" className="btn-primary mt-4 inline-block">
-          Back to Orders
-        </a>
-      </div>
-    );
-  }
-
   return (
-    <LogisticsOrderDetailPage
-      order={order as OrderDetail}
-      history={history as Promise<HistoryEntry[]>}
-      locations={locations as Location[]}
-      riders={riders as Array<{ id: string; name: string; logisticsLocationId: string | null }>}
-      backLink="/tpl/orders"
-      backLabel="Orders"
-      allocatableLocations={allocatableLocations.length > 0 ? (allocatableLocations as Location[]) : undefined}
-      richAllocatableLocations={richAllocatableLocations.length > 0 ? richAllocatableLocations : undefined}
-    />
+    <Suspense fallback={<OrderDetailSkeleton />}>
+      <Await resolve={pageData}>
+        {({ order, history, locations, riders, allocatableLocations, richAllocatableLocations }) => {
+          if (!order) {
+            return (
+              <div className="card text-center py-12">
+                <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+                <h2 className="text-xl font-bold text-app-fg">Order not found</h2>
+                <p className="mt-2 text-sm text-app-fg-muted">
+                  The order you&apos;re looking for doesn&apos;t exist or you don&apos;t have access.
+                </p>
+                <a href="/tpl/orders" className="btn-primary mt-4 inline-block">
+                  Back to Orders
+                </a>
+              </div>
+            );
+          }
+
+          return (
+            <LogisticsOrderDetailPage
+              order={order as OrderDetail}
+              history={history as Promise<HistoryEntry[]>}
+              locations={locations as Location[]}
+              riders={riders as Array<{ id: string; name: string; logisticsLocationId: string | null }>}
+              backLink="/tpl/orders"
+              backLabel="Orders"
+              allocatableLocations={allocatableLocations.length > 0 ? (allocatableLocations as Location[]) : undefined}
+              richAllocatableLocations={richAllocatableLocations.length > 0 ? richAllocatableLocations : undefined}
+            />
+          );
+        }}
+      </Await>
+    </Suspense>
   );
 }

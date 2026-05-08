@@ -75,7 +75,7 @@ export function StaffOnboardingDocumentsPage({
   counts,
 }: StaffOnboardingDocumentsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
-  const isFilterLoading = useLoaderRefetchBusy();
+  const isFilterLoading = useLoaderRefetchBusy().busy;
 
   const patchParams = (patch: Record<string, string | undefined>) => {
     const next = new URLSearchParams(searchParams);

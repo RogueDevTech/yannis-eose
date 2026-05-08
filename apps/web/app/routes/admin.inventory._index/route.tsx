@@ -1,6 +1,7 @@
 import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -15,8 +16,18 @@ import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
-import type { InventoryLevel, StockMovement, InventoryStreamData, ProductOption, LocationOption, ShipmentRow, WarehouseRowLite } from '~/features/inventory/types';
+import type {
+  InventoryLevel,
+  StockMovement,
+  InventoryStreamData,
+  ProductOption,
+  LocationOption,
+  ShipmentRow,
+  WarehouseRowLite,
+  LowStockAlertsResult,
+} from '~/features/inventory/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
+import { InventoryOverviewLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [
   { title: 'Inventory — Yannis EOSE' },
@@ -69,6 +80,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     levelsInput.sortOrder = 'desc';
   }
 
+  const pageData = (async () => {
   // Start fetches concurrently (extended read timeout — inventory fans out many calls under single-fetch).
   const levelsPromise = apiRequest<unknown>(
     `/trpc/inventory.levels?input=${encodeURIComponent(JSON.stringify(levelsInput))}`,
@@ -217,52 +229,76 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }));
   }
 
-  // Low-stock alert threshold (org-wide setting). Default 10 if unset.
-  let lowStockThreshold = 10;
-  const lowStockRes = await lowStockPromise.catch(() => null);
-  if (lowStockRes?.ok) {
-    const settingsRows = (lowStockRes.data as { result?: { data?: { key: string; value: unknown }[] } })?.result?.data ?? [];
-    const row = settingsRows.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
-    const threshold = (row?.value as { threshold?: number } | null)?.threshold;
-    if (typeof threshold === 'number' && threshold > 0) lowStockThreshold = threshold;
-  }
+  /** Threshold, low-stock banner, shipments strip, warehouses — resolved before first paint of page body. */
+  const extras = await Promise.all([
+    lowStockPromise.catch(() => null),
+    lowStockAlertsPromise.catch(() => ({ ok: false as const, status: 503, data: {} })),
+    shipmentsPromise.catch(() => null),
+    warehousesPromise.catch(() => null),
+  ]).then(([lowStockRes, alertsRes, shipmentsRes, warehousesRes]) => {
+    let lowStockThreshold = 10;
+    if (lowStockRes?.ok) {
+      const settingsRows =
+        (lowStockRes.data as { result?: { data?: { key: string; value: unknown }[] } })?.result?.data ?? [];
+      const row = settingsRows.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
+      const threshold = (row?.value as { threshold?: number } | null)?.threshold;
+      if (typeof threshold === 'number' && threshold > 0) lowStockThreshold = threshold;
+    }
 
-  // Stream low-stock alerts as a deferred promise — silently empty when the actor lacks inventory.read.
-  const lowStockAlerts = lowStockAlertsPromise.then((res) => {
-    if (!res.ok) return { threshold: lowStockThreshold, items: [] };
-    const data = (res.data as { result?: { data?: { threshold: number; items: unknown[] } } })?.result?.data;
-    return data ?? { threshold: lowStockThreshold, items: [] };
-  }).catch(() => ({ threshold: lowStockThreshold, items: [] as unknown[] }));
+    let lowStockAlertsData: LowStockAlertsResult;
+    if (!alertsRes.ok) {
+      lowStockAlertsData = { threshold: lowStockThreshold, items: [] };
+    } else {
+      const data = (alertsRes.data as {
+        result?: { data?: LowStockAlertsResult };
+      })?.result?.data;
+      lowStockAlertsData = data ?? { threshold: lowStockThreshold, items: [] };
+    }
 
-  // Resolve shipments — silently empty when the actor lacks inventory.read.
-  let shipments: ShipmentRow[] = [];
-  let totalShipments = 0;
-  const shipmentsRes = await shipmentsPromise.catch(() => null);
-  if (shipmentsRes?.ok) {
-    const data = (shipmentsRes.data as {
-      result?: { data?: { rows: ShipmentRow[]; pagination: { total: number } } };
-    })?.result?.data;
-    shipments = data?.rows ?? [];
-    totalShipments = data?.pagination?.total ?? 0;
-  }
+    let shipments: ShipmentRow[] = [];
+    let totalShipments = 0;
+    if (shipmentsRes?.ok) {
+      const data = (shipmentsRes.data as {
+        result?: { data?: { rows: ShipmentRow[]; pagination: { total: number } } };
+      })?.result?.data;
+      shipments = data?.rows ?? [];
+      totalShipments = data?.pagination?.total ?? 0;
+    }
 
-  // Resolve warehouses (company-owned only)
-  let warehouses: WarehouseRowLite[] = [];
-  const warehousesRes = await warehousesPromise.catch(() => null);
-  if (warehousesRes?.ok) {
-    const data = (warehousesRes.data as {
-      result?: { data?: { warehouses: Array<{ id: string; name: string; address: string; dispatchLocked?: boolean; stockSummary?: { totalStock: number; totalReserved: number; skuCount: number } }> } };
-    })?.result?.data;
-    warehouses = (data?.warehouses ?? []).map((w) => ({
-      id: w.id,
-      name: w.name,
-      address: w.address,
-      dispatchLocked: w.dispatchLocked ?? false,
-      stockSummary: w.stockSummary ?? { totalStock: 0, totalReserved: 0, skuCount: 0 },
-    }));
-  }
+    let warehouses: WarehouseRowLite[] = [];
+    if (warehousesRes?.ok) {
+      const data = (warehousesRes.data as {
+        result?: {
+          data?: {
+            warehouses: Array<{
+              id: string;
+              name: string;
+              address: string;
+              dispatchLocked?: boolean;
+              stockSummary?: { totalStock: number; totalReserved: number; skuCount: number };
+            }>;
+          };
+        };
+      })?.result?.data;
+      warehouses = (data?.warehouses ?? []).map((w) => ({
+        id: w.id,
+        name: w.name,
+        address: w.address,
+        dispatchLocked: w.dispatchLocked ?? false,
+        stockSummary: w.stockSummary ?? { totalStock: 0, totalReserved: 0, skuCount: 0 },
+      }));
+    }
 
-  return defer({
+    return {
+      lowStockThreshold,
+      lowStockAlerts: lowStockAlertsData,
+      shipments,
+      totalShipments,
+      warehouses,
+    };
+  });
+
+  return {
     levels: levelsData?.levels ?? [],
     levelsTotals: levelsData?.totals ?? { totalStock: 0, totalReserved: 0 },
     totalLevels: levelsData?.pagination?.total ?? 0,
@@ -287,19 +323,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.intake')),
     canAdjust:
       isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.adjust')),
-    // Inventory CSV export is restricted to admin-level users and STOCK_MANAGER — the same
-    // roles that own the stock data. Everyone else reading inventory (logistics, TPL managers,
-    // finance) still sees the table but cannot download the raw levels.
-    canExport: isAdminLevel(user) || user.role === 'STOCK_MANAGER',
-    lowStockThreshold,
+    // Inventory CSV export is permission-gated via `inventory.export`. Admin-class
+    // bypasses; STOCK_MANAGER and HoLogistics get it by default in the catalog.
+    // Other roles can be granted ad-hoc via the user permission overrides UI.
+    canExport: isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.export')),
     canEditLowStock: isAdminLevel(user),
-    lowStockAlerts,
-    shipments,
-    totalShipments,
-    warehouses,
+    lowStockThreshold: extras.lowStockThreshold,
+    lowStockAlerts: Promise.resolve(extras.lowStockAlerts),
+    shipments: extras.shipments,
+    totalShipments: extras.totalShipments,
+    warehouses: extras.warehouses,
     levelsLoadError,
     movementsLoadError,
-  });
+  };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -441,11 +480,13 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function InventoryIndexRoute() {
-  const data = useLoaderData<typeof loader>() as unknown as InventoryStreamData;
+  const { pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['stock:updated', 'transfer:created']);
   return (
-    <>
-      <InventoryPage {...data} />
-    </>
+    <Suspense fallback={<InventoryOverviewLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <InventoryPage {...(data as InventoryStreamData)} />}
+      </Await>
+    </Suspense>
   );
 }

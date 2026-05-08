@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -16,10 +16,15 @@ import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useAgentStateBroadcast } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
-import { generateInvoicePdf } from '~/lib/invoice-pdf';
-import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
+import { formatOrderTimestamp } from '~/lib/format-date';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { OrderTimeline } from '~/components/ui/order-timeline';
+
+const OrderTimeline = lazy(() =>
+  import('~/components/ui/order-timeline').then((m) => ({ default: m.OrderTimeline })),
+);
+const InvoicePreviewModal = lazy(() =>
+  import('~/components/ui/invoice-preview-modal').then((m) => ({ default: m.InvoicePreviewModal })),
+);
 import { CSMessagingPanel } from '~/components/ui/cs-messaging-panel';
 import { FileUpload } from '~/components/ui/file-upload';
 import { FormSelect } from '~/components/ui/form-select';
@@ -34,6 +39,36 @@ import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard'
 import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
 import { buildOrderSummaryClipboardText } from './build-order-summary-clipboard';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
+
+function InvoiceCardSkeleton() {
+  return (
+    <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm animate-pulse space-y-4" aria-hidden>
+      <div className="h-3 w-28 rounded bg-app-hover" />
+      <div className="h-7 w-44 rounded bg-app-hover font-mono" />
+      <div className="h-4 w-56 rounded bg-app-hover" />
+      <div className="flex flex-wrap gap-2 justify-end pt-2">
+        <div className="h-8 w-24 rounded-lg bg-app-hover" />
+        <div className="h-8 w-16 rounded-lg bg-app-hover" />
+      </div>
+    </div>
+  );
+}
+
+function OrderTimelineSkeleton() {
+  return (
+    <div className="space-y-4 py-1 animate-pulse" aria-hidden>
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="flex gap-3 items-start">
+          <div className="h-2 w-2 rounded-full bg-app-hover mt-1.5 shrink-0" />
+          <div className="flex-1 space-y-2 min-w-0">
+            <div className="h-4 w-full max-w-lg rounded bg-app-hover" />
+            <div className="h-3 w-36 rounded bg-app-hover" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function DeferredPanelError({ label }: { label: string }) {
   const { revalidate, state } = useRevalidator();
@@ -207,31 +242,31 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     label: 'Created',
     alwaysShow: true,
     getValue: (o) => o.createdAt,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
     label: 'Confirmed',
     getValue: (o) => o.confirmedAt,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
     label: 'Agent assigned',
     getValue: (o) => o.allocatedAt,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
     label: 'Dispatched',
     getValue: (o) => o.dispatchedAt,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
     label: 'Delivered',
     getValue: (o) => o.deliveredAt,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
@@ -269,7 +304,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
     label: 'Callback scheduled',
     getValue: (o) => o.callbackScheduledAt,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
@@ -306,7 +341,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
     label: 'Locked until',
     getValue: (o) => o.lockedUntil,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
@@ -390,7 +425,7 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
     label: 'Updated',
     getValue: (o) => o.updatedAt,
-    format: (v) => (v ? new Date(String(v)).toLocaleString('en-NG') : ''),
+    format: (v) => (v ? formatOrderTimestamp(String(v)) : ''),
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
@@ -1325,7 +1360,7 @@ export function OrderDetailPage({
                                   variant="secondary"
                                   size="sm"
                                   onClick={() => {
-                                    void generateInvoicePdf(resolved);
+                                    void import('~/lib/invoice-pdf').then((m) => m.generateInvoicePdf(resolved));
                                   }}
                                 >
                                   Download
@@ -1366,9 +1401,8 @@ export function OrderDetailPage({
                 return (
                   <div className="card">
                     <h2 className="text-lg font-semibold text-app-fg mb-1">Invoice</h2>
-                    <div className="py-4 flex items-center justify-center text-app-fg-muted">
-                      <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
-                    </div>
+                    <p className="text-sm text-app-fg-muted mb-3">Loading invoice…</p>
+                    <InvoiceCardSkeleton />
                   </div>
                 );
               }
@@ -1421,11 +1455,7 @@ export function OrderDetailPage({
                             {i.lineItems.length} line item{i.lineItems.length === 1 ? '' : 's'}
                             <span className="mx-1.5">·</span>
                             Issued{' '}
-                            {new Date(i.createdAt).toLocaleDateString('en-NG', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })}
+                            {formatOrderTimestamp(i.createdAt)}
                             {i.dueDate ? (
                               <>
                                 <span className="mx-1.5">·</span>
@@ -1453,7 +1483,7 @@ export function OrderDetailPage({
                               variant="secondary"
                               size="sm"
                               onClick={() => {
-                                void generateInvoicePdf(i);
+                                void import('~/lib/invoice-pdf').then((m) => m.generateInvoicePdf(i));
                               }}
                             >
                               Download
@@ -1480,7 +1510,11 @@ export function OrderDetailPage({
                   skeleton="table"
                   errorElement={<DeferredPanelError label="Order Activity (orders.getTimeline)" />}
                 >
-                  {(resolvedTimeline) => <OrderTimeline events={resolvedTimeline as TimelineEvent[]} />}
+                  {(resolvedTimeline) => (
+                    <Suspense fallback={<OrderTimelineSkeleton />}>
+                      <OrderTimeline events={resolvedTimeline as TimelineEvent[]} />
+                    </Suspense>
+                  )}
                 </DeferredSection>
               ) : timelineFetcher.data && !timelineFetcher.data.ok ? (
                 <InlineNotification
@@ -1495,15 +1529,13 @@ export function OrderDetailPage({
                   ]}
                 />
               ) : timelineFetcher.state === 'loading' && !timelineFetcher.data ? (
-                <div className="py-4 flex items-center justify-center text-app-fg-muted">
-                  <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
-                </div>
+                <OrderTimelineSkeleton />
               ) : timelineFetcher.data?.ok ? (
-                <OrderTimeline events={timelineFetcher.data.timeline as TimelineEvent[]} />
+                <Suspense fallback={<OrderTimelineSkeleton />}>
+                  <OrderTimeline events={timelineFetcher.data.timeline as TimelineEvent[]} />
+                </Suspense>
               ) : (
-                <div className="py-4 flex items-center justify-center text-app-fg-muted">
-                  <Spinner size="lg" className="text-brand-500 dark:text-brand-400" />
-                </div>
+                <OrderTimelineSkeleton />
               )}
             </div>
 
@@ -2984,7 +3016,9 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      <InvoicePreviewModal invoice={invoicePreview} onClose={() => setInvoicePreview(null)} />
+      <Suspense fallback={null}>
+        <InvoicePreviewModal invoice={invoicePreview} onClose={() => setInvoicePreview(null)} />
+      </Suspense>
     </div>
   );
 }

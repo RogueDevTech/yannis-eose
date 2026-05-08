@@ -1,6 +1,7 @@
-import { json } from '@remix-run/node';
+import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { useLoaderData, useFetcher } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, useLoaderData, useFetcher } from '@remix-run/react';
 import { useCallback, useMemo, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -18,6 +19,7 @@ import {
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { BranchesListLoadingShell } from '~/features/branches/BranchesDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Branch Management — Yannis EOSE' }];
 
@@ -34,6 +36,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'branches.manage');
   const cookie = getSessionCookie(request);
 
+  const pageData = (async () => {
   const res = await apiRequest<{ result?: { data?: Branch[] } }>(
     '/trpc/branches.list',
     { method: 'GET', cookie },
@@ -41,6 +44,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const branches: Branch[] = res.ok ? (res.data?.result?.data ?? []) : [];
   return { branches };
+  })();
+
+  return defer({ pageData });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -83,8 +89,7 @@ export async function action({ request }: ActionFunctionArgs) {
   return json({ error: 'Unknown intent' }, { status: 400 });
 }
 
-export default function BranchManagementRoute() {
-  const { branches } = useLoaderData<typeof loader>();
+function BranchManagementContent({ branches }: { branches: Branch[] }) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const branchSurface = useFetcherActionSurface(fetcher);
   const [createOpen, setCreateOpen] = useState(false);
@@ -312,5 +317,16 @@ export default function BranchManagementRoute() {
         </Modal>
       )}
     </div>
+  );
+}
+
+export default function BranchManagementRoute() {
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<BranchesListLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => <BranchManagementContent branches={data.branches} />}
+      </Await>
+    </Suspense>
   );
 }

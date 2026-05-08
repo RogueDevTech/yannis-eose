@@ -1,7 +1,9 @@
-import { Suspense, useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, Link, useSearchParams } from '@remix-run/react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { formatOrderTimestamp } from '~/lib/format-date';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { useLiveIndicator } from '~/hooks/useSocket';
@@ -43,6 +45,10 @@ export type MarketingOrdersSecondaryPayload = {
   dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
   marketingExportPicklists?: Partial<ExportModalPicklists>;
   mediaBuyersForFilter: Array<{ id: string; name: string }>;
+  /** Always populated — Media Buyers + HoM/admin filter by Product on this table. */
+  productsForFilter: Array<{ id: string; name: string }>;
+  /** Always populated — Form (campaign) filter so a Media Buyer can isolate a single funnel. */
+  campaignsForFilter: Array<{ id: string; name: string }>;
 };
 
 interface MarketingOrdersPageProps {
@@ -60,6 +66,11 @@ interface MarketingOrdersPageProps {
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   /** When provided, shows the Live indicator and subscribes to these events for "just received" state. */
   liveEvents?: string[];
+  /**
+   * When false (default), the Generate report button is hidden. Server still
+   * enforces `orders.export` on the actual download.
+   */
+  canExport?: boolean;
 }
 
 export function MarketingOrdersPage({
@@ -75,10 +86,19 @@ export function MarketingOrdersPage({
   showMediaBuyerColumn = false,
   filters,
   liveEvents,
+  canExport = false,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
+  const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const liveState = useLiveIndicator(liveEvents ?? []);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams, remixSetSearchParams] = useSearchParams();
+  const setSearchParams = useCallback(
+    (...args: Parameters<typeof remixSetSearchParams>) => {
+      primeSamePathRefetch();
+      remixSetSearchParams(...args);
+    },
+    [remixSetSearchParams, primeSamePathRefetch],
+  );
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showChartView, setShowChartView] = useState(false);
@@ -125,6 +145,8 @@ export function MarketingOrdersPage({
     if (selectedStatus !== 'ALL') n += 1;
     const mb = searchParams.get('mediaBuyerId') || 'ALL';
     if (showMediaBuyerColumn && mb !== 'ALL') n += 1;
+    if ((searchParams.get('productId') || '').length > 0) n += 1;
+    if ((searchParams.get('campaignId') || '').length > 0) n += 1;
     return n;
   }, [selectedStatus, showMediaBuyerColumn, searchParams]);
 
@@ -160,6 +182,31 @@ export function MarketingOrdersPage({
     }
     cols.push(
       {
+        key: 'product',
+        header: 'Product',
+        render: (order) => {
+          const name = order.primaryProductName?.trim();
+          const extra = (order.itemCount ?? 0) > 1 ? ` · +${(order.itemCount ?? 0) - 1} more` : '';
+          return name ? (
+            <span className="text-sm text-app-fg truncate">
+              {name}
+              {extra ? <span className="text-app-fg-muted">{extra}</span> : null}
+            </span>
+          ) : (
+            <span className="text-app-fg-muted">—</span>
+          );
+        },
+      },
+      {
+        key: 'campaign',
+        header: 'Form',
+        render: (order) => (
+          <span className="text-sm text-app-fg-muted truncate">
+            {order.campaignName?.trim() ? order.campaignName : '—'}
+          </span>
+        ),
+      },
+      {
         key: 'amount',
         header: 'Amount',
         align: 'right',
@@ -179,13 +226,8 @@ export function MarketingOrdersPage({
         header: 'Created',
         nowrap: true,
         render: (order) => (
-          <span className="text-app-fg-muted">
-            {new Date(order.createdAt).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
+          <span className="text-app-fg-muted whitespace-nowrap">
+            {formatOrderTimestamp(order.createdAt)}
           </span>
         ),
       },
@@ -240,21 +282,23 @@ export function MarketingOrdersPage({
                 >
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
-                <Suspense
-                  fallback={
-                    <Button type="button" variant="secondary" size="sm" disabled>
-                      Generate report…
-                    </Button>
-                  }
-                >
-                  <Await resolve={secondary}>
-                    {() => (
-                      <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
-                        Generate report
+                {canExport && (
+                  <Suspense
+                    fallback={
+                      <Button type="button" variant="secondary" size="sm" disabled>
+                        Generate report…
                       </Button>
-                    )}
-                  </Await>
-                </Suspense>
+                    }
+                  >
+                    <Await resolve={secondary}>
+                      {() => (
+                        <Button onClick={() => setShowExportModal(true)} variant="secondary" size="sm">
+                          Generate report
+                        </Button>
+                      )}
+                    </Await>
+                  </Suspense>
+                )}
                 <PageRefreshButton />
               </>
             }
@@ -280,29 +324,31 @@ export function MarketingOrdersPage({
                 >
                   {showChartView ? 'View as data' : 'View data in chart'}
                 </Button>
-                <Suspense
-                  fallback={
-                    <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
-                      Generate report…
-                    </Button>
-                  }
-                >
-                  <Await resolve={secondary}>
-                    {() => (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="w-full justify-center"
-                        onClick={() => {
-                          closeSheet();
-                          setShowExportModal(true);
-                        }}
-                      >
-                        Generate report
+                {canExport && (
+                  <Suspense
+                    fallback={
+                      <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                        Generate report…
                       </Button>
-                    )}
-                  </Await>
-                </Suspense>
+                    }
+                  >
+                    <Await resolve={secondary}>
+                      {() => (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="w-full justify-center"
+                          onClick={() => {
+                            closeSheet();
+                            setShowExportModal(true);
+                          }}
+                        >
+                          Generate report
+                        </Button>
+                      )}
+                    </Await>
+                  </Suspense>
+                )}
               </>
             )}
           />
@@ -479,6 +525,50 @@ export function MarketingOrdersPage({
                           searchPlaceholder="Search buyers…"
                         />
                       ) : null}
+                      {ins.productsForFilter.length > 0 ? (
+                        <SearchableSelect
+                          id="marketing-orders-filter-product"
+                          value={searchParams.get('productId') || 'ALL'}
+                          onChange={(v) => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('page', '1');
+                              if (v && v !== 'ALL') next.set('productId', v);
+                              else next.delete('productId');
+                              return next;
+                            });
+                          }}
+                          options={[
+                            { value: 'ALL', label: 'All products' },
+                            ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                          ]}
+                          wrapperClassName="w-full min-w-0 sm:w-48"
+                          placeholder="All products"
+                          searchPlaceholder="Search products…"
+                        />
+                      ) : null}
+                      {ins.campaignsForFilter.length > 0 ? (
+                        <SearchableSelect
+                          id="marketing-orders-filter-form"
+                          value={searchParams.get('campaignId') || 'ALL'}
+                          onChange={(v) => {
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('page', '1');
+                              if (v && v !== 'ALL') next.set('campaignId', v);
+                              else next.delete('campaignId');
+                              return next;
+                            });
+                          }}
+                          options={[
+                            { value: 'ALL', label: 'All forms' },
+                            ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                          ]}
+                          wrapperClassName="w-full min-w-0 sm:w-48"
+                          placeholder="All forms"
+                          searchPlaceholder="Search forms…"
+                        />
+                      ) : null}
                     </>
                   }
                   sheetFilterBody={
@@ -511,6 +601,56 @@ export function MarketingOrdersPage({
                             wrapperClassName="w-full"
                             placeholder="All media buyers"
                             searchPlaceholder="Search buyers…"
+                          />
+                        </div>
+                      ) : null}
+                      {ins.productsForFilter.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                          <SearchableSelect
+                            id="marketing-orders-filter-product-sheet"
+                            value={searchParams.get('productId') || 'ALL'}
+                            onChange={(v) => {
+                              setSearchParams((p) => {
+                                const next = new URLSearchParams(p);
+                                next.set('page', '1');
+                                if (v && v !== 'ALL') next.set('productId', v);
+                                else next.delete('productId');
+                                return next;
+                              });
+                            }}
+                            options={[
+                              { value: 'ALL', label: 'All products' },
+                              ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                            ]}
+                            wrapperClassName="w-full"
+                            placeholder="All products"
+                            searchPlaceholder="Search products…"
+                          />
+                        </div>
+                      ) : null}
+                      {ins.campaignsForFilter.length > 0 ? (
+                        <div className="space-y-1.5">
+                          <span className="text-xs font-medium text-app-fg-muted">Form</span>
+                          <SearchableSelect
+                            id="marketing-orders-filter-form-sheet"
+                            value={searchParams.get('campaignId') || 'ALL'}
+                            onChange={(v) => {
+                              setSearchParams((p) => {
+                                const next = new URLSearchParams(p);
+                                next.set('page', '1');
+                                if (v && v !== 'ALL') next.set('campaignId', v);
+                                else next.delete('campaignId');
+                                return next;
+                              });
+                            }}
+                            options={[
+                              { value: 'ALL', label: 'All forms' },
+                              ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                            ]}
+                            wrapperClassName="w-full"
+                            placeholder="All forms"
+                            searchPlaceholder="Search forms…"
                           />
                         </div>
                       ) : null}
@@ -552,6 +692,8 @@ export function MarketingOrdersPage({
           rowKey={(order) => order.id}
           emptyTitle="No orders match your filters"
           emptyDescription="Try adjusting your status filter or search query"
+          loading={isLoaderRefetchBusy}
+          loadingVariant="overlay"
         />
       </div>
       {/* Pagination — same layout as CS Orders list; page size is fixed at 20 in the route loader. */}

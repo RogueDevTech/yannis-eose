@@ -55,6 +55,7 @@ import {
   setBranchesSessionStore,
   setBranchesNotificationsService,
   setBranchTeamsService,
+  setBranchesSettingsService,
 } from './routers/branches.router';
 import { BranchesModule } from '../branches/branches.module';
 import { BranchTeamsService } from '../branches/branch-teams.service';
@@ -156,6 +157,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setBranchTeamsService(this.branchTeamsService);
     setBranchesSessionStore(this.sessionStore);
     setBranchesNotificationsService(this.notificationsService);
+    setBranchesSettingsService(this.settingsService);
     setMessagingDb(this.db as Parameters<typeof setMessagingDb>[0]);
     setMessagingCacheService(this.cacheService);
     setDashboardServices({
