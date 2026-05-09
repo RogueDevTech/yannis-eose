@@ -18,6 +18,8 @@ import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 import { SlowConnectionToast } from '~/components/ui/slow-connection-toast';
+import { RouteTransitionSkeleton } from '~/components/layout/route-transition-skeleton';
+import { getFullLoaderEntry } from '~/lib/loader-cache';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
@@ -837,6 +839,17 @@ function DashboardLayoutInner({
       navigation.location.pathname.startsWith('/hr'));
   const isRouteLoading = isAdminShellPath && isRouteChange;
 
+  // Skip the transition skeleton when the destination URL already has cached
+  // loader data (`cachedClientLoader` will render it on the same tick — no
+  // network roundtrip, so a skeleton flash would be a regression). Only show
+  // the skeleton on cache misses where the user actually has to wait.
+  const destFullPath = navigation.location
+    ? navigation.location.pathname + navigation.location.search
+    : null;
+  const destHasCachedPayload =
+    destFullPath != null && getFullLoaderEntry(destFullPath) !== null;
+  const showTransitionSkeleton = isRouteLoading && !destHasCachedPayload;
+
   const handleToggleCollapse = () => {
     const next = !collapsed;
     setCollapsed(next);
@@ -1148,7 +1161,16 @@ function DashboardLayoutInner({
             aria-live="polite"
           >
             <BranchesCatalogProvider value={branches ?? []}>
-              <Outlet />
+              {/* Cross-route nav swap — replace the old `<Outlet />` with a
+                  generic skeleton the moment the user clicks a sidebar link, so
+                  the swap feels instant instead of waiting for the destination
+                  loader to return.
+                  IMPORTANT: gated on `showTransitionSkeleton` (cache miss),
+                  NOT plain `isRouteLoading`. When the destination URL has a
+                  hot `cachedClientLoader` payload, Remix mounts the new route
+                  with cached data on the same tick — adding a skeleton flash
+                  would be a regression on the instant-revisit UX. */}
+              {showTransitionSkeleton ? <RouteTransitionSkeleton /> : <Outlet />}
             </BranchesCatalogProvider>
           </div>
         </div>

@@ -11,6 +11,8 @@
  */
 
 import { Link, useSearchParams } from '@remix-run/react';
+import { useEffect, useRef, useState } from 'react';
+import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 
 interface PaginationProps {
   page: number;
@@ -60,6 +62,26 @@ export function Pagination({
 }: PaginationProps) {
   const [searchParams] = useSearchParams();
 
+  // Loader-refetch indicator: in URL mode the loader re-runs on click; in callback mode the
+  // consumer manages loading. We arm a local "navigating" flag the moment a click happens so
+  // the spinner paints on the same frame as the click; clear it when the loader settles.
+  const refetchBusy = useLoaderRefetchBusy();
+  const [callbackNavigating, setCallbackNavigating] = useState(false);
+  const callbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // In callback mode there's no router signal; we auto-clear after a short window so the
+  // spinner doesn't get stuck if the consumer's update is synchronous.
+  useEffect(() => {
+    return () => {
+      if (callbackTimerRef.current) clearTimeout(callbackTimerRef.current);
+    };
+  }, []);
+  const isPaginating = onPageChange ? callbackNavigating : refetchBusy.busy;
+  const armCallbackNavigating = () => {
+    setCallbackNavigating(true);
+    if (callbackTimerRef.current) clearTimeout(callbackTimerRef.current);
+    callbackTimerRef.current = setTimeout(() => setCallbackNavigating(false), 1200);
+  };
+
   if (totalPages < 1) return null;
   if (totalPages === 1 && !showWhenSinglePage) return null;
 
@@ -81,14 +103,28 @@ export function Pagination({
 
     if (onPageChange) {
       return (
-        <button type="button" onClick={() => onPageChange(p)} className={btnClass} aria-current={isActive ? 'page' : undefined}>
+        <button
+          type="button"
+          onClick={() => {
+            armCallbackNavigating();
+            onPageChange(p);
+          }}
+          className={btnClass}
+          aria-current={isActive ? 'page' : undefined}
+        >
           {content}
         </button>
       );
     }
 
     return (
-      <Link to={buildHref(p)} className={btnClass} aria-current={isActive ? 'page' : undefined} prefetch="intent">
+      <Link
+        to={buildHref(p)}
+        className={btnClass}
+        aria-current={isActive ? 'page' : undefined}
+        prefetch="intent"
+        onClick={() => refetchBusy.primeSamePathRefetch()}
+      >
         {content}
       </Link>
     );
@@ -106,14 +142,26 @@ export function Pagination({
 
     if (onPageChange) {
       return (
-        <button type="button" onClick={() => onPageChange(p)} className={btnClass}>
+        <button
+          type="button"
+          onClick={() => {
+            armCallbackNavigating();
+            onPageChange(p);
+          }}
+          className={btnClass}
+        >
           {label}
         </button>
       );
     }
 
     return (
-      <Link to={buildHref(p)} className={btnClass} prefetch="intent">
+      <Link
+        to={buildHref(p)}
+        className={btnClass}
+        prefetch="intent"
+        onClick={() => refetchBusy.primeSamePathRefetch()}
+      >
         {label}
       </Link>
     );
@@ -144,20 +192,28 @@ export function Pagination({
       />
 
       {showLabel ? (
-        <span className="px-3 text-sm text-app-fg-muted">
+        <span className="px-3 text-sm text-app-fg-muted inline-flex items-center gap-2">
           Page <span className="font-semibold text-app-fg">{page}</span> of{' '}
           <span className="font-semibold text-app-fg">{totalPages}</span>
+          {isPaginating ? <PaginationSpinner /> : null}
         </span>
       ) : (
-        pages.map((p, i) =>
-          p === '...' ? (
-            <span key={`ellipsis-${i}`} className="flex h-8 w-8 items-center justify-center text-sm text-app-fg-muted">
-              …
+        <>
+          {pages.map((p, i) =>
+            p === '...' ? (
+              <span key={`ellipsis-${i}`} className="flex h-8 w-8 items-center justify-center text-sm text-app-fg-muted">
+                …
+              </span>
+            ) : (
+              <PageItem key={p} p={p} />
+            )
+          )}
+          {isPaginating ? (
+            <span className="ml-1 inline-flex items-center">
+              <PaginationSpinner />
             </span>
-          ) : (
-            <PageItem key={p} p={p} />
-          )
-        )
+          ) : null}
+        </>
       )}
 
       <NavBtn
@@ -177,5 +233,26 @@ export function Pagination({
         <NavBtn p={totalPages} label="»" disabled={page === totalPages} />
       )}
     </nav>
+  );
+}
+
+/** Small inline spinner shown next to the page label / number row while a page change is in flight. */
+function PaginationSpinner() {
+  return (
+    <svg
+      className="w-3.5 h-3.5 animate-spin text-app-fg-muted"
+      viewBox="0 0 24 24"
+      fill="none"
+      role="status"
+      aria-label="Loading"
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+      <path
+        d="M22 12a10 10 0 0 1-10 10"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }

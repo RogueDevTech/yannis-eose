@@ -1,6 +1,6 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
+
 import { Await, useLoaderData, useFetcher } from '@remix-run/react';
 import { useCallback, useMemo, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
@@ -19,6 +19,8 @@ import {
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { BranchesListLoadingShell } from '~/features/branches/BranchesDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Branch Management — Yannis EOSE' }];
@@ -48,6 +50,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   await requirePermission(request, 'branches.manage');
@@ -323,10 +328,13 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
 export default function BranchManagementRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<BranchesListLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<BranchesListLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {(data) => <BranchManagementContent branches={data.branches} />}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

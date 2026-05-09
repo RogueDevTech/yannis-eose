@@ -3,6 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
+import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
@@ -205,6 +206,13 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function MarketingOrdersRoute() {
   const { ordersShell, listPromise, secondaryPromise } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
+  // Cache the full multi-deferred loader shape so `clientLoader` can serve it
+  // instantly on revisit (instant LinkedIn-style navigation). Both promises
+  // must resolve before the cache write fires.
+  useMultiDeferredCacheSync({
+    shell: { ordersShell },
+    deferred: { listPromise, secondaryPromise },
+  });
   const sharedProps = {
     page: ordersShell.page,
     limit: ORDERS_PER_PAGE,

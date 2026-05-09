@@ -2,6 +2,8 @@ import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   getSessionCookie,
@@ -166,6 +168,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return defer({ userDetail: userDetailPromise });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 // ─── Action ─────────────────────────────────────────────
 
@@ -617,25 +622,28 @@ export function UserDetailPageWithMirror({
 export default function UserDetailRoute() {
   const { userDetail } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<UserDetailShellSkeleton />}>
-      <Await resolve={userDetail}>
-        {(data) =>
-          'notFound' in data && data.notFound ? (
-            <div className="card text-center py-12">
-              <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
-              <h2 className="text-xl font-bold text-app-fg">User not found</h2>
-              <p className="mt-2 text-sm text-app-fg-muted">
-                The user you're looking for doesn't exist or has been removed.
-              </p>
-              <a href="/hr/users" className="btn-primary mt-4 inline-block">
-                Back to Users
-              </a>
-            </div>
-          ) : (
-            <UserDetailPageWithMirror data={data as UserDetailLoaderData} />
-          )
-        }
-      </Await>
-    </Suspense>
+    <CachedAwait
+      resolve={userDetail}
+      fallback={<UserDetailShellSkeleton />}
+      loaderShell={{}}
+      deferredKey="userDetail"
+    >
+      {(data) =>
+        'notFound' in data && data.notFound ? (
+          <div className="card text-center py-12">
+            <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+            <h2 className="text-xl font-bold text-app-fg">User not found</h2>
+            <p className="mt-2 text-sm text-app-fg-muted">
+              The user you're looking for doesn't exist or has been removed.
+            </p>
+            <a href="/hr/users" className="btn-primary mt-4 inline-block">
+              Back to Users
+            </a>
+          </div>
+        ) : (
+          <UserDetailPageWithMirror data={data as UserDetailLoaderData} />
+        )
+      }
+    </CachedAwait>
   );
 }

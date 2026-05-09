@@ -2,6 +2,8 @@ import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import * as React from 'react';
 import { Await, Link, useFetcher, useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -185,6 +187,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canManageOffers,
   });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -491,20 +496,29 @@ function ProductsRouteInner(
 export default function ProductsRoute() {
   const data = useLoaderData<ProductsLoaderData>();
   return (
-    <React.Suspense fallback={<ProductsHubLoadingShell initialTab={data.initialTab} />}>
-      <Await resolve={data.pageData}>
-        {({ products, offerGroupsCount }) => (
-          <ProductsRouteInner
-            initialTab={data.initialTab}
-            canEditProduct={data.canEditProduct}
-            canCreateProduct={data.canCreateProduct}
-            canInstantArchiveProduct={data.canInstantArchiveProduct}
-            canManageOffers={data.canManageOffers}
-            products={products}
-            offerGroupsCount={offerGroupsCount}
-          />
-        )}
-      </Await>
-    </React.Suspense>
+    <CachedAwait
+      resolve={data.pageData}
+      fallback={<ProductsHubLoadingShell initialTab={data.initialTab} />}
+      loaderShell={{
+        initialTab: data.initialTab,
+        canEditProduct: data.canEditProduct,
+        canCreateProduct: data.canCreateProduct,
+        canInstantArchiveProduct: data.canInstantArchiveProduct,
+        canManageOffers: data.canManageOffers,
+      }}
+      deferredKey="pageData"
+    >
+      {({ products, offerGroupsCount }) => (
+        <ProductsRouteInner
+          initialTab={data.initialTab}
+          canEditProduct={data.canEditProduct}
+          canCreateProduct={data.canCreateProduct}
+          canInstantArchiveProduct={data.canInstantArchiveProduct}
+          canManageOffers={data.canManageOffers}
+          products={products}
+          offerGroupsCount={offerGroupsCount}
+        />
+      )}
+    </CachedAwait>
   );
 }
