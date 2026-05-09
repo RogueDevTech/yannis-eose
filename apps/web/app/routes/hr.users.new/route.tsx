@@ -1,7 +1,6 @@
-import { useLoaderData, Await } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
@@ -13,7 +12,6 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
-import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type {
   UserCreateProduct,
   UserCreateLocation,
@@ -40,7 +38,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (guard) return guard;
   const cookie = getSessionCookie(request);
 
-  const pageData = (async (): Promise<UserCreateLoaderData> => {
+  // App Shell pattern — defer the 8 picklist fetches so the form chrome (name,
+  // email, phone, role, status, password notice, save button) renders instantly.
+  // Only the picklist-driven sections briefly show "Loading…".
+  const picklistsPromise = (async (): Promise<UserCreateLoaderData> => {
   const productsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
@@ -129,16 +130,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
   })();
 
-  return defer({ pageData });
+  return defer({ picklistsPromise });
 }
 
-// `clientLoader` cache — once the form has been opened and its 8 picklists
-// (products, locations, plans, branches, role templates, permissions catalog,
-// active heads, template baselines) have resolved on first visit, every
-// subsequent visit within the 5-min TTL skips the server roundtrip entirely
-// and renders the full form on the same React tick as the click. Refactoring
-// the form itself to pure App Shell (each picklist independent) is a bigger
-// surgery — caching gets us the instant-revisit win without that risk.
+// `clientLoader` cache — on revisit within the 5-min TTL, the cached picklists
+// are served synchronously, so even the dropdowns render fully populated on
+// the same React tick as the click.
 export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
@@ -276,12 +273,8 @@ export async function action({ request }: ActionFunctionArgs) {
 // ─── Component ──────────────────────────────────────────
 
 export default function NewUserRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
+  const { picklistsPromise } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<UserCreateEditLoadingShell mode="create" />}>
-      <Await resolve={pageData}>
-        {(data) => <UserCreatePage {...data} />}
-      </Await>
-    </Suspense>
+    <UserCreatePage picklistsPromise={picklistsPromise} />
   );
 }

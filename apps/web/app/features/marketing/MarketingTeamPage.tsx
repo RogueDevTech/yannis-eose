@@ -10,7 +10,7 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { FormSelect } from '~/components/ui/form-select';
+import { SortMenu } from '~/components/ui/sort-menu';
 import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
 import { ExportModal } from '~/components/ui/export-modal';
@@ -66,15 +66,71 @@ function buildOrdersQuery(
   return `/admin/marketing/orders?${params.toString()}`;
 }
 
-const TEAM_SORT_BY_OPTIONS = [
-  { value: 'name', label: 'Name' },
-  { value: 'balance', label: 'Balance' },
-  { value: 'received', label: 'Received' },
-  { value: 'spent', label: 'Ad spend' },
-  { value: 'cpa', label: 'CPA' },
-  { value: 'profitability', label: 'Profitability' },
-  { value: 'confirm', label: 'Confirm %' },
-  { value: 'delivery', label: 'Delivery %' },
+/** SortMenu options for the marketing team list — names use A→Z vocab, numerics use Highest/Lowest. */
+const TEAM_SORT_MENU_OPTIONS = [
+  {
+    value: 'name',
+    label: 'Name',
+    ascLabel: 'A → Z',
+    descLabel: 'Z → A',
+    defaultDir: 'asc' as const,
+  },
+  {
+    value: 'balance',
+    label: 'Balance',
+    description: 'Total received minus approved ad spend.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'received',
+    label: 'Received',
+    description: 'Funding the buyer has been allocated.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'spent',
+    label: 'Ad spend',
+    description: 'Approved ad spend in the period.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'cpa',
+    label: 'CPA',
+    description: 'Cost per order created.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'asc' as const,
+  },
+  {
+    value: 'profitability',
+    label: 'Profitability',
+    description: 'True profit attributable to this buyer.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'confirm',
+    label: 'Confirm %',
+    description: 'Share of orders confirmed by CS.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'delivery',
+    label: 'Delivery %',
+    description: 'Share of confirmed orders that were delivered.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
 ];
 
 export function MarketingTeamPage({
@@ -341,60 +397,25 @@ export function MarketingTeamPage({
             </form>
           }
           desktopInlineFilters={
-            <>
-              <FormSelect
-                aria-label="Sort team list by"
-                value={sortByFromLoader}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  const nextDir: 'asc' | 'desc' = next === 'name' ? 'asc' : 'desc';
-                  mergeListParams({ sortBy: next, sortDir: nextDir, page: 1 });
-                }}
-                options={TEAM_SORT_BY_OPTIONS}
-                wrapperClassName="w-auto min-w-[11rem]"
-              />
-              <FormSelect
-                aria-label="Sort order"
-                value={sortDirFromLoader}
-                onChange={(e) => mergeListParams({ sortDir: e.target.value as 'asc' | 'desc', page: 1 })}
-                options={[
-                  { value: 'asc', label: 'Ascending' },
-                  { value: 'desc', label: 'Descending' },
-                ]}
-                wrapperClassName="w-auto min-w-[8rem]"
-              />
-            </>
+            <SortMenu
+              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+              onChange={(next) =>
+                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+              }
+              defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
+              options={TEAM_SORT_MENU_OPTIONS}
+            />
           }
           sheetFilterBody={
-            <>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                <FormSelect
-                  aria-label="Sort team list by"
-                  value={sortByFromLoader}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    const nextDir: 'asc' | 'desc' = next === 'name' ? 'asc' : 'desc';
-                    mergeListParams({ sortBy: next, sortDir: nextDir, page: 1 });
-                  }}
-                  options={TEAM_SORT_BY_OPTIONS}
-                  wrapperClassName="w-full"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Order</span>
-                <FormSelect
-                  aria-label="Sort order"
-                  value={sortDirFromLoader}
-                  onChange={(e) => mergeListParams({ sortDir: e.target.value as 'asc' | 'desc', page: 1 })}
-                  options={[
-                    { value: 'asc', label: 'Ascending' },
-                    { value: 'desc', label: 'Descending' },
-                  ]}
-                  wrapperClassName="w-full"
-                />
-              </div>
-            </>
+            <SortMenu
+              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+              onChange={(next) =>
+                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+              }
+              defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
+              options={TEAM_SORT_MENU_OPTIONS}
+              className="w-full justify-center"
+            />
           }
         />
 

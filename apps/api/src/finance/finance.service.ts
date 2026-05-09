@@ -128,9 +128,25 @@ export class FinanceService {
 
     if (!rows[0]) return null;
 
+    // `markedPaid` — true when the order is on a delivery remittance whose
+    // status has been confirmed `RECEIVED`. Drives the "MARKED AS PAID"
+    // rubber-stamp on the invoice preview + PDF (web). Done via a single LEFT
+    // JOIN so the typical "no remittance yet" path stays free.
+    const remittanceLink = await this.db
+      .select({ status: schema.deliveryRemittances.status })
+      .from(schema.deliveryRemittanceOrders)
+      .innerJoin(
+        schema.deliveryRemittances,
+        eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id),
+      )
+      .where(eq(schema.deliveryRemittanceOrders.orderId, orderId))
+      .limit(1);
+    const markedPaid = remittanceLink[0]?.status === 'RECEIVED';
+
     return {
       ...rows[0],
       referenceFormatted: this.formatReference(rows[0].referenceNumber),
+      markedPaid,
     };
   }
 

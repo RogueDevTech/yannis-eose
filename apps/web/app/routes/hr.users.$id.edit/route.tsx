@@ -1,7 +1,6 @@
-import { useLoaderData, Await } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
@@ -15,7 +14,6 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { extractTrpc } from '~/lib/trpc-extract.server';
 import { canEditUser } from '~/lib/rbac';
 import { UserCreatePage, type EditingUser } from '~/features/users/UserCreatePage';
-import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import type {
   UserCreateProduct,
   UserCreateLocation,
@@ -46,36 +44,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (guard) return guard;
   const cookie = getSessionCookie(request);
 
-  const pageData = (async () => {
+  // App Shell pattern — fetch user + matrix sync (needed for current values +
+  // auth gate). Defer all 8 picklists.
   const productsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const locationsInput = encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
   const userInput = encodeURIComponent(JSON.stringify({ userId }));
   const matrixInput = encodeURIComponent(JSON.stringify({ userId, intent: 'edit_matrix' }));
 
-  const [
-    userRes,
-    productsRes,
-    locationsRes,
-    plansRes,
-    branchesRes,
-    activeHeadsRes,
-    templatesRes,
-    permissionCatalogRes,
-    templateBaselinesRes,
-    matrixRes,
-  ] = await Promise.all([
-    apiRequest<unknown>(`/trpc/users.getById?input=${userInput}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/products.options?input=${productsInput}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/logistics.locationOptions?input=${locationsInput}`, { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie }),
-    apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie }),
-    apiRequest<unknown>(`/trpc/permissions.getUserMatrix?input=${matrixInput}`, { method: 'GET', cookie }),
-  ]);
+  // Kick off ALL fetches in parallel — sync block awaits user + matrix; the
+  // rest become the deferred picklists promise.
+  const userResP = apiRequest<unknown>(`/trpc/users.getById?input=${userInput}`, { method: 'GET', cookie });
+  const productsResP = apiRequest<unknown>(`/trpc/products.options?input=${productsInput}`, { method: 'GET', cookie });
+  const locationsResP = apiRequest<unknown>(`/trpc/logistics.locationOptions?input=${locationsInput}`, { method: 'GET', cookie });
+  const plansResP = apiRequest<unknown>(`/trpc/hr.listPlans?input=${plansInput}`, { method: 'GET', cookie });
+  const branchesResP = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie });
+  const activeHeadsResP = apiRequest<unknown>('/trpc/users.listActiveHeads', { method: 'GET', cookie });
+  const templatesResP = apiRequest<unknown>('/trpc/roleTemplates.list', { method: 'GET', cookie });
+  const permissionCatalogResP = apiRequest<unknown>('/trpc/permissions.listCatalog', { method: 'GET', cookie });
+  const templateBaselinesResP = apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie });
+  const matrixResP = apiRequest<unknown>(`/trpc/permissions.getUserMatrix?input=${matrixInput}`, { method: 'GET', cookie });
+
+  const [userRes, matrixRes] = await Promise.all([userResP, matrixResP]);
 
   if (!userRes.ok) {
     throw new Response('User not found', { status: 404 });
@@ -110,68 +100,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
   }
 
-  const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
-    if (!res.ok) return [];
-    const d = res.data as Record<string, unknown>;
-    const result = d?.result as Record<string, unknown> | undefined;
-    const data = result?.data as Record<string, unknown> | undefined;
-    return (data?.[key] as unknown[]) ?? [];
-  };
-
-  /** Same SYSTEM templates as `roleTemplates.list`, returned when staff has baselines but list failed (defensive). */
-  const roleTemplatesFromBaselines = (): RoleTemplateOption[] => {
-    if (!templateBaselinesRes.ok) return [];
-    const rows =
-      (
-        templateBaselinesRes.data as {
-          result?: { data?: { templates?: Array<{ id: string; key: string; name: string; kind: string; mappedRole: string | null }> } };
-        }
-      )?.result?.data?.templates ?? [];
-    return rows.map((t) => ({
-      id: t.id,
-      key: t.key,
-      name: t.name,
-      kind: t.kind,
-      mappedRole: t.mappedRole ?? null,
-    }));
-  };
-
-  let roleTemplates = templatesRes.ok
-    ? (((templatesRes.data as { result?: { data?: { templates?: RoleTemplateOption[] } } })?.result?.data?.templates) ??
-        [])
-    : [];
-  if (roleTemplates.length === 0) {
-    roleTemplates = roleTemplatesFromBaselines();
-  }
-  const permissionCatalog = permissionCatalogRes.ok
-    ? (((permissionCatalogRes.data as { result?: { data?: { permissions?: PermissionCatalogItem[] } } })?.result?.data?.permissions) ??
-        [])
-    : [];
-  const templatePermissionsById = templateBaselinesRes.ok
-    ? (((templateBaselinesRes.data as { result?: { data?: { byTemplateId?: Record<string, string[]> } } })?.result?.data?.byTemplateId) ??
-        {})
-    : {};
-
-  const branches = ((branchesRes.ok
-    ? (branchesRes.data as { result?: { data?: unknown[] } })?.result?.data
-    : []) ?? []) as UserCreateBranch[];
-
-  // Use the shared `extractTrpc` helper (same one the detail-page loader uses
-  // via `parseMatrix`) so we handle both tRPC response shapes — direct
-  // `result.data.userOverrides` AND the `result.data.json.userOverrides`
-  // variant. Manual indexing missed the wrapped shape and produced an empty
-  // override map, which is why saved permission edits weren't pre-checking
-  // when the user came back to the edit page.
-  // TEMPORARY: log the resolved overrides count so we can confirm the fix
-  // landed in production. Drop after a few good cycles.
+  // Use the shared `extractTrpc` helper so we handle both tRPC response shapes.
   const matrixExtracted = extractTrpc<{
     userOverrides?: Record<string, boolean>;
     templateCodes?: string[];
     effectiveCodes?: string[];
   }>(matrixRes, {});
   const permissionOverrides = matrixExtracted.userOverrides ?? {};
-  // eslint-disable-next-line no-console
-  console.log('[loader/hr.users.$id.edit] getUserMatrix → overrides count:', Object.keys(permissionOverrides).length, 'matrixOk:', matrixRes.ok);
 
   const editingUser: EditingUser = {
     id: user.id,
@@ -190,27 +125,86 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     permissionOverrides,
   };
 
-  const formData: UserCreateLoaderData = {
-    products: extractData(productsRes, 'products') as UserCreateProduct[],
-    locations: (extractData(locationsRes, 'locations') as Array<{ id: string; name: string; address: string; providerName?: string | null }>).map(
-      (l) => ({ id: l.id, name: l.name, address: l.address, providerName: l.providerName ?? null }),
-    ) as UserCreateLocation[],
-    plans: extractData(plansRes, 'plans') as UserCreateCommissionPlan[],
-    branches,
-    activeHeads: ((activeHeadsRes.ok
-      ? (activeHeadsRes.data as { result?: { data?: unknown[] } })?.result?.data
-      : []) ?? []) as ActiveHeadUser[],
-    roleTemplates,
-    permissionCatalog,
-    templatePermissionsById,
-    // Editing — no auto-fill default needed.
-    defaultMembershipBranchId: null,
-  };
+  // Deferred picklists — the form chrome (current values + auth gate) renders
+  // immediately above; only the dropdowns/sections driven by this data wait.
+  const picklistsPromise: Promise<UserCreateLoaderData> = (async () => {
+    const [productsRes, locationsRes, plansRes, branchesRes, activeHeadsRes, templatesRes, permissionCatalogRes, templateBaselinesRes] =
+      await Promise.all([
+        productsResP,
+        locationsResP,
+        plansResP,
+        branchesResP,
+        activeHeadsResP,
+        templatesResP,
+        permissionCatalogResP,
+        templateBaselinesResP,
+      ]);
 
-  return { formData, editingUser };
+    const extractData = (res: { ok: boolean; data: unknown }, key: string) => {
+      if (!res.ok) return [];
+      const d = res.data as Record<string, unknown>;
+      const result = d?.result as Record<string, unknown> | undefined;
+      const data = result?.data as Record<string, unknown> | undefined;
+      return (data?.[key] as unknown[]) ?? [];
+    };
+
+    /** Same SYSTEM templates as `roleTemplates.list`, returned when staff has baselines but list failed (defensive). */
+    const roleTemplatesFromBaselines = (): RoleTemplateOption[] => {
+      if (!templateBaselinesRes.ok) return [];
+      const rows =
+        (
+          templateBaselinesRes.data as {
+            result?: { data?: { templates?: Array<{ id: string; key: string; name: string; kind: string; mappedRole: string | null }> } };
+          }
+        )?.result?.data?.templates ?? [];
+      return rows.map((t) => ({
+        id: t.id,
+        key: t.key,
+        name: t.name,
+        kind: t.kind,
+        mappedRole: t.mappedRole ?? null,
+      }));
+    };
+
+    let roleTemplates = templatesRes.ok
+      ? (((templatesRes.data as { result?: { data?: { templates?: RoleTemplateOption[] } } })?.result?.data?.templates) ??
+          [])
+      : [];
+    if (roleTemplates.length === 0) {
+      roleTemplates = roleTemplatesFromBaselines();
+    }
+    const permissionCatalog = permissionCatalogRes.ok
+      ? (((permissionCatalogRes.data as { result?: { data?: { permissions?: PermissionCatalogItem[] } } })?.result?.data?.permissions) ??
+          [])
+      : [];
+    const templatePermissionsById = templateBaselinesRes.ok
+      ? (((templateBaselinesRes.data as { result?: { data?: { byTemplateId?: Record<string, string[]> } } })?.result?.data?.byTemplateId) ??
+          {})
+      : {};
+
+    const branches = ((branchesRes.ok
+      ? (branchesRes.data as { result?: { data?: unknown[] } })?.result?.data
+      : []) ?? []) as UserCreateBranch[];
+
+    return {
+      products: extractData(productsRes, 'products') as UserCreateProduct[],
+      locations: (extractData(locationsRes, 'locations') as Array<{ id: string; name: string; address: string; providerName?: string | null }>).map(
+        (l) => ({ id: l.id, name: l.name, address: l.address, providerName: l.providerName ?? null }),
+      ) as UserCreateLocation[],
+      plans: extractData(plansRes, 'plans') as UserCreateCommissionPlan[],
+      branches,
+      activeHeads: ((activeHeadsRes.ok
+        ? (activeHeadsRes.data as { result?: { data?: unknown[] } })?.result?.data
+        : []) ?? []) as ActiveHeadUser[],
+      roleTemplates,
+      permissionCatalog,
+      templatePermissionsById,
+      // Editing — no auto-fill default needed.
+      defaultMembershipBranchId: null,
+    };
   })();
 
-  return defer({ pageData });
+  return defer({ editingUser, picklistsPromise });
 }
 
 // `clientLoader` cache — same surgery as `hr.users.new`. The form has 8
@@ -428,12 +422,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
 // ─── Component ──────────────────────────────────────────
 
 export default function EditUserRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
-  return (
-    <Suspense fallback={<UserCreateEditLoadingShell mode="edit" />}>
-      <Await resolve={pageData}>
-        {(data) => <UserCreatePage {...data.formData} editingUser={data.editingUser} />}
-      </Await>
-    </Suspense>
-  );
+  const { editingUser, picklistsPromise } = useLoaderData<typeof loader>();
+  return <UserCreatePage picklistsPromise={picklistsPromise} editingUser={editingUser} />;
 }
