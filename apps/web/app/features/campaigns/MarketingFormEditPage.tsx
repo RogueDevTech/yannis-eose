@@ -18,16 +18,29 @@ import { FormFullPreview } from './form-full-preview';
 import { additionalFieldSelectOptionsFromConfig, normalizeStandardFields } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
 
-export interface MarketingFormEditPageProps {
-  campaign: Campaign;
-  /** Catalog rows for `campaign.productIds` (fallback context / legacy multi-product rows). */
+type MarketingFormEditPicklists = {
   formProducts: Product[];
-  /** All offer templates for the campaign’s primary product (`productIds[0]`). */
   offerTemplates: MinimalOfferTemplateForPreview[];
   offerGroups: OfferGroupRow[];
-  offerGroupsLoadError?: string | null;
+  offerGroupsLoadError: string | null;
+};
+
+export interface MarketingFormEditPageProps {
+  campaign: Campaign;
+  /**
+   * Resolved picklists OR a Promise that resolves them. When a Promise, the
+   * Offer + Tiers selection sections show "Loading…" while every other input
+   * (heading, subtitle, button text, accent, custom fields, status actions)
+   * is fully interactive (App Shell pattern).
+   */
+  picklistsPromise: Promise<MarketingFormEditPicklists> | MarketingFormEditPicklists;
   /** `marketing.offerTemplate` — enables Offer tiers panel on this form. */
   canManageOfferTemplates?: boolean;
+}
+
+/** Type guard — distinguishes a pre-resolved payload from a Promise. */
+function isResolvedPicklistsForFormEdit<T>(v: T | Promise<T>): v is T {
+  return typeof v === 'object' && v != null && !('then' in (v as object));
 }
 
 const FORMS_INDEX_ACTION = '/admin/marketing/forms';
@@ -60,12 +73,45 @@ const ArchiveIcon = (
  */
 export function MarketingFormEditPage({
   campaign,
-  formProducts,
-  offerTemplates,
-  offerGroups,
-  offerGroupsLoadError = null,
+  picklistsPromise,
   canManageOfferTemplates = false,
 }: MarketingFormEditPageProps) {
+  // Bridge the deferred picklists to local state so the rest of the form
+  // (heading, subtitle, button text, accent, custom fields, preview, status
+  // actions) renders immediately. Only the Offer/Tiers selection sections
+  // briefly suspend until this resolves.
+  const [picklists, setPicklists] = useState<MarketingFormEditPicklists | null>(
+    isResolvedPicklistsForFormEdit(picklistsPromise) ? picklistsPromise : null,
+  );
+  useEffect(() => {
+    if (isResolvedPicklistsForFormEdit(picklistsPromise)) {
+      setPicklists(picklistsPromise);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(picklistsPromise)
+      .then((p) => {
+        if (!cancelled) setPicklists(p);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPicklists({
+            formProducts: [],
+            offerTemplates: [],
+            offerGroups: [],
+            offerGroupsLoadError: 'Could not load offers. Try refreshing.',
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [picklistsPromise]);
+  const picklistsLoading = picklists === null;
+  const formProducts = picklists?.formProducts ?? [];
+  const offerTemplates = picklists?.offerTemplates ?? [];
+  const offerGroups = picklists?.offerGroups ?? [];
+  const offerGroupsLoadError = picklists?.offerGroupsLoadError ?? null;
   const navigation = useNavigation();
   const actionData = useActionData<{ error?: string } | undefined>();
   const statusFetcher = useFetcher<{ success?: boolean; error?: string }>();
@@ -336,11 +382,13 @@ export function MarketingFormEditPage({
                     setSelectedOfferTemplateIds([]);
                   }}
                   options={
-                    compatibleOfferGroups.length > 0
-                      ? [{ value: '', label: 'No offer selected' }, ...offerGroupOptions]
-                      : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
+                    picklistsLoading
+                      ? [{ value: selectedOfferGroupId, label: 'Loading offers…' }]
+                      : compatibleOfferGroups.length > 0
+                        ? [{ value: '', label: 'No offer selected' }, ...offerGroupOptions]
+                        : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
                   }
-                  disabled={compatibleOfferGroups.length === 0}
+                  disabled={picklistsLoading || compatibleOfferGroups.length === 0}
                 />
               </div>
 

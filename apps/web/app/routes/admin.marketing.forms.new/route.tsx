@@ -1,6 +1,7 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   ensureBranchScopeOrRedirect,
@@ -30,31 +31,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (guard) return guard;
   const cookie = getSessionCookie(request);
 
+  // App Shell pattern — defer the offer groups fetch so the form chrome (heading,
+  // subtitle, button text, accent color, custom field builder, preview pane)
+  // renders instantly. Only the offer-group dropdown briefly shows "Loading…".
   const offerGroupsInputStr = encodeURIComponent(JSON.stringify({ page: 1, limit: 250 }));
-  let offerGroups: OfferGroupRow[] = [];
-  let offerGroupsLoadError: string | null = null;
-  try {
-    const offerGroupsRes = await apiRequest<unknown>(
-      `/trpc/marketing.listOfferGroups?input=${offerGroupsInputStr}`,
-      { method: 'GET', cookie },
-    );
-    if (offerGroupsRes.ok) {
-      const raw = (offerGroupsRes.data as { result?: { data?: { groups?: unknown[] } } })?.result?.data?.groups ?? [];
-      offerGroups = Array.isArray(raw) ? (raw as OfferGroupRow[]) : [];
-    } else {
-      console.error('[admin.marketing.forms.new] listOfferGroups failed', offerGroupsRes.status, offerGroupsRes.data);
-      offerGroupsLoadError = 'Could not load offers. Try refreshing the page.';
-    }
-  } catch (err) {
-    console.error('[admin.marketing.forms.new] listOfferGroups error', err);
-    offerGroupsLoadError = 'Could not load offers. Try refreshing the page.';
-  }
+  const offerGroupsPromise: Promise<{ offerGroups: OfferGroupRow[]; offerGroupsLoadError: string | null }> = apiRequest<unknown>(
+    `/trpc/marketing.listOfferGroups?input=${offerGroupsInputStr}`,
+    { method: 'GET', cookie },
+  )
+    .then((res) => {
+      if (!res.ok) {
+        console.error('[admin.marketing.forms.new] listOfferGroups failed', res.status, res.data);
+        return { offerGroups: [], offerGroupsLoadError: 'Could not load offers. Try refreshing the page.' };
+      }
+      const raw = (res.data as { result?: { data?: { groups?: unknown[] } } })?.result?.data?.groups ?? [];
+      return {
+        offerGroups: Array.isArray(raw) ? (raw as OfferGroupRow[]) : [],
+        offerGroupsLoadError: null,
+      };
+    })
+    .catch((err) => {
+      console.error('[admin.marketing.forms.new] listOfferGroups error', err);
+      return { offerGroups: [], offerGroupsLoadError: 'Could not load offers. Try refreshing the page.' };
+    });
 
-  return {
-    offerGroups,
-    offerGroupsLoadError,
-  };
+  return defer({ offerGroupsPromise });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -158,7 +163,5 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function MarketingFormNewRoute() {
   const data = useLoaderData<typeof loader>();
-  return (
-    <MarketingFormCreatePage offerGroups={data.offerGroups} offerGroupsLoadError={data.offerGroupsLoadError} />
-  );
+  return <MarketingFormCreatePage offerGroupsPromise={data.offerGroupsPromise} />;
 }

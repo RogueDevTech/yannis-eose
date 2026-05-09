@@ -4,11 +4,11 @@ import { AddExpenseForm } from './AddExpenseForm';
 import type { Campaign, Product } from './types';
 
 export function MarketingAddExpensePage({
-  campaigns,
-  products,
+  picklistsPromise,
 }: {
-  campaigns: Campaign[];
-  products: Product[];
+  picklistsPromise:
+    | Promise<{ campaigns: Campaign[]; products: Product[] }>
+    | { campaigns: Campaign[]; products: Product[] };
 }) {
   return (
     <div className="space-y-6">
@@ -24,7 +24,7 @@ export function MarketingAddExpensePage({
           </Link>
         }
       />
-      <AddExpenseForm campaigns={campaigns} products={products} />
+      <AddExpenseForm picklistsPromise={picklistsPromise} />
     </div>
   );
 }

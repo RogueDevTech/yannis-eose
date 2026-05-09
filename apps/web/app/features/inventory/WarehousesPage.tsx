@@ -23,6 +23,7 @@ import { Pagination } from '~/components/ui/pagination';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { SortMenu } from '~/components/ui/sort-menu';
 
 export interface WarehouseStockSummary {
   totalStock: number;
@@ -50,6 +51,8 @@ export interface WarehousesPageProps {
   limit: number;
   totalPages: number;
   search: string;
+  sortBy?: 'createdAt' | 'name' | 'available';
+  sortDir?: 'asc' | 'desc';
   canManage: boolean;
   overview: {
     activeWarehousesCount: number;
@@ -76,6 +79,8 @@ export function WarehousesPage({
   limit,
   totalPages,
   search,
+  sortBy = 'createdAt',
+  sortDir = 'desc',
   canManage,
   overview,
 }: WarehousesPageProps) {
@@ -231,32 +236,87 @@ export function WarehousesPage({
     },
   ];
 
+  const updateWarehouseSort = (nextSortBy: 'createdAt' | 'name' | 'available', nextSortDir: 'asc' | 'desc') => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      const isDefault = nextSortBy === 'createdAt' && nextSortDir === 'desc';
+      if (isDefault) {
+        next.delete('sortBy');
+        next.delete('sortDir');
+      } else {
+        next.set('sortBy', nextSortBy);
+        next.set('sortDir', nextSortDir);
+      }
+      next.delete('page');
+      return next;
+    }, { preventScrollReset: true });
+  };
+
   const toolbar = useMemo(() => {
+    const sortIsDefault = sortBy === 'createdAt' && sortDir === 'desc';
     return (
       <ToolbarFiltersCollapsible
         searchRow={
-          <Form method="get" replace className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <SearchInput
-              name="search"
-              defaultValue={search}
-              placeholder="Search by warehouse name…"
-              className="sm:max-w-xs"
-              aria-label="Search warehouses"
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
+            <Form method="get" replace className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <SearchInput
+                name="search"
+                defaultValue={search}
+                placeholder="Search by warehouse name…"
+                className="sm:max-w-xs"
+                aria-label="Search warehouses"
+              />
+              <input type="hidden" name="page" value="1" />
+              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+                Search
+              </Button>
+            </Form>
+            <SortMenu
+              value={{ sortBy, sortDir }}
+              onChange={(next) =>
+                updateWarehouseSort(
+                  next.sortBy as 'createdAt' | 'name' | 'available',
+                  next.sortDir,
+                )
+              }
+              defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
+              options={[
+                {
+                  value: 'createdAt',
+                  label: 'Recently added',
+                  description: 'When the warehouse was created.',
+                  ascLabel: 'Oldest first',
+                  descLabel: 'Newest first',
+                  defaultDir: 'desc',
+                },
+                {
+                  value: 'name',
+                  label: 'Name',
+                  description: 'Alphabetical.',
+                  ascLabel: 'A → Z',
+                  descLabel: 'Z → A',
+                  defaultDir: 'asc',
+                },
+                {
+                  value: 'available',
+                  label: 'Available units',
+                  description: 'Stock count minus reserved units across the warehouse.',
+                  ascLabel: 'Lowest first',
+                  descLabel: 'Highest first',
+                  defaultDir: 'desc',
+                },
+              ]}
             />
-            <input type="hidden" name="page" value="1" />
-            <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-              Search
-            </Button>
-          </Form>
+          </div>
         }
         desktopInlineFilters={<div />}
         sheetFilterBody={<div className="text-sm text-app-fg-muted">No extra filters.</div>}
-        badgeCount={0}
+        badgeCount={sortIsDefault ? 0 : 1}
         sheetTitle="Filters"
         sheetSubtitle="Search warehouses by name."
       />
     );
-  }, [search]);
+  }, [search, sortBy, sortDir, setSearchParams]);
 
   return (
     <div className="space-y-4">

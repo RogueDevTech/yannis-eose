@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { Form, useNavigation, Link } from '@remix-run/react';
+import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
+import { Await, Form, useNavigation, Link } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
@@ -21,10 +21,15 @@ interface CategoryOption {
 
 interface ProductCreatePageProps {
   actionData?: { error?: string } | undefined;
-  categories?: CategoryOption[];
+  /**
+   * Resolved categories OR a Promise that resolves them. When a Promise, the
+   * category select renders a "Loading…" placeholder while every other input
+   * is fully interactive (App Shell pattern — form chrome paints instantly).
+   */
+  categoriesPromise?: Promise<CategoryOption[]> | CategoryOption[];
 }
 
-export function ProductCreatePage({ actionData, categories = [] }: ProductCreatePageProps) {
+export function ProductCreatePage({ actionData, categoriesPromise = [] }: ProductCreatePageProps) {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
   const errorRef = useRef<HTMLDivElement>(null);
@@ -66,7 +71,7 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
       )}
 
       <Form method="post" className="space-y-6">
-        {categories.length > 0 ? <input type="hidden" name="categoryId" value={categoryId} /> : null}
+        <input type="hidden" name="categoryId" value={categoryId} />
         <input type="hidden" name="galleryImageUrls" value={galleryJson} readOnly />
 
         <div className="card space-y-4">
@@ -81,38 +86,56 @@ export function ProductCreatePage({ actionData, categories = [] }: ProductCreate
             placeholder="e.g. Premium Face Cream"
           />
 
-          <div>
-            {categories.length > 0 ? (
+          {/* App Shell pattern — the rest of the form is interactive immediately;
+              ONLY this select shows a brief "Loading categories…" state. */}
+          <Suspense
+            fallback={
               <SearchableSelect
-                id="categoryId"
+                id="categoryId-loading"
                 label="Category"
-                value={categoryId}
-                onChange={setCategoryId}
-                placeholder="— Select category —"
-                searchPlaceholder="Search categories..."
-                options={categories.map((cat) => ({
-                  value: cat.id,
-                  label: cat.name,
-                  description: cat.brandName,
-                }))}
+                value=""
+                onChange={() => undefined}
+                placeholder="Loading categories…"
+                disabled
+                options={[]}
               />
-            ) : (
-              <div>
-                <TextInput
-                  id="category"
-                  name="category"
-                  label="Category"
-                  placeholder="e.g. Skincare"
-                />
-                <p className="text-xs text-app-fg-muted mt-1">
-                  <Link to="/admin/categories" className="text-brand-500 hover:text-brand-600">
-                    Create categories
-                  </Link>{' '}
-                  to use a dropdown instead.
-                </p>
-              </div>
-            )}
-          </div>
+            }
+          >
+            <Await resolve={categoriesPromise}>
+              {(categories: CategoryOption[]) =>
+                categories.length > 0 ? (
+                  <SearchableSelect
+                    id="categoryId"
+                    label="Category"
+                    value={categoryId}
+                    onChange={setCategoryId}
+                    placeholder="— Select category —"
+                    searchPlaceholder="Search categories..."
+                    options={categories.map((cat) => ({
+                      value: cat.id,
+                      label: cat.name,
+                      description: cat.brandName,
+                    }))}
+                  />
+                ) : (
+                  <div>
+                    <TextInput
+                      id="category"
+                      name="category"
+                      label="Category"
+                      placeholder="e.g. Skincare"
+                    />
+                    <p className="text-xs text-app-fg-muted mt-1">
+                      <Link to="/admin/categories" className="text-brand-500 hover:text-brand-600">
+                        Create categories
+                      </Link>{' '}
+                      to use a dropdown instead.
+                    </p>
+                  </div>
+                )
+              }
+            </Await>
+          </Suspense>
 
           <Textarea
             id="description"

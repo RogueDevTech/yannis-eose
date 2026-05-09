@@ -2,6 +2,7 @@ import { useLoaderData, Await } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Suspense } from 'react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   ensureBranchScopeOrRedirect,
@@ -130,6 +131,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+// `clientLoader` cache — once the form has been opened and its 8 picklists
+// (products, locations, plans, branches, role templates, permissions catalog,
+// active heads, template baselines) have resolved on first visit, every
+// subsequent visit within the 5-min TTL skips the server roundtrip entirely
+// and renders the full form on the same React tick as the click. Refactoring
+// the form itself to pure App Shell (each picklist independent) is a bigger
+// surgery — caching gets us the instant-revisit win without that risk.
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 // ─── Action ─────────────────────────────────────────────
 

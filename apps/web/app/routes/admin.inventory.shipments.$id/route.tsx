@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+
 import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, useLoaderData } from '@remix-run/react';
@@ -13,6 +13,8 @@ import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { ShipmentDetailPage } from '~/features/inventory/ShipmentDetailPage';
 import type { ShipmentDetail } from '~/features/inventory/types';
 import { ShipmentDetailLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [{ title: 'Shipment — Yannis EOSE' }];
 
@@ -40,6 +42,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request, params }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -140,15 +145,18 @@ export default function ShipmentDetailRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['shipment:updated', 'stock:updated']);
   return (
-    <Suspense fallback={<ShipmentDetailLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<ShipmentDetailLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {({ detail, shipmentId }) => (
           <ShipmentDetailPage
             data={detail as ShipmentDetail}
             actionUrl={`/admin/inventory/shipments/${shipmentId}`}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

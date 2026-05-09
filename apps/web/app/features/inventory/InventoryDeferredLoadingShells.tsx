@@ -13,6 +13,9 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
+import { Breadcrumb } from '~/components/ui/breadcrumb';
+import { Card, CardBody, CardHeader } from '~/components/ui/card';
+import { DescriptionList } from '~/components/ui/description-list';
 
 const SHELL_PAGINATION_FOOTER = (
   <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -385,29 +388,209 @@ export function ShipmentsListLoadingShell() {
   );
 }
 
-/** Shipment detail workflow. */
+/**
+ * Shipment detail workflow — mirrors the real `ShipmentDetailPage` layout 1:1
+ * so the page chrome (breadcrumb structure, page header, section headings,
+ * field labels, table column headers, status-timeline steps) is visible
+ * immediately. Only the data-dependent slots (reference label, status badge,
+ * timeline current-step highlight, field VALUES, table rows) render as pulses
+ * — this keeps the static layout grounded so the swap to real data feels like
+ * a fill-in rather than a re-render.
+ */
+const SHIPMENT_TIMELINE_STEPS = ['Created', 'In transit', 'Arrived', 'Verified', 'Closed'] as const;
+
+const SHIPMENT_DETAIL_FIELDS = [
+  { label: 'Destination', pulseClass: 'w-[10rem]' },
+  { label: 'Supplier', pulseClass: 'w-[8rem]' },
+  { label: 'Supplier ref', pulseClass: 'w-[7rem]' },
+  { label: 'Expected arrival', pulseClass: 'w-[9rem]' },
+  { label: 'Arrived', pulseClass: 'w-[9rem]' },
+  { label: 'Verified', pulseClass: 'w-[9rem]' },
+  { label: 'Closed', pulseClass: 'w-[9rem]' },
+  { label: 'Total landing cost', pulseClass: 'w-[6rem]' },
+] as const;
+
+const SHIPMENT_LINE_SHELL_ROWS = 4;
+
+function shipmentLineShellColumns(): CompactTableColumn<{ id: string }>[] {
+  return [
+    { key: 'product', header: 'Product', render: () => <TableCellTextPulse className="w-[9rem]" /> },
+    {
+      key: 'warehouse',
+      header: 'Warehouse',
+      render: () => <TableCellTextPulse className="w-[8rem]" />,
+    },
+    {
+      key: 'expected',
+      header: 'Expected',
+      align: 'right',
+      nowrap: true,
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[3rem]" />
+        </span>
+      ),
+    },
+    {
+      key: 'received',
+      header: 'Received',
+      align: 'right',
+      nowrap: true,
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[3rem]" />
+        </span>
+      ),
+    },
+    {
+      key: 'factory',
+      header: 'Factory cost',
+      align: 'right',
+      nowrap: true,
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[4rem]" />
+        </span>
+      ),
+    },
+    {
+      key: 'landing',
+      header: 'Allocated landing',
+      align: 'right',
+      nowrap: true,
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[4rem]" />
+        </span>
+      ),
+    },
+    {
+      key: 'variance',
+      header: 'Variance',
+      render: () => <TableCellTextPulse className="w-[5rem]" />,
+    },
+  ];
+}
+
 export function ShipmentDetailLoadingShell() {
+  const lineRows = shellPulsePlaceholderRows('shipment-line', SHIPMENT_LINE_SHELL_ROWS);
+  const lineColumns = shipmentLineShellColumns();
+
   return (
-    <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-2 min-w-0 flex-1">
-          <div className="h-7 w-56 max-w-full rounded bg-app-hover animate-pulse" aria-hidden />
-          <div className="h-4 w-40 rounded bg-app-hover animate-pulse" aria-hidden />
-        </div>
-        <div className="h-9 w-28 rounded-md bg-app-hover animate-pulse shrink-0" aria-hidden />
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      {/* Breadcrumb — first two crumbs are static, the trailing reference is a pulse */}
+      <Breadcrumb
+        items={[
+          { label: 'Inventory', to: '/admin/inventory' },
+          { label: 'Shipments', to: '/admin/inventory?tab=shipments' },
+          {
+            label: (
+              <span className="inline-block h-4 w-32 align-middle rounded bg-app-border/75 dark:bg-app-border/55 animate-pulse" />
+            ) as unknown as string,
+          },
+        ]}
+      />
+
+      {/* Page header — `referenceLabel` and `label` are dynamic so they pulse;
+          status badge + workflow buttons render as a neutral pill row + pulse
+          buttons since which buttons are visible depends on status + perms. */}
+      <PageHeader
+        title={
+          (
+            <span className="inline-block h-6 w-44 rounded-md bg-app-border/75 dark:bg-app-border/55 animate-pulse align-middle" />
+          ) as unknown as string
+        }
+        description={
+          (
+            <span className="inline-block h-3.5 w-56 rounded bg-app-border/55 dark:bg-app-border/45 animate-pulse" />
+          ) as unknown as string
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className="inline-block h-6 w-20 rounded-full bg-app-border/65 dark:bg-app-border/55 animate-pulse"
+              aria-hidden
+              aria-label="Status badge"
+            />
+            <PageRefreshButton />
+            <span
+              className="inline-block h-8 w-28 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+              aria-hidden
+            />
+            <span
+              className="inline-block h-8 w-32 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+              aria-hidden
+            />
+          </div>
+        }
+      />
+
+      {/* Status timeline — step labels are static (we know all 5), the
+          current-step highlight is unknown so every step renders neutral. */}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-app-fg-muted">
+        {SHIPMENT_TIMELINE_STEPS.map((label, idx) => (
+          <span key={label} className="flex items-center gap-2">
+            <span
+              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-app-hover px-2 text-[10px] font-semibold text-app-fg-muted"
+              aria-hidden
+            >
+              {idx + 1}
+            </span>
+            <span>{label}</span>
+            {idx < SHIPMENT_TIMELINE_STEPS.length - 1 ? (
+              <span className="text-app-fg-muted/40" aria-hidden>
+                →
+              </span>
+            ) : null}
+          </span>
+        ))}
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="card p-4 space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-4 rounded bg-app-hover animate-pulse" aria-hidden />
-          ))}
-        </div>
-        <div className="card p-4 space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-4 rounded bg-app-hover animate-pulse" aria-hidden />
-          ))}
-        </div>
-      </div>
+
+      {/* Shipment details — labels visible, values pulse. Mirrors the
+          `DescriptionList layout="grid" gridColumns={3}` on the real page. */}
+      <Card>
+        <CardHeader title="Shipment details" />
+        <CardBody>
+          <DescriptionList
+            layout="grid"
+            gridColumns={3}
+            divided
+            className="gap-y-3"
+            items={SHIPMENT_DETAIL_FIELDS.map((f) => ({
+              label: f.label,
+              value: <TableCellTextPulse className={f.pulseClass} />,
+            }))}
+          />
+        </CardBody>
+      </Card>
+
+      {/* Line items — table chrome (column headers) is real, rows pulse. */}
+      <Card>
+        <CardHeader
+          title={
+            <span className="inline-flex flex-wrap items-center gap-x-1">
+              <span>Line items</span>
+              <span className="inline-flex items-center gap-0.5 text-base font-semibold text-app-fg">
+                <span aria-hidden>(</span>
+                <span
+                  className="inline-block h-5 w-6 rounded-md bg-app-border/80 dark:bg-app-border/65 animate-pulse align-middle"
+                  aria-hidden
+                />
+                <span aria-hidden>)</span>
+              </span>
+            </span>
+          }
+        />
+        <CardBody>
+          <CompactTable
+            columns={lineColumns}
+            rows={lineRows}
+            rowKey={(r) => r.id}
+            emptyTitle="Loading…"
+            emptyDescription=""
+          />
+        </CardBody>
+      </Card>
     </div>
   );
 }

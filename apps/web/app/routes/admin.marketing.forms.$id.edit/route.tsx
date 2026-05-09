@@ -1,6 +1,7 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   ensureBranchScopeOrRedirect,
@@ -103,74 +104,80 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     throw new Response('Forbidden', { status: 403 });
   }
 
-  const productsListInput = {
-    page: 1,
-    limit: 100,
-    sortBy: 'name' as const,
-    sortOrder: 'asc' as const,
-  };
-  const productsInputStr = encodeURIComponent(JSON.stringify(productsListInput));
-  const productsPromise = apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie });
+  const soleProductId =
+    Array.isArray(campaign.productIds) && campaign.productIds.length > 0 ? String(campaign.productIds[0]) : '';
 
-  let formProducts: Product[] = [];
-  try {
-    const productsRes = await productsPromise;
+  // App Shell pattern — defer the picklists fetches so the form chrome (current
+  // values from `campaign`) renders instantly. Only the dropdowns that need
+  // these (Offer, Tiers preview) wait briefly.
+  type PicklistsPayload = {
+    formProducts: Product[];
+    offerTemplates: MinimalOfferTemplateForPreview[];
+    offerGroups: OfferGroupRow[];
+    offerGroupsLoadError: string | null;
+  };
+  const picklistsPromise: Promise<PicklistsPayload> = (async () => {
+    const productsListInput = {
+      page: 1,
+      limit: 100,
+      sortBy: 'name' as const,
+      sortOrder: 'asc' as const,
+    };
+    const productsInputStr = encodeURIComponent(JSON.stringify(productsListInput));
+
+    const [productsRes, offerGroupsRes, offerTemplatesRes] = await Promise.all([
+      apiRequest<unknown>(`/trpc/products.list?input=${productsInputStr}`, { method: 'GET', cookie }).catch(() => ({ ok: false, status: 0, data: null })),
+      apiRequest<unknown>(
+        `/trpc/marketing.listOfferGroups?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 250 }))}`,
+        { method: 'GET', cookie },
+      ).catch(() => ({ ok: false, status: 0, data: null })),
+      soleProductId
+        ? apiRequest<unknown>(
+            `/trpc/marketing.listOfferTemplates?input=${encodeURIComponent(
+              JSON.stringify({ productId: soleProductId, page: 1, limit: 100 }),
+            )}`,
+            { method: 'GET', cookie },
+          ).catch(() => ({ ok: false, status: 0, data: null }))
+        : Promise.resolve({ ok: false, status: 0, data: null }),
+    ]);
+
+    let formProducts: Product[] = [];
     if (productsRes.ok) {
       const productsData = (productsRes.data as { result?: { data?: { products: Product[] } } })?.result?.data;
       const all = productsData?.products ?? [];
       const ids = new Set((campaign.productIds ?? []).filter(Boolean));
       formProducts = all.filter((p) => ids.has(p.id));
     }
-  } catch (err) {
-    console.error('[admin.marketing.forms.$id.edit] products.list error', err);
-  }
 
-  const soleProductId =
-    Array.isArray(campaign.productIds) && campaign.productIds.length > 0 ? String(campaign.productIds[0]) : '';
-
-  let offerTemplates: MinimalOfferTemplateForPreview[] = [];
-  if (soleProductId) {
-    const tmplRes = await apiRequest<unknown>(
-      `/trpc/marketing.listOfferTemplates?input=${encodeURIComponent(
-        JSON.stringify({ productId: soleProductId, page: 1, limit: 100 }),
-      )}`,
-      { method: 'GET', cookie },
-    );
-    if (tmplRes.ok) {
-      const td = tmplRes.data as { result?: { data?: { templates?: unknown[] } } };
-      const raw = td?.result?.data?.templates ?? [];
-      offerTemplates = raw
-        .map((r) => mapApiOfferTemplatesRow(typeof r === 'object' && r ? (r as Record<string, unknown>) : {}))
-        .filter((x): x is MinimalOfferTemplateForPreview => x != null);
-    }
-  }
-
-  let offerGroups: OfferGroupRow[] = [];
-  let offerGroupsLoadError: string | null = null;
-  try {
-    const offerGroupsRes = await apiRequest<unknown>(
-      `/trpc/marketing.listOfferGroups?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 250 }))}`,
-      { method: 'GET', cookie },
-    );
+    let offerGroups: OfferGroupRow[] = [];
+    let offerGroupsLoadError: string | null = null;
     if (offerGroupsRes.ok) {
       offerGroups = parseOfferGroups(offerGroupsRes.data);
     } else {
       offerGroupsLoadError = extractApiErrorMessage(offerGroupsRes.data, 'Could not load offers. Try refreshing.');
     }
-  } catch (err) {
-    console.error('[admin.marketing.forms.$id.edit] listOfferGroups error', err);
-    offerGroupsLoadError = 'Could not load offers. Try refreshing.';
-  }
 
-  return {
+    let offerTemplates: MinimalOfferTemplateForPreview[] = [];
+    if (offerTemplatesRes.ok) {
+      const td = offerTemplatesRes.data as { result?: { data?: { templates?: unknown[] } } };
+      const raw = td?.result?.data?.templates ?? [];
+      offerTemplates = raw
+        .map((r) => mapApiOfferTemplatesRow(typeof r === 'object' && r ? (r as Record<string, unknown>) : {}))
+        .filter((x): x is MinimalOfferTemplateForPreview => x != null);
+    }
+
+    return { formProducts, offerTemplates, offerGroups, offerGroupsLoadError };
+  })();
+
+  return defer({
     campaign,
-    formProducts,
-    offerTemplates,
-    offerGroups,
-    offerGroupsLoadError,
     canManageOfferTemplates: userCanManageOfferTemplates(user),
-  };
+    picklistsPromise,
+  });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request, params }: ActionFunctionArgs) {
   await requirePermission(request, 'marketing.campaigns');
@@ -312,16 +319,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function MarketingFormEditRoute() {
-  const { campaign, formProducts, offerTemplates, offerGroups, offerGroupsLoadError, canManageOfferTemplates } =
-    useLoaderData<typeof loader>();
+  const { campaign, picklistsPromise, canManageOfferTemplates } = useLoaderData<typeof loader>();
   return (
     <MarketingFormEditPage
       key={`${campaign.id}-${campaign.status}`}
       campaign={campaign}
-      formProducts={formProducts}
-      offerTemplates={offerTemplates}
-      offerGroups={offerGroups}
-      offerGroupsLoadError={offerGroupsLoadError}
+      picklistsPromise={picklistsPromise}
       canManageOfferTemplates={canManageOfferTemplates}
     />
   );

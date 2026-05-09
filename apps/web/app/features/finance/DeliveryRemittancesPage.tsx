@@ -106,10 +106,15 @@ export interface DeliveryRemittancesPageProps {
 function formatDeliveredAt(iso: string | null): string {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleDateString('en-NG', {
+    // Date + time (12-hour) — finance ops want to see WHEN a delivery landed
+    // not just the day, especially when reconciling same-day batches.
+    return new Date(iso).toLocaleString('en-NG', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
     });
   } catch {
     return iso;
@@ -353,9 +358,16 @@ export function DeliveryRemittancesPage({
         header: 'Invoice',
         render: (o) =>
           o.invoice ? (
-            <span className="font-mono text-sm font-medium text-app-fg whitespace-nowrap">
+            // Clickable invoice reference — opens the same preview modal as the
+            // explicit "View Invoice" button, just discoverable inline. Brand
+            // colour signals clickability the way standard hyperlinks do.
+            <button
+              type="button"
+              onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
+              className="font-mono text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1 rounded-sm"
+            >
               {o.invoice.referenceFormatted}
-            </span>
+            </button>
           ) : (
             <span className="text-xs text-app-fg-muted">No invoice</span>
           ),
@@ -378,12 +390,6 @@ export function DeliveryRemittancesPage({
           const raw = o.invoice?.totalAmount ?? o.totalAmount;
           return raw != null && raw !== '' ? <NairaPrice amount={Number(raw)} /> : '—';
         },
-      },
-      {
-        key: 'invoiceStatus',
-        header: 'Status',
-        render: (o) =>
-          o.invoice ? <StatusBadge status={o.invoice.status} /> : <span className="text-app-fg-muted">—</span>,
       },
       {
         key: 'location',
@@ -411,10 +417,10 @@ export function DeliveryRemittancesPage({
             <TableActionButton
               variant="primary"
               disabled={!o.invoice}
-              title={o.invoice ? 'View' : 'No invoice yet'}
+              title={o.invoice ? 'View invoice' : 'No invoice yet'}
               onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
             >
-              View
+              View Invoice
             </TableActionButton>
             <TableActionButton
               variant="neutral"
@@ -480,10 +486,6 @@ export function DeliveryRemittancesPage({
     setShowCreateModal(false);
   }, []);
 
-  const goToEligibleTab = useCallback(() => {
-    setViewTab('eligible');
-  }, [setViewTab]);
-
   return (
     <div className="space-y-4">
       <PageHeader
@@ -507,17 +509,6 @@ export function DeliveryRemittancesPage({
                 <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                   Generate report
                 </Button>
-                {canCreateRemittance && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={goToEligibleTab}
-                    disabled={eligibleTotal === 0}
-                    title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
-                  >
-                    Pick orders to remit
-                  </Button>
-                )}
               </>
             }
             sheet={({ closeSheet }) => (
@@ -541,21 +532,6 @@ export function DeliveryRemittancesPage({
                 >
                   Generate report
                 </Button>
-                {canCreateRemittance && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="w-full justify-center"
-                    disabled={eligibleTotal === 0}
-                    title={eligibleTotal === 0 ? 'No delivered orders awaiting remittance' : undefined}
-                    onClick={() => {
-                      closeSheet();
-                      goToEligibleTab();
-                    }}
-                  >
-                    Pick orders to remit
-                  </Button>
-                )}
               </>
             )}
           />
@@ -655,7 +631,7 @@ export function DeliveryRemittancesPage({
                 </span>
               ) : null,
           },
-          { value: 'remittances', label: `Remittances (${pagination.total})` },
+          { value: 'remittances', label: `Confirmed remittances (${pagination.total})` },
         ]}
       />
 
@@ -842,7 +818,7 @@ export function DeliveryRemittancesPage({
                           : undefined
                   }
                 >
-                  Continue to receipts…
+                  Confirm remittance
                 </Button>
               )}
             </div>

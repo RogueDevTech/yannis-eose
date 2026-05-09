@@ -10,6 +10,7 @@ import {
   StatValuePulse,
   TableCellTextPulse,
 } from '~/components/ui/deferred-skeletons';
+import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -339,40 +340,83 @@ export function CSLeaderboardLoadingShell({
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   leaderboardPeriod: 'this_month' | 'all_time';
 }) {
-  const periodLabel = leaderboardPeriod === 'all_time' ? 'all time' : 'this month';
+  const periodLabel =
+    leaderboardPeriod === 'all_time'
+      ? 'all time'
+      : filters.startDate && filters.endDate
+        ? `${filters.startDate} – ${filters.endDate}`
+        : 'this month';
   return (
-    <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <PageHeader
-        title="CS Leaderboard"
-        description={`Closer performance ranked for ${periodLabel}.`}
-        actions={
-          <>
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-              <DateFilterBar
-                startDate={filters.startDate}
-                endDate={filters.endDate}
-                periodAllTime={filters.periodAllTime}
-              />
-            </div>
-            <PageRefreshButton />
-          </>
-        }
-      />
-      <div className="card p-0">
-        <div className="px-4 py-3 border-b border-app-border space-y-2">
-          <div className="h-5 w-56 rounded bg-app-hover animate-pulse" aria-hidden />
-          <div className="h-3 w-72 rounded bg-app-hover animate-pulse" aria-hidden />
+    <div className="space-y-6 px-3 sm:px-0" aria-busy="true" aria-live="polite">
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-bold text-app-fg">CS Leaderboard</h1>
+          <p className="text-sm text-app-fg-muted mt-1">
+            Closer performance ranked by delivery rate ({periodLabel}).
+          </p>
         </div>
-        <div className="space-y-3 px-4 py-4">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={i}
-              className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2 animate-pulse"
-            >
-              <div className="h-4 w-40 rounded bg-app-hover" aria-hidden />
-              <div className="h-3 w-full max-w-md rounded bg-app-hover" aria-hidden />
-            </div>
-          ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <DateFilterBar
+            startDate={filters.startDate}
+            endDate={filters.endDate}
+            periodAllTime={filters.periodAllTime}
+          />
+        </div>
+      </div>
+
+      <div className="card p-0">
+        <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
+          <h2 className="text-base font-semibold text-app-fg sm:text-lg">Closer performance</h2>
+          <p className="text-xs text-app-fg-muted mt-0.5">Ranked by delivery rate ({periodLabel})</p>
+        </div>
+        <div className="space-y-4 px-4 py-4">
+          {[1, 2, 3, 4, 5].map((rank) => {
+            const isTopThree = rank <= 3;
+            return (
+              <div
+                key={rank}
+                className={`rounded-lg border border-app-border bg-app-elevated p-4 ${isTopThree ? 'bg-app-hover' : ''}`}
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
+                      #{rank}
+                    </span>
+                    {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
+                    <p className="min-w-0 flex-1 sm:flex-none">
+                      <TableCellTextPulse className="w-[8rem] max-w-[12rem]" />
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 justify-end sm:order-last">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-app-hover px-3 py-1.5 text-sm font-bold text-app-fg">
+                      <TableCellTextPulse className="w-[2.5rem]" />
+                      <span>% del.</span>
+                    </span>
+                  </div>
+                  <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
+                    <span className="text-app-fg-muted">
+                      Engaged <TableCellTextPulse className="w-[1.5rem] align-middle" />
+                    </span>
+                    <span className="text-success-600 dark:text-success-400">
+                      Confirmed <TableCellTextPulse className="w-[1.5rem] align-middle" />
+                    </span>
+                    <span className="text-brand-600 dark:text-brand-400 font-medium">
+                      Delivered <TableCellTextPulse className="w-[1.5rem] align-middle" />
+                    </span>
+                    <span className="text-app-fg-muted">
+                      Calls <TableCellTextPulse className="w-[1.5rem] align-middle" />
+                    </span>
+                    <span className="text-app-fg-muted">
+                      Conf. <TableCellTextPulse className="w-[2.5rem] align-middle" />
+                    </span>
+                    <span className="text-app-fg-muted">
+                      Avg call <TableCellTextPulse className="w-[2rem] align-middle" />
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

@@ -17,6 +17,7 @@ import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
+import { SortMenu } from '~/components/ui/sort-menu';
 import { useFetcherToast } from '~/components/ui/toast';
 import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
@@ -74,6 +75,8 @@ export function InventoryPage(props: InventoryStreamData) {
     levelsShipmentFilter: serverShipmentFilter = '',
     levelsSearch: serverSearch = '',
     levelsSort: serverSort = 'default',
+    levelsSortBy: serverSortBy = 'updatedAt',
+    levelsSortDir: serverSortDir = 'desc',
     displayLocations = [] as LocationOption[],
     movements: _movements,
     totalMovements,
@@ -116,6 +119,26 @@ export function InventoryPage(props: InventoryStreamData) {
     }, { preventScrollReset: true });
   };
 
+  const updateLevelsSort = (sortBy: 'available' | 'updatedAt', sortDir: 'asc' | 'desc') => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      // Default is updatedAt desc — drop the params entirely so the URL stays clean.
+      const isDefault = sortBy === 'updatedAt' && sortDir === 'desc';
+      if (isDefault) {
+        next.delete('sortBy');
+        next.delete('sortDir');
+        next.delete('sort');
+      } else {
+        next.set('sortBy', sortBy);
+        next.set('sortDir', sortDir);
+        // Drop the legacy fused param so it doesn't compete on the next read.
+        next.delete('sort');
+      }
+      next.delete('page');
+      return next;
+    }, { preventScrollReset: true });
+  };
+
   const resetLevelsFilters = () => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -123,6 +146,8 @@ export function InventoryPage(props: InventoryStreamData) {
       next.delete('locationId');
       next.delete('shipmentId');
       next.delete('sort');
+      next.delete('sortBy');
+      next.delete('sortDir');
       next.delete('search');
       next.delete('page');
       return next;
@@ -787,6 +812,8 @@ export function InventoryPage(props: InventoryStreamData) {
           currentLocationFilter !== 'ALL' ||
           currentShipmentFilter !== 'ALL' ||
           currentSort !== 'default' ||
+          serverSortBy !== 'updatedAt' ||
+          serverSortDir !== 'desc' ||
           serverSearch) && (
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <SearchableSelect
@@ -863,24 +890,40 @@ export function InventoryPage(props: InventoryStreamData) {
                 wrapperClassName="w-full"
               />
             </form>
-            <FormSelect
-              label=""
-              id="levels-sort"
-              name="levelsSort"
-              value={currentSort}
-              onChange={(e) => updateLevelsParam('sort', e.target.value)}
-              wrapperClassName="w-full sm:w-48"
+            <SortMenu
+              value={{ sortBy: serverSortBy, sortDir: serverSortDir }}
+              onChange={(next) =>
+                updateLevelsSort(
+                  next.sortBy as 'available' | 'updatedAt',
+                  next.sortDir,
+                )
+              }
+              defaultValue={{ sortBy: 'updatedAt', sortDir: 'desc' }}
               options={[
-                { value: 'default', label: 'Default order' },
-                { value: 'lowestAvailable', label: 'Lowest available first' },
-                { value: 'highestAvailable', label: 'Highest available first' },
+                {
+                  value: 'updatedAt',
+                  label: 'Last updated',
+                  description: 'Most recently changed inventory rows.',
+                  ascLabel: 'Oldest first',
+                  descLabel: 'Newest first',
+                  defaultDir: 'desc',
+                },
+                {
+                  value: 'available',
+                  label: 'Available units',
+                  description: 'Stock count minus units reserved on open orders.',
+                  ascLabel: 'Lowest first',
+                  descLabel: 'Highest first',
+                  defaultDir: 'desc',
+                },
               ]}
-              aria-label="Sort order"
             />
             {(currentProductFilter !== 'ALL' ||
               currentLocationFilter !== 'ALL' ||
               currentShipmentFilter !== 'ALL' ||
               currentSort !== 'default' ||
+              serverSortBy !== 'updatedAt' ||
+              serverSortDir !== 'desc' ||
               serverSearch) && (
               <button
                 type="button"

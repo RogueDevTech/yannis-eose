@@ -1,7 +1,8 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from '@remix-run/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -22,11 +23,7 @@ function normalizeReturnTo(raw: string | null): string {
   return raw;
 }
 
-type LoaderData = {
-  returnTo: string;
-  products: Product[];
-  productsLoadError: string | null;
-};
+type ProductsPayload = { products: Product[]; productsLoadError: string | null };
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'products.offers');
@@ -42,23 +39,30 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortOrder: 'asc' as const,
   };
 
-  const productsRes = await apiRequest<unknown>(
+  // App Shell pattern — defer the products fetch so the form chrome renders
+  // instantly. Only the product dropdown (and the gallery picker that depends
+  // on the chosen product) waits for this promise.
+  const productsPromise: Promise<ProductsPayload> = apiRequest<unknown>(
     `/trpc/products.list?input=${encodeURIComponent(JSON.stringify(productsListInput))}`,
-    // Products list can be slow on remote Postgres hops (list + count + inventory aggregate).
-    // This page is unusable without products, so give it a longer timeout than default.
     { method: 'GET', cookie, timeoutMs: 15_000 },
-  );
+  )
+    .then((res) => {
+      if (!res.ok) {
+        return {
+          products: [],
+          productsLoadError: extractApiErrorMessage(res.data, 'Could not load products. Refresh to retry.'),
+        };
+      }
+      const products = ((res.data as { result?: { data?: { products?: Product[] } } })?.result?.data?.products ?? []);
+      return { products, productsLoadError: null };
+    })
+    .catch(() => ({ products: [], productsLoadError: 'Could not load products. Refresh to retry.' }));
 
-  const products = productsRes.ok
-    ? ((productsRes.data as { result?: { data?: { products?: Product[] } } })?.result?.data?.products ?? [])
-    : [];
-
-  const productsLoadError = productsRes.ok
-    ? null
-    : extractApiErrorMessage(productsRes.data, 'Could not load products. Refresh to retry.');
-
-  return json({ returnTo, products, productsLoadError } satisfies LoaderData);
+  return defer({ returnTo, productsPromise });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   await requirePermission(request, 'products.offers');
@@ -128,14 +132,49 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function CreateOfferRoute() {
-  const { returnTo, products, productsLoadError } = useLoaderData<typeof loader>();
+  const { returnTo, productsPromise } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
   const navigation = useNavigation();
   const busy = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'createOffer';
 
+  // Bridge the deferred products payload into local state so the rest of the
+  // form (which is rendered eagerly) can derive selectedProduct + gallery +
+  // basePrice without being wrapped in <Suspense>. While `products` is null,
+  // the product picker shows a "Loading…" state but every other input is
+  // immediately interactive.
+  const [products, setProducts] = useState<Product[] | null>(
+    Array.isArray(productsPromise)
+      ? (productsPromise as unknown as ProductsPayload).products ?? []
+      : null,
+  );
+  const [productsLoadError, setProductsLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    if (Array.isArray(productsPromise)) {
+      const payload = productsPromise as unknown as ProductsPayload;
+      setProducts(payload.products);
+      setProductsLoadError(payload.productsLoadError ?? null);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(productsPromise)
+      .then((payload) => {
+        if (cancelled) return;
+        setProducts(payload.products);
+        setProductsLoadError(payload.productsLoadError ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProducts([]);
+        setProductsLoadError('Could not load products. Refresh to retry.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [productsPromise]);
+
   const productOptions = useMemo(
     () =>
-      products.map((p) => ({
+      (products ?? []).map((p) => ({
         value: p.id,
         label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
       })),
@@ -146,7 +185,7 @@ export default function CreateOfferRoute() {
   type DraftLine = { label: string; quantity: number; imageUrl?: string };
   const [lines, setLines] = useState<DraftLine[]>([{ label: '', quantity: 1 }]);
 
-  const selectedProduct = useMemo(() => products.find((p) => p.id === productId) ?? null, [products, productId]);
+  const selectedProduct = useMemo(() => (products ?? []).find((p) => p.id === productId) ?? null, [products, productId]);
   const gallery = useMemo(
     () => (selectedProduct?.galleryImageUrls ?? []).filter((u) => typeof u === 'string' && u.length > 0),
     [selectedProduct?.galleryImageUrls],
@@ -213,8 +252,9 @@ export default function CreateOfferRoute() {
               setLines((prev) => prev.map((l) => ({ ...l, imageUrl: undefined })));
             }}
             options={productOptions}
-            placeholder="Select product…"
+            placeholder={products === null ? 'Loading products…' : 'Select product…'}
             searchPlaceholder="Search products…"
+            disabled={products === null}
           />
         </div>
 

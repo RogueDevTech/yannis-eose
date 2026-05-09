@@ -443,6 +443,8 @@ export class LogisticsService {
     search?: string;
     /** Default `all` — partner sites + our warehouses. `our` — internal WAREHOUSE-kind sites only. */
     listScope?: 'all' | 'our';
+    sortBy?: 'createdAt' | 'name' | 'available';
+    sortOrder?: 'asc' | 'desc';
     page: number;
     limit: number;
   }) {
@@ -460,9 +462,29 @@ export class LogisticsService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
+    // Internal warehouses always surface above partner sites, regardless of secondary sort.
     const kindOrder = asc(
       sql`(CASE WHEN ${schema.logisticsProviders.kind} = 'WAREHOUSE' THEN 0 ELSE 1 END)`,
     );
+
+    // Secondary order — explicit sort. `available` uses a correlated subquery against
+    // inventory_levels; warehouses count is small enough that the subquery cost is fine.
+    const dirAsc = (input.sortOrder ?? 'desc') === 'asc';
+    const dirFn = dirAsc ? asc : desc;
+    let secondaryOrder: SQL;
+    if (input.sortBy === 'name') {
+      secondaryOrder = dirFn(schema.logisticsLocations.name);
+    } else if (input.sortBy === 'available') {
+      const availableSql = sql`(
+        SELECT COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)
+        FROM inventory_levels
+        WHERE ${schema.inventoryLevels.locationId} = ${schema.logisticsLocations.id}
+      )`;
+      secondaryOrder = dirFn(availableSql);
+    } else {
+      // createdAt fallback — preserves prior default behaviour.
+      secondaryOrder = dirFn(schema.logisticsLocations.createdAt);
+    }
 
     const [rows, totalRows] = await Promise.all([
       this.db
@@ -483,7 +505,7 @@ export class LogisticsService {
           eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
         )
         .where(whereClause)
-        .orderBy(kindOrder, desc(schema.logisticsLocations.createdAt))
+        .orderBy(kindOrder, secondaryOrder)
         .limit(input.limit)
         .offset(offset),
       this.db

@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+
 import { Await, useLoaderData } from '@remix-run/react';
 import type { ShouldRevalidateFunctionArgs } from '@remix-run/react';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
@@ -15,6 +15,8 @@ import { LogisticsProviderDetailLoadingShell } from '~/features/logistics/Logist
 import type { LogisticsProviderDetailRecord, LogisticsProviderRow } from '~/features/logistics/team-types';
 import type { Location } from '~/features/logistics/types';
 import type { HistoryEntry } from '~/features/orders/types';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -185,13 +187,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return defer({ logisticsProviderShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export const meta: MetaFunction = () => [{ title: 'Logistics company — Yannis EOSE' }];
 
 export default function LogisticsProviderDetailRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
+  const { logisticsProviderShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<LogisticsProviderDetailLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<LogisticsProviderDetailLoadingShell />}
+      loaderShell={{ logisticsProviderShell }}
+      deferredKey="pageData"
+    >
         {(data) => (
           <LogisticsProviderDetailPage
             provider={data.provider}
@@ -205,7 +214,6 @@ export default function LogisticsProviderDetailRoute() {
             actorNamesById={data.actorNamesById}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

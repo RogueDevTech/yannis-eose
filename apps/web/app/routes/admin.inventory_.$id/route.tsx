@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, Link, useLoaderData, useSearchParams } from '@remix-run/react';
@@ -19,6 +19,8 @@ import { Button } from '~/components/ui/button';
 import type { StockMovement } from '~/features/inventory/types';
 import { MOVEMENT_COLORS, formatMovementReasonForDisplay, formatMovementType } from '~/features/inventory/types';
 import { InventoryLevelDetailLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [
   { title: 'Inventory — Level Detail — Yannis EOSE' },
@@ -136,6 +138,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 type DirectionFilter = 'all' | 'in' | 'out';
 
@@ -524,11 +529,14 @@ function InventoryLevelDetailRouteInner({
 export default function InventoryLevelDetailRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<InventoryLevelDetailLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<InventoryLevelDetailLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {(data) => <InventoryLevelDetailRouteInner {...data} />}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }
 

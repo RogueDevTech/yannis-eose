@@ -38,6 +38,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
   const search = (url.searchParams.get('search') ?? '').trim();
+  const rawSortBy = url.searchParams.get('sortBy') ?? '';
+  const rawSortDir = url.searchParams.get('sortDir') ?? '';
+  const sortBy: 'createdAt' | 'name' | 'available' =
+    rawSortBy === 'name' || rawSortBy === 'available' ? rawSortBy : 'createdAt';
+  const sortDir: 'asc' | 'desc' = rawSortDir === 'asc' ? 'asc' : 'desc';
 
   const pageData = (async () => {
     const user = await getCurrentUser(request);
@@ -49,7 +54,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       limit: number;
       listScope: 'our';
       search?: string;
-    } = { status: 'ACTIVE', page, limit: WAREHOUSES_PAGE_LIMIT, listScope: 'our' };
+      sortBy: 'createdAt' | 'name' | 'available';
+      sortOrder: 'asc' | 'desc';
+    } = {
+      status: 'ACTIVE',
+      page,
+      limit: WAREHOUSES_PAGE_LIMIT,
+      listScope: 'our',
+      sortBy,
+      sortOrder: sortDir,
+    };
     if (search.length > 0) listInput.search = search;
 
     const input = JSON.stringify(listInput);
@@ -117,6 +131,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       limit: WAREHOUSES_PAGE_LIMIT,
       totalPages,
       search,
+      sortBy,
+      sortDir,
       canManage,
       overview: overview ?? {
         activeWarehousesCount: 0,

@@ -1,6 +1,7 @@
 import { useLoaderData, Await } from '@remix-run/react';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Suspense } from 'react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
 import type { UserCreateLoaderData } from '~/features/users/types';
 import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
@@ -15,6 +16,9 @@ export async function loader(args: LoaderFunctionArgs) {
 export async function action(args: ActionFunctionArgs) {
   return userCreateAction(args);
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export default function FinanceStaffAccountsNewRoute() {
   const { pageData } = useLoaderData<typeof loader>();

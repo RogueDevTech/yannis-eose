@@ -1,6 +1,7 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useActionData, useLoaderData } from '@remix-run/react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { ProductCreatePage } from '~/features/products/ProductCreatePage';
@@ -15,10 +16,6 @@ interface CategoryOption {
   brandName: string;
 }
 
-interface LoaderData {
-  categories: CategoryOption[];
-}
-
 function parseCurrencyToNumber(raw: string): number | null {
   const n = Number(String(raw).replace(/,/g, '').trim());
   if (!Number.isFinite(n) || n < 0) return null;
@@ -29,16 +26,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'products.create');
   const cookie = getSessionCookie(request);
 
-  const categoriesRes = await apiRequest<unknown>('/trpc/productCategories.listActive', { method: 'GET', cookie });
+  // App Shell pattern — defer the category fetch so the form chrome renders
+  // instantly. Only the category dropdown briefly shows a "Loading…" state.
+  const categoriesPromise = apiRequest<unknown>('/trpc/productCategories.listActive', {
+    method: 'GET',
+    cookie,
+  })
+    .then((res) => {
+      if (!res.ok) return [] as CategoryOption[];
+      const trpcData = res.data as { result?: { data?: CategoryOption[] } };
+      return trpcData?.result?.data ?? [];
+    })
+    .catch(() => [] as CategoryOption[]);
 
-  let categories: CategoryOption[] = [];
-  if (categoriesRes.ok) {
-    const trpcData = categoriesRes.data as { result?: { data?: CategoryOption[] } };
-    categories = trpcData?.result?.data ?? [];
-  }
-
-  return { categories } satisfies LoaderData;
+  return defer({ categoriesPromise });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const formData = await request.formData();
@@ -94,7 +99,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function NewProductRoute() {
-  const { categories } = useLoaderData<LoaderData>();
+  const { categoriesPromise } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  return <ProductCreatePage actionData={actionData} categories={categories} />;
+  return (
+    <ProductCreatePage
+      actionData={actionData}
+      categoriesPromise={categoriesPromise}
+    />
+  );
 }

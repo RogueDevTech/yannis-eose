@@ -1,6 +1,6 @@
 import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
+
 import { Await, Form, Link, useLoaderData, useSearchParams } from '@remix-run/react';
 import {
   apiRequest,
@@ -20,6 +20,8 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Pagination } from '~/components/ui/pagination';
 import { WarehouseShipmentsLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [{ title: 'Warehouse shipments — Yannis EOSE' }];
 
@@ -127,6 +129,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 type WarehouseShipmentsPageProps = {
   warehouseId: string;
@@ -278,11 +283,14 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
 export default function WarehouseShipmentsRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<WarehouseShipmentsLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<WarehouseShipmentsLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {(data) => <WarehouseShipmentsPage {...data} />}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }
 

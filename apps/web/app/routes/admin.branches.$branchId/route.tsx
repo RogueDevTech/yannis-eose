@@ -1,6 +1,6 @@
 import { defer, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
+
 import { Link, useLoaderData, useFetcher, useRevalidator, Await } from '@remix-run/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
@@ -26,6 +26,8 @@ import { CompactTable, type CompactTableColumn, CompactTableActionButton } from 
 import { BranchDetailLoadingShell } from '~/features/branches/BranchesDeferredLoadingShells';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Collapsible } from '~/components/ui/collapsible';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
@@ -270,6 +272,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 // ── Action ───────────────────────────────────────────────────────────────────
 
@@ -2074,8 +2079,12 @@ function BranchOverviewPage({
 export default function BranchDetailRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<BranchDetailLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<BranchDetailLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {(data) => (
           <BranchOverviewPage
             overview={data.overview}
@@ -2084,7 +2093,6 @@ export default function BranchDetailRoute() {
             teamSettingsByTeamId={data.teamSettingsByTeamId}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

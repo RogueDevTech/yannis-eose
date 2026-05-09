@@ -1628,6 +1628,20 @@ export class InventoryService {
         )!,
       );
     }
+    if (input.shipmentId) {
+      // Trace: every INTAKE movement for this shipment carries `referenceId = shipment_line.id`.
+      // Filter by EXISTS against shipment_lines so the index lookup stays in the planner without
+      // pulling the full lines into memory. See validators/inventory.ts → `listMovementsSchema.shipmentId`
+      // for the rationale + scope (intake events only; downstream allocation/delivery references
+      // the order, not the line).
+      conditions.push(
+        sql<boolean>`EXISTS (
+          SELECT 1 FROM shipment_lines sl
+          WHERE sl.id = ${schema.stockMovements.referenceId}
+            AND sl.shipment_id = ${input.shipmentId}
+        )`,
+      );
+    }
 
     const branchFilter = this.movementsReadBranchFilter(actor, currentBranchId);
     if (branchFilter) {

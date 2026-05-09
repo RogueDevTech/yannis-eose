@@ -11,6 +11,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
+import { Breadcrumb } from '~/components/ui/breadcrumb';
 
 const FINANCE_OVERVIEW_STRIP = [
   { label: 'Revenue', value: <StatValuePulse className="min-w-[3.5rem]" /> },
@@ -300,30 +301,159 @@ export function DeliveryRemittancesLoadingShell({
   );
 }
 
-/** Cash remittance detail — breadcrumb row + detail card pulse. */
+/**
+ * Cash remittance detail — mirrors `DeliveryRemittanceDetailPage` 1:1 so static
+ * chrome (breadcrumb, page title, section headings, table column headers, the
+ * "Remittance total" label + helper) is visible immediately. Only the
+ * data-dependent slots pulse — status badge, sent timestamp, batch ID,
+ * location, recorded-by, marked-received, the total amount, and table rows.
+ */
+const REMITTANCE_ORDER_SHELL_ROWS = 4;
+
+function remittanceOrderShellColumns(): CompactTableColumn<{ id: string }>[] {
+  return [
+    { key: 'customer', header: 'Customer', render: () => <TableCellTextPulse className="w-[10rem]" /> },
+    { key: 'orderId', header: 'Order ID', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[5rem]" />
+        </span>
+      ),
+    },
+    { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5.5rem]" /> },
+    {
+      key: 'delivered',
+      header: 'Delivered',
+      nowrap: true,
+      render: () => <TableCellTextPulse className="w-[9rem]" />,
+    },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      tight: true,
+      render: () => <CompactTableActionButton disabled>View</CompactTableActionButton>,
+    },
+  ];
+}
+
 export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remittanceId: string }) {
+  const orderRows = shellPulsePlaceholderRows('remittance-order', REMITTANCE_ORDER_SHELL_ROWS);
+  const orderColumns = remittanceOrderShellColumns();
+
   return (
-    <div className="space-y-4" aria-busy="true" aria-live="polite">
-      <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-        <div className="h-4 w-32 rounded bg-app-hover animate-pulse" aria-hidden />
-        <span>/</span>
-        <div
-          className="h-4 w-48 rounded bg-app-hover animate-pulse"
-          aria-hidden
-          title={remittanceId}
-        />
-      </div>
-      <div className="card p-6 space-y-4 animate-pulse">
-        <div className="h-8 w-64 rounded bg-app-hover" aria-hidden />
-        <div className="grid gap-4 md:grid-cols-2">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="space-y-2">
-              <div className="h-3 w-24 rounded bg-app-hover" aria-hidden />
-              <div className="h-5 w-full rounded bg-app-hover" aria-hidden />
-            </div>
-          ))}
+    <div className="space-y-5 w-full min-w-0" aria-busy="true" aria-live="polite">
+      {/* Breadcrumb — first 2 crumbs static, current page is a pulse since the
+          batch reference is dynamic. */}
+      <Breadcrumb
+        className="mb-1"
+        items={[
+          { label: 'Finance', to: '/admin/finance/overview' },
+          { label: 'Cash remittances', to: '/admin/finance/delivery-remittances' },
+          {
+            label: (
+              <span
+                className="inline-block h-4 w-32 align-middle rounded bg-app-border/75 dark:bg-app-border/55 animate-pulse"
+                title={remittanceId}
+              />
+            ) as unknown as string,
+          },
+        ]}
+      />
+
+      <PageHeader
+        title="Cash remittance"
+        description={
+          (
+            <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-sm text-app-fg-muted">
+              <span className="inline-block h-4 w-36 rounded bg-app-border/65 dark:bg-app-border/55 animate-pulse" />
+              <span className="text-app-fg-muted">·</span>
+              <span className="inline-block h-4 w-20 rounded bg-app-border/65 dark:bg-app-border/55 animate-pulse" />
+              <span className="text-app-fg-muted">·</span>
+              <span className="inline-block h-4 w-16 rounded bg-app-border/65 dark:bg-app-border/55 animate-pulse" />
+            </span>
+          ) as unknown as string
+        }
+        actions={
+          <>
+            <PageRefreshButton />
+            <span
+              className="inline-block h-8 w-28 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+              aria-hidden
+            />
+          </>
+        }
+      />
+
+      {/* Header card — status + metadata row (single row to mirror the real
+          page), remittance total. Labels stay readable; values pulse. */}
+      <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+          <span
+            className="inline-block h-6 w-20 rounded-full bg-app-border/65 dark:bg-app-border/55 animate-pulse"
+            aria-hidden
+          />
+          <span className="text-app-fg-muted">
+            <span>Sent </span>
+            <TableCellTextPulse className="w-[10rem]" />
+          </span>
+          <span className="h-3 w-px bg-app-border" aria-hidden />
+          <span className="text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Batch ID</span>{' '}
+            <TableCellTextPulse className="w-[8rem]" />
+          </span>
+          <span className="h-3 w-px bg-app-border" aria-hidden />
+          <span className="text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Location</span>{' '}
+            <TableCellTextPulse className="w-[10rem]" />
+          </span>
+          <span className="h-3 w-px bg-app-border" aria-hidden />
+          <span className="text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Recorded by</span>{' '}
+            <TableCellTextPulse className="w-[7rem]" />
+          </span>
         </div>
-        <div className="h-40 rounded-lg bg-app-hover" aria-hidden />
+        <div className="pt-1 border-t border-app-border">
+          <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">
+            Remittance total
+          </p>
+          <p className="mt-1">
+            <span className="inline-block h-8 w-32 rounded-md bg-brand-100 dark:bg-brand-900/30 animate-pulse" aria-hidden />
+          </p>
+          <p className="text-xs text-brand-500 dark:text-brand-400 mt-0.5">Sum of linked order(s)</p>
+        </div>
+      </div>
+
+      {/* Receipts — heading visible, list slot pulses. */}
+      <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-3">
+        <h2 className="text-base font-semibold text-app-fg">Receipts</h2>
+        <div className="h-4 w-32 rounded bg-app-border/65 dark:bg-app-border/55 animate-pulse" aria-hidden />
+      </div>
+
+      {/* Orders in this batch — section heading + count pulse + table headers
+          rendered, rows pulse. */}
+      <div className="rounded-xl border border-app-border bg-app-elevated p-0 overflow-hidden shadow-sm">
+        <div className="px-5 py-4 border-b border-app-border">
+          <h2 className="text-base font-semibold text-app-fg">Orders in this batch</h2>
+          <p className="text-sm text-app-fg-muted mt-0.5">
+            <span className="inline-block h-3.5 w-16 rounded bg-app-border/65 dark:bg-app-border/55 animate-pulse align-middle" aria-hidden />
+            <span> linked order(s)</span>
+          </p>
+        </div>
+        <CompactTable
+          caption="Orders linked to this cash remittance"
+          columns={orderColumns}
+          rows={orderRows}
+          rowKey={(o) => o.id}
+          withCard={false}
+          className="min-w-[720px]"
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
       </div>
     </div>
   );
