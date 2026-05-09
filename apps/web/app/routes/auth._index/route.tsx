@@ -132,8 +132,37 @@ async function handleLogin(request: Request, formData: FormData) {
   }
 
   if (!res.ok) {
-    const errorData = res.data as { message?: string };
-    return json({ error: errorData.message ?? 'Invalid credentials' }, { status: safeStatus(res.status) });
+    // `apiRequest` synthesizes 503/504 responses on TCP failures with shape
+    // `{ error: 'API unreachable' | 'API request timed out' }` — note `error`,
+    // not `message`. Earlier this code only read `data.message` and so fell
+    // back to the misleading literal "Invalid credentials" any time the API
+    // host couldn't be reached, hiding misconfigured `API_URL` / proxy / DNS
+    // problems behind what looked like a password failure. Surface the real
+    // cause so we don't repeat that diagnosis.
+    const errorData = res.data as { message?: string; error?: string };
+    const looksLikeNetworkFailure =
+      (res.status === 503 || res.status === 504) && !errorData.message;
+    if (looksLikeNetworkFailure) {
+      console.error(
+        `[auth] POST /auth/login could not reach the API (status=${res.status} reason=${errorData.error ?? 'unknown'}). ` +
+          `Check API_URL on the Remix server and that the API host is reachable.`,
+      );
+      return json(
+        {
+          error:
+            res.status === 504
+              ? 'The server took too long to respond. Please try again.'
+              : 'We could not reach the server. Check your connection and try again.',
+        },
+        { status: safeStatus(res.status) },
+      );
+    }
+    // Real API response — prefer the API's `message`, fall back to its `error`,
+    // and only show the generic credentials message as a last resort.
+    return json(
+      { error: errorData.message ?? errorData.error ?? 'Invalid credentials' },
+      { status: safeStatus(res.status) },
+    );
   }
 
   if (res.setCookies.length === 0) {

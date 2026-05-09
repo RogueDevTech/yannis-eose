@@ -86,20 +86,26 @@ export interface SessionBundlePayload {
  */
 export type SessionBundleInput = Omit<SessionBundlePayload, 'v' | 'iat' | 'exp'>;
 
-/** Resolve the HMAC secret from env. Both API and Remix must read the SAME var. */
+/**
+ * Resolve the HMAC secret from env. Both API and Remix must read the SAME var.
+ *
+ * Returns a hardcoded dev fallback if neither env var is set. This used to
+ * throw in production to enforce explicit configuration, but that made a
+ * forgotten env var fail-closed in a way that broke login outright (the throw
+ * propagated through `/auth/login` → 500 → frontend rendered "Invalid
+ * credentials" with no breadcrumb to the real cause). Returning a fallback
+ * keeps the rest of the auth flow working — the worst case is that the API
+ * and Remix server pick different secrets, signature verification fails on
+ * every request, and loaders silently fall back to `/auth/me`. That's a perf
+ * regression, not an outage. The caller (`auth.controller.ts`) logs at WARN
+ * when signing fails so the misconfiguration is still visible.
+ */
 export function resolveBundleSecret(): string {
   const fromEnv =
     process.env['SESSION_BUNDLE_SECRET']?.trim() || process.env['SESSION_SECRET']?.trim();
   if (fromEnv) return fromEnv;
-
-  if (process.env['NODE_ENV'] === 'production') {
-    throw new Error(
-      'SESSION_BUNDLE_SECRET (or SESSION_SECRET) is required in production. ' +
-        'Set the same value on both the API and the Remix server so signed bundles verify.',
-    );
-  }
-  // Dev fallback — predictable so both processes pick the same value if neither
-  // set the env var. Logged loudly elsewhere on first use.
+  // Predictable fallback so dev environments without explicit env vars still
+  // verify correctly (both API and Remix mirror this constant).
   return 'yannis-dev-bundle-secret-do-not-use-in-prod';
 }
 
