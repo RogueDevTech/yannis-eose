@@ -2,6 +2,8 @@ import * as React from 'react';
 import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, useLoaderData, useActionData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { CategoriesPage } from '~/features/categories/CategoriesPage';
@@ -60,6 +62,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -130,12 +135,15 @@ export default function CategoriesRoute() {
   const actionData = useActionData<{ error?: string | null; success?: boolean }>();
 
   return (
-    <React.Suspense fallback={<CategoriesLoadingShell />}>
-      <Await resolve={pageData}>
-        {({ categories, total }) => (
-          <CategoriesPage categories={categories} total={total} actionData={actionData} />
-        )}
-      </Await>
-    </React.Suspense>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<CategoriesLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
+      {({ categories, total }) => (
+        <CategoriesPage categories={categories} total={total} actionData={actionData} />
+      )}
+    </CachedAwait>
   );
 }

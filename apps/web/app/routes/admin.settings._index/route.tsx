@@ -1,7 +1,8 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
-import { DeferredSection } from '~/components/ui/deferred-section';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { APP_THEME_IDS } from '@yannis/shared';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -98,6 +99,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ user, systemSettings, myNotificationPrefs, adminPanelData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 interface VoipActive {
   enabled: boolean;
@@ -377,7 +381,19 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function SettingsIndexRoute() {
   const { user, systemSettings, myNotificationPrefs, adminPanelData } = useLoaderData<typeof loader>();
   return (
-    <DeferredSection resolve={adminPanelData} skeleton="card">
+    <CachedAwait
+      resolve={adminPanelData}
+      fallback={
+        <div className="card animate-pulse space-y-3">
+          <div className="h-4 w-32 rounded bg-app-hover" />
+          <div className="h-3 w-full rounded bg-app-hover" />
+          <div className="h-3 w-3/4 rounded bg-app-hover" />
+          <div className="h-3 w-5/6 rounded bg-app-hover" />
+        </div>
+      }
+      loaderShell={{ user, systemSettings, myNotificationPrefs }}
+      deferredKey="adminPanelData"
+    >
       {({ notificationEmailConfig, voipState }) => (
         <SettingsPage
           user={user}
@@ -387,6 +403,6 @@ export default function SettingsIndexRoute() {
           myNotificationPrefs={myNotificationPrefs}
         />
       )}
-    </DeferredSection>
+    </CachedAwait>
   );
 }

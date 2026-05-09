@@ -1,6 +1,6 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
+
 import { Await, useLoaderData } from '@remix-run/react';
 import { apiRequest, getCurrentUser, getSessionCookie, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
@@ -8,6 +8,8 @@ import { isAdminLevel } from '~/lib/rbac';
 import { AuditPage } from '~/features/audit/AuditPage';
 import { AuditLoadingShell } from '~/features/audit/AuditLoadingShell';
 import type { AuditActorFilterOption, AuditEntry, AuditStreamData } from '~/features/audit/types';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [
   { title: 'Audit Trail — Yannis EOSE' },
@@ -149,6 +151,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ auditShell, pageData, canExport });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
@@ -190,8 +195,12 @@ export default function AuditRoute() {
   const { auditShell, pageData, canExport } = useLoaderData<typeof loader>();
 
   return (
-    <Suspense fallback={<AuditLoadingShell filters={auditShell.filters} />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<AuditLoadingShell filters={auditShell.filters} />}
+      loaderShell={{ auditShell, canExport }}
+      deferredKey="pageData"
+    >
         {(data) => (
           <AuditPage
             rows={data.rows}
@@ -204,7 +213,6 @@ export default function AuditRoute() {
             canExport={canExport}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

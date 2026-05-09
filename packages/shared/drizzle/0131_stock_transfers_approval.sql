@@ -30,6 +30,20 @@ ALTER TABLE "stock_transfers"
   ADD COLUMN IF NOT EXISTS "rejected_at" timestamptz,
   ADD COLUMN IF NOT EXISTS "rejection_reason" text;
 
+-- ── stock_transfers_history: mirror the same columns FIRST ─────────
+-- This MUST happen before any UPDATE on stock_transfers — the temporal
+-- `yannis_capture_history_insert` trigger uses `INSERT … SELECT ($1).*` so
+-- the history table needs the new columns in place before any modify on the
+-- main table fires the trigger. (If we did the backfill UPDATE before this,
+-- it would error with "INSERT has more expressions than target columns".)
+ALTER TABLE "stock_transfers_history"
+  ADD COLUMN IF NOT EXISTS "initiated_by" uuid,
+  ADD COLUMN IF NOT EXISTS "approved_by" uuid,
+  ADD COLUMN IF NOT EXISTS "approved_at" timestamptz,
+  ADD COLUMN IF NOT EXISTS "rejected_by" uuid,
+  ADD COLUMN IF NOT EXISTS "rejected_at" timestamptz,
+  ADD COLUMN IF NOT EXISTS "rejection_reason" text;
+
 -- Backfill `initiated_by` for existing rows from the TRANSFER_OUT movement
 -- so older transfers still show the right initiator in the UI. Best-effort —
 -- if a row has no matching movement (shouldn't happen in practice), it stays NULL.
@@ -39,18 +53,6 @@ FROM "stock_movements" sm
 WHERE sm."reference_id" = st."id"
   AND sm."movement_type" = 'TRANSFER_OUT'
   AND st."initiated_by" IS NULL;
-
--- ── stock_transfers_history: mirror the same columns ─────────
--- (per the "alter *_history in the same migration" rule; the generic
--- yannis_capture_history_insert trigger uses `INSERT … SELECT ($1).*`
--- so column-shape parity is all that's needed.)
-ALTER TABLE "stock_transfers_history"
-  ADD COLUMN IF NOT EXISTS "initiated_by" uuid,
-  ADD COLUMN IF NOT EXISTS "approved_by" uuid,
-  ADD COLUMN IF NOT EXISTS "approved_at" timestamptz,
-  ADD COLUMN IF NOT EXISTS "rejected_by" uuid,
-  ADD COLUMN IF NOT EXISTS "rejected_at" timestamptz,
-  ADD COLUMN IF NOT EXISTS "rejection_reason" text;
 
 -- Useful for the "Pending approval" tab query (small index — pending count is bounded).
 CREATE INDEX IF NOT EXISTS "stock_transfers_pending_idx"

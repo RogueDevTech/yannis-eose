@@ -1,7 +1,9 @@
-import { Suspense } from 'react';
+
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { Await, useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   getCurrentUser,
@@ -101,6 +103,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 /**
  * User-triggered refresh of the finance materialized views that back this page.
  * Returns once the refresh completes; the client revalidates the loader after, which
@@ -139,8 +144,12 @@ export default function CEODashboardRoute() {
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   return (
-    <Suspense fallback={<CEODashboardSkeleton />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<CEODashboardSkeleton />}
+      loaderShell={{ ceoShell }}
+      deferredKey="pageData"
+    >
         {(p) => (
           <CEODashboardPage
             data={p.data as CEODashboardData}
@@ -150,7 +159,6 @@ export default function CEODashboardRoute() {
             canViewAuditLink={ceoShell.canViewAuditLink}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

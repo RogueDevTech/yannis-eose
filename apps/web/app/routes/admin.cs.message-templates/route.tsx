@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+
 import { json, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, useLoaderData, useFetcher } from '@remix-run/react';
@@ -16,6 +16,8 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -83,6 +85,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   await requirePermissionOrRoles(request, TEMPLATE_ACCESS);
@@ -728,8 +733,12 @@ function MessageTemplatesPage({
 export default function MessageTemplatesRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<CSMessageTemplatesLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<CSMessageTemplatesLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {(data) => (
           <MessageTemplatesPage
             templates={data.templates}
@@ -737,7 +746,6 @@ export default function MessageTemplatesRoute() {
             canEditAnyTemplate={data.canEditAnyTemplate}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

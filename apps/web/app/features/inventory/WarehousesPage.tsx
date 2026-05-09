@@ -6,7 +6,7 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Button } from '~/components/ui/button';
-import { Card, CardBody, CardFooter, CardHeader, StatCard } from '~/components/ui/card';
+import { Card, CardBody, CardFooter, StatCard } from '~/components/ui/card';
 import { Modal } from '~/components/ui/modal';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
@@ -23,7 +23,6 @@ import { Pagination } from '~/components/ui/pagination';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
-import { Tabs } from '~/components/ui/tabs';
 
 export interface WarehouseStockSummary {
   totalStock: number;
@@ -261,21 +260,6 @@ export function WarehousesPage({
 
   return (
     <div className="space-y-4">
-      <Tabs
-        value="inhouse"
-        onChange={() => {}}
-        tabs={[
-          {
-            value: 'inhouse',
-            label: 'Our warehouses',
-            badge: (
-              <span className="ml-1 inline-flex items-center rounded-full border border-brand-200/70 bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-700 tabular-nums dark:border-brand-700/40 dark:bg-brand-900/20 dark:text-brand-200">
-                {totalWarehouses}
-              </span>
-            ),
-          },
-        ]}
-      />
       <PageHeader
         title="Our warehouses"
         description="Company sites used for intake, adjustments, and inbound shipments."
@@ -324,10 +308,6 @@ export function WarehousesPage({
       />
 
       <Card variant="default" padding="md">
-        <CardHeader
-          title="Warehouses"
-          description={`${totalWarehouses} site${totalWarehouses === 1 ? '' : 's'} — internal facilities only (not partner logistics locations).`}
-        />
         <div className="mb-4">{toolbar}</div>
 
         <CardBody className="p-0">

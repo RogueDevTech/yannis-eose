@@ -1,7 +1,8 @@
 import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { apiRequest, getCurrentUser, getSessionCookie, safeStatus } from '~/lib/api.server';
@@ -136,19 +137,25 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function RoleTemplatesRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<RoleTemplatesLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => (
-          <RoleTemplatesPage
-            templates={data.templates}
-            permissions={data.permissions}
-            templatePermissionsById={data.templatePermissionsById}
-          />
-        )}
-      </Await>
-    </Suspense>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<RoleTemplatesLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
+      {(data) => (
+        <RoleTemplatesPage
+          templates={data.templates}
+          permissions={data.permissions}
+          templatePermissionsById={data.templatePermissionsById}
+        />
+      )}
+    </CachedAwait>
   );
 }
