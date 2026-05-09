@@ -34,36 +34,22 @@ export function ShipmentsTab({
 }: ShipmentsTabProps) {
   const display = shipments;
 
-  const shouldHideBackfillSublines = (s: ShipmentRow) =>
-    (s.label ?? '').trim().toLowerCase() === 'legacy intake backfill' &&
-    (s.supplierReference ?? '').trim().toUpperCase() === 'BACKFILL';
-
   const columns = useMemo<CompactTableColumn<ShipmentRow>[]>(
     () => [
       {
         key: 'reference',
         header: 'Reference',
         render: (s) => (
-          <div className="flex flex-col min-w-0">
-            <span className="font-mono text-sm font-medium text-app-fg truncate">
-              {s.referenceLabel}
-            </span>
-            {s.label && !shouldHideBackfillSublines(s) ? (
-              <span className="text-xs text-app-fg-muted truncate">{s.label}</span>
-            ) : null}
-          </div>
+          <span className="font-mono text-sm font-medium text-app-fg truncate block">
+            {s.referenceLabel}
+          </span>
         ),
       },
       {
         key: 'supplier',
         header: 'Supplier',
         render: (s) => (
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm text-app-fg truncate">{s.supplierName ?? '—'}</span>
-            {s.supplierReference && !shouldHideBackfillSublines(s) ? (
-              <span className="text-xs text-app-fg-muted truncate">{s.supplierReference}</span>
-            ) : null}
-          </div>
+          <span className="text-sm text-app-fg truncate block">{s.supplierName ?? '—'}</span>
         ),
       },
       {

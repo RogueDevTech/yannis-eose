@@ -112,6 +112,10 @@ export interface InventoryStreamData {
   levelsSearch?: string;
   /** `default` | `lowestAvailable` | `highestAvailable`. */
   levelsSort?: 'default' | 'lowestAvailable' | 'highestAvailable';
+  /** Resolved sort key (the new explicit URL contract used by SortMenu). */
+  levelsSortBy?: 'available' | 'updatedAt';
+  /** Resolved sort direction. */
+  levelsSortDir?: 'asc' | 'desc';
   movements: StockMovement[];
   totalMovements: number;
   products: ProductOption[];

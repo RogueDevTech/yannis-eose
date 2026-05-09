@@ -112,19 +112,76 @@ export interface EditingUser {
   permissionOverrides: Record<string, boolean>;
 }
 
+/** Type guard — distinguishes a pre-resolved payload (clientLoader cache hit
+ *  OR ad-hoc sync caller) from a Promise (first paint). */
+function isResolvedUserPicklists<T>(v: T | Promise<T>): v is T {
+  return typeof v === 'object' && v != null && !('then' in (v as object));
+}
+
+const EMPTY_USER_PICKLISTS: UserCreateLoaderData = {
+  products: [],
+  locations: [],
+  plans: [],
+  branches: [],
+  activeHeads: [],
+  roleTemplates: [],
+  permissionCatalog: [],
+  templatePermissionsById: {},
+  defaultMembershipBranchId: null,
+};
+
 export function UserCreatePage({
-  products,
-  locations,
-  plans,
-  branches,
-  activeHeads,
-  roleTemplates,
-  permissionCatalog,
-  templatePermissionsById,
-  defaultMembershipBranchId,
+  picklistsPromise,
   usersBasePath = '/hr/users',
   editingUser,
-}: UserCreateLoaderData & { usersBasePath?: string; editingUser?: EditingUser }) {
+}: {
+  /**
+   * Resolved picklists OR a Promise that resolves them. When a Promise, the
+   * form chrome (name, email, phone, role, status, password notice, save
+   * button, probation flag) renders instantly and only the picklist-driven
+   * dropdowns/sections (branch matrix, role template, logistics location,
+   * product restrictions, commission plan, permission overrides preview,
+   * conflict warning) show "Loading…" until the data lands.
+   */
+  picklistsPromise: Promise<UserCreateLoaderData> | UserCreateLoaderData;
+  usersBasePath?: string;
+  editingUser?: EditingUser;
+}) {
+  // Bridge the deferred picklists to local state so the rest of the form
+  // renders immediately with empty arrays (the dropdowns are inert + the
+  // selects show "Loading…"). Once the promise resolves the dropdowns light up.
+  const [picklists, setPicklists] = useState<UserCreateLoaderData | null>(
+    isResolvedUserPicklists(picklistsPromise) ? picklistsPromise : null,
+  );
+  useEffect(() => {
+    if (isResolvedUserPicklists(picklistsPromise)) {
+      setPicklists(picklistsPromise);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(picklistsPromise)
+      .then((p) => {
+        if (!cancelled) setPicklists(p);
+      })
+      .catch(() => {
+        if (!cancelled) setPicklists(EMPTY_USER_PICKLISTS);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [picklistsPromise]);
+  const picklistsLoading = picklists === null;
+  const {
+    products,
+    locations,
+    plans,
+    branches,
+    activeHeads,
+    roleTemplates,
+    permissionCatalog,
+    templatePermissionsById,
+    defaultMembershipBranchId,
+  } = picklists ?? EMPTY_USER_PICKLISTS;
   const isEditMode = !!editingUser;
   const actionData = useActionData<{
     error?: string;

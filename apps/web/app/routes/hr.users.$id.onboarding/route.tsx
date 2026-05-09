@@ -1,6 +1,6 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
+
 import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
@@ -14,6 +14,8 @@ import {
   type OnboardingRecord,
 } from '~/features/onboarding/StaffOnboardingPage';
 import { UserOnboardingLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [{ title: 'Staff Onboarding — Yannis EOSE' }];
 
@@ -87,6 +89,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return defer({ pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request, params }: ActionFunctionArgs) {
   await requireOnboardingHrPagesAccess(request);
   const userId = params['id'];
@@ -148,8 +153,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
 export default function HrOnboardingRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<UserOnboardingLoadingShell />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<UserOnboardingLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {(data) => (
           <StaffOnboardingPage
             mode="hr"
@@ -160,7 +169,6 @@ export default function HrOnboardingRoute() {
             approverName={data.approverName}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

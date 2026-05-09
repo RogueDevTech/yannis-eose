@@ -8,7 +8,6 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
-import { DescriptionList } from '~/components/ui/description-list';
 import { Textarea } from '~/components/ui/textarea';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -18,7 +17,6 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
-import type { DescriptionItem } from '~/components/ui/description-list';
 import type { DeliveryRemittanceDetail } from './DeliveryRemittancesPage';
 
 interface DeliveryRemittanceDetailPageProps {
@@ -44,7 +42,6 @@ export function DeliveryRemittanceDetailPage({
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const [disputeMode, setDisputeMode] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
-  const [activeReceiptIndex, setActiveReceiptIndex] = useState(0);
   const [dismissedError, setDismissedError] = useState(false);
 
   const listBackHref =
@@ -79,35 +76,6 @@ export function DeliveryRemittanceDetailPage({
         ? `${detail.locationName} — ${detail.locationProviderName}`
         : detail.locationName
       : 'Unknown location';
-
-  const summaryItems: DescriptionItem[] = [
-    {
-      label: 'Batch ID',
-      value: <span className="font-mono text-xs break-all">{detail.id}</span>,
-    },
-    {
-      label: 'Logistics location',
-      value: locationLine,
-    },
-    {
-      label: 'Recorded by',
-      value: recordedByLabel,
-    },
-  ];
-  if (detail.receivedAt) {
-    summaryItems.push({
-      label: 'Marked received',
-      value: `${new Date(detail.receivedAt).toLocaleString('en-NG')}${
-        detail.receivedByName ? ` · ${detail.receivedByName}` : ''
-      }`,
-    });
-  }
-  summaryItems.push({
-    label: 'Accountant notes',
-    value: detail.notes?.trim() || '',
-    fullWidth: true,
-    hideIfEmpty: true,
-  });
 
   const orderColumns = useMemo((): CompactTableColumn<RemittanceOrderRow>[] => {
     return [
@@ -223,13 +191,49 @@ export function DeliveryRemittanceDetailPage({
       )}
 
       <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Status + all metadata in a single flex-wrap row. Each pair is inline
+            (label + value), separators are vertical bars. Wraps on narrow
+            viewports — order matches the visual hierarchy: status first, then
+            who/when sent it, then identifying fields, then settlement timing. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
           <StatusBadge status={detail.status} label={STATUS_LABEL[detail.status] ?? detail.status} />
-          <span className="text-xs text-app-fg-muted">
+          <span className="text-app-fg-muted">
             Sent {new Date(detail.sentAt).toLocaleString('en-NG')} · by {recordedByLabel}
           </span>
+          <span className="h-3 w-px bg-app-border" aria-hidden />
+          <span className="text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Batch ID</span>{' '}
+            <span className="font-mono text-app-fg break-all">{detail.id}</span>
+          </span>
+          <span className="h-3 w-px bg-app-border" aria-hidden />
+          <span className="text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Location</span>{' '}
+            <span className="text-app-fg">{locationLine}</span>
+          </span>
+          <span className="h-3 w-px bg-app-border" aria-hidden />
+          <span className="text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Recorded by</span>{' '}
+            <span className="text-app-fg">{recordedByLabel}</span>
+          </span>
+          {detail.receivedAt ? (
+            <>
+              <span className="h-3 w-px bg-app-border" aria-hidden />
+              <span className="text-app-fg-muted">
+                <span className="font-medium text-app-fg-muted/80">Marked received</span>{' '}
+                <span className="text-app-fg">
+                  {new Date(detail.receivedAt).toLocaleString('en-NG')}
+                  {detail.receivedByName ? ` · ${detail.receivedByName}` : ''}
+                </span>
+              </span>
+            </>
+          ) : null}
         </div>
-        <DescriptionList layout="grid" divided className="text-sm" items={summaryItems} />
+        {detail.notes?.trim() ? (
+          <div className="text-sm text-app-fg-muted">
+            <span className="font-medium text-app-fg-muted/80">Accountant notes:</span>{' '}
+            <span className="text-app-fg">{detail.notes}</span>
+          </div>
+        ) : null}
         <div className="pt-1 border-t border-app-border">
           <p className="text-xs font-medium text-brand-600 dark:text-brand-400 uppercase tracking-wider">
             Remittance total
@@ -324,33 +328,37 @@ export function DeliveryRemittanceDetailPage({
 
       <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-3">
         <h2 className="text-base font-semibold text-app-fg">Receipts</h2>
-        {(detail.receiptUrls ?? []).length > 1 ? (
-          <div className="flex flex-wrap gap-1">
-            {(detail.receiptUrls ?? []).map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setActiveReceiptIndex(i)}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                  activeReceiptIndex === i
-                    ? 'bg-brand-600 text-white'
-                    : 'bg-app-hover text-app-fg-muted hover:text-app-fg'
-                }`}
-              >
-                Receipt {i + 1}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
+        {/* Receipts open on demand — embedding the image inline made the page
+            heavy on long batches with multiple attachments and pushed the
+            "Orders in this batch" table below the fold. Tap to open in a new
+            tab when needed. */}
         {(detail.receiptUrls ?? []).length > 0 ? (
-          <div className="rounded-lg border border-app-border overflow-hidden bg-app-hover flex items-center justify-center min-h-[min(50vh,28rem)]">
-            <img
-              src={(detail.receiptUrls ?? [])[activeReceiptIndex]}
-              alt={`Receipt ${activeReceiptIndex + 1}`}
-              className="w-full max-h-[min(70vh,40rem)] object-contain"
-            />
-          </div>
+          <ul className="flex flex-col gap-1.5">
+            {(detail.receiptUrls ?? []).map((url, i) => (
+              <li key={url}>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline"
+                >
+                  {(detail.receiptUrls ?? []).length > 1
+                    ? `View receipt ${i + 1}`
+                    : 'View receipt'}
+                  <svg
+                    className="w-3.5 h-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    aria-hidden
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                  </svg>
+                </a>
+              </li>
+            ))}
+          </ul>
         ) : (
           <p className="text-sm text-app-fg-muted italic">No receipts attached</p>
         )}

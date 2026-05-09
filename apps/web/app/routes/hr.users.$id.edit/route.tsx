@@ -2,6 +2,7 @@ import { useLoaderData, Await } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Suspense } from 'react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   ensureBranchScopeOrRedirect,
@@ -211,6 +212,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+// `clientLoader` cache — same surgery as `hr.users.new`. The form has 8
+// picklist dependencies (commission plan editor, branch matrix, role-template
+// baseline, permission overrides preview), so the App Shell refactor is its
+// own project. The cache makes every revisit (within 5 min) instant — no
+// fetch, no skeleton, all current values are pre-populated.
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 // ─── Action ─────────────────────────────────────────────
 

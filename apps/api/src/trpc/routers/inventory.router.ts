@@ -397,6 +397,10 @@ export const inventoryRouter = router({
         limit: 50,
         sortBy: 'createdAt' as const,
         sortOrder: 'desc' as const,
+        // Trace a single shipment's intake into the movement log when the user navigates
+        // here from a Shipment detail page (button "View shipment stock"). Same scope rules
+        // apply (referenceId IN shipment_lines for this shipment) — see InventoryService.listMovements.
+        ...(input.shipmentId && { shipmentId: input.shipmentId }),
       };
 
       const [

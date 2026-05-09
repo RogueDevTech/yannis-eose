@@ -10,6 +10,7 @@ import {
 } from '~/components/ui/compact-table';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { FormSelect } from '~/components/ui/form-select';
+import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -1079,24 +1080,25 @@ export function MarketingLeaderboardLoadingShell({
         <div className="border-b border-app-border px-4 py-3 sm:px-4 sm:py-3">
           <h2 className="text-base font-semibold text-app-fg sm:text-lg">Media Buyer Performance</h2>
           <p className="mt-0.5 text-xs text-app-fg-muted">
-            <span className="inline-block h-3 w-64 max-w-full rounded-md bg-app-border/70 dark:bg-app-border/55 animate-pulse" aria-hidden />
+            Ranked by True ROAS ({periodLabel})
           </p>
         </div>
         <div className="space-y-4 px-4 py-4">
-          {[1, 2, 3, 4, 5].map((i) => {
-            const isTopThree = i <= 3;
+          {[1, 2, 3, 4, 5].map((rank) => {
+            const isTopThree = rank <= 3;
             return (
               <div
-                key={i}
+                key={rank}
                 className={`rounded-lg border border-app-border p-4 ${
                   isTopThree ? 'bg-app-hover' : 'bg-app-elevated'
                 }`}
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                   <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-border/80 font-mono text-sm font-medium text-app-fg-muted dark:bg-app-border/65">
-                      #{i}
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
+                      #{rank}
                     </span>
+                    {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
                     <div className="min-w-0 flex-1 sm:flex-none">
                       <TableCellTextPulse className="w-[10rem] max-w-[min(16rem,100%)]" />
                       <div className="mt-1">
@@ -1105,12 +1107,36 @@ export function MarketingLeaderboardLoadingShell({
                     </div>
                   </div>
                   <div className="flex shrink-0 justify-end sm:order-last">
-                    <span className="inline-block h-8 w-[5.5rem] rounded-full bg-app-border/80 dark:bg-app-border/65 animate-pulse" aria-hidden />
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-app-hover px-3 py-1.5 text-sm font-bold text-app-fg">
+                      <TableCellTextPulse className="w-[2.25rem]" />
+                      <span>x ROAS</span>
+                    </span>
                   </div>
                   <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
-                    {[1, 2, 3, 4, 5, 6].map((j) => (
-                      <TableCellTextPulse key={j} className="w-[7rem] max-w-full" />
-                    ))}
+                    <span className="text-app-fg-muted font-medium">
+                      {'₦'}<TableCellTextPulse className="w-[3rem] align-middle" /> spend
+                    </span>
+                    <span className="text-app-fg-muted">
+                      Orders <TableCellTextPulse className="w-[1.5rem] align-middle" />
+                    </span>
+                    <span className="text-success-600 dark:text-success-400">
+                      Delivered <TableCellTextPulse className="w-[1.5rem] align-middle" />
+                    </span>
+                    <span className="text-success-600 dark:text-success-400">
+                      Confirmed <TableCellTextPulse className="w-[1.5rem] align-middle" />
+                    </span>
+                    <span className="text-app-fg-muted font-medium">
+                      {'₦'}<TableCellTextPulse className="w-[3rem] align-middle" /> revenue
+                    </span>
+                    <span className="text-app-fg-muted">
+                      CPA {'₦'}<TableCellTextPulse className="w-[2.5rem] align-middle" />
+                    </span>
+                    <span className="text-app-fg-muted">
+                      Del. rate <TableCellTextPulse className="w-[2.5rem] align-middle" />
+                    </span>
+                    <span className="text-app-fg-muted">
+                      Conf. rate <TableCellTextPulse className="w-[2.5rem] align-middle" />
+                    </span>
                   </div>
                 </div>
               </div>

@@ -6,7 +6,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { Modal } from '~/components/ui/modal';
-import { useFetcher } from '@remix-run/react';
+import { Link, useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
@@ -412,8 +412,18 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         title="Logistics"
         description="Manage 3PL logistics companies, locations, and delivery operations"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <PageRefreshButton />
+            <Link
+              to="/admin/inventory"
+              prefetch="intent"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-app-border bg-app-surface text-sm font-medium text-app-fg hover:bg-app-hover"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l3-4h12l3 4M3 7h18M9 11h6" />
+              </svg>
+              View stocks
+            </Link>
             <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
               + Logistics company
             </Button>

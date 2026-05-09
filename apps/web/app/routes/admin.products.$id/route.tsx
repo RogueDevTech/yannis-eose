@@ -2,6 +2,8 @@ import * as React from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, useActionData, useLoaderData, useSearchParams } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission, redirectIfUnauthorized, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { ProductEditPage } from '~/features/products/ProductEditPage';
@@ -127,6 +129,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return defer({ pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request, params }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   const productId = params['id'];
@@ -221,10 +226,13 @@ function ProductDetailBody({
 export default function ProductDetailRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <React.Suspense fallback={<ProductDetailLoadingShell />}>
-      <Await resolve={pageData}>
-        {(data) => <ProductDetailBody {...data} />}
-      </Await>
-    </React.Suspense>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<ProductDetailLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
+      {(data) => <ProductDetailBody {...data} />}
+    </CachedAwait>
   );
 }

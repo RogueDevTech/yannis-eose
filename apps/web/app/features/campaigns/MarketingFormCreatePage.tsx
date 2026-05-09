@@ -1,5 +1,11 @@
 import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
 import { useEffect, useMemo, useState } from 'react';
+
+/** Type guard — distinguishes a pre-resolved payload (clientLoader cache hit)
+ *  from a Promise (first-paint). */
+function isResolved<T>(v: T | Promise<T>): v is T {
+  return typeof v === 'object' && v != null && !('then' in (v as object));
+}
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
@@ -14,8 +20,14 @@ import { cloneDefaultAdditionalFieldSelectOptions } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormCreatePageProps {
-  offerGroups: OfferGroupRow[];
-  offerGroupsLoadError?: string | null;
+  /**
+   * Resolved offer groups + load error OR a Promise that resolves them. When a
+   * Promise, the offer-group dropdown shows a "Loading…" state while every
+   * other input is fully interactive (App Shell pattern).
+   */
+  offerGroupsPromise:
+    | Promise<{ offerGroups: OfferGroupRow[]; offerGroupsLoadError: string | null }>
+    | { offerGroups: OfferGroupRow[]; offerGroupsLoadError: string | null };
 }
 
 /**
@@ -23,9 +35,40 @@ export interface MarketingFormCreatePageProps {
  * `marketing.createCampaign` with `formConfig.customFields`. Offer group is required; product ids are derived server-side.
  */
 export function MarketingFormCreatePage({
-  offerGroups,
-  offerGroupsLoadError = null,
+  offerGroupsPromise,
 }: MarketingFormCreatePageProps) {
+  // Bridge the deferred offer-groups payload to local state so the rest of the
+  // form (heading/subtitle/preview/custom field builder) renders immediately.
+  // While `offerGroups` is null, the offer-group select is the only briefly
+  // disabled control on the page.
+  const [offerGroups, setOfferGroups] = useState<OfferGroupRow[] | null>(
+    isResolved(offerGroupsPromise) ? offerGroupsPromise.offerGroups : null,
+  );
+  const [offerGroupsLoadError, setOfferGroupsLoadError] = useState<string | null>(
+    isResolved(offerGroupsPromise) ? offerGroupsPromise.offerGroupsLoadError : null,
+  );
+  useEffect(() => {
+    if (isResolved(offerGroupsPromise)) {
+      setOfferGroups(offerGroupsPromise.offerGroups);
+      setOfferGroupsLoadError(offerGroupsPromise.offerGroupsLoadError);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(offerGroupsPromise)
+      .then((payload) => {
+        if (cancelled) return;
+        setOfferGroups(payload.offerGroups);
+        setOfferGroupsLoadError(payload.offerGroupsLoadError);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOfferGroups([]);
+        setOfferGroupsLoadError('Could not load offers. Try refreshing the page.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [offerGroupsPromise]);
   const navigation = useNavigation();
   const actionData = useActionData<{ error?: string } | undefined>();
 
@@ -62,10 +105,11 @@ export function MarketingFormCreatePage({
   }, [navigation.state, navigation.formData]);
 
   const compatibleOfferGroups = useMemo(() => {
-    return offerGroups
+    return (offerGroups ?? [])
       .filter((g) => String(g.status).toUpperCase() === 'ACTIVE')
       .filter((g) => g.items.length > 0);
   }, [offerGroups]);
+  const offerGroupsLoading = offerGroups === null;
 
   const offerGroupOptions = useMemo(
     () =>
@@ -191,17 +235,21 @@ export function MarketingFormCreatePage({
                     onChange={setSelectedOfferGroupId}
                     required
                     options={
-                      compatibleOfferGroups.length > 0
-                        ? offerGroupOptions
-                        : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
+                      offerGroupsLoading
+                        ? []
+                        : compatibleOfferGroups.length > 0
+                          ? offerGroupOptions
+                          : [{ value: '', label: 'No offers yet — create one on the Offers tab' }]
                     }
-                    disabled={compatibleOfferGroups.length === 0}
-                    placeholder="Select offer…"
+                    disabled={offerGroupsLoading || compatibleOfferGroups.length === 0}
+                    placeholder={offerGroupsLoading ? 'Loading offers…' : 'Select offer…'}
                     searchPlaceholder="Search offers…"
                     hint={
-                      compatibleOfferGroups.length === 0
-                        ? 'Create an offer package on the Offers tab first.'
-                        : 'Required. Catalog products and tiers come from this offer.'
+                      offerGroupsLoading
+                        ? 'Fetching available offer packages…'
+                        : compatibleOfferGroups.length === 0
+                          ? 'Create an offer package on the Offers tab first.'
+                          : 'Required. Catalog products and tiers come from this offer.'
                     }
                   />
                 </div>

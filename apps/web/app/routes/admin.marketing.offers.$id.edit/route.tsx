@@ -1,7 +1,8 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useLoaderData, useNavigation } from '@remix-run/react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -35,15 +36,7 @@ type OfferGroupPayload = {
   items: OfferItem[];
 };
 
-type LoaderData = {
-  offerId: string;
-  returnTo: string;
-  group: OfferGroupPayload['group'];
-  items: OfferItem[];
-  productId: string;
-  products: Product[];
-  productsLoadError: string | null;
-};
+type ProductsPayload = { products: Product[]; productsLoadError: string | null };
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermission(request, 'products.offers');
@@ -53,24 +46,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const offerId = params.id ?? '';
   if (!offerId) throw new Response('Offer id required', { status: 400 });
 
-  const [offerRes, productsRes] = await Promise.all([
-    apiRequest<unknown>(
-      `/trpc/marketing.getOfferGroup?input=${encodeURIComponent(JSON.stringify({ id: offerId }))}`,
-      { method: 'GET', cookie, timeoutMs: 10_000 },
-    ),
-    apiRequest<unknown>(
-      `/trpc/products.list?input=${encodeURIComponent(
-        JSON.stringify({
-          page: 1,
-          limit: 100,
-          status: 'ACTIVE',
-          sortBy: 'name',
-          sortOrder: 'asc',
-        }),
-      )}`,
-      { method: 'GET', cookie, timeoutMs: 15_000 },
-    ),
-  ]);
+  // Sync — the offer group itself is required to render the form (current
+  // values, line items). Without it there's nothing to edit.
+  const offerRes = await apiRequest<unknown>(
+    `/trpc/marketing.getOfferGroup?input=${encodeURIComponent(JSON.stringify({ id: offerId }))}`,
+    { method: 'GET', cookie, timeoutMs: 10_000 },
+  );
 
   if (!offerRes.ok) {
     throw new Response(extractApiErrorMessage(offerRes.data, 'Offer not found'), {
@@ -81,25 +62,50 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const data = (offerRes.data as { result?: { data?: OfferGroupPayload } })?.result?.data;
   if (!data) throw new Response('Offer not found', { status: 404 });
 
-  const products = productsRes.ok
-    ? ((productsRes.data as { result?: { data?: { products?: Product[] } } })?.result?.data?.products ?? [])
-    : [];
-  const productsLoadError = productsRes.ok
-    ? null
-    : extractApiErrorMessage(productsRes.data, 'Could not load products. Refresh to retry.');
-
   const productId = data.items[0]?.productId ?? '';
 
-  return json({
+  // App Shell pattern — defer the products fetch so the form chrome (current
+  // offer name, line items with labels and quantities) renders instantly.
+  // Only the Product picker (and product-derived gallery + base price) wait.
+  const productsPromise: Promise<ProductsPayload> = apiRequest<unknown>(
+    `/trpc/products.list?input=${encodeURIComponent(
+      JSON.stringify({
+        page: 1,
+        limit: 100,
+        status: 'ACTIVE',
+        sortBy: 'name',
+        sortOrder: 'asc',
+      }),
+    )}`,
+    { method: 'GET', cookie, timeoutMs: 15_000 },
+  )
+    .then((res) => {
+      if (!res.ok) {
+        return {
+          products: [],
+          productsLoadError: extractApiErrorMessage(res.data, 'Could not load products. Refresh to retry.'),
+        };
+      }
+      return {
+        products:
+          ((res.data as { result?: { data?: { products?: Product[] } } })?.result?.data?.products ?? []),
+        productsLoadError: null,
+      };
+    })
+    .catch(() => ({ products: [], productsLoadError: 'Could not load products. Refresh to retry.' }));
+
+  return defer({
     offerId,
     returnTo,
     group: data.group,
     items: data.items,
     productId,
-    products,
-    productsLoadError,
-  } satisfies LoaderData);
+    productsPromise,
+  });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request, params }: ActionFunctionArgs) {
   await requirePermission(request, 'products.offers');
@@ -169,15 +175,52 @@ export async function action({ request, params }: ActionFunctionArgs) {
 }
 
 export default function EditOfferRoute() {
-  const { returnTo, group, items, productId: initialProductId, products, productsLoadError } =
+  const { returnTo, group, items, productId: initialProductId, productsPromise } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
   const navigation = useNavigation();
   const busy = navigation.state !== 'idle' && navigation.formData?.get('intent') === 'updateOffer';
 
+  // Bridge deferred products to local state — form chrome (offer name, line
+  // labels + quantities, total price column) is fully editable from first
+  // paint; only the Product picker briefly shows "Loading…".
+  const [products, setProducts] = useState<Product[] | null>(
+    Array.isArray((productsPromise as unknown as ProductsPayload).products)
+      ? (productsPromise as unknown as ProductsPayload).products
+      : null,
+  );
+  const [productsLoadError, setProductsLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    const isResolved =
+      typeof productsPromise === 'object' &&
+      productsPromise != null &&
+      !('then' in (productsPromise as object));
+    if (isResolved) {
+      const payload = productsPromise as unknown as ProductsPayload;
+      setProducts(payload.products);
+      setProductsLoadError(payload.productsLoadError ?? null);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(productsPromise)
+      .then((payload) => {
+        if (cancelled) return;
+        setProducts(payload.products);
+        setProductsLoadError(payload.productsLoadError ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProducts([]);
+        setProductsLoadError('Could not load products. Refresh to retry.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [productsPromise]);
+
   const productOptions = useMemo(
     () =>
-      products.map((p) => ({
+      (products ?? []).map((p) => ({
         value: p.id,
         label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
       })),
@@ -197,7 +240,10 @@ export default function EditOfferRoute() {
       : [{ label: '', quantity: 1 }],
   );
 
-  const selectedProduct = useMemo(() => products.find((p) => p.id === productId) ?? null, [products, productId]);
+  const selectedProduct = useMemo(
+    () => (products ?? []).find((p) => p.id === productId) ?? null,
+    [products, productId],
+  );
   const gallery = useMemo(
     () => (selectedProduct?.galleryImageUrls ?? []).filter((u) => typeof u === 'string' && u.length > 0),
     [selectedProduct?.galleryImageUrls],
@@ -269,8 +315,9 @@ export default function EditOfferRoute() {
               setLines((prev) => prev.map((l) => ({ ...l, imageUrl: undefined })));
             }}
             options={productOptions}
-            placeholder="Select product…"
+            placeholder={products === null ? 'Loading products…' : 'Select product…'}
             searchPlaceholder="Search products…"
+            disabled={products === null}
           />
         </div>
 

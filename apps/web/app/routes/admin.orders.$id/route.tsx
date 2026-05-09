@@ -1,4 +1,4 @@
-import { Suspense, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -24,6 +24,8 @@ import type {
   TimelineEvent,
 } from '~/features/orders/types';
 import { trpcOrderGetByIdIsNotFound } from '~/lib/trpc-http-response';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [
   { title: 'Order Detail — Yannis EOSE' },
@@ -273,6 +275,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request, params }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
@@ -318,7 +323,6 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     return json({ success: true });
   }
-
 
   if (intent === 'initiateCall') {
     const res = await apiRequest<unknown>('/trpc/orders.initiateCall', {
@@ -772,8 +776,12 @@ export default function OrderDetailRoute() {
   const orderEvents = useMemo(() => [...ORDER_DETAIL_EVENTS], []);
   usePageRefreshOnEvent(orderEvents);
   return (
-    <Suspense fallback={<OrderDetailSkeleton />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<OrderDetailSkeleton />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
         {({
           orderDetail,
           canEditOrder,
@@ -833,7 +841,6 @@ export default function OrderDetailRoute() {
             />
           )
         }
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

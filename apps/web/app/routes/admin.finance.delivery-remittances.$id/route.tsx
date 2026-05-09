@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+
 import { json, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, useLoaderData } from '@remix-run/react';
@@ -15,6 +15,8 @@ import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import type { DeliveryRemittanceDetail } from '~/features/finance/DeliveryRemittancesPage';
 import { DeliveryRemittanceDetailPage } from '~/features/finance/DeliveryRemittanceDetailPage';
 import { DeliveryRemittanceDetailLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [
   { title: 'Cash Remittance Detail — Finance — Yannis EOSE' },
@@ -77,6 +79,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return defer({ detailShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   // Phase 21 — accept either legacy `finance.approve` or the granular
   // `finance.cashRemittance.markReceived` permission. The service-layer gate
@@ -129,8 +134,12 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminFinanceDeliveryRemittanceDetailRoute() {
   const { detailShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<DeliveryRemittanceDetailLoadingShell remittanceId={detailShell.remittanceId} />}>
-      <Await resolve={pageData}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<DeliveryRemittanceDetailLoadingShell remittanceId={detailShell.remittanceId} />}
+      loaderShell={{ detailShell }}
+      deferredKey="pageData"
+    >
         {(data) => (
           <DeliveryRemittanceDetailPage
             detail={data.detail}
@@ -138,7 +147,6 @@ export default function AdminFinanceDeliveryRemittanceDetailRoute() {
             userMap={data.userMap}
           />
         )}
-      </Await>
-    </Suspense>
+      </CachedAwait>
   );
 }

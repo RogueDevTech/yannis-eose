@@ -300,6 +300,18 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
               variant={SHIPMENT_STATUS_VARIANT[status]}
             />
             <PageRefreshButton />
+            {/* View shipment stock — links to the inventory list filtered to this shipment so the
+                user can see where each unit went (current location distribution + intake events).
+                Only meaningful once the shipment is verified (units actually entered stock). */}
+            {(status === 'VERIFIED' || status === 'CLOSED') ? (
+              <Link
+                to={`/admin/inventory?shipmentId=${shipment.id}`}
+                prefetch="intent"
+                className="inline-flex items-center px-3 py-1.5 rounded-md border border-transparent bg-brand-500 text-sm font-medium text-white shadow-sm hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+              >
+                View shipment stock
+              </Link>
+            ) : null}
             {allow('MARK_IN_TRANSIT') ? (
               <Button
                 variant="secondary"

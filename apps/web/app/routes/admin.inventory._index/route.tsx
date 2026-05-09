@@ -54,6 +54,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const rawLocationFilter = url.searchParams.get('locationId') ?? '';
   const rawShipmentFilter = url.searchParams.get('shipmentId') ?? '';
   const rawSort = url.searchParams.get('sort') ?? '';
+  // New explicit URL contract: ?sortBy=available|updatedAt and ?sortDir=asc|desc.
+  // Legacy ?sort=lowestAvailable|highestAvailable still works (back-compat).
+  const rawSortBy = url.searchParams.get('sortBy') ?? '';
+  const rawSortDir = url.searchParams.get('sortDir') ?? '';
   const rawSearch = (url.searchParams.get('search') ?? '').trim();
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
@@ -73,12 +77,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (rawLocationFilter) levelsInput.locationId = rawLocationFilter;
   if (rawShipmentFilter) levelsInput.shipmentId = rawShipmentFilter;
   if (rawSearch) levelsInput.search = rawSearch;
-  if (rawSort === 'lowestAvailable') {
-    levelsInput.sortBy = 'available';
-    levelsInput.sortOrder = 'asc';
-  } else if (rawSort === 'highestAvailable') {
-    levelsInput.sortBy = 'available';
-    levelsInput.sortOrder = 'desc';
+  // Prefer the new explicit params when present; fall back to the legacy fused enum.
+  if (rawSortBy === 'available' || rawSortBy === 'updatedAt') {
+    levelsInput.sortBy = rawSortBy;
+  }
+  if (rawSortDir === 'asc' || rawSortDir === 'desc') {
+    levelsInput.sortOrder = rawSortDir;
+  }
+  if (!levelsInput.sortBy && !levelsInput.sortOrder) {
+    if (rawSort === 'lowestAvailable') {
+      levelsInput.sortBy = 'available';
+      levelsInput.sortOrder = 'asc';
+    } else if (rawSort === 'highestAvailable') {
+      levelsInput.sortBy = 'available';
+      levelsInput.sortOrder = 'desc';
+    }
   }
 
   const pageData = (async () => {
@@ -236,6 +249,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     levelsShipmentFilter: rawShipmentFilter,
     levelsSearch: rawSearch,
     levelsSort: rawSort === 'lowestAvailable' || rawSort === 'highestAvailable' ? rawSort : 'default',
+    /** Resolved sort key sent to the API after legacy / new URL params are merged. */
+    levelsSortBy: levelsInput.sortBy ?? 'updatedAt',
+    /** Resolved sort direction sent to the API after legacy / new URL params are merged. */
+    levelsSortDir: levelsInput.sortOrder ?? 'desc',
     movements: movementsData.movements.map((m) => ({
       ...m,
       referenceCustomerName: m.referenceId ? deliveryOrderCustomerNameById.get(m.referenceId) ?? null : null,

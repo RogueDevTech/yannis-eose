@@ -18,8 +18,8 @@ import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 import { SlowConnectionToast } from '~/components/ui/slow-connection-toast';
-import { RouteTransitionSkeleton } from '~/components/layout/route-transition-skeleton';
 import { getFullLoaderEntry } from '~/lib/loader-cache';
+import { getShellForPath } from '~/lib/route-shells';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
@@ -1161,16 +1161,20 @@ function DashboardLayoutInner({
             aria-live="polite"
           >
             <BranchesCatalogProvider value={branches ?? []}>
-              {/* Cross-route nav swap — replace the old `<Outlet />` with a
-                  generic skeleton the moment the user clicks a sidebar link, so
-                  the swap feels instant instead of waiting for the destination
-                  loader to return.
-                  IMPORTANT: gated on `showTransitionSkeleton` (cache miss),
-                  NOT plain `isRouteLoading`. When the destination URL has a
-                  hot `cachedClientLoader` payload, Remix mounts the new route
-                  with cached data on the same tick — adding a skeleton flash
-                  would be a regression on the instant-revisit UX. */}
-              {showTransitionSkeleton ? <RouteTransitionSkeleton /> : <Outlet />}
+              {/* Cross-route nav swap — when the user clicks a sidebar link, render the
+                  destination route's own loading shell (matched by pathname against the
+                  registry in `~/lib/route-shells.tsx`) so Skeleton #1 == Skeleton #2 and
+                  static chrome (tab labels, stat-strip labels, table headers) is visible
+                  on the same tick as the click. If the destination has no registered shell,
+                  fall through to `<Outlet />` and let the old page linger — `NavProgressBar`
+                  + the in-route Suspense fallback own the rest. Gated on cache miss so
+                  `cachedClientLoader` revisits never flash a skeleton over cached data. */}
+              {showTransitionSkeleton
+                ? (getShellForPath(
+                    navigation.location!.pathname,
+                    navigation.location!.search,
+                  ) ?? <Outlet />)
+                : <Outlet />}
             </BranchesCatalogProvider>
           </div>
         </div>

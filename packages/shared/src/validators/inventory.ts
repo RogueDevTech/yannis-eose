@@ -108,6 +108,16 @@ export const listMovementsSchema = z.object({
     'DELIVERY', 'RETURN', 'RESTOCK', 'WRITE_OFF',
     'TRANSFER_OUT', 'TRANSFER_IN', 'ADJUSTMENT',
   ]).optional(),
+  /**
+   * Trace a single shipment's intake into the movement ledger. Filters movements whose
+   * `referenceId` points at one of this shipment's `shipment_lines`. The trigger that
+   * stamps INTAKE rows on shipment verification sets `referenceId = shipment_line.id`,
+   * so this captures the entry of the shipment's units into stock. Downstream
+   * allocations/deliveries off those batches reference order_id (not the line) and
+   * therefore aren't included — current location distribution is in the Stock Levels
+   * tab via the matching `shipmentId` filter on `listInventorySchema`.
+   */
+  shipmentId: z.string().uuid().optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(20),
 });
@@ -259,6 +269,13 @@ export const listWarehousesSchema = z.object({
   search: z.string().trim().min(1).max(100).optional(),
   /** `all` — every logistics site. `our` — internal (provider kind WAREHOUSE) sites only. */
   listScope: z.enum(['all', 'our']).default('all'),
+  /**
+   * `available` sorts by computed (stockCount − reservedCount) summed across the warehouse;
+   * `name` is alphabetical; `createdAt` is recency. Default = `createdAt` desc (newest first),
+   * with internal warehouses surfaced first by provider-kind tiebreaker (unchanged from prior).
+   */
+  sortBy: z.enum(['createdAt', 'name', 'available']).default('createdAt'),
+  sortOrder: z.enum(['asc', 'desc']).default('desc'),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(100).default(50),
 });

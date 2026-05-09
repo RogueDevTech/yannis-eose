@@ -53,11 +53,53 @@ function todayYmd(): string {
 }
 
 interface AddExpenseFormProps {
-  campaigns: Campaign[];
-  products: Product[];
+  /**
+   * Resolved picklists OR a Promise that resolves them. When a Promise, the
+   * campaign + product dropdowns show "Loading…" while every other input
+   * (date, spend amount, screenshot upload, attributed order split) is fully
+   * interactive (App Shell pattern).
+   */
+  picklistsPromise:
+    | Promise<{ campaigns: Campaign[]; products: Product[] }>
+    | { campaigns: Campaign[]; products: Product[] };
 }
 
-export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
+function isResolvedPicklists<T>(v: T | Promise<T>): v is T {
+  return typeof v === 'object' && v != null && !('then' in (v as object));
+}
+
+export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
+  // Bridge picklists to local state so the entire form chrome paints
+  // immediately while only the dropdowns wait for data.
+  const [campaigns, setCampaigns] = useState<Campaign[] | null>(
+    isResolvedPicklists(picklistsPromise) ? picklistsPromise.campaigns : null,
+  );
+  const [products, setProducts] = useState<Product[] | null>(
+    isResolvedPicklists(picklistsPromise) ? picklistsPromise.products : null,
+  );
+  useEffect(() => {
+    if (isResolvedPicklists(picklistsPromise)) {
+      setCampaigns(picklistsPromise.campaigns);
+      setProducts(picklistsPromise.products);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(picklistsPromise)
+      .then((p) => {
+        if (cancelled) return;
+        setCampaigns(p.campaigns);
+        setProducts(p.products);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCampaigns([]);
+        setProducts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [picklistsPromise]);
+  const picklistsLoading = campaigns === null || products === null;
   const submit = useSubmit();
   const navigation = useNavigation();
   const actionData = useActionData<{ error?: string } | undefined>();
@@ -72,13 +114,13 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
   const [lines, setLines] = useState<ExpenseLine[]>(() => [emptyLine(newLineUid())]);
 
   const productOptions = useMemo(
-    () => products.map((p) => ({ value: p.id, label: p.name })),
+    () => (products ?? []).map((p) => ({ value: p.id, label: p.name })),
     [products],
   );
 
   const campaignProductMap = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const c of campaigns) {
+    for (const c of (campaigns ?? [])) {
       if (Array.isArray(c.productIds) && c.productIds.length > 0) {
         m.set(c.id, c.productIds.filter((id): id is string => typeof id === 'string' && id.length > 0));
       }
@@ -262,12 +304,18 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
             id="add-expense-campaign"
             value={campaignId}
             onChange={onCampaignChange}
-            options={[
-              { value: '', label: 'Select form' },
-              ...campaigns.map((c) => ({ value: c.id, label: c.name })),
-            ]}
+            options={
+              campaigns === null
+                ? []
+                : [
+                    { value: '', label: 'Select form' },
+                    ...campaigns.map((c) => ({ value: c.id, label: c.name })),
+                  ]
+            }
+            placeholder={campaigns === null ? 'Loading forms…' : undefined}
             searchPlaceholder="Search forms..."
             required
+            disabled={campaigns === null}
           />
         </FormField>
         <FormField label="Date" htmlFor="add-expense-date" required>
@@ -362,9 +410,15 @@ export function AddExpenseForm({ campaigns, products }: AddExpenseFormProps) {
                     id={`${line.uid}-product`}
                     value={line.productId}
                     onChange={(v) => updateLine(line.uid, { productId: v })}
-                    options={[{ value: '', label: 'Select product' }, ...productOptionsForLine]}
+                    options={
+                      products === null
+                        ? []
+                        : [{ value: '', label: 'Select product' }, ...productOptionsForLine]
+                    }
+                    placeholder={products === null ? 'Loading products…' : undefined}
                     searchPlaceholder="Search products..."
                     required
+                    disabled={products === null}
                   />
                 </FormField>
                 <FormField label="Amount (₦)" htmlFor={`${line.uid}-amount`} required>

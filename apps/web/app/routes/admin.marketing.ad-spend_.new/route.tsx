@@ -1,6 +1,7 @@
-import { json, redirect } from '@remix-run/node';
+import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { ensureBranchScopeOrRedirect, getSessionCookie, requirePermission } from '~/lib/api.server';
 import {
   getMarketingRoleFlags,
@@ -8,6 +9,7 @@ import {
   runMarketingAdSpendAction,
 } from '~/lib/marketing-pages.server';
 import { MarketingAddExpensePage } from '~/features/marketing/MarketingAddExpensePage';
+import type { Campaign, Product } from '~/features/marketing/types';
 
 export const meta: MetaFunction = () => [{ title: 'Log expenses — Ads Expense — Yannis EOSE' }];
 
@@ -21,11 +23,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     throw redirect(`/auth?redirectTo=${encodeURIComponent(new URL(request.url).pathname)}`);
   }
   const { isMediaBuyer } = getMarketingRoleFlags(user);
-  const { campaigns, products } = await loadAdSpendExpenseFormData(cookie, {
-    mediaBuyerId: isMediaBuyer ? user.id : undefined,
-  });
-  return json({ campaigns, products });
+
+  // App Shell pattern — defer the picklists fetch so the form chrome (date,
+  // line rows, screenshot upload, totals) renders instantly. Only the campaign
+  // and product dropdowns briefly show "Loading…".
+  const picklistsPromise: Promise<{ campaigns: Campaign[]; products: Product[] }> =
+    loadAdSpendExpenseFormData(cookie, {
+      mediaBuyerId: isMediaBuyer ? user.id : undefined,
+    }).catch(() => ({ campaigns: [], products: [] }));
+
+  return defer({ picklistsPromise });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -42,6 +53,6 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export default function AdminMarketingAdSpendNewRoute() {
-  const data = useLoaderData<typeof loader>();
-  return <MarketingAddExpensePage campaigns={data.campaigns} products={data.products} />;
+  const { picklistsPromise } = useLoaderData<typeof loader>();
+  return <MarketingAddExpensePage picklistsPromise={picklistsPromise} />;
 }
