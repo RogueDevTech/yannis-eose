@@ -1,10 +1,7 @@
-import { useLoaderData, Await } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { UserCreatePage } from '~/features/users/UserCreatePage';
-import type { UserCreateLoaderData } from '~/features/users/types';
-import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import { loader as userCreateLoader, action as userCreateAction, meta as userCreateMeta } from '../hr.users.new/route';
 
 export const meta: MetaFunction = userCreateMeta;
@@ -21,14 +18,11 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export default function FinanceStaffAccountsNewRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
+  const { picklistsPromise } = useLoaderData<typeof loader>();
   return (
-    <Suspense fallback={<UserCreateEditLoadingShell mode="create" />}>
-      <Await resolve={pageData}>
-        {(data) => (
-          <UserCreatePage {...(data as UserCreateLoaderData)} usersBasePath="/admin/finance/staff-accounts" />
-        )}
-      </Await>
-    </Suspense>
+    <UserCreatePage
+      picklistsPromise={picklistsPromise}
+      usersBasePath="/admin/finance/staff-accounts"
+    />
   );
 }

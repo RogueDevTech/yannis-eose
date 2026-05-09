@@ -8,7 +8,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { FormSelect } from '~/components/ui/form-select';
+import { SortMenu } from '~/components/ui/sort-menu';
 import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
 import {
@@ -34,14 +34,63 @@ export interface LogisticsTeamPageProps {
 const STATUS_SPLIT_HELP =
   'Assigned orders in this period, shown as a share by current order status (delivered, agent assigned, in transit, returned, etc.). Bar segments add up to 100% of assigned count.';
 
-const SORT_BY_OPTIONS = [
-  { value: 'name', label: 'Provider' },
-  { value: 'assigned', label: 'Assigned' },
-  { value: 'delivered', label: 'Delivered' },
-  { value: 'deliveryRate', label: 'Delivery rate' },
-  { value: 'delinquencyRate', label: 'Delinquency rate' },
-  { value: 'returned', label: 'Returned' },
-  { value: 'locations', label: 'Locations' },
+const SORT_MENU_OPTIONS = [
+  {
+    value: 'name',
+    label: 'Provider',
+    description: 'Logistics company name (alphabetical).',
+    ascLabel: 'A → Z',
+    descLabel: 'Z → A',
+    defaultDir: 'asc' as const,
+  },
+  {
+    value: 'assigned',
+    label: 'Assigned',
+    description: 'Total orders allocated to this provider.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'delivered',
+    label: 'Delivered',
+    description: 'Orders this provider successfully delivered.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'deliveryRate',
+    label: 'Delivery rate',
+    description: 'Delivered ÷ assigned, as a percentage.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'delinquencyRate',
+    label: 'Delinquency rate',
+    description: 'Returned + partial + write-off ÷ assigned.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'asc' as const,
+  },
+  {
+    value: 'returned',
+    label: 'Returned',
+    description: 'Orders the customer rejected or sent back.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
+    value: 'locations',
+    label: 'Locations',
+    description: 'Number of physical sites under this provider.',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
 ];
 
 /** Tailwind color class for each status segment of the stacked mix bar. */
@@ -412,64 +461,25 @@ export function LogisticsTeamPage({
             </form>
           }
           desktopInlineFilters={
-            <>
-              <FormSelect
-                aria-label="Sort providers by"
-                value={sortByFromLoader}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  const nextDir: 'asc' | 'desc' = next === 'name' ? 'asc' : 'desc';
-                  mergeListParams({ sortBy: next, sortDir: nextDir, page: 1 });
-                }}
-                options={SORT_BY_OPTIONS}
-                wrapperClassName="w-auto min-w-[12rem]"
-              />
-              <FormSelect
-                aria-label="Sort order"
-                value={sortDirFromLoader}
-                onChange={(e) =>
-                  mergeListParams({ sortDir: e.target.value as 'asc' | 'desc', page: 1 })
-                }
-                options={[
-                  { value: 'asc', label: 'Ascending' },
-                  { value: 'desc', label: 'Descending' },
-                ]}
-                wrapperClassName="w-auto min-w-[8rem]"
-              />
-            </>
+            <SortMenu
+              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+              onChange={(next) =>
+                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+              }
+              defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
+              options={SORT_MENU_OPTIONS}
+            />
           }
           sheetFilterBody={
-            <>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Sort by</span>
-                <FormSelect
-                  aria-label="Sort providers by"
-                  value={sortByFromLoader}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    const nextDir: 'asc' | 'desc' = next === 'name' ? 'asc' : 'desc';
-                    mergeListParams({ sortBy: next, sortDir: nextDir, page: 1 });
-                  }}
-                  options={SORT_BY_OPTIONS}
-                  wrapperClassName="w-full"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Order</span>
-                <FormSelect
-                  aria-label="Sort order"
-                  value={sortDirFromLoader}
-                  onChange={(e) =>
-                    mergeListParams({ sortDir: e.target.value as 'asc' | 'desc', page: 1 })
-                  }
-                  options={[
-                    { value: 'asc', label: 'Ascending' },
-                    { value: 'desc', label: 'Descending' },
-                  ]}
-                  wrapperClassName="w-full"
-                />
-              </div>
-            </>
+            <SortMenu
+              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+              onChange={(next) =>
+                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+              }
+              defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
+              options={SORT_MENU_OPTIONS}
+              className="w-full justify-center"
+            />
           }
         />
 

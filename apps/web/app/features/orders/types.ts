@@ -255,4 +255,12 @@ export interface OrderInvoice {
   status: string;
   dueDate: string | null;
   createdAt: string;
+  /**
+   * True when the order's cash has been confirmed received via a delivery
+   * remittance (`delivery_remittances.status = 'RECEIVED'`). Drives the
+   * "MARKED AS PAID" rubber-stamp on the invoice preview + PDF — see
+   * `InvoiceDocumentPreview` and `buildInvoicePdf`. Server-derived; the
+   * frontend never flips this on its own.
+   */
+  markedPaid?: boolean;
 }

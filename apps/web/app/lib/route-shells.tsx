@@ -52,6 +52,7 @@ import {
   MarketingFormsLoadingShell,
   MarketingFundingLoadingShell,
   MarketingLeaderboardLoadingShell,
+  MarketingOrdersLoadingShell,
   MarketingTeamLoadingShell,
 } from '~/features/marketing/MarketingDeferredLoadingShells';
 import { MarketingOverviewLoadingShell } from '~/features/marketing/MarketingOverviewLoadingShell';
@@ -298,6 +299,16 @@ const entries: ShellEntry[] = [
     render: (_m, sp) => (
       <MarketingCrossFunnelLoadingShell
         filters={{ ...parseDateFilters(sp), productId: sp.get('productId') ?? '' }}
+      />
+    ),
+  },
+  {
+    match: /^\/admin\/marketing\/orders$/,
+    render: (_m, sp) => (
+      <MarketingOrdersLoadingShell
+        filters={parseDateFilters(sp)}
+        isMediaBuyer={false}
+        showMediaBuyerColumn={false}
       />
     ),
   },

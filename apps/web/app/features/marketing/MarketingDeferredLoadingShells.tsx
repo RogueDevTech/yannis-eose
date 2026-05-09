@@ -1399,3 +1399,158 @@ export function MarketingFormsLoadingShell({
     </div>
   );
 }
+
+const MARKETING_ORDERS_SHELL_ROWS = 8;
+
+const MARKETING_ORDERS_SHELL_ROW_DATA = Array.from(
+  { length: MARKETING_ORDERS_SHELL_ROWS },
+  (_, i) => ({ id: `__marketing_orders_shell_${i}` }),
+);
+
+function marketingOrdersShellTableColumns(
+  showMediaBuyerColumn: boolean,
+): CompactTableColumn<{ id: string }>[] {
+  const cols: CompactTableColumn<{ id: string }>[] = [
+    { key: 'id', header: 'Order ID', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    {
+      key: 'customer',
+      header: 'Customer',
+      render: () => <TableCellTextPulse className="w-[9rem] max-w-[min(14rem,100%)]" />,
+    },
+  ];
+  if (showMediaBuyerColumn) {
+    cols.push({
+      key: 'mediaBuyer',
+      header: 'Media buyer',
+      render: () => <TableCellTextPulse className="w-[7rem]" />,
+    });
+  }
+  cols.push(
+    {
+      key: 'product',
+      header: 'Product',
+      render: () => <TableCellTextPulse className="w-[10rem] max-w-[min(16rem,100%)]" />,
+    },
+    {
+      key: 'campaign',
+      header: 'Form',
+      render: () => <TableCellTextPulse className="w-[8rem]" />,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      headerClassName: 'text-right',
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[4.5rem]" />
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      render: () => <TableCellTextPulse className="w-[5.5rem]" />,
+    },
+    {
+      key: 'created',
+      header: 'Created',
+      render: () => <TableCellTextPulse className="w-[9rem]" />,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'center',
+      headerClassName: 'text-center',
+      tight: true,
+      mobileShowLabel: false,
+      render: () => <CompactTableActionButton disabled>View</CompactTableActionButton>,
+    },
+  );
+  return cols;
+}
+
+/**
+ * Marketing orders list — PageHeader + stat strip + table pulse. Mirrors `MarketingOrdersPage`
+ * chrome so the cross-route transition shell shows real labels (Total / Unprocessed / Confirmed /
+ * Delivered / Delivery Rate / CPA + table headers Order ID / Customer / Product / Form / Amount /
+ * Status / Created) on the same tick as the click.
+ */
+export function MarketingOrdersLoadingShell({
+  filters,
+  isMediaBuyer,
+  showMediaBuyerColumn = false,
+}: {
+  filters: { startDate: string; endDate: string; periodAllTime: boolean };
+  isMediaBuyer: boolean;
+  showMediaBuyerColumn?: boolean;
+}) {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title={isMediaBuyer ? 'My Orders' : 'Marketing Orders'}
+        description={
+          isMediaBuyer
+            ? 'Track your campaign orders and conversion funnel'
+            : 'View orders across all media buyers'
+        }
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Marketing orders tools"
+            sheetSubtitle={<span>Date range, chart toggle, and export</span>}
+            triggerAriaLabel="Orders toolbar and date range"
+            desktop={
+              <>
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                  />
+                </div>
+                <Button type="button" variant="secondary" size="sm" disabled>
+                  View data in chart
+                </Button>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            }
+          />
+        }
+      />
+
+      <OverviewStatStrip
+        items={[
+          { label: 'Total', value: <StatValuePulse className="min-w-[2.25rem]" /> },
+          { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Delivery Rate', value: <StatValuePulse className="min-w-[3rem]" /> },
+          { label: 'CPA', value: <StatValuePulse className="min-w-[4rem]" /> },
+        ]}
+      />
+
+      <div
+        className="h-10 w-full max-w-md rounded-lg border border-app-border bg-app-hover animate-pulse"
+        aria-hidden
+      />
+
+      <CompactTable<{ id: string }>
+        rows={MARKETING_ORDERS_SHELL_ROW_DATA}
+        rowKey={(r) => r.id}
+        columns={marketingOrdersShellTableColumns(showMediaBuyerColumn)}
+        emptyTitle="Loading…"
+        emptyDescription=""
+      />
+    </div>
+  );
+}
