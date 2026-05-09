@@ -181,7 +181,7 @@ export const CANONICAL_PERMISSIONS: PermissionCatalogEntry[] = [
   ).values(),
 ];
 
-const ALL_PERMISSION_CODES: string[] = CANONICAL_PERMISSIONS.map((p) => p.code);
+export const ALL_PERMISSION_CODES: string[] = CANONICAL_PERMISSIONS.map((p) => p.code);
 
 /**
  * Role → permission codes. Admin is `ALL_PERMISSION_CODES` (full bypass at runtime

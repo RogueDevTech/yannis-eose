@@ -49,8 +49,13 @@ export const BUNDLE_TTL_SECONDS = 60;
  * Bundle format version. Bump when the payload shape changes incompatibly so
  * older cookies are rejected gracefully (verify returns null → loader falls back
  * to `/auth/me` which issues a v2 cookie).
+ *
+ * v1 → v2 (cookie size fix): permissions changed from `string[]` to a base64url
+ *   bitmask (`p` field). v1 cookies are now rejected because their permissions
+ *   wouldn't decode against the bitmask index — the auto-fallback to /auth/me
+ *   re-issues a v2 cookie on the very next request, so users won't notice.
  */
-const BUNDLE_VERSION = 1;
+const BUNDLE_VERSION = 2;
 
 export interface SessionBundlePayload {
   /** Format version — see `BUNDLE_VERSION`. */
@@ -70,7 +75,14 @@ export interface SessionBundlePayload {
   scopeOrgWideHead: boolean;
   scopeTeamSupervisor: boolean;
   logisticsLocationId: string | null;
-  permissions: string[];
+  /**
+   * Bitmask-encoded permissions. Use `decodePermissionsFromBitmask()` from
+   * `@yannis/shared` to expand back to a `string[]` of canonical codes.
+   * Stored as a short base64url string (~22 chars for any user — full code list
+   * fits in 16 bytes binary) so the cookie stays well under the browser's 4 KB
+   * per-cookie soft limit regardless of how many permissions the user holds.
+   */
+  p: string;
   currentBranchId: string | null;
   branchIds: string[];
   appTheme: string | null;

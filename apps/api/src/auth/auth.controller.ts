@@ -18,6 +18,7 @@ import { UserBundleCacheService } from './user-bundle-cache.service';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
+import { encodePermissionsToBitmask } from '@yannis/shared';
 import {
   BUNDLE_COOKIE_NAME,
   BUNDLE_TTL_SECONDS,
@@ -73,6 +74,11 @@ function sessionClearCookieOpts(): { path: string; domain?: string; secure?: boo
  * so missing optional fields are normalised to `null` / empty arrays here.
  */
 function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
+  // Permissions are encoded as a 16-byte bitmask (`p`, ~22 chars base64url)
+  // so the cookie stays small regardless of how many codes the user holds —
+  // including admin-class with all 118. The Remix server decodes via
+  // `decodePermissionsFromBitmask()` from `@yannis/shared`. See
+  // `permission-bitmask.ts` for the index stability rules.
   return {
     id: user.id,
     email: user.email,
@@ -83,7 +89,7 @@ function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
     scopeOrgWideHead: user.scopeOrgWideHead === true,
     scopeTeamSupervisor: user.scopeTeamSupervisor === true,
     logisticsLocationId: user.logisticsLocationId ?? null,
-    permissions: user.permissions ?? [],
+    p: encodePermissionsToBitmask(user.permissions ?? []),
     currentBranchId: user.currentBranchId ?? null,
     branchIds: user.branchIds ?? [],
     appTheme: user.appTheme ?? null,
