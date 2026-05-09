@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useRevalidator } from '@remix-run/react';
-import { getCachedLoaderEntry, setCachedLoaderEntry } from '~/lib/loader-cache';
+import {
+  getCachedLoaderEntry,
+  setCachedLoaderEntry,
+  setFullLoaderEntry,
+} from '~/lib/loader-cache';
 
 /**
  * Drop-in replacement for `<Suspense fallback>` + `<Await resolve>` that
@@ -38,6 +42,8 @@ export function CachedAwait<T>({
   fallback,
   children,
   errorElement,
+  loaderShell,
+  deferredKey,
 }: {
   resolve: Promise<T> | T;
   fallback: ReactNode;
@@ -47,6 +53,24 @@ export function CachedAwait<T>({
    * message and a Retry button that fires `revalidator.revalidate()`.
    */
   errorElement?: (err: Error, retry: () => void) => ReactNode;
+  /**
+   * Synchronous portion of the loader response (e.g. `csOrdersShell`,
+   * `financeShell`). When BOTH `loaderShell` AND `deferredKey` are provided,
+   * CachedAwait writes the full reconstructed loader shape to the
+   * `setFullLoaderEntry` cache so a `clientLoader` can serve the entire
+   * `useLoaderData()` payload on revisit — skipping the server roundtrip
+   * entirely (true LinkedIn-style instant navigation).
+   *
+   * Pass the shell as a plain object — Remix's loader response shape minus
+   * the deferred field. Example: `{ csOrdersShell }`.
+   */
+  loaderShell?: Record<string, unknown>;
+  /**
+   * Key in the loader response under which the deferred Promise lives —
+   * e.g. `'pageData'`. When provided alongside `loaderShell`, CachedAwait
+   * writes `{ ...loaderShell, [deferredKey]: <resolved> }` to the full cache.
+   */
+  deferredKey?: string;
 }) {
   const location = useLocation();
   const revalidator = useRevalidator();
@@ -68,6 +92,12 @@ export function CachedAwait<T>({
       .then((data) => {
         if (cancelled) return;
         setCachedLoaderEntry(cacheKey, data);
+        // When the route opted into full-loader caching, write the full
+        // useLoaderData() shape too so `clientLoader` can serve it instantly
+        // on revisit (skipping the server roundtrip).
+        if (loaderShell && deferredKey) {
+          setFullLoaderEntry(cacheKey, { ...loaderShell, [deferredKey]: data });
+        }
         setResolved(data);
       })
       .catch((err: unknown) => {
@@ -79,7 +109,7 @@ export function CachedAwait<T>({
     return () => {
       cancelled = true;
     };
-  }, [resolve, cacheKey]);
+  }, [resolve, cacheKey, loaderShell, deferredKey]);
 
   // On mount with a fresh cache hit, kick off background revalidation so the
   // user sees fresh data within ~300ms even though they're already looking at

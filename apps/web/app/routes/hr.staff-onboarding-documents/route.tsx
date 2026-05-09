@@ -2,6 +2,7 @@ import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { listStaffOnboardingDocumentsSchema } from '@yannis/shared';
 import {
   apiRequest,
@@ -122,10 +123,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function StaffOnboardingDocumentsRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<StaffOnboardingDocsLoadingShell />}>
+    <CachedAwait resolve={pageData} fallback={<StaffOnboardingDocsLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
       {(data) => (
           <StaffOnboardingDocumentsPage
             rows={data.rows}

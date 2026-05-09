@@ -100,6 +100,8 @@ export async function transfersRouteAction({ request }: ActionFunctionArgs) {
     if (reason.length < 10) {
       return json({ error: 'Cancellation reason must be at least 10 characters' }, { status: 400 });
     }
+    // PENDING transfers can also be cancelled by the original initiator (no
+    // inventory side effects — server-side handler short-circuits for PENDING).
     const res = await apiRequest<unknown>('/trpc/inventory.cancelTransfer', {
       method: 'POST',
       cookie,
@@ -108,6 +110,48 @@ export async function transfersRouteAction({ request }: ActionFunctionArgs) {
     if (!res.ok) {
       return json(
         { error: extractApiErrorMessage(res.data, 'Failed to cancel transfer') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'approveTransfer') {
+    const transferId = formData.get('transferId')?.toString() ?? '';
+    if (!transferId) {
+      return json({ error: 'Transfer ID is required' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/inventory.approveTransfer', {
+      method: 'POST',
+      cookie,
+      body: { transferId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to approve transfer') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'rejectTransfer') {
+    const transferId = formData.get('transferId')?.toString() ?? '';
+    const reason = formData.get('reason')?.toString().trim() ?? '';
+    if (!transferId) {
+      return json({ error: 'Transfer ID is required' }, { status: 400 });
+    }
+    if (reason.length < 10) {
+      return json({ error: 'Rejection reason must be at least 10 characters' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/inventory.rejectTransfer', {
+      method: 'POST',
+      cookie,
+      body: { transferId, reason },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to reject transfer') },
         { status: safeStatus(res.status) },
       );
     }

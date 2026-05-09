@@ -1,5 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { CSLeaderboardPage } from '~/features/leaderboards/CSLeaderboardPage';
@@ -63,6 +64,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ csLeaderboardShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function CSLeaderboardRoute() {
   const { csLeaderboardShell, pageData } = useLoaderData<typeof loader>();
   return (
@@ -71,7 +75,10 @@ export default function CSLeaderboardRoute() {
           filters={csLeaderboardShell.filters}
           leaderboardPeriod={csLeaderboardShell.leaderboardPeriod}
         />
-      }>
+      }
+        loaderShell={{ csLeaderboardShell }}
+        deferredKey="pageData"
+      >
       {(data) => (
           <CSLeaderboardPage
             csLeaderboard={data.csLeaderboard}

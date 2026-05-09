@@ -82,6 +82,23 @@ export const stockTransfers = pgTable('stock_transfers', {
   /** Optional free-text comment written by the receiver when marking received. */
   receiverNotes: text('receiver_notes'),
   transferCost: numeric('transfer_cost', { precision: 12, scale: 2 }),
+  /**
+   * Initiator — the actor who created the transfer row. Stored explicitly so PENDING
+   * transfers (which have no TRANSFER_OUT movement yet) still surface a sender name
+   * in the UI, and so approve/reject can notify the original initiator.
+   */
+  initiatedBy: uuid('initiated_by').references(() => users.id),
+  /**
+   * Approval audit — set when a non-source-authority initiated the transfer
+   * and a source-authority then approved it. Source stock deducts at this point,
+   * not at initiate. See CLAUDE.md → Transfer Approval Gate.
+   */
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  /** Rejection audit — terminal state for PENDING rows that the source authority refuses. */
+  rejectedBy: uuid('rejected_by').references(() => users.id),
+  rejectedAt: timestamp('rejected_at', { withTimezone: true }),
+  rejectionReason: text('rejection_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
   ...temporalColumns,

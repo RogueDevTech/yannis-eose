@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remi
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
 import { HRUsersListLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
@@ -94,10 +95,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function UsersRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<HRUsersListLoadingShell staffAccounts={false} />}>
+    <CachedAwait resolve={pageData} fallback={<HRUsersListLoadingShell staffAccounts={false} />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
       {(data) => <UsersListPage {...data} />}
     </CachedAwait>
   );

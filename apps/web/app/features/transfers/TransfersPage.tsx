@@ -22,6 +22,11 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import {
+  applyOptimisticPatches,
+  isOptimisticPatched,
+  useOptimisticListPatches,
+} from '~/hooks/useOptimisticListPatches';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
@@ -31,10 +36,11 @@ import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData }
 
 /** Status options shown as filter pills. Order matches the lifecycle. */
 const STATUS_FILTER_OPTIONS: { value: string; label: string; dotColor: string }[] = [
-  { value: 'PENDING', label: 'Pending', dotColor: 'bg-warning-500' },
+  { value: 'PENDING', label: 'Pending approval', dotColor: 'bg-warning-500' },
   { value: 'IN_TRANSIT', label: 'In transit', dotColor: 'bg-brand-500' },
   { value: 'RECEIVED', label: 'Received', dotColor: 'bg-success-500' },
   { value: 'DISPUTED', label: 'Disputed', dotColor: 'bg-danger-500' },
+  { value: 'REJECTED', label: 'Rejected', dotColor: 'bg-danger-500' },
   { value: 'CANCELLED', label: 'Cancelled', dotColor: 'bg-app-fg-muted' },
 ];
 
@@ -59,6 +65,8 @@ export function TransfersPage({
 }: TransfersStreamData) {
   const fetcher = useFetcher();
   const cancelFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const approveFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const rejectFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const formDataFetcher = useFetcher<{
     ok: boolean;
     products: Product[];
@@ -71,6 +79,9 @@ export function TransfersPage({
   const [viewTransfer, setViewTransfer] = useState<Transfer | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Transfer | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  const [rejectTarget, setRejectTarget] = useState<Transfer | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectInlineError, setRejectInlineError] = useState<string | null>(null);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedFromLocation, setSelectedFromLocation] = useState('');
   const [selectedToLocationId, setSelectedToLocationId] = useState('');
@@ -136,6 +147,73 @@ export function TransfersPage({
     cancelFetcher.submit(fd, { method: 'POST' });
   };
 
+  // Approve / Reject — both share the same `inventory.approveTransfer`
+  // permission server-side. Approve is a one-click action; Reject opens a
+  // modal demanding a reason ≥ 10 chars (audit trail).
+  useFetcherToast(approveFetcher.data, { successMessage: 'Transfer approved' });
+  useFetcherToast(rejectFetcher.data, { successMessage: 'Transfer rejected' });
+
+  const submitApprove = (transfer: Transfer) => {
+    const fd = new FormData();
+    fd.set('intent', 'approveTransfer');
+    fd.set('transferId', transfer.id);
+    approveFetcher.submit(fd, { method: 'POST' });
+  };
+
+  const rejectSubmitting = rejectFetcher.state !== 'idle';
+  const rejectFetcherError = (rejectFetcher.data as { error?: string } | undefined)?.error ?? null;
+  const rejectError = rejectInlineError ?? rejectFetcherError;
+  const handleRejectSuccess = useCallback(() => {
+    setRejectTarget(null);
+    setRejectReason('');
+    setRejectInlineError(null);
+    setViewTransfer(null);
+    stripTransferIdFromUrl();
+  }, [stripTransferIdFromUrl]);
+  useCloseOnFetcherSuccess(rejectFetcher, handleRejectSuccess);
+
+  const submitReject = () => {
+    if (!rejectTarget) return;
+    if (rejectReason.trim().length < 10) {
+      setRejectInlineError('Rejection reason must be at least 10 characters.');
+      return;
+    }
+    setRejectInlineError(null);
+    const fd = new FormData();
+    fd.set('intent', 'rejectTransfer');
+    fd.set('transferId', rejectTarget.id);
+    fd.set('reason', rejectReason.trim());
+    rejectFetcher.submit(fd, { method: 'POST' });
+  };
+
+  // Optimistic status flip on approve/reject — keeps the row in place while
+  // the loader revalidates. Server is canonical (the server re-checks the
+  // source-authority gate on submit and runs the inventory side effects).
+  const buildApprovePatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'approveTransfer') return null;
+    const id = fd.get('transferId')?.toString();
+    if (!id) return null;
+    return [{ id, patch: { transferStatus: 'IN_TRANSIT' as const, canApprove: false } }];
+  }, []);
+  const buildRejectPatches = useCallback((fd: FormData, intent: string) => {
+    if (intent !== 'rejectTransfer') return null;
+    const id = fd.get('transferId')?.toString();
+    if (!id) return null;
+    const reason = fd.get('reason')?.toString() ?? '';
+    return [
+      {
+        id,
+        patch: {
+          transferStatus: 'REJECTED' as const,
+          canApprove: false,
+          rejectionReason: reason,
+        },
+      },
+    ];
+  }, []);
+  const approvePatches = useOptimisticListPatches<Transfer>(approveFetcher, buildApprovePatches);
+  const rejectPatches = useOptimisticListPatches<Transfer>(rejectFetcher, buildRejectPatches);
+
   const actionError = (fetcher.data as { error?: string } | undefined)?.error;
   const [dismissedError, setDismissedError] = useState(false);
   useFetcherToast(fetcher.data, {
@@ -189,10 +267,14 @@ export function TransfersPage({
     [],
   );
   const optimisticTransfers = useOptimisticListMerge<Transfer>(fetcher, buildOptimisticTransfers);
-  const displayTransfers = useMemo(
-    () => [...optimisticTransfers, ...transfers],
-    [optimisticTransfers, transfers],
-  );
+  const displayTransfers = useMemo(() => {
+    // Layer order: server transfers + optimistic-add rows, then apply
+    // approve/reject patches so a row mid-flight reflects its target status
+    // (IN_TRANSIT or REJECTED) until the loader revalidates.
+    const merged = [...optimisticTransfers, ...transfers];
+    const afterApprove = applyOptimisticPatches(merged, approvePatches);
+    return applyOptimisticPatches(afterApprove, rejectPatches);
+  }, [optimisticTransfers, transfers, approvePatches, rejectPatches]);
 
   useEffect(() => {
     setSelectedToLocationId((prev) => (prev === selectedFromLocation ? '' : prev));
@@ -357,6 +439,7 @@ export function TransfersPage({
       IN_TRANSIT: 0,
       RECEIVED: 0,
       DISPUTED: 0,
+      REJECTED: 0,
       CANCELLED: 0,
     };
     for (const t of summaryTransfers) {
@@ -774,14 +857,22 @@ export function TransfersPage({
               {
                 key: 'product',
                 header: 'Product',
-                render: (t) => (
-                  <span className="font-medium text-app-fg">
-                    {productName(t.productId)}
-                    {isOptimisticId(t.id) ? (
-                      <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">Saving…</span>
-                    ) : null}
-                  </span>
-                ),
+                render: (t) => {
+                  const midFlight =
+                    isOptimisticId(t.id) ||
+                    isOptimisticPatched(approvePatches, t.id) ||
+                    isOptimisticPatched(rejectPatches, t.id);
+                  return (
+                    <span className="font-medium text-app-fg">
+                      {productName(t.productId)}
+                      {midFlight ? (
+                        <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">
+                          Saving…
+                        </span>
+                      ) : null}
+                    </span>
+                  );
+                },
                 minWidth: 'min-w-[140px]',
               },
               {
@@ -822,28 +913,64 @@ export function TransfersPage({
                 align: 'right',
                 tight: true,
                 className: 'w-[1%] whitespace-nowrap',
-                render: (t) => (
-                  <div className="inline-flex items-center justify-end gap-1.5">
-                    <CompactTableActionButton
-                      disabled={isOptimisticId(t.id)}
-                      onClick={() => setViewTransfer(t)}
-                    >
-                      View
-                    </CompactTableActionButton>
-                    {t.transferStatus !== 'CANCELLED' && (
+                render: (t) => {
+                  const isMidFlight =
+                    isOptimisticId(t.id) ||
+                    isOptimisticPatched(approvePatches, t.id) ||
+                    isOptimisticPatched(rejectPatches, t.id);
+                  const isPending = t.transferStatus === 'PENDING';
+                  // Source-authority gate is canonical on the server; the
+                  // server stamps `canApprove` per row for the viewer.
+                  const showApproval = isPending && t.canApprove === true;
+                  // PENDING rows can be Cancelled by the initiator (no-op on
+                  // inventory); Cancel is hidden on REJECTED/CANCELLED.
+                  const canCancel =
+                    t.transferStatus !== 'CANCELLED' && t.transferStatus !== 'REJECTED';
+                  return (
+                    <div className="inline-flex items-center justify-end gap-1.5">
                       <CompactTableActionButton
-                        tone="danger"
-                        disabled={isOptimisticId(t.id)}
-                        onClick={() => {
-                          setCancelTarget(t);
-                          setCancelReason('');
-                        }}
+                        disabled={isMidFlight}
+                        onClick={() => setViewTransfer(t)}
                       >
-                        Cancel
+                        View
                       </CompactTableActionButton>
-                    )}
-                  </div>
-                ),
+                      {showApproval && (
+                        <>
+                          <CompactTableActionButton
+                            tone="success"
+                            disabled={isMidFlight}
+                            onClick={() => submitApprove(t)}
+                          >
+                            Approve
+                          </CompactTableActionButton>
+                          <CompactTableActionButton
+                            tone="danger"
+                            disabled={isMidFlight}
+                            onClick={() => {
+                              setRejectTarget(t);
+                              setRejectReason('');
+                              setRejectInlineError(null);
+                            }}
+                          >
+                            Reject
+                          </CompactTableActionButton>
+                        </>
+                      )}
+                      {canCancel && !showApproval && (
+                        <CompactTableActionButton
+                          tone="danger"
+                          disabled={isMidFlight}
+                          onClick={() => {
+                            setCancelTarget(t);
+                            setCancelReason('');
+                          }}
+                        >
+                          Cancel
+                        </CompactTableActionButton>
+                      )}
+                    </div>
+                  );
+                },
               },
             ];
 
@@ -861,7 +988,13 @@ export function TransfersPage({
                     return `${t.id}-${o.outcomeStatus}-${String(o.outcomeQuantity ?? '')}`;
                   return t.id;
                 }}
-                rowClassName={(t) => (isOptimisticId(t.id) ? 'opacity-60' : '')}
+                rowClassName={(t) =>
+                  isOptimisticId(t.id) ||
+                  isOptimisticPatched(approvePatches, t.id) ||
+                  isOptimisticPatched(rejectPatches, t.id)
+                    ? 'opacity-60'
+                    : ''
+                }
                 loading={isLoaderRefetchBusy}
                 loadingVariant="overlay"
                 emptyTitle="No transfers yet"
@@ -927,8 +1060,38 @@ export function TransfersPage({
                     { label: 'Quantity', value: qtyLabel },
                     {
                       label: 'Recorded',
-                      value: formatRecordedAt(viewTransfer.verifiedAt ?? viewTransfer.createdAt),
+                      value: formatRecordedAt(viewTransfer.createdAt),
                     },
+                    ...(viewTransfer.senderName
+                      ? [{ label: 'Initiated by', value: viewTransfer.senderName }]
+                      : []),
+                    ...(viewTransfer.approvedAt
+                      ? [
+                          {
+                            label: 'Approved',
+                            value: formatRecordedAt(viewTransfer.approvedAt),
+                          },
+                        ]
+                      : []),
+                    ...(viewTransfer.rejectedAt
+                      ? [
+                          {
+                            label: 'Rejected',
+                            value: formatRecordedAt(viewTransfer.rejectedAt),
+                          },
+                        ]
+                      : []),
+                    ...(viewTransfer.rejectionReason
+                      ? [{ label: 'Rejection reason', value: viewTransfer.rejectionReason }]
+                      : []),
+                    ...(viewTransfer.verifiedAt
+                      ? [
+                          {
+                            label: 'Verified',
+                            value: formatRecordedAt(viewTransfer.verifiedAt),
+                          },
+                        ]
+                      : []),
                     ...(viewTransfer.shrinkageReason
                       ? [{ label: 'Shrinkage reason', value: viewTransfer.shrinkageReason }]
                       : []),
@@ -939,23 +1102,65 @@ export function TransfersPage({
                 />
               );
             })()}
-            <p className="text-xs text-app-fg-muted">
-              Confirm or dispute receipt in <span className="font-medium text-app-fg">Logistics → Stock Transfer Confirmations</span>.
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              {viewTransfer.transferStatus !== 'CANCELLED' && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setCancelTarget(viewTransfer);
-                    setCancelReason('');
-                  }}
-                >
-                  Cancel transfer
-                </Button>
+            {viewTransfer.transferStatus === 'PENDING' && viewTransfer.canApprove ? (
+              <p className="rounded-md border border-warning-200 bg-warning-50/60 px-3 py-2 text-xs text-warning-800 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-200">
+                This transfer is awaiting your approval as the source-location authority. Approving deducts source stock and flips the transfer to In transit. Rejecting leaves stock untouched.
+              </p>
+            ) : viewTransfer.transferStatus === 'PENDING' ? (
+              <p className="text-xs text-app-fg-muted">
+                Awaiting approval from the source-location authority before stock leaves.
+              </p>
+            ) : viewTransfer.transferStatus === 'REJECTED' ? (
+              <p className="text-xs text-app-fg-muted">
+                This transfer was rejected; no stock movement occurred. Reason logged in the audit trail.
+              </p>
+            ) : (
+              <p className="text-xs text-app-fg-muted">
+                Confirm or dispute receipt in <span className="font-medium text-app-fg">Logistics → Stock Transfer Confirmations</span>.
+              </p>
+            )}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {viewTransfer.transferStatus === 'PENDING' && viewTransfer.canApprove && (
+                <>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      submitApprove(viewTransfer);
+                      dismissTransferModal();
+                    }}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setRejectTarget(viewTransfer);
+                      setRejectReason('');
+                      setRejectInlineError(null);
+                    }}
+                  >
+                    Reject
+                  </Button>
+                </>
               )}
+              {viewTransfer.transferStatus !== 'CANCELLED' &&
+                viewTransfer.transferStatus !== 'REJECTED' && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setCancelTarget(viewTransfer);
+                      setCancelReason('');
+                    }}
+                  >
+                    Cancel transfer
+                  </Button>
+                )}
               <Button type="button" variant="secondary" size="sm" onClick={dismissTransferModal}>
                 Close
               </Button>
@@ -980,7 +1185,9 @@ export function TransfersPage({
         title="Cancel this transfer?"
         description={
           cancelTarget
-            ? `This will add ${cancelTarget.quantitySent} unit(s) back to ${getLocationName(cancelTarget.fromLocationId)} and remove ${cancelTarget.quantityReceived ?? cancelTarget.quantitySent} unit(s) from ${getLocationName(cancelTarget.toLocationId)}. The transfer row stays for audit but flips to CANCELLED.`
+            ? cancelTarget.transferStatus === 'PENDING'
+              ? `This transfer is still awaiting approval — cancelling leaves stock at ${getLocationName(cancelTarget.fromLocationId)} unchanged. The row stays for audit but flips to CANCELLED.`
+              : `This will add ${cancelTarget.quantitySent} unit(s) back to ${getLocationName(cancelTarget.fromLocationId)} and remove ${cancelTarget.quantityReceived ?? cancelTarget.quantitySent} unit(s) from ${getLocationName(cancelTarget.toLocationId)}. The transfer row stays for audit but flips to CANCELLED.`
             : ''
         }
         confirmLabel="Cancel transfer"
@@ -1009,6 +1216,58 @@ export function TransfersPage({
             />
             <p className="text-[11px] text-app-fg-muted">
               {cancelReason.trim().length}/10 characters minimum
+            </p>
+          </div>
+        }
+      />
+
+      {/* Reject-transfer confirmation. Mandatory reason (≥ 10 chars) so the
+          audit trail explains the rejection. Inventory-neutral — PENDING rows
+          haven't deducted source stock, so reject is a clean status flip. */}
+      <ConfirmActionModal
+        open={!!rejectTarget}
+        onClose={() => {
+          if (!rejectSubmitting) {
+            setRejectTarget(null);
+            setRejectReason('');
+            setRejectInlineError(null);
+          }
+        }}
+        title="Reject this transfer?"
+        description={
+          rejectTarget
+            ? `Rejecting will leave stock at ${getLocationName(rejectTarget.fromLocationId)} unchanged. The transfer row stays for audit but flips to REJECTED, and the initiator is notified.`
+            : ''
+        }
+        confirmLabel="Reject transfer"
+        cancelLabel="Keep pending"
+        variant="danger"
+        loading={rejectSubmitting}
+        onConfirm={submitReject}
+        error={rejectError}
+        details={
+          <div className="space-y-2">
+            <label
+              htmlFor="reject-transfer-reason"
+              className="block text-xs font-semibold text-app-fg-muted uppercase tracking-wider"
+            >
+              Reason (required, min 10 chars)
+            </label>
+            <Textarea
+              id="reject-transfer-reason"
+              value={rejectReason}
+              onChange={(e) => {
+                setRejectReason(e.target.value);
+                if (rejectInlineError && e.target.value.trim().length >= 10) {
+                  setRejectInlineError(null);
+                }
+              }}
+              rows={3}
+              placeholder="Why is this transfer being rejected?"
+              maxLength={500}
+            />
+            <p className="text-[11px] text-app-fg-muted">
+              {rejectReason.trim().length}/10 characters minimum
             </p>
           </div>
         }

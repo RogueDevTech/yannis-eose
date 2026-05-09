@@ -1,5 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import type { ShouldRevalidateFunctionArgs } from '@remix-run/react';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
@@ -233,6 +234,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ disbursementsShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const exportResponse = await handleExportReportAction(request);
   if (exportResponse) return exportResponse;
@@ -314,7 +318,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function DisbursementsRoute() {
   const { disbursementsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<FinanceDisbursementsLoadingShell filters={disbursementsShell.filters} />}>
+    <CachedAwait resolve={pageData} fallback={<FinanceDisbursementsLoadingShell filters={disbursementsShell.filters} />}
+      loaderShell={{ disbursementsShell }}
+      deferredKey="pageData"
+    >
       {(data) => <DisbursementsPage {...(data as DisbursementsPageData)} />}
     </CachedAwait>
   );

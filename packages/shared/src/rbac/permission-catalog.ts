@@ -47,6 +47,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'inventory.read', resource: 'inventory', action: 'read', description: 'View inventory' },
   { code: 'inventory.intake', resource: 'inventory', action: 'intake', description: 'Stock intake' },
   { code: 'inventory.transfer', resource: 'inventory', action: 'transfer', description: 'Transfer stock' },
+  { code: 'inventory.approveTransfer', resource: 'inventory', action: 'approveTransfer', description: 'Approve or reject a pending stock transfer (source-authority gate)' },
   { code: 'inventory.verifyTransfer', resource: 'inventory', action: 'verifyTransfer', description: 'Verify received transfer' },
   { code: 'inventory.adjust', resource: 'inventory', action: 'adjust', description: 'Adjust stock' },
   { code: 'inventory.lowStockAlerts', resource: 'inventory', action: 'lowStockAlerts', description: 'View low stock alerts' },
@@ -215,6 +216,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     // (per-order context check still runs in the service).
     'permission_requests.order_line_price.approve',
     'permission_requests.order_deletion.approve',
+    // Branch admin is the source authority for WAREHOUSE locations in their branch
+    // (alongside Stock Manager) — see Transfer Approval Gate in CLAUDE.md.
+    'inventory.approveTransfer',
     // Branch admin owns the branch end-to-end and can pull data downloads for
     // any domain they read (orders + inventory + finance + audit + HR).
     'orders.export',
@@ -336,6 +340,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'logistics.teamOverview',
     'inventory.read',
     'inventory.transfer',
+    'inventory.approveTransfer',
     'inventory.intake',
     'inventory.verifyTransfer',
     'inventory.lowStockAlerts',
@@ -367,6 +372,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'inventory.read',
     'inventory.intake',
     'inventory.transfer',
+    'inventory.approveTransfer',
     'inventory.verifyTransfer',
     'inventory.adjust',
     'inventory.lowStockAlerts',
@@ -385,6 +391,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   ],
   TPL_MANAGER: [
     'inventory.read',
+    'inventory.approveTransfer',
     'inventory.verifyTransfer',
     'inventory.returnedOrders',
     'inventory.createReconciliation',

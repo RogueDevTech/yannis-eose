@@ -929,7 +929,7 @@ export const ordersRouter = router({
             branchId,
             undefined,
           ),
-          getInventoryService().listTransfers(undefined),
+          getInventoryService().listTransfers(undefined, ctx.user),
           getInventoryService().listReturnedOrders(locationFilter),
         ]);
 

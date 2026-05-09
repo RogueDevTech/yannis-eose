@@ -743,7 +743,11 @@ export function MarketingOrdersPage({
         <div className="px-4 py-3 border-b border-app-border">
           <h2 className="text-lg font-semibold text-app-fg inline-flex flex-wrap items-center gap-x-1">
             <span>Orders</span>
-            {showSkeletonRows ? (
+            {/* Show pulse for the count ONLY on the initial Suspense fallback,
+                not on in-page refetches. During pagination/filter refetch the
+                old `total` is still meaningful and unmounting the count would
+                trigger layout flicker. */}
+            {deferredLoading ? (
               <span className="inline-flex items-center gap-0.5 text-base font-semibold text-app-fg">
                 <span aria-hidden>(</span>
                 <span
@@ -766,9 +770,16 @@ export function MarketingOrdersPage({
           emptyDescription="Try adjusting your status filter or search query"
         />
       </div>
-      {/* Pagination — same layout as CS Orders list; page size is fixed at 20 in the route loader. */}
+      {/* Pagination — same layout as CS Orders list; page size is fixed at 20 in the route loader.
+          We deliberately gate the skeleton on `deferredLoading` (initial Suspense fallback) NOT
+          `showSkeletonRows` (which also goes true on `isLoaderRefetchBusy`). Reason: the pointerdown
+          handler in `useLoaderRefetchBusy` calls `flushSync(setArmed(true))` synchronously, which
+          would re-render this section between the click's pointerdown and click events. If the real
+          `<Pagination>` is replaced with non-interactive skeleton bars in that gap, the browser
+          loses its click target and the navigation never fires — pagination clicks silently no-op.
+          Keep Pagination mounted across refetches so click handlers stay alive. */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-        {showSkeletonRows ? (
+        {deferredLoading ? (
           <>
             <p className="text-sm m-0 min-h-[1.25rem] flex items-center">
               <span

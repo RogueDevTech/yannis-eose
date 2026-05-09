@@ -2,6 +2,7 @@ import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Link, useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
@@ -102,6 +103,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -260,7 +264,10 @@ function InventoryShipmentsIndexContent(data: {
 export default function InventoryShipmentsIndexRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<ShipmentsListLoadingShell />}>
+    <CachedAwait resolve={pageData} fallback={<ShipmentsListLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
       {(data) => <InventoryShipmentsIndexContent {...data} />}
     </CachedAwait>
   );

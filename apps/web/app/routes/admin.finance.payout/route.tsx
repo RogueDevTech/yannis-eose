@@ -1,6 +1,7 @@
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { FinancePayoutPage, type BatchDetail } from '~/features/finance/FinancePayoutPage';
 import { FinancePayoutLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
@@ -52,10 +53,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ payoutShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function AdminFinancePayoutRoute() {
   const { payoutShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<FinancePayoutLoadingShell status={payoutShell.status} />}>
+    <CachedAwait resolve={pageData} fallback={<FinancePayoutLoadingShell status={payoutShell.status} />}
+      loaderShell={{ payoutShell }}
+      deferredKey="pageData"
+    >
       {(data) => (
           <FinancePayoutPage
             batches={data.batches}

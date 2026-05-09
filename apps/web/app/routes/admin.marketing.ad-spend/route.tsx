@@ -4,6 +4,7 @@ import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
 import { MarketingAdSpendLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
@@ -180,7 +181,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     campaignIdFilter,
     mediaBuyerIdFilter,
     metrics: null,
-    leaderboard: null,
     users: null,
     products: null,
     leaderboardPeriod,
@@ -200,6 +200,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     pageData,
   } as unknown as Record<string, unknown>);
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -232,6 +235,9 @@ export default function AdminMarketingAdSpendRoute() {
     <CachedAwait
       resolve={pageData}
       fallback={<MarketingAdSpendLoadingShell {...adSpendShell} />}
+    
+      loaderShell={{ adSpendShell }}
+      deferredKey="pageData"
     >
       {(data) => {
         if (data.adSpendPicklists) {

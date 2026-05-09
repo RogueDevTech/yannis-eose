@@ -3,18 +3,15 @@ import { json } from '@remix-run/node';
 import { secondaryCacheJson } from '~/lib/secondary-api-cache';
 import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, requirePermission } from '~/lib/api.server';
 import {
-  buildLeaderboardInput,
   emptyMetrics,
-  parseLeaderboard,
   parseMetrics,
   parseProducts,
   parseUsers,
 } from '~/lib/marketing-pages.server';
-import type { AdSpendGroup, LeaderboardEntry, Metrics, Product, User } from '~/features/marketing/types';
+import type { AdSpendGroup, Metrics, Product, User } from '~/features/marketing/types';
 
 type SecondaryPayload = {
   metrics: Metrics;
-  leaderboard: LeaderboardEntry[];
   users: User[];
   products: Product[];
   groups: AdSpendGroup[];
@@ -26,7 +23,6 @@ type SecondaryPayload = {
 function emptyPayload(): SecondaryPayload {
   return {
     metrics: emptyMetrics(),
-    leaderboard: [],
     users: [],
     products: [],
     groups: [],
@@ -86,13 +82,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ...(endDate && !periodAllTime ? { endDate } : {}),
     });
 
-    const leaderboardInput = buildLeaderboardInput(
-      startDate && !periodAllTime ? startDate : undefined,
-      endDate && !periodAllTime ? endDate : undefined,
-      periodAllTime,
+    const productsListInput = encodeURIComponent(
+      JSON.stringify({
+        page: 1,
+        limit: 100,
+        status: 'ACTIVE',
+        sortBy: 'name',
+        sortOrder: 'asc',
+      }),
     );
-
-    const productsP = apiRequest<unknown>('/trpc/products.list', opt);
+    const productsP = apiRequest<unknown>(`/trpc/products.list?input=${productsListInput}`, {
+      ...opt,
+      timeoutMs: 15_000,
+    });
     const campaignsP = isMediaBuyer
       ? apiRequest<unknown>(
           `/trpc/marketing.listCampaigns?input=${encodeURIComponent(
@@ -102,16 +104,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         )
       : Promise.resolve({ ok: false as const, data: null });
 
-    const [metrics, leaderboard, users, productsRaw, groupedRes, campaignsRes] = await Promise.all([
+    const [metrics, users, productsRaw, groupedRes, campaignsRes] = await Promise.all([
       apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, opt)
         .then(parseMetrics)
         .catch(() => emptyMetrics()),
-      apiRequest<unknown>(
-        `/trpc/marketing.leaderboard?input=${encodeURIComponent(JSON.stringify(leaderboardInput))}`,
-        opt,
-      )
-        .then((r) => parseLeaderboard(r))
-        .catch(() => []),
       userIds.length > 0
         ? apiRequest<unknown>(
             `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ userIds, limit: 100 }))}`,
@@ -203,7 +199,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const payload: SecondaryPayload = {
       metrics,
-      leaderboard,
       users,
       products,
       groups,

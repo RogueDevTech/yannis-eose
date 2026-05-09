@@ -372,7 +372,19 @@ export class NotificationsService {
     if (data['requestId'] && type.includes('approval')) return '/admin/users';
     if (data['fundingId'] || (data['requesterId'] && type === 'funding:request')) return '/admin/marketing/funding';
     if (data['requestId'] && (type === 'funding:approved' || type === 'funding:rejected')) return '/admin/marketing/funding';
-    if (data['transferId']) return '/admin/inventory';
+    if (data['transferId']) {
+      // Approval-flow types (pending / approved / rejected) live on the dedicated
+      // transfers page where the action buttons render. Legacy / verify / shrinkage
+      // types still land on the inventory page.
+      if (
+        type === 'inventory:transfer_pending_approval' ||
+        type === 'inventory:transfer_approved' ||
+        type === 'inventory:transfer_rejected'
+      ) {
+        return `/admin/transfers?status=PENDING&transferId=${String(data['transferId'])}`;
+      }
+      return '/admin/inventory';
+    }
     if (data['payoutId']) return '/admin/hr';
     if (data['batchId'] && type.startsWith('hr:batch_')) return `/hr/payroll?batchId=${data['batchId']}`;
     if (type === 'hr:onboarding_changes_requested' || type === 'hr:onboarding_approved') {

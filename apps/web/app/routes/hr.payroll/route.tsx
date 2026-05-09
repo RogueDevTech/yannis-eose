@@ -2,6 +2,7 @@ import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, Await, type ShouldRevalidateFunction } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   getCurrentUser,
@@ -112,6 +113,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -227,7 +231,10 @@ function extractError(res: { data: unknown }, fallback: string): string {
 export default function HRRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<MonthlyPayrollsLoadingShell />}>
+    <CachedAwait resolve={pageData} fallback={<MonthlyPayrollsLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
       {(data) => (
           <HRPage
             adjustments={data.adjustments}

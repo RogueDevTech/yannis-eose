@@ -2,6 +2,7 @@ import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   getSessionCookie,
@@ -132,10 +133,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ logisticsTeamShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function LogisticsTeamIndexRoute() {
   const { logisticsTeamShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<LogisticsTeamLoadingShell dateFilters={logisticsTeamShell.dateFilters} />}>
+    <CachedAwait resolve={pageData} fallback={<LogisticsTeamLoadingShell dateFilters={logisticsTeamShell.dateFilters} />}
+      loaderShell={{ logisticsTeamShell }}
+      deferredKey="pageData"
+    >
       {(data) => (
           <LogisticsTeamPage
             providers={data.providers}

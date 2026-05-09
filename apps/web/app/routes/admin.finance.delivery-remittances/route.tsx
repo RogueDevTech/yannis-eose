@@ -2,6 +2,7 @@ import { json, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultThisMonthRange, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
@@ -231,6 +232,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ remittancesShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
@@ -281,7 +285,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminFinanceDeliveryRemittancesRoute() {
   const { remittancesShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<DeliveryRemittancesLoadingShell filters={remittancesShell.filters} />}>
+    <CachedAwait resolve={pageData} fallback={<DeliveryRemittancesLoadingShell filters={remittancesShell.filters} />}
+      loaderShell={{ remittancesShell }}
+      deferredKey="pageData"
+    >
       {(data) => (
           <DeliveryRemittancesPage
             remittances={data.remittances}

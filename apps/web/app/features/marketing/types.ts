@@ -402,8 +402,6 @@ export interface MarketingAdSpendLoaderData {
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
   metrics: Metrics | null;
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
-  leaderboard: LeaderboardEntry[] | null;
-  /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
   users: User[] | null;
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
   products: Product[] | null;
