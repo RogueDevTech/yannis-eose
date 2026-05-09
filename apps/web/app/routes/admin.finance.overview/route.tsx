@@ -1,6 +1,7 @@
 import { useLoaderData } from '@remix-run/react';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { FinancePage } from '~/features/finance/FinancePage';
 import { FinanceOverviewLoadingShell } from '~/features/finance/FinanceDeferredLoadingShells';
@@ -129,12 +130,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ financeShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function FinanceRoute() {
   const { financeShell, pageData } = useLoaderData<typeof loader>();
   return (
     <CachedAwait
       resolve={pageData}
       fallback={<FinanceOverviewLoadingShell filters={financeShell.filters} />}
+      loaderShell={{ financeShell }}
+      deferredKey="pageData"
     >
       {(data) => <FinancePage data={data} />}
     </CachedAwait>

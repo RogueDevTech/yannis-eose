@@ -2,6 +2,7 @@ import { json, redirect, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
@@ -156,6 +157,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ formsShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
@@ -204,7 +208,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function FormsIndexRoute() {
   const { formsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<MarketingFormsLoadingShell isMediaBuyer={formsShell.isMediaBuyer} />}>
+    <CachedAwait resolve={pageData} fallback={<MarketingFormsLoadingShell isMediaBuyer={formsShell.isMediaBuyer} />}
+      loaderShell={{ formsShell }}
+      deferredKey="pageData"
+    >
       {(stream) => (
           <FormsPage
             forms={stream.forms}

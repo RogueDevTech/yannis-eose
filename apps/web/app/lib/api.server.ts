@@ -36,10 +36,29 @@ const DEV_NEST_ORIGIN = 'http://127.0.0.1:4444';
  * the proxy hop can stall long enough to trip Remix single-fetch stream timeouts,
  * which surfaces as "Server Timeout" for deferred loader data.
  */
-function resolveServerApiBase(resolvedPath: string): string {
+/**
+ * Logged once per process when production resolves to localhost — without this guard the
+ * symptom is "every login returns Invalid credentials" because the fetch fails silently and
+ * the auth route falls back to the hard-coded message. The warning makes the misconfig
+ * obvious in deploy logs.
+ */
+let warnedProductionFallback = false;
+
+function resolveServerApiBase(_resolvedPath: string): string {
   const explicit = process.env['API_URL']?.trim() || process.env['PUBLIC_API_URL']?.trim();
   if (explicit) return explicit;
   if (process.env['NODE_ENV'] === 'production') {
+    if (!warnedProductionFallback) {
+      warnedProductionFallback = true;
+      // eslint-disable-next-line no-console
+      console.error(
+        '[api.server] FATAL CONFIG: NODE_ENV=production but API_URL / PUBLIC_API_URL is unset. ' +
+          'All API calls will fall back to ' +
+          DEV_NEST_ORIGIN +
+          ' which is not reachable from a deployed host — every login will appear as "Invalid credentials". ' +
+          'Set API_URL (or PUBLIC_API_URL) to the deployed API origin (e.g. https://api.your-domain.com).',
+      );
+    }
     return DEV_NEST_ORIGIN;
   }
   return DEV_NEST_ORIGIN;

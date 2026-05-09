@@ -1,5 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import {
@@ -62,6 +63,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   return defer({ pageData });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -173,7 +177,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function PlansRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<CommissionPlansLoadingShell />}>
+    <CachedAwait resolve={pageData} fallback={<CommissionPlansLoadingShell />}
+      loaderShell={{}}
+      deferredKey="pageData"
+    >
       {(data) => (
           <CommissionPlansPage
             plans={data.plans}

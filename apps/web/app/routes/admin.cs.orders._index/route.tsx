@@ -2,6 +2,7 @@ import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
@@ -311,6 +312,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   } as Record<string, unknown>);
 }
 
+/**
+ * `clientLoader` for true LinkedIn-style instant revisit — skips the server
+ * roundtrip entirely on cache hit, then revalidates in the background once
+ * the route has mounted (fired by `<CachedAwait>`'s on-mount revalidator).
+ *
+ * `hydrate = false`: on initial SSR there's no cache yet, so let the server
+ * loader populate the page normally. From there, every subsequent client-side
+ * navigation back to this URL within 5 minutes hits the cache.
+ */
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const exportResponse = await handleExportReportAction(request);
   if (exportResponse) return exportResponse;
@@ -549,6 +562,8 @@ export default function CSOrdersRoute() {
           showCSAgentColumn={csOrdersShell.showCSAgentColumn}
         />
       }
+      loaderShell={{ csOrdersShell }}
+      deferredKey="pageData"
     >
       {(d) => (
         <OrdersListPage

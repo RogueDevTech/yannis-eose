@@ -1,5 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
@@ -343,6 +344,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
@@ -355,7 +359,12 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function MarketingFundingRoute() {
   const { fundingShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<MarketingFundingLoadingShell {...fundingShell} />}>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<MarketingFundingLoadingShell {...fundingShell} />}
+      loaderShell={{ fundingShell }}
+      deferredKey="pageData"
+    >
       {(data) => <MarketingFundingPage {...data} />}
     </CachedAwait>
   );

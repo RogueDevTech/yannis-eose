@@ -64,6 +64,7 @@ export const transferStatusEnum = pgEnum('transfer_status', [
   'RECEIVED',
   'DISPUTED',
   'CANCELLED',
+  'REJECTED',
 ]);
 
 export const fundingStatusEnum = pgEnum('funding_status', [

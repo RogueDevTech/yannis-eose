@@ -24,6 +24,7 @@ export const LEGACY_PERMISSION_CODE_MAP: Record<string, string> = {
   'inventory.read': 'inventory.overview.view',
   'inventory.intake': 'inventory.stock.intake',
   'inventory.transfer': 'inventory.stock.transfer',
+  'inventory.approveTransfer': 'inventory.transfer.approve',
   'inventory.verifyTransfer': 'inventory.transfer.verify',
   'inventory.adjust': 'inventory.stock.adjust',
   'inventory.lowStockAlerts': 'inventory.alerts.low_stock.view',

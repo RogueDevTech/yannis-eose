@@ -2,6 +2,7 @@ import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
@@ -178,6 +179,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ logisticsOrdersShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   if (!cookie) {
@@ -353,7 +357,10 @@ export default function LogisticsOrdersRoute() {
   const { logisticsOrdersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
-    <CachedAwait resolve={pageData} fallback={<LogisticsOrdersLoadingShell filters={logisticsOrdersShell.filters} />}>
+    <CachedAwait resolve={pageData} fallback={<LogisticsOrdersLoadingShell filters={logisticsOrdersShell.filters} />}
+      loaderShell={{ logisticsOrdersShell }}
+      deferredKey="pageData"
+    >
       {(data) => <LogisticsOrdersPage {...data} />}
     </CachedAwait>
   );

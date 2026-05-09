@@ -157,10 +157,28 @@ async function handleLogin(request: Request, formData: FormData) {
         { status: safeStatus(res.status) },
       );
     }
-    // Real API response — prefer the API's `message`, fall back to its `error`,
-    // and only show the generic credentials message as a last resort.
+    // Real API response — prefer the API's `message`, fall back to its `error`.
+    // Only show the literal "Invalid credentials" for an actual 401 — otherwise we
+    // mask config problems (5xx with empty body, gateway HTML, etc.) as a password
+    // failure and the user spends 30 minutes retyping their password.
+    const apiMessage = errorData.message ?? errorData.error;
+    if (apiMessage) {
+      return json({ error: apiMessage }, { status: safeStatus(res.status) });
+    }
+    if (res.status === 401) {
+      return json({ error: 'Invalid email or password.' }, { status: 401 });
+    }
+    console.error(
+      `[auth] POST /auth/login returned status=${res.status} with no message body. ` +
+        `Likely an API_URL misconfig or upstream gateway intercepting the response.`,
+    );
     return json(
-      { error: errorData.message ?? errorData.error ?? 'Invalid credentials' },
+      {
+        error:
+          'Sign-in is temporarily unavailable. The server returned an unexpected response (status ' +
+          res.status +
+          '). Please try again in a moment.',
+      },
       { status: safeStatus(res.status) },
     );
   }

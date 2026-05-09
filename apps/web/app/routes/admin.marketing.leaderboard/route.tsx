@@ -1,5 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { MarketingLeaderboardPage } from '~/features/leaderboards/MarketingLeaderboardPage';
@@ -71,6 +72,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ leaderboardShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function MarketingLeaderboardRoute() {
   const { leaderboardShell, pageData } = useLoaderData<typeof loader>();
   return (
@@ -79,7 +83,10 @@ export default function MarketingLeaderboardRoute() {
           filters={leaderboardShell.filters}
           leaderboardPeriod={leaderboardShell.leaderboardPeriod}
         />
-      }>
+      }
+        loaderShell={{ leaderboardShell }}
+        deferredKey="pageData"
+      >
       {(data) => (
           <MarketingLeaderboardPage
             mediaBuyerLeaderboard={data.mediaBuyerLeaderboard}

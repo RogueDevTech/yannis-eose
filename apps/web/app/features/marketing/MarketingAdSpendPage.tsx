@@ -43,7 +43,6 @@ import type {
   AdSpendGroupLine,
   AdSpendStatusCounts,
   Campaign,
-  LeaderboardEntry,
   MarketingAdSpendLoaderData,
   Product,
   User,
@@ -54,7 +53,6 @@ import { AdSpendDayAccordion } from './AdSpendDayAccordion';
 type SecondaryOk = {
   ok: true;
   metrics: NonNullable<MarketingAdSpendLoaderData['metrics']>;
-  leaderboard: NonNullable<MarketingAdSpendLoaderData['leaderboard']>;
   users: NonNullable<MarketingAdSpendLoaderData['users']>;
   products: NonNullable<MarketingAdSpendLoaderData['products']>;
   groups: NonNullable<MarketingAdSpendLoaderData['groups']>;
@@ -116,7 +114,6 @@ export function MarketingAdSpendPage({
   mediaBuyersForFilter: mediaBuyersForFilterProp,
   statusCounts: statusCountsProp,
   metrics: initialMetrics,
-  leaderboard: initialLeaderboard,
   users: initialUsers,
   products: initialProducts,
   campaigns: campaignsProp,
@@ -204,7 +201,6 @@ export function MarketingAdSpendPage({
   const secondaryError = secondaryFetcher.data && !secondaryFetcher.data.ok ? secondaryFetcher.data.error : null;
 
   const metrics = secondary?.metrics ?? initialMetrics ?? null;
-  const leaderboard = secondary?.leaderboard ?? initialLeaderboard ?? null;
   const users = secondary?.users ?? initialUsers ?? [];
   const products = secondary?.products ?? initialProducts ?? [];
   const groups = secondary?.groups ?? initialGroups ?? [];

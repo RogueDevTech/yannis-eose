@@ -792,8 +792,35 @@ export function OrderDetailPage({
   const [sharePending, setSharePending] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
-  const selectedAllocatableLocation = allocatableLocations.find((l) => l.id === allocateLocationId);
-  const eligibleAllocatableCount = allocatableLocations.filter((l) => l.eligible).length;
+  // Resolve the deferred allocatable-locations promise once into local state so
+  // both the Assign modal AND the Mark Delivered dropdown can show per-product
+  // stock counts. The sync `allocatableLocations` prop is currently empty in the
+  // canonical loader path (loader streams via `allocatableLocationsDeferred`); we
+  // mirror it here so dependent UIs render immediately on the next tick.
+  const [resolvedAllocatableLocations, setResolvedAllocatableLocations] =
+    useState<typeof allocatableLocations>(allocatableLocations);
+  useEffect(() => {
+    if (allocatableLocations.length > 0) {
+      setResolvedAllocatableLocations(allocatableLocations);
+      return;
+    }
+    if (!allocatableLocationsDeferred) return;
+    let cancelled = false;
+    Promise.resolve(allocatableLocationsDeferred)
+      .then((rows) => {
+        if (cancelled) return;
+        if (Array.isArray(rows)) setResolvedAllocatableLocations(rows);
+      })
+      .catch(() => {
+        // Fall back to no descriptions — never block the modal.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allocatableLocations, allocatableLocationsDeferred]);
+
+  const selectedAllocatableLocation = resolvedAllocatableLocations.find((l) => l.id === allocateLocationId);
+  const eligibleAllocatableCount = resolvedAllocatableLocations.filter((l) => l.eligible).length;
 
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const scheduleSurface = useFetcherActionSurface(scheduleFetcher);
@@ -801,7 +828,14 @@ export function OrderDetailPage({
   const priceRequestSurface = useFetcherActionSurface(priceRequestFetcher);
 
   /** Disambiguates `intent: transition` (confirm / allocate / cancel / deliver share one intent). */
-  type FetchSubmissionKey = { intent: string; newStatus?: string } | null;
+  type FetchSubmissionKey = {
+    intent: string;
+    newStatus?: string;
+    /** Stamped at submit time for AGENT_ASSIGNED transitions so the post-success
+     *  hand-off flow (auto-open Share-to-3PL modal) can preselect the location
+     *  even after Remix has cleared `fetcher.formData`. */
+    logisticsLocationId?: string;
+  } | null;
   const fetcherSubmissionKeyRef = useRef<FetchSubmissionKey>(null);
   useEffect(() => {
     if (fetcher.state !== 'submitting' && fetcher.state !== 'loading') return;
@@ -811,9 +845,11 @@ export function OrderDetailPage({
     if (typeof intentRaw !== 'string' || !intentRaw) return;
     if (intentRaw === 'transition') {
       const ns = fd.get('newStatus');
+      const llid = fd.get('logisticsLocationId');
       fetcherSubmissionKeyRef.current = {
         intent: intentRaw,
         newStatus: typeof ns === 'string' ? ns : undefined,
+        logisticsLocationId: typeof llid === 'string' && llid ? llid : undefined,
       };
     } else {
       fetcherSubmissionKeyRef.current = { intent: intentRaw };
@@ -1109,6 +1145,10 @@ export function OrderDetailPage({
       setCancelModalOpen(false);
       setCancelReason('');
     }
+    const justAllocated =
+      allocateModalOpen &&
+      fetcherSubmissionKeyRef.current?.intent === 'transition' &&
+      fetcherSubmissionKeyRef.current?.newStatus === 'AGENT_ASSIGNED';
     if (allocateModalOpen) {
       setAllocateModalOpen(false);
       setAllocateLocationId('');
@@ -1118,7 +1158,35 @@ export function OrderDetailPage({
       setDeliverNote('');
       setDeliverProofUrl('');
     }
-  }, [confirmModalOpen, cancelModalOpen, allocateModalOpen, deliverModalOpen]);
+    // Chain assign → share: when the assignment succeeds AND a WhatsApp group
+    // exists for some logistics location AND a dispatch template exists, pop
+    // the Share-to-3PL modal next so the operator's hand-off is one continuous
+    // flow rather than "click Assign, click Share, pick again."
+    if (justAllocated) {
+      const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
+      if (locationsWithGroup.length > 0 && logisticsDispatchTemplates.length > 0) {
+        const justAllocatedId = fetcherSubmissionKeyRef.current?.logisticsLocationId ?? null;
+        const preselected =
+          (justAllocatedId && locationsWithGroup.find((l) => l.id === justAllocatedId)?.id) ??
+          (order.logisticsLocationId &&
+            locationsWithGroup.find((l) => l.id === order.logisticsLocationId)?.id) ??
+          locationsWithGroup[0]?.id ??
+          '';
+        setShareError(null);
+        setShareLocationId(preselected);
+        setShareTemplateId(logisticsDispatchTemplates[0]?.id ?? '');
+        setShareModalOpen(true);
+      }
+    }
+  }, [
+    confirmModalOpen,
+    cancelModalOpen,
+    allocateModalOpen,
+    deliverModalOpen,
+    logisticsLocations,
+    logisticsDispatchTemplates,
+    order.logisticsLocationId,
+  ]);
   useCloseOnFetcherSuccess(fetcher, handleStateTransitionSuccess);
 
   const handleScheduleSuccess = useCallback(
@@ -2492,7 +2560,10 @@ export function OrderDetailPage({
           </p>
           <ModalFetcherInlineError message={fetcherErrorForTransition('DELIVERED')} />
           {/* Logistics provider that actually delivered. Pre-filled with the original
-              allocation; can be changed if a different provider stepped in. */}
+              allocation; can be changed if a different provider stepped in. The
+              dropdown surfaces per-product stock counts (same data the Assign
+              modal uses) so the user can pick the provider that actually has the
+              units they need to deduct from. */}
           {logisticsLocations.length > 0 && (
             <div className="mb-4">
               <p className="text-xs font-medium text-app-fg-muted mb-1.5">Logistics provider</p>
@@ -2501,12 +2572,23 @@ export function OrderDetailPage({
                 value={deliverLocationId}
                 onChange={setDeliverLocationId}
                 placeholder="Select the provider that delivered…"
-                options={logisticsLocations.map((loc) => ({
-                  value: loc.id,
-                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                  description:
-                    loc.id === order.logisticsLocationId ? 'Originally allocated' : undefined,
-                }))}
+                options={logisticsLocations.map((loc) => {
+                  const stockInfo = resolvedAllocatableLocations.find((a) => a.id === loc.id);
+                  const stockDesc =
+                    stockInfo?.availabilityByProduct && stockInfo.availabilityByProduct.length > 0
+                      ? stockInfo.availabilityByProduct
+                          .map((p) => `${p.productName}: ${p.available} available`)
+                          .join(' · ')
+                      : undefined;
+                  const originLabel =
+                    loc.id === order.logisticsLocationId ? 'Originally allocated' : undefined;
+                  const description = [stockDesc, originLabel].filter(Boolean).join(' · ') || undefined;
+                  return {
+                    value: loc.id,
+                    label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                    description,
+                  };
+                })}
                 searchPlaceholder="Search providers..."
                 controlSize="lg"
               />

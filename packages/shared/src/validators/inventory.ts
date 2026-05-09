@@ -42,6 +42,26 @@ export const verifyTransferSchema = z.object({
 export type VerifyTransferInput = z.infer<typeof verifyTransferSchema>;
 
 // ============================================
+// Approve / Reject Transfer — source-authority gate
+// ============================================
+// Used when a non-source-authority initiated a transfer. The transfer sits in
+// PENDING until the source authority approves (deducts source stock + flips to
+// IN_TRANSIT) or rejects (terminal REJECTED, inventory-neutral).
+
+export const approveTransferSchema = z.object({
+  transferId: z.string().uuid(),
+});
+
+export type ApproveTransferInput = z.infer<typeof approveTransferSchema>;
+
+export const rejectTransferSchema = z.object({
+  transferId: z.string().uuid(),
+  reason: z.string().trim().min(10, 'Rejection reason must be at least 10 characters').max(500),
+});
+
+export type RejectTransferInput = z.infer<typeof rejectTransferSchema>;
+
+// ============================================
 // Stock Adjustment — manual correction
 // ============================================
 

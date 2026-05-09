@@ -2,6 +2,7 @@ import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
@@ -151,6 +152,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ permissionRequestsShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
@@ -195,7 +199,10 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function PermissionRequestsRoute() {
   const { permissionRequestsShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<PermissionRequestsLoadingShell activeStatus={permissionRequestsShell.status} />}>
+    <CachedAwait resolve={pageData} fallback={<PermissionRequestsLoadingShell activeStatus={permissionRequestsShell.status} />}
+      loaderShell={{ permissionRequestsShell }}
+      deferredKey="pageData"
+    >
       {(data) => (
           <PermissionRequestsPage
             requests={data.requests}

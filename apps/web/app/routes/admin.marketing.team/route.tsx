@@ -1,5 +1,6 @@
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
@@ -213,10 +214,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ teamShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function MarketingTeamRoute() {
   const { teamShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<MarketingTeamLoadingShell dateFilters={teamShell.dateFilters} />}>
+    <CachedAwait resolve={pageData} fallback={<MarketingTeamLoadingShell dateFilters={teamShell.dateFilters} />}
+      loaderShell={{ teamShell }}
+      deferredKey="pageData"
+    >
       {(data) => (
           <MarketingTeamPage
             teamMembers={data.teamMembers}

@@ -7,6 +7,8 @@ import type {
   StockIntakeInput,
   StockTransferInput,
   VerifyTransferInput,
+  ApproveTransferInput,
+  RejectTransferInput,
   StockAdjustmentInput,
   ListInventoryInput,
   ListMovementsInput,
@@ -363,14 +365,100 @@ export class InventoryService {
   // ============================================
 
   /**
+   * Resolve the source location's `(providerKind, providerId, locationName)` so
+   * `canApproveSourceTransfer` can decide if the actor is the source authority.
+   */
+  private async getSourceLocationInfo(
+    tx: InventoryDbTx,
+    locationId: string,
+  ): Promise<{ providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null; providerId: string | null; locationName: string }> {
+    const rows = await tx
+      .select({
+        locationName: schema.logisticsLocations.name,
+        providerId: schema.logisticsLocations.providerId,
+        providerKind: schema.logisticsProviders.kind,
+      })
+      .from(schema.logisticsLocations)
+      .leftJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(eq(schema.logisticsLocations.id, locationId))
+      .limit(1);
+    const row = rows[0];
+    if (!row) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Source location not found' });
+    }
+    return {
+      providerKind: (row.providerKind as 'WAREHOUSE' | 'THIRD_PARTY' | null) ?? null,
+      providerId: row.providerId ?? null,
+      locationName: row.locationName ?? 'source',
+    };
+  }
+
+  /**
+   * Source-authority rule (role-based, no per-location manager assignment yet).
+   *
+   * | Source provider kind | Actors who skip approval (source authority)                                 |
+   * | -------------------- | --------------------------------------------------------------------------- |
+   * | WAREHOUSE            | STOCK_MANAGER, BRANCH_ADMIN, SUPER_ADMIN, ADMIN                             |
+   * | THIRD_PARTY          | TPL_MANAGER, HEAD_OF_LOGISTICS, SUPER_ADMIN, ADMIN                          |
+   *
+   * HEAD_OF_LOGISTICS does NOT skip approval for WAREHOUSE sources — that's the
+   * whole point of the gate. Stock managers must consciously sign off on stock
+   * leaving the warehouse.
+   */
+  private canApproveSourceTransfer(
+    actor: SessionUser,
+    providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null,
+  ): boolean {
+    if (isAdminLevel(actor)) return true;
+    if (providerKind === 'WAREHOUSE') {
+      return actor.role === 'STOCK_MANAGER' || actor.role === 'BRANCH_ADMIN';
+    }
+    if (providerKind === 'THIRD_PARTY') {
+      return actor.role === 'TPL_MANAGER' || actor.role === 'HEAD_OF_LOGISTICS';
+    }
+    // Unknown / null provider kind — fail closed (require approval).
+    return false;
+  }
+
+  /**
+   * Roles to fan-out the "transfer pending approval" notification to.
+   * Mirrors `canApproveSourceTransfer` minus admin-class (admins get notified
+   * about everything via their broad permissions; we don't want to spam them
+   * for every transfer — the `STOCK_MANAGER` / `TPL_MANAGER` row + their
+   * `inventory.approveTransfer` grant cover their need to approve).
+   */
+  private getSourceAuthorityRolesForNotification(
+    providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null,
+  ): Array<'STOCK_MANAGER' | 'BRANCH_ADMIN' | 'TPL_MANAGER' | 'HEAD_OF_LOGISTICS'> {
+    if (providerKind === 'WAREHOUSE') return ['STOCK_MANAGER', 'BRANCH_ADMIN'];
+    if (providerKind === 'THIRD_PARTY') return ['TPL_MANAGER', 'HEAD_OF_LOGISTICS'];
+    return [];
+  }
+
+  /**
    * Initiate a stock transfer between locations.
-   * Deducts from source immediately and records transfer as IN_TRANSIT.
-   * Destination stock is credited only when Logistics verifies receipt.
+   *
+   * If the actor is the source-authority for the FROM location they keep the
+   * legacy fast-path: source stock deducts immediately, status starts at
+   * IN_TRANSIT, and the receiver verifies on arrival.
+   *
+   * Otherwise the row starts as PENDING (no source deduction, no movement row
+   * yet). The source authority pool is notified to approve. On approve, source
+   * stock deducts and the row flips to IN_TRANSIT. Reject is a clean status flip
+   * to REJECTED — inventory-neutral. This way ops can record planned moves
+   * without nuking the warehouse's view of available stock.
+   *
+   * See CLAUDE.md → Transfer Approval Gate.
    */
   async initiateTransfer(input: StockTransferInput, actor: SessionUser) {
     const now = new Date();
-    const transfer = await withActor(this.db, actor, async (tx) => {
-      // Check source has enough stock
+    const result = await withActor(this.db, actor, async (tx) => {
+      const sourceInfo = await this.getSourceLocationInfo(tx, input.fromLocationId);
+      const requiresApproval = !this.canApproveSourceTransfer(actor, sourceInfo.providerKind);
+
       const sourceLevel = await tx
         .select()
         .from(schema.inventoryLevels)
@@ -390,17 +478,6 @@ export class InventoryService {
         });
       }
 
-      // Deduct from source
-      if (sourceLevel[0]) {
-        await tx
-          .update(schema.inventoryLevels)
-          .set({
-            stockCount: sql`${schema.inventoryLevels.stockCount} - ${input.quantity}`,
-            updatedAt: now,
-          })
-          .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
-      }
-
       const transferCostTotal = await this.computeFifoLandedCostForQuantityInTx(
         tx,
         input.productId,
@@ -415,9 +492,10 @@ export class InventoryService {
           quantityReceived: null,
           fromLocationId: input.fromLocationId,
           toLocationId: input.toLocationId,
-          transferStatus: 'IN_TRANSIT',
+          transferStatus: requiresApproval ? 'PENDING' : 'IN_TRANSIT',
           transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
           verifiedAt: null,
+          initiatedBy: actor.id,
         })
         .returning();
 
@@ -426,28 +504,279 @@ export class InventoryService {
         throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer' });
       }
 
-      await tx.insert(schema.stockMovements).values({
+      // Fast-path (source-authority initiator): deduct source + write movement
+      // inside the same transaction. Otherwise the side effects defer to approve.
+      if (!requiresApproval) {
+        if (sourceLevel[0]) {
+          await tx
+            .update(schema.inventoryLevels)
+            .set({
+              stockCount: sql`${schema.inventoryLevels.stockCount} - ${input.quantity}`,
+              updatedAt: now,
+            })
+            .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
+        }
+        await tx.insert(schema.stockMovements).values({
+          productId: input.productId,
+          movementType: 'TRANSFER_OUT',
+          quantity: input.quantity,
+          fromLocationId: input.fromLocationId,
+          toLocationId: input.toLocationId,
+          referenceId: newTransfer.id,
+          actorId: actor.id,
+        });
+      }
+
+      return { transfer: newTransfer, requiresApproval, sourceProviderKind: sourceInfo.providerKind, sourceLocationName: sourceInfo.locationName };
+    });
+
+    if (result.requiresApproval) {
+      this.events.emitToRoom('inventory', 'transfer:pending_approval', {
+        transferId: result.transfer.id,
         productId: input.productId,
+      });
+
+      // Fan out to the source-authority pool. Best-effort, non-blocking.
+      try {
+        const [productRow] = await this.db
+          .select({ name: schema.products.name })
+          .from(schema.products)
+          .where(eq(schema.products.id, input.productId))
+          .limit(1);
+        const productName = productRow?.name ?? 'product';
+        const payload = {
+          type: 'inventory:transfer_pending_approval' as const,
+          title: 'Transfer awaiting your approval',
+          body: `${actor.name ?? 'Someone'} initiated a transfer of ${input.quantity} × ${productName} out of ${result.sourceLocationName}. Approve before stock leaves.`,
+          data: {
+            transferId: result.transfer.id,
+            productId: input.productId,
+            quantity: input.quantity,
+            fromLocationId: input.fromLocationId,
+            toLocationId: input.toLocationId,
+            initiatedBy: actor.id,
+          },
+        };
+        for (const role of this.getSourceAuthorityRolesForNotification(result.sourceProviderKind)) {
+          this.notifications.enqueueCreateForRole(role, payload);
+        }
+      } catch {
+        // Notifications are best-effort.
+      }
+    } else {
+      this.events.emitToRoom('inventory', 'transfer:created', {
+        transferId: result.transfer.id,
+        productId: input.productId,
+        completed: false,
+      });
+      this.scheduleLowStockCheck(input.productId, input.fromLocationId);
+    }
+
+    return result.transfer;
+  }
+
+  /**
+   * Source-authority approves a PENDING transfer. This is when source stock
+   * actually deducts and the TRANSFER_OUT movement row is written.
+   *
+   * Re-checks availability inside the transaction — the picture can change
+   * between initiate and approve (other allocations, other approvals against
+   * the same source). If the source no longer has the requested quantity, the
+   * approver gets the same BAD_REQUEST shape as `initiateTransfer`.
+   */
+  async approveTransfer(input: ApproveTransferInput, actor: SessionUser) {
+    const now = new Date();
+    const result = await withActor(this.db, actor, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(schema.stockTransfers)
+        .where(eq(schema.stockTransfers.id, input.transferId))
+        .limit(1);
+      const transfer = rows[0];
+      if (!transfer) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      }
+      if (transfer.transferStatus !== 'PENDING') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot approve a transfer in status ${transfer.transferStatus}`,
+        });
+      }
+
+      const sourceInfo = await this.getSourceLocationInfo(tx, transfer.fromLocationId);
+      if (!this.canApproveSourceTransfer(actor, sourceInfo.providerKind)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You are not authorised to approve transfers from this source location',
+        });
+      }
+
+      const sourceLevel = await tx
+        .select()
+        .from(schema.inventoryLevels)
+        .where(
+          and(
+            eq(schema.inventoryLevels.productId, transfer.productId),
+            eq(schema.inventoryLevels.locationId, transfer.fromLocationId),
+          ),
+        )
+        .limit(1);
+      const available = (sourceLevel[0]?.stockCount ?? 0) - (sourceLevel[0]?.reservedCount ?? 0);
+      if (available < transfer.quantitySent) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Insufficient stock at source. Available: ${available}, Requested: ${transfer.quantitySent}`,
+        });
+      }
+
+      // Deduct source + flip status + audit columns + insert movement (single tx).
+      if (sourceLevel[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} - ${transfer.quantitySent}`,
+            updatedAt: now,
+          })
+          .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
+      }
+      await tx
+        .update(schema.stockTransfers)
+        .set({
+          transferStatus: 'IN_TRANSIT',
+          approvedBy: actor.id,
+          approvedAt: now,
+        })
+        .where(eq(schema.stockTransfers.id, transfer.id));
+      await tx.insert(schema.stockMovements).values({
+        productId: transfer.productId,
         movementType: 'TRANSFER_OUT',
-        quantity: input.quantity,
-        fromLocationId: input.fromLocationId,
-        toLocationId: input.toLocationId,
-        referenceId: newTransfer.id,
+        quantity: transfer.quantitySent,
+        fromLocationId: transfer.fromLocationId,
+        toLocationId: transfer.toLocationId,
+        referenceId: transfer.id,
         actorId: actor.id,
       });
 
-      return newTransfer;
+      return { transfer, sourceLocationName: sourceInfo.locationName };
     });
 
-    this.events.emitToRoom('inventory', 'transfer:created', {
-      transferId: transfer.id,
-      productId: input.productId,
-      completed: false,
+    this.events.emitToRoom('inventory', 'transfer:approved', {
+      transferId: result.transfer.id,
+      productId: result.transfer.productId,
+    });
+    this.scheduleLowStockCheck(result.transfer.productId, result.transfer.fromLocationId);
+
+    if (result.transfer.initiatedBy) {
+      try {
+        const [productRow] = await this.db
+          .select({ name: schema.products.name })
+          .from(schema.products)
+          .where(eq(schema.products.id, result.transfer.productId))
+          .limit(1);
+        const productName = productRow?.name ?? 'product';
+        this.notifications.enqueueCreate({
+          userId: result.transfer.initiatedBy,
+          type: 'inventory:transfer_approved',
+          title: 'Transfer approved',
+          body: `${actor.name ?? 'A source manager'} approved your transfer of ${result.transfer.quantitySent} × ${productName} out of ${result.sourceLocationName}. Stock is now in transit.`,
+          data: {
+            transferId: result.transfer.id,
+            productId: result.transfer.productId,
+            approvedBy: actor.id,
+          },
+        });
+      } catch {
+        // Notifications are best-effort.
+      }
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Source-authority rejects a PENDING transfer. Pure status flip — no inventory
+   * side effects, since nothing was deducted at initiate. The original initiator
+   * gets a notification with the rejection reason.
+   */
+  async rejectTransfer(input: RejectTransferInput, actor: SessionUser) {
+    const reason = input.reason.trim();
+    if (reason.length < 10) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Rejection reason must be at least 10 characters',
+      });
+    }
+
+    const now = new Date();
+    const result = await withActor(this.db, actor, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(schema.stockTransfers)
+        .where(eq(schema.stockTransfers.id, input.transferId))
+        .limit(1);
+      const transfer = rows[0];
+      if (!transfer) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Transfer not found' });
+      }
+      if (transfer.transferStatus !== 'PENDING') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `Cannot reject a transfer in status ${transfer.transferStatus}`,
+        });
+      }
+
+      const sourceInfo = await this.getSourceLocationInfo(tx, transfer.fromLocationId);
+      if (!this.canApproveSourceTransfer(actor, sourceInfo.providerKind)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You are not authorised to reject transfers from this source location',
+        });
+      }
+
+      await tx
+        .update(schema.stockTransfers)
+        .set({
+          transferStatus: 'REJECTED',
+          rejectedBy: actor.id,
+          rejectedAt: now,
+          rejectionReason: reason,
+        })
+        .where(eq(schema.stockTransfers.id, transfer.id));
+
+      return { transfer };
     });
 
-    this.scheduleLowStockCheck(input.productId, input.fromLocationId);
+    this.events.emitToRoom('inventory', 'transfer:rejected', {
+      transferId: result.transfer.id,
+      productId: result.transfer.productId,
+    });
 
-    return transfer;
+    if (result.transfer.initiatedBy) {
+      try {
+        const [productRow] = await this.db
+          .select({ name: schema.products.name })
+          .from(schema.products)
+          .where(eq(schema.products.id, result.transfer.productId))
+          .limit(1);
+        const productName = productRow?.name ?? 'product';
+        this.notifications.enqueueCreate({
+          userId: result.transfer.initiatedBy,
+          type: 'inventory:transfer_rejected',
+          title: 'Transfer rejected',
+          body: `${actor.name ?? 'The source manager'} rejected your transfer of ${result.transfer.quantitySent} × ${productName}. Reason: ${reason}`,
+          data: {
+            transferId: result.transfer.id,
+            productId: result.transfer.productId,
+            rejectedBy: actor.id,
+            rejectionReason: reason,
+          },
+        });
+      } catch {
+        // Notifications are best-effort.
+      }
+    }
+
+    return { success: true };
   }
 
   /**
@@ -626,6 +955,27 @@ export class InventoryService {
       }
       if (transfer.transferStatus === 'CANCELLED') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is already cancelled' });
+      }
+      if (transfer.transferStatus === 'REJECTED') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Transfer is already rejected' });
+      }
+
+      // PENDING transfers never deducted source stock — cancelling is a pure
+      // status flip. No movement rows, no inventory changes.
+      if (transfer.transferStatus === 'PENDING') {
+        await tx
+          .update(schema.stockTransfers)
+          .set({
+            transferStatus: 'CANCELLED',
+            shrinkageReason: input.reason?.trim() ? input.reason.trim() : transfer.shrinkageReason,
+          })
+          .where(eq(schema.stockTransfers.id, input.transferId));
+
+        this.events.emitToRoom('inventory', 'transfer:cancelled', {
+          transferId: transfer.id,
+          productId: transfer.productId,
+        });
+        return { success: true };
       }
 
       const receivedQty = transfer.quantityReceived ?? 0;
@@ -1328,12 +1678,21 @@ export class InventoryService {
   }
 
   /**
-   * Get pending transfers.
+   * Get transfers with optional status filter.
+   *
+   * `viewer` is optional — when provided, every PENDING row is annotated with
+   * `canApprove: boolean` so the client can render the Approve / Reject buttons
+   * without mirroring the source-authority rule. Server is canonical.
    */
-  async listTransfers(status?: string) {
+  async listTransfers(status?: string, viewer?: SessionUser) {
     const conditions = [];
     if (status) {
-      conditions.push(eq(schema.stockTransfers.transferStatus, status as 'PENDING' | 'IN_TRANSIT' | 'RECEIVED' | 'DISPUTED'));
+      conditions.push(
+        eq(
+          schema.stockTransfers.transferStatus,
+          status as 'PENDING' | 'IN_TRANSIT' | 'RECEIVED' | 'DISPUTED' | 'CANCELLED' | 'REJECTED',
+        ),
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1350,6 +1709,9 @@ export class InventoryService {
     if (transfers.length === 0) return transfers;
 
     const transferIds = transfers.map((t) => t.id);
+    // Sender preference: TRANSFER_OUT movement actor (set on initiate fast-path
+    // and on approve), then fall back to `initiated_by` (set on every initiate)
+    // so PENDING rows still surface their initiator's name.
     const senderRows = await this.db
       .select({
         transferId: schema.stockMovements.referenceId,
@@ -1368,6 +1730,53 @@ export class InventoryService {
     for (const row of senderRows) {
       if (!row.transferId || !row.senderName || senderByTransferId.has(row.transferId)) continue;
       senderByTransferId.set(row.transferId, row.senderName);
+    }
+
+    // Fallback: for PENDING transfers (no TRANSFER_OUT movement yet) we look up
+    // the initiator's name via stock_transfers.initiated_by → users.name.
+    const missingInitiatorIds = Array.from(
+      new Set(
+        transfers
+          .filter((t) => !senderByTransferId.has(t.id) && t.initiatedBy)
+          .map((t) => t.initiatedBy as string),
+      ),
+    );
+    if (missingInitiatorIds.length > 0) {
+      const initiatorRows = await this.db
+        .select({ id: schema.users.id, name: schema.users.name })
+        .from(schema.users)
+        .where(inArray(schema.users.id, missingInitiatorIds));
+      const nameById = new Map(initiatorRows.map((r) => [r.id, r.name]));
+      for (const t of transfers) {
+        if (senderByTransferId.has(t.id)) continue;
+        if (t.initiatedBy && nameById.has(t.initiatedBy)) {
+          senderByTransferId.set(t.id, nameById.get(t.initiatedBy)!);
+        }
+      }
+    }
+
+    // Enrich every row with the source provider's kind so the client can render
+    // "requires approval" affordances and gate the Approve/Reject buttons.
+    const sourceLocationIds = Array.from(new Set(transfers.map((t) => t.fromLocationId)));
+    const providerInfoRows = sourceLocationIds.length
+      ? await this.db
+          .select({
+            locationId: schema.logisticsLocations.id,
+            providerKind: schema.logisticsProviders.kind,
+          })
+          .from(schema.logisticsLocations)
+          .leftJoin(
+            schema.logisticsProviders,
+            eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+          )
+          .where(inArray(schema.logisticsLocations.id, sourceLocationIds))
+      : [];
+    const providerKindByLocation = new Map<string, 'WAREHOUSE' | 'THIRD_PARTY' | null>();
+    for (const row of providerInfoRows) {
+      providerKindByLocation.set(
+        row.locationId,
+        (row.providerKind as 'WAREHOUSE' | 'THIRD_PARTY' | null) ?? null,
+      );
     }
 
     let outcomeRows: Array<{
@@ -1407,11 +1816,20 @@ export class InventoryService {
     const mapped = transfers.flatMap((transfer) => {
       const senderName = senderByTransferId.get(transfer.id) ?? null;
       const outcomes = outcomesByTransfer.get(transfer.id) ?? [];
+      const sourceProviderKind = providerKindByLocation.get(transfer.fromLocationId) ?? null;
+      // Only PENDING rows are actionable. Non-PENDING rows are always
+      // `canApprove: false` regardless of viewer role — keeps the UI honest.
+      const canApprove =
+        viewer && transfer.transferStatus === 'PENDING'
+          ? this.canApproveSourceTransfer(viewer, sourceProviderKind)
+          : false;
       if (outcomes.length === 0) {
         return [
           {
             ...transfer,
             senderName,
+            sourceProviderKind,
+            canApprove,
             outcomeStatus: transfer.transferStatus === 'RECEIVED' ? 'APPROVED' : transfer.transferStatus,
             outcomeQuantity: transfer.quantityReceived,
             outcomeReason: transfer.shrinkageReason,
@@ -1421,6 +1839,8 @@ export class InventoryService {
       return outcomes.map((outcome) => ({
         ...transfer,
         senderName,
+        sourceProviderKind,
+        canApprove,
         outcomeStatus: outcome.outcomeStatus,
         outcomeQuantity: outcome.outcomeQuantity,
         outcomeReason: outcome.outcomeReason,

@@ -4,6 +4,8 @@ import {
   stockIntakeSchema,
   stockTransferSchema,
   verifyTransferSchema,
+  approveTransferSchema,
+  rejectTransferSchema,
   stockAdjustmentSchema,
   listInventorySchema,
   listMovementsSchema,
@@ -146,6 +148,30 @@ export const inventoryRouter = router({
     }),
 
   /**
+   * Approve a PENDING transfer. Source authority only (gated by
+   * `inventory.approveTransfer` permission AND a server-side
+   * `canApproveSourceTransfer` check that compares the actor's role against
+   * the source location's provider kind).
+   *
+   * On approval, source stock deducts and the row flips to IN_TRANSIT.
+   */
+  approveTransfer: permissionProcedure('inventory.approveTransfer')
+    .input(approveTransferSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getInventoryService().approveTransfer(input, ctx.user);
+    }),
+
+  /**
+   * Reject a PENDING transfer. Pure status flip — no inventory side effects.
+   * Reason is mandatory (min 10 chars). Same gate as approveTransfer.
+   */
+  rejectTransfer: permissionProcedure('inventory.approveTransfer')
+    .input(rejectTransferSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getInventoryService().rejectTransfer(input, ctx.user);
+    }),
+
+  /**
    * Verify transfer receipt — 3PL Manager, Stock Manager, or Head of Logistics (when 3PL is not on-platform).
    */
   verifyTransfer: permissionProcedure('inventory.verifyTransfer')
@@ -193,8 +219,8 @@ export const inventoryRouter = router({
    */
   transfers: authedProcedure
     .input(z.object({ status: z.string().optional() }))
-    .query(async ({ input }) => {
-      return getInventoryService().listTransfers(input.status);
+    .query(async ({ input, ctx }) => {
+      return getInventoryService().listTransfers(input.status, ctx.user);
     }),
 
   /**
@@ -305,7 +331,7 @@ export const inventoryRouter = router({
           ctx.user.role,
         ),
         getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
-        getInventoryService().listTransfers(undefined),
+        getInventoryService().listTransfers(undefined, ctx.user),
         canSeeReturned
           ? getInventoryService().listReturnedOrders(input.locationId)
           : Promise.resolve([]),

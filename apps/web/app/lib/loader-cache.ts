@@ -102,4 +102,145 @@ export function invalidateCachedLoader(pathname: string): void {
       cache.delete(k);
     }
   }
+  // Also drop the full-loader cache so clientLoader doesn't serve stale
+  // route shape after explicit invalidation.
+  for (const k of [...fullCache.keys()]) {
+    if (k === pathname || k.startsWith(`${pathname}?`)) {
+      fullCache.delete(k);
+    }
+  }
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// Full-loader cache — used by `clientLoader` to skip the server roundtrip
+// entirely on revisit, giving true LinkedIn-style instant navigation.
+//
+// Why a second cache: the original `cache` above stores ONLY the resolved
+// deferred portion (whatever `<CachedAwait resolve={pageData}>` snapshots).
+// `clientLoader` needs the WHOLE loader return shape — synchronous shell
+// (`csOrdersShell`, `financeShell`, etc.) AND the resolved deferred — so it
+// can serve `useLoaderData()` immediately without any network call.
+//
+// Populated by `<CachedAwait>` when it receives both `loaderShell` and a
+// `deferredKey` prop (opt-in per route).
+// ───────────────────────────────────────────────────────────────────────────
+
+interface FullCacheEntry {
+  /** Full loader return value with deferred promises pre-resolved. */
+  data: unknown;
+  ts: number;
+}
+
+const fullCache = new Map<string, FullCacheEntry>();
+
+export function getFullLoaderEntry(key: string): unknown | null {
+  const entry = fullCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts >= TTL_MS) {
+    fullCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+export function setFullLoaderEntry(key: string, data: unknown): void {
+  if (data == null) return;
+  const existing = fullCache.get(key);
+  if (existing && existing.data === data) {
+    existing.ts = Date.now();
+    return;
+  }
+  fullCache.set(key, { data, ts: Date.now() });
+  if (fullCache.size > MAX_ENTRIES) {
+    let oldestKey: string | null = null;
+    let oldestTs = Number.POSITIVE_INFINITY;
+    for (const [k, v] of fullCache) {
+      if (v.ts < oldestTs) {
+        oldestTs = v.ts;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey != null) fullCache.delete(oldestKey);
+  }
+}
+
+/**
+ * Reusable `clientLoader` for routes that opted into full-loader caching.
+ *
+ * On a client-side navigation:
+ *  - Cache hit (TTL fresh) → return cached `useLoaderData` shape immediately.
+ *    Remix mounts the route on the same tick — NO server roundtrip, NO
+ *    skeleton flash. After mount, `<CachedAwait>` fires `revalidator.revalidate()`
+ *    which re-runs `clientLoader`; on that revalidation we bypass the cache and
+ *    call `serverLoader()` so fresh data lands.
+ *  - Cache miss → fall through to `serverLoader()`.
+ *
+ * Usage in a route file:
+ *
+ *   import { cachedClientLoader } from '~/lib/loader-cache';
+ *   export const clientLoader = cachedClientLoader;
+ *   clientLoader.hydrate = false;
+ *
+ * Pair with `<CachedAwait>` configured with `loaderShell` + `deferredKey` so
+ * the cache gets populated on first visit.
+ */
+/**
+ * In-flight revalidation tracker — when a cached payload is served, we stamp
+ * the URL with a timestamp so the very next loader run (the on-mount revalidate
+ * fired by `<CachedAwait>`) bypasses the cache and fetches fresh data. The
+ * TTL is a safety net: if the user navigates away before the revalidate fires,
+ * the flag becomes stale and the next visit can hit the cache again.
+ */
+const inFlightRevalidations = new Map<string, number>();
+/** Window during which a stamped URL forces a fresh fetch. Long enough for the
+ *  revalidator to fire (it runs in a useEffect, ~50ms after mount); short
+ *  enough that an interrupted navigation doesn't lock the cache out for long. */
+const REVALIDATE_FLAG_MS = 5_000;
+
+/**
+ * Type matches Remix's `ClientLoaderFunctionArgs` shape without importing
+ * the type (avoids a Remix-version coupling at the cache layer).
+ */
+interface CachedClientLoaderArgs {
+  request: Request;
+  serverLoader: () => Promise<unknown>;
+}
+
+interface CachedClientLoaderFn {
+  (args: CachedClientLoaderArgs): Promise<unknown>;
+  /** Remix flag: when `true`, also runs on initial SSR hydration. Default `false`. */
+  hydrate?: boolean;
+}
+
+const cachedClientLoaderImpl = async (
+  args: CachedClientLoaderArgs,
+): Promise<unknown> => {
+  const url = new URL(args.request.url);
+  const key = url.pathname + url.search;
+
+  // If a fresh revalidation flag exists, fall through to the server (this is
+  // the on-mount revalidate triggered by `<CachedAwait>` after the cached
+  // shape rendered — we want fresh data this time).
+  const flagged = inFlightRevalidations.get(key);
+  if (flagged != null && Date.now() - flagged < REVALIDATE_FLAG_MS) {
+    inFlightRevalidations.delete(key);
+    const fresh = await args.serverLoader();
+    return fresh;
+  }
+  if (flagged != null) {
+    // Stale flag (user navigated away before revalidate fired) — drop it and
+    // fall through to the cache check below.
+    inFlightRevalidations.delete(key);
+  }
+
+  const cached = getFullLoaderEntry(key);
+  if (cached !== null) {
+    // Stamp the key so the next revalidation tick fetches fresh data.
+    inFlightRevalidations.set(key, Date.now());
+    return cached;
+  }
+
+  return args.serverLoader();
+};
+
+export const cachedClientLoader: CachedClientLoaderFn = cachedClientLoaderImpl;
