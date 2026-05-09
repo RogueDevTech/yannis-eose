@@ -100,25 +100,53 @@ function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
  * Sign + set the bundle cookie. Cookie max-age is the same as the session
  * (so the cookie persists across short network blips); the bundle's payload
  * carries its own short-lived `exp` so loaders refresh data within ~60s.
+ *
+ * Wrapped in try/catch so a missing `SESSION_BUNDLE_SECRET` / `SESSION_SECRET`
+ * (or any other signing failure) NEVER breaks the request it's attached to —
+ * the bundle is purely an optimization. If signing fails the loader simply
+ * falls back to `/auth/me` on every request (the pre-bundle behaviour).
+ *
+ * Logs at WARN level so missing env vars are visible in deploy logs without
+ * spamming on every request after the first warning.
  */
+let bundleCookieFailureLogged = false;
 function setBundleCookie(res: Response, user: SessionUser, sessionTtlSeconds: number): void {
-  const value = signSessionBundle(bundleInputFromSessionUser(user), resolveBundleSecret());
-  const isProduction = process.env['NODE_ENV'] === 'production';
-  const domain = resolvedSessionCookieDomain();
-  res.cookie(BUNDLE_COOKIE_NAME, value, {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'strict' : 'lax',
-    // The HTTP cookie outlives the bundle's freshness window — see the file
-    // header in `session-bundle-cookie.ts` for the rationale.
-    maxAge: Math.max(sessionTtlSeconds, BUNDLE_TTL_SECONDS) * 1000,
-    path: '/',
-    ...(domain ? { domain } : {}),
-  });
+  try {
+    const value = signSessionBundle(bundleInputFromSessionUser(user), resolveBundleSecret());
+    const isProduction = process.env['NODE_ENV'] === 'production';
+    const domain = resolvedSessionCookieDomain();
+    res.cookie(BUNDLE_COOKIE_NAME, value, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'strict' : 'lax',
+      // The HTTP cookie outlives the bundle's freshness window — see the file
+      // header in `session-bundle-cookie.ts` for the rationale.
+      maxAge: Math.max(sessionTtlSeconds, BUNDLE_TTL_SECONDS) * 1000,
+      path: '/',
+      ...(domain ? { domain } : {}),
+    });
+  } catch (err) {
+    // Most common cause: SESSION_BUNDLE_SECRET / SESSION_SECRET not set on the
+    // deployed API. Swallowing means login still succeeds with just the session
+    // cookie; the perf optimisation is silently degraded.
+    if (!bundleCookieFailureLogged) {
+      bundleCookieFailureLogged = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[auth] setBundleCookie failed; login will still succeed but bundle-cookie ` +
+          `optimisation is degraded: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 }
 
 function clearBundleCookie(res: Response): void {
-  res.clearCookie(BUNDLE_COOKIE_NAME, sessionClearCookieOpts());
+  try {
+    res.clearCookie(BUNDLE_COOKIE_NAME, sessionClearCookieOpts());
+  } catch {
+    // Cookie clearing is best-effort. If it fails, the cookie's own short
+    // expiry (BUNDLE_TTL_SECONDS) will let it die naturally.
+  }
 }
 
 @Controller('auth')
