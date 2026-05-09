@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { decodePermissionsFromBitmask } from '@yannis/shared';
 
 /**
  * Verify-only counterpart of `apps/api/src/auth/session-bundle-cookie.ts`.
@@ -14,13 +15,17 @@ import { createHmac, timingSafeEqual } from 'crypto';
  * The two files are intentionally NOT a shared package — keeping them as
  * mirrors avoids dragging the API's NestJS deps into the Remix server bundle,
  * and the surface is small enough that drift is easy to spot in code review.
+ *
+ * The permission bitmask encoder/decoder IS shared, in `@yannis/shared`, so
+ * both processes use the same bit-position index without drift.
  */
 
 export const BUNDLE_COOKIE_NAME = 'yannis_bundle';
 
-const BUNDLE_VERSION = 1;
+const BUNDLE_VERSION = 2;
 
-export interface SessionBundlePayload {
+/** Wire shape of the bundle payload — `p` is the bitmask (decoded by the caller). */
+interface RawSessionBundlePayload {
   v: number;
   iat: number;
   exp: number;
@@ -33,7 +38,8 @@ export interface SessionBundlePayload {
   scopeOrgWideHead: boolean;
   scopeTeamSupervisor: boolean;
   logisticsLocationId: string | null;
-  permissions: string[];
+  /** Bitmask-encoded permissions — see `@yannis/shared/permission-bitmask.ts`. */
+  p: string;
   currentBranchId: string | null;
   branchIds: string[];
   appTheme: string | null;
@@ -42,6 +48,11 @@ export interface SessionBundlePayload {
   mirrorSessionId: string | null;
   staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
   isFinanceOfficer?: boolean;
+}
+
+/** Decoded shape that callers consume — `permissions` expanded back to `string[]`. */
+export interface SessionBundlePayload extends Omit<RawSessionBundlePayload, 'p'> {
+  permissions: string[];
 }
 
 function resolveBundleSecret(): string {
@@ -99,12 +110,18 @@ function verifyAndDecode(cookieValue: string, secret: string): SessionBundlePayl
     return null;
   }
   if (!parsed || typeof parsed !== 'object') return null;
-  const p = parsed as SessionBundlePayload;
+  const raw = parsed as RawSessionBundlePayload;
 
-  if (p.v !== BUNDLE_VERSION) return null;
-  if (typeof p.exp !== 'number' || Date.now() > p.exp) return null;
+  if (raw.v !== BUNDLE_VERSION) return null;
+  if (typeof raw.exp !== 'number' || Date.now() > raw.exp) return null;
+  if (typeof raw.p !== 'string') return null; // Required since v2 — old shape (`permissions: string[]`) was retired in BUNDLE_VERSION bump.
 
-  return p;
+  // Expand the bitmask back to the canonical permission codes.
+  const { p, ...rest } = raw;
+  return {
+    ...rest,
+    permissions: decodePermissionsFromBitmask(p),
+  };
 }
 
 /**
