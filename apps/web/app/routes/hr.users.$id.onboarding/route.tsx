@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { Await, useLoaderData } from '@remix-run/react';
 import {
   apiRequest,
+  getCurrentUser,
   getSessionCookie,
   requireOnboardingHrPagesAccess,
   safeStatus,
@@ -24,6 +25,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const userId = params['id'];
   if (!userId) throw new Response('Missing user id', { status: 400 });
   const cookie = getSessionCookie(request);
+  // Mirror Mode forces every form field + action button into read-only state.
+  const actor = await getCurrentUser(request);
+  const isMirroring = !!actor?.mirroredBy;
 
   const pageData = (async () => {
   const [onboardingRes, userRes] = await Promise.all([
@@ -83,6 +87,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     record,
     subject: { id: user.id, name: user.name, role: user.role },
     approverName,
+    isMirroring,
   };
   })();
 
@@ -94,6 +99,14 @@ clientLoader.hydrate = false;
 
 export async function action({ request, params }: ActionFunctionArgs) {
   await requireOnboardingHrPagesAccess(request);
+  // Mirror Mode is strictly view-only — see CLAUDE.md → "Mirror Mode".
+  const actor = await getCurrentUser(request);
+  if (actor?.mirroredBy) {
+    return json(
+      { error: 'Read-only while mirroring user. Exit mirror mode to make changes.' },
+      { status: 403 },
+    );
+  }
   const userId = params['id'];
   if (!userId) return json({ error: 'Missing user id' }, { status: 400 });
   const cookie = getSessionCookie(request);
@@ -167,6 +180,7 @@ export default function HrOnboardingRoute() {
             actionUrl={`/hr/users/${data.subject.id}/onboarding`}
             showBackToProfile
             approverName={data.approverName}
+            isMirroring={data.isMirroring}
           />
         )}
       </CachedAwait>

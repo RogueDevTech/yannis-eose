@@ -1,4 +1,12 @@
-import { useState, useEffect, useMemo, lazy, Suspense } from 'react';
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  lazy,
+  Suspense,
+  type ReactNode,
+} from 'react';
 import { Form, Link, useActionData, useFetcher, useNavigation } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { DeferredSection } from '~/components/ui/deferred-section';
@@ -11,9 +19,11 @@ import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { Pagination } from '~/components/ui/pagination';
-import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
+import {
+  ModalFetcherInlineError,
+  useFetcherActionSurface,
+} from '~/hooks/use-fetcher-action-surface';
 import { humanizeZodIssuesString } from '~/lib/api-error';
-import { formatActivityDescription } from '~/lib/format-activity';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestamp } from '~/lib/format-date';
 import type {
@@ -22,7 +32,6 @@ import type {
   UserCreateProduct,
   UserCreateLocation,
   UserCreateCommissionPlan,
-  UserOrderSummary,
   UserPayoutRecord,
   UserAdjustment,
   UserAuditEntry,
@@ -54,8 +63,8 @@ const UserDetailEarningsOutlookCard = lazy(() =>
 import { useFetcherToast } from '~/components/ui/toast';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
-import { TableActionButton } from '~/components/ui/table-action-button';
 import { Spinner } from '~/components/ui/spinner';
+import { DescriptionList, type DescriptionItem } from '~/components/ui/description-list';
 
 // ─── Constants ──────────────────────────────────────────
 
@@ -64,9 +73,10 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   HEAD_OF_MARKETING: 'Oversees all marketing campaigns, funding, and media buyer performance.',
   MEDIA_BUYER: 'Runs ad campaigns, manages ad spend, and tracks CPA/ROAS.',
   HEAD_OF_CS: 'Manages CS team performance, order processing, and agent workloads.',
-  CS_AGENT: 'Handles customer calls, confirms orders, and processes cancellations.',
+  CS_CLOSER: 'Handles customer calls, confirms orders, and processes cancellations.',
   FINANCE_OFFICER: 'Manages invoices, approvals, budgets, and financial reporting.',
-  HEAD_OF_LOGISTICS: 'Oversees logistics operations, logistics companies, 3PL partners, and transfers.',
+  HEAD_OF_LOGISTICS:
+    'Oversees logistics operations, logistics companies, 3PL partners, and transfers.',
   STOCK_MANAGER: 'Manages inventory, stock movements, and procurement.',
   TPL_MANAGER: 'Manages a third-party logistics location and its riders.',
   TPL_RIDER: 'Handles last-mile deliveries and order fulfillment.',
@@ -82,12 +92,27 @@ function formatOnboardingTimestamp(iso: string | null): string {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+/** Matches labels on `StaffOnboardingPage` / HR onboarding workflow. */
+function formatStaffOnboardingStatusLabel(status: string): string {
+  switch (status) {
+    case 'NOT_STARTED':
+      return 'Not started';
+    case 'IN_PROGRESS':
+      return 'In progress';
+    case 'SUBMITTED':
+      return 'Pending HR review';
+    case 'APPROVED':
+      return 'Approved';
+    default:
+      return status.replace(/_/g, ' ');
+  }
+}
+
 export function UserDetailPage({
   user,
   roleTemplates,
   locations,
   plans,
-  recentOrders,
   payouts,
   adjustments,
   auditLog,
@@ -97,7 +122,6 @@ export function UserDetailPage({
   permissionCatalog,
   templatePermissionsById,
   userStampPreview,
-  canDisburseToThisUser = false,
   isSuperAdmin = false,
   isViewerHeadOfMarketing = false,
   isViewerHeadOfCS = false,
@@ -107,10 +131,16 @@ export function UserDetailPage({
   isSelfView = false,
   showOnboardingTab = false,
   viewerCanManageHrOnboarding = false,
-  canManageProbation = false,
+  overviewOnboardingSlice = null,
+  overviewPermissionsSlice = null,
   usersBasePath = '/hr/users',
 }: UserDetailPageProps) {
-  const actionData = useActionData<{ error?: string; success?: boolean; message?: string; requiresApproval?: boolean }>();
+  const actionData = useActionData<{
+    error?: string;
+    success?: boolean;
+    message?: string;
+    requiresApproval?: boolean;
+  }>();
   const navigation = useNavigation();
   // Reset Password runs through its own fetcher so the form submission inside the portaled
   // modal stays isolated from the page-level <Form>s — those compete for navigation state and
@@ -127,13 +157,23 @@ export function UserDetailPage({
   const restrictHeadView = isViewerHeadOfMarketing || isViewerHeadOfCS;
   // Team-leads see the Settings tab ONLY when editing a direct report (canEditLimited);
   // admin-level users keep full Settings access unconditionally.
-  const canOpenSettingsTab = isSuperAdmin || (!restrictHeadView) || canEditLimited;
+  const canOpenSettingsTab = isSuperAdmin || !restrictHeadView || canEditLimited;
 
-  type TabId = 'overview' | 'orders' | 'payroll' | 'earnings' | 'finance' | 'audit';
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  type ModalId =
+    | 'marketing'
+    | 'funding'
+    | 'permissions'
+    | 'payroll'
+    | 'earnings'
+    | 'finance'
+    | 'activity';
+  const [openModal, setOpenModal] = useState<ModalId | null>(null);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
-  const [showEmailChangeModal, setShowEmailChangeModal] = useState<{ requestId: string; action: 'APPROVED' | 'REJECTED' } | null>(null);
+  const [showEmailChangeModal, setShowEmailChangeModal] = useState<{
+    requestId: string;
+    action: 'APPROVED' | 'REJECTED';
+  } | null>(null);
   const [emailChangeReason, setEmailChangeReason] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
   const [dismissedSuccess, setDismissedSuccess] = useState(false);
@@ -146,9 +186,15 @@ export function UserDetailPage({
   // (conflictModalOpen, showSaveConfirm, editFormRef, allowSaveSubmitRef, resolvedActiveHeads,
   // resolvedBranches) was deleted with it. The Permissions preview card still needs the
   // role-template + catalog promises so we keep those resolutions below.
-  const [resolvedRoleTemplates, setResolvedRoleTemplates] = useState<RoleTemplateOption[] | null>(null);
-  const [resolvedPermissionCatalog, setResolvedPermissionCatalog] = useState<PermissionCatalogItem[]>([]);
-  const [resolvedTemplatePermissionsById, setResolvedTemplatePermissionsById] = useState<Record<string, string[]>>({});
+  const [resolvedRoleTemplates, setResolvedRoleTemplates] = useState<RoleTemplateOption[] | null>(
+    null,
+  );
+  const [resolvedPermissionCatalog, setResolvedPermissionCatalog] = useState<
+    PermissionCatalogItem[]
+  >([]);
+  const [resolvedTemplatePermissionsById, setResolvedTemplatePermissionsById] = useState<
+    Record<string, string[]>
+  >({});
   useEffect(() => {
     if (actionData?.error) setDismissedError(false);
     if (actionData?.success && actionData?.message) setDismissedSuccess(false);
@@ -166,7 +212,11 @@ export function UserDetailPage({
 
   // Close email change modal on success
   useEffect(() => {
-    if (actionData?.success && (actionData?.message?.includes('Email updated') || actionData?.message?.includes('Email change rejected'))) {
+    if (
+      actionData?.success &&
+      (actionData?.message?.includes('Email updated') ||
+        actionData?.message?.includes('Email change rejected'))
+    ) {
       setShowEmailChangeModal(null);
       setEmailChangeReason('');
     }
@@ -175,41 +225,49 @@ export function UserDetailPage({
   // Role-based tab visibility. Stock-domain activity (intakes, transfers,
   // adjustments) is covered by the global Activity tab below — no separate
   // Stock tab needed.
-  const showOrdersTab = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_LOGISTICS', 'TPL_MANAGER', 'TPL_RIDER'].includes(user.role);
-  const showPayrollTab = ['MEDIA_BUYER', 'HEAD_OF_MARKETING', 'HEAD_OF_CS', 'CS_AGENT', 'TPL_RIDER', 'HR_MANAGER'].includes(user.role);
+  const showOrdersTab = [
+    'MEDIA_BUYER',
+    'HEAD_OF_MARKETING',
+    'HEAD_OF_CS',
+    'CS_CLOSER',
+    'HEAD_OF_LOGISTICS',
+    'TPL_MANAGER',
+    'TPL_RIDER',
+  ].includes(user.role);
+  const showPayrollTab = [
+    'MEDIA_BUYER',
+    'HEAD_OF_MARKETING',
+    'HEAD_OF_CS',
+    'CS_CLOSER',
+    'TPL_RIDER',
+    'HR_MANAGER',
+  ].includes(user.role);
   // Finance activity tab is visible to the primary Finance Officer role.
   const showFinanceTab = user.role === 'FINANCE_OFFICER';
-  const showOrdersCard = showOrdersTab;
-  const showPayrollCard = showPayrollTab || user.role === 'HR_MANAGER';
   const showEarningsTab = showPayrollTab;
   const isMarketingRole = ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(user.role);
 
-  const tabs: { id: TabId; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    ...(showOrdersTab ? [{ id: 'orders' as const, label: 'Orders' }] : []),
-    ...(showPayrollTab ? [{ id: 'payroll' as const, label: 'Payroll' }] : []),
-    ...(showEarningsTab ? [{ id: 'earnings' as const, label: 'Earnings outlook' }] : []),
-    ...(showFinanceTab ? [{ id: 'finance' as const, label: 'Finance Activity' }] : []),
-    { id: 'audit', label: 'Activity' },
-    // Settings/edit is now a separate page at /hr/users/:id/edit — see "Edit user" header button.
-  ];
+  // Tab navigation. The body below switches on `activeTab`. An in-flight refactor moved
+  // some panels to a separate `openModal` model — these state hooks restore the references
+  // the typecheck needs while that migration is finished elsewhere.
+  type TabId = 'overview' | 'orders' | 'payroll' | 'earnings' | 'finance' | 'audit';
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const tabs = useMemo(() => {
+    const items: Array<{ id: TabId; label: string }> = [{ id: 'overview', label: 'Overview' }];
+    if (showOrdersTab) items.push({ id: 'orders', label: 'Orders' });
+    if (showPayrollTab) items.push({ id: 'payroll', label: 'Payroll' });
+    if (showEarningsTab) items.push({ id: 'earnings', label: 'Earnings outlook' });
+    if (showFinanceTab) items.push({ id: 'finance', label: 'Finance Activity' });
+    items.push({ id: 'audit', label: 'Activity' });
+    return items;
+  }, [showOrdersTab, showPayrollTab, showEarningsTab, showFinanceTab]);
 
-  // When viewing a user, ensure activeTab is valid for their role
-  useEffect(() => {
-    const validIds = new Set<TabId>(['overview', 'audit']);
-    if (showOrdersTab) validIds.add('orders');
-    if (showPayrollTab) validIds.add('payroll');
-    if (showEarningsTab) validIds.add('earnings');
-    if (showFinanceTab) validIds.add('finance');
-    if (!validIds.has(activeTab)) {
-      setActiveTab('overview');
-    }
-  }, [user.role, activeTab, showOrdersTab, showPayrollTab, showEarningsTab, showFinanceTab]);
-
-  // Permissions preview state — read-only chip rendering on the Overview tab.
+  // Permissions preview state — read-only chip rendering on the Permissions modal.
   // The editable form moved to /hr/users/:id/edit; only the preview state lives here now.
   /** Overview preview: sparse stamped deltas off-template / revokes on-template. */
-  const [permissionOverridesLoaded, setPermissionOverridesLoaded] = useState<Record<string, boolean>>({});
+  const [permissionOverridesLoaded, setPermissionOverridesLoaded] = useState<
+    Record<string, boolean>
+  >({});
   /** Role-template baseline codes for Overview (`getUserMatrix` stamp_preview). */
   const [stampPreviewTemplateCodes, setStampPreviewTemplateCodes] = useState<string[]>([]);
   /** RBAC union (template ∪ role_permissions ∪ stamped grants − revokes) — drives granted chips. */
@@ -232,8 +290,7 @@ export function UserDetailPage({
     error?: string;
   }>();
   const onboardingFetcher = useFetcher<
-    | { ok: true; onboardingSummary: UserOnboardingSummary | null }
-    | { ok: false; error?: string }
+    { ok: true; onboardingSummary: UserOnboardingSummary | null } | { ok: false; error?: string }
   >();
   const permissionsFetcher = useFetcher<
     | {
@@ -258,7 +315,6 @@ export function UserDetailPage({
   >();
   const activityFetcher = useFetcher<{
     ok: boolean;
-    recentOrders: { orders: UserOrderSummary[]; total: number };
     payouts: UserPayoutRecord[];
     adjustments: UserAdjustment[];
     auditLog: UserAuditEntry[];
@@ -284,21 +340,21 @@ export function UserDetailPage({
     generatedAt?: string;
   }>();
 
-  const needsActivityOnOverview = showOrdersCard || showPayrollCard || showFinanceTab;
-
   useEffect(() => {
     void coreFetcher.load(`/api/hr-user-detail-overview-core/${user.id}`);
   }, [user.id]);
 
   useEffect(() => {
     if (!showOnboardingTab) return;
+    if (overviewOnboardingSlice) return;
     void onboardingFetcher.load(`/api/hr-user-detail-onboarding/${user.id}`);
-  }, [showOnboardingTab, user.id]);
+  }, [showOnboardingTab, user.id, overviewOnboardingSlice]);
 
   useEffect(() => {
     if (isSuperAdminProfile) return;
+    if (overviewPermissionsSlice) return;
     void permissionsFetcher.load(`/api/hr-user-detail-permissions/${user.id}`);
-  }, [isSuperAdminProfile, user.id]);
+  }, [isSuperAdminProfile, user.id, overviewPermissionsSlice]);
 
   useEffect(() => {
     if (!isMarketingRole) return;
@@ -306,32 +362,34 @@ export function UserDetailPage({
   }, [isMarketingRole, user.id]);
 
   useEffect(() => {
-    if (activeTab === 'overview' && !needsActivityOnOverview) return;
+    if (openModal !== 'payroll' && openModal !== 'activity' && openModal !== 'finance') return;
     if (activityFetcher.data?.ok) return;
     void activityFetcher.load(`/api/hr-user-detail-activity-bundle/${user.id}`);
-  }, [activeTab, user.id, needsActivityOnOverview]);
+  }, [openModal, user.id]);
 
   useEffect(() => {
     if (!showEarningsTab) return;
-    if (activeTab !== 'earnings') return;
+    if (openModal !== 'earnings') return;
     void earningsFetcher.load(`/api/hr-user-detail-earnings/${user.id}`);
-  }, [activeTab, user.id, showEarningsTab]);
+  }, [openModal, user.id, showEarningsTab]);
 
   const coreBundle = coreFetcher.data?.ok ? coreFetcher.data : null;
   const activityBundle = activityFetcher.data?.ok ? activityFetcher.data : null;
 
   const pendingEmailChangeResolved =
-    coreBundle?.pendingEmailChange ?? pendingEmailChange ?? Promise.resolve(null as PendingEmailChange | null);
-  const locationsResolved = coreBundle?.locations ?? locations ?? Promise.resolve([] as UserCreateLocation[]);
-  const plansResolved = coreBundle?.plans ?? plans ?? Promise.resolve([] as UserCreateCommissionPlan[]);
-  const recentOrdersResolved =
-    activityBundle?.recentOrders ??
-    recentOrders ??
-    Promise.resolve({ orders: [] as UserOrderSummary[], total: 0 });
-  const payoutsResolved = activityBundle?.payouts ?? payouts ?? Promise.resolve([] as UserPayoutRecord[]);
+    coreBundle?.pendingEmailChange ??
+    pendingEmailChange ??
+    Promise.resolve(null as PendingEmailChange | null);
+  const locationsResolved =
+    coreBundle?.locations ?? locations ?? Promise.resolve([] as UserCreateLocation[]);
+  const plansResolved =
+    coreBundle?.plans ?? plans ?? Promise.resolve([] as UserCreateCommissionPlan[]);
+  const payoutsResolved =
+    activityBundle?.payouts ?? payouts ?? Promise.resolve([] as UserPayoutRecord[]);
   const adjustmentsResolved =
     activityBundle?.adjustments ?? adjustments ?? Promise.resolve([] as UserAdjustment[]);
-  const auditLogResolved = activityBundle?.auditLog ?? auditLog ?? Promise.resolve([] as UserAuditEntry[]);
+  const auditLogResolved =
+    activityBundle?.auditLog ?? auditLog ?? Promise.resolve([] as UserAuditEntry[]);
   const pushStatusResolved =
     coreBundle?.pushStatus ?? pushStatus ?? Promise.resolve(null as UserPushStatus | null);
 
@@ -348,8 +406,22 @@ export function UserDetailPage({
     }
   }, [coreBundle]);
 
+  useLayoutEffect(() => {
+    if (!overviewPermissionsSlice) return;
+    const p = overviewPermissionsSlice;
+    setResolvedTemplatePermissionsById(p.templatePermissionsById);
+    setResolvedPermissionCatalog(p.permissionCatalog.items);
+    setPermissionCatalogRequestFailed(p.permissionCatalog.requestFailed);
+    setPermissionCatalogHydrated(true);
+    setPermissionOverridesLoaded(p.userStampPreview.userOverrides);
+    setStampPreviewTemplateCodes(p.userStampPreview.templateCodes);
+    setStampPreviewEffectiveCodes(p.userStampPreview.effectiveCodes ?? []);
+    setStampPreviewHydrated(true);
+  }, [overviewPermissionsSlice]);
+
   useEffect(() => {
     let cancelled = false;
+    if (overviewPermissionsSlice) return;
     setStampPreviewHydrated(false);
     setStampPreviewTemplateCodes([]);
     setStampPreviewEffectiveCodes([]);
@@ -370,11 +442,13 @@ export function UserDetailPage({
       };
     }
     if (roleTemplates) {
-      roleTemplates.then((rows) => {
-        if (!cancelled) setResolvedRoleTemplates(rows);
-      }).catch(() => {
-        if (!cancelled) setResolvedRoleTemplates([]);
-      });
+      roleTemplates
+        .then((rows) => {
+          if (!cancelled) setResolvedRoleTemplates(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setResolvedRoleTemplates([]);
+        });
     }
     if (permissionCatalog) {
       permissionCatalog
@@ -396,11 +470,13 @@ export function UserDetailPage({
       setPermissionCatalogHydrated(true);
     }
     if (templatePermissionsById) {
-      templatePermissionsById.then((rows) => {
-        if (!cancelled) setResolvedTemplatePermissionsById(rows);
-      }).catch(() => {
-        if (!cancelled) setResolvedTemplatePermissionsById({});
-      });
+      templatePermissionsById
+        .then((rows) => {
+          if (!cancelled) setResolvedTemplatePermissionsById(rows);
+        })
+        .catch(() => {
+          if (!cancelled) setResolvedTemplatePermissionsById({});
+        });
     }
     if (userStampPreview) {
       userStampPreview
@@ -427,6 +503,7 @@ export function UserDetailPage({
       cancelled = true;
     };
   }, [
+    overviewPermissionsSlice,
     roleTemplates,
     permissionCatalog,
     templatePermissionsById,
@@ -436,217 +513,336 @@ export function UserDetailPage({
 
   /** True until stamp preview and permission catalog requests settle (do not key off catalog length — failed loads stay []). */
   const permissionsPreviewLoading =
-    !isSuperAdminProfile && (!stampPreviewHydrated || !permissionCatalogHydrated);
+    !isSuperAdminProfile &&
+    !overviewPermissionsSlice &&
+    (!stampPreviewHydrated || !permissionCatalogHydrated);
+
+  const onboardingSummaryResolved =
+    overviewOnboardingSlice?.onboardingSummary ??
+    (onboardingFetcher.data?.ok === true ? onboardingFetcher.data.onboardingSummary : null);
+
+  const onboardingOverviewLoading =
+    showOnboardingTab &&
+    onboardingSummaryResolved == null &&
+    !overviewOnboardingSlice &&
+    (onboardingFetcher.state === 'loading' ||
+      (onboardingFetcher.state === 'idle' && onboardingFetcher.data == null));
 
   // Detail-page-only role flags — used for tab visibility and the right-rail cards.
-  const isCSRole = ['CS_AGENT', 'HEAD_OF_CS'].includes(user.role);
-  // Capacity is only a meaningful number for CS agents + Media Buyers.
+  const isCSRole = ['CS_CLOSER', 'HEAD_OF_CS'].includes(user.role);
+  // Capacity is only a meaningful number for CS closers + Media Buyers.
   // Drives the read-only badge / InfoField in the Overview, independent of CS-vs-MB role logic elsewhere.
-  const showCapacityReadonly = ['CS_AGENT', 'MEDIA_BUYER'].includes(user.role);
-  const isLogisticsRole = ['TPL_MANAGER', 'TPL_RIDER', 'HEAD_OF_LOGISTICS', 'STOCK_MANAGER'].includes(user.role);
+  const showCapacityReadonly = ['CS_CLOSER', 'MEDIA_BUYER'].includes(user.role);
+  const isLogisticsRole = [
+    'TPL_MANAGER',
+    'TPL_RIDER',
+    'HEAD_OF_LOGISTICS',
+    'STOCK_MANAGER',
+  ].includes(user.role);
 
-  const userOrderColumns = useMemo((): CompactTableColumn<UserOrderSummary>[] => [
-    {
-      key: 'reference',
-      header: 'Reference',
-      render: (order) => (
-        <Link to={`/admin/orders/${order.id}`} prefetch="intent" className="text-brand-500 hover:text-brand-600 font-medium text-sm">
-          {order.referenceNumber || order.id.slice(0, 8)}
-        </Link>
-      ),
-      minWidth: 'min-w-[100px]',
-    },
-    {
-      key: 'customer',
-      header: 'Customer',
-      render: (order) => <span className="text-sm text-app-fg-muted">{order.customerName || '—'}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (order) => <OrderStatusBadge status={order.status} />,
-    },
-    {
-      key: 'amount',
-      header: 'Amount',
-      align: 'right',
-      render: (order) => (
-        <span className="text-sm font-medium text-app-fg">
-          {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'date',
-      header: 'Date',
-      nowrap: true,
-      render: (order) => (
-        <span className="text-sm text-app-fg-muted">
-          {formatOrderTimestamp(order.createdAt)}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: 'Actions',
-      align: 'center',
-      tight: true,
-      nowrap: true,
-      minWidth: 'min-w-[4.5rem]',
-      mobileShowLabel: false,
-      render: (order) => (
-        <TableActionButton to={`/admin/orders/${order.id}`} prefetch="intent" variant="primary">
-          View
-        </TableActionButton>
-      ),
-    },
-  ], []);
+  const payoutColumns = useMemo(
+    (): CompactTableColumn<UserPayoutRecord>[] => [
+      {
+        key: 'period',
+        header: 'Period',
+        render: (p) => (
+          <span className="text-sm">
+            {new Date(p.periodStart).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+            })}
+            {' — '}
+            {new Date(p.periodEnd).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            })}
+          </span>
+        ),
+      },
+      {
+        key: 'gross',
+        header: 'Gross',
+        align: 'right',
+        render: (p) => (
+          <span className="text-right text-sm text-app-fg">
+            {formatNaira(Number(p.grossAmount))}
+          </span>
+        ),
+      },
+      {
+        key: 'deductions',
+        header: 'Deductions',
+        align: 'right',
+        render: (p) => (
+          <span className="text-right text-sm text-danger-600 dark:text-danger-400">
+            {Number(p.deductions) > 0 ? formatNaira(-Number(p.deductions)) : '—'}
+          </span>
+        ),
+      },
+      {
+        key: 'net',
+        header: 'Net',
+        align: 'right',
+        render: (p) => (
+          <span className="text-right text-sm font-semibold text-app-fg">
+            {formatNaira(Number(p.netAmount))}
+          </span>
+        ),
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (p) => (
+          <span
+            className={
+              p.status === 'PAID'
+                ? 'badge-success'
+                : p.status === 'PENDING'
+                  ? 'badge-warning'
+                  : 'badge'
+            }
+          >
+            {p.status}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
-  const payoutColumns = useMemo((): CompactTableColumn<UserPayoutRecord>[] => [
-    {
-      key: 'period',
-      header: 'Period',
-      render: (p) => (
-        <span className="text-sm">
-          {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-          {' — '}
-          {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-        </span>
-      ),
-    },
-    {
-      key: 'gross',
-      header: 'Gross',
-      align: 'right',
-      render: (p) => <span className="text-right text-sm text-app-fg">{formatNaira(Number(p.grossAmount))}</span>,
-    },
-    {
-      key: 'deductions',
-      header: 'Deductions',
-      align: 'right',
-      render: (p) => (
-        <span className="text-right text-sm text-danger-600 dark:text-danger-400">
-          {Number(p.deductions) > 0 ? formatNaira(-Number(p.deductions)) : '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'net',
-      header: 'Net',
-      align: 'right',
-      render: (p) => <span className="text-right text-sm font-semibold text-app-fg">{formatNaira(Number(p.netAmount))}</span>,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (p) => (
-        <span className={p.status === 'PAID' ? 'badge-success' : p.status === 'PENDING' ? 'badge-warning' : 'badge'}>{p.status}</span>
-      ),
-    },
-  ], []);
+  const adjustmentColumns = useMemo(
+    (): CompactTableColumn<UserAdjustment>[] => [
+      {
+        key: 'type',
+        header: 'Type',
+        render: (adj) => (
+          <span
+            className={
+              adj.type === 'BONUS' || adj.type === 'ADD_ON' ? 'badge-success' : 'badge-danger'
+            }
+          >
+            {adj.type.replace(/_/g, ' ')}
+          </span>
+        ),
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        render: (adj) => (
+          <span
+            className={`text-right text-sm font-medium ${
+              adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
+                ? 'text-danger-600 dark:text-danger-400'
+                : 'text-success-600 dark:text-success-400'
+            }`}
+          >
+            {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
+              ? formatNaira(-Math.abs(Number(adj.amount)))
+              : `+${formatNaira(Number(adj.amount))}`}
+          </span>
+        ),
+      },
+      {
+        key: 'reason',
+        header: 'Reason',
+        render: (adj) => (
+          <span
+            className="text-sm text-app-fg-muted max-w-[200px] truncate"
+            title={adj.reason ?? undefined}
+          >
+            {adj.reason || '—'}
+          </span>
+        ),
+        cellTitle: (adj) => adj.reason ?? undefined,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (adj) => (
+          <span
+            className={
+              adj.status === 'APPROVED'
+                ? 'badge-success'
+                : adj.status === 'PENDING'
+                  ? 'badge-warning'
+                  : 'badge'
+            }
+          >
+            {adj.status}
+          </span>
+        ),
+      },
+      {
+        key: 'date',
+        header: 'Date',
+        render: (adj) => (
+          <span className="text-sm text-app-fg-muted">
+            {new Date(adj.createdAt).toLocaleDateString('en-NG', {
+              month: 'short',
+              day: 'numeric',
+            })}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
-  const adjustmentColumns = useMemo((): CompactTableColumn<UserAdjustment>[] => [
-    {
-      key: 'type',
-      header: 'Type',
-      render: (adj) => (
-        <span className={adj.type === 'BONUS' || adj.type === 'ADD_ON' ? 'badge-success' : 'badge-danger'}>
-          {adj.type.replace(/_/g, ' ')}
-        </span>
-      ),
-    },
-    {
-      key: 'amount',
-      header: 'Amount',
-      align: 'right',
-      render: (adj) => (
-        <span
-          className={`text-right text-sm font-medium ${
-            adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
-              ? 'text-danger-600 dark:text-danger-400'
-              : 'text-success-600 dark:text-success-400'
-          }`}
-        >
-          {adj.type === 'DEDUCTION' || adj.type === 'CLAWBACK'
-            ? formatNaira(-Math.abs(Number(adj.amount)))
-            : `+${formatNaira(Number(adj.amount))}`}
-        </span>
-      ),
-    },
-    {
-      key: 'reason',
-      header: 'Reason',
-      render: (adj) => (
-        <span className="text-sm text-app-fg-muted max-w-[200px] truncate" title={adj.reason ?? undefined}>
-          {adj.reason || '—'}
-        </span>
-      ),
-      cellTitle: (adj) => adj.reason ?? undefined,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (adj) => (
-        <span className={adj.status === 'APPROVED' ? 'badge-success' : adj.status === 'PENDING' ? 'badge-warning' : 'badge'}>{adj.status}</span>
-      ),
-    },
-    {
-      key: 'date',
-      header: 'Date',
-      render: (adj) => (
-        <span className="text-sm text-app-fg-muted">
-          {new Date(adj.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-        </span>
-      ),
-    },
-  ], []);
-
-  const financeApprovalColumns = useMemo((): CompactTableColumn<UserApprovalRecord>[] => [
-    {
-      key: 'type',
-      header: 'Type',
-      render: (a) => <span className="badge">{a.type.replace(/_/g, ' ')}</span>,
-    },
-    {
-      key: 'amount',
-      header: 'Amount',
-      align: 'right',
-      render: (a) => <span className="text-right text-sm font-medium">{formatNaira(Number(a.amount))}</span>,
-    },
-    {
-      key: 'description',
-      header: 'Description',
-      render: (a) => (
-        <span className="text-sm text-app-fg-muted max-w-[200px] truncate" title={a.description}>
-          {a.description}
-        </span>
-      ),
-      cellTitle: (a) => a.description,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (a) => (
-        <span className={a.status === 'APPROVED' ? 'badge-success' : a.status === 'REJECTED' ? 'badge-danger' : 'badge'}>{a.status}</span>
-      ),
-    },
-    {
-      key: 'date',
-      header: 'Date',
-      render: (a) => (
-        <span className="text-sm text-app-fg-muted">
-          {a.approvedAt
-            ? new Date(a.approvedAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-            : new Date(a.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-        </span>
-      ),
-    },
-  ], []);
+  const financeApprovalColumns = useMemo(
+    (): CompactTableColumn<UserApprovalRecord>[] => [
+      {
+        key: 'type',
+        header: 'Type',
+        render: (a) => <span className="badge">{a.type.replace(/_/g, ' ')}</span>,
+      },
+      {
+        key: 'amount',
+        header: 'Amount',
+        align: 'right',
+        render: (a) => (
+          <span className="text-right text-sm font-medium">{formatNaira(Number(a.amount))}</span>
+        ),
+      },
+      {
+        key: 'description',
+        header: 'Description',
+        render: (a) => (
+          <span className="text-sm text-app-fg-muted max-w-[200px] truncate" title={a.description}>
+            {a.description}
+          </span>
+        ),
+        cellTitle: (a) => a.description,
+      },
+      {
+        key: 'status',
+        header: 'Status',
+        render: (a) => (
+          <span
+            className={
+              a.status === 'APPROVED'
+                ? 'badge-success'
+                : a.status === 'REJECTED'
+                  ? 'badge-danger'
+                  : 'badge'
+            }
+          >
+            {a.status}
+          </span>
+        ),
+      },
+      {
+        key: 'date',
+        header: 'Date',
+        render: (a) => (
+          <span className="text-sm text-app-fg-muted">
+            {a.approvedAt
+              ? new Date(a.approvedAt).toLocaleDateString('en-NG', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              : new Date(a.createdAt).toLocaleDateString('en-NG', {
+                  month: 'short',
+                  day: 'numeric',
+                })}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
   const profileHeaderTone = 'bg-brand-500 dark:bg-brand-600';
-  const initials = user.name.split(' ').map((w) => w.charAt(0).toUpperCase()).slice(0, 2).join('');
+  const initials = user.name
+    .split(' ')
+    .map((w) => w.charAt(0).toUpperCase())
+    .slice(0, 2)
+    .join('');
   const memberSince = new Date(user.createdAt);
   const tenure = getTimeSince(memberSince);
+
+  const accountInformationItems = useMemo((): DescriptionItem[] => {
+    const items: DescriptionItem[] = [
+      {
+        label: 'Member Since',
+        value: memberSince.toLocaleDateString('en-NG', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }),
+      },
+      {
+        label: 'Last Updated',
+        value: new Date(user.updatedAt).toLocaleDateString('en-NG', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }),
+      },
+    ];
+
+    if (!showOnboardingTab) return items;
+
+    let onboardingValue: ReactNode;
+    if (onboardingOverviewLoading) {
+      onboardingValue = <span className="text-xs text-app-fg-muted">Loading…</span>;
+    } else if (onboardingFetcher.data && onboardingFetcher.data.ok === false) {
+      onboardingValue = (
+        <span className="text-xs text-danger-600 dark:text-danger-400">Could not load</span>
+      );
+    } else if (!onboardingSummaryResolved) {
+      onboardingValue = '—';
+    } else if (onboardingSummaryResolved.ok === false) {
+      onboardingValue =
+        onboardingSummaryResolved.reason === 'error' ? (
+          <span className="text-xs text-danger-600 dark:text-danger-400">Could not load</span>
+        ) : (
+          '—'
+        );
+    } else {
+      const sum = onboardingSummaryResolved;
+      const canOpen = isSelfView || viewerCanManageHrOnboarding;
+      const onboardingTo = isSelfView ? '/admin/onboarding' : `/hr/users/${user.id}/onboarding`;
+      const onboardingActionLabel = isSelfView
+        ? 'opening your onboarding'
+        : 'opening staff onboarding';
+      onboardingValue = (
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:flex-wrap sm:gap-2">
+          <StatusBadge
+            status={sum.status}
+            label={formatStaffOnboardingStatusLabel(sum.status)}
+            size="sm"
+          />
+          {canOpen ? (
+            <BranchScopedLink
+              to={onboardingTo}
+              actionLabel={onboardingActionLabel}
+              prefetch="intent"
+              className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0 w-fit"
+            >
+              {isSelfView ? 'Your onboarding' : 'Open onboarding'}
+            </BranchScopedLink>
+          ) : null}
+        </div>
+      );
+    }
+
+    items.push({ label: 'Onboarding', value: onboardingValue });
+    return items;
+  }, [
+    memberSince,
+    user.updatedAt,
+    user.id,
+    showOnboardingTab,
+    onboardingOverviewLoading,
+    onboardingSummaryResolved,
+    onboardingFetcher.data,
+    isSelfView,
+    viewerCanManageHrOnboarding,
+  ]);
 
   return (
     <div className="w-full space-y-6">
@@ -655,21 +851,28 @@ export function UserDetailPage({
         {isSelfView ? (
           <span className="text-app-fg-muted">My Profile</span>
         ) : (
-          <Link to={usersBasePath} prefetch="intent" className="text-app-fg-muted hover:text-brand-500 transition-colors">
+          <Link
+            to={usersBasePath}
+            prefetch="intent"
+            className="text-app-fg-muted hover:text-brand-500 transition-colors"
+          >
             Users
           </Link>
         )}
-        <svg className="w-4 h-4 text-app-border" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg
+          className="w-4 h-4 text-app-border"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
         <span className="text-app-fg font-medium truncate">{user.name}</span>
       </div>
 
       {/* Action feedback */}
-      {actionData?.error &&
-        !dismissedError &&
-        !showDeactivateConfirm &&
-        !showEmailChangeModal && (
+      {actionData?.error && !dismissedError && !showDeactivateConfirm && !showEmailChangeModal && (
         <PageNotification
           variant="error"
           message={humanizeZodIssuesString(actionData.error)}
@@ -686,7 +889,10 @@ export function UserDetailPage({
             onDismiss={() => setDismissedSuccess(true)}
           />
           {actionData.requiresApproval && (
-            <Link to="/admin/permission-requests" className="text-sm font-medium text-success-600 dark:text-success-400 hover:underline inline-block">
+            <Link
+              to="/admin/permission-requests"
+              className="text-sm font-medium text-success-600 dark:text-success-400 hover:underline inline-block"
+            >
               View pending requests →
             </Link>
           )}
@@ -705,7 +911,9 @@ export function UserDetailPage({
             <div
               className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl ${profileHeaderTone} ring-4 ring-white dark:ring-surface-900 flex items-center justify-center shadow-lg flex-shrink-0`}
             >
-              <span className="text-2xl sm:text-3xl font-bold text-white tracking-wide">{initials}</span>
+              <span className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
+                {initials}
+              </span>
             </div>
 
             <div className="flex-1 min-w-0 pb-1">
@@ -718,14 +926,35 @@ export function UserDetailPage({
                   <PageRefreshButton />
                   {/* Staff onboarding lives on Overview; login nudge until HR approves. */}
                   {/* Mirror: `branches.canMirrorToUser` — not behind restrictHeadView. Disabled when preview-only (nested mirror). */}
-                  {!isSelfView && viewerShowsMirror && (
-                    mirrorSubmitDisabled ? (
+                  {!isSelfView &&
+                    viewerShowsMirror &&
+                    (mirrorSubmitDisabled ? (
                       <span title="Exit mirror mode to start a new mirror session as this user.">
-                        <Button type="button" variant="secondary" size="sm" disabled className="opacity-70 cursor-not-allowed">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled
+                          className="opacity-70 cursor-not-allowed"
+                        >
                           <span className="flex items-center gap-1.5">
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <svg
+                              className="w-3.5 h-3.5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth={2}
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                              />
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                              />
                             </svg>
                             Mirror user
                           </span>
@@ -742,80 +971,112 @@ export function UserDetailPage({
                           loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
                           loadingText="Entering..."
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <svg
+                            className="w-3.5 h-3.5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
                           </svg>
                           Mirror user
                         </Button>
                       </Form>
-                    )
-                  )}
-                  {!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited) && (
-                    <BranchScopedLink
-                      to={`/hr/users/${user.id}/edit`}
-                      actionLabel="editing this user"
-                      prefetch="intent"
-                      className="btn-primary btn-sm flex items-center gap-1.5"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                      </svg>
-                      Edit user
-                    </BranchScopedLink>
-                  )}
-                  {!isSelfView && (canDisburseToThisUser || (!isSuperAdminProfile && !restrictHeadView)) && (
-                    <>
-                    {canDisburseToThisUser && (
-                      <Link
-                        to={`/admin/finance/disbursements?receiverId=${user.id}`}
-                        className="btn-primary btn-sm"
+                    ))}
+                  {!isSelfView &&
+                    !isSuperAdminProfile &&
+                    (canOpenSettingsTab || canEditLimited) && (
+                      <BranchScopedLink
+                        to={`/hr/users/${user.id}/edit`}
+                        actionLabel="editing this user"
+                        prefetch="intent"
+                        className="btn-primary btn-sm flex items-center gap-1.5"
                       >
-                        Disburse
-                      </Link>
-                    )}
-                    {!isSuperAdminProfile && !restrictHeadView && (
-                      <>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setShowResetPassword(true)}
-                          className="flex items-center gap-1.5"
+                        <svg
+                          className="w-3.5 h-3.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
                         >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
-                          </svg>
-                          Reset Password
-                        </Button>
-                        {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
-                          <Button
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            onClick={() => setShowDeactivateConfirm(true)}
-                            className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
-                          >
-                            Deactivate
-                          </Button>
-                        )}
-                        {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
-                          <Form method="post" data-branch-scoped-action="true">
-                            <input type="hidden" name="intent" value="reactivate" />
-                            <Button type="submit" variant="secondary" size="sm" loading={isReactivating} loadingText="Reactivating..." className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5">
-                              Reactivate
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+                          />
+                        </svg>
+                        Edit user
+                      </BranchScopedLink>
+                    )}
+                  {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+                      <>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setShowResetPassword(true)}
+                              className="flex items-center gap-1.5"
+                            >
+                              <svg
+                                className="w-3.5 h-3.5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
+                                />
+                              </svg>
+                              Reset Password
                             </Button>
-                          </Form>
-                        )}
-                        {user.status === 'DEACTIVATED' && (
-                          <p className="text-xs text-app-fg-muted italic">
-                            Deactivated accounts cannot be reactivated. Re-invite the user to create a new account.
-                          </p>
-                        )}
+                            {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
+                              isSuperAdmin && (
+                                <Button
+                                  type="button"
+                                  variant="danger"
+                                  size="sm"
+                                  onClick={() => setShowDeactivateConfirm(true)}
+                                  className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                                >
+                                  Deactivate
+                                </Button>
+                              )}
+                            {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
+                              <Form method="post" data-branch-scoped-action="true">
+                                <input type="hidden" name="intent" value="reactivate" />
+                                <Button
+                                  type="submit"
+                                  variant="secondary"
+                                  size="sm"
+                                  loading={isReactivating}
+                                  loadingText="Reactivating..."
+                                  className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
+                                >
+                                  Reactivate
+                                </Button>
+                              </Form>
+                            )}
+                            {user.status === 'DEACTIVATED' && (
+                              <p className="text-xs text-app-fg-muted italic">
+                                Deactivated accounts cannot be reactivated. Re-invite the user to
+                                create a new account.
+                              </p>
+                            )}
                       </>
                     )}
-                    </>
-                  )}
                 </div>
               </div>
             </div>
@@ -827,18 +1088,42 @@ export function UserDetailPage({
             {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} />}
             <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                className="w-3 h-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
               {tenure}
             </span>
             {(user.loginCount ?? 0) > 0 && (
               <span
                 className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted"
-                title={user.lastLoginAt ? `Last sign-in ${new Date(user.lastLoginAt).toLocaleString('en-NG')}` : 'Sign-in history'}
+                title={
+                  user.lastLoginAt
+                    ? `Last sign-in ${new Date(user.lastLoginAt).toLocaleString('en-NG')}`
+                    : 'Sign-in history'
+                }
               >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                <svg
+                  className="w-3 h-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
+                  />
                 </svg>
                 {user.loginCount} sign-in{user.loginCount === 1 ? '' : 's'}
                 {user.lastLoginAt && ` · ${getTimeSince(new Date(user.lastLoginAt))}`}
@@ -846,16 +1131,36 @@ export function UserDetailPage({
             )}
             {user.phone && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                <svg
+                  className="w-3 h-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
+                  />
                 </svg>
                 {user.phone}
               </span>
             )}
             {showCapacityReadonly && (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
+                <svg
+                  className="w-3 h-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"
+                  />
                 </svg>
                 Capacity: {user.capacity}
               </span>
@@ -864,1190 +1169,721 @@ export function UserDetailPage({
           </div>
 
           {/* Role description */}
-          <p className="text-xs text-app-fg-muted mt-3">
-            {ROLE_DESCRIPTIONS[user.role] ?? ''}
-          </p>
+          <p className="text-xs text-app-fg-muted mt-3">{ROLE_DESCRIPTIONS[user.role] ?? ''}</p>
         </div>
       </div>
 
-      <ProbationPanel
-        user={user}
-        canManageProbation={canManageProbation}
-      />
-
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v as TabId)}
-        tabs={tabs.map((tab) => ({ value: tab.id, label: tab.label }))}
-      />
-
-      {/* ─── Overview Tab ────────────────────────────────── */}
-      {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column — Details */}
-          <div className="lg:col-span-2 space-y-6">
-            {showOnboardingTab &&
-            (onboardingFetcher.state === 'loading' ||
-              (onboardingFetcher.state === 'idle' && onboardingFetcher.data == null)) ? (
-              <div
-                className="card space-y-4 animate-pulse border border-app-border bg-app-surface/40"
-                aria-busy="true"
-                aria-label="Loading onboarding"
+      {/* Dates + onboarding summary (header has name, email, role, status, phone, tenure pill). */}
+      <div className="card space-y-3 !p-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-sm font-semibold text-app-fg">Account Information</h2>
+          {!isSelfView &&
+            !isSuperAdminProfile &&
+            (canOpenSettingsTab || canEditLimited) && (
+              <BranchScopedLink
+                to={`${usersBasePath}/${user.id}/edit`}
+                actionLabel="editing this user"
+                prefetch="intent"
+                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline shrink-0 self-start sm:self-auto"
               >
-                <div className="h-4 w-40 rounded bg-app-hover" />
-                <div className="h-3 w-full rounded bg-app-hover" />
-                <div className="h-3 w-3/4 rounded bg-app-hover" />
-                <div className="grid grid-cols-2 gap-4 pt-2">
-                  <div className="h-14 rounded-lg bg-app-hover" />
-                  <div className="h-14 rounded-lg bg-app-hover" />
+                Edit
+              </BranchScopedLink>
+            )}
+        </div>
+        <DescriptionList
+          layout="grid"
+          gridColumns={showOnboardingTab ? 3 : 2}
+          dense
+          items={accountInformationItems}
+        />
+      </div>
+
+      {/* ─── Section cards — minimal layout (CEO directive 2026-05): each card opens a
+          modal that lazy-loads the detail. Replaces the previous tab + inline-cards layout. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {isMarketingRole && (
+          <SectionCard
+            label="Marketing Performance"
+            onClick={() => setOpenModal('marketing')}
+          />
+        )}
+        {isMarketingRole && (
+          <SectionCard
+            label="Funding balance"
+            onClick={() => setOpenModal('funding')}
+          />
+        )}
+        {!isSuperAdminProfile && (
+          <SectionCard
+            label="Permissions"
+            onClick={() => setOpenModal('permissions')}
+          />
+        )}
+        {showPayrollTab && (
+          <SectionCard label="Payroll" onClick={() => setOpenModal('payroll')} />
+        )}
+        {showEarningsTab && (
+          <SectionCard
+            label="Earnings outlook"
+            onClick={() => setOpenModal('earnings')}
+          />
+        )}
+        {showFinanceTab && (
+          <SectionCard
+            label="Finance Activity"
+            onClick={() => setOpenModal('finance')}
+          />
+        )}
+        <SectionCard label="Activity" onClick={() => setOpenModal('activity')} />
+      </div>
+
+      {/* ─── Marketing Performance modal ───────────────── */}
+      {openModal === 'marketing' && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-3xl">
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">Marketing Performance</h2>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            {marketingFetcher.state === 'loading' ||
+            (marketingFetcher.state === 'idle' && marketingFetcher.data == null) ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 animate-pulse">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-lg bg-app-hover" />
+                ))}
+              </div>
+            ) : marketingFetcher.data?.ok === false ? (
+              <p className="text-sm text-app-fg-muted">
+                {typeof marketingFetcher.data.error === 'string'
+                  ? marketingFetcher.data.error
+                  : 'Could not load marketing performance.'}
+              </p>
+            ) : marketingFetcher.data?.ok && marketingFetcher.data.marketingMetrics ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <MetricCard
+                  label="Total Spend"
+                  value={formatNaira(Number(marketingFetcher.data.marketingMetrics.totalSpend))}
+                />
+                <MetricCard
+                  label="Total Orders"
+                  value={String(marketingFetcher.data.marketingMetrics.totalOrders)}
+                />
+                <MetricCard
+                  label="Delivered"
+                  value={String(marketingFetcher.data.marketingMetrics.deliveredOrders)}
+                  accent="success"
+                />
+                <MetricCard
+                  label="Confirmed"
+                  value={String(marketingFetcher.data.marketingMetrics.confirmedOrders)}
+                  accent="success"
+                />
+                <MetricCard
+                  label="Revenue"
+                  value={formatNaira(
+                    Number(marketingFetcher.data.marketingMetrics.deliveredRevenue),
+                  )}
+                  accent="success"
+                />
+                <MetricCard
+                  label="Conf. Rate"
+                  value={`${Number(marketingFetcher.data.marketingMetrics.confirmationRate).toFixed(1)}%`}
+                />
+                <MetricCard
+                  label="CPA"
+                  value={formatNaira(Number(marketingFetcher.data.marketingMetrics.cpa))}
+                />
+                <MetricCard
+                  label="True ROAS"
+                  value={`${Number(marketingFetcher.data.marketingMetrics.trueRoas).toFixed(2)}x`}
+                  accent={
+                    marketingFetcher.data.marketingMetrics.trueRoas >= 2
+                      ? 'success'
+                      : marketingFetcher.data.marketingMetrics.trueRoas >= 1
+                        ? 'warning'
+                        : 'danger'
+                  }
+                />
+              </div>
+            ) : (
+              <p className="text-sm text-app-fg-muted">No marketing data.</p>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Funding balance modal ─────────────────────── */}
+      {openModal === 'funding' && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-2xl">
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">Funding balance</h2>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <p className="text-xs text-app-fg-muted">
+              Confirmed funding received minus approved ad spend
+            </p>
+            {marketingFetcher.data?.ok && marketingFetcher.data.fundingBalance ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-app-fg-muted">Total received</p>
+                  <p className="text-lg font-medium text-app-fg">
+                    {formatNaira(
+                      Number(marketingFetcher.data.fundingBalance.totalReceived),
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-app-fg-muted">Total spent</p>
+                  <p className="text-lg font-medium text-app-fg">
+                    {user.role === 'MEDIA_BUYER'
+                      ? formatNaira(
+                          Number(marketingFetcher.data.fundingBalance.totalSpend),
+                        )
+                      : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-app-fg-muted">Balance</p>
+                  <p className="text-xl font-bold text-brand-600 dark:text-brand-400">
+                    {formatNaira(Number(marketingFetcher.data.fundingBalance.balance))}
+                  </p>
                 </div>
               </div>
-            ) : null}
-            {showOnboardingTab && onboardingFetcher.data && onboardingFetcher.data.ok === false ? (
-              <div className="card space-y-2 border border-danger-200/60 dark:border-danger-800/40">
-                <p className="text-sm font-medium text-app-fg">Staff onboarding unavailable</p>
-                <p className="text-sm text-app-fg-muted">
-                  {typeof onboardingFetcher.data.error === 'string'
-                    ? onboardingFetcher.data.error
-                    : 'You may not have access to load this summary in this session.'}
+            ) : (
+              <p className="text-sm text-app-fg-muted">No funding data.</p>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Permissions modal ─────────────────────────── */}
+      {openModal === 'permissions' && !isSuperAdminProfile && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-3xl">
+          <div className="p-4 space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-app-fg">Permissions</h2>
+                <p className="text-xs text-app-fg-muted mt-0.5">
+                  {isSelfView
+                    ? 'Capabilities from your role template and any changes stamped on your account.'
+                    : 'Read-only preview of effective permissions (template baseline plus account overrides).'}
                 </p>
               </div>
-            ) : null}
-            {showOnboardingTab && onboardingFetcher.data?.ok ? (() => {
-              const summary: UserOnboardingSummary | null = onboardingFetcher.data.onboardingSummary;
-              return (
-                  <div
-                    className={
-                      isSelfView
-                        ? 'card space-y-4 border-brand-200/80 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-950/20'
-                        : 'card space-y-4'
-                    }
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0 space-y-1">
-                        <h2 className="text-base font-semibold text-app-fg">
-                          {isSelfView ? 'Your onboarding' : 'Staff onboarding'}
-                        </h2>
-                        <p className="text-sm text-app-fg-muted">
-                          {isSelfView
-                            ? 'HR documents, proof of address, and guarantors — does not affect your login. Open the full form to edit or submit for review.'
-                            : 'HR documents and guarantor details — this does not affect their login.'}
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-2 sm:items-end shrink-0">
-                        {isSelfView ? (
-                          <Link
-                            to="/admin/onboarding"
-                            prefetch="intent"
-                            className="btn-primary inline-flex items-center justify-center whitespace-nowrap"
-                          >
-                            Open onboarding
-                          </Link>
-                        ) : null}
-                        {!isSelfView && viewerCanManageHrOnboarding && summary?.ok === true ? (
-                          <Link
-                            to={`${usersBasePath}/${user.id}/onboarding`}
-                            prefetch="intent"
-                            className="btn-primary inline-flex items-center justify-center whitespace-nowrap"
-                          >
-                            View details
-                          </Link>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {!summary || summary.ok === false ? (
-                      <div className="rounded-lg border border-app-border bg-app-hover/40 px-4 py-3 text-sm text-app-fg-muted">
-                        {summary?.reason === 'forbidden'
-                          ? "You don't have permission to view this user's onboarding summary. HR can open the full record from the staff directory."
-                          : 'Could not load onboarding status. Try refreshing the page.'}
-                      </div>
-                    ) : (
-                      <>
-                        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wide">Status</dt>
-                            <dd className="mt-1">
-                              <StatusBadge status={summary.status} showDot size="md" />
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wide">Submitted</dt>
-                            <dd className="mt-1 text-app-fg">{formatOnboardingTimestamp(summary.submittedAt)}</dd>
-                          </div>
-                          <div className="sm:col-span-2">
-                            <dt className="text-app-fg-muted text-xs font-medium uppercase tracking-wide">Approved</dt>
-                            <dd className="mt-1 text-app-fg">{formatOnboardingTimestamp(summary.approvedAt)}</dd>
-                          </div>
-                        </dl>
-                        {(isSelfView || viewerCanManageHrOnboarding) && (
-                          <p className="text-xs text-app-fg-muted">
-                            {isSelfView ? (
-                              <>
-                                Use <strong>Open onboarding</strong> to upload documents, edit guarantors, or submit for HR review.
-                              </>
-                            ) : (
-                              <>
-                                Use <strong>View details</strong> for the full packet and HR approval workflow.
-                              </>
-                            )}
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-              );
-            })() : null}
-
-            {/* Account Information */}
-            <div className="card space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold text-app-fg">Account Information</h2>
-                {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                  <BranchScopedLink
-                    to={`/hr/users/${user.id}/edit`}
-                    actionLabel="editing this user"
-                    prefetch="intent"
-                    className="text-xs text-brand-500 hover:text-brand-600 font-medium"
-                  >
-                    Edit
-                  </BranchScopedLink>
-                )}
-              </div>
-              <DeferredSection resolve={pendingEmailChangeResolved} skeleton="inline">
-                {(pending: PendingEmailChange | null) => pending && !isSuperAdminProfile && !restrictHeadView && (
-                  <div className="rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-800 p-3 mb-4">
-                    <p className="text-sm font-medium text-warning-800 dark:text-warning-200">
-                      Pending email change to <strong>{pending.requestedNewEmail}</strong> — requires SuperAdmin approval
-                    </p>
-                    <div className="flex gap-2 mt-2">
-                      <Button
-                        type="button"
-                        variant="success"
-                        size="sm"
-                        className="text-xs"
-                        onClick={() => { setShowEmailChangeModal({ requestId: pending.id, action: 'APPROVED' }); setEmailChangeReason(''); }}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="danger"
-                        size="sm"
-                        className="text-xs"
-                        onClick={() => { setShowEmailChangeModal({ requestId: pending.id, action: 'REJECTED' }); setEmailChangeReason(''); }}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </DeferredSection>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-6">
-                <InfoField label="Full Name" value={user.name} icon={<UserIcon />} />
-                <InfoField label="Email Address" value={user.email} icon={<EnvelopeIcon />} />
-                <InfoField label="Role" value={formatRole(user.role)} icon={<ShieldIcon />} />
-                <InfoField label="Status" value={user.status} icon={<StatusDot status={user.status} />} />
-                <InfoField label="Phone" value={user.phone ?? 'Not set'} icon={<PhoneIcon />} />
-                {showCapacityReadonly && <InfoField label="Order Capacity" value={String(user.capacity)} icon={<StackIcon />} />}
-                <InfoField
-                  label="Member Since"
-                  value={memberSince.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })}
-                  icon={<CalendarIcon />}
-                />
-                <InfoField
-                  label="Last Updated"
-                  value={new Date(user.updatedAt).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })}
-                  icon={<ClockIcon />}
-                />
-              </div>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
-
-            {/* Role Settings */}
-            {(user.logisticsLocationId || user.restrictProductAccess || user.commissionPlanId) && (
-              <div className="card space-y-4">
-                <h2 className="text-base font-semibold text-app-fg">Role Configuration</h2>
-
-                {user.logisticsLocationId && (
-                  <div>
-                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Assigned Location</p>
-                    <DeferredSection resolve={locationsResolved} skeleton="inline">
-                      {(resolvedLocations) => {
-                        const assignedLocation = resolvedLocations.find(
-                          (location) => location.id === user.logisticsLocationId,
-                        );
-                        return assignedLocation ? (
-                          <Link to="/admin/logistics" className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
-                            {assignedLocation.name}
-                          </Link>
-                        ) : (
-                          <p className="text-sm text-app-fg">Unknown location</p>
-                        );
-                      }}
-                    </DeferredSection>
-                    <p className="text-xs text-app-fg-muted mt-1">Open Logistics to see full location details.</p>
-                  </div>
-                )}
-
-                {user.restrictProductAccess && (
-                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-800">
-                    <svg className="w-4 h-4 text-warning-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                    </svg>
-                    <span className="text-sm text-warning-700 dark:text-warning-300 font-medium">Product access is restricted to assigned products only</span>
-                  </div>
-                )}
-
-                {user.commissionPlanId && (
-                  <div>
-                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider mb-1">Commission Plan</p>
-                    <DeferredSection resolve={plansResolved} skeleton="inline">
-                      {(resolvedPlans) => {
-                        const assignedCommissionPlan = resolvedPlans.find(
-                          (plan) => plan.id === user.commissionPlanId,
-                        );
-                        return assignedCommissionPlan ? (
-                          <Link to="/hr/plans" className="text-sm text-brand-600 dark:text-brand-400 hover:underline">
-                            {assignedCommissionPlan.planName}
-                          </Link>
-                        ) : (
-                          <p className="text-sm text-app-fg">Unknown commission plan</p>
-                        );
-                      }}
-                    </DeferredSection>
-                    <p className="text-xs text-app-fg-muted mt-1">Manage commission plans in HR Plans.</p>
-                  </div>
-                )}
+            {!restrictHeadView && !isSelfView && (
+              <div className="flex justify-end">
+                <BranchScopedLink
+                  to={`/hr/users/${user.id}/edit`}
+                  actionLabel="editing user permissions"
+                  prefetch="intent"
+                  className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                >
+                  Edit permissions
+                </BranchScopedLink>
               </div>
             )}
-
-            {/* Marketing Metrics — lazy slice (see `api.hr-user-detail-marketing.$userId`) */}
-            {isMarketingRole &&
-            (marketingFetcher.state === 'loading' ||
-              (marketingFetcher.state === 'idle' && marketingFetcher.data == null)) ? (
-              <div className="card animate-pulse space-y-4 border border-app-border" aria-busy="true" aria-label="Loading marketing performance">
-                <div className="h-4 w-48 rounded bg-app-hover" />
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {permissionsPreviewLoading ? (
+              <div className="space-y-2 py-2">
+                <div className="h-3 w-32 rounded bg-app-hover animate-pulse" />
+                <div className="flex flex-wrap gap-1.5">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="h-16 rounded-lg bg-app-hover" />
+                    <div key={i} className="h-6 w-24 rounded bg-app-hover animate-pulse" />
                   ))}
                 </div>
               </div>
-            ) : null}
-            {isMarketingRole && marketingFetcher.data?.ok === false ? (
-              <div className="card space-y-2 border border-app-border bg-app-hover/40">
-                <p className="text-sm font-medium text-app-fg">Marketing data unavailable</p>
-                <p className="text-sm text-app-fg-muted">
-                  {typeof marketingFetcher.data.error === 'string'
-                    ? marketingFetcher.data.error
-                    : 'Could not load marketing performance.'}
-                </p>
-              </div>
-            ) : null}
-            {isMarketingRole && marketingFetcher.data?.ok ? (() => {
-              const metrics = marketingFetcher.data.marketingMetrics;
-              return metrics ? (
-                  <div className="card space-y-4">
-                    <h2 className="text-base font-semibold text-app-fg">Marketing Performance</h2>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                      <MetricCard label="Total Spend" value={formatNaira(Number(metrics.totalSpend))} />
-                      <MetricCard label="Total Orders" value={String(metrics.totalOrders)} />
-                      <MetricCard label="Delivered" value={String(metrics.deliveredOrders)} accent="success" />
-                      <MetricCard label="Confirmed" value={String(metrics.confirmedOrders)} accent="success" />
-                      <MetricCard label="Revenue" value={formatNaira(Number(metrics.deliveredRevenue))} accent="success" />
-                      <MetricCard label="Conf. Rate" value={`${Number(metrics.confirmationRate).toFixed(1)}%`} />
-                      <MetricCard label="CPA" value={formatNaira(Number(metrics.cpa))} />
-                      <MetricCard label="True ROAS" value={`${Number(metrics.trueRoas).toFixed(2)}x`} accent={metrics.trueRoas >= 2 ? 'success' : metrics.trueRoas >= 1 ? 'warning' : 'danger'} />
-                    </div>
-                  </div>
-              ) : null;
-            })() : null}
-
-            {/* Funding balance — same lazy marketing slice */}
-            {isMarketingRole && marketingFetcher.data?.ok ? (() => {
-              const balance = marketingFetcher.data.fundingBalance;
-              return balance ? (
-                  <div className="card space-y-4 border-brand-200 dark:border-brand-700/50 bg-brand-50/20 dark:bg-brand-900/10">
-                    <h2 className="text-base font-semibold text-app-fg">Funding balance</h2>
-                    <p className="text-xs text-app-fg-muted">Confirmed funding received minus approved ad spend</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <p className="text-xs text-app-fg-muted">Total received</p>
-                        <p className="text-lg font-medium text-app-fg">{formatNaira(Number(balance.totalReceived))}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-app-fg-muted">Total spent</p>
-                        <p className="text-lg font-medium text-app-fg">
-                          {user.role === 'MEDIA_BUYER' ? formatNaira(Number(balance.totalSpend)) : '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-app-fg-muted">Balance</p>
-                        <p className="text-xl font-bold text-brand-600 dark:text-brand-400">{formatNaira(Number(balance.balance))}</p>
-                      </div>
-                    </div>
-                  </div>
-              ) : null;
-            })() : null}
-
-            {/* Permissions preview — effective capability list (role template ∪ stamped deltas).
-                The "Edit permissions" button opens Settings (sparse matrix / `edit_matrix`). */}
-            {!isSuperAdminProfile && (
-              <div className="card space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <h2 className="text-base font-semibold text-app-fg">Permissions</h2>
-                    <p className="text-xs text-app-fg-muted mt-0.5">
-                      {isSelfView
-                        ? 'Capabilities from your role template and any changes stamped on your account.'
-                        : 'Read-only preview of effective permissions (template baseline plus account overrides).'}
-                    </p>
-                  </div>
-                  {!restrictHeadView && !isSelfView && (
-                    <BranchScopedLink
-                      to={`/hr/users/${user.id}/edit`}
-                      actionLabel="editing user permissions"
-                      prefetch="intent"
-                      className="text-xs text-brand-500 hover:text-brand-600 font-medium shrink-0"
-                    >
-                      Edit permissions
-                    </BranchScopedLink>
-                  )}
-                </div>
-                {permissionsPreviewLoading ? (
-                  <div className="space-y-2 py-2">
-                    <div className="h-3 w-32 rounded bg-app-hover animate-pulse" />
-                    <div className="flex flex-wrap gap-1.5">
-                      {Array.from({ length: 6 }).map((_, i) => (
-                        <div key={i} className="h-6 w-24 rounded bg-app-hover animate-pulse" />
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <Suspense fallback={<div className="h-16 rounded bg-app-hover animate-pulse" aria-hidden />}>
-                    <PermissionsPreview
-                      permissions={resolvedPermissionCatalog}
-                      templateCodes={stampPreviewTemplateCodes}
-                      overrides={permissionOverridesLoaded}
-                      effectiveCodes={stampPreviewEffectiveCodes}
-                      catalogRequestFailed={permissionCatalogRequestFailed}
-                    />
-                  </Suspense>
-                )}
-              </div>
+            ) : (
+              <Suspense
+                fallback={<div className="h-16 rounded bg-app-hover animate-pulse" aria-hidden />}
+              >
+                <PermissionsPreview
+                  permissions={resolvedPermissionCatalog}
+                  templateCodes={stampPreviewTemplateCodes}
+                  overrides={permissionOverridesLoaded}
+                  effectiveCodes={stampPreviewEffectiveCodes}
+                  catalogRequestFailed={permissionCatalogRequestFailed}
+                />
+              </Suspense>
             )}
           </div>
+        </Modal>
+      )}
 
-          {/* Right Column — Quick Stats */}
-          <div className="space-y-6">
-            {/* Order Stats — only for roles with order attribution */}
-            {showOrdersCard && (
-              <DeferredSection resolve={recentOrdersResolved} skeleton="stat">
-                {(data) => (
-                  <div className="card space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-app-fg">Orders</h3>
-                      <button type="button" onClick={() => setActiveTab('orders')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
-                        View all
-                      </button>
-                    </div>
-                    <p className="text-3xl font-bold text-app-fg">{data.total}</p>
-                    <p className="text-xs text-app-fg-muted">
-                      {isCSRole ? 'Orders handled as CS agent' : isMarketingRole ? 'Orders from campaigns' : isLogisticsRole ? 'Deliveries assigned' : 'Total orders in system'}
-                    </p>
-                    {data.orders.length > 0 && (
-                      <div className="border-t border-app-border pt-3 space-y-2">
-                        {data.orders.slice(0, 3).map((order) => (
-                          <Link key={order.id} to={`/admin/orders/${order.id}`} prefetch="intent" className="flex items-center justify-between text-xs hover:bg-app-hover/50 -mx-1 px-1 py-1 rounded transition-colors">
-                            <span className="text-app-fg font-medium">{order.referenceNumber || order.id.slice(0, 8)}</span>
-                            <OrderStatusBadge status={order.status} />
-                          </Link>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </DeferredSection>
-            )}
-
-            {/* Payout Summary — only for roles with payroll */}
-            {showPayrollCard && (
-            <DeferredSection resolve={payoutsResolved} skeleton="stat">
+      {/* ─── Payroll modal ─────────────────────────────── */}
+      {openModal === 'payroll' && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-4xl">
+          <div className="p-4 space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">Payroll</h2>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <DeferredSection resolve={payoutsResolved} skeleton="table">
               {(payoutList) => (
-                <div className="card space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-semibold text-app-fg">Payroll</h3>
-                    <div className="flex items-center gap-3 shrink-0">
-                      {showEarningsTab ? (
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('earnings')}
-                          className="text-xs text-brand-500 hover:text-brand-600 font-medium"
-                        >
-                          Earnings outlook
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('payroll')}
-                        className="text-xs text-brand-500 hover:text-brand-600 font-medium"
-                      >
-                        View all
-                      </button>
-                    </div>
+                <div className="card p-0">
+                  <div className="px-4 py-3 border-b border-app-border">
+                    <h3 className="text-sm font-semibold text-app-fg">Payout History</h3>
                   </div>
-                  <p className="text-3xl font-bold text-app-fg">{payoutList.length}</p>
-                  <p className="text-xs text-app-fg-muted">Payout records</p>
-                  {payoutList.length > 0 && (
-                    <div className="border-t border-app-border pt-3 space-y-2">
-                      {payoutList.slice(0, 3).map((p) => (
-                        <div key={p.id} className="flex items-center justify-between text-xs">
-                          <span className="text-app-fg-muted">
-                            {new Date(p.periodStart).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                            {' — '}
-                            {new Date(p.periodEnd).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
-                          </span>
-                          <span className="font-medium text-app-fg">{formatNaira(Number(p.netAmount))}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <CompactTable<UserPayoutRecord>
+                    caption="Payout history"
+                    columns={payoutColumns}
+                    rows={payoutList}
+                    rowKey={(p) => p.id}
+                    withCard={false}
+                    className="min-w-[640px]"
+                    emptyTitle="No payout records found"
+                  />
                 </div>
               )}
             </DeferredSection>
-            )}
+            <DeferredSection resolve={adjustmentsResolved} skeleton="table">
+              {(adjList) => (
+                <div className="card p-0">
+                  <div className="px-4 py-3 border-b border-app-border">
+                    <h3 className="text-sm font-semibold text-app-fg">Adjustments & Bonuses</h3>
+                  </div>
+                  <CompactTable<UserAdjustment>
+                    caption="Adjustments and bonuses"
+                    columns={adjustmentColumns}
+                    rows={adjList}
+                    rowKey={(adj) => adj.id}
+                    withCard={false}
+                    className="min-w-[720px]"
+                    emptyTitle="No adjustments found"
+                  />
+                </div>
+              )}
+            </DeferredSection>
+          </div>
+        </Modal>
+      )}
 
-            {/* Recent Activity */}
+      {/* ─── Earnings outlook modal ────────────────────── */}
+      {openModal === 'earnings' && showEarningsTab && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-3xl">
+          <div className="p-4 space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">Earnings outlook</h2>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-hover/40 px-4 py-3 text-xs text-app-fg-muted">
+              <p>
+                These figures are a <strong className="text-app-fg">running estimate</strong> from
+                your attributed orders and commission plan — they update as you deliver. HR still
+                finalises amounts in payroll batches; bonuses and adjustments may change the final
+                payout.
+              </p>
+            </div>
+            {(() => {
+              const ep = earningsFetcher.data;
+              const earningsLoading =
+                earningsFetcher.state === 'loading' || earningsFetcher.state === 'submitting';
+              if (earningsLoading || !ep) {
+                return (
+                  <div className="card flex justify-center py-16">
+                    <Spinner />
+                  </div>
+                );
+              }
+              if (!ep.ok) {
+                return (
+                  <InlineNotification
+                    variant="danger"
+                    message={`Could not load earnings outlook.\n${ep.error ?? 'Try again in a moment.'}`}
+                  />
+                );
+              }
+              return (
+                <>
+                  <div className="grid gap-6 lg:grid-cols-2">
+                    {ep.currentMonth ? (
+                      <Suspense fallback={<Spinner className="mx-auto my-8" />}>
+                        <UserDetailEarningsOutlookCard
+                          heading="This month (so far)"
+                          periodLabel={ep.currentMonth.periodLabel}
+                          preview={ep.currentMonth.preview}
+                        />
+                      </Suspense>
+                    ) : null}
+                    {ep.nextMonth ? (
+                      <Suspense fallback={<Spinner className="mx-auto my-8" />}>
+                        <UserDetailEarningsOutlookCard
+                          heading="Next calendar month (early outlook)"
+                          periodLabel={ep.nextMonth.periodLabel}
+                          preview={ep.nextMonth.preview}
+                        />
+                      </Suspense>
+                    ) : null}
+                  </div>
+                  {ep.lastPaidPayout ? (
+                    <div className="card p-4 space-y-2">
+                      <h3 className="text-sm font-semibold text-app-fg">Last paid payroll</h3>
+                      <p className="text-xs text-app-fg-muted">
+                        Period{' '}
+                        {new Date(ep.lastPaidPayout.periodStart).toLocaleDateString('en-NG', {
+                          month: 'short',
+                          day: 'numeric',
+                        })}{' '}
+                        —{' '}
+                        {new Date(ep.lastPaidPayout.periodEnd).toLocaleDateString('en-NG', {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </p>
+                      <p className="text-lg font-bold text-app-fg">
+                        {formatNaira(Number(ep.lastPaidPayout.totalPayout))}
+                      </p>
+                      <p className="text-xs text-app-fg-muted">
+                        After Finance marks a batch paid, your next cycle starts fresh —
+                        open <strong>Payroll</strong> for full history.
+                      </p>
+                    </div>
+                  ) : null}
+                </>
+              );
+            })()}
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Finance Activity modal ────────────────────── */}
+      {openModal === 'finance' && showFinanceTab && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-4xl">
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">Finance Activity</h2>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <DeferredSection resolve={financeActivityForDeferred} skeleton="table">
+              {(data) => (
+                <div className="card p-0">
+                  <div className="px-4 py-3 border-b border-app-border">
+                    <h3 className="text-sm font-semibold text-app-fg">
+                      Approvals Processed
+                      <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
+                    </h3>
+                    <p className="text-xs text-app-fg-muted mt-0.5">
+                      Approval requests processed by this Finance Officer
+                    </p>
+                  </div>
+                  <CompactTable<UserApprovalRecord>
+                    caption="Approvals processed"
+                    columns={financeApprovalColumns}
+                    rows={data.approvals}
+                    rowKey={(a) => a.id}
+                    withCard={false}
+                    className="min-w-[720px]"
+                    emptyTitle="No approvals processed yet"
+                  />
+                </div>
+              )}
+            </DeferredSection>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Activity modal ────────────────────────────── */}
+      {openModal === 'activity' && (
+        <Modal open onClose={() => setOpenModal(null)} maxWidth="max-w-4xl">
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-app-fg">Activity</h2>
+              <button
+                type="button"
+                onClick={() => setOpenModal(null)}
+                className="text-app-fg-muted hover:text-app-fg text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
             <DeferredSection resolve={auditLogResolved} skeleton="stat">
               {(entries) => (
-                <div className="card space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-app-fg">Recent Activity</h3>
-                    <button type="button" onClick={() => setActiveTab('audit')} className="text-xs text-brand-500 hover:text-brand-600 font-medium">
-                      View all
-                    </button>
-                  </div>
-                  {entries.length > 0 ? (
-                    <div className="space-y-2">
-                      {entries.slice(0, 5).map((entry, index) => (
-                        <div key={auditActivityRowKey(entry, index)} className="flex items-start gap-2 text-xs">
-                          <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-app-fg truncate">
-                              {formatActivityDescription(entry)}
-                            </p>
-                            <p className="text-app-fg-muted text-[11px] mt-0.5">
-                              {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-app-fg-muted">No activity recorded yet</p>
-                  )}
-                </div>
+                <Suspense fallback={<Spinner className="mx-auto my-8" />}>
+                  <UserDetailActivityTabContent entries={entries} />
+                </Suspense>
               )}
             </DeferredSection>
-
-            {/* Push Notification Status — SuperAdmin only */}
-            {isSuperAdmin && (
-              <DeferredSection resolve={pushStatusResolved} skeleton="stat">
-                {(status: UserPushStatus | null) => (
-                  <div className="card space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-semibold text-app-fg">Push Notifications</h3>
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                        status && status.subscribedDevices > 0
-                          ? 'bg-success-100 dark:bg-success-900/30 text-success-700 dark:text-success-300'
-                          : 'bg-app-hover text-app-fg-muted'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${status && status.subscribedDevices > 0 ? 'bg-success-500' : 'bg-app-fg-muted/50'}`} />
-                        {status && status.subscribedDevices > 0 ? 'Subscribed' : 'Not subscribed'}
-                      </span>
-                    </div>
-
-                    {status ? (
-                      <div className="space-y-3">
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="rounded-lg bg-app-hover px-3 py-2">
-                            <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Devices</p>
-                            <p className="text-xl font-bold text-app-fg">{status.subscribedDevices}</p>
-                          </div>
-                          <div className="rounded-lg bg-app-hover px-3 py-2">
-                            <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Installed</p>
-                            <p className="text-xl font-bold text-app-fg">
-                              {status.installedDeviceCount}
-                              <span className="text-xs font-normal text-app-fg-muted">
-                                {' '}
-                                / {status.subscribedDevices}
-                              </span>
-                            </p>
-                          </div>
-                          <div className="rounded-lg bg-app-hover px-3 py-2">
-                            <p className="text-[10px] text-app-fg-muted uppercase tracking-wider mb-0.5">Total sent</p>
-                            <p className="text-xl font-bold text-app-fg">{status.totalPushSent}</p>
-                          </div>
-                        </div>
-
-                        {status.lastPushSentAt && (
-                          <p className="text-xs text-app-fg-muted">
-                            Last push:{' '}
-                            <span className="text-app-fg">
-                              {new Date(status.lastPushSentAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </p>
-                        )}
-
-                        {status.subscribedDevices > 0 && status.devices.length > 0 && (
-                          <div className="border-t border-app-border pt-3 space-y-2">
-                            {status.devices.map((device) => (
-                              <div key={device.id} className="flex items-start gap-2">
-                                <svg className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 8.25h3m0 3.75h-3" />
-                                </svg>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <InstallModeBadge
-                                      mode={device.installMode}
-                                      updatedAt={device.installModeUpdatedAt}
-                                    />
-                                  </div>
-                                  <p className="text-xs text-app-fg truncate mt-0.5">{device.userAgent ?? 'Unknown device'}</p>
-                                  <p className="text-[11px] text-app-fg-muted">
-                                    Added {new Date(device.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                  </p>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-app-fg-muted">No push data available</p>
-                    )}
-                  </div>
-                )}
-              </DeferredSection>
-            )}
           </div>
-        </div>
+        </Modal>
       )}
-
-      {/* ─── Orders Tab ──────────────────────────────────── */}
-      {activeTab === 'orders' && (
-        <DeferredSection resolve={recentOrdersResolved} skeleton="table">
-          {(data) => (
-            <div className="card p-0">
-              <div className="px-4 py-3 border-b border-app-border flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-app-fg">
-                  {isCSRole ? 'Orders Handled' : isMarketingRole ? 'Campaign Orders' : isLogisticsRole ? 'Delivery Orders' : 'All Orders'}
-                  <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
-                </h2>
-              </div>
-              <CompactTable<UserOrderSummary>
-                caption="User orders"
-                columns={userOrderColumns}
-                rows={data.orders}
-                rowKey={(order) => order.id}
-                withCard={false}
-                className="min-w-[720px]"
-                emptyTitle="No orders found for this user"
-              />
-            </div>
-          )}
-        </DeferredSection>
-      )}
-
-      {/* ─── Payroll Tab ─────────────────────────────────── */}
-      {activeTab === 'payroll' && (
-        <div className="space-y-6">
-          {/* Payouts */}
-          <DeferredSection resolve={payoutsResolved} skeleton="table">
-            {(payoutList) => (
-              <div className="card p-0">
-                <div className="px-4 py-3 border-b border-app-border">
-                  <h2 className="text-sm font-semibold text-app-fg">Payout History</h2>
-                </div>
-                <CompactTable<UserPayoutRecord>
-                  caption="Payout history"
-                  columns={payoutColumns}
-                  rows={payoutList}
-                  rowKey={(p) => p.id}
-                  withCard={false}
-                  className="min-w-[640px]"
-                  emptyTitle="No payout records found"
-                />
-              </div>
-            )}
-          </DeferredSection>
-
-          {/* Adjustments */}
-          <DeferredSection resolve={adjustmentsResolved} skeleton="table">
-            {(adjList) => (
-              <div className="card p-0">
-                <div className="px-4 py-3 border-b border-app-border">
-                  <h2 className="text-sm font-semibold text-app-fg">Adjustments & Bonuses</h2>
-                </div>
-                <CompactTable<UserAdjustment>
-                  caption="Adjustments and bonuses"
-                  columns={adjustmentColumns}
-                  rows={adjList}
-                  rowKey={(adj) => adj.id}
-                  withCard={false}
-                  className="min-w-[720px]"
-                  emptyTitle="No adjustments found"
-                />
-              </div>
-            )}
-          </DeferredSection>
-        </div>
-      )}
-
-      {/* ─── Earnings outlook (deferred: post-mount API only) ─ */}
-      {activeTab === 'earnings' && showEarningsTab && (
-        <div className="space-y-6">
-          <div className="rounded-lg border border-app-border bg-app-hover/40 px-4 py-3 text-xs text-app-fg-muted">
-            <p>
-              These figures are a <strong className="text-app-fg">running estimate</strong> from your attributed
-              orders and commission plan — they update as you deliver. HR still finalises amounts in payroll batches;
-              bonuses and adjustments may change the final payout.
-            </p>
-          </div>
-          {(() => {
-            const ep = earningsFetcher.data;
-            const earningsLoading =
-              earningsFetcher.state === 'loading' || earningsFetcher.state === 'submitting';
-            if (earningsLoading || !ep) {
-              return (
-                <div className="card flex justify-center py-16">
-                  <Spinner />
-                </div>
-              );
-            }
-            if (!ep.ok) {
-              return (
-                <InlineNotification
-                  variant="danger"
-                  message={`Could not load earnings outlook.\n${ep.error ?? 'Try again in a moment.'}`}
-                />
-              );
-            }
-            return (
-            <>
-              <div className="grid gap-6 lg:grid-cols-2">
-                {ep.currentMonth ? (
-                  <Suspense fallback={<Spinner className="mx-auto my-8" />}>
-                    <UserDetailEarningsOutlookCard
-                      heading="This month (so far)"
-                      periodLabel={ep.currentMonth.periodLabel}
-                      preview={ep.currentMonth.preview}
-                    />
-                  </Suspense>
-                ) : null}
-                {ep.nextMonth ? (
-                  <Suspense fallback={<Spinner className="mx-auto my-8" />}>
-                    <UserDetailEarningsOutlookCard
-                      heading="Next calendar month (early outlook)"
-                      periodLabel={ep.nextMonth.periodLabel}
-                      preview={ep.nextMonth.preview}
-                    />
-                  </Suspense>
-                ) : null}
-              </div>
-              {ep.lastPaidPayout ? (
-                <div className="card p-4 space-y-2">
-                  <h3 className="text-sm font-semibold text-app-fg">Last paid payroll</h3>
-                  <p className="text-xs text-app-fg-muted">
-                    Period{' '}
-                    {new Date(ep.lastPaidPayout.periodStart).toLocaleDateString('en-NG', {
-                      month: 'short',
-                      day: 'numeric',
-                    })}{' '}
-                    —{' '}
-                    {new Date(ep.lastPaidPayout.periodEnd).toLocaleDateString('en-NG', {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </p>
-                  <p className="text-lg font-bold text-app-fg">
-                    {formatNaira(Number(ep.lastPaidPayout.totalPayout))}
-                  </p>
-                  <p className="text-xs text-app-fg-muted">
-                    After Finance marks a batch paid, your next cycle starts fresh in HR payroll — use{' '}
-                    <button
-                      type="button"
-                      className="text-brand-500 hover:text-brand-600 font-medium"
-                      onClick={() => setActiveTab('payroll')}
-                    >
-                      Payroll
-                    </button>{' '}
-                    for full history.
-                  </p>
-                </div>
-              ) : null}
-            </>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* ─── Finance Activity Tab ─────────────────────────── */}
-      {activeTab === 'finance' && showFinanceTab && (
-        <DeferredSection resolve={financeActivityForDeferred} skeleton="table">
-          {(data) => (
-            <div className="card p-0">
-              <div className="px-4 py-3 border-b border-app-border">
-                <h2 className="text-sm font-semibold text-app-fg">
-                  Approvals Processed
-                  <span className="text-app-fg-muted font-normal ml-2">({data.total})</span>
-                </h2>
-                <p className="text-xs text-app-fg-muted mt-0.5">
-                  Approval requests processed by this Finance Officer
-                </p>
-              </div>
-              <CompactTable<UserApprovalRecord>
-                caption="Approvals processed"
-                columns={financeApprovalColumns}
-                rows={data.approvals}
-                rowKey={(a) => a.id}
-                withCard={false}
-                className="min-w-[720px]"
-                emptyTitle="No approvals processed yet"
-              />
-            </div>
-          )}
-        </DeferredSection>
-      )}
-
-      {/* ─── Activity / Audit Tab ────────────────────────── */}
-      {activeTab === 'audit' && (
-        <DeferredSection resolve={auditLogResolved} skeleton="stat">
-          {(entries) => (
-            <Suspense fallback={<Spinner className="mx-auto my-8" />}>
-              <UserDetailActivityTabContent entries={entries} />
-            </Suspense>
-          )}
-        </DeferredSection>
-      )}
-
 
       {/* ─── Reset Password Modal ────────────────────────── */}
       {showResetPassword && (
-        <Modal open onClose={() => setShowResetPassword(false)} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-app-fg">Reset Password</h3>
-            <p className="text-sm text-app-fg-muted">
-              Set a new password for <strong>{user.name}</strong>. This will log them out of all sessions.
-            </p>
-            <ModalFetcherInlineError message={resetSurface.errorMatchingIntent('resetPassword')} />
-            <resetFetcher.Form method="post" action="." data-branch-scoped-action="true">
-              <input type="hidden" name="intent" value="resetPassword" />
-              <div className="space-y-4">
-                <div>
-                  <TextInput
-                    id="newPassword"
-                    name="newPassword"
-                    type="password"
-                    label="New Password"
-                    required
-                    minLength={8}
-                    placeholder="Minimum 8 characters"
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-3">
-                  <Button type="button" variant="secondary" onClick={() => setShowResetPassword(false)} disabled={isResetting}>Cancel</Button>
-                  <Button type="submit" variant="primary" loading={isResetting} loadingText="Resetting...">
-                    Reset Password
-                  </Button>
-                </div>
+        <Modal
+          open
+          onClose={() => setShowResetPassword(false)}
+          maxWidth="max-w-md"
+          contentClassName="p-6 space-y-4"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">Reset Password</h3>
+          <p className="text-sm text-app-fg-muted">
+            Set a new password for <strong>{user.name}</strong>. This will log them out of all
+            sessions.
+          </p>
+          <ModalFetcherInlineError message={resetSurface.errorMatchingIntent('resetPassword')} />
+          <resetFetcher.Form method="post" action="." data-branch-scoped-action="true">
+            <input type="hidden" name="intent" value="resetPassword" />
+            <div className="space-y-4">
+              <div>
+                <TextInput
+                  id="newPassword"
+                  name="newPassword"
+                  type="password"
+                  label="New Password"
+                  required
+                  minLength={8}
+                  placeholder="Minimum 8 characters"
+                />
               </div>
-            </resetFetcher.Form>
+              <div className="flex items-center justify-end gap-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowResetPassword(false)}
+                  disabled={isResetting}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  loading={isResetting}
+                  loadingText="Resetting..."
+                >
+                  Reset Password
+                </Button>
+              </div>
+            </div>
+          </resetFetcher.Form>
         </Modal>
       )}
 
       {/* ─── Email Change Approval Modal ─────────────────── */}
       {showEmailChangeModal && (
-        <Modal open onClose={() => { setShowEmailChangeModal(null); setEmailChangeReason(''); }} maxWidth="max-w-md" contentClassName="p-6 space-y-4">
-            <h3 className="text-lg font-semibold text-app-fg">
-              {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'} Email Change
-            </h3>
-            <p className="text-sm text-app-fg-muted">
-              {showEmailChangeModal.action === 'APPROVED'
-                ? 'This will update the user\'s email address. Please provide a reason for the approval.'
-                : 'This will reject the pending email change. Please provide a reason.'}
-            </p>
-            {actionData?.error ? (
-              <InlineNotification variant="danger" message={humanizeZodIssuesString(actionData.error)} />
-            ) : null}
-            <Form method="post" data-branch-scoped-action="true">
-              <input type="hidden" name="intent" value="processEmailChange" />
-              <input type="hidden" name="requestId" value={showEmailChangeModal.requestId} />
-              <input type="hidden" name="action" value={showEmailChangeModal.action} />
-              <div className="space-y-4">
-                <div>
-                  <Textarea
-                    id="emailChangeReason"
-                    name="reason"
-                    label="Reason (min 10 characters)"
-                    required
-                    minLength={10}
-                    value={emailChangeReason}
-                    onChange={(e) => setEmailChangeReason(e.target.value)}
-                    rows={4}
-                    placeholder="e.g. Verified with HR, request approved"
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-3">
-                  <Button type="button" variant="secondary" onClick={() => { setShowEmailChangeModal(null); setEmailChangeReason(''); }}>Cancel</Button>
-                  <Button
-                    type="submit"
-                    variant={showEmailChangeModal.action === 'APPROVED' ? 'success' : 'danger'}
-                    disabled={isProcessingEmailChange || emailChangeReason.length < 10}
-                    loading={isProcessingEmailChange}
-                    loadingText="Processing..."
-                  >
-                    {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'}
-                  </Button>
-                </div>
+        <Modal
+          open
+          onClose={() => {
+            setShowEmailChangeModal(null);
+            setEmailChangeReason('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6 space-y-4"
+        >
+          <h3 className="text-lg font-semibold text-app-fg">
+            {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'} Email Change
+          </h3>
+          <p className="text-sm text-app-fg-muted">
+            {showEmailChangeModal.action === 'APPROVED'
+              ? "This will update the user's email address. Please provide a reason for the approval."
+              : 'This will reject the pending email change. Please provide a reason.'}
+          </p>
+          {actionData?.error ? (
+            <InlineNotification
+              variant="danger"
+              message={humanizeZodIssuesString(actionData.error)}
+            />
+          ) : null}
+          <Form method="post" data-branch-scoped-action="true">
+            <input type="hidden" name="intent" value="processEmailChange" />
+            <input type="hidden" name="requestId" value={showEmailChangeModal.requestId} />
+            <input type="hidden" name="action" value={showEmailChangeModal.action} />
+            <div className="space-y-4">
+              <div>
+                <Textarea
+                  id="emailChangeReason"
+                  name="reason"
+                  label="Reason (min 10 characters)"
+                  required
+                  minLength={10}
+                  value={emailChangeReason}
+                  onChange={(e) => setEmailChangeReason(e.target.value)}
+                  rows={4}
+                  placeholder="e.g. Verified with HR, request approved"
+                />
               </div>
-            </Form>
+              <div className="flex items-center justify-end gap-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setShowEmailChangeModal(null);
+                    setEmailChangeReason('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant={showEmailChangeModal.action === 'APPROVED' ? 'success' : 'danger'}
+                  disabled={isProcessingEmailChange || emailChangeReason.length < 10}
+                  loading={isProcessingEmailChange}
+                  loadingText="Processing..."
+                >
+                  {showEmailChangeModal.action === 'APPROVED' ? 'Approve' : 'Reject'}
+                </Button>
+              </div>
+            </div>
+          </Form>
         </Modal>
       )}
 
       {/* ─── Deactivate Confirmation Modal ───────────────── */}
       {showDeactivateConfirm && (
-        <Modal open onClose={() => setShowDeactivateConfirm(false)} maxWidth="max-w-lg" role="alertdialog" aria-labelledby="deactivate-modal-title" aria-describedby="deactivate-modal-desc" contentClassName="p-6 space-y-5 border-2 border-danger-200 dark:border-danger-800">
-            <div className="flex items-center gap-3 pb-2 border-b border-danger-100 dark:border-danger-900/50">
-              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/50 flex items-center justify-center">
-                <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <h3 id="deactivate-modal-title" className="text-lg font-semibold text-danger-700 dark:text-danger-300">
-                Deactivate user permanently
-              </h3>
+        <Modal
+          open
+          onClose={() => setShowDeactivateConfirm(false)}
+          maxWidth="max-w-lg"
+          role="alertdialog"
+          aria-labelledby="deactivate-modal-title"
+          aria-describedby="deactivate-modal-desc"
+          contentClassName="p-6 space-y-5 border-2 border-danger-200 dark:border-danger-800"
+        >
+          <div className="flex items-center gap-3 pb-2 border-b border-danger-100 dark:border-danger-900/50">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/50 flex items-center justify-center">
+              <svg
+                className="w-5 h-5 text-danger-600 dark:text-danger-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
             </div>
-            <p id="deactivate-modal-desc" className="text-sm text-app-fg-muted">
-              You are about to deactivate <strong>{user.name}</strong> ({user.email}). This action is <strong>irreversible</strong> for this account.
+            <h3
+              id="deactivate-modal-title"
+              className="text-lg font-semibold text-danger-700 dark:text-danger-300"
+            >
+              Deactivate user permanently
+            </h3>
+          </div>
+          <p id="deactivate-modal-desc" className="text-sm text-app-fg-muted">
+            You are about to deactivate <strong>{user.name}</strong> ({user.email}). This action is{' '}
+            <strong>irreversible</strong> for this account.
+          </p>
+          <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 p-4 space-y-2">
+            <p className="text-sm font-medium text-danger-800 dark:text-danger-200">
+              Risks and consequences:
             </p>
-            <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 p-4 space-y-2">
-              <p className="text-sm font-medium text-danger-800 dark:text-danger-200">Risks and consequences:</p>
-              <ul className="text-sm text-danger-700 dark:text-danger-300 space-y-1.5 list-disc list-inside">
-                <li>Their login will be disabled immediately; all sessions will be terminated.</li>
-                <li>They will disappear from the default user list (only visible when filtering by “Deactivated”).</li>
-                <li>This account <strong>cannot be reactivated</strong>. To give them access again you must re-invite them, which creates a new account and new audit history.</li>
-                <li>Existing audit trail and historical data (orders, payouts, etc.) remain tied to this user for compliance.</li>
-              </ul>
-            </div>
-            <p className="text-xs text-app-fg-muted">
-              Only Super Admins can deactivate users. If you need to temporarily disable access, use <strong>Inactive</strong> or <strong>Archived</strong> instead (those can be reactivated).
-            </p>
-            {actionData?.error && !dismissedError ? (
-              <InlineNotification variant="danger" message={humanizeZodIssuesString(actionData.error)} />
-            ) : null}
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <Button type="button" variant="secondary" onClick={() => setShowDeactivateConfirm(false)} disabled={isDeactivating}>
-                Cancel
+            <ul className="text-sm text-danger-700 dark:text-danger-300 space-y-1.5 list-disc list-inside">
+              <li>Their login will be disabled immediately; all sessions will be terminated.</li>
+              <li>
+                They will disappear from the default user list (only visible when filtering by
+                “Deactivated”).
+              </li>
+              <li>
+                This account <strong>cannot be reactivated</strong>. To give them access again you
+                must re-invite them, which creates a new account and new audit history.
+              </li>
+              <li>
+                Existing audit trail and historical data (orders, payouts, etc.) remain tied to this
+                user for compliance.
+              </li>
+            </ul>
+          </div>
+          <p className="text-xs text-app-fg-muted">
+            Only Super Admins can deactivate users. If you need to temporarily disable access, use{' '}
+            <strong>Inactive</strong> or <strong>Archived</strong> instead (those can be
+            reactivated).
+          </p>
+          {actionData?.error && !dismissedError ? (
+            <InlineNotification
+              variant="danger"
+              message={humanizeZodIssuesString(actionData.error)}
+            />
+          ) : null}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowDeactivateConfirm(false)}
+              disabled={isDeactivating}
+            >
+              Cancel
+            </Button>
+            <Form method="post" data-branch-scoped-action="true">
+              <input type="hidden" name="intent" value="deactivate" />
+              <Button
+                type="submit"
+                variant="danger"
+                loading={isDeactivating}
+                loadingText="Deactivating..."
+                className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700"
+              >
+                Deactivate permanently
               </Button>
-              <Form method="post" data-branch-scoped-action="true">
-                <input type="hidden" name="intent" value="deactivate" />
-                <Button
-                  type="submit"
-                  variant="danger"
-                  loading={isDeactivating}
-                  loadingText="Deactivating..."
-                  className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700"
-                >
-                  Deactivate permanently
-                </Button>
-              </Form>
-            </div>
+            </Form>
+          </div>
         </Modal>
       )}
-
     </div>
   );
 }
 
 // ─── Sub-components ─────────────────────────────────────
 
-// ─── Probation Panel ─────────────────────────────────────────
-// Renders the probation card with Mark Permanent / Extend / Terminate actions.
-// Visible when:
-//   - target user is on probation, OR
-//   - viewer has authority (HR_MANAGER + SUPER_ADMIN) AND target is probation-eligible
-// Authority check is repeated server-side; UI gating is for affordance only.
-
-function formatDateForInput(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 10);
-}
-
-function ProbationPanel({
-  user,
-  canManageProbation,
-}: {
-  user: UserDetail;
-  canManageProbation: boolean;
-}) {
-  const [showSet, setShowSet] = useState(false);
-  const [showExtend, setShowExtend] = useState(false);
-  const [showTerminate, setShowTerminate] = useState(false);
-  const [reason, setReason] = useState('');
-  const [confirmName, setConfirmName] = useState('');
-
-  const setFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
-  const extendFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
-  const permanentFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
-  const terminateFetcher = useFetcher<{ error?: string; success?: boolean; message?: string }>();
-  const blockersFetcher = useFetcher<{
-    activeOrderCount?: number;
-    pendingCallbackCount?: number;
-    pendingPayoutCount?: number;
-    canTerminate?: boolean;
-  }>();
-
-  useFetcherToast(setFetcher.data, { successMessage: 'User placed on probation' });
-  useFetcherToast(extendFetcher.data, { successMessage: 'Probation date updated' });
-  useFetcherToast(permanentFetcher.data, { successMessage: 'Probation cleared' });
-  useFetcherToast(terminateFetcher.data, { successMessage: 'Probation user terminated' });
-
-  // Close modals on success.
-  useEffect(() => {
-    if (setFetcher.state === 'idle' && setFetcher.data?.success) setShowSet(false);
-  }, [setFetcher.state, setFetcher.data?.success]);
-  useEffect(() => {
-    if (extendFetcher.state === 'idle' && extendFetcher.data?.success) setShowExtend(false);
-  }, [extendFetcher.state, extendFetcher.data?.success]);
-
-  // Load blockers when terminate modal opens.
-  useEffect(() => {
-    if (!showTerminate) return;
-    void blockersFetcher.load(`/api/hr-user-detail-probation-blockers/${user.id}`);
-  }, [showTerminate, user.id]);
-
-  const isOnProbation = !!user.isProbation;
-  // Show panel only when relevant: user is on probation, or viewer can promote them onto it.
-  const targetEligible = !['SUPER_ADMIN', 'ADMIN'].includes(user.role);
-  if (!isOnProbation && (!canManageProbation || !targetEligible)) return null;
-
-  const blockers = blockersFetcher.data;
-  const blockerCount =
-    (blockers?.activeOrderCount ?? 0) +
-    (blockers?.pendingCallbackCount ?? 0) +
-    (blockers?.pendingPayoutCount ?? 0);
-  const canTerminate = blockers?.canTerminate === true;
-
+/**
+ * Grey clickable card for the minimal user-detail layout. Each card opens a
+ * modal with the section's lazy-loaded data.
+ */
+function SectionCard({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <div
-      className={`card border-l-4 ${
-        isOnProbation
-          ? 'border-l-amber-400 dark:border-l-amber-500 bg-amber-50/30 dark:bg-amber-900/10'
-          : 'border-l-app-border'
-      }`}
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-left rounded-lg border border-app-border bg-app-hover px-4 py-3 hover:bg-app-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 transition-colors"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-app-fg flex items-center gap-2">
-            Probation
-            {isOnProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" />}
-          </h3>
-          {isOnProbation ? (
-            <p className="text-xs text-app-fg-muted mt-1">
-              On probation since{' '}
-              {user.probationStartedAt ? formatOrderTimestamp(user.probationStartedAt) : 'unknown'}.
-              Review {user.probationUntil ? `due ${formatOrderTimestamp(user.probationUntil)}` : 'window not set'}.
-            </p>
-          ) : (
-            <p className="text-xs text-app-fg-muted mt-1">
-              Permanent staff. Probation can be applied retroactively if needed.
-            </p>
-          )}
-        </div>
-        {canManageProbation && (
-          <div className="flex flex-wrap items-center gap-2">
-            {isOnProbation ? (
-              <>
-                <Button size="sm" variant="secondary" onClick={() => setShowExtend(true)}>
-                  Change review date
-                </Button>
-                <permanentFetcher.Form method="post">
-                  <input type="hidden" name="intent" value="markProbationPermanent" />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    variant="primary"
-                    loading={permanentFetcher.state !== 'idle'}
-                    loadingText="Saving..."
-                  >
-                    Mark permanent
-                  </Button>
-                </permanentFetcher.Form>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="text-danger-600 dark:text-danger-400 border-danger-200 dark:border-danger-700"
-                  onClick={() => {
-                    setReason('');
-                    setConfirmName('');
-                    setShowTerminate(true);
-                  }}
-                >
-                  Terminate
-                </Button>
-              </>
-            ) : (
-              <Button size="sm" variant="secondary" onClick={() => setShowSet(true)}>
-                Place on probation
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {showSet ? (
-        <Modal open onClose={() => setShowSet(false)} contentClassName="p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-app-fg">Place on probation</h2>
-          <setFetcher.Form method="post" className="space-y-4">
-            <input type="hidden" name="intent" value="setProbation" />
-            <p className="text-sm text-app-fg-muted">
-              The user keeps every permission of their role. Probation enables a complete PII-scrub
-              termination if they don&apos;t meet expectations.
-            </p>
-            <TextInput
-              label="Review date (optional)"
-              name="probationUntil"
-              type="date"
-              defaultValue={formatDateForInput(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())}
-              hint="Default is 90 days from today. HR will get a 7-day reminder before this date."
-            />
-            {setFetcher.data?.error ? (
-              <InlineNotification variant="danger" message={setFetcher.data.error} />
-            ) : null}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" onClick={() => setShowSet(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" loading={setFetcher.state !== 'idle'} loadingText="Saving...">
-                Confirm
-              </Button>
-            </div>
-          </setFetcher.Form>
-        </Modal>
-      ) : null}
-
-      {showExtend ? (
-        <Modal open onClose={() => setShowExtend(false)} contentClassName="p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-app-fg">Change probation review date</h2>
-          <extendFetcher.Form method="post" className="space-y-4">
-            <input type="hidden" name="intent" value="extendProbation" />
-            <TextInput
-              label="New review date"
-              name="probationUntil"
-              type="date"
-              defaultValue={formatDateForInput(user.probationUntil ?? null)}
-              required
-            />
-            {extendFetcher.data?.error ? (
-              <InlineNotification variant="danger" message={extendFetcher.data.error} />
-            ) : null}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" onClick={() => setShowExtend(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" loading={extendFetcher.state !== 'idle'} loadingText="Saving...">
-                Save
-              </Button>
-            </div>
-          </extendFetcher.Form>
-        </Modal>
-      ) : null}
-
-      {showTerminate ? (
-        <Modal open onClose={() => setShowTerminate(false)} maxWidth="max-w-xl" contentClassName="p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-app-fg">Terminate probation user</h2>
-          <terminateFetcher.Form method="post" className="space-y-4">
-            <input type="hidden" name="intent" value="terminateProbation" />
-            <InlineNotification
-              variant="danger"
-              message="Permanent action: Terminating scrubs this user's name, email, phone, and bank details from the database (live row + history). Their orders, payouts, and audit attribution stay intact under their UUID. This cannot be undone."
-            />
-
-            <div>
-              <p className="text-xs font-semibold text-app-fg uppercase tracking-wide mb-2">Termination blockers</p>
-              {blockersFetcher.state === 'loading' || blockersFetcher.state === 'submitting' ? (
-                <p className="text-sm text-app-fg-muted flex items-center gap-2">
-                  <Spinner size="sm" /> Checking open items...
-                </p>
-              ) : (
-                <ul className="text-sm space-y-1">
-                  <BlockerRow
-                    label="Active orders assigned"
-                    count={blockers?.activeOrderCount ?? 0}
-                    resolveHref={`/admin/orders?assignedTo=${user.id}`}
-                  />
-                  <BlockerRow
-                    label="Scheduled callbacks"
-                    count={blockers?.pendingCallbackCount ?? 0}
-                  />
-                  <BlockerRow
-                    label="Unpaid payouts (must be PAID/REJECTED)"
-                    count={blockers?.pendingPayoutCount ?? 0}
-                    resolveHref={`/hr/payroll`}
-                  />
-                </ul>
-              )}
-              {blockerCount > 0 ? (
-                <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
-                  Resolve every item above before HR can terminate this user.
-                </p>
-              ) : null}
-            </div>
-
-            <Textarea
-              label="Reason (min 10 chars)"
-              name="reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={3}
-              required
-              minLength={10}
-              placeholder="Why is this user being terminated?"
-            />
-
-            <TextInput
-              label={`Type "${user.name}" to confirm`}
-              name="confirmName"
-              value={confirmName}
-              onChange={(e) => setConfirmName(e.target.value)}
-              required
-            />
-
-            {terminateFetcher.data?.error ? (
-              <InlineNotification variant="danger" message={terminateFetcher.data.error} />
-            ) : null}
-
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" onClick={() => setShowTerminate(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="danger"
-                disabled={
-                  !canTerminate ||
-                  reason.trim().length < 10 ||
-                  confirmName.trim().toLowerCase() !== user.name.trim().toLowerCase()
-                }
-                loading={terminateFetcher.state !== 'idle'}
-                loadingText="Terminating..."
-              >
-                Terminate user
-              </Button>
-            </div>
-          </terminateFetcher.Form>
-        </Modal>
-      ) : null}
-    </div>
+      <span className="block text-sm font-medium text-app-fg">{label}</span>
+      <span className="block text-xs text-app-fg-muted mt-0.5">View details →</span>
+    </button>
   );
 }
 
@@ -2064,13 +1900,13 @@ function BlockerRow({
   return (
     <li className="flex items-center justify-between gap-2 px-3 py-1.5 rounded bg-app-hover/40">
       <span className="flex items-center gap-2 text-app-fg">
-        <span
-          className={`w-2 h-2 rounded-full ${cleared ? 'bg-success-500' : 'bg-amber-500'}`}
-        />
+        <span className={`w-2 h-2 rounded-full ${cleared ? 'bg-success-500' : 'bg-amber-500'}`} />
         {label}
       </span>
       <span className="flex items-center gap-2 text-xs">
-        <span className={`font-mono ${cleared ? 'text-success-700 dark:text-success-400' : 'text-amber-700 dark:text-amber-400'}`}>
+        <span
+          className={`font-mono ${cleared ? 'text-success-700 dark:text-success-400' : 'text-amber-700 dark:text-amber-400'}`}
+        >
           {count}
         </span>
         {!cleared && resolveHref && (
@@ -2121,23 +1957,45 @@ function InstallModeBadge({
   );
 }
 
-function InfoField({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
+function InfoField({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon?: React.ReactNode;
+}) {
   return (
     <div className="flex items-start gap-2.5">
       {icon && <div className="mt-0.5 text-app-fg-muted flex-shrink-0">{icon}</div>}
       <div>
-        <p className="text-[11px] font-medium text-app-fg-muted uppercase tracking-wider">{label}</p>
+        <p className="text-[11px] font-medium text-app-fg-muted uppercase tracking-wider">
+          {label}
+        </p>
         <p className="text-sm text-app-fg mt-0.5">{value}</p>
       </div>
     </div>
   );
 }
 
-function MetricCard({ label, value, accent }: { label: string; value: string; accent?: 'success' | 'warning' | 'danger' }) {
-  const color = accent === 'success' ? 'text-success-600 dark:text-success-400'
-    : accent === 'warning' ? 'text-warning-600 dark:text-warning-400'
-    : accent === 'danger' ? 'text-danger-600 dark:text-danger-400'
-    : 'text-app-fg';
+function MetricCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: 'success' | 'warning' | 'danger';
+}) {
+  const color =
+    accent === 'success'
+      ? 'text-success-600 dark:text-success-400'
+      : accent === 'warning'
+        ? 'text-warning-600 dark:text-warning-400'
+        : accent === 'danger'
+          ? 'text-danger-600 dark:text-danger-400'
+          : 'text-app-fg';
 
   return (
     <div className="p-3 rounded-lg bg-app-hover">
@@ -2148,8 +2006,21 @@ function MetricCard({ label, value, accent }: { label: string; value: string; ac
 }
 
 function StatusDot({ status }: { status: string }) {
-  const color = status === 'ACTIVE' ? 'bg-success-500' : status === 'PENDING' ? 'bg-info-500' : status === 'DEACTIVATED' ? 'bg-danger-500' : status === 'INACTIVE' ? 'bg-danger-500' : 'bg-warning-500';
-  return <div className={`w-4 h-4 rounded-full ${color} flex items-center justify-center`}><div className="w-2 h-2 rounded-full bg-white" /></div>;
+  const color =
+    status === 'ACTIVE'
+      ? 'bg-success-500'
+      : status === 'PENDING'
+        ? 'bg-info-500'
+        : status === 'DEACTIVATED'
+          ? 'bg-danger-500'
+          : status === 'INACTIVE'
+            ? 'bg-danger-500'
+            : 'bg-warning-500';
+  return (
+    <div className={`w-4 h-4 rounded-full ${color} flex items-center justify-center`}>
+      <div className="w-2 h-2 rounded-full bg-white" />
+    </div>
+  );
 }
 
 function getTimeSince(date: Date): string {
@@ -2171,25 +2042,123 @@ function getTimeSince(date: Date): string {
 // ─── Icons ──────────────────────────────────────────────
 
 function UserIcon() {
-  return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" /></svg>;
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
+      />
+    </svg>
+  );
 }
 function EnvelopeIcon() {
-  return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>;
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"
+      />
+    </svg>
+  );
 }
 function ShieldIcon() {
-  return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>;
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
+      />
+    </svg>
+  );
 }
 function PhoneIcon() {
-  return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" /></svg>;
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
+      />
+    </svg>
+  );
 }
 function StackIcon() {
-  return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L12 12.75 6.43 9.75m11.14 0l4.179 2.25-4.179 2.25m0 0L12 17.25l-5.571-3m11.142 0l4.179 2.25L12 21.75l-9.75-5.25 4.179-2.25" /></svg>;
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L12 12.75 6.43 9.75m11.14 0l4.179 2.25-4.179 2.25m0 0L12 17.25l-5.571-3m11.142 0l4.179 2.25L12 21.75l-9.75-5.25 4.179-2.25"
+      />
+    </svg>
+  );
 }
 function CalendarIcon() {
-  return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>;
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+      />
+    </svg>
+  );
 }
 function ClockIcon() {
-  return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>;
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+      />
+    </svg>
+  );
 }
 
 /**

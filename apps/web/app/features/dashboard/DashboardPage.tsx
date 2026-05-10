@@ -22,7 +22,7 @@ const KNOWN_ROLES = [
   'SUPER_ADMIN',
   'ADMIN',
   'HEAD_OF_CS',
-  'CS_AGENT',
+  'CS_CLOSER',
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'FINANCE_OFFICER',
@@ -65,7 +65,7 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
 
       {/* Role-specific dashboard */}
       {role && isAdminLevel({ role }) && <SuperAdminDashboard data={data} naira={naira} />}
-      {(role === 'HEAD_OF_CS' || role === 'CS_AGENT') && <CSDashboard data={data} role={role} />}
+      {(role === 'HEAD_OF_CS' || role === 'CS_CLOSER') && <CSDashboard data={data} role={role} />}
       {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} />}
       {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
@@ -102,7 +102,7 @@ function getRoleDescription(role: string | null) {
   const descriptions: Record<string, string> = {
     SUPER_ADMIN: "Here's your full platform overview.",
     HEAD_OF_CS: 'Your CS team performance at a glance.',
-    CS_AGENT: 'Your personal queue and performance.',
+    CS_CLOSER: 'Your personal queue and performance.',
     HEAD_OF_MARKETING: 'Marketing performance and team metrics.',
     MEDIA_BUYER: 'Your campaign performance and payouts.',
     FINANCE_OFFICER: 'Financial overview and pending approvals.',
@@ -207,14 +207,24 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
           embedded
           tileClassName="min-w-[5.5rem]"
           items={[
-            { label: 'Unprocessed', value: counts['UNPROCESSED'] ?? 0, valueClassName: 'text-warning-600 dark:text-warning-400' },
-            { label: 'CS Assigned', value: counts['CS_ASSIGNED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
-            { label: 'CS Engaged', value: counts['CS_ENGAGED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
-            { label: 'Confirmed', value: counts['CONFIRMED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Agent assigned', value: counts['AGENT_ASSIGNED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Dispatched', value: counts['DISPATCHED'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'In Transit', value: counts['IN_TRANSIT'] ?? 0, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Unassigned', value: counts['UNPROCESSED'] ?? 0, valueClassName: 'text-warning-600 dark:text-warning-400' },
+            { label: 'Assigned', value: counts['CS_ASSIGNED'] ?? 0, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'Unconfirmed', value: counts['CS_ENGAGED'] ?? 0, valueClassName: 'text-cyan-600 dark:text-cyan-400' },
+            // Confirmed rolls up CONFIRMED + the in-flight logistics sub-stages
+            // (AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT) so this matches the
+            // OrderStatusBadge default. Logistics-specific dashboards keep the
+            // sub-stage tiles where ops actually need them.
+            {
+              label: 'Confirmed',
+              value:
+                (counts['CONFIRMED'] ?? 0) +
+                (counts['AGENT_ASSIGNED'] ?? 0) +
+                (counts['DISPATCHED'] ?? 0) +
+                (counts['IN_TRANSIT'] ?? 0),
+              valueClassName: 'text-brand-600 dark:text-brand-400',
+            },
             { label: 'Delivered', value: counts['DELIVERED'] ?? 0, valueClassName: 'text-success-600 dark:text-success-400' },
+            { label: 'Cash Remitted', value: counts['REMITTED'] ?? 0, valueClassName: 'text-green-600 dark:text-green-400' },
             { label: 'Cancelled', value: counts['CANCELLED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
             { label: 'Returned', value: counts['RETURNED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
           ]}
@@ -247,11 +257,11 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
   const confirmed = counts['CONFIRMED'] ?? 0;
   const pendingQueue = unprocessed + csAssigned;
 
-  // CS Agents get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
+  // CS Closers get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
   // No Order Pipeline (they don't manage flow), no Recent Orders feed (they have a dedicated
   // queue/orders page) — keeps the landing page fast and focused on the metrics they care
   // about: their own confirmation/delivery performance.
-  if (role === 'CS_AGENT') {
+  if (role === 'CS_CLOSER') {
     return (
       <>
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
@@ -784,7 +794,7 @@ function getQuickActions(role: string, unprocessed: number) {
         { href: '/admin/marketing/ad-spend', label: 'Ad spend', description: 'Log & approve spend', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
         { href: '/admin/marketing/forms', label: 'Forms', description: 'Manage forms', icon: 'orders', bg: 'bg-app-hover text-app-fg-muted' },
       ];
-    case 'CS_AGENT':
+    case 'CS_CLOSER':
       return [
         { href: '/admin/cs/queue', label: 'Live Queue', description: unprocessed > 0 ? `${unprocessed} pending` : 'Take new orders', icon: 'pending', bg: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400' },
         { href: '/admin/cs/orders', label: 'My Orders', description: 'Orders assigned to you', icon: 'orders', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },

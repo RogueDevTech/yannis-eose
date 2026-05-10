@@ -40,7 +40,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' && user?.id ? { mediaBuyerId: user.id } : {};
-  const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
+  const assignedCsParam = role === 'CS_CLOSER' && user?.id ? { assignedCsId: user.id } : {};
+  const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
 
   // Admin-class landing: lightweight path. The heavy Executive Overview with profit
   // aggregation, time series, charts, and leaderboards now lives at /admin/ceo. Landing on

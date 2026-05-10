@@ -38,9 +38,9 @@ const STATUS_LABELS: Record<string, string> = {
   ACTIVE: 'Active',
   INACTIVE: 'Inactive',
   ARCHIVED: 'Archived',
-  UNPROCESSED: 'Unprocessed',
-  CS_ASSIGNED: 'CS Assigned',
-  CS_ENGAGED: 'CS Engaged',
+  UNPROCESSED: 'Unassigned',
+  CS_ASSIGNED: 'Assigned',
+  CS_ENGAGED: 'Unconfirmed',
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
   AGENT_ASSIGNED: 'Agent assigned',
@@ -67,7 +67,7 @@ const ROLE_LABELS: Record<string, string> = {
   HEAD_OF_MARKETING: 'Head of Marketing',
   MEDIA_BUYER: 'Media Buyer',
   HEAD_OF_CS: 'Head of CS',
-  CS_AGENT: 'CS Agent',
+  CS_CLOSER: 'CS Closer',
   FINANCE_OFFICER: 'Finance Officer',
   HEAD_OF_LOGISTICS: 'Head of Logistics',
   STOCK_MANAGER: 'Stock Manager',
@@ -120,8 +120,8 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     const statusLabel = status ? (STATUS_LABELS[status] ?? status) : '';
     const customer = data.customer_name ? ` for ${data.customer_name}` : '';
     if (status === 'UNPROCESSED') return `New order created${customer}`;
-    if (status === 'CS_ASSIGNED') return `Order assigned to CS agent${customer}`;
-    if (status === 'CS_ENGAGED') return `Engaged CS call on order${customer}`;
+    if (status === 'CS_ASSIGNED') return `Order assigned to CS closer${customer}`;
+    if (status === 'CS_ENGAGED') return `Started CS call on order${customer}`;
     if (status === 'CONFIRMED') return `Confirmed order${customer}`;
     if (status === 'CANCELLED') {
       const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';

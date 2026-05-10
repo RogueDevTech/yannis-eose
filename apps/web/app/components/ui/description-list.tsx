@@ -31,6 +31,8 @@ interface DescriptionListProps {
   layout?: DescriptionListLayout;
   /** Applies only when layout="grid". Default is 2 columns. */
   gridColumns?: 2 | 3;
+  /** Applies only when layout="grid" — tighter gaps and smaller value text */
+  dense?: boolean;
   /** Separator line between items */
   divided?: boolean;
   className?: string;
@@ -44,19 +46,22 @@ export function DescriptionList({
   items,
   layout = 'stacked',
   gridColumns = 2,
+  dense = false,
   divided = false,
   className = '',
 }: DescriptionListProps) {
   const visibleItems = items.filter((item) => !(item.hideIfEmpty && isEmptyValue(item.value)));
 
   if (layout === 'grid') {
-    const gridColsClass = gridColumns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2';
+    const gridColsClass =
+      gridColumns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2';
     const fullWidthClass = gridColumns === 3 ? 'sm:col-span-3' : 'sm:col-span-2';
 
     return (
       <dl
         className={[
-          'grid grid-cols-1 gap-x-6 gap-y-4',
+          'grid grid-cols-1',
+          dense ? 'gap-x-3 gap-y-2 sm:gap-x-4 sm:gap-y-2.5' : 'gap-x-6 gap-y-4',
           gridColsClass,
           divided ? 'divide-y divide-app-border sm:divide-y-0' : '',
           className,
@@ -68,17 +73,25 @@ export function DescriptionList({
           <div
             key={i}
             className={[
-              'flex flex-col gap-0.5',
+              dense ? 'flex flex-col gap-px' : 'flex flex-col gap-0.5',
               item.fullWidth ? fullWidthClass : '',
               divided ? 'pt-4 first:pt-0' : '',
             ]
               .filter(Boolean)
               .join(' ')}
           >
-            <dt className="text-xs font-medium text-app-fg-muted">{item.label}</dt>
+            <dt
+              className={
+                dense
+                  ? 'text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted'
+                  : 'text-xs font-medium text-app-fg-muted'
+              }
+            >
+              {item.label}
+            </dt>
             <dd
               className={[
-                'text-sm text-app-fg break-words',
+                dense ? 'text-xs text-app-fg leading-snug break-words' : 'text-sm text-app-fg break-words',
                 item.sensitive ? 'blur-sm hover:blur-none transition-all select-none hover:select-auto' : '',
               ]
                 .filter(Boolean)

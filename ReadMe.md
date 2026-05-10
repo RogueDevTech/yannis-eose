@@ -62,7 +62,7 @@ cd apps/web && npm run dev
 | Email | Role | Password |
 |-------|------|----------|
 | `admin@yannis.test` | SuperAdmin | `Test@12345` |
-| `cs.agent@yannis.test` | CS Agent | `Test@12345` |
+| `cs.agent@yannis.test` | CS Closer | `Test@12345` |
 | `media.buyer@yannis.test` | Media Buyer | `Test@12345` |
 | `finance@yannis.test` | Finance Officer | `Test@12345` |
 | `hr@yannis.test` | HR Manager | `Test@12345` |

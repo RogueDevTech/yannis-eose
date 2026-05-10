@@ -9,6 +9,7 @@ import {
   getSessionCookie,
   requirePermission,
   defaultThisMonthRange,
+  parsePerPage,
   safeStatus,
 } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
@@ -20,7 +21,15 @@ import { CSOrdersLoadingShell } from '~/features/cs/CSDeferredLoadingShells';
 import type { Order } from '~/features/orders/types';
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
-import { CS_ORDERS_STATUS_DROPDOWN_EXCLUDE } from '~/features/shared/order-status';
+import { STATUS_OPTIONS } from '~/features/shared/order-status';
+
+// Statuses surfaced in the CEO's six-bucket filter (CEO directive 2026-05-09).
+// Bookmarked URLs targeting a status outside this set — e.g.
+// `?status=DISPATCHED` from the old long dropdown — redirect to the unfiltered
+// list so the page stays consistent with what the dropdown can actually pick.
+const CS_ORDERS_VISIBLE_STATUSES = new Set(
+  STATUS_OPTIONS.filter((s) => s !== 'ALL'),
+);
 export const meta: MetaFunction = () => [
   { title: 'CS Orders — Yannis EOSE' },
 ];
@@ -34,8 +43,6 @@ const CS_ORDERS_LIVE_EVENTS = [
   'order:transfer_rejected',
 ] as const;
 
-const ORDERS_PER_PAGE = 20;
-
 const defaultThisMonth = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -44,14 +51,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  // URL-driven page size — clamped to [20, 50, 100]; fallback 20.
+  const { perPage: ORDERS_PER_PAGE } = parsePerPage(url.searchParams);
   let status = url.searchParams.get('status') || undefined;
-  if (status && CS_ORDERS_STATUS_DROPDOWN_EXCLUDE.has(status)) {
+  if (status && !CS_ORDERS_VISIBLE_STATUSES.has(status)) {
     url.searchParams.delete('status');
     const qs = url.searchParams.toString();
     throw redirect(qs ? `${url.pathname}?${qs}` : url.pathname);
   }
   const search = url.searchParams.get('search') || undefined;
-  const csAgentIdParam = url.searchParams.get('csAgentId') || undefined;
+  const csCloserIdParam = url.searchParams.get('csCloserId') || undefined;
 
   const scheduleKindRaw = url.searchParams.get('scheduleKind') || undefined;
   const scheduleDateRaw = url.searchParams.get('scheduleDate') || undefined;
@@ -115,21 +124,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const apiStartDate = composeBound(startDate, startTime);
   const apiEndDate = composeBound(endDate, endTime);
 
-  const isCSAgent = user.role === 'CS_AGENT';
-  const assignedCsId = isCSAgent ? user.id : csAgentIdParam;
+  const isCSCloser = user.role === 'CS_CLOSER';
+  const assignedCsId = isCSCloser ? user.id : csCloserIdParam;
   // Phase 21 — capability gate now permission-driven so a custom role with
-  // `orders.createOffline` can show the offline-entry button without inheriting CS_AGENT.
+  // `orders.createOffline` can show the offline-entry button without inheriting CS_CLOSER.
   const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const canCreateOffline =
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
     user.role === 'HEAD_OF_CS' ||
-    user.role === 'CS_AGENT' ||
+    user.role === 'CS_CLOSER' ||
     userPerms.includes(canonicalPermissionCode('orders.createOffline'));
   const canExport =
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
     userPerms.includes(canonicalPermissionCode('orders.export'));
+  // SmartPick (bulk N-pick toolbar) is gated by `orders.bulkAssign` — the same
+  // permission the bulkAssignToCS action requires. HEAD_OF_CS holds it by default;
+  // admin-class inherits via ALL_PERMISSION_CODES.
+  const canBulkPick =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    userPerms.includes(canonicalPermissionCode('orders.bulkAssign'));
 
   // Schedule heat + list both key off callback / preferred delivery dates. The default
   // "this month" strip filters createdAt — that would hide e.g. an April-created order
@@ -163,7 +179,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const input = encodeURIComponent(JSON.stringify(listInput));
 
-  const showCSAgentColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const showCSCloserColumn = user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
 
   const csOrdersShell = {
     filters: {
@@ -178,12 +194,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       scheduleKind: scheduleKind ?? null,
       scheduleDate: scheduleKind === 'delivery_overdue' ? null : (scheduleDate ?? null),
     },
-    isCSAgent,
-    showCSAgentColumn,
+    isCSCloser,
+    showCSCloserColumn,
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
     currentUserId: user.id,
     canCreateOffline,
     canExport,
+    canBulkPick,
     page,
     limit: ORDERS_PER_PAGE,
     statusFilter: status,
@@ -202,12 +219,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'searchFilter'
       | 'filters'
       | 'scheduleFilters'
-      | 'isCSAgent'
-      | 'showCSAgentColumn'
+      | 'isCSCloser'
+      | 'showCSCloserColumn'
       | 'canAssignDirectly'
       | 'currentUserId'
       | 'canCreateOffline'
       | 'canExport'
+      | 'canBulkPick'
       | 'deferredSecondary'
     >
   > => {
@@ -221,7 +239,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const deferredSecondary = (async () => {
     // Single bundle endpoint replaces what used to be 5 (or up to 7 for HoCS /
-    // admin) parallel HTTP calls — statusCounts, myCSWorkload (CS_AGENT only),
+    // admin) parallel HTTP calls — statusCounts, myCSWorkload (CS_CLOSER only),
     // timeSeriesByCreated, scheduleCalendarHeat, products.list (offline modal),
     // csWorkloads + logistics.locationOptions (admin column). Same fan-out,
     // one HTTP round-trip and one auth pass.
@@ -233,8 +251,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
         trendStatus: status,
         heatYearMonth: calendarMonth,
         heatStatus: status,
-        isCSAgent,
-        showCSAgentColumn,
+        isCSCloser,
+        showCSCloserColumn,
         canCreateOffline,
       }),
     );
@@ -255,7 +273,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       } | null;
       dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
       scheduleHeat: ScheduleHeatDay[];
-      csAgentsForFilter: Array<{ agentId: string; agentName: string }>;
+      csClosersForFilter: Array<{ agentId: string; agentName: string }>;
       logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }>;
       productsForOfflineOrder: Array<{
         id: string;
@@ -272,7 +290,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       dailyCounts: bundle?.dailyCounts ?? [],
       scheduleHeat: bundle?.scheduleHeat ?? [],
       myWorkload: bundle?.myWorkload ?? null,
-      csAgentsForFilter: bundle?.csAgentsForFilter ?? [],
+      csClosersForFilter: bundle?.csClosersForFilter ?? [],
       logisticsLocationsForBulk: bundle?.logisticsLocationsForBulk ?? [],
       productsForOfflineOrder: bundle?.productsForOfflineOrder ?? [],
     };
@@ -286,12 +304,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     limit: ORDERS_PER_PAGE,
     statusFilter: status,
     searchFilter: search,
-    isCSAgent,
-    showCSAgentColumn,
+    isCSCloser,
+    showCSCloserColumn,
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
     currentUserId: user.id,
     canCreateOffline,
     canExport,
+    canBulkPick,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
@@ -337,7 +356,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'createOffline') {
     const createOfflineUser = await requirePermission(request, 'orders.read');
-    if (!['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(createOfflineUser.role)) {
+    if (!['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(createOfflineUser.role)) {
       return json({ error: 'Only closers and Head of CS can create offline orders' }, { status: 403 });
     }
     const customerName = form.get('customerName')?.toString()?.trim() ?? '';
@@ -436,15 +455,15 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'bulkAssign') {
     await requirePermission(request, 'orders.bulkAssign');
     const orderIds = JSON.parse(form.get('orderIds') as string) as string[];
-    const csAgentIdsRaw = form.get('csAgentIds')?.toString();
-    const csAgentIdSingle = (form.get('csAgentId') as string | null) ?? '';
+    const csCloserIdsRaw = form.get('csCloserIds')?.toString();
+    const csCloserIdSingle = (form.get('csCloserId') as string | null) ?? '';
 
-    let csAgentIds: string[] = [];
-    if (csAgentIdsRaw) {
+    let csCloserIds: string[] = [];
+    if (csCloserIdsRaw) {
       try {
-        const parsed = JSON.parse(csAgentIdsRaw) as unknown;
+        const parsed = JSON.parse(csCloserIdsRaw) as unknown;
         if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
-          csAgentIds = parsed as string[];
+          csCloserIds = parsed as string[];
         }
       } catch {
         return json(
@@ -459,10 +478,10 @@ export async function action({ request }: ActionFunctionArgs) {
         );
       }
     }
-    if (csAgentIds.length === 0 && csAgentIdSingle) {
-      csAgentIds = [csAgentIdSingle];
+    if (csCloserIds.length === 0 && csCloserIdSingle) {
+      csCloserIds = [csCloserIdSingle];
     }
-    if (csAgentIds.length === 0) {
+    if (csCloserIds.length === 0) {
       return json(
         {
           success: false,
@@ -476,9 +495,9 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const body =
-      csAgentIds.length === 1
-        ? { orderIds, csAgentId: csAgentIds[0] }
-        : { orderIds, csAgentIds };
+      csCloserIds.length === 1
+        ? { orderIds, csCloserId: csCloserIds[0] }
+        : { orderIds, csCloserIds };
 
     const res = await apiRequest<{ result?: { data?: { succeeded: number; failed: number; total: number; results: Array<{ orderId: string; success: boolean; error?: string }> } } }>(
       '/trpc/orders.bulkAssignToCS',
@@ -517,8 +536,8 @@ export default function CSOrdersRoute() {
     csOrdersShell: {
       filters: OrdersListPageProps['filters'];
       scheduleFilters: OrdersListPageProps['scheduleFilters'];
-      isCSAgent: boolean;
-      showCSAgentColumn: boolean;
+      isCSCloser: boolean;
+      showCSCloserColumn: boolean;
       canAssignDirectly: boolean;
       currentUserId: string;
       canCreateOffline: boolean;
@@ -539,8 +558,8 @@ export default function CSOrdersRoute() {
         | 'searchFilter'
         | 'filters'
         | 'scheduleFilters'
-        | 'isCSAgent'
-        | 'showCSAgentColumn'
+        | 'isCSCloser'
+        | 'showCSCloserColumn'
         | 'canAssignDirectly'
         | 'currentUserId'
         | 'canCreateOffline'
@@ -557,9 +576,9 @@ export default function CSOrdersRoute() {
       fallback={
         <CSOrdersLoadingShell
           filters={csOrdersShell.filters!}
-          isCSAgent={csOrdersShell.isCSAgent}
+          isCSCloser={csOrdersShell.isCSCloser}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
-          showCSAgentColumn={csOrdersShell.showCSAgentColumn}
+          showCSCloserColumn={csOrdersShell.showCSCloserColumn}
         />
       }
       loaderShell={{ csOrdersShell }}

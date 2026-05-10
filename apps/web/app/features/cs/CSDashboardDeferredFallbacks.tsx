@@ -16,7 +16,7 @@ export function CSCartOverviewStatTileSkeleton() {
 export function CSTabCountBadgeSkeleton() {
   return (
     <span
-      className="ml-1.5 inline-flex w-5 h-5 shrink-0 items-center justify-center rounded-full bg-app-hover animate-pulse"
+      className="ml-1 inline-flex w-4 h-4 shrink-0 items-center justify-center rounded-full bg-app-hover animate-pulse"
       aria-hidden
     />
   );

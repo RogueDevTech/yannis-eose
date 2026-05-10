@@ -5,13 +5,14 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
+import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { Tabs } from '~/components/ui/tabs';
 
-function hrUsersShellColumns(staffAccounts: boolean): CompactTableColumn<{ id: string }>[] {
+export function hrUsersShellColumns(staffAccounts: boolean): CompactTableColumn<{ id: string }>[] {
   if (staffAccounts) {
     return [
       { key: 'name', header: 'Name', render: () => <TableCellTextPulse className="w-[12rem]" /> },
@@ -245,22 +246,228 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
 }
 
 /** `/hr/users/new` and edit — multi-section form */
+/**
+ * App Shell pattern — every static element of the form (page header,
+ * breadcrumb, section headings, field labels, hints, action buttons) renders
+ * for real. ONLY the input values + the avatar initials + the role-options
+ * radio cards are skeleton pulses, so the user sees the actual full-width
+ * page outline while `editingUser` and the 8 picklists are in flight.
+ */
 export function UserCreateEditLoadingShell({ mode }: { mode: 'create' | 'edit' }) {
+  const inputPulse = (
+    <div
+      className="h-10 w-full rounded-md border border-app-border bg-app-hover/40 animate-pulse"
+      aria-hidden
+    />
+  );
+  const labelClass = 'block text-sm font-medium text-app-fg-muted mb-1.5';
+  const sectionClass = 'card space-y-4';
+  const sectionHeading = 'text-lg font-semibold text-app-fg';
   return (
-    <div className="space-y-6 max-w-4xl" aria-busy="true" aria-live="polite">
+    <div className="w-full space-y-6" aria-busy="true" aria-live="polite">
+      <Breadcrumb
+        items={
+          mode === 'edit'
+            ? [{ label: 'Users', to: '/hr/users' }, { label: 'Edit' }]
+            : [{ label: 'Users', to: '/hr/users' }, { label: 'Add User' }]
+        }
+      />
       <PageHeader
         title={mode === 'edit' ? 'Edit user' : 'Add User'}
-        description={mode === 'edit' ? 'Update profile, role, and permissions.' : 'Create a new staff account with role, branch, and compensation.'}
-        actions={<PageRefreshButton />}
+        description={
+          mode === 'edit'
+            ? 'Update account, branch memberships, permissions, and role settings.'
+            : 'Create a new account for a team member with role-specific settings.'
+        }
       />
-      <div className="space-y-4">
-        {[1, 2, 3, 4].map((section) => (
-          <div key={section} className="card p-4 space-y-3">
-            <div className="h-5 w-40 rounded bg-app-hover animate-pulse" aria-hidden />
-            <div className="h-10 w-full max-w-md rounded-md bg-app-hover animate-pulse" aria-hidden />
-            <div className="h-10 w-full max-w-md rounded-md bg-app-hover animate-pulse" aria-hidden />
+
+      {/* Section 1: Account Details — full width card, role + name + email + branches */}
+      <div className={sectionClass}>
+        <div className="flex flex-col-reverse sm:flex-row sm:items-start sm:justify-between gap-4">
+          <h2 className={`${sectionHeading} shrink-0`}>Account Details</h2>
+          {/* Avatar gradient + initials placeholder — real ring chrome */}
+          <div
+            className="sm:mt-0 w-14 h-14 sm:w-16 sm:h-16 rounded-xl bg-app-hover ring-2 ring-app-border flex items-center justify-center shadow-md flex-shrink-0 self-start sm:self-auto animate-pulse"
+            aria-hidden
+          />
+        </div>
+        <p className="text-xs text-app-fg-muted -mt-2 sm:-mt-1">
+          Initials preview from the full name and role (same style as the user profile header).
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Role — full width */}
+          <div className="sm:col-span-2 space-y-1.5">
+            <label className={labelClass}>Role *</label>
+            {inputPulse}
           </div>
-        ))}
+
+          {/* Permission matrix preview block — real card frame, pulses inside */}
+          <div className="sm:col-span-2">
+            <div className="rounded-lg border border-app-border p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider">
+                  Effective permissions
+                </span>
+                <TableCellTextPulse className="h-3 w-16" />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                  <span
+                    key={i}
+                    className="inline-flex items-center h-6 px-2.5 py-0.5 rounded-full bg-app-hover"
+                    aria-hidden
+                  >
+                    <TableCellTextPulse className="h-3 w-20" />
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>Full Name *</label>
+            {inputPulse}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>Email Address *</label>
+            {inputPulse}
+            <p className="text-xs text-app-fg-muted">
+              {mode === 'edit'
+                ? 'Email changes require SuperAdmin approval before taking effect.'
+                : 'A password will be auto-generated and sent to this email.'}
+            </p>
+          </div>
+
+          {/* Branch memberships matrix — full width */}
+          <div className="sm:col-span-2 space-y-3">
+            <label className={labelClass}>Branch Memberships</label>
+            <div className="border border-app-border rounded-lg overflow-hidden flex flex-col">
+              {/* Real "Select all branches" row chrome */}
+              <div className="flex items-center gap-3 px-3 py-2.5 bg-app-hover/70 border-b border-app-border">
+                <span className="w-4 h-4 rounded bg-app-hover animate-pulse" aria-hidden />
+                <span className="text-sm font-medium text-app-fg">Select all branches</span>
+              </div>
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 px-3 py-2 border-b border-app-border last:border-b-0"
+                >
+                  <span className="w-4 h-4 rounded bg-app-hover animate-pulse" aria-hidden />
+                  <TableCellTextPulse className="w-[10rem] h-4" />
+                  <TableCellTextPulse className="ml-auto w-[3rem] h-3" />
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1.5">
+              <label className={labelClass}>Primary Branch *</label>
+              {inputPulse}
+              <p className="text-xs text-app-fg-muted">
+                Choose all branches this user belongs to, then pick one as their default branch.
+              </p>
+            </div>
+          </div>
+
+          {/* Status (edit only) */}
+          {mode === 'edit' && (
+            <div className="sm:col-span-2 space-y-1.5">
+              <label className={labelClass}>Status</label>
+              <div className="flex flex-wrap gap-2">
+                {['Active', 'Inactive', 'Archived'].map((label) => (
+                  <span
+                    key={label}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-app-border text-sm text-app-fg-muted"
+                    aria-hidden
+                  >
+                    <span className="w-3.5 h-3.5 rounded-full border border-app-border" />
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Section 2: Role Settings — capacity / logistics / products */}
+      <div className={sectionClass}>
+        <h2 className={sectionHeading}>Role Settings</h2>
+        <p className="text-xs text-app-fg-muted">
+          Capacity, logistics location, and product restrictions appear here based on the chosen role.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className={labelClass}>Order Capacity</label>
+            {inputPulse}
+            <p className="text-xs text-app-fg-muted">
+              Maximum concurrent orders this agent can handle.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <label className={labelClass}>Logistics Location</label>
+            {inputPulse}
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Compensation */}
+      <div className={sectionClass}>
+        <h2 className={sectionHeading}>Compensation</h2>
+        <p className="text-xs text-app-fg-muted">
+          Either pick an existing commission plan or define a flat compensation inline.
+        </p>
+        {/* Mode toggle frame */}
+        <div className="flex flex-wrap gap-2">
+          {['Define compensation (flat)', 'Use existing plan'].map((label, i) => (
+            <span
+              key={label}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm ${
+                i === 0
+                  ? 'border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-900/20 dark:text-brand-300'
+                  : 'border-app-border text-app-fg-muted'
+              }`}
+              aria-hidden
+            >
+              <span className="w-3.5 h-3.5 rounded-full border border-current" />
+              {label}
+            </span>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {['Fixed Salary (₦)', 'Bonus (₦)', 'Commission Type', 'Commission Value'].map((label) => (
+            <div key={label} className="space-y-1.5">
+              <label className={labelClass}>{label}</label>
+              {inputPulse}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Section 4: Contact */}
+      <div className={sectionClass}>
+        <h2 className={sectionHeading}>Contact</h2>
+        <div className="sm:w-1/2 space-y-1.5">
+          <label className={labelClass}>
+            WhatsApp / Phone Number {mode === 'edit' ? '' : '*'}
+          </label>
+          <div className="flex">
+            <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-app-border bg-app-hover/60 text-sm text-app-fg-muted">
+              +234
+            </span>
+            <div className="h-10 w-full rounded-r-md border border-app-border bg-app-hover/40 animate-pulse" aria-hidden />
+          </div>
+        </div>
+      </div>
+
+      {/* Action buttons — visible chrome */}
+      <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3">
+        <span className="btn-secondary w-full sm:w-auto opacity-60 cursor-default" aria-hidden>
+          Cancel
+        </span>
+        <span className="btn-primary w-full sm:w-auto opacity-60 cursor-default" aria-hidden>
+          {mode === 'edit' ? 'Save changes' : 'Create user'}
+        </span>
       </div>
     </div>
   );

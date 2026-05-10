@@ -39,7 +39,7 @@ import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
-import { getOrdersService } from './orders.router';
+import { getOrdersService, narrowOrdersAggregateFiltersForViewer } from './orders.router';
 import { getProductsService } from './products.router';
 import { getUsersService } from './users.router';
 import { getCartService } from './cart.router';
@@ -447,17 +447,66 @@ export const marketingRouter = router({
     .input(
       z.object({
         mediaBuyerId: z.string().uuid().optional(),
+        assignedCsId: z.string().uuid().optional(),
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
+      let mediaBuyerId = input.mediaBuyerId;
+      let assignedCsId = input.assignedCsId;
+
+      if (ctx.user.role === 'MEDIA_BUYER') {
+        if (input.mediaBuyerId && input.mediaBuyerId !== ctx.user.id) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Cannot query another media buyer funnel.',
+          });
+        }
+        mediaBuyerId = ctx.user.id;
+        assignedCsId = undefined;
+      } else if (ctx.user.role === 'CS_CLOSER') {
+        if (input.mediaBuyerId) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Media buyer filter is not available for CS closers.',
+          });
+        }
+        if (input.assignedCsId && input.assignedCsId !== ctx.user.id) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Cannot scope metrics to another CS closer.',
+          });
+        }
+        assignedCsId = ctx.user.id;
+      } else if (!isAdminLevel(ctx.user)) {
+        assignedCsId = undefined;
+      }
+
+      if (ctx.user.role === 'CS_CLOSER') {
+        const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, ctx.currentBranchId, {
+          assignedCsId: ctx.user.id,
+          startDate: input.startDate,
+          endDate: input.endDate,
+        });
+        return getMarketingService().getPerformanceMetrics(
+          narrowed.mediaBuyerId,
+          input.startDate && input.endDate ? 'this_month' : 'all_time',
+          input.startDate,
+          input.endDate,
+          ctx.currentBranchId,
+          narrowed.assignedCsId,
+          narrowed.supervisorScope,
+        );
+      }
+
       return getMarketingService().getPerformanceMetrics(
-        input.mediaBuyerId,
+        mediaBuyerId,
         input.startDate && input.endDate ? 'this_month' : 'all_time',
         input.startDate,
         input.endDate,
         ctx.currentBranchId,
+        assignedCsId,
       );
     }),
 
@@ -715,6 +764,12 @@ export const marketingRouter = router({
       const branchId = ctx.currentBranchId;
       const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists } = input;
 
+      const ordersScope = await narrowOrdersAggregateFiltersForViewer(ctx, branchId, {
+        mediaBuyerId,
+        startDate,
+        endDate,
+      });
+
       // Defense-in-depth: the original page loader gated the buyer picklist on
       // `users.list` (which is `permissionProcedure('users.read')`). Calling
       // `getUsersService().list(...)` directly here bypasses that gate, so we
@@ -727,6 +782,8 @@ export const marketingRouter = router({
         includeMarketingExportPicklists &&
         (isAdminLevel(ctx.user) || callerPerms.includes('users.read'));
 
+      const metricsBuyerId = ordersScope.mediaBuyerId ?? mediaBuyerId;
+
       // Six concurrent service calls — same shape as the old loader fan-out, but
       // running in-process without per-call HTTP / auth overhead.
       const [
@@ -738,22 +795,28 @@ export const marketingRouter = router({
         campaignsResult,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
-          mediaBuyerId,
-          startDate,
-          endDate,
-          undefined,
+          ordersScope.mediaBuyerId,
+          ordersScope.startDate,
+          ordersScope.endDate,
+          ordersScope.assignedCsId,
           undefined,
           branchId,
+          undefined,
+          ordersScope.supervisorScope,
         ),
         getMarketingService().getPerformanceMetrics(
-          mediaBuyerId,
+          metricsBuyerId,
           startDate && endDate ? 'this_month' : 'all_time',
           startDate,
           endDate,
           branchId,
+          ordersScope.assignedCsId,
+          ordersScope.supervisorScope,
         ),
-        getOrdersService().getOrdersTimeSeriesByCreated(startDate, endDate, branchId, {
-          mediaBuyerId,
+        getOrdersService().getOrdersTimeSeriesByCreated(ordersScope.startDate, ordersScope.endDate, branchId, {
+          mediaBuyerId: ordersScope.mediaBuyerId,
+          csCloserId: ordersScope.assignedCsId,
+          supervisorScope: ordersScope.supervisorScope,
           status,
         }),
         canSeeBuyerPicklist

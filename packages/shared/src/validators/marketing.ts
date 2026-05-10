@@ -174,10 +174,17 @@ const adSpendBatchLineSchema = z.object({
    * count the system shows for this (campaign, mediaBuyer, spendDate window).
    */
   attributedOrderCount: z.coerce.number().int().min(0),
-  screenshotUrl: z.string().url().min(1),
+  // CEO directive 2026-05-10: ad URL is now the required evidence (proof the
+  // ad ran), screenshot is optional supporting material. Empty/whitespace
+  // collapses to undefined; the service writes '' to satisfy the column's
+  // NOT NULL constraint without changing the DB schema.
+  screenshotUrl: z
+    .union([z.literal(''), z.string().url()])
+    .optional()
+    .transform((v) => (v && v.length > 0 ? v : undefined)),
   platform: adPlatformSchema.default('FACEBOOK'),
   platformCustomLabel: platformCustomLabelSchema,
-  adUrl: adUrlSchema,
+  adUrl: z.string().trim().url('Ad URL must be a valid URL'),
 });
 
 const createAdSpendBatchObjectSchema = z.object({

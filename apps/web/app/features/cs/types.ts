@@ -54,6 +54,9 @@ export interface CSOrder {
 export interface DuplicatePair {
   duplicate: CSOrder;
   original: CSOrder | null;
+  /** 'FLAGGED' = same phone in last 24h (urgent triage).
+   *  'POSSIBLY_DUPLICATE' = same phone older than 24h within 30d (softer signal). */
+  flagKind?: 'FLAGGED' | 'POSSIBLY_DUPLICATE';
 }
 
 export interface CSLeaderboardEntry {
@@ -152,7 +155,6 @@ export interface CSActivityItem {
 /** Tab keys for Live Activities (/admin/cs/queue). */
 export const CS_QUEUE_TAB_VALUES = [
   'queue',
-  'active',
   'duplicates',
   'abandoned',
   'callbacks',

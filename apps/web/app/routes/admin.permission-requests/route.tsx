@@ -8,7 +8,10 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
-import { PermissionRequestsPage } from '~/features/permission-requests/PermissionRequestsPage';
+import {
+  PermissionRequestsPage,
+  type PermissionRequestBranchPicklist,
+} from '~/features/permission-requests/PermissionRequestsPage';
 import { PermissionRequestsLoadingShell } from '~/features/permission-requests/PermissionRequestsLoadingShell';
 import type { PermissionRequest } from '~/features/permission-requests/types';
 
@@ -48,10 +51,10 @@ function viewerCanSeePermissionRequests(user: {
   if (APPROVER_CODES.some((code) => perms.includes(canonicalPermissionCode(code)))) {
     return true;
   }
-  // Submitters (CS Agent / Media Buyer / HoMarketing / etc.) need to track their own
+  // Submitters (CS Closer / Media Buyer / HoMarketing / etc.) need to track their own
   // requests; they pass the gate but only see their own rows.
   if (
-    user.role === 'CS_AGENT' ||
+    user.role === 'CS_CLOSER' ||
     user.role === 'HEAD_OF_MARKETING' ||
     user.role === 'MEDIA_BUYER' ||
     user.role === 'HEAD_OF_CS' ||
@@ -84,9 +87,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const pageData = (async () => {
   const listInput = encodeURIComponent(JSON.stringify({ status, page, limit: PER_PAGE }));
-  const [listRes, countsRes] = await Promise.all([
+  const [listRes, countsRes, branchesRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/permissionRequests.list?input=${listInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/permissionRequests.statusCounts`, { method: 'GET', cookie }),
+    apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie }),
   ]);
 
   type ListPayload = {
@@ -111,6 +115,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
         all: 0,
       })
     : { pending: 0, approved: 0, rejected: 0, all: 0 };
+
+  type BranchRow = { id: string; name: string };
+  const branchesListRaw = branchesRes.ok
+    ? ((branchesRes.data as { result?: { data?: BranchRow[] } })?.result?.data ?? [])
+    : [];
+  const branches: PermissionRequestBranchPicklist = branchesListRaw.map((b) => ({
+    id: b.id,
+    name: b.name,
+  }));
 
   // UI affordance flags — drive button visibility on each row. The actual gate is
   // enforced server-side in `assertApproverMayProcessRequest`, so these checks just
@@ -141,6 +154,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     totalPages,
     limit: PER_PAGE,
     statusCounts,
+    branches,
     canApprove,
     canApproveProductArchive,
     canApproveOrderLinePriceChange,
@@ -211,6 +225,7 @@ export default function PermissionRequestsRoute() {
             totalPages={data.totalPages}
             limit={data.limit}
             statusCounts={data.statusCounts}
+            branches={data.branches}
             canApprove={data.canApprove}
             canApproveProductArchive={data.canApproveProductArchive}
             canApproveOrderLinePriceChange={data.canApproveOrderLinePriceChange}

@@ -5,7 +5,7 @@
  *  - templates.list    — list active templates (filtered by channel/branch)
  *  - templates.create  — create a new template (HoCS/SuperAdmin)
  *  - templates.update  — update template name/body/status (HoCS/SuperAdmin)
- *  - sendMessage       — send an SMS or WhatsApp message to a customer (CS agent)
+ *  - sendMessage       — send an SMS or WhatsApp message to a customer (CS closer)
  *  - outboxList        — list outbound messages for an order
  *
  * Phone masking: raw phone is retrieved server-side from the orders table and
@@ -195,11 +195,11 @@ export const messagingRouter = router({
 
   /**
    * Create a message template. HoCS / Admin / SuperAdmin can create branch-shared templates;
-   * CS agents can also author their own (visible to the team but only editable by the
+   * CS closers can also author their own (visible to the team but only editable by the
    * creator and Heads).
    *
    * Phase 21: gated by `messaging.templates.create` permission so custom role templates
-   * can grant template authoring without inheriting CS_AGENT or HEAD_OF_CS wholesale.
+   * can grant template authoring without inheriting CS_CLOSER or HEAD_OF_CS wholesale.
    */
   'templates.create': permissionProcedure('messaging.templates.create')
     .input(
@@ -227,9 +227,9 @@ export const messagingRouter = router({
   /**
    * Update template name, body, or status (archive/restore).
    * - HoCS / Admin / SuperAdmin: can update any template in their scope.
-   * - CS_AGENT: can only update templates they themselves created.
+   * - CS_CLOSER: can only update templates they themselves created.
    *
-   * Phase 21: gated by `messaging.templates.update` permission. The CS_AGENT-can-only-edit-own
+   * Phase 21: gated by `messaging.templates.update` permission. The CS_CLOSER-can-only-edit-own
    * rule below remains a service-side check on top of the permission gate.
    */
   'templates.update': permissionProcedure('messaging.templates.update')
@@ -282,7 +282,7 @@ export const messagingRouter = router({
 
   /**
    * Send an outbound message to the order's customer.
-   * CS agents can access this via `orders.read` permission.
+   * CS closers can access this via `orders.read` permission.
    * Phone number is fetched server-side and NEVER returned to the client.
    */
   sendMessage: permissionProcedure('orders.read')

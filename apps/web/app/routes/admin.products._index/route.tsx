@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Await, Link, useFetcher, useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermission, safeStatus } from '~/lib/api.server';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
@@ -48,6 +48,8 @@ type ProductsLoaderData = {
   canCreateProduct: boolean;
   canInstantArchiveProduct: boolean;
   canManageOffers: boolean;
+  perPage: number;
+  pageSizeOptions: number[];
 };
 
 export const meta: MetaFunction = () => [
@@ -122,7 +124,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const pageParam = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
-  const input = { page, limit: 20, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
+  const { perPage, pageSizeOptions } = parsePerPage(url.searchParams);
+  const input = { page, limit: perPage, sortBy: 'createdAt' as const, sortOrder: 'desc' as const };
   const productsPromise = apiRequest<unknown>(
     `/trpc/products.list?input=${encodeURIComponent(JSON.stringify(input))}`,
     { method: 'GET', cookie },
@@ -185,6 +188,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateProduct,
     canInstantArchiveProduct,
     canManageOffers,
+    perPage,
+    pageSizeOptions,
   });
 }
 
@@ -487,6 +492,8 @@ function ProductsRouteInner(
           canEditProduct={data.canEditProduct}
           canCreateProduct={data.canCreateProduct}
           canInstantArchiveProduct={data.canInstantArchiveProduct}
+          pageSize={data.perPage}
+          pageSizeOptions={data.pageSizeOptions}
         />
       ) : null}
     </div>
@@ -505,6 +512,8 @@ export default function ProductsRoute() {
         canCreateProduct: data.canCreateProduct,
         canInstantArchiveProduct: data.canInstantArchiveProduct,
         canManageOffers: data.canManageOffers,
+        perPage: data.perPage,
+        pageSizeOptions: data.pageSizeOptions,
       }}
       deferredKey="pageData"
     >
@@ -515,6 +524,8 @@ export default function ProductsRoute() {
           canCreateProduct={data.canCreateProduct}
           canInstantArchiveProduct={data.canInstantArchiveProduct}
           canManageOffers={data.canManageOffers}
+          perPage={data.perPage}
+          pageSizeOptions={data.pageSizeOptions}
           products={products}
           offerGroupsCount={offerGroupsCount}
         />

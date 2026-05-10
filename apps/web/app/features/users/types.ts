@@ -34,7 +34,7 @@ export const ROLE_COLORS: Record<string, string> = {
   HEAD_OF_MARKETING: 'badge-brand',
   MEDIA_BUYER: 'badge-info',
   HEAD_OF_CS: 'badge-brand',
-  CS_AGENT: 'badge-info',
+  CS_CLOSER: 'badge-info',
   FINANCE_OFFICER: 'badge-success',
   HEAD_OF_LOGISTICS: 'badge-brand',
   STOCK_MANAGER: 'badge-info',
@@ -59,7 +59,7 @@ export const ROLE_OPTIONS = [
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'HEAD_OF_CS',
-  'CS_AGENT',
+  'CS_CLOSER',
   'FINANCE_OFFICER',
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
@@ -321,13 +321,30 @@ export type PermissionCatalogBundle = {
  * Remix `defer` payload for `/hr/users/:id` (and reuse routes like finance staff accounts).
  * Heavy reads stream client-side from `/api/hr-user-detail-*` resource routes — only shell flags + user row here.
  */
+/** Server-resolved onboarding summary for the user detail overview (avoids client fetcher races). */
+export type UserDetailOnboardingOverviewSlice = {
+  onboardingSummary: UserOnboardingSummary;
+};
+
+/** Server-resolved permissions preview bundle for the overview card. */
+export type UserDetailPermissionsOverviewSlice = {
+  permissionCatalog: PermissionCatalogBundle;
+  templatePermissionsById: Record<string, string[]>;
+  userStampPreview: {
+    userOverrides: Record<string, boolean>;
+    templateCodes: string[];
+    effectiveCodes: string[];
+  };
+};
+
 export interface UserDetailLoaderData {
   user: UserDetail;
-  /**
-   * Mirror affordances — deferred promise so first paint does not await `canMirrorToUser`.
-   */
-  mirrorUi: Promise<{ viewerShowsMirror: boolean; mirrorSubmitDisabled: boolean }>;
-  canDisburseToThisUser?: boolean;
+  /** Resolved inside deferred `userDetail` — avoids nested `<Await>` remounting fetcher-driven UI. */
+  mirrorUi: { viewerShowsMirror: boolean; mirrorSubmitDisabled: boolean };
+  /** When set, Overview onboarding card hydrates from SSR; client resource route is skipped. */
+  overviewOnboardingSlice?: UserDetailOnboardingOverviewSlice | null;
+  /** When set, Overview permissions card hydrates from SSR; client resource route is skipped. */
+  overviewPermissionsSlice?: UserDetailPermissionsOverviewSlice | null;
   isSuperAdmin?: boolean;
   isViewerHeadOfMarketing?: boolean;
   isViewerHeadOfCS?: boolean;
@@ -343,25 +360,24 @@ export interface UserDetailLoaderData {
   showOnboardingTab?: boolean;
   /** Viewer may open `/hr/users/:id/onboarding` (HR workflow). */
   viewerCanManageHrOnboarding?: boolean;
-  /**
-   * Viewer can set/unset/extend/terminate probation on this user.
-   * True only when viewer is SUPER_ADMIN or HR_MANAGER AND target is probation-eligible.
-   */
-  canManageProbation?: boolean;
 }
 
 /**
  * Props for `UserDetailPage` after `UserDetailPageWithMirror` strips `mirrorUi`.
  * Optional promises are legacy/test-only fallbacks; production hydrates from resource routes.
  */
-export type UserDetailPageProps = Omit<UserDetailLoaderData, 'mirrorUi'> & {
+export type UserDetailPageProps = Omit<
+  UserDetailLoaderData,
+  'mirrorUi' | 'overviewOnboardingSlice' | 'overviewPermissionsSlice'
+> & {
   usersBasePath?: string;
   viewerShowsMirror?: boolean;
   mirrorSubmitDisabled?: boolean;
+  overviewOnboardingSlice?: UserDetailOnboardingOverviewSlice | null;
+  overviewPermissionsSlice?: UserDetailPermissionsOverviewSlice | null;
   roleTemplates?: Promise<RoleTemplateOption[]>;
   locations?: Promise<UserCreateLocation[]>;
   plans?: Promise<UserCreateCommissionPlan[]>;
-  recentOrders?: Promise<{ orders: UserOrderSummary[]; total: number }>;
   payouts?: Promise<UserPayoutRecord[]>;
   adjustments?: Promise<UserAdjustment[]>;
   auditLog?: Promise<UserAuditEntry[]>;
@@ -386,7 +402,7 @@ export const ROLE_AVATAR_GRADIENTS: Record<string, string> = {
   HEAD_OF_MARKETING: 'from-brand-500 to-brand-700',
   MEDIA_BUYER: 'from-sky-400 to-blue-600',
   HEAD_OF_CS: 'from-brand-500 to-indigo-600',
-  CS_AGENT: 'from-blue-400 to-cyan-600',
+  CS_CLOSER: 'from-blue-400 to-cyan-600',
   FINANCE_OFFICER: 'from-emerald-400 to-green-600',
   HEAD_OF_LOGISTICS: 'from-violet-500 to-purple-700',
   STOCK_MANAGER: 'from-amber-400 to-orange-600',
@@ -402,7 +418,7 @@ export const ROLE_ICONS: Record<string, string> = {
   HEAD_OF_MARKETING: 'megaphone',
   MEDIA_BUYER: 'chart-bar',
   HEAD_OF_CS: 'headset',
-  CS_AGENT: 'phone',
+  CS_CLOSER: 'phone',
   FINANCE_OFFICER: 'banknotes',
   HEAD_OF_LOGISTICS: 'truck',
   STOCK_MANAGER: 'cube',

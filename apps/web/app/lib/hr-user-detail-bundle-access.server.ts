@@ -14,6 +14,9 @@ export async function authorizeUserDetailBundle(request: Request, userId: string
     return { ok: false as const, response: json({ ok: false as const, error: 'Not authenticated' }) };
   }
   const cookie = getSessionCookie(request);
+  if (!cookie) {
+    return { ok: false as const, response: json({ ok: false as const, error: 'Not authenticated' }) };
+  }
   const userRes = await apiRequest<unknown>(
     `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
     { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
@@ -30,7 +33,7 @@ export async function authorizeUserDetailBundle(request: Request, userId: string
   const isSelfView =
     actorUserIdsMatch(currentUser.id, profileUser.id) || actorUserIdsMatch(currentUser.id, userId);
   const headOfCSViewingTeam =
-    currentUser.role === 'HEAD_OF_CS' && ['CS_AGENT', 'HEAD_OF_CS'].includes(profileUser.role);
+    currentUser.role === 'HEAD_OF_CS' && ['CS_CLOSER', 'HEAD_OF_CS'].includes(profileUser.role);
   const headOfMarketingViewingTeam =
     currentUser.role === 'HEAD_OF_MARKETING' &&
     ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(profileUser.role);

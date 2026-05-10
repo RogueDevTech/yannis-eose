@@ -15,11 +15,11 @@ describe('hasFinanceAccess', () => {
   });
 
   it('grants access to user with finance.costView permission', () => {
-    expect(hasFinanceAccess({ role: 'CS_AGENT', permissions: ['finance.costView'] })).toBe(true);
+    expect(hasFinanceAccess({ role: 'CS_CLOSER', permissions: ['finance.costView'] })).toBe(true);
   });
 
-  it('denies access to CS_AGENT without permission', () => {
-    expect(hasFinanceAccess({ role: 'CS_AGENT' })).toBe(false);
+  it('denies access to CS_CLOSER without permission', () => {
+    expect(hasFinanceAccess({ role: 'CS_CLOSER' })).toBe(false);
   });
 
   it('denies access to MEDIA_BUYER without permission', () => {
@@ -35,7 +35,7 @@ describe('hasFinanceAccess', () => {
   });
 
   it('denies access even with unrelated permissions', () => {
-    expect(hasFinanceAccess({ role: 'CS_AGENT', permissions: ['orders.view', 'cs.assign'] })).toBe(false);
+    expect(hasFinanceAccess({ role: 'CS_CLOSER', permissions: ['orders.view', 'cs.assign'] })).toBe(false);
   });
 
   it('grants access to non-elevated role if permissions array includes finance.costView', () => {

@@ -162,7 +162,7 @@
 
 **Rationale**:
 - **Defense in depth**: Even a SQL injection or API bug cannot bypass RLS
-- **Role isolation**: CS agents see only their orders, media buyers see only their campaigns
+- **Role isolation**: CS closers see only their orders, media buyers see only their campaigns
 - **Column-level security**: `products_safe` view masks `cost_price` for non-privileged roles
 - **Compliance**: Data access is auditable at the database level
 

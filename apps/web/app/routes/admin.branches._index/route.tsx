@@ -79,11 +79,21 @@ export async function action({ request }: ActionFunctionArgs) {
   if (intent === 'update') {
     const branchId = form.get('branchId')?.toString() ?? '';
     const name = form.get('name')?.toString()?.trim();
+    const code = form.get('code')?.toString()?.trim().toUpperCase();
     const status = form.get('status')?.toString();
     const res = await apiRequest('/trpc/branches.update', {
       method: 'POST',
       cookie,
-      body: { branchId, name, status },
+      // Only forward fields the operator actually touched. `branches.update`
+      // makes every field optional and the service patches only what's set,
+      // so an empty `code` from a stripped-down form (e.g. an older client)
+      // won't accidentally clear the column.
+      body: {
+        branchId,
+        ...(name ? { name } : {}),
+        ...(code ? { code } : {}),
+        ...(status ? { status } : {}),
+      },
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to update branch') }, { status: safeStatus(res.status) });
@@ -270,7 +280,7 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
                 Edit branch
               </h3>
               <p className="text-sm text-app-fg-muted mt-0.5">
-                Update name and status · <span className="font-mono">{editBranch.code}</span>
+                Update name, code, and status
               </p>
             </div>
             <button
@@ -298,6 +308,17 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
               type="text"
               required
               defaultValue={editBranch.name}
+            />
+            <TextInput
+              label="Code (unique identifier)"
+              id="branch-edit-code"
+              name="code"
+              type="text"
+              required
+              defaultValue={editBranch.code}
+              hint="Short label shown in the branch switcher (e.g. LGS, ABJ). Auto-uppercased on save."
+              className="font-mono uppercase"
+              maxLength={20}
             />
             <FormSelect
               label="Status"

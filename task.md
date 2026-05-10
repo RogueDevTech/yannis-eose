@@ -223,10 +223,10 @@ Implement Postgres RLS policies so that even if the application layer has a bug,
 - `apps/api/src/common/interceptors/audit.interceptor.ts` — Now sets both user_id and role
 
 **Acceptance Criteria:**
-- [x] CS agent querying orders table returns ONLY their assigned orders (policy: `assigned_cs_id = current_user_id`)
+- [x] CS closer querying orders table returns ONLY their assigned orders (policy: `assigned_cs_id = current_user_id`)
 - [x] Media Buyer querying orders table returns ONLY orders from their campaigns (policy: `media_buyer_id = current_user_id`)
 - [x] Third-Party Logistics Manager sees only their location's inventory and orders (policy: via `users.logistics_location_id`)
-- [x] Direct SQL query (bypassing NestJS) with a CS agent's session still enforces RLS (FORCE ROW LEVEL SECURITY enabled)
+- [x] Direct SQL query (bypassing NestJS) with a CS closer's session still enforces RLS (FORCE ROW LEVEL SECURITY enabled)
 - [x] SuperAdmin bypasses all RLS policies (privileged policy matches SUPER_ADMIN role)
 - [x] Column-level restriction: Media Buyer SELECT on products returns NULL for cost_price (via `products_safe` security barrier view)
 
@@ -281,7 +281,7 @@ Set up WebSocket infrastructure for live dashboard updates.
 **Room Structure:**
 - `admin` — SuperAdmin (receives all events)
 - `cs-all` — Head of CS
-- `cs-{userId}` — Individual CS agent
+- `cs-{userId}` — Individual CS closer
 - `finance` — Finance Officer
 - `logistics` — Head of Logistics, Warehouse Manager
 - `marketing-all` — Head of Marketing
@@ -309,7 +309,7 @@ Set up WebSocket infrastructure for live dashboard updates.
 
 ## Phase 1: Core Order Flow (The Heartbeat)
 
-> **Goal:** A customer can submit an order, a CS agent can confirm it, and the order moves through the lifecycle.
+> **Goal:** A customer can submit an order, a CS closer can confirm it, and the order moves through the lifecycle.
 > This is the minimum viable flow that proves the architecture works end-to-end.
 
 ---
@@ -381,15 +381,15 @@ Build the form creation interface for Media Buyers.
 `[x]` Status: Complete
 **Dependencies:** Task 1.1, Task 0.7
 
-Build the CS agent's workspace and the automatic order assignment system.
+Build the CS closer's workspace and the automatic order assignment system.
 
 **Implementation Steps:**
 1. Create the dispatch service in NestJS:
-   - On new UNPROCESSED order: query active CS agents, count pending orders per agent
+   - On new UNPROCESSED order: query active CS closers, count pending orders per agent
    - Assign to agent with lowest `active_pending_count`
    - If tied, assign to agent with oldest `last_action_timestamp` (most idle)
    - Respect agent capacity limits (set by Head of CS)
-2. Create CS Agent dashboard in Remix:
+2. Create CS Closer dashboard in Remix:
    - Personal queue showing: order ID, customer name (masked phone), product, status, time in queue
    - Order detail panel (nested route — sidebar stays static)
    - "Call Customer" button (initiates VOIP — see Task 1.4)
@@ -403,7 +403,7 @@ Build the CS agent's workspace and the automatic order assignment system.
 **Acceptance Criteria:**
 - [x] New orders auto-assign to the least-loaded active agent
 - [x] Agent with 2 pending orders receives the next order over agent with 5 pending
-- [x] CS agent sees ONLY their assigned orders (RLS enforced)
+- [x] CS closer sees ONLY their assigned orders (RLS enforced)
 - [x] Head of CS can reassign single or bulk orders between agents
 - [x] Reassignment logged in audit trail with actor and reason
 - [ ] Agent going inactive (no action > 10 min) triggers notification to Head of CS (deferred — depends on VOIP heartbeat)
@@ -484,7 +484,7 @@ Implement the strict order lifecycle state machine.
 `[x]` Status: Complete
 **Dependencies:** None
 **PRD Ref:** Section 7.3 (Call Flow), 7.4 (Status Lock), 7.7 (Edge Cases)
-**Why:** CS agents need a VOIP bridge to call customers without seeing raw phone numbers.
+**Why:** CS closers need a VOIP bridge to call customers without seeing raw phone numbers.
 
 **What was built:**
 1. `apps/api/src/voip/` NestJS module (service, controller, module)
@@ -520,7 +520,7 @@ Implement the strict order lifecycle state machine.
 `[x]` Status: Complete
 **Dependencies:** None
 **PRD Ref:** Section 11.3 (Column-Level Security)
-**Why:** `cost_price`, `landed_cost`, `margin`, and `internal_fulfillment_cost` are currently returned to ALL roles in API responses. The PRD explicitly states these must be STRIPPED via a NestJS interceptor (not frontend hiding). This violates Pillar 3 (Financial Truth) — cost data is exposed to Media Buyers, CS Agents, and Logistics staff who should never see it.
+**Why:** `cost_price`, `landed_cost`, `margin`, and `internal_fulfillment_cost` are currently returned to ALL roles in API responses. The PRD explicitly states these must be STRIPPED via a NestJS interceptor (not frontend hiding). This violates Pillar 3 (Financial Truth) — cost data is exposed to Media Buyers, CS Closers, and Logistics staff who should never see it.
 
 **Implementation Steps:**
 1. Create `apps/api/src/common/interceptors/finance-fields.interceptor.ts`
@@ -536,7 +536,7 @@ Implement the strict order lifecycle state machine.
 
 **Acceptance Criteria:**
 - [x] Media Buyer API response for products has `costPrice: null`
-- [x] CS Agent API response for orders has `landedCost: null`
+- [x] CS Closer API response for orders has `landedCost: null`
 - [x] Finance Officer sees all cost fields populated
 - [x] SuperAdmin sees all cost fields populated
 - [x] Interceptor works at the NestJS level (not just frontend hiding)
@@ -549,7 +549,7 @@ Implement the strict order lifecycle state machine.
 `[x]` Status: Complete
 **Dependencies:** None
 **PRD Ref:** Section 11.2 (True Profit Calculation)
-**Why:** Current finance service calculates `trueProfit = revenue - landedCost - deliveryFee - adSpend`. Missing: **Commission deductions** (Media Buyer + CS Agent) and **Internal Fulfillment Cost** (warehouse → 3PL transfer cost amortized per unit). Financial reports show inflated profits.
+**Why:** Current finance service calculates `trueProfit = revenue - landedCost - deliveryFee - adSpend`. Missing: **Commission deductions** (Media Buyer + CS Closer) and **Internal Fulfillment Cost** (warehouse → 3PL transfer cost amortized per unit). Financial reports show inflated profits.
 
 **Implementation Steps:**
 1. Update `apps/api/src/finance/finance.service.ts` `getProfitReport()`:
@@ -564,7 +564,7 @@ Implement the strict order lifecycle state machine.
 
 **Acceptance Criteria:**
 - [x] True Profit per order deducts ALL 6 cost layers
-- [x] Commission for both MB and CS agent included in cost
+- [x] Commission for both MB and CS closer included in cost
 - [x] Fulfillment cost (transfer cost / received qty) included in cost
 - [x] Operational Loss (write-offs + shrinkage) shown as separate line in P&L
 - [x] CEO dashboard shows complete cost breakdown
@@ -640,7 +640,7 @@ Implement the strict order lifecycle state machine.
 `[x]` Status: Complete
 **Dependencies:** None
 **PRD Ref:** Section 5.2 (Permission Matrix)
-**Why:** Any logged-in user can navigate to any admin page. A CS Agent can open `/admin/finance/overview`. PRD Section 5.2 has an explicit permission matrix that is not enforced on the frontend.
+**Why:** Any logged-in user can navigate to any admin page. A CS Closer can open `/admin/finance/overview`. PRD Section 5.2 has an explicit permission matrix that is not enforced on the frontend.
 
 **Implementation Steps:**
 1. Create a `requireRole(...roles)` utility for Remix loaders:
@@ -659,10 +659,10 @@ Implement the strict order lifecycle state machine.
    - `/admin/orders` → ALL authenticated (filtered by RLS on backend)
    - `/admin/settings` → ALL authenticated
 3. Update sidebar navigation to only show links the user's role can access
-4. Create role-specific redirect on login (CS Agent → `/admin/orders`, Media Buyer → `/admin/campaigns`, etc.)
+4. Create role-specific redirect on login (CS Closer → `/admin/orders`, Media Buyer → `/admin/campaigns`, etc.)
 
 **Acceptance Criteria:**
-- [x] CS Agent navigating to `/admin/finance/overview` is redirected with "Access denied"
+- [x] CS Closer navigating to `/admin/finance/overview` is redirected with "Access denied"
 - [x] Sidebar only shows links relevant to the user's role
 - [x] Each role lands on their relevant dashboard after login
 - [x] SuperAdmin sees all sidebar links
@@ -1049,7 +1049,7 @@ TIER 3 — INFRASTRUCTURE & POLISH (parallel)
    - Orders with `callbackScheduledAt <= now()` AND `callbackAttempts < max` appear in a "Callbacks Due" section
    - Sorted by scheduled time (oldest first)
    - Shows attempt count badge: "Attempt 2/3"
-3. When CS agent selects "No Answer":
+3. When CS closer selects "No Answer":
    - Auto-schedule callback for +2 hours (configurable)
    - Increment `callbackAttempts`
    - If attempts >= max, auto-transition to `CANCELLED` with reason "Max callback attempts exceeded"
@@ -1205,7 +1205,7 @@ TIER 3 — INFRASTRUCTURE & POLISH (parallel)
 ### Task 1.7.C — Bulk Order Actions 🟢
 `[x]` Status: Complete
 **Dependencies:** None
-**Why:** CS agents and logistics managers frequently need to act on multiple orders (e.g., bulk assign to rider, bulk transition to ALLOCATED). Currently each order requires individual clicks.
+**Why:** CS closers and logistics managers frequently need to act on multiple orders (e.g., bulk assign to rider, bulk transition to ALLOCATED). Currently each order requires individual clicks.
 
 **Implementation Steps:**
 1. Add checkbox selection to order list tables
@@ -1531,7 +1531,7 @@ TIER 3 — INFRASTRUCTURE & POLISH (parallel)
    - Apply FIFO rule matching: base threshold first, then multipliers
    - Calculate delivery_rate from orders data
    - Apply penalties for returns
-3. Support different plans per role (CS Agent, Media Buyer, etc.)
+3. Support different plans per role (CS Closer, Media Buyer, etc.)
 4. Allow HR to preview payout calculations before finalizing
 
 **Acceptance Criteria:**
@@ -1585,7 +1585,7 @@ TIER 3 — INFRASTRUCTURE & POLISH (parallel)
 
 **Implementation Steps:**
 1. Create a trigger: when an order transitions to RETURNED, check if commission was previously paid
-2. If yes: create PENDING_DEDUCTION for affected staff (Media Buyer AND CS Agent)
+2. If yes: create PENDING_DEDUCTION for affected staff (Media Buyer AND CS Closer)
 3. In next payout calculation: subtract pending deductions
 4. Display clawbacks as negative line items in payout breakdown
 5. Handle edge case: clawbacks exceeding earnings (cap at zero, no debt carried forward unless configured)
@@ -1643,7 +1643,7 @@ Build the unified dashboard that renders different content based on the authenti
 
 1. **SuperAdmin:** Platform-wide KPIs, revenue vs cost graph, critical alerts (red), quick links to all modules
 2. **Head of CS:** Agent performance table, queue health metrics, Hot Swap interface, SLA timers
-3. **CS Agent:** Personal queue, call button, order detail panel, today's performance stats
+3. **CS Closer:** Personal queue, call button, order detail panel, today's performance stats
 4. **Media Buyer:** Campaign performance, CPA/ROAS metrics, funding balance, payout history
 5. **HoM:** All Media Buyer performance comparison, total budget vs spend, campaign ROI
 6. **Finance Officer:** Approval queue, budget tracker, invoice summary, True Profit overview
@@ -1676,13 +1676,13 @@ Build the unified dashboard that renders different content based on the authenti
    - PWA Web Push notifications (for offline/minimized users)
    - Socket.io real-time push (for active users)
 2. Create notification triggers for key events:
-   - New order assigned (CS Agent)
+   - New order assigned (CS Closer)
    - Funding sent/received (HoM/Media Buyer)
    - Approval request (Finance)
    - SLA breach (Head of CS)
    - Shrinkage alert (CEO/Head of Logistics)
    - Low stock alert (Warehouse Manager)
-   - Incoming call (CS Agent)
+   - Incoming call (CS Closer)
    - Payout generated (All staff)
 3. Create notification UI:
    - Bell icon with unread count in global header
@@ -1738,7 +1738,7 @@ Build the unified dashboard that renders different content based on the authenti
    - Cache assigned deliveries in IndexedDB
    - Queue delivery confirmations with GPS + timestamp
    - Auto-sync on network recovery (within 30 seconds)
-3. CS Agent offline features:
+3. CS Closer offline features:
    - Cache current queue for viewing (read-only when offline)
    - Queue is refreshed on reconnection
 
@@ -1746,7 +1746,7 @@ Build the unified dashboard that renders different content based on the authenti
 - [x] App loads from cache when offline (app shell renders)
 - [x] Rider can mark deliveries offline — data syncs when online
 - [x] Synced data includes GPS coordinates and original offline timestamp
-- [x] CS agent can view cached queue offline (read-only)
+- [x] CS closer can view cached queue offline (read-only)
 - [x] Background sync completes within 30 seconds of network recovery
 
 **Note:** SW registered in root.tsx. `sw.js` handles caching + background sync + push. `offline-sync.ts` manages IndexedDB queue. Rider layout shows offline banner, pending sync indicator, install prompt. `usePwaInstall()` hook for A2HS. Manifest at `/manifest.webmanifest`.
@@ -1761,7 +1761,7 @@ Build the unified dashboard that renders different content based on the authenti
 1. Set up load testing (k6 or Artillery)
 2. Test scenarios:
    - 1,000 concurrent form submissions
-   - 100 concurrent CS agents on dashboard
+   - 100 concurrent CS closers on dashboard
    - Profit report generation with 100k orders
 3. Optimize with: database indexes, Materialized Views, Redis caching, connection pooling
 
@@ -2092,7 +2092,7 @@ Add `writeTimelineEvent()` helper to `apps/api/src/orders/orders.service.ts` and
 **Implementation:**
 - `private async writeTimelineEvent(tx, { orderId, eventType, actorId, actorName, description, metadata?, branchId })` — always called inside the same transaction as the state change, never standalone
 - Wire into all existing service methods: `assignToCS`, `bulkReassign`, `transition` (all state changes), `initiateCall`, VOIP webhook handler, delivery confirmation, return/restock/write-off
-- Add `ORDER_VIEWED` event when a CS agent loads an order detail (called from tRPC `getById` when role = CS_AGENT)
+- Add `ORDER_VIEWED` event when a CS closer loads an order detail (called from tRPC `getById` when role = CS_CLOSER)
 - Add `SUPERVISOR_WATCHING` event when a supervisor opens Mirror View
 
 **Acceptance Criteria:**
@@ -2118,7 +2118,7 @@ Add `orders.getTimeline` tRPC procedure with role-filtered event visibility.
 
 **Acceptance Criteria:**
 - [x] `orders.getTimeline` procedure exists
-- [x] CS Agent only sees events for orders assigned to them
+- [x] CS Closer only sees events for orders assigned to them
 - [x] Finance role sees delivery + financial events but not CS comms events
 - [x] SuperAdmin sees all event types
 
@@ -2196,7 +2196,7 @@ Update all existing RLS policies to include branch_id filtering.
 - Add `branch_id` to the `yannis_capture_history_insert` trigger so history tables record branch context
 
 **Acceptance Criteria:**
-- [x] CS agent in Branch A cannot see Branch B orders (RLS blocks it)
+- [x] CS closer in Branch A cannot see Branch B orders (RLS blocks it)
 - [x] SuperAdmin with NULL branch_id sees all branches
 - [x] Branch Admin sees only their branch data
 - [x] Integration tests prove cross-branch data isolation
@@ -2311,7 +2311,7 @@ Remove the agent-initiated order transfer feature entirely.
 
 **Acceptance Criteria:**
 - [x] `order_transfer_requests` table dropped via migration
-- [x] No transfer-request UI visible to CS agents
+- [x] No transfer-request UI visible to CS closers
 - [x] No transfer-request tRPC procedures exist
 - [x] Hot Swap (HoCS only) still works correctly — it is NOT removed
 
@@ -2357,9 +2357,9 @@ New NestJS `messaging` module with send logic.
 - `archiveTemplate(templateId, actorId)` — soft-archive
 
 **tRPC procedures (`messaging.router.ts`):**
-- `messaging.sendSms` — CS agents only
-- `messaging.sendWhatsApp` — CS agents only
-- `messaging.listTemplates` — CS agents + HoCS
+- `messaging.sendSms` — CS closers only
+- `messaging.sendWhatsApp` — CS closers only
+- `messaging.listTemplates` — CS closers + HoCS
 - `messaging.createTemplate` — HoCS + SuperAdmin
 - `messaging.archiveTemplate` — HoCS + SuperAdmin
 - `messaging.getOrderMessages(orderId)` — get all outbound messages for an order
@@ -2429,7 +2429,7 @@ Broadcast CS rep UI state to server on every route/panel change.
 **Modify:** `apps/web/app/hooks/useSocket.ts` or create `apps/web/app/hooks/useAgentState.ts`
 
 **Implementation:**
-- On every route change for CS agent routes, emit `agent:state_update` to server:
+- On every route change for CS closer routes, emit `agent:state_update` to server:
   ```typescript
   socket.emit('agent:state_update', {
     agentId: currentUser.id,
@@ -2444,7 +2444,7 @@ Broadcast CS rep UI state to server on every route/panel change.
   - Forwards to supervisor room: `supervisor:room:{branchId}` (all supervisors in same branch receive it)
 
 **Acceptance Criteria:**
-- [x] CS agent navigating order detail emits `agent:state_update` within 500ms
+- [x] CS closer navigating order detail emits `agent:state_update` within 500ms
 - [x] Server stores state in Redis with TTL
 - [x] Supervisors in the same branch receive the event in real time
 
@@ -2546,9 +2546,9 @@ Add Claim Mode dispatch logic to the orders service.
 - Writes `ORDER_CLAIMED` timeline event
 - Returns success
 
-**New tRPC procedure: `orders.claimOrder(orderId)`** — authedProcedure, CS_AGENT only
+**New tRPC procedure: `orders.claimOrder(orderId)`** — authedProcedure, CS_CLOSER only
 
-**Modify `autoDispatchToCS()`**: if `dispatch_mode === 'claim'`, skip auto-assignment and emit `order:in_claim_queue` Socket.io event to broadcast the new order to all CS agents in the branch.
+**Modify `autoDispatchToCS()`**: if `dispatch_mode === 'claim'`, skip auto-assignment and emit `order:in_claim_queue` Socket.io event to broadcast the new order to all CS closers in the branch.
 
 **Acceptance Criteria:**
 - [x] In claim mode, new orders are NOT auto-assigned — they appear in the claim queue
@@ -2725,7 +2725,7 @@ Core send infrastructure and in-app → push mirror.
 **Server-side scope enforcement** (tRPC procedure checks caller role before allowing target).
 
 **Acceptance Criteria:**
-- [x] HoCS can only target CS Agents
+- [x] HoCS can only target CS Closers
 - [x] HoM can only target Media Buyers
 - [x] SuperAdmin can target everyone
 - [x] Recipient count shown in confirm modal before send
@@ -2995,7 +2995,7 @@ VOICE_MODE=termii   # termii | africastalking | failover | mock
 `[ ]` Status: Not started
 **Dependencies:** Task 15.2
 
-Wire the new `VoiceService` into the existing CS agent call flow. The UI should require zero changes — the "Call" button already works; only the backend provider changes.
+Wire the new `VoiceService` into the existing CS closer call flow. The UI should require zero changes — the "Call" button already works; only the backend provider changes.
 
 **Changes:**
 - Update `voip.controller.ts` — replace Twilio TwiML responses with Termii/AT equivalents
@@ -3004,7 +3004,7 @@ Wire the new `VoiceService` into the existing CS agent call flow. The UI should 
 - Provider webhook endpoint: `POST /api/voip/webhook/status` — receives call completion events from Termii/AT, updates `call_logs` with `duration_seconds` and `cost_ngn`
 
 **Acceptance Criteria:**
-- [ ] CS agent clicks Call → call connects via Termii (or AT failover)
+- [ ] CS closer clicks Call → call connects via Termii (or AT failover)
 - [ ] Call duration tracked and stored in `call_logs`
 - [ ] Cost in NGN calculated and stored at call end
 - [ ] 15-second gate still blocks Confirm button until call duration confirmed
@@ -3023,7 +3023,7 @@ Handle calls coming into the business's virtual number. Route to the correct age
 - Logic:
   1. Hash the `from` number — look up in `orders` for an assigned agent
   2. If found → return XML/JSON instruction to dial that agent's browser session
-  3. If not found → round-robin to available CS agents (capacity check via Redis)
+  3. If not found → round-robin to available CS closers (capacity check via Redis)
   4. Create/update `lead_profiles` row for the caller
 - Return provider-specific XML/JSON call control response
 
@@ -3046,7 +3046,7 @@ When an inbound call comes from an unknown number, enrich the auto-created `lead
   - Call Truecaller API with the phone number
   - If match found: update `lead_profiles.display_name`, `carrier`, `location`
   - If no match: leave nullable fields null
-- CS agent's inbound call screen shows: "Incoming: [Name or Unknown] — [Carrier] — [Location]"
+- CS closer's inbound call screen shows: "Incoming: [Name or Unknown] — [Carrier] — [Location]"
 - `TRUECALLER_API_KEY` env variable (optional — skip lookup gracefully if not set)
 
 **Acceptance Criteria:**
@@ -3417,7 +3417,7 @@ The `deploy-dev.yml` health-check loop already fails the deploy if the API doesn
 
 **Open questions (need CEO sign-off before Task 20.1):**
 1. **Audience** — all staff, or office-only roles? My default split:
-   - **REQUIRED:** CS_AGENT, FINANCE_OFFICER, HR_MANAGER, BRANCH_ADMIN, STOCK_MANAGER, LOGISTICS_MANAGER (on-site)
+   - **REQUIRED:** CS_CLOSER, FINANCE_OFFICER, HR_MANAGER, BRANCH_ADMIN, STOCK_MANAGER, LOGISTICS_MANAGER (on-site)
    - **REMOTE_OK** (can check in but no late flag): MEDIA_BUYER, HEAD_OF_MARKETING, HEAD_OF_LOGISTICS, HEAD_OF_CS — they travel between branches
    - **EXEMPT:** SUPER_ADMIN, ADMIN, TPL_MANAGER, TPL_RIDER (riders tracked via deliveries instead)
    - Captured per-user via `users.attendance_mode` enum so individual exceptions are easy.

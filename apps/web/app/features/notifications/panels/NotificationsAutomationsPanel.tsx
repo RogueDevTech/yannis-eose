@@ -69,7 +69,7 @@ const ALL_ROLES = [
   { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
   { value: 'MEDIA_BUYER', label: 'Media Buyer' },
   { value: 'HEAD_OF_CS', label: 'Head of CS' },
-  { value: 'CS_AGENT', label: 'CS Agent' },
+  { value: 'CS_CLOSER', label: 'CS Closer' },
   { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
   { value: 'LOGISTICS_MANAGER', label: 'Logistics Manager' },

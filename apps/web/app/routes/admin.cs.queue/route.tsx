@@ -300,17 +300,17 @@ export async function action({ request }: ActionFunctionArgs) {
 
   if (intent === 'assign') {
     const orderId = formData.get('orderId')?.toString() ?? '';
-    const csAgentId = formData.get('csAgentId')?.toString() ?? '';
+    const csCloserId = formData.get('csCloserId')?.toString() ?? '';
     const branchId = branchIdFromForm(formData);
 
-    if (!orderId || !csAgentId) {
+    if (!orderId || !csCloserId) {
       return json({ error: 'Order and closer selection are required' }, { status: 400 });
     }
 
     const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
       method: 'POST',
       cookie,
-      body: { orderId, csAgentId, ...(branchId ? { branchId } : {}) },
+      body: { orderId, csCloserId, ...(branchId ? { branchId } : {}) },
     });
 
     if (!res.ok) {
@@ -324,8 +324,8 @@ export async function action({ request }: ActionFunctionArgs) {
     // Multi-select bulk-assign from the Unassigned Queue tab. Posts the same backend
     // mutation as `assign` but for an arbitrary list of order IDs.
     const orderIdsRaw = formData.get('orderIds')?.toString() ?? '[]';
-    const csAgentIdsRaw = formData.get('csAgentIds')?.toString();
-    const csAgentId = formData.get('csAgentId')?.toString() ?? '';
+    const csCloserIdsRaw = formData.get('csCloserIds')?.toString();
+    const csCloserId = formData.get('csCloserId')?.toString() ?? '';
 
     let orderIds: string[];
     try {
@@ -337,30 +337,30 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Pick at least one order' }, { status: 400 });
     }
 
-    let csAgentIds: string[] = [];
-    if (csAgentIdsRaw) {
+    let csCloserIds: string[] = [];
+    if (csCloserIdsRaw) {
       try {
-        const parsed = JSON.parse(csAgentIdsRaw) as unknown;
+        const parsed = JSON.parse(csCloserIdsRaw) as unknown;
         if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
-          csAgentIds = parsed as string[];
+          csCloserIds = parsed as string[];
         }
       } catch {
         return json({ error: 'Invalid closer selection' }, { status: 400 });
       }
     }
-    if (csAgentIds.length === 0 && csAgentId) {
-      csAgentIds = [csAgentId];
+    if (csCloserIds.length === 0 && csCloserId) {
+      csCloserIds = [csCloserId];
     }
-    if (csAgentIds.length === 0) {
+    if (csCloserIds.length === 0) {
       return json({ error: 'Pick at least one closer' }, { status: 400 });
     }
 
     const branchId = branchIdFromForm(formData);
 
     const body =
-      csAgentIds.length === 1
-        ? { orderIds, csAgentId: csAgentIds[0], ...(branchId ? { branchId } : {}) }
-        : { orderIds, csAgentIds, ...(branchId ? { branchId } : {}) };
+      csCloserIds.length === 1
+        ? { orderIds, csCloserId: csCloserIds[0], ...(branchId ? { branchId } : {}) }
+        : { orderIds, csCloserIds, ...(branchId ? { branchId } : {}) };
 
     const res = await apiRequest<unknown>('/trpc/orders.bulkAssignToCS', {
       method: 'POST',

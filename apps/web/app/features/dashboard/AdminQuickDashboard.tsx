@@ -22,11 +22,11 @@ export interface QuickOverviewData {
     };
   };
   cs: {
-    /** CS agents with any workload row in the current branch. */
+    /** CS closers with any workload row in the current branch. */
     closerCount: number;
-    /** Sum of pending orders across all CS agents. */
+    /** Sum of pending orders across all CS closers. */
     totalPending: number;
-    /** CS agents flagged as idle (no action > threshold). */
+    /** CS closers flagged as idle (no action > threshold). */
     idleCount: number;
     /** Orders sitting in UNPROCESSED waiting for CS assignment. */
     unassigned: number;
@@ -134,7 +134,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
               label: 'Closers',
               value: data.cs.closerCount.toString(),
               valueClassName: 'text-app-fg',
-              title: 'CS agents with any workload row in the current branch',
+              title: 'CS closers with any workload row in the current branch',
             },
             {
               label: 'Pending',

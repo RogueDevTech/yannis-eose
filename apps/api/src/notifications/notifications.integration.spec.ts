@@ -38,7 +38,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('inserts a notification row successfully', async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const notifRows = await db.insert(schema.notifications).values({
@@ -65,7 +65,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('inserts push_delivery_log row with SENT status', async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const logId = randomUUID();
@@ -92,7 +92,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('updates push_delivery_log to SHOWN status when acked with shown', async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const logId = randomUUID();
@@ -127,7 +127,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('updates push_delivery_log to CLICKED status when acked with clicked', async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const logId = randomUUID();
@@ -162,7 +162,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('can delete stale push_subscriptions row (410 Gone scenario)', async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const subEndpoint = `https://fcm.example.com/sub-${randomUUID()}`;
@@ -193,7 +193,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('notification row and delivery log are both readable in same transaction', async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const logId = randomUUID();
@@ -231,13 +231,13 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // broadcastPush role scope: HEAD_OF_CS can only target CS_AGENT
+  // broadcastPush role scope: HEAD_OF_CS can only target CS_CLOSER
   // ---------------------------------------------------------------------------
 
-  it('broadcastPush scoped to CS_AGENT role creates delivery logs only for CS_AGENT users', async () => {
+  it('broadcastPush scoped to CS_CLOSER role creates delivery logs only for CS_CLOSER users', async () => {
     const headOfCs = await createTestUser(db as any, { role: 'HEAD_OF_CS' });
-    const csAgent1 = await createTestUser(db as any, { role: 'CS_AGENT' });
-    const csAgent2 = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const csCloser1 = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    const csCloser2 = await createTestUser(db as any, { role: 'CS_CLOSER' });
     const superAdmin = await createTestUser(db as any, { role: 'SUPER_ADMIN' });
     await setSessionActor(pgClient, headOfCs.id);
 
@@ -247,13 +247,13 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
       id: broadcastId,
       createdBy: headOfCs.id,
       targetType: 'ROLE',
-      targetRole: 'CS_AGENT',
+      targetRole: 'CS_CLOSER',
       title: 'CS Team Notice',
       body: 'New dispatch mode active',
     });
 
-    // Only insert delivery logs for CS_AGENT users — not for SuperAdmin
-    for (const csUser of [csAgent1, csAgent2]) {
+    // Only insert delivery logs for CS_CLOSER users — not for SuperAdmin
+    for (const csUser of [csCloser1, csCloser2]) {
       await db.insert(schema.pushDeliveryLog).values({
         id: randomUUID(),
         userId: csUser.id,
@@ -273,9 +273,9 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
 
     const loggedUserIds = logs.map((l) => l.userId);
 
-    // CS agents received it
-    expect(loggedUserIds).toContain(csAgent1.id);
-    expect(loggedUserIds).toContain(csAgent2.id);
+    // CS closers received it
+    expect(loggedUserIds).toContain(csCloser1.id);
+    expect(loggedUserIds).toContain(csCloser2.id);
 
     // SuperAdmin did NOT receive it — out of scope for HEAD_OF_CS broadcast
     expect(loggedUserIds).not.toContain(superAdmin.id);
@@ -285,19 +285,19 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   it('broadcastPush to SUPER_ADMIN role by HEAD_OF_CS is rejected at router level', () => {
     // This is enforced at the tRPC router layer (permissionProcedure + role scope check),
     // not at the DB layer. We verify the rule is correct by asserting the role hierarchy:
-    // HEAD_OF_CS → can only target CS_AGENT
+    // HEAD_OF_CS → can only target CS_CLOSER
     // SUPER_ADMIN → can target any role
     const allowedTargets: Record<string, string[]> = {
-      HEAD_OF_CS: ['CS_AGENT'],
+      HEAD_OF_CS: ['CS_CLOSER'],
       HEAD_OF_MARKETING: ['MEDIA_BUYER'],
       HEAD_OF_LOGISTICS: ['TPL_RIDER', 'LOGISTICS_MANAGER'],
-      SUPER_ADMIN: ['CS_AGENT', 'MEDIA_BUYER', 'SUPER_ADMIN', 'FINANCE_OFFICER', 'HR_MANAGER'],
+      SUPER_ADMIN: ['CS_CLOSER', 'MEDIA_BUYER', 'SUPER_ADMIN', 'FINANCE_OFFICER', 'HR_MANAGER'],
     };
 
     // HEAD_OF_CS cannot target SUPER_ADMIN
     expect(allowedTargets['HEAD_OF_CS']).not.toContain('SUPER_ADMIN');
     // SUPER_ADMIN can target anything
-    expect(allowedTargets['SUPER_ADMIN']).toContain('CS_AGENT');
+    expect(allowedTargets['SUPER_ADMIN']).toContain('CS_CLOSER');
     expect(allowedTargets['SUPER_ADMIN']).toContain('SUPER_ADMIN');
   });
 
@@ -306,7 +306,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('marks push_delivery_log as FAILED instead of deleting', async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const logId = randomUUID();

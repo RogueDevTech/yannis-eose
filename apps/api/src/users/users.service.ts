@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { TRPCError } from '@trpc/server';
 import * as bcrypt from 'bcrypt';
 import { randomBytes, randomUUID } from 'crypto';
-import { eq, and, desc, asc, ilike, or, count, ne, inArray, sql, isNull } from 'drizzle-orm';
+import { eq, and, desc, asc, ilike, or, count, countDistinct, ne, inArray, sql, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -11,6 +11,7 @@ import type {
   CreateStaffInput,
   UpdateStaffInput,
   ListUsersInput,
+  ListUsersRosterSummaryInput,
   ResetPasswordInput,
 } from '@yannis/shared';
 import {
@@ -38,6 +39,11 @@ import { isAdminLevelRole } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 
 type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
+
+/** Strip ILIKE metacharacters so user input cannot widen patterns (aligned with searchForPushTarget). */
+function sanitizeListUsersSearch(raw: string): string {
+  return raw.replace(/[%_\\]/g, ' ').trim();
+}
 
 @Injectable()
 export class UsersService {
@@ -76,6 +82,33 @@ export class UsersService {
       )
       .limit(1);
     return rows[0]?.id ?? null;
+  }
+
+  /** Duplicate `users.phone` lookup for create (no exclude) or update (exclude target user). */
+  private async selectStaffPhoneConflictRows(
+    phone: string,
+    excludeUserId?: string,
+  ): Promise<Array<{ name: string | null; email: string | null }>> {
+    const whereClause =
+      excludeUserId !== undefined
+        ? and(eq(schema.users.phone, phone), ne(schema.users.id, excludeUserId))
+        : eq(schema.users.phone, phone);
+    return this.db
+      .select({ name: schema.users.name, email: schema.users.email })
+      .from(schema.users)
+      .where(whereClause)
+      .limit(1);
+  }
+
+  private throwIfStaffPhoneConflictRows(
+    rows: ReadonlyArray<{ name: string | null; email: string | null }>,
+  ): void {
+    const hit = rows[0];
+    if (!hit) return;
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: `Phone number already in use by ${hit.name} (${hit.email}). Each user must have a unique number.`,
+    });
   }
 
   /**
@@ -211,7 +244,7 @@ export class UsersService {
     if (perms.includes('users.read') || perms.includes('hr.read') || perms.includes('hr.write'))
       return true;
 
-    if ((perms.includes('cs.teamOverview') || perms.includes('team.supervise_cs')) && target.role === 'CS_AGENT')
+    if ((perms.includes('cs.teamOverview') || perms.includes('team.supervise_cs')) && target.role === 'CS_CLOSER')
       return true;
     if (
       (perms.includes('marketing.teamOverview') || perms.includes('team.supervise_marketing')) &&
@@ -368,6 +401,30 @@ export class UsersService {
     // This covers: HR creating any sensitive role, AND ADMIN creating another ADMIN.
     const isSuperAdmin = actor.role === 'SUPER_ADMIN';
     if (!isSuperAdmin && this.permissionsService.isSensitiveRole(input.role)) {
+      // Same identifiers SuperAdmin will enforce on approve — fail fast so the queue
+      // never fills with payloads that cannot be applied (duplicate phone/email).
+      if (!input.phone) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Phone number is required.',
+        });
+      }
+      const [phoneConflictRows, existingEmailRows] = await Promise.all([
+        this.selectStaffPhoneConflictRows(input.phone),
+        this.db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.email, input.email.toLowerCase()))
+          .limit(1),
+      ]);
+      this.throwIfStaffPhoneConflictRows(phoneConflictRows);
+      if (existingEmailRows[0]) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'A user with this email already exists',
+        });
+      }
+
       const [req] = await withActor(this.db, actor, async (tx) =>
         tx
           .insert(schema.permissionRequests)
@@ -463,12 +520,7 @@ export class UsersService {
       });
     }
 
-    if (phoneRows[0]) {
-      throw new TRPCError({
-        code: 'CONFLICT',
-        message: `Phone number already in use by ${phoneRows[0].name} (${phoneRows[0].email}). Each user must have a unique number.`,
-      });
-    }
+    this.throwIfStaffPhoneConflictRows(phoneRows);
 
     if (activeBranchRows.length !== requestedBranchIds.length) {
       throw new TRPCError({
@@ -741,44 +793,50 @@ export class UsersService {
   }
 
   /**
-   * List users with filtering, search, and pagination.
-   *
-   * Staff phone is unmasked for callers who pass `canSeeStaffPhone`. The router gates the
-   * procedure on `users.read` so any direct caller already qualifies, but the per-row check
-   * still runs so a future caller without that permission falls back to the masked form.
+   * Shared WHERE fragments for `list` vs HR roster KPI aggregates (`rosterSummary`).
+   * `rosterBreakdown` ignores the list's status equality filter so tiles stay meaningful when
+   * the table is filtered to one status; DEACTIVATED handling matches product rules in the plan.
    */
-  async list(
-    input: ListUsersInput,
-    actor: { id: string; role: string; permissions?: string[] } | null = null,
-    currentBranchId: string | null = null,
-  ) {
-    const conditions = [];
+  private buildUsersListConditions(
+    input: Pick<
+      ListUsersInput,
+      'search' | 'role' | 'status' | 'branchId' | 'userIds' | 'allBranches' | 'probationOnly'
+    >,
+    actor: { id: string; role: string; permissions?: string[] } | null,
+    currentBranchId: string | null,
+    mode: 'list' | 'rosterBreakdown',
+  ): SQL[] {
+    const conditions: SQL[] = [];
 
-    // When the caller asks for a specific set of IDs (e.g. resolving buyer names behind ad-spend
-    // rows), match exactly those — and bypass the default "hide DEACTIVATED" filter so names
-    // still render for historical records owned by since-removed users.
-    if (input.userIds && input.userIds.length > 0) {
-      conditions.push(inArray(schema.users.id, input.userIds));
-    } else if (!input.status) {
-      // Default: exclude DEACTIVATED (record stays in DB; only visible when filter status=DEACTIVATED)
-      conditions.push(ne(schema.users.status, 'DEACTIVATED'));
+    if (mode === 'list') {
+      if (input.userIds && input.userIds.length > 0) {
+        conditions.push(inArray(schema.users.id, input.userIds));
+      } else if (!input.status) {
+        conditions.push(ne(schema.users.status, 'DEACTIVATED'));
+      }
+      if (input.role) {
+        conditions.push(eq(schema.users.role, input.role));
+      }
+      if (input.status) {
+        conditions.push(eq(schema.users.status, input.status));
+      }
+    } else {
+      if (input.userIds && input.userIds.length > 0) {
+        conditions.push(inArray(schema.users.id, input.userIds));
+      } else if (input.status === 'DEACTIVATED') {
+        conditions.push(eq(schema.users.status, 'DEACTIVATED'));
+      } else {
+        conditions.push(ne(schema.users.status, 'DEACTIVATED'));
+      }
+      if (input.role) {
+        conditions.push(eq(schema.users.role, input.role));
+      }
     }
 
-    if (input.role) {
-      conditions.push(eq(schema.users.role, input.role));
+    if (input.probationOnly === true) {
+      conditions.push(eq(schema.users.isProbation, true));
     }
-    if (input.status) {
-      conditions.push(eq(schema.users.status, input.status));
-    }
-    // Branch scoping (CEO directive 2026-04-26: branch isolation):
-    //  - userIds set        → skip branch filter (name-resolution path)
-    //  - allBranches + admin → skip branch filter (admin opt-in for /admin/branches/:id picker)
-    //  - input.branchId     → filter to that branch (legacy explicit override)
-    //  - ctx.currentBranchId → auto-scope to caller's active branch
-    //  - admin in global mode (currentBranchId = NULL) → unscoped
-    // `allBranches` opt-in is reserved for callers who can already see all branches —
-    // SuperAdmin (always) or anyone whose session resolved unscoped (e.g. admin holding
-    // every permission, or an org-wide head with `currentBranchId === null`).
+
     const actorPerms = (actor?.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const canViewAllBranches =
       !!actor && (
@@ -805,15 +863,33 @@ export class UsersService {
         )`,
       );
     }
-    if (input.search) {
-      conditions.push(
-        or(
-          ilike(schema.users.name, `%${input.search}%`),
-          ilike(schema.users.email, `%${input.search}%`),
-        ),
+
+    const searchForDb = input.search ? sanitizeListUsersSearch(input.search) : '';
+    if (searchForDb.length > 0) {
+      const searchOr = or(
+        ilike(schema.users.name, `%${searchForDb}%`),
+        ilike(schema.users.email, `%${searchForDb}%`),
+        ilike(schema.users.phone, `%${searchForDb}%`),
       );
+      if (searchOr) conditions.push(searchOr);
     }
 
+    return conditions;
+  }
+
+  /**
+   * List users with filtering, search, and pagination.
+   *
+   * Staff phone is unmasked for callers who pass `canSeeStaffPhone`. The router gates the
+   * procedure on `users.read` so any direct caller already qualifies, but the per-row check
+   * still runs so a future caller without that permission falls back to the masked form.
+   */
+  async list(
+    input: ListUsersInput,
+    actor: { id: string; role: string; permissions?: string[] } | null = null,
+    currentBranchId: string | null = null,
+  ) {
+    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'list');
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const orderByColumn = {
@@ -902,6 +978,50 @@ export class UsersService {
   }
 
   /**
+   * Full-roster aggregates for the HR Users KPI strip — same branch/search/role/probation
+   * scope as `list`, but status breakdown ignores the list status filter (except DEACTIVATED).
+   */
+  async rosterSummary(
+    input: ListUsersRosterSummaryInput,
+    actor: { id: string; role: string; permissions?: string[] } | null = null,
+    currentBranchId: string | null = null,
+  ): Promise<{
+    active: number;
+    pending: number;
+    inactiveArchived: number;
+    distinctRoles: number;
+  }> {
+    const conditions = this.buildUsersListConditions(input, actor, currentBranchId, 'rosterBreakdown');
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [statusRows, roleRows] = await Promise.all([
+      this.db
+        .select({ status: schema.users.status, c: count() })
+        .from(schema.users)
+        .where(whereClause)
+        .groupBy(schema.users.status),
+      this.db
+        .select({ distinctRoles: countDistinct(schema.users.role) })
+        .from(schema.users)
+        .where(whereClause),
+    ]);
+
+    let active = 0;
+    let pending = 0;
+    let inactiveArchived = 0;
+    for (const row of statusRows) {
+      const n = Number(row.c);
+      if (row.status === 'ACTIVE') active += n;
+      else if (row.status === 'PENDING') pending += n;
+      else if (row.status === 'INACTIVE' || row.status === 'ARCHIVED') inactiveArchived += n;
+    }
+
+    const distinctRoles = Number(roleRows[0]?.distinctRoles ?? 0);
+
+    return { active, pending, inactiveArchived, distinctRoles };
+  }
+
+  /**
    * Minimal active-user search for push broadcast recipient picker.
    * Router gates with notifications.broadcast | users.read.
    */
@@ -940,7 +1060,7 @@ export class UsersService {
   }
 
   /**
-   * List CS team members (HEAD_OF_CS + CS_AGENT) for Team page.
+   * List CS team members (HEAD_OF_CS + CS_CLOSER) for Team page.
    * Gated by cs.teamOverview; does not require users.read.
    */
   async listCSTeam(): Promise<Array<{
@@ -966,7 +1086,7 @@ export class UsersService {
         and(
           eq(schema.users.status, 'ACTIVE'),
           or(
-            eq(schema.users.role, 'CS_AGENT'),
+            eq(schema.users.role, 'CS_CLOSER'),
             eq(schema.users.role, 'HEAD_OF_CS'),
             sql<boolean>`EXISTS (
               SELECT 1
@@ -1142,7 +1262,7 @@ export class UsersService {
     // Scoped team-lead edits: anyone holding `users.staff.update_supervised` can narrow-edit
     // their direct reports (capacity, productIds, visibleOrderStatuses). The supervised role
     // resolution still uses the team-supervision codes (cs.teamOverview, team.supervise_cs, etc.)
-    // so a CS-domain supervisor edits CS Agents and a marketing-domain supervisor edits MBs.
+    // so a CS-domain supervisor edits CS Closers and a marketing-domain supervisor edits MBs.
     // Cannot change role, status, email, phone, name, logistics location, commission plan, etc.
     // Team-leads cannot edit each other or themselves — that stays admin territory.
     const p = (actor.permissions ?? []).map((c) => canonicalPermissionCode(c));
@@ -1159,7 +1279,7 @@ export class UsersService {
 
     const actorIsTeamLead = actorIsCsLead || actorIsMarketingLead;
     const targetFitsTeamLeadScope =
-      (actorIsCsLead && beforeRow.role === 'CS_AGENT') ||
+      (actorIsCsLead && beforeRow.role === 'CS_CLOSER') ||
       (actorIsMarketingLead && beforeRow.role === 'MEDIA_BUYER');
     const sameBranch =
       !!actor.currentBranchId &&
@@ -1172,7 +1292,7 @@ export class UsersService {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: actorIsCsLead
-            ? 'You can only edit CS Agents on your team. Contact an administrator for anything else.'
+            ? 'You can only edit CS Closers on your team. Contact an administrator for anything else.'
             : 'You can only edit Media Buyers on your team. Contact an administrator for anything else.',
         });
       }
@@ -1224,6 +1344,11 @@ export class UsersService {
           code: 'BAD_REQUEST',
           message: 'Cannot request sensitive role for yourself',
         });
+      }
+
+      if (input.phone) {
+        const phoneConflictRows = await this.selectStaffPhoneConflictRows(input.phone, input.userId);
+        this.throwIfStaffPhoneConflictRows(phoneConflictRows);
       }
 
       const [req] = await withActor(this.db, actor, async (tx) =>
@@ -1347,18 +1472,8 @@ export class UsersService {
     if (input.status !== undefined) updateFields['status'] = input.status;
     if (input.phone !== undefined) {
       if (input.phone) {
-        const phoneRows = await this.db
-          .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
-          .from(schema.users)
-          .where(and(eq(schema.users.phone, input.phone), ne(schema.users.id, input.userId)))
-          .limit(1);
-
-        if (phoneRows[0]) {
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: `Phone number already in use by ${phoneRows[0].name} (${phoneRows[0].email}). Each user must have a unique number.`,
-          });
-        }
+        const phoneRows = await this.selectStaffPhoneConflictRows(input.phone, input.userId);
+        this.throwIfStaffPhoneConflictRows(phoneRows);
       }
       updateFields['phone'] = input.phone;
     }

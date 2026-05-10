@@ -29,12 +29,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   // Include the user's role so StaffOnboardingPage can pick the right reviewer copy
   // (HR / Admin / SuperAdmin onboardings are reviewed by SuperAdmin, not HR).
-  return { record, subject: { id: user.id, name: user.name, role: user.role } };
+  return {
+    record,
+    subject: { id: user.id, name: user.name, role: user.role },
+    isMirroring: !!user.mirroredBy,
+  };
 }
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
   if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
+  // Mirror Mode is strictly view-only. The tRPC layer blocks the underlying mutation, but
+  // we short-circuit here so the user gets a clean error instead of a tRPC 403. See
+  // CLAUDE.md → "Mirror Mode".
+  const actor = await getCurrentUser(request);
+  if (actor?.mirroredBy) {
+    return json(
+      { error: 'Read-only while mirroring user. Exit mirror mode to make changes.' },
+      { status: 403 },
+    );
+  }
   const fd = await request.formData();
   const intent = fd.get('intent')?.toString();
 
@@ -110,13 +124,14 @@ function emptyToNull(v: FormDataEntryValue | null): string | null {
 }
 
 export default function AdminSelfOnboardingRoute() {
-  const { record, subject } = useLoaderData<typeof loader>();
+  const { record, subject, isMirroring } = useLoaderData<typeof loader>();
   return (
     <StaffOnboardingPage
       mode="self"
       subject={subject}
       record={record as OnboardingRecord}
       actionUrl="/admin/onboarding"
+      isMirroring={isMirroring}
     />
   );
 }

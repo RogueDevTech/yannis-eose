@@ -95,9 +95,9 @@ The system is divided into **7 interlocking functional modules** plus a **univer
 
 **Media Buyer** — Plans and executes media campaigns. Creates sales forms from approved Offer Templates. Logs daily ad spend with mandatory screenshots. Views own orders, own campaigns, own payouts. Cannot set prices or see cost data.
 
-**Head of CS** — Manages the customer service team. Views all CS agent performance metrics. Can Hot Swap (mass-reassign) orders between agents. Views SLA breach reports.
+**Head of CS** — Manages the customer service team. Views all CS closer performance metrics. Can Hot Swap (mass-reassign) orders between agents. Views SLA breach reports.
 
-**CS Agent** — First line of contact for order confirmation. Receives auto-dispatched orders. Calls customers via VOIP bridge. Confirms, cancels, or updates orders. Can only see orders assigned to them. Never sees full phone numbers.
+**CS Closer** — First line of contact for order confirmation. Receives auto-dispatched orders. Calls customers via VOIP bridge. Confirms, cancels, or updates orders. Can only see orders assigned to them. Never sees full phone numbers.
 
 **Finance Officer** — Reviews and approves all financial requests (media spend, procurement, logistics reimbursements). Manages invoices. Views all cost data. Cannot approve their own requests.
 
@@ -115,7 +115,7 @@ The system is divided into **7 interlocking functional modules** plus a **univer
 
 ### 5.2 Permission Matrix
 
-| Capability | SuperAdmin | Branch Admin | HoM | Media Buyer | Head CS | CS Agent | Finance | Head Logistics | Warehouse Mgr | 3PL Manager | 3PL Rider | HR Manager |
+| Capability | SuperAdmin | Branch Admin | HoM | Media Buyer | Head CS | CS Closer | Finance | Head Logistics | Warehouse Mgr | 3PL Manager | 3PL Rider | HR Manager |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | View all orders | Yes | Branch only | No | Own only | CS orders | Assigned only | Yes (read) | Yes | No | Own location | Own assigned | No |
 | See cost_price / margin | Yes | No | No | No | No | No | Yes | No | No | No | No | No |
@@ -298,7 +298,7 @@ Customer fills form → POST to Cloudflare Worker (Edge)
 
 ### 6.4 Edge Cases
 
-**Ghost Orders (Double Submit):** Customer clicks Submit 5 times. The Edge Worker hashes `phone_number + product_id` and checks Redis. Second through fifth submissions are flagged as `POTENTIAL_DUPLICATE` and stored separately. CS agent sees a warning: "Another order from this customer exists (created 3m ago)" and can merge or dismiss.
+**Ghost Orders (Double Submit):** Customer clicks Submit 5 times. The Edge Worker hashes `phone_number + product_id` and checks Redis. Second through fifth submissions are flagged as `POTENTIAL_DUPLICATE` and stored separately. CS closer sees a warning: "Another order from this customer exists (created 3m ago)" and can merge or dismiss.
 
 **API Downtime:** If the primary NestJS API is completely unreachable, the Cloudflare Worker buffers orders in QStash. A "Healer" cron job checks the queue every 60 seconds. As soon as the API is back, it drains the queue into Postgres. The customer never sees an error — they always get "Order received!"
 
@@ -323,7 +323,7 @@ The Head of CS configures the active dispatch mode via system settings. There ar
 
 **Mode 1: Load-Balanced (Default)**
 When a new order enters with status `UNPROCESSED`, it is automatically pushed to an agent:
-1. Query all CS agents with status `ACTIVE`
+1. Query all CS closers with status `ACTIVE`
 2. Count each agent's `UNPROCESSED` + `CS_ENGAGED` orders (active pending workload)
 3. Assign to the agent with the **lowest active pending count**
 4. If tied, assign to the one idle longest (`last_action_timestamp`)
@@ -350,7 +350,7 @@ Orders are NOT auto-assigned. They sit in a live **Claim Queue** visible to all 
 ### 7.3 The Call Flow (VOIP Privacy Bridge)
 
 ```
-CS Agent sees order in queue (phone: 0803****1234)
+CS Closer sees order in queue (phone: 0803****1234)
     → Agent clicks "Call Customer" button
     → System logs ACCESS_EVENT in audit trail (agent_id, order_id, timestamp)
     → System sends call_token to VOIP provider (Twilio/MessageBird)
@@ -369,7 +369,7 @@ CS Agent sees order in queue (phone: 0803****1234)
 
 ### 7.4 Status Update Rules (The Status Lock)
 
-After a call, the CS agent needs to update the order status. These transitions have hard gates:
+After a call, the CS closer needs to update the order status. These transitions have hard gates:
 
 | Action | UI State | Gate |
 |---|---|---|
@@ -382,15 +382,15 @@ After a call, the CS agent needs to update the order status. These transitions h
 
 During the confirmation call, the customer may change their mind:
 
-**Address Change:** CS agent updates the delivery address. The system creates a version snapshot — the original address is preserved in the temporal table. The order history timeline shows: "Address changed from [old] to [new] by Agent Amaka at 10:25 AM."
+**Address Change:** CS closer updates the delivery address. The system creates a version snapshot — the original address is preserved in the temporal table. The order history timeline shows: "Address changed from [old] to [new] by Agent Amaka at 10:25 AM."
 
-**Quantity Change / Upsell:** CS agent can add or remove products. The system recalculates the total and updates inventory reservation accordingly. If adding products, system checks stock availability in real-time. If stock is insufficient, the UI shows a warning.
+**Quantity Change / Upsell:** CS closer can add or remove products. The system recalculates the total and updates inventory reservation accordingly. If adding products, system checks stock availability in real-time. If stock is insufficient, the UI shows a warning.
 
-**Delivery Scheduling:** CS agent records the customer's preferred delivery time and any special instructions.
+**Delivery Scheduling:** CS closer records the customer's preferred delivery time and any special instructions.
 
 ### 7.6 Hot Swap (Management Reassignment Only)
 
-**Order reassignment is a management action only.** CS agents CANNOT initiate order transfers between themselves. Only Head of CS and SuperAdmin can reassign orders.
+**Order reassignment is a management action only.** CS closers CANNOT initiate order transfers between themselves. Only Head of CS and SuperAdmin can reassign orders.
 
 The Head of CS has a management dashboard showing all agents and their current workloads.
 
@@ -406,7 +406,7 @@ Every reassignment is logged in the audit trail: "Order #XYZ reassigned from Age
 
 **Agent Fakes "No Answer":** The Status Lock prevents marking "No Answer" unless the VOIP log confirms a call attempt was actually made. If the VOIP log shows call_duration = 0 and call_status = no_answer, the system allows it (phone actually rang but nobody picked up). If there is NO call log at all, the button stays disabled.
 
-**Customer Calls Back:** The VOIP system recognizes the incoming number and routes the call to the specific CS agent last assigned to that customer's order. A browser notification popup appears: "Incoming Call: Order #502 — Customer Adaeze." Agent clicks "Answer" and the WebRTC connection starts.
+**Customer Calls Back:** The VOIP system recognizes the incoming number and routes the call to the specific CS closer last assigned to that customer's order. A browser notification popup appears: "Incoming Call: Order #502 — Customer Adaeze." Agent clicks "Answer" and the WebRTC connection starts.
 
 **PWA Incoming Calls:** Because the dashboard is a PWA, agents receive Web Push notifications for incoming calls even if the browser is minimized or the phone screen is off.
 
@@ -605,7 +605,7 @@ When an order is `CONFIRMED` by CS, the Logistics Manager allocates it to a Thir
 - Must capture: OTP confirmation or recipient signature
 - GPS coordinates logged
 - Stock: DELIVERED (final — deducted from inventory)
-- Commission triggered for Media Buyer and CS Agent
+- Commission triggered for Media Buyer and CS Closer
 - Revenue recognized in Finance
 
 **Partial Delivery:**
@@ -731,7 +731,7 @@ Costs:
   + Internal Fulfillment Cost (warehouse → 3PL transfer, amortized per unit)
   + Delivery Fee (quoted by Third-Party Logistics for this specific order)
   + Ad Spend (proportional: total_ad_spend / total_orders for this campaign)
-  + Commission (Media Buyer commission + CS Agent commission for this order)
+  + Commission (Media Buyer commission + CS Closer commission for this order)
 
 True Net Profit = Revenue - Total Costs
 ```
@@ -843,7 +843,7 @@ The settlement period is CONFIGURABLE by HR: Weekly, Bi-weekly, or Monthly.
 
 If an order that was already counted in a previous payout is later returned:
 
-1. System creates a `PENDING_DEDUCTION` record linked to the original order and the affected staff members (Media Buyer AND CS Agent)
+1. System creates a `PENDING_DEDUCTION` record linked to the original order and the affected staff members (Media Buyer AND CS Closer)
 2. The deduction appears in the next settlement period as a negative line item
 3. Payout calculation: `SUM(current_period_earnings) - SUM(pending_deductions) = final_payout`
 
@@ -908,7 +908,7 @@ The audit trail is NOT a separate application-level log table. It is built into 
 | Field update | Address changed | Editor ID, old value, new value, timestamp |
 | Status change | Order CONFIRMED → ALLOCATED | Actor ID, old status, new status, timestamp |
 | Financial action | Spend request approved | Approver ID, amount, decision reason, timestamp |
-| Access event | CS agent clicked "Call" (phone number accessed) | Agent ID, order ID, data accessed, timestamp |
+| Access event | CS closer clicked "Call" (phone number accessed) | Agent ID, order ID, data accessed, timestamp |
 | Login/logout | User authenticated | User ID, IP address, device info, timestamp |
 | Permission change | User role updated | Admin ID who made change, old role, new role |
 | Failed access | Unauthorized data request blocked by RLS | User ID, attempted action, blocked resource |
@@ -962,20 +962,20 @@ This timeline is distinct from the temporal history tables. It is purpose-built 
 | `ORDER_AUTO_ASSIGNED` | Dispatch algorithm | "Auto-assigned to [agent name] by system" |
 | `ORDER_MANUALLY_ASSIGNED` | HoCS / SuperAdmin | "Assigned to [agent name] by [actor name]" |
 | `ORDER_REASSIGNED` | HoCS / SuperAdmin Hot Swap | "Reassigned from [old agent] to [new agent] by [actor name] — Reason: [reason]" |
-| `ORDER_CLAIMED` | CS Agent (Claim Mode) | "Claimed by [agent name]" |
-| `ORDER_VIEWED` | CS Agent opens order | "Opened by [agent name]" |
-| `CALL_INITIATED` | CS Agent | "Call initiated by [agent name]" |
+| `ORDER_CLAIMED` | CS Closer (Claim Mode) | "Claimed by [agent name]" |
+| `ORDER_VIEWED` | CS Closer opens order | "Opened by [agent name]" |
+| `CALL_INITIATED` | CS Closer | "Call initiated by [agent name]" |
 | `CALL_COMPLETED` | VOIP webhook | "Call completed — Duration: [X]m [Y]s" |
 | `CALL_NO_ANSWER` | VOIP webhook | "No answer — logged by [agent name]" |
 | `CALL_FAILED` | VOIP webhook | "Call failed — [reason]" |
-| `MANUAL_CALL_LOGGED` | CS Agent (VOIP off) | "Manual call logged by [agent name]" |
-| `SMS_SENT` | CS Agent | "SMS sent by [agent name] — Template: [template name]" |
-| `WHATSAPP_SENT` | CS Agent | "WhatsApp sent by [agent name] — Template: [template name]" |
-| `ORDER_CONFIRMED` | CS Agent | "Order confirmed by [agent name]" |
-| `ORDER_CANCELLED` | CS Agent / HoCS | "Order cancelled by [actor name] — Reason: [reason]" |
-| `ADDRESS_UPDATED` | CS Agent | "Delivery address updated by [agent name] — From: [old] → To: [new]" |
-| `QUANTITY_UPDATED` | CS Agent | "Quantity updated by [agent name] — [old] → [new] units" |
-| `CALLBACK_SCHEDULED` | CS Agent | "Callback scheduled for [date/time] by [agent name]" |
+| `MANUAL_CALL_LOGGED` | CS Closer (VOIP off) | "Manual call logged by [agent name]" |
+| `SMS_SENT` | CS Closer | "SMS sent by [agent name] — Template: [template name]" |
+| `WHATSAPP_SENT` | CS Closer | "WhatsApp sent by [agent name] — Template: [template name]" |
+| `ORDER_CONFIRMED` | CS Closer | "Order confirmed by [agent name]" |
+| `ORDER_CANCELLED` | CS Closer / HoCS | "Order cancelled by [actor name] — Reason: [reason]" |
+| `ADDRESS_UPDATED` | CS Closer | "Delivery address updated by [agent name] — From: [old] → To: [new]" |
+| `QUANTITY_UPDATED` | CS Closer | "Quantity updated by [agent name] — [old] → [new] units" |
+| `CALLBACK_SCHEDULED` | CS Closer | "Callback scheduled for [date/time] by [agent name]" |
 | `ORDER_ALLOCATED` | Logistics Manager | "Allocated to [3PL name] / [location] by [actor name]" |
 | `ORDER_DISPATCHED` | 3PL Manager / Rider | "Dispatched with rider [rider name]" |
 | `ORDER_IN_TRANSIT` | Rider | "In transit — Rider [rider name] confirmed departure (GPS logged)" |
@@ -998,7 +998,7 @@ The **Order Timeline** is a vertical timeline component rendered on the order de
 
 **Role visibility matrix:**
 
-| Event Category | CS Agent | HoCS | Logistics | Finance | 3PL | SuperAdmin |
+| Event Category | CS Closer | HoCS | Logistics | Finance | 3PL | SuperAdmin |
 |---|---|---|---|---|---|---|
 | Order receipt & assignment | Own orders only | All | No | No | No | All |
 | CS actions (calls, confirm, cancel) | Own orders only | All | No | No | No | All |
@@ -1028,7 +1028,7 @@ First screen every user sees. Role-personalized, real-time, actionable.
 - Queue health: unassigned orders, SLA timers, escalation count
 - Hot Swap interface for order reassignment
 
-**CS Agent Dashboard:**
+**CS Closer Dashboard:**
 - Personal queue: pending calls, engaged orders, confirmed orders
 - Call button and order detail panel (nested routing — sidebar stays static)
 - Performance stats: today's calls, confirmation rate
@@ -1141,7 +1141,7 @@ Admins and role heads can compose and send a push message from `/admin/notificat
 - **Target options**: Specific user (search by name/email) | Role group | Everyone
 - **Scope by role**:
   - SuperAdmin / Branch Admin → everyone
-  - Head of CS → CS Agents only
+  - Head of CS → CS Closers only
   - Head of Marketing → Media Buyers only
   - Head of Logistics → Riders + Logistics Managers only
 - **Message**: Title + Body (plain text, max 120 chars body)

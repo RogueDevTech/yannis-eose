@@ -36,6 +36,10 @@ import { withActor } from '../common/db/with-actor';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
+import {
+  appendOrdersAggregateScopeConditions,
+  type OrdersAggregateSupervisorScope,
+} from '../orders/orders.service';
 
 /** Default profitability config when `MARKETING_PROFITABILITY` system setting is unset. */
 const DEFAULT_PROFITABILITY_TARGET_ROAS = 3;
@@ -2207,7 +2211,10 @@ export class MarketingService {
               productId: line.productId,
               campaignId: input.campaignId,
               spendAmount: sql`${String(line.spendAmount)}::numeric`,
-              screenshotUrl: line.screenshotUrl,
+              // Schema flips screenshot to optional (CEO 2026-05-10) but the
+              // ad_spend_logs.screenshot_url column is still NOT NULL — coerce
+              // missing values to '' so existing rows stay readable.
+              screenshotUrl: line.screenshotUrl ?? '',
               spendDate: spendDateAt,
               platform,
               platformCustomLabel:
@@ -3025,6 +3032,8 @@ export class MarketingService {
     startDate?: string,
     endDate?: string,
     branchId?: string | null,
+    assignedCsId?: string,
+    supervisorScope?: OrdersAggregateSupervisorScope,
   ) {
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
@@ -3057,16 +3066,32 @@ export class MarketingService {
     if (periodEnd) spendConditions.push(lte(schema.adSpendLogs.spendDate, periodEnd));
     const spendWhere = and(...spendConditions);
 
+    /** Same ownership semantics as `orders.list` / `getStatusCounts` (supervisor OR replaces single-ID filters). */
+    const appendMetricsOrderScope = (conditions: Parameters<typeof and>[0][]) => {
+      if (supervisorScope) {
+        appendOrdersAggregateScopeConditions(conditions, { supervisorScope });
+      } else {
+        if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
+        if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
+      }
+      if (branchId && !mediaBuyerId) conditions.push(eq(schema.orders.branchId, branchId));
+    };
+
     const orderConditions: Parameters<typeof and>[0][] = [];
-    if (mediaBuyerId) orderConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
-    if (branchId && !mediaBuyerId) orderConditions.push(eq(schema.orders.branchId, branchId));
+    appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) orderConditions.push(lte(schema.orders.createdAt, periodEnd));
-    const orderWhere = orderConditions.length > 0 ? and(...orderConditions) : (mediaBuyerId ? eq(schema.orders.mediaBuyerId, mediaBuyerId) : undefined);
+    const orderWhere =
+      orderConditions.length > 0
+        ? and(...orderConditions)
+        : mediaBuyerId
+          ? eq(schema.orders.mediaBuyerId, mediaBuyerId)
+          : assignedCsId
+            ? eq(schema.orders.assignedCsId, assignedCsId)
+            : undefined;
 
     const deliveredConditions: Parameters<typeof and>[0][] = [eq(schema.orders.status, 'DELIVERED')];
-    if (mediaBuyerId) deliveredConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
-    if (branchId && !mediaBuyerId) deliveredConditions.push(eq(schema.orders.branchId, branchId));
+    appendMetricsOrderScope(deliveredConditions);
     if (periodStart) deliveredConditions.push(gte(schema.orders.deliveredAt, periodStart));
     if (periodEnd) deliveredConditions.push(lte(schema.orders.deliveredAt, periodEnd));
     const deliveredWhere = and(...deliveredConditions);
@@ -3085,8 +3110,7 @@ export class MarketingService {
       'REMITTED',
     ] as const;
     const confirmedConditions: Parameters<typeof and>[0][] = [inArray(schema.orders.status, [...confirmedStatuses])];
-    if (mediaBuyerId) confirmedConditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
-    if (branchId && !mediaBuyerId) confirmedConditions.push(eq(schema.orders.branchId, branchId));
+    appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) confirmedConditions.push(lte(schema.orders.createdAt, periodEnd));
     const confirmedWhere = and(...confirmedConditions);

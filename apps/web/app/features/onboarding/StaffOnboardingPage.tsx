@@ -67,6 +67,14 @@ export interface StaffOnboardingPageProps {
   /** When true, show breadcrumb back to /hr/users/:id. */
   showBackToProfile?: boolean;
   approverName?: string | null;
+  /**
+   * Set when the actor is browsing the app via Mirror Mode. Forces every form field
+   * + every action button into read-only state so the admin can't write into the
+   * mirrored user's onboarding (S3 uploads, draft saves, submit, approve all blocked).
+   * The server still gates these via `blockMutationsWhileMirroring` + the `/api/upload-url`
+   * mirror check — this prop is the UX layer that disables the affordance up-front.
+   */
+  isMirroring?: boolean;
 }
 
 /**
@@ -300,15 +308,17 @@ export function StaffOnboardingPage({
   actionUrl,
   showBackToProfile,
   approverName,
+  isMirroring = false,
 }: StaffOnboardingPageProps) {
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const navigation = useNavigation();
 
   useFetcherToast(fetcher.data, { successMessage: 'Onboarding saved' });
 
-  // Lock rules: staff lose write access once SUBMITTED or APPROVED. HR profile view is always read-only for fields.
+  // Lock rules: staff lose write access once SUBMITTED or APPROVED. HR profile view is always
+  // read-only for fields. Mirror Mode is also strictly view-only — see CLAUDE.md → "Mirror Mode".
   const lockedForStaff = record.status === 'SUBMITTED' || record.status === 'APPROVED';
-  const readOnly = (mode === 'self' && lockedForStaff) || mode === 'hr';
+  const readOnly = (mode === 'self' && lockedForStaff) || mode === 'hr' || isMirroring;
 
   const [proofUrl, setProofUrl] = useState(record.proofOfAddressUrl ?? '');
   const [g1Letter, setG1Letter] = useState(record.guarantor1LetterUrl ?? '');
@@ -392,7 +402,18 @@ export function StaffOnboardingPage({
         }
       />
 
-      {readOnly && mode === 'self' ? (
+      {isMirroring ? (
+        <div className="rounded-lg border border-success-300 bg-success-50 p-3 text-sm text-success-900 dark:border-success-700 dark:bg-success-900/20 dark:text-success-100">
+          <p className="font-semibold">Read-only — Mirror Mode</p>
+          <p className="mt-1">
+            You're viewing this onboarding as {subject.name}. Form fields, file uploads,
+            save and submit are disabled. Exit Mirror Mode from the header to make changes
+            on your own account.
+          </p>
+        </div>
+      ) : null}
+
+      {readOnly && mode === 'self' && !isMirroring ? (
         <div className="rounded-lg border border-app-border bg-app-hover/50 p-3 text-sm text-app-fg-muted">
           {record.status === 'APPROVED'
             ? `Your onboarding has been approved by ${reviewerLabel(subject.role)} and is now locked. Contact ${reviewerLabel(subject.role)} if anything needs to change.`
@@ -427,7 +448,7 @@ export function StaffOnboardingPage({
           <OnboardingReadOnlyView record={record} />
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {mode === 'hr' && record.status === 'SUBMITTED' ? (
+            {mode === 'hr' && record.status === 'SUBMITTED' && !isMirroring ? (
               <>
                 <Button
                   type="button"

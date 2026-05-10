@@ -147,7 +147,7 @@ Every single change to every record — who did it, when, what was the old value
 | **Head of Marketing** | Marketing team performance, all campaigns, funding ledger |
 | **Media Buyer** | Own campaigns, own orders, own payouts, ad spend log |
 | **Head of CS** | CS team performance, all CS orders, Hot Swap interface |
-| **CS Agent** | Own assigned orders only, masked phone numbers, VOIP calling |
+| **CS Closer** | Own assigned orders only, masked phone numbers, VOIP calling |
 | **Finance Officer** | All financial data, approval queue, budgets, invoices, cost data |
 | **Head of Logistics** | All 3PL partners, transfers, delivery metrics |
 | **Stock Manager** | Inventory levels, stock movements, transfers |

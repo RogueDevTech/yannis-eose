@@ -43,6 +43,25 @@ export type {
   ScheduleCalendarHeatInput,
 } from './orders';
 
+export {
+  csRoutingStrategySchema,
+  csRoutingRuleTargetInputSchema,
+  createCsRoutingRuleSchema,
+  updateCsRoutingRuleSchema,
+  deleteCsRoutingRuleSchema,
+  listCsRoutingRulesSchema,
+  csRoutingRelationshipModeSchema,
+  getCsRoutingBranchSettingsSchema,
+  setCsRoutingRelationshipModeSchema,
+} from './cs-order-routing';
+
+export type {
+  CreateCsRoutingRuleInput,
+  UpdateCsRoutingRuleInput,
+  CsRoutingRelationshipMode,
+  SetCsRoutingRelationshipModeInput,
+} from './cs-order-routing';
+
 // User validators
 export {
   userRoleSchema,
@@ -52,6 +71,7 @@ export {
   createStaffSchema,
   updateStaffSchema,
   listUsersSchema,
+  usersRosterSummarySchema,
   searchUsersForPushTargetSchema,
   resetPasswordSchema,
   processEmailChangeSchema,
@@ -71,6 +91,7 @@ export type {
   CreateStaffInput,
   UpdateStaffInput,
   ListUsersInput,
+  ListUsersRosterSummaryInput,
   SearchUsersForPushTargetInput,
   ResetPasswordInput,
   ProcessEmailChangeInput,

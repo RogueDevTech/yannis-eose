@@ -2,7 +2,13 @@ import { Inject, Module, type MiddlewareConsumer, type NestModule, type OnModule
 import { TrpcMiddleware } from './trpc.middleware';
 import { OrdersModule } from '../orders/orders.module';
 import { OrdersService } from '../orders/orders.service';
-import { setOrdersCacheService, setOrdersService, setVoipService } from './routers/orders.router';
+import { CsOrderRoutingService } from '../orders/cs-order-routing.service';
+import {
+  setOrdersCacheService,
+  setOrdersService,
+  setVoipService,
+  setCsOrderRoutingService,
+} from './routers/orders.router';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
 import { setUsersCacheService, setUsersService, setUsersSessionStore } from './routers/users.router';
@@ -98,6 +104,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
   constructor(
     private readonly permissionRequestsService: PermissionRequestsService,
     private readonly ordersService: OrdersService,
+    private readonly csOrderRoutingService: CsOrderRoutingService,
     private readonly usersService: UsersService,
     private readonly productsService: ProductsService,
     private readonly productCategoriesService: ProductCategoriesService,
@@ -127,6 +134,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     // Inject NestJS service instances into tRPC routers
     setPermissionRequestsService(this.permissionRequestsService);
     setOrdersService(this.ordersService);
+    setCsOrderRoutingService(this.csOrderRoutingService);
     setOrdersCacheService(this.cacheService);
     setUsersService(this.usersService);
     setUsersSessionStore(this.sessionStore);

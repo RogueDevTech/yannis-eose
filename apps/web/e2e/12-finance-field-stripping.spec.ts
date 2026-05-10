@@ -28,8 +28,8 @@ async function assertCostFieldsNotVisible(page: import('@playwright/test').Page)
   // returned in product/inventory API calls
 }
 
-test.describe('Finance Field Stripping — CS Agent (unauthorized)', () => {
-  test('CS Agent does not see cost/margin data in network responses', async ({ page }) => {
+test.describe('Finance Field Stripping — CS Closer (unauthorized)', () => {
+  test('CS Closer does not see cost/margin data in network responses', async ({ page }) => {
     const leakedFields: string[] = [];
 
     page.on('response', async (response) => {
@@ -59,20 +59,20 @@ test.describe('Finance Field Stripping — CS Agent (unauthorized)', () => {
 
     expect(
       leakedFields,
-      `Cost fields leaked to CS Agent in network responses:\n${leakedFields.join('\n')}`,
+      `Cost fields leaked to CS Closer in network responses:\n${leakedFields.join('\n')}`,
     ).toHaveLength(0);
   });
 
-  test('CS Agent products page does not show cost price', async ({ page }) => {
+  test('CS Closer products page does not show cost price', async ({ page }) => {
     await loginAsCsAgent(page);
-    // CS agent may not have access to products page — redirect is fine
+    // CS closer may not have access to products page — redirect is fine
     await page.goto('/admin/products');
     await page.waitForLoadState('networkidle');
 
     // If they can access products, cost fields should be hidden
     const body = await page.textContent('body') ?? '';
     const hasCostData = /₦\d+.*cost|cost.*₦\d+/i.test(body);
-    // Cost price line items should not appear for CS agent
+    // Cost price line items should not appear for CS closer
     // This is a soft check since the field may simply not be rendered
     if (body.includes('Cost Price') || body.includes('Factory Cost')) {
       // Verify these are null/empty values, not real numbers

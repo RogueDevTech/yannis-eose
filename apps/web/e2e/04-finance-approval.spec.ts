@@ -57,13 +57,13 @@ test.describe('Finance — Finance Officer access', () => {
   });
 });
 
-test.describe('Finance — CS Agent blocked from cost fields', () => {
-  test('CS agent cannot access finance overview', async ({ page }) => {
+test.describe('Finance — CS Closer blocked from cost fields', () => {
+  test('CS closer cannot access finance overview', async ({ page }) => {
     await loginAsCsAgent(page);
     await page.goto('/admin/finance/overview');
     await page.waitForLoadState('networkidle');
 
-    // CS agent should be redirected or shown forbidden — NOT see profit data
+    // CS closer should be redirected or shown forbidden — NOT see profit data
     const body = await page.locator('body').textContent() ?? '';
     const isBlocked = /unauthorized|forbidden|403|not allowed|access denied/i.test(body);
     const isRedirected = !page.url().includes('/finance');

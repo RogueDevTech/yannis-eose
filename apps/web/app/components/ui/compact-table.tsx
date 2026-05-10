@@ -93,6 +93,11 @@ export interface CompactTablePagination {
   wrapperClassName?: string;
   /** Forwarded to `Pagination` `className` (e.g. `sm:justify-end`). */
   controlsClassName?: string;
+  /** Forwarded to `Pagination` — opts in to the per-page picker. */
+  pageSizeOptions?: number[];
+  pageSize?: number;
+  pageSizeParam?: string;
+  onPageSizeChange?: (size: number) => void;
 }
 
 export interface CompactTableSelection<T> {
@@ -322,6 +327,10 @@ export function CompactTable<T>({
           onPageChange={pagination.onPageChange}
           showWhenSinglePage={pagination.showWhenSinglePage ?? false}
           className={pagination.controlsClassName ?? ''}
+          pageSizeOptions={pagination.pageSizeOptions}
+          pageSize={pagination.pageSize}
+          pageSizeParam={pagination.pageSizeParam}
+          onPageSizeChange={pagination.onPageSizeChange}
         />
       </div>
     ) : pagination?.summary ? (

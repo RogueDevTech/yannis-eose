@@ -9,7 +9,6 @@ import type {
   UserAdjustment,
   UserApprovalRecord,
   UserAuditEntry,
-  UserOrderSummary,
   UserPayoutRecord,
 } from '~/features/users/types';
 
@@ -23,29 +22,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const { profileUser, cookie, currentUser } = gate;
   const opt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
 
-  const orderFilter: Record<string, unknown> = { limit: 10 };
-  if (['CS_AGENT', 'HEAD_OF_CS'].includes(profileUser.role)) {
-    orderFilter.csAgentId = userId;
-  } else if (['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(profileUser.role)) {
-    orderFilter.mediaBuyerId = userId;
-  } else if (['TPL_RIDER'].includes(profileUser.role)) {
-    orderFilter.riderId = userId;
-  }
-
-  const needsOrders = [
-    'CS_AGENT',
-    'HEAD_OF_CS',
-    'MEDIA_BUYER',
-    'HEAD_OF_MARKETING',
-    'TPL_RIDER',
-    'HEAD_OF_LOGISTICS',
-    'TPL_MANAGER',
-  ].includes(profileUser.role);
   const needsPayouts = [
     'MEDIA_BUYER',
     'HEAD_OF_MARKETING',
     'HEAD_OF_CS',
-    'CS_AGENT',
+    'CS_CLOSER',
     'TPL_RIDER',
     'HR_MANAGER',
   ].includes(profileUser.role);
@@ -53,16 +34,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const viewerMayAudit = canAccessGlobalAuditLog(currentUser);
   const isFinanceRole = profileUser.role === 'FINANCE_OFFICER';
 
-  const [recentOrdersRes, payoutsRes, adjustmentsRes, auditRes, financeActivityRes] = await Promise.all([
-    needsOrders
-      ? apiRequest<unknown>(
-          `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify(orderFilter))}`,
-          opt,
-        )
-      : Promise.resolve({
-          ok: true as const,
-          data: { result: { data: { orders: [], pagination: { total: 0 } } } },
-        }),
+  const [payoutsRes, adjustmentsRes, auditRes, financeActivityRes] = await Promise.all([
     needsPayouts
       ? apiRequest<unknown>(
           `/trpc/hr.listPayouts?input=${encodeURIComponent(JSON.stringify({ staffId: userId, limit: 10 }))}`,
@@ -90,11 +62,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         )
       : Promise.resolve({ ok: true as const, data: { result: { data: { requests: [], pagination: { total: 0 } } } } }),
   ]);
-
-  const recentOrdersData = recentOrdersRes.ok
-    ? (recentOrdersRes.data as { result?: { data?: { orders: UserOrderSummary[]; pagination: { total: number } } } })
-        ?.result?.data
-    : null;
 
   const payouts =
     payoutsRes.ok
@@ -145,10 +112,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   return secondaryCacheJson({
     ok: true as const,
-    recentOrders: {
-      orders: recentOrdersData?.orders ?? [],
-      total: recentOrdersData?.pagination?.total ?? 0,
-    },
     payouts,
     adjustments,
     auditLog,

@@ -75,22 +75,22 @@ describe.skipIf(SKIP_IF_NO_DB)('RLS Policies — Integration', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // CS Agent assignment: assigned order is retrievable
+  // CS Closer assignment: assigned order is retrievable
   // ---------------------------------------------------------------------------
 
-  it('CS agent can see their own assigned order', async () => {
-    const csAgent = await createTestUser(db as any, { role: 'CS_AGENT' });
-    await setSessionActor(pgClient, csAgent.id);
+  it('CS closer can see their own assigned order', async () => {
+    const csCloser = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await setSessionActor(pgClient, csCloser.id);
 
     const { orderId } = await createTestOrder(db as any, {
       status: 'CS_ASSIGNED',
-      assignedCsId: csAgent.id,
+      assignedCsId: csCloser.id,
     });
 
     const orders = await db
       .select({ id: schema.orders.id, assignedCsId: schema.orders.assignedCsId })
       .from(schema.orders)
-      .where(eq(schema.orders.assignedCsId, csAgent.id));
+      .where(eq(schema.orders.assignedCsId, csCloser.id));
 
     const ids = orders.map((o) => o.id);
     expect(ids).toContain(orderId);
@@ -101,7 +101,7 @@ describe.skipIf(SKIP_IF_NO_DB)('RLS Policies — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it("user can access their own push_subscriptions row", async () => {
-    const user = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const user = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, user.id);
 
     const subId = randomUUID();
@@ -127,9 +127,9 @@ describe.skipIf(SKIP_IF_NO_DB)('RLS Policies — Integration', () => {
   // Multi-user isolation: two agents' orders don't bleed into each other
   // ---------------------------------------------------------------------------
 
-  it('two CS agents have separate assigned orders', async () => {
-    const agentA = await createTestUser(db as any, { role: 'CS_AGENT' });
-    const agentB = await createTestUser(db as any, { role: 'CS_AGENT' });
+  it('two CS closers have separate assigned orders', async () => {
+    const agentA = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    const agentB = await createTestUser(db as any, { role: 'CS_CLOSER' });
 
     await setSessionActor(pgClient, agentA.id);
     const { orderId: orderA } = await createTestOrder(db as any, {

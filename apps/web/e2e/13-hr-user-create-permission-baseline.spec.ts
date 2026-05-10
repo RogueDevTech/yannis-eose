@@ -10,7 +10,7 @@ test.describe('HR create user — permission baseline from role', () => {
     await page.goto('/hr/users/new');
     await page.waitForLoadState('networkidle');
 
-    await page.locator('select[name="role"]').selectOption('CS_AGENT');
+    await page.locator('select[name="role"]').selectOption('CS_CLOSER');
 
     await expect(page.getByRole('heading', { name: 'Permissions' })).toBeVisible();
     await expect(page.getByText(/^Inherited: [1-9]\d*$/)).toBeVisible();

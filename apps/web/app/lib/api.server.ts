@@ -81,6 +81,32 @@ export function defaultThisMonthRange(): { startDate: string; endDate: string } 
   };
 }
 
+/**
+ * Resolve `?perPage=` from a request's URL search params, clamped to a safe set.
+ *
+ * Every paginated route should call this so the `<Pagination>` per-page picker maps to
+ * an actual API limit. The default options are `[20, 50, 100]`; anything outside the set
+ * (or missing) falls back to `defaultPerPage` (20). Returns the resolved size + the
+ * options array so the loader can pass both straight into the page component.
+ *
+ * Usage in a Remix loader:
+ *   const url = new URL(request.url);
+ *   const { perPage, pageSizeOptions } = parsePerPage(url.searchParams);
+ *   const inputForApi = { page, limit: perPage, ... };
+ */
+const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [20, 50, 100];
+
+export function parsePerPage(
+  searchParams: URLSearchParams,
+  options?: { defaultPerPage?: number; allowed?: readonly number[] },
+): { perPage: number; pageSizeOptions: number[] } {
+  const allowed = options?.allowed ?? DEFAULT_PAGE_SIZE_OPTIONS;
+  const fallback = options?.defaultPerPage ?? allowed[0] ?? 20;
+  const raw = Number(searchParams.get('perPage') ?? '');
+  const perPage = allowed.includes(raw) ? raw : fallback;
+  return { perPage, pageSizeOptions: [...allowed] };
+}
+
 /** Returns { startDate, endDate } both set to today in local time. */
 export function defaultTodayRange(): { startDate: string; endDate: string } {
   const today = toLocalDateString(new Date());

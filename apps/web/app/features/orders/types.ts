@@ -194,7 +194,7 @@ export interface OrderDetailPageExtraProps {
   /** Active branch from session — paired with `order.branchId` for Branch Admin gates */
   currentBranchId?: string | null;
   permissions: string[];
-  csAgentsForAssign?: Array<{ id: string; name: string }>;
+  csClosersForAssign?: Array<{ id: string; name: string }>;
   logisticsLocations?: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }>;
   allocatableLocations?: Array<{
     id: string;
@@ -206,7 +206,7 @@ export interface OrderDetailPageExtraProps {
     reason: string | null;
     /**
      * Per-product remaining stock at this location for the order's line items.
-     * Server returns `null` when the viewer is not allowed to see counts (e.g. CS_AGENT).
+     * Server returns `null` when the viewer is not allowed to see counts (e.g. CS_CLOSER).
      * When non-null, the UI renders these counts inline in the allocate dropdown.
      */
     availabilityByProduct: Array<{

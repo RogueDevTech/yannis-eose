@@ -2,7 +2,7 @@ import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 
 import { Await, useLoaderData } from '@remix-run/react';
-import { apiRequest, getCurrentUser, getSessionCookie, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
+import { apiRequest, getCurrentUser, getSessionCookie, parsePerPage, requireGlobalAuditAccess, safeStatus } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { AuditPage } from '~/features/audit/AuditPage';
@@ -30,7 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const endDate = url.searchParams.get('endDate') || '';
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   const page = parseInt(url.searchParams.get('page') || '1', 10);
-  const limit = 20;
+  const { perPage: limit } = parsePerPage(url.searchParams);
 
   const filters = { tableName, actorId, startDate, endDate, periodAllTime, page, limit };
 
@@ -98,7 +98,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const USER_REF_FIELDS = [
     'sender_id', 'receiver_id', 'requester_id', 'requested_by', 'approver_id', 'approved_by',
     'assigned_cs_id', 'assigned_rider_id', 'media_buyer_id', 'staff_id', 'user_id', 'created_by',
-    'cs_agent_id', 'rider_id',
+    'cs_closer_id', 'rider_id',
     // mirror_sessions row carries `actor_id` + `target_id`; loading their names lets the
     // description renderer print "Kabir mirrored Amina" instead of UUID stubs.
     'actor_id', 'target_id',

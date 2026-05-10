@@ -72,6 +72,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   type LeaderboardEntry = {
     mediaBuyerId: string;
+    totalOrders: number;
     confirmationRate: number;
     deliveryRate: number;
     cpa: number;
@@ -83,6 +84,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboard.map((e) => [
       e.mediaBuyerId,
       {
+        totalOrders: e.totalOrders,
         confirmationRate: e.confirmationRate,
         deliveryRate: e.deliveryRate,
         cpa: e.cpa,
@@ -97,6 +99,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return metrics
       ? {
           ...m,
+          totalOrders: metrics.totalOrders,
           confirmationRate: metrics.confirmationRate,
           deliveryRate: metrics.deliveryRate,
           cpa: metrics.cpa,
@@ -111,6 +114,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     'balance',
     'received',
     'spent',
+    'orders',
     'confirm',
     'delivery',
     'cpa',
@@ -155,12 +159,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
           ? Number(m.totalReceived)
           : sortBy === 'spent'
             ? Number(m.totalSpend)
-            : sortBy === 'cpa'
-              ? m.cpa ?? 0
-              : 0;
+            : sortBy === 'orders'
+              ? m.totalOrders ?? 0
+              : sortBy === 'cpa'
+                ? m.cpa ?? 0
+                : 0;
     const rate = (m: FundingBalanceRow, k: 'confirmationRate' | 'deliveryRate') => m[k];
     sorted.sort((a, b) => {
-      if (sortBy === 'balance' || sortBy === 'received' || sortBy === 'spent' || sortBy === 'cpa') {
+      if (
+        sortBy === 'balance' ||
+        sortBy === 'received' ||
+        sortBy === 'spent' ||
+        sortBy === 'orders' ||
+        sortBy === 'cpa'
+      ) {
         return sortDir === 'asc' ? num(a) - num(b) : num(b) - num(a);
       }
       if (sortBy === 'profitability') {

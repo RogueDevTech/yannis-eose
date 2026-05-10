@@ -28,6 +28,8 @@ export interface FundingBalanceRow {
   confirmationRate?: number;
   /** This month's delivery rate (0–100), when loaded from team page with leaderboard */
   deliveryRate?: number;
+  /** Orders created in period (`orders.created_at`), when merged from leaderboard — Media Buyers only */
+  totalOrders?: number;
   /** Ad spend / total orders (period), when merged from leaderboard */
   cpa?: number;
   trueRoas?: number;

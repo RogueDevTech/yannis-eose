@@ -79,7 +79,7 @@ describe('generatePayoutsSchema', () => {
 
 describe('createCommissionPlanSchema', () => {
   const baseValid = {
-    role: 'CS_AGENT',
+    role: 'CS_CLOSER',
     planName: 'Standard CS Plan',
     rules: { baseSalary: 50000, baseThreshold: 50, perOrderRate: 1000 },
     effectiveFrom: '2026-01-01',

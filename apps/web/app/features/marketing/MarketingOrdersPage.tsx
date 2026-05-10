@@ -487,8 +487,17 @@ export function MarketingOrdersPage({
             const statusCounts = ins.statusCounts;
             const ordersInPeriodTotal = Object.values(statusCounts).reduce((sum, n) => sum + n, 0);
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
-            const confirmedCount = statusCounts['CONFIRMED'] ?? 0;
+            const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
+            const unconfirmedCount = statusCounts['CS_ENGAGED'] ?? 0;
+            // "Confirmed" rolls up the full post-confirmation in-flight pipeline
+            // so this count matches the OrderStatusBadge default.
+            const confirmedCount =
+              (statusCounts['CONFIRMED'] ?? 0) +
+              (statusCounts['AGENT_ASSIGNED'] ?? 0) +
+              (statusCounts['DISPATCHED'] ?? 0) +
+              (statusCounts['IN_TRANSIT'] ?? 0);
             const deliveredCount = statusCounts['DELIVERED'] ?? 0;
+            const remittedCount = statusCounts['REMITTED'] ?? 0;
             const deliveryRate =
               total > 0 ? (((statusCounts['DELIVERED'] ?? 0) / total) * 100).toFixed(1) : '0';
             const statusOptions = STATUS_OPTIONS.map((status) => ({
@@ -505,9 +514,19 @@ export function MarketingOrdersPage({
                   items={[
                     { label: 'Total', value: total, valueClassName: 'text-app-fg' },
                     {
-                      label: 'Unprocessed',
+                      label: 'Unassigned',
                       value: unprocessedCount,
                       valueClassName: 'text-warning-600 dark:text-warning-400',
+                    },
+                    {
+                      label: 'Assigned',
+                      value: csAssignedCount,
+                      valueClassName: 'text-info-600 dark:text-info-400',
+                    },
+                    {
+                      label: 'Unconfirmed',
+                      value: unconfirmedCount,
+                      valueClassName: 'text-cyan-600 dark:text-cyan-400',
                     },
                     {
                       label: 'Confirmed',
@@ -518,6 +537,11 @@ export function MarketingOrdersPage({
                       label: 'Delivered',
                       value: deliveredCount,
                       valueClassName: 'text-success-600 dark:text-success-400',
+                    },
+                    {
+                      label: 'Cash Remitted',
+                      value: remittedCount,
+                      valueClassName: 'text-green-600 dark:text-green-400',
                     },
                     { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
                     {
@@ -796,16 +820,11 @@ export function MarketingOrdersPage({
         ) : (
           <>
             <p className="text-sm text-app-fg-muted">
-              {total > 0 ? (
-                <>
-                  Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total} orders
-                  <span className="text-app-fg-muted/90"> · {limit} per page</span>
-                </>
-              ) : (
-                'No orders'
-              )}
+              {total > 0
+                ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
+                : 'No orders'}
             </p>
-            <Pagination page={page} totalPages={totalPages} pageParam="page" />
+            <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
           </>
         )}
       </div>

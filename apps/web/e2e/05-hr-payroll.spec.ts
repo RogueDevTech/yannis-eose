@@ -5,7 +5,7 @@ import { loginAsSuperAdmin, loginAsHR, navigateTo } from './helpers';
  * E2E Test: HR Payroll — Payouts, Commission, Clawback
  *
  * Tests payout generation, cross-month settlement, and clawback engine.
- * Requires seed data: at least one commission plan and one CS agent.
+ * Requires seed data: at least one commission plan and one CS closer.
  */
 
 test.describe('HR Payroll — SuperAdmin', () => {

@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
-import { createTestUser, createTestBranch } from '../test/factories/order.factory';
+import { createTestUser, createTestBranch, insertTestBranchTeam } from '../test/factories/order.factory';
 import { MarketingService } from './marketing.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import type { EventsService } from '../events/events.service';
@@ -440,10 +440,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
       receiptUrl: 'https://x.test/in-sup.png',
       status: 'COMPLETED',
     });
-    const [team] = await db
-      .insert(schema.branchTeams)
-      .values({ branchId: branch.id, department: 'MARKETING', name: 'MB squad' })
-      .returning({ id: schema.branchTeams.id });
+    const team = await insertTestBranchTeam(db as any, branch.id, 'MARKETING', 'MB squad');
     await db.insert(schema.branchTeamMembers).values([
       { teamId: team!.id, userId: supMb.id, isSupervisor: true },
       { teamId: team!.id, userId: recvMb.id, isSupervisor: false },

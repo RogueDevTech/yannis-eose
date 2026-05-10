@@ -4,7 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
-import { apiRequest, getSessionCookie, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -18,9 +18,6 @@ export const meta: MetaFunction = () => [
 
 const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed'] as const;
 
-/** Fixed page size for this table (not configurable via `?limit=` — URL param ignored). */
-const ORDERS_PER_PAGE = 20;
-
 const getDefaultThisMonthRange = defaultThisMonthRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -29,6 +26,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  // URL-driven page size — clamped to [20, 50, 100]; fallback 20.
+  const { perPage: ORDERS_PER_PAGE } = parsePerPage(url.searchParams);
   const status = url.searchParams.get('status') || undefined;
   const search = url.searchParams.get('search') || undefined;
   const mediaBuyerIdParam = url.searchParams.get('mediaBuyerId') || undefined;
@@ -97,6 +96,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     showMediaBuyerColumn,
     canExport,
     page,
+    perPage: ORDERS_PER_PAGE,
     statusFilter: status,
     searchFilter: search,
   };
@@ -215,7 +215,7 @@ export default function MarketingOrdersRoute() {
   });
   const sharedProps = {
     page: ordersShell.page,
-    limit: ORDERS_PER_PAGE,
+    limit: ordersShell.perPage,
     secondary: secondaryPromise,
     statusFilter: ordersShell.statusFilter,
     searchFilter: ordersShell.searchFilter,

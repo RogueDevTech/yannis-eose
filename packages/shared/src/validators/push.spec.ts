@@ -27,7 +27,7 @@ describe('broadcastPushSchema', () => {
     expect(() =>
       broadcastPushSchema.parse({
         targetType: 'ROLE',
-        targetRole: 'CS_AGENT',
+        targetRole: 'CS_CLOSER',
         title: 'CS Notice',
         body: 'Hello CS team',
       }),

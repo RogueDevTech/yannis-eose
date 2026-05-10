@@ -145,27 +145,29 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
   );
 }
 
-/** "MARKED AS PAID" rubber-stamp — rotated, double-ring border, ink-red, semi-transparent. */
+/** "MARKED AS PAID" rubber-stamp — rotated, double-ring border, ink-green, semi-transparent. */
+const PAID_STAMP_INK = '#15803d'; // green-700 — classic accounting "paid" stamp ink
+
 function PaidStamp() {
   return (
     <div
       aria-hidden
       className="pointer-events-none absolute bottom-6 right-6 select-none"
-      style={{ transform: 'rotate(-12deg)', opacity: 0.78 }}
+      style={{ transform: 'rotate(-12deg)', opacity: 0.85 }}
     >
       <div
         className="rounded-md border-[3px] px-3 py-1.5"
         style={{
-          borderColor: '#c0392b',
-          color: '#c0392b',
-          boxShadow: 'inset 0 0 0 2px #c0392b',
+          borderColor: PAID_STAMP_INK,
+          color: PAID_STAMP_INK,
+          boxShadow: `inset 0 0 0 2px ${PAID_STAMP_INK}`,
           fontFamily: '"Courier New", Courier, monospace',
           letterSpacing: '0.08em',
         }}
       >
         <div
           className="text-[18px] font-extrabold uppercase leading-none"
-          style={{ textShadow: '0 0 1px #c0392b' }}
+          style={{ textShadow: `0 0 1px ${PAID_STAMP_INK}` }}
         >
           Marked as Paid
         </div>

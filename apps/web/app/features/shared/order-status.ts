@@ -122,9 +122,9 @@ export const STATUS_HEX: Record<string, string> = Object.fromEntries(
 
 /** Human-readable labels for order statuses. */
 export const STATUS_LABELS: Record<string, string> = {
-  UNPROCESSED: 'Unprocessed',
-  CS_ASSIGNED: 'CS Assigned',
-  CS_ENGAGED: 'CS Engaged',
+  UNPROCESSED: 'Unassigned',
+  CS_ASSIGNED: 'Assigned',
+  CS_ENGAGED: 'Unconfirmed',
   CONFIRMED: 'Confirmed',
   CANCELLED: 'Cancelled',
   AGENT_ASSIGNED: 'Agent assigned',
@@ -135,36 +135,30 @@ export const STATUS_LABELS: Record<string, string> = {
   RETURNED: 'Returned',
   RESTOCKED: 'Restocked',
   WRITTEN_OFF: 'Written Off',
-  REMITTED: 'Remitted',
+  REMITTED: 'Cash Remitted',
 };
 
+/**
+ * The six top-level order buckets the CEO wants visible across admin order
+ * surfaces (CEO directive 2026-05-09). Logistics-flow sub-stages
+ * (AGENT_ASSIGNED, DISPATCHED, IN_TRANSIT) and exception states (CANCELLED,
+ * RETURNED, PARTIALLY_DELIVERED, RESTOCKED, WRITTEN_OFF) are still real enum
+ * values — they're rendered in detail pages, timelines, audit log — but they
+ * no longer appear in the top-level filter row or status dropdown.
+ *
+ * The Logistics module's own page (`/admin/logistics/orders`) and the TPL
+ * portal define their own scoped option list and intentionally keep the
+ * sub-stages — that's where ops actually drive the in-flight pipeline.
+ */
 export const STATUS_OPTIONS = [
   'ALL',
   'UNPROCESSED',
   'CS_ASSIGNED',
   'CS_ENGAGED',
   'CONFIRMED',
-  'CANCELLED',
-  'AGENT_ASSIGNED',
-  'DISPATCHED',
-  'IN_TRANSIT',
   'DELIVERED',
-  'PARTIALLY_DELIVERED',
-  'RETURNED',
   'REMITTED',
 ];
-
-/** Omitted from CS Orders status dropdown — logistics stages + accounting closure. */
-export const CS_ORDERS_STATUS_DROPDOWN_EXCLUDE = new Set([
-  'DISPATCHED',
-  'IN_TRANSIT',
-  'PARTIALLY_DELIVERED',
-  'REMITTED',
-]);
-
-export const CS_ORDERS_STATUS_DROPDOWN_OPTIONS = STATUS_OPTIONS.filter(
-  (s) => s === 'ALL' || !CS_ORDERS_STATUS_DROPDOWN_EXCLUDE.has(s),
-);
 
 export function formatStatus(status: string): string {
   return STATUS_LABELS[status] ?? status.replace(/_/g, ' ');

@@ -142,7 +142,28 @@ export function MarketingAdSpendPage({
   const [selectedCampaignId, setSelectedCampaignId] = useState(campaignIdFilter || 'ALL');
   const [selectedMediaBuyerId, setSelectedMediaBuyerId] = useState(mediaBuyerIdFilter || 'ALL');
   const [showAdSpendForm, setShowAdSpendForm] = useState(false);
-  const [showLegacyTable, setShowLegacyTable] = useState(false);
+  // Daily-grouped accordion is the default view. Switching to "detailed"
+  // hides the accordion and renders the per-line table inside the same card,
+  // so the filters above (status / product / campaign / buyer / search) keep
+  // applying without duplication. CEO directive 2026-05-10.
+  // Named `expenseListView` to avoid shadowing the page-level `viewMode` prop
+  // (`'admin' | 'media_buyer'`) used for scoping the leaderboard.
+  // URL-synced: `?view=daily|detailed` so reload / share preserves the active
+  // view + the correct pagination param (`gpage` for daily, `page` for detailed).
+  const expenseListView: 'daily' | 'detailed' =
+    searchParams.get('view') === 'detailed' ? 'detailed' : 'daily';
+  const setExpenseListView = (next: 'daily' | 'detailed') => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'daily') params.delete('view');
+    else params.set('view', next);
+    // Inactive view's pagination param is meaningless and just clutters the URL.
+    if (next === 'daily') params.delete('page');
+    else params.delete('gpage');
+    // DateFilterBar globally seeds `eligiblePage=1` on every date change for the
+    // delivery-remittances page; this page never reads it — strip it as noise.
+    params.delete('eligiblePage');
+    setSearchParams(params);
+  };
   const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendRecord | null>(null);
   const [rejectStep, setRejectStep] = useState(false);
   const [editTarget, setEditTarget] = useState<AdSpendRecord | null>(null);
@@ -310,6 +331,9 @@ export function MarketingAdSpendPage({
     mediaBuyerId?: string;
   }) => {
     const params = new URLSearchParams(searchParams);
+    // `eligiblePage` is leaked by the shared DateFilterBar (see delivery-remittances
+    // page) — drop it on every URL write so it never crusts onto this page's URL.
+    params.delete('eligiblePage');
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
     if (overrides.gpage !== undefined) params.set('gpage', String(overrides.gpage));
     if (overrides.status !== undefined) {
@@ -770,6 +794,18 @@ export function MarketingAdSpendPage({
               title: `${metrics.totalOrders} orders, ${metrics.deliveredOrders} delivered`,
             },
             {
+              label: 'Orders',
+              value: metrics.totalOrders.toLocaleString(),
+              valueClassName: 'text-app-fg',
+              title: `${metrics.deliveredOrders} delivered for this date range`,
+            },
+            {
+              label: 'Delivered',
+              value: metrics.deliveredOrders.toLocaleString(),
+              valueClassName: 'text-success-600 dark:text-success-400',
+              title: 'Orders delivered to customers in this date range',
+            },
+            {
               label: 'CPA',
               value: <>{'\u20A6'}{Math.round(metrics.cpa).toLocaleString()}</>,
               valueClassName: 'text-app-fg',
@@ -784,7 +820,7 @@ export function MarketingAdSpendPage({
           ]}
         />
       ) : (
-        <OverviewStatStripSkeleton count={4} />
+        <OverviewStatStripSkeleton count={5} />
       )}
 
       {/* High-CPA warning banner removed (CEO directive 2026-05-08) — the
@@ -1076,18 +1112,43 @@ export function MarketingAdSpendPage({
         ) : null}
       </ResponsiveFormPanel>
 
-      {/* Phase 17: Daily groups accordion — primary view. */}
+      {/* Phase 17: Daily groups accordion (default) + per-line table —
+          chosen via the segmented view-mode control. Same filters apply. */}
       <div className="card p-0">
         <div className="px-4 py-3 border-b border-app-border flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-app-fg">Daily expenses</h2>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowLegacyTable((v) => !v)}
-          >
-            {showLegacyTable ? 'Hide detailed view' : 'Detailed view'}
-          </Button>
+          <h2 className="text-lg font-semibold text-app-fg">
+            {expenseListView === 'daily' ? 'Daily expenses' : 'Detailed expenses (per ad)'}
+          </h2>
+          <div role="tablist" aria-label="Expense view mode" className="inline-flex rounded-md border border-app-border overflow-hidden">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={expenseListView === 'daily'}
+              onClick={() => setExpenseListView('daily')}
+              className={[
+                'px-3 py-1 text-xs font-medium transition-colors',
+                expenseListView === 'daily'
+                  ? 'bg-brand-500 text-white'
+                  : 'bg-app-canvas text-app-fg-muted hover:bg-app-hover hover:text-app-fg',
+              ].join(' ')}
+            >
+              Daily
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={expenseListView === 'detailed'}
+              onClick={() => setExpenseListView('detailed')}
+              className={[
+                'px-3 py-1 text-xs font-medium transition-colors border-l border-app-border',
+                expenseListView === 'detailed'
+                  ? 'bg-brand-500 text-white'
+                  : 'bg-app-canvas text-app-fg-muted hover:bg-app-hover hover:text-app-fg',
+              ].join(' ')}
+            >
+              Detailed
+            </button>
+          </div>
         </div>
         <div className="px-4 py-3 border-b border-app-border flex items-center justify-between gap-3">
           <Tabs
@@ -1119,7 +1180,8 @@ export function MarketingAdSpendPage({
               <SearchInput
                 value={searchQuery}
                 onChange={(val) => setSearchQuery(val)}
-                placeholder="Search buyer, product, campaign, or entry ID..."
+                placeholder="Search ads…"
+                controlSize="sm"
                 wrapperClassName="min-w-0 flex-1"
               />
               <Button type="submit" variant="secondary" size="sm">
@@ -1242,62 +1304,55 @@ export function MarketingAdSpendPage({
           }
         />
         <TableLoadingOverlay show={isFilterLoading}>
-          <div className="p-4">
-            <AdSpendDayAccordion
-              groups={groups}
-              showMediaBuyerColumn={viewMode !== 'media_buyer'}
-              canModerate={canApproveAdSpend}
-              currentUserId={currentUserId}
-              page={groupsPage}
-              totalPages={groupsTotalPages}
-              actionUrl="/admin/marketing/ad-spend"
-              onPreviewReceipt={openGroupLineReceiptModal}
-              onEdit={(line) =>
-                setEditTarget({
-                  id: line.id,
-                  mediaBuyerId: line.mediaBuyerId,
-                  productId: line.productId,
-                  campaignId: line.campaignId,
-                  spendAmount: line.spendAmount,
-                  screenshotUrl: line.screenshotUrl,
-                  adUrl: line.adUrl,
-                  platform: line.platform,
-                  platformCustomLabel: line.platformCustomLabel ?? null,
-                  spendDate: line.spendDate,
-                  status: line.status,
-                  approvedAt: line.approvedAt,
-                  approvedBy: null,
-                  rejectionReason: line.rejectionReason,
-                  rejectedAt: line.rejectedAt,
-                  rejectedBy: null,
-                  orderCount: line.orderCount ?? 0,
-                  indicativeCpa: line.indicativeCpa ?? null,
-                })
-              }
-            />
-          </div>
-        </TableLoadingOverlay>
-      </div>
+          {expenseListView === 'daily' ? (
+            <div className="p-4">
+              <AdSpendDayAccordion
+                groups={groups}
+                showMediaBuyerColumn={viewMode !== 'media_buyer'}
+                canModerate={canApproveAdSpend}
+                currentUserId={currentUserId}
+                page={groupsPage}
+                totalPages={groupsTotalPages}
+                actionUrl="/admin/marketing/ad-spend"
+                onPreviewReceipt={openGroupLineReceiptModal}
+                onEdit={(line) =>
+                  setEditTarget({
+                    id: line.id,
+                    mediaBuyerId: line.mediaBuyerId,
+                    productId: line.productId,
+                    campaignId: line.campaignId,
+                    spendAmount: line.spendAmount,
+                    screenshotUrl: line.screenshotUrl,
+                    adUrl: line.adUrl,
+                    platform: line.platform,
+                    platformCustomLabel: line.platformCustomLabel ?? null,
+                    spendDate: line.spendDate,
+                    status: line.status,
+                    approvedAt: line.approvedAt,
+                    approvedBy: null,
+                    rejectionReason: line.rejectionReason,
+                    rejectedAt: line.rejectedAt,
+                    rejectedBy: null,
+                    orderCount: line.orderCount ?? 0,
+                    indicativeCpa: line.indicativeCpa ?? null,
+                  })
+                }
+              />
+            </div>
+          ) : (
+            <>
+              <div className="hidden md:block overflow-x-auto">
+                <CompactTable
+                  withCard={false}
+                  className="min-w-[920px]"
+                  columns={legacyAdSpendColumns}
+                  rows={adSpend}
+                  rowKey={(s) => s.id}
+                  emptyTitle="No ad spend records yet"
+                />
+              </div>
 
-      {showLegacyTable && (
-      <div className="card p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h2 className="text-lg font-semibold text-app-fg">Detailed view (per-line)</h2>
-          <p className="text-sm text-app-fg-muted mt-1">Uses the same filters as Daily expenses above.</p>
-        </div>
-        <TableLoadingOverlay show={isFilterLoading}>
-        <div className="hidden md:block overflow-x-auto">
-          <CompactTable
-            withCard={false}
-            className="min-w-[920px]"
-            columns={legacyAdSpendColumns}
-            rows={adSpend}
-            rowKey={(s) => s.id}
-            emptyTitle="No ad spend records yet"
-          />
-        </div>
-
-        <div className="md:hidden space-y-3 px-1 py-3">
+              <div className="md:hidden space-y-3 px-1 py-3">
           {adSpend.map((s: AdSpendRecord) => (
             <div key={s.id} className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-2">
               <div className="flex items-center justify-between">
@@ -1407,17 +1462,18 @@ export function MarketingAdSpendPage({
               </div>
             </div>
           ))}
-          {adSpend.length === 0 && <EmptyState title="No ad spend records" />}
-        </div>
+                {adSpend.length === 0 && <EmptyState title="No ad spend records" />}
+              </div>
 
-        {totalPages > 1 && (
-          <div className="border-t border-app-border px-4 py-3">
-            <Pagination page={page} totalPages={totalPages} pageParam="page" />
-          </div>
-        )}
+              {totalPages > 1 && (
+                <div className="border-t border-app-border px-4 py-3">
+                  <Pagination page={page} totalPages={totalPages} pageParam="page" />
+                </div>
+              )}
+            </>
+          )}
         </TableLoadingOverlay>
       </div>
-      )}
 
       {adSpendDetailModal?.screenshotUrl && (
         <Modal

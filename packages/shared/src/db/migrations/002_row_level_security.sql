@@ -29,7 +29,7 @@ $$ LANGUAGE sql STABLE;
 -- ============================================
 -- 1. ORDERS — RLS Policies
 -- ============================================
--- CS agents: assigned_cs_id = me
+-- CS closers: assigned_cs_id = me
 -- Media Buyers: media_buyer_id = me
 -- 3PL Managers: logistics_location_id belongs to their provider
 -- Head of CS: all orders (needs full team visibility)
@@ -45,11 +45,11 @@ CREATE POLICY orders_privileged ON orders
     yannis_current_user_role() IN ('SUPER_ADMIN', 'FINANCE_OFFICER', 'HEAD_OF_LOGISTICS', 'HEAD_OF_CS')
   );
 
--- CS Agent: see only assigned orders
-CREATE POLICY orders_cs_agent ON orders
+-- CS Closer: see only assigned orders
+CREATE POLICY orders_cs_closer ON orders
   FOR ALL
   USING (
-    yannis_current_user_role() = 'CS_AGENT'
+    yannis_current_user_role() = 'CS_CLOSER'
     AND assigned_cs_id = yannis_current_user_id()
   );
 
@@ -296,10 +296,10 @@ CREATE POLICY call_logs_privileged ON call_logs
     yannis_current_user_role() IN ('SUPER_ADMIN', 'HEAD_OF_CS', 'FINANCE_OFFICER')
   );
 
-CREATE POLICY call_logs_cs_agent ON call_logs
+CREATE POLICY call_logs_cs_closer ON call_logs
   FOR ALL
   USING (
-    yannis_current_user_role() = 'CS_AGENT'
+    yannis_current_user_role() = 'CS_CLOSER'
     AND agent_id = yannis_current_user_id()
   );
 

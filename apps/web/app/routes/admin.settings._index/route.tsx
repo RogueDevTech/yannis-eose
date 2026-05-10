@@ -3,7 +3,6 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { APP_THEME_IDS } from '@yannis/shared';
 import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { SettingsPage } from '~/features/settings/SettingsPage';
@@ -208,22 +207,6 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!capRes.ok) {
       return json({ error: extractApiErrorMessage(capRes.data, 'Failed to update claim cap') }, { status: safeStatus(capRes.status) });
-    }
-
-    const defaultAppTheme = formData.get('defaultAppTheme')?.toString() ?? 'system';
-    if (!(APP_THEME_IDS as readonly string[]).includes(defaultAppTheme)) {
-      return json({ error: 'Invalid default theme' }, { status: 400 });
-    }
-    const uiRes = await apiRequest<unknown>('/trpc/settings.updateClientUiConfig', {
-      method: 'POST',
-      cookie,
-      body: { defaultAppTheme },
-    });
-    if (!uiRes.ok) {
-      return json(
-        { error: extractApiErrorMessage(uiRes.data, 'Failed to update default appearance') },
-        { status: safeStatus(uiRes.status) },
-      );
     }
 
     // 4. Marketing profitability config (target ROAS + green/red threshold)

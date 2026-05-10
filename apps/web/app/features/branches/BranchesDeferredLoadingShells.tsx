@@ -7,7 +7,6 @@ import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
-import { Tabs } from '~/components/ui/tabs';
 
 const BRANCH_LIST_COLS: CompactTableColumn<{ id: string }>[] = [
   { key: 'name', header: 'Name', render: () => <TableCellTextPulse className="w-[14rem]" /> },
@@ -84,25 +83,23 @@ export function BranchDetailLoadingShell() {
         ]}
       />
 
-      <Tabs
-        value="overview"
-        onChange={() => {}}
-        tabs={[
-          { value: 'overview', label: 'Overview' },
-          { value: 'team', label: 'Branch members' },
-          { value: 'squads', label: 'Supervisor teams' },
-        ]}
-      />
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {[1, 2, 3].map((i) => (
+      {/* Department cards skeleton — mirrors the post-load Departments grid. */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {[1, 2].map((i) => (
           <div key={i} className="card p-4 space-y-3">
-            <div className="h-3 w-24 rounded bg-app-hover animate-pulse" aria-hidden />
-            <div className="space-y-2">
-              {[1, 2, 3, 4].map((j) => (
-                <div key={j} className="h-3 w-full rounded bg-app-hover animate-pulse" aria-hidden />
+            <div className="flex items-center justify-between">
+              <div className="h-5 w-24 rounded-md bg-app-hover animate-pulse" aria-hidden />
+              <div className="h-4 w-4 rounded bg-app-hover animate-pulse" aria-hidden />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[1, 2, 3].map((j) => (
+                <div key={j} className="space-y-1">
+                  <div className="h-6 w-full rounded bg-app-hover animate-pulse" aria-hidden />
+                  <div className="h-2 w-12 mx-auto rounded bg-app-hover animate-pulse" aria-hidden />
+                </div>
               ))}
             </div>
+            <div className="h-3 w-32 rounded bg-app-hover animate-pulse" aria-hidden />
           </div>
         ))}
       </div>

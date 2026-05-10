@@ -41,7 +41,7 @@ export interface CEODashboardData {
   csTeam: {
     agentCount: number;
     pendingOrders: number;
-    /** Mean of (todayClosesCount / capacity) across CS agents — Lagos calendar day. */
+    /** Mean of (todayClosesCount / capacity) across CS closers — Lagos calendar day. */
     utilization: number;
   };
 
@@ -58,10 +58,10 @@ export interface CEODashboardData {
   /** Daily buckets for Revenue & orders over time chart (Phase 2). */
   timeSeries?: { date: string; revenue: number; orderCount: number; createdCount?: number }[];
 
-  /** Order pipeline chart: Volume, CS Engaged, Confirmed, Logistics distributed, Delivered. */
+  /** Order pipeline chart: Volume, Unconfirmed, Confirmed, Logistics distributed, Delivered. */
   orderPipelineChart?: {
     volume: number;
-    csEngaged: number;
+    unconfirmed: number;
     confirmed: number;
     logisticsDistributed: number;
     delivered: number;
@@ -101,7 +101,7 @@ export interface ChartDataPayload {
   timeSeries?: { date: string; revenue: number; orderCount: number; createdCount?: number }[];
   orderPipelineChart?: {
     volume: number;
-    csEngaged: number;
+    unconfirmed: number;
     confirmed: number;
     logisticsDistributed: number;
     delivered: number;

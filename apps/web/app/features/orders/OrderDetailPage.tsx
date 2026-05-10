@@ -98,7 +98,7 @@ function canCopyOrderSummaryForChat(
   order: OrderDetail,
 ): boolean {
   if (
-    ['CS_AGENT', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'LOGISTICS_MANAGER', 'TPL_MANAGER'].includes(userRole)
+    ['CS_CLOSER', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS', 'LOGISTICS_MANAGER', 'TPL_MANAGER'].includes(userRole)
   ) {
     return true;
   }
@@ -136,7 +136,7 @@ type AllocatableLocationDescriptor = {
 // Builds the row description for an entry in the allocate-location dropdown.
 // When the API returns availability per product (HoCS, HoLogistics, admins,
 // LogisticsManager, TPL_MANAGER, etc.), surface "Product: N available" so the
-// allocator can pick the right hub without leaving the modal. CS_AGENTs receive
+// allocator can pick the right hub without leaving the modal. CS_CLOSERs receive
 // `availabilityByProduct: null` from the API and just see the address —
 // remaining-stock numbers are intentionally hidden from them.
 function describeAllocatableLocation(loc: AllocatableLocationDescriptor): string | undefined {
@@ -151,19 +151,45 @@ function describeAllocatableLocation(loc: AllocatableLocationDescriptor): string
 
 // ── Constants ────────────────────────────────────────────────────
 
-const STATUS_FLOW = [
+/**
+ * "Order Progress" stepper visible to non-CS roles (admin / finance / logistics).
+ * Includes `AGENT_ASSIGNED` (with-logistics state — DISPATCHED / IN_TRANSIT
+ * collapse into it) and `REMITTED` (Finance has reconciled the cash).
+ */
+const STATUS_FLOW_FULL = [
   'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED',
   'DELIVERED', 'REMITTED',
 ] as const;
 
-// Everything between ALLOCATED and DELIVERED happens offline (rider with the parcel).
-// DISPATCHED + IN_TRANSIT therefore collapse back into the ALLOCATED step — the order is
-// still with the logistics company from the CS perspective until someone marks it delivered.
-function getProgressIndex(status: string): number {
-  if (status === 'DISPATCHED' || status === 'IN_TRANSIT') {
-    return STATUS_FLOW.indexOf('AGENT_ASSIGNED');
+/**
+ * "Order Progress" stepper visible to CS closers — CEO directive 2026-05-10.
+ * The CEO's six top-level buckets minus `REMITTED` (finance reconciliation —
+ * "does not concern them"). `AGENT_ASSIGNED` / `DISPATCHED` / `IN_TRANSIT`
+ * are also dropped — once an order leaves CS, the with-logistics phase is
+ * outside CS's working surface.
+ */
+const STATUS_FLOW_CS = [
+  'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED',
+] as const;
+
+// Everything between ALLOCATED and DELIVERED happens offline (rider with the
+// parcel). DISPATCHED + IN_TRANSIT therefore collapse — for the full flow
+// they fold into the AGENT_ASSIGNED step; for the CS flow they fold into
+// CONFIRMED (CS already finished their part by then).
+function getProgressIndex(status: string, flow: readonly string[]): number {
+  if (status === 'DISPATCHED' || status === 'IN_TRANSIT' || status === 'AGENT_ASSIGNED') {
+    const allocated = flow.indexOf('AGENT_ASSIGNED');
+    if (allocated !== -1) return allocated;
+    // CS flow has no AGENT_ASSIGNED — pin to CONFIRMED so the stepper shows
+    // CS finished their work; the rider's pickup is "downstream" of the strip.
+    return flow.indexOf('CONFIRMED');
   }
-  return STATUS_FLOW.indexOf(status as (typeof STATUS_FLOW)[number]);
+  // CS flow doesn't render REMITTED — if the order is in that state, show
+  // the stepper as fully delivered (final visible step lit).
+  if (status === 'REMITTED' && !flow.includes('REMITTED')) {
+    return flow.indexOf('DELIVERED');
+  }
+  return flow.indexOf(status);
 }
 
 /** ISO `YYYY-MM-DD` from confirm modal → readable label (no timezone shift). */
@@ -695,7 +721,7 @@ function applyOptimisticOrderPatch<T extends OrderDetail>(
   }
 
   if (intent === 'assignToCS') {
-    const newAssignee = fd.get('csAgentId');
+    const newAssignee = fd.get('csCloserId');
     if (typeof newAssignee !== 'string' || !newAssignee) return serverOrder;
     // Auto-bump UNPROCESSED → CS_ASSIGNED to mirror the server transition that fires alongside.
     const nextStatus = serverOrder.status === 'UNPROCESSED' ? 'CS_ASSIGNED' : serverOrder.status;
@@ -716,7 +742,7 @@ export function OrderDetailPage({
   userId,
   currentBranchId = null,
   permissions,
-  csAgentsForAssign = [],
+  csClosersForAssign = [],
   logisticsLocations = [],
   allocatableLocations = [],
   allocatableLocationsDeferred,
@@ -753,10 +779,10 @@ export function OrderDetailPage({
     return orderAfterFetcher;
   })();
 
-  // Team Live View — broadcast CS agent state to cs-all room.
-  const isCSAgent = userRole === 'CS_AGENT';
+  // Team Live View — broadcast CS closer state to cs-all room.
+  const isCSCloser = userRole === 'CS_CLOSER';
   useAgentStateBroadcast(
-    isCSAgent
+    isCSCloser
       ? { currentRoute: `/admin/orders/${order.id}`, currentOrderId: order.id, currentPanel: 'details' }
       : { currentRoute: '' }
   );
@@ -870,7 +896,14 @@ export function OrderDetailPage({
     deliverModalOpen ||
     callCustomerModalOpen;
 
-  const currentStatusIndex = getProgressIndex(order.status);
+  // CS closers see the 5-step CEO stepper (no AGENT_ASSIGNED, no REMITTED).
+  // Every other role sees the full 7-step lifecycle with REMITTED at the end.
+  // The stepper shape is the only thing this flips — actions, gates, and
+  // backend transitions are unchanged.
+  const orderStatusFlow = isCSCloser
+    ? (STATUS_FLOW_CS as readonly string[])
+    : (STATUS_FLOW_FULL as readonly string[]);
+  const currentStatusIndex = getProgressIndex(order.status, orderStatusFlow);
   const actionError = (fetcher.data as { error?: string })?.error;
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
   useFetcherToast(fetcher.data, {
@@ -887,7 +920,7 @@ export function OrderDetailPage({
 
   // Fetch heavy-but-non-blocking panels after mount to keep the page resilient.
   useEffect(() => {
-    if (currentStatusIndex < getProgressIndex('CONFIRMED')) return;
+    if (currentStatusIndex < getProgressIndex('CONFIRMED', orderStatusFlow)) return;
     if (invoice !== undefined) return; // loader provided it (streaming mode)
     if (invoiceFetcher.state !== 'idle' || invoiceFetcher.data) return;
     invoiceFetcher.load(`/api/order-invoice/${order.id}`);
@@ -1008,16 +1041,16 @@ export function OrderDetailPage({
     !!currentBranchId &&
     order.branchId === currentBranchId;
   const isCSOrHoS =
-    ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole) || branchAdminSameBranch;
+    ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'].includes(userRole) || branchAdminSameBranch;
   const isElevated =
     userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch;
   const viewerIsCsTeamSupervisor = order.viewerIsCsTeamSupervisor === true;
   const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
-  // CS agent can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
+  // CS closer can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
     viewerIsCsTeamSupervisor ||
-    (userRole === 'CS_AGENT' && (isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId)));
+    (userRole === 'CS_CLOSER' && (isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId)));
   const canAssignToCS =
     permissions.includes('orders.reassign') ||
     isAdminLevel({ role: userRole }) ||
@@ -1047,7 +1080,7 @@ export function OrderDetailPage({
     if (!csOnlyStatuses.includes(newStatus)) return true;
     if (!isCSOrHoS) return false;
     if (userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch) return true;
-    if (userRole === 'CS_AGENT') {
+    if (userRole === 'CS_CLOSER') {
       if (newStatus === 'CS_ENGAGED') {
         return isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId);
       }
@@ -1239,7 +1272,7 @@ export function OrderDetailPage({
           if (userRole === 'HEAD_OF_MARKETING' || userRole === 'MEDIA_BUYER') {
             return '/admin/marketing/orders';
           }
-          // CS_AGENT, HEAD_OF_CS, SUPER_ADMIN, ADMIN, BRANCH_ADMIN, FINANCE_OFFICER,
+          // CS_CLOSER, HEAD_OF_CS, SUPER_ADMIN, ADMIN, BRANCH_ADMIN, FINANCE_OFFICER,
           // HR_MANAGER → CS orders is the canonical "orders" list.
           return '/admin/cs/orders';
         })();
@@ -1276,9 +1309,11 @@ export function OrderDetailPage({
       </div>
 
       {/* Phase 18 — surface the cash-remittance association so anyone reading
-          the order knows why a DELIVERED order isn't yet COMPLETED, or where
-          the cash receipt that closed it out lives. */}
-      {order.remittanceId && (
+          the order knows why a DELIVERED order isn't yet REMITTED, or where
+          the cash receipt that closed it out lives.
+          Hidden from CS closers (CEO directive 2026-05-10) — cash remittance
+          is a Finance reconciliation concern, not CS's. */}
+      {order.remittanceId && !isCSCloser && (
         <Link
           to={`/admin/finance/delivery-remittances/${order.remittanceId}`}
           prefetch="intent"
@@ -1351,8 +1386,8 @@ export function OrderDetailPage({
             <div className="card overflow-hidden order-[-3] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-4">Order Progress</h2>
               <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
-                <div className="flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:grid-cols-5 lg:gap-x-3 lg:gap-y-4">
-                {STATUS_FLOW.map((status, idx) => {
+                <div className={`flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:gap-x-3 lg:gap-y-4 ${orderStatusFlow.length === 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-7'}`}>
+                {orderStatusFlow.map((status, idx) => {
                   const isPast = idx < currentStatusIndex;
                   const isCurrent = idx === currentStatusIndex;
 
@@ -1380,7 +1415,7 @@ export function OrderDetailPage({
                           {STATUS_LABELS[status] ?? formatStatus(status)}
                         </span>
                       </div>
-                      {idx < STATUS_FLOW.length - 1 && (
+                      {idx < orderStatusFlow.length - 1 && (
                         <div className={`h-0.5 w-8 mx-1 flex-shrink-0 lg:hidden ${isPast ? 'bg-success-500' : 'bg-app-hover'}`} />
                       )}
                     </div>
@@ -1451,7 +1486,7 @@ export function OrderDetailPage({
             {/* Invoice card — auto-generated on CONFIRMED. Visible to CS, Logistics, etc.
                 Some legacy orders may not have one yet; in that case we still render
                 the section so it doesn't "disappear" from the page. */}
-            {currentStatusIndex >= getProgressIndex('CONFIRMED') && (() => {
+            {currentStatusIndex >= getProgressIndex('CONFIRMED', orderStatusFlow) && (() => {
               // Loader may stream invoice, but in the "fetch after mount" mode it will be undefined.
               const invoiceLoadedViaFetcher = invoiceFetcher.data?.ok ? invoiceFetcher.data.invoice : null;
               const invoiceError = invoiceFetcher.data && !invoiceFetcher.data.ok ? invoiceFetcher.data.error : null;
@@ -1737,7 +1772,7 @@ export function OrderDetailPage({
                     correct lifecycle entry point: someone (HoCS / admin) picks a closer first,
                     then the order moves to CS_ASSIGNED and the rest of the workflow opens up.
                     Without this, an admin could engage / confirm an order directly and the
-                    "Closer" column on `/admin/cs/orders` ends up blank because no CS_AGENT
+                    "Closer" column on `/admin/cs/orders` ends up blank because no CS_CLOSER
                     is on the row. */}
                 {order.status === 'UNPROCESSED' && !order.assignedCsId && (
                   <div className="rounded-lg bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-700/50 px-4 py-3 mb-3">
@@ -1851,17 +1886,17 @@ export function OrderDetailPage({
                   )}
 
                   {/* Assign to closer — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED.
-                      The CS agent (closer) drives the order from queue → call → confirm; assignment
+                      The CS closer (closer) drives the order from queue → call → confirm; assignment
                       happens BEFORE confirmation per the locked Order Lifecycle (CLAUDE.md). */}
                   {(order.status === 'UNPROCESSED' ||
                     order.status === 'CS_ASSIGNED' ||
                     order.status === 'CS_ENGAGED') &&
                     canAssignToCS &&
-                    csAgentsForAssign &&
-                    csAgentsForAssign.length > 0 && (
+                    csClosersForAssign &&
+                    csClosersForAssign.length > 0 && (
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-app-fg-muted">
-                        {order.assignedCsId ? 'Reassign closer' : 'Assign closer (CS agent)'}
+                        {order.assignedCsId ? 'Reassign closer' : 'Assign closer (CS closer)'}
                       </p>
                       <div className="flex items-stretch gap-2">
                         <SearchableSelect
@@ -1869,7 +1904,7 @@ export function OrderDetailPage({
                           value={assignToId}
                           onChange={setAssignToId}
                           placeholder="Pick a closer to assign…"
-                          options={csAgentsForAssign.map((a) => ({ value: a.id, label: a.name }))}
+                          options={csClosersForAssign.map((a) => ({ value: a.id, label: a.name }))}
                           wrapperClassName="flex-1 min-w-0"
                           searchPlaceholder="Search closers..."
                           controlSize="lg"
@@ -2091,7 +2126,7 @@ export function OrderDetailPage({
               );
             })()}
 
-            {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS agents.
+            {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS closers.
                 Hidden once the order leaves the CS lifecycle (DELIVERED / COMPLETED /
                 CANCELLED / RETURNED / WRITTEN_OFF / RESTOCKED / PARTIALLY_DELIVERED) —
                 customer engagement is already done at that point and the panel
@@ -2135,7 +2170,7 @@ export function OrderDetailPage({
                     </DeferredSection>
                   ) : (
                     <p className="text-sm text-app-fg-muted">
-                      VOIP calling is available once the order is in CS Engaged status.
+                      VOIP calling is available once the order is in Unconfirmed status.
                     </p>
                   )
                 }

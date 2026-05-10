@@ -1,7 +1,9 @@
-import { useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
+import { Await, Link, useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { cachedClientLoader } from '~/lib/loader-cache';
+import { UserCreateEditLoadingShell } from '~/features/hr/HRDeferredLoadingShells';
 import {
   apiRequest,
   ensureBranchScopeOrRedirect,
@@ -65,65 +67,71 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const templateBaselinesResP = apiRequest<unknown>('/trpc/permissions.listTemplateBaselines', { method: 'GET', cookie });
   const matrixResP = apiRequest<unknown>(`/trpc/permissions.getUserMatrix?input=${matrixInput}`, { method: 'GET', cookie });
 
-  const [userRes, matrixRes] = await Promise.all([userResP, matrixResP]);
+  // App Shell pattern — defer the editingUser fetch + auth gate too so the
+  // route mounts INSTANTLY with the form chrome (page header, breadcrumb,
+  // section headings, field labels). `editingUserPromise` resolves to either
+  // the user record OR a tagged error so the page-level <Await> can render
+  // the appropriate state without waiting at the loader.
+  const editingUserPromise: Promise<
+    | { kind: 'ok'; editingUser: EditingUser }
+    | { kind: 'notFound' }
+    | { kind: 'forbidden'; message: string }
+  > = (async () => {
+    const [userRes, matrixRes] = await Promise.all([userResP, matrixResP]);
 
-  if (!userRes.ok) {
-    throw new Response('User not found', { status: 404 });
-  }
-  const userPayload = userRes.data as { result?: { data?: UserDetail } };
-  const user = userPayload?.result?.data;
-  if (!user) {
-    throw new Response('User not found', { status: 404 });
-  }
+    if (!userRes.ok) return { kind: 'notFound' };
+    const userPayload = userRes.data as { result?: { data?: UserDetail } };
+    const user = userPayload?.result?.data;
+    if (!user) return { kind: 'notFound' };
 
-  // Admin-level accounts can't be edited from this page (mirrors `intent === 'update'` gate
-  // on the detail-route action). 403 — same surface as the action would return.
-  if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
-    throw new Response('SuperAdmin/Admin accounts cannot be updated from this page.', { status: 403 });
-  }
+    // Admin-level accounts can't be edited from this page (mirrors `intent === 'update'` gate
+    // on the detail-route action).
+    if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
+      return {
+        kind: 'forbidden',
+        message: 'SuperAdmin/Admin accounts cannot be updated from this page.',
+      };
+    }
 
-  // Per-target edit-access gate. `requireStaffAccountsAccess` only checks
-  // "can the viewer manage staff at all" — it admits a HoCS even when the
-  // target is a Media Buyer (out of their scope). `canEditUser` is the
-  // canonical "can THIS viewer edit THIS target" check; mirrors the
-  // service-layer guard in users.service.ts so the 403 fires up-front
-  // instead of after the user fills the form. See CLAUDE.md / RBAC.
-  const accessLevel = canEditUser(viewer, {
-    id: user.id,
-    role: user.role,
-    primaryBranchId: user.primaryBranchId ?? null,
-  });
-  if (accessLevel === 'none') {
-    throw new Response(
-      'You do not have permission to edit this user. Contact an administrator if this is unexpected.',
-      { status: 403 },
-    );
-  }
+    // Per-target edit-access gate — mirrors the service-layer guard in users.service.ts.
+    const accessLevel = canEditUser(viewer, {
+      id: user.id,
+      role: user.role,
+      primaryBranchId: user.primaryBranchId ?? null,
+    });
+    if (accessLevel === 'none') {
+      return {
+        kind: 'forbidden',
+        message:
+          'You do not have permission to edit this user. Contact an administrator if this is unexpected.',
+      };
+    }
 
-  // Use the shared `extractTrpc` helper so we handle both tRPC response shapes.
-  const matrixExtracted = extractTrpc<{
-    userOverrides?: Record<string, boolean>;
-    templateCodes?: string[];
-    effectiveCodes?: string[];
-  }>(matrixRes, {});
-  const permissionOverrides = matrixExtracted.userOverrides ?? {};
+    const matrixExtracted = extractTrpc<{
+      userOverrides?: Record<string, boolean>;
+      templateCodes?: string[];
+      effectiveCodes?: string[];
+    }>(matrixRes, {});
+    const permissionOverrides = matrixExtracted.userOverrides ?? {};
 
-  const editingUser: EditingUser = {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone ?? null,
-    role: user.role,
-    status: user.status,
-    capacity: user.capacity ?? null,
-    logisticsLocationId: user.logisticsLocationId ?? null,
-    productIds: user.assignedProductIds ?? [],
-    restrictProductAccess: user.restrictProductAccess ?? false,
-    primaryBranchId: user.primaryBranchId ?? null,
-    branchIds: (user.branchMemberships ?? []).map((m) => m.branchId),
-    roleTemplateId: user.roleTemplateId ?? null,
-    permissionOverrides,
-  };
+    const editingUser: EditingUser = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone ?? null,
+      role: user.role,
+      status: user.status,
+      capacity: user.capacity ?? null,
+      logisticsLocationId: user.logisticsLocationId ?? null,
+      productIds: user.assignedProductIds ?? [],
+      restrictProductAccess: user.restrictProductAccess ?? false,
+      primaryBranchId: user.primaryBranchId ?? null,
+      branchIds: (user.branchMemberships ?? []).map((m) => m.branchId),
+      roleTemplateId: user.roleTemplateId ?? null,
+      permissionOverrides,
+    };
+    return { kind: 'ok', editingUser };
+  })();
 
   // Deferred picklists — the form chrome (current values + auth gate) renders
   // immediately above; only the dropdowns/sections driven by this data wait.
@@ -204,7 +212,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     };
   })();
 
-  return defer({ editingUser, picklistsPromise });
+  return defer({ editingUserPromise, picklistsPromise });
 }
 
 // `clientLoader` cache — same surgery as `hr.users.new`. The form has 8
@@ -422,6 +430,49 @@ export async function action({ request, params }: ActionFunctionArgs) {
 // ─── Component ──────────────────────────────────────────
 
 export default function EditUserRoute() {
-  const { editingUser, picklistsPromise } = useLoaderData<typeof loader>();
-  return <UserCreatePage picklistsPromise={picklistsPromise} editingUser={editingUser} />;
+  const { editingUserPromise, picklistsPromise } = useLoaderData<typeof loader>();
+  // App Shell — render the form chrome + skeleton inputs immediately while
+  // editingUserPromise (user record + auth gate) and picklistsPromise (8
+  // dropdown lists) resolve in parallel. Permission errors render as a
+  // friendly card inside the page rather than throwing a route boundary.
+  return (
+    <Suspense fallback={<UserCreateEditLoadingShell mode="edit" />}>
+      <Await resolve={editingUserPromise}>
+        {(result) => {
+          if (result.kind === 'notFound') {
+            return (
+              <div className="card text-center py-12">
+                <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">404</p>
+                <h2 className="text-xl font-bold text-app-fg">User not found</h2>
+                <p className="mt-2 text-sm text-app-fg-muted">
+                  The user you&apos;re looking for doesn&apos;t exist or has been removed.
+                </p>
+                <Link to="/hr/users" className="btn-primary mt-4 inline-block">
+                  Back to Users
+                </Link>
+              </div>
+            );
+          }
+          if (result.kind === 'forbidden') {
+            return (
+              <div className="card text-center py-12">
+                <p className="text-6xl font-bold text-surface-200 dark:text-app-fg-muted mb-4">403</p>
+                <h2 className="text-xl font-bold text-app-fg">Access denied</h2>
+                <p className="mt-2 text-sm text-app-fg-muted">{result.message}</p>
+                <Link to="/hr/users" className="btn-primary mt-4 inline-block">
+                  Back to Users
+                </Link>
+              </div>
+            );
+          }
+          return (
+            <UserCreatePage
+              picklistsPromise={picklistsPromise}
+              editingUser={result.editingUser}
+            />
+          );
+        }}
+      </Await>
+    </Suspense>
+  );
 }

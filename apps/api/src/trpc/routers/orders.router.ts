@@ -10,6 +10,14 @@ import {
   bulkReassignSchema,
   listOrdersSchema,
   scheduleCalendarHeatSchema,
+  createCsRoutingRuleSchema,
+  updateCsRoutingRuleSchema,
+  deleteCsRoutingRuleSchema,
+  listCsRoutingRulesSchema,
+  getCsRoutingBranchSettingsSchema,
+  setCsRoutingRelationshipModeSchema,
+  type ListOrdersInput,
+  type OrderStatus,
 } from '@yannis/shared';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -20,7 +28,11 @@ import { getUsersService } from './users.router';
 import { getProductsService } from './products.router';
 import { getLogisticsService } from './logistics.router';
 import { getInventoryService } from './inventory.router';
-import { OrdersService } from '../../orders/orders.service';
+import {
+  OrdersService,
+  type OrdersAggregateSupervisorScope,
+} from '../../orders/orders.service';
+import { CsOrderRoutingService } from '../../orders/cs-order-routing.service';
 import type { VoipService } from '../../voip/voip.service';
 import { isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
@@ -31,9 +43,14 @@ import { CacheService } from '../../common/cache/cache.service';
 let ordersServiceInstance: OrdersService | null = null;
 let voipServiceInstance: VoipService | null = null;
 let ordersCacheService: CacheService | null = null;
+let csOrderRoutingInstance: CsOrderRoutingService | null = null;
 
 export function setOrdersService(service: OrdersService) {
   ordersServiceInstance = service;
+}
+
+export function setCsOrderRoutingService(service: CsOrderRoutingService) {
+  csOrderRoutingInstance = service;
 }
 
 export function setVoipService(service: VoipService) {
@@ -102,11 +119,47 @@ function getVoipService(): VoipService {
   return voipServiceInstance;
 }
 
+function getCsOrderRoutingService(): CsOrderRoutingService {
+  if (!csOrderRoutingInstance) {
+    throw new Error('CsOrderRoutingService not initialized. Call setCsOrderRoutingService() first.');
+  }
+  return csOrderRoutingInstance;
+}
+
+/** HoCS / Branch Admin branch scope for CS routing settings (mirrors CsOrderRoutingService). */
+function assertCsRoutingBranchAccess(actor: SessionUser, ownerBranchId: string): void {
+  if (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') return;
+  if (actor.role === 'HEAD_OF_CS') return;
+  if (actor.role === 'BRANCH_ADMIN') {
+    if (!actor.currentBranchId || actor.currentBranchId !== ownerBranchId) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Branch admins may only access CS routing for their active branch.',
+      });
+    }
+    return;
+  }
+  throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access CS order routing' });
+}
+
 /**
  * Session branch for orders list / statusCounts / timeSeries: non-null = restrict to that branch;
  * null = org-wide (all branches). Applies to admin-class and org-wide department heads the same
  * as everyone else — previously these roles forced null and ignored the branch switcher.
  */
+
+function csCloserSelfQueueListOpts(
+  user: { id: string; role: string },
+  input: { assignedCsId?: string },
+):
+  | { assignedCloserViewerId: string }
+  | undefined {
+  if (user.role === 'CS_CLOSER' && input.assignedCsId === user.id) {
+    return { assignedCloserViewerId: user.id };
+  }
+  return undefined;
+}
+
 function orderListBranchId(_user: { role: string }, sessionBranchId: string | null): string | null {
   return sessionBranchId;
 }
@@ -124,7 +177,7 @@ function canAccessDeliveryMovementCustomerNames(user: SessionUser): boolean {
  * on the active branch, restrict the list to:
  *   - orders **assigned to** their CS team members (assignedCsIds), AND
  *   - orders **created by** their MB team members (mediaBuyerIds).
- * Org-wide scope, admin-class, and the role-restricted CS_AGENT / MEDIA_BUYER
+ * Org-wide scope, admin-class, and the role-restricted CS_CLOSER / MEDIA_BUYER
  * paths short-circuit before this helper. Their own id is always in the set so
  * a supervisor still sees their own work.
  *
@@ -160,6 +213,92 @@ async function applySupervisorScope<T extends SupervisorScopeInput>(
   };
 }
 
+/** Output filters for `getStatusCounts` / `getOrdersTimeSeriesByCreated` after viewer-safe narrowing. */
+export type NarrowedOrdersAggregateFilters = {
+  mediaBuyerId?: string;
+  assignedCsId?: string;
+  supervisorScope?: OrdersAggregateSupervisorScope;
+  logisticsLocationId?: string;
+  statuses?: OrderStatus[];
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+};
+
+/**
+ * Mirrors `orders.list` narrowing so aggregate endpoints cannot return branch-wide counts for
+ * MEDIA_BUYER / CS_CLOSER without supervisor OR-scope.
+ */
+export async function narrowOrdersAggregateFiltersForViewer(
+  ctx: { user: SessionUser; currentBranchId: string | null },
+  branchId: string | null,
+  partial: NarrowedOrdersAggregateFilters,
+): Promise<NarrowedOrdersAggregateFilters> {
+  if (ctx.user.role === 'SUPER_ADMIN') {
+    return { ...partial };
+  }
+
+  const perms = ctx.user.permissions ?? [];
+  const hasOrdersRead = perms.includes('orders.read');
+  const hasMarketingOrders = perms.includes('marketing.orders');
+  const hasLogisticsRead = perms.includes('logistics.read');
+  const hasOrgWideScope =
+    perms.includes('cs.scope.global') ||
+    perms.includes('marketing.scope.global') ||
+    perms.includes('logistics.scope.global');
+
+  if (!hasOrdersRead && !hasMarketingOrders && !hasLogisticsRead && !hasOrgWideScope) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Missing orders.read, marketing.orders, or logistics.read permission',
+    });
+  }
+  if (hasOrgWideScope) {
+    return { ...partial };
+  }
+
+  let merged: Record<string, unknown> = { ...partial };
+
+  if (ctx.user.role === 'MEDIA_BUYER') {
+    if (merged.mediaBuyerId && merged.mediaBuyerId !== ctx.user.id) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Cannot query another media buyer orders',
+      });
+    }
+    merged.mediaBuyerId = ctx.user.id;
+  }
+
+  if (hasOrdersRead && ctx.user.role === 'CS_CLOSER') {
+    merged.assignedCsId = ctx.user.id;
+  }
+
+  const withSupervisor = await applySupervisorScope(
+    ctx,
+    merged as unknown as ListOrdersInput,
+    branchId,
+  );
+
+  const out = { ...withSupervisor } as Record<string, unknown>;
+  if (out.supervisorScope && typeof out.supervisorScope === 'object') {
+    delete out.mediaBuyerId;
+    delete out.assignedCsId;
+  }
+
+  const supervisorScope = out.supervisorScope as OrdersAggregateSupervisorScope | undefined;
+
+  return {
+    startDate: partial.startDate,
+    endDate: partial.endDate,
+    logisticsLocationId: partial.logisticsLocationId,
+    statuses: partial.statuses,
+    status: partial.status,
+    ...(supervisorScope ? { supervisorScope } : {}),
+    ...(!supervisorScope && typeof out.mediaBuyerId === 'string' ? { mediaBuyerId: out.mediaBuyerId } : {}),
+    ...(!supervisorScope && typeof out.assignedCsId === 'string' ? { assignedCsId: out.assignedCsId } : {}),
+  };
+}
+
 export const ordersRouter = router({
   /**
    * Create a new order.
@@ -187,7 +326,7 @@ export const ordersRouter = router({
   /**
    * Create an offline order (CS manual entry). Creator is set as assignee.
    * Phase 21: gated by `orders.createOffline` permission so a custom role can be granted just this capability
-   * without inheriting all of CS_AGENT.
+   * without inheriting all of CS_CLOSER.
    */
   createOffline: permissionProcedure('orders.createOffline')
     .meta({ branchScopedMutation: true })
@@ -273,7 +412,7 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
       if (ctx.user.role === 'SUPER_ADMIN') {
-        return getOrdersService().list(input, branchId);
+        return getOrdersService().list(input, branchId, csCloserSelfQueueListOpts(ctx.user, input));
       }
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
@@ -291,25 +430,25 @@ export const ordersRouter = router({
         });
       }
       if (hasOrgWideScope) {
-        return getOrdersService().list(input, branchId);
+        return getOrdersService().list(input, branchId, csCloserSelfQueueListOpts(ctx.user, input));
       }
       let effectiveInput = input;
-      if (!hasOrdersRead && hasMarketingOrders && ctx.user.role === 'MEDIA_BUYER') {
-        effectiveInput = { ...input, mediaBuyerId: ctx.user.id };
+      if (ctx.user.role === 'MEDIA_BUYER') {
+        effectiveInput = { ...effectiveInput, mediaBuyerId: ctx.user.id };
       }
-      if (hasOrdersRead && ctx.user.role === 'CS_AGENT') {
+      if (hasOrdersRead && ctx.user.role === 'CS_CLOSER') {
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
       // Supervisor scoping (Phase B): non-org-wide branch supervisors only see
       // orders assigned to their CS team agents OR created by their MB team
       // members. Their own work is always included.
       effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
-      return getOrdersService().list(effectiveInput, branchId);
+      return getOrdersService().list(effectiveInput, branchId, csCloserSelfQueueListOpts(ctx.user, effectiveInput));
     }),
 
   /**
    * CS schedule calendar: per-day callback + ISO delivery-date counts (Africa/Lagos for callbacks).
-   * Same auth / branch / CS_AGENT / Media Buyer scoping as `orders.list`.
+   * Same auth / branch / CS_CLOSER / Media Buyer scoping as `orders.list`.
    */
   scheduleCalendarHeat: authedProcedure
     .input(scheduleCalendarHeatSchema)
@@ -336,10 +475,10 @@ export const ordersRouter = router({
         return getOrdersService().scheduleCalendarHeat(input, branchId);
       }
       let effectiveInput = input;
-      if (!hasOrdersRead && hasMarketingOrders && ctx.user.role === 'MEDIA_BUYER') {
-        effectiveInput = { ...input, mediaBuyerId: ctx.user.id };
+      if (ctx.user.role === 'MEDIA_BUYER') {
+        effectiveInput = { ...effectiveInput, mediaBuyerId: ctx.user.id };
       }
-      if (hasOrdersRead && ctx.user.role === 'CS_AGENT') {
+      if (hasOrdersRead && ctx.user.role === 'CS_CLOSER') {
         effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
       }
       effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
@@ -426,14 +565,14 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Assign an order to a CS agent.
+   * Assign an order to a CS closer.
    * `orders.reassign` (HoCS / Admin) or branch CS team supervisor for in-team agents (UNPROCESSED / CS_ASSIGNED only).
    */
   assignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(assignOrderSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      const res = await getOrdersService().assignToCS(input.orderId, input.csAgentId, ctx.user);
+      const res = await getOrdersService().assignToCS(input.orderId, input.csCloserId, ctx.user);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCache(input.orderId),
@@ -486,7 +625,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Distribute all UNPROCESSED (unassigned) orders to CS agents using the dispatch algorithm.
+   * Distribute all UNPROCESSED (unassigned) orders to CS closers using the dispatch algorithm.
    * Manual fallback when auto-assignment on order creation did not run. Restricted to Head of CS and SuperAdmin.
    */
   distributeUnassignedOrders: permissionProcedure('orders.reassign')
@@ -499,16 +638,16 @@ export const ordersRouter = router({
     }),
 
   /**
-   * List CS agents for assign dropdowns — full roster with `orders.reassign`, else supervised team agents only.
+   * List CS closers for assign dropdowns — full roster with `orders.reassign`, else supervised team agents only.
    */
-  listCSAgents: authedProcedure.query(async ({ ctx }) => {
-    return getOrdersService().listCSAgents(ctx.user);
+  listCSClosers: authedProcedure.query(async ({ ctx }) => {
+    return getOrdersService().listCSClosers(ctx.user);
   }),
 
   /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
-   * Optional assignedCsId filters to that CS agent's orders (for CS Orders page).
+   * Optional assignedCsId filters to that CS closer's orders (for CS Orders page).
    * Optional startDate/endDate filter by orders.createdAt.
    */
   statusCounts: authedProcedure
@@ -542,15 +681,25 @@ export const ordersRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const effectiveBranchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, effectiveBranchId, {
+        mediaBuyerId: input?.mediaBuyerId,
+        assignedCsId: input?.assignedCsId,
+        logisticsLocationId: input?.logisticsLocationId,
+        statuses: input?.statuses,
+        startDate: input?.startDate,
+        endDate: input?.endDate,
+      });
+
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
-          input?.mediaBuyerId,
-          input?.startDate,
-          input?.endDate,
-          input?.assignedCsId,
-          input?.logisticsLocationId,
+          narrowed.mediaBuyerId,
+          narrowed.startDate,
+          narrowed.endDate,
+          narrowed.assignedCsId,
+          narrowed.logisticsLocationId,
           effectiveBranchId,
-          input?.statuses,
+          narrowed.statuses,
+          narrowed.supervisorScope,
         );
       }
 
@@ -560,18 +709,19 @@ export const ordersRouter = router({
           branchId: effectiveBranchId,
           viewerId: ctx.user.id,
           viewerRole: ctx.user.role,
-          input: input ?? null,
+          narrowed,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
         getOrdersService().getStatusCounts(
-          input?.mediaBuyerId,
-          input?.startDate,
-          input?.endDate,
-          input?.assignedCsId,
-          input?.logisticsLocationId,
+          narrowed.mediaBuyerId,
+          narrowed.startDate,
+          narrowed.endDate,
+          narrowed.assignedCsId,
+          narrowed.logisticsLocationId,
           effectiveBranchId,
-          input?.statuses,
+          narrowed.statuses,
+          narrowed.supervisorScope,
         ),
       );
     }),
@@ -614,18 +764,29 @@ export const ordersRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const effectiveBranchId = orderListBranchId(ctx.user, ctx.currentBranchId);
-      const filters = {
+      const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, effectiveBranchId, {
         mediaBuyerId: input?.mediaBuyerId,
-        csAgentId: input?.assignedCsId,
+        assignedCsId: input?.assignedCsId,
         logisticsLocationId: input?.logisticsLocationId,
-        status: input?.status,
         statuses: input?.statuses,
+        startDate: input?.startDate,
+        endDate: input?.endDate,
+        status: input?.status,
+      });
+
+      const filters = {
+        mediaBuyerId: narrowed.mediaBuyerId,
+        csCloserId: narrowed.assignedCsId,
+        logisticsLocationId: narrowed.logisticsLocationId,
+        status: narrowed.status,
+        statuses: narrowed.statuses,
+        supervisorScope: narrowed.supervisorScope,
       };
 
       if (!ordersCacheService) {
         return getOrdersService().getOrdersTimeSeriesByCreated(
-          input?.startDate,
-          input?.endDate,
+          narrowed.startDate,
+          narrowed.endDate,
           effectiveBranchId,
           filters,
         );
@@ -637,13 +798,13 @@ export const ordersRouter = router({
           branchId: effectiveBranchId,
           viewerId: ctx.user.id,
           viewerRole: ctx.user.role,
-          input: input ?? null,
+          narrowed,
         });
 
       return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, () =>
         getOrdersService().getOrdersTimeSeriesByCreated(
-          input?.startDate,
-          input?.endDate,
+          narrowed.startDate,
+          narrowed.endDate,
           effectiveBranchId,
           filters,
         ),
@@ -651,11 +812,11 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Get CS agent workloads — for dispatch dashboard.
+   * Get CS closer workloads — for dispatch dashboard.
    * Restricted to Head of CS and SuperAdmin.
    */
   csWorkloads: permissionProcedure('orders.csWorkloads').query(async ({ ctx }) => {
-    return getOrdersService().getCSAgentWorkloads(ctx.currentBranchId);
+    return getOrdersService().getCSCloserWorkloads(ctx.currentBranchId);
   }),
 
   /**
@@ -668,8 +829,8 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Get workload for the current CS agent — for \"My Orders\" page.
-   * Non–CS agents receive null.
+   * Get workload for the current CS closer — for \"My Orders\" page.
+   * Non–CS closers receive null.
    */
   myCSWorkload: authedProcedure.query(async ({ ctx }) => {
     return getOrdersService().getMyCSWorkload(ctx.user);
@@ -690,7 +851,7 @@ export const ordersRouter = router({
   }),
 
   /**
-   * Get inactive CS agents (no action for > threshold minutes).
+   * Get inactive CS closers (no action for > threshold minutes).
    * Used by Head of CS to monitor agent activity.
    */
   inactiveAgents: permissionProcedure('orders.inactiveAgents')
@@ -700,8 +861,8 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Get CS agent leaderboard — performance metrics for ranking.
-   * Restricted to Head of CS, SuperAdmin, and CS_AGENT (gamification).
+   * Get CS closer leaderboard — performance metrics for ranking.
+   * Restricted to Head of CS, SuperAdmin, and CS_CLOSER (gamification).
    * period: 'this_month' (default) or 'all_time'
    */
   csLeaderboard: permissionProcedure('orders.csLeaderboard')
@@ -713,7 +874,7 @@ export const ordersRouter = router({
       }),
     )
     .query(async ({ input }) =>
-      getOrdersService().getCSAgentLeaderboard(
+      getOrdersService().getCSCloserLeaderboard(
         input.period ?? 'this_month',
         input.startDate,
         input.endDate,
@@ -724,7 +885,7 @@ export const ordersRouter = router({
    * Single-request bundle for the `/admin/cs/orders` secondary fan-out.
    *
    * Replaces up to 7 parallel loader calls — `orders.statusCounts`,
-   * `orders.myCSWorkload` (CS_AGENT only), `orders.timeSeriesByCreated`,
+   * `orders.myCSWorkload` (CS_CLOSER only), `orders.timeSeriesByCreated`,
    * `orders.scheduleCalendarHeat`, `products.list` (offline order modal),
    * `orders.csWorkloads` (HoCS / Admin column), `logistics.locationOptions`
    * (HoCS / Admin bulk allocate). Same fan-out, single HTTP round-trip and one
@@ -769,59 +930,70 @@ export const ordersRouter = router({
           ])
           .optional(),
         // Capability flags from the loader.
-        isCSAgent: z.boolean().optional().default(false),
-        showCSAgentColumn: z.boolean().optional().default(false),
+        isCSCloser: z.boolean().optional().default(false),
+        showCSCloserColumn: z.boolean().optional().default(false),
         canCreateOffline: z.boolean().optional().default(false),
       }),
     )
     .query(async ({ input, ctx }) => {
       const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
-      const trendFilters = {
+      const scope = await narrowOrdersAggregateFiltersForViewer(ctx, branchId, {
         assignedCsId: input.countsAssignedCsId,
+        startDate: input.countsStartDate,
+        endDate: input.countsEndDate,
+      });
+
+      const trendFilters = {
+        mediaBuyerId: scope.mediaBuyerId,
+        csCloserId: scope.assignedCsId,
+        supervisorScope: scope.supervisorScope,
         status: input.trendStatus,
       };
+
+      const scheduleHeatInput =
+        scope.supervisorScope != null
+          ? {
+              yearMonth: input.heatYearMonth,
+              supervisorScope: scope.supervisorScope,
+              status: input.heatStatus,
+            }
+          : {
+              yearMonth: input.heatYearMonth,
+              ...(scope.assignedCsId ? { assignedCsId: scope.assignedCsId } : {}),
+              ...(scope.mediaBuyerId ? { mediaBuyerId: scope.mediaBuyerId } : {}),
+              status: input.heatStatus,
+            };
 
       const [
         statusCounts,
         myWorkload,
         dailyCounts,
         scheduleHeat,
-        csAgentsForFilter,
+        csClosersForFilter,
         logisticsLocationsForBulk,
         productsForOfflineOrder,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
-          undefined,
-          input.countsStartDate,
-          input.countsEndDate,
-          input.countsAssignedCsId,
+          scope.mediaBuyerId,
+          scope.startDate,
+          scope.endDate,
+          scope.assignedCsId,
           undefined,
           branchId,
           undefined,
+          scope.supervisorScope,
         ),
-        input.isCSAgent ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
-        getOrdersService().getOrdersTimeSeriesByCreated(
-          input.countsStartDate,
-          input.countsEndDate,
-          branchId,
-          trendFilters,
-        ),
-        getOrdersService().scheduleCalendarHeat(
-          {
-            yearMonth: input.heatYearMonth,
-            assignedCsId: input.countsAssignedCsId,
-            status: input.heatStatus,
-          },
-          branchId,
-        ),
+        input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
+        getOrdersService().getOrdersTimeSeriesByCreated(scope.startDate, scope.endDate, branchId, trendFilters),
+        getOrdersService().scheduleCalendarHeat(scheduleHeatInput, branchId),
         // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
         // — bundle gate is `orders.read` so we re-check before exposing the
         // agent roster.
-        input.showCSAgentColumn &&
+        input.showCSCloserColumn &&
         (ctx.user.permissions ?? []).includes('orders.csWorkloads')
-          ? getOrdersService().getCSAgentWorkloads(branchId)
+          ? getOrdersService().getCSCloserWorkloads(branchId)
           : Promise.resolve([]),
-        input.showCSAgentColumn
+        input.showCSCloserColumn
           ? getLogisticsService().listLocationOptions({ status: 'ACTIVE' })
           : Promise.resolve([]),
         input.canCreateOffline
@@ -838,7 +1010,7 @@ export const ordersRouter = router({
         myWorkload,
         dailyCounts,
         scheduleHeat,
-        csAgentsForFilter: (csAgentsForFilter as Array<{ agentId: string; agentName: string }>).map(
+        csClosersForFilter: (csClosersForFilter as Array<{ agentId: string; agentName: string }>).map(
           (w) => ({ agentId: w.agentId, agentName: w.agentName }),
         ),
         logisticsLocationsForBulk: (
@@ -873,8 +1045,8 @@ export const ordersRouter = router({
       const branchId = ctx.currentBranchId;
       const [team, workloads, leaderboard, inactiveAgents] = await Promise.all([
         getUsersService().listCSTeam(),
-        getOrdersService().getCSAgentWorkloads(branchId),
-        getOrdersService().getCSAgentLeaderboard(
+        getOrdersService().getCSCloserWorkloads(branchId),
+        getOrdersService().getCSCloserLeaderboard(
           input.period,
           input.startDate,
           input.endDate,
@@ -1253,7 +1425,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Bulk assign multiple orders to a CS agent (same gates as assignToCS).
+   * Bulk assign multiple orders to a CS closer (same gates as assignToCS).
    */
   bulkAssignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
@@ -1261,37 +1433,37 @@ export const ordersRouter = router({
       z
         .object({
           orderIds: z.array(z.string().uuid()).min(1).max(100),
-          csAgentId: z.string().uuid().optional(),
-          csAgentIds: z.array(z.string().uuid()).min(1).max(50).optional(),
+          csCloserId: z.string().uuid().optional(),
+          csCloserIds: z.array(z.string().uuid()).min(1).max(50).optional(),
           branchId: z.string().uuid().optional(),
         })
         .superRefine((val, ctx) => {
-          const fromMulti = val.csAgentIds && val.csAgentIds.length > 0;
-          const fromSingle = Boolean(val.csAgentId);
+          const fromMulti = val.csCloserIds && val.csCloserIds.length > 0;
+          const fromSingle = Boolean(val.csCloserId);
           if (!fromMulti && !fromSingle) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: 'Provide csAgentId or csAgentIds',
-              path: ['csAgentId'],
+              message: 'Provide csCloserId or csCloserIds',
+              path: ['csCloserId'],
             });
           }
           if (fromMulti && fromSingle) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: 'Use either csAgentId or csAgentIds, not both',
-              path: ['csAgentIds'],
+              message: 'Use either csCloserId or csCloserIds, not both',
+              path: ['csCloserIds'],
             });
           }
         }),
     )
     .mutation(async ({ input, ctx }) => {
-      const csAgentIds =
-        input.csAgentIds && input.csAgentIds.length > 0
-          ? input.csAgentIds
-          : input.csAgentId
-            ? [input.csAgentId]
+      const csCloserIds =
+        input.csCloserIds && input.csCloserIds.length > 0
+          ? input.csCloserIds
+          : input.csCloserId
+            ? [input.csCloserId]
             : [];
-      const res = await getOrdersService().bulkAssignToCS(input.orderIds, csAgentIds, ctx.user);
+      const res = await getOrdersService().bulkAssignToCS(input.orderIds, csCloserIds, ctx.user);
       await Promise.all([
         invalidateOrdersAggregatesCache(),
         invalidateOrderDetailCacheMany(input.orderIds),
@@ -1303,7 +1475,7 @@ export const ordersRouter = router({
 
   /**
    * Get the timeline of events for a specific order.
-   * Role-filtered: CS agents only see CS-relevant events; Logistics only see logistics events; etc.
+   * Role-filtered: CS closers only see CS-relevant events; Logistics only see logistics events; etc.
    * Requires orders.read or marketing.orders permission.
    */
   getTimeline: authedProcedure
@@ -1315,7 +1487,7 @@ export const ordersRouter = router({
   // ── Claim Mode ────────────────────────────────────────
 
   /**
-   * Get the claim queue — UNPROCESSED orders available for CS agents to claim.
+   * Get the claim queue — UNPROCESSED orders available for CS closers to claim.
    * Only relevant when CS_DISPATCH_STRATEGY = 'claim'.
    */
   claimQueue: permissionProcedure('orders.read')
@@ -1338,5 +1510,50 @@ export const ordersRouter = router({
         invalidateOrderDetailCache(input.orderId),
       ]);
       return res;
+    }),
+
+  // ── CS order routing (auto-dispatch pools) ─────────────
+
+  listCsRoutingRules: permissionProcedure('orders.routing')
+    .input(listCsRoutingRulesSchema)
+    .query(async ({ input, ctx }) => {
+      assertCsRoutingBranchAccess(ctx.user, input.ownerBranchId);
+      return getCsOrderRoutingService().listRules(input.ownerBranchId);
+    }),
+
+  createCsRoutingRule: permissionProcedure('orders.routing')
+    .input(createCsRoutingRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCsOrderRoutingService().createRule(ctx.user, input);
+    }),
+
+  updateCsRoutingRule: permissionProcedure('orders.routing')
+    .input(updateCsRoutingRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCsOrderRoutingService().updateRule(ctx.user, input);
+    }),
+
+  deleteCsRoutingRule: permissionProcedure('orders.routing')
+    .input(deleteCsRoutingRuleSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCsOrderRoutingService().deleteRule(ctx.user, input.ruleId);
+    }),
+
+  getCsRoutingBranchSettings: permissionProcedure('orders.routing')
+    .input(getCsRoutingBranchSettingsSchema)
+    .query(async ({ input, ctx }) => {
+      assertCsRoutingBranchAccess(ctx.user, input.ownerBranchId);
+      const relationshipMode = await getCsOrderRoutingService().getRelationshipMode(input.ownerBranchId);
+      return { relationshipMode };
+    }),
+
+  setCsRoutingRelationshipMode: permissionProcedure('orders.routing')
+    .input(setCsRoutingRelationshipModeSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getCsOrderRoutingService().setRelationshipMode(
+        ctx.user,
+        input.ownerBranchId,
+        input.relationshipMode,
+      );
     }),
 });

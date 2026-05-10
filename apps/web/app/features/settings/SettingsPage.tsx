@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useFetcher, useLocation, useSearchParams } from '@remix-run/react';
-import { APP_THEME_IDS, CLIENT_UI_CONFIG_KEY } from '@yannis/shared';
+import { Link, useFetcher, useLocation, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -19,22 +18,14 @@ import { humanizeZodIssuesString } from '~/lib/api-error';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
-import { FormSelect } from '~/components/ui/form-select';
-
-type OrgDefaultTheme = (typeof APP_THEME_IDS)[number];
-
-function parseOrgDefaultTheme(raw: unknown): OrgDefaultTheme {
-  if (typeof raw === 'string' && (APP_THEME_IDS as readonly string[]).includes(raw)) {
-    return raw as OrgDefaultTheme;
-  }
-  return 'system';
-}
+import { Collapsible } from '~/components/ui/collapsible';
 
 interface SettingsUser {
   id: string;
   name: string;
   email: string;
   role: string;
+  permissions?: string[];
 }
 
 interface SystemSetting {
@@ -328,9 +319,15 @@ export function SettingsPage({
     (value: string) => {
       const next = resolveTab(value);
       setActiveTab(next);
-      setSearchParams({ tab: next }, { replace: true });
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('tab', next);
+      if (next !== 'system') {
+        nextParams.delete('section');
+        nextParams.delete('branchId');
+      }
+      setSearchParams(nextParams, { replace: true });
     },
-    [resolveTab, setSearchParams],
+    [resolveTab, searchParams, setSearchParams],
   );
   const [profileName, setProfileName] = useState(user?.name ?? '');
   const { themeId, setTheme, activeTheme } = useAppTheme();
@@ -463,18 +460,6 @@ export function SettingsPage({
     setLocalProfitabilityThreshold(profitabilityThresholdSaved);
   }, [profitabilityThresholdSaved]);
 
-  const orgDefaultSaved = useMemo(
-    () =>
-      parseOrgDefaultTheme(
-        systemSettings.find((s) => s.key === CLIENT_UI_CONFIG_KEY)?.value?.defaultAppTheme,
-      ),
-    [systemSettings],
-  );
-  const [orgDefaultAppTheme, setOrgDefaultAppTheme] = useState<OrgDefaultTheme>(orgDefaultSaved);
-  useEffect(() => {
-    setOrgDefaultAppTheme(orgDefaultSaved);
-  }, [orgDefaultSaved]);
-
   useEffect(() => {
     if (location.hash !== '#install-app') return;
     setActiveTab('profile');
@@ -488,7 +473,6 @@ export function SettingsPage({
     localVoipEnabled !== isVoipEnabled ||
     selectedDispatchStrategy !== dispatchStrategyFromSettings ||
     localClaimCap !== claimCapFromSettings ||
-    orgDefaultAppTheme !== orgDefaultSaved ||
     localProfitabilityTarget !== profitabilityTargetSaved ||
     localProfitabilityThreshold !== profitabilityThresholdSaved;
 
@@ -865,7 +849,6 @@ export function SettingsPage({
               <input type="hidden" name="voipEnabled" value={localVoipEnabled ? 'true' : 'false'} />
               <input type="hidden" name="csDispatchStrategy" value={selectedDispatchStrategy} />
               <input type="hidden" name="claimCap" value={String(localClaimCap)} />
-              <input type="hidden" name="defaultAppTheme" value={orgDefaultAppTheme} />
               <input
                 type="hidden"
                 name="profitabilityTargetRoas"
@@ -879,17 +862,22 @@ export function SettingsPage({
 
               {/* VOIP Integration */}
               <div className="card lg:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
-                    <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS agents</p>
-                  </div>
-                </div>
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
+                        <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS closers</p>
+                      </div>
+                    </div>
+                  }
+                >
                 <div className="rounded-lg border border-app-border p-4 space-y-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1">
@@ -941,21 +929,27 @@ export function SettingsPage({
                     <VoipProviderPicker active={voipState.active.provider} providers={voipState.providers} />
                   )}
                 </div>
+                </Collapsible>
               </div>
 
               {/* CS Order Distribution */}
               <div className="card lg:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 006 3.75h2.25A2.25 2.25 0 0010.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
-                    <p className="text-sm text-app-fg-muted">How new orders are assigned to CS agents when they come in</p>
-                  </div>
-                </div>
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 006 3.75h2.25A2.25 2.25 0 0010.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
+                        <p className="text-sm text-app-fg-muted">How new orders are assigned to CS closers when they come in</p>
+                      </div>
+                    </div>
+                  }
+                >
                 <div className="rounded-lg border border-app-border p-4">
                   <div className="space-y-3">
                     <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
@@ -1061,24 +1055,69 @@ export function SettingsPage({
                     {hasSystemChanges && ' — you have unsaved changes'}
                   </p>
                 </div>
+                </Collapsible>
+              </div>
+
+              {/* CS order routing — same card shell as VOIP / CS distribution */}
+              <div className="card lg:col-span-2">
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
+                          />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">CS order routing</h3>
+                        <p className="text-sm text-app-fg-muted">Cross-branch CS pools when load-balanced or performance dispatch runs</p>
+                      </div>
+                    </div>
+                  }
+                >
+                <div className="rounded-lg border border-app-border p-4">
+                  <p className="text-sm text-app-fg-muted">
+                    Send orders from each funnel branch to the right servicing branch, team, or whole-branch closer pool. Reporting stays on
+                    the funnel branch; only assignment changes.
+                  </p>
+                  <p className="mt-3">
+                    <Link
+                      to="/admin/settings/cs-order-routing"
+                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Open CS order routing
+                    </Link>
+                  </p>
+                </div>
+                </Collapsible>
               </div>
 
               {/* Marketing Profitability — target ROAS + green/red threshold */}
               <div className="card lg:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-app-fg">Marketing profitability</h3>
-                    <p className="text-sm text-app-fg-muted">
-                      True ROAS = revenue from delivered orders ÷ approved ad spend. Drives the
-                      Profitability column on Team Analysis and the ROAS pill on the leaderboard.
-                    </p>
-                  </div>
-                </div>
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">Marketing profitability</h3>
+                        <p className="text-sm text-app-fg-muted">
+                          True ROAS = revenue from delivered orders ÷ approved ad spend. Drives the
+                          Profitability column on Team Analysis and the ROAS pill on the leaderboard.
+                        </p>
+                      </div>
+                    </div>
+                  }
+                >
                 <div className="rounded-lg border border-app-border p-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="profit-target-roas" className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
@@ -1128,24 +1167,7 @@ export function SettingsPage({
                       localProfitabilityThreshold !== profitabilityThresholdSaved) && ' — you have unsaved changes'}
                   </p>
                 </div>
-              </div>
-
-              <div className="card lg:col-span-2">
-                <h3 className="text-lg font-semibold text-app-fg mb-1">Default appearance</h3>
-                <p className="text-sm text-app-fg-muted mb-3">
-                  Theme for users who have not set a personal preference. Personal choices in Profile still override this.
-                </p>
-                <FormSelect
-                  id="org-default-theme"
-                  label="Workspace default theme"
-                  value={orgDefaultAppTheme}
-                  onChange={(e) => setOrgDefaultAppTheme(parseOrgDefaultTheme(e.target.value))}
-                  wrapperClassName="mt-1 max-w-md"
-                  options={APP_THEMES.map((t) => ({ value: t.id, label: t.label }))}
-                />
-                <p className="text-xs text-app-fg-muted mt-2">
-                  Saved default: <strong>{APP_THEMES.find((t) => t.id === orgDefaultSaved)?.label ?? 'System'}</strong>
-                </p>
+                </Collapsible>
               </div>
 
               <div className="card lg:col-span-2 pt-4 border-t border-app-border">
@@ -1166,17 +1188,22 @@ export function SettingsPage({
             <>
               {/* Read-only cards for non–SuperAdmin */}
               <div className="card lg:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
-                    <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS agents</p>
-                  </div>
-                </div>
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
+                        <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS closers</p>
+                      </div>
+                    </div>
+                  }
+                >
                 <div className="rounded-lg border border-app-border p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1">
@@ -1193,19 +1220,25 @@ export function SettingsPage({
                     </div>
                   </div>
                 </div>
+                </Collapsible>
               </div>
               <div className="card lg:col-span-2">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                    <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 006 3.75h2.25A2.25 2.25 0 0010.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
-                    <p className="text-sm text-app-fg-muted">How new orders are assigned to CS agents when they come in</p>
-                  </div>
-                </div>
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 006 3.75h2.25A2.25 2.25 0 0010.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
+                        <p className="text-sm text-app-fg-muted">How new orders are assigned to CS closers when they come in</p>
+                      </div>
+                    </div>
+                  }
+                >
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-sm text-app-fg-muted">
                     Only Super Admin can configure CS order distribution. Current: <strong>{
@@ -1219,6 +1252,7 @@ export function SettingsPage({
                     }</strong>.
                   </p>
                 </div>
+                </Collapsible>
               </div>
             </>
           )}

@@ -37,6 +37,7 @@ import { CartService } from '../cart/cart.service';
 import { PaystackService } from '../payments/paystack.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { CsOrderRoutingService } from './cs-order-routing.service';
 import { CacheService } from '../common/cache/cache.service';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 
@@ -50,6 +51,46 @@ const ARCHIVABLE_ORDER_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] a
 const PREFERRED_DELIVERY_ISO_SQL = sql`${schema.orders.preferredDeliveryDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`;
 
 const CALLBACK_PRECONFIRM_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
+
+/** OR-scope for aggregate queries — mirrors `listOrders` when `supervisorScope` is set. */
+export type OrdersAggregateSupervisorScope = {
+  csUserIds: string[];
+  mediaBuyerIds: string[];
+};
+
+export type OrdersAggregateScopeFilters = {
+  mediaBuyerId?: string;
+  csCloserId?: string;
+  logisticsLocationId?: string;
+  status?: string;
+  statuses?: Array<(typeof schema.orders.$inferSelect)['status']>;
+  supervisorScope?: OrdersAggregateSupervisorScope;
+};
+
+/** Applies single-ID filters or supervisor OR-scope — mutually exclusive with supervisorScope vs bare IDs. */
+export function appendOrdersAggregateScopeConditions(
+  conditions: Parameters<typeof and>[0][],
+  opts: {
+    mediaBuyerId?: string;
+    assignedCsId?: string;
+    supervisorScope?: OrdersAggregateSupervisorScope;
+  },
+): void {
+  if (opts.supervisorScope) {
+    const { csUserIds, mediaBuyerIds } = opts.supervisorScope;
+    const orParts: ReturnType<typeof inArray>[] = [];
+    if (csUserIds.length > 0) orParts.push(inArray(schema.orders.assignedCsId, csUserIds));
+    if (mediaBuyerIds.length > 0) orParts.push(inArray(schema.orders.mediaBuyerId, mediaBuyerIds));
+    if (orParts.length === 0) conditions.push(sql`FALSE`);
+    else {
+      const combined = or(...orParts);
+      if (combined) conditions.push(combined);
+    }
+    return;
+  }
+  if (opts.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, opts.mediaBuyerId));
+  if (opts.assignedCsId) conditions.push(eq(schema.orders.assignedCsId, opts.assignedCsId));
+}
 
 /** Undelivered vs preferred date: exclude terminal / returned rows (OrdersService.list delivery_overdue). */
 const DELIVERY_OVERDUE_EXCLUDED_STATUSES = [
@@ -77,6 +118,7 @@ export class OrdersService {
     private readonly paystackService: PaystackService,
     private readonly branchTeams: BranchTeamsService,
     private readonly cache: CacheService,
+    private readonly csOrderRouting: CsOrderRoutingService,
   ) {}
 
   /** Per-order detail cache key used by `getById`. Kept here so the router-side
@@ -89,7 +131,7 @@ export class OrdersService {
   /** HoCS / Admin / `orders.reassign`, or CS team supervisor for same-branch team (supervisor: UNPROCESSED / CS_ASSIGNED only). */
   private async assertCanManualAssignToCs(
     actor: SessionUser,
-    csAgentId: string,
+    csCloserId: string,
     orderBranchId: string,
     orderStatus: string,
   ): Promise<void> {
@@ -110,7 +152,7 @@ export class OrdersService {
         message: 'Team supervisors may only assign orders that are unprocessed or CS-assigned.',
       });
     }
-    const ok = await this.branchTeams.isCsSupervisorOf(actor.id, csAgentId, orderBranchId);
+    const ok = await this.branchTeams.isCsSupervisorOf(actor.id, csCloserId, orderBranchId);
     if (!ok) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -961,12 +1003,13 @@ export class OrdersService {
     });
 
     // Cross-funnel attempt detection (Pillar 2 / attribution truth):
-    // If an order with the same phone+product already exists in the last 6h via a
+    // If an order with the same phone+product already exists in the last 24h via a
     // DIFFERENT Media Buyer, do NOT create a new order. Record the attempt in
     // cross_funnel_attempts so the second MB can see their funnel got traction —
     // but the original MB keeps attribution. CS never sees this row; it does not
     // count in any order metric. Only applies to edge-form submissions with a
     // mediaBuyerId. Direct API callers (admin/CS offline entry) skip this path.
+    // Window is shared with `detectDuplicates` — change in one place.
     if (orderSource === 'edge-form' && orderInput.mediaBuyerId && orderInput.customerPhoneHash) {
       const productIds = orderInput.items.map((i) => i.productId);
       const existing = await this.detectDuplicates(orderInput.customerPhoneHash, productIds);
@@ -989,9 +1032,24 @@ export class OrdersService {
         return { crossFunnelAttempt: true };
       }
     }
+    // Two-tier duplicate flagging:
+    //   24h match → 'FLAGGED' (hard, fresh — likely an accidental resubmission)
+    //   24h–30d match → 'POSSIBLY_DUPLICATE' (soft, historical — repeat customer or stale scam)
+    //   else → null (clean)
     const recentSamePhoneOrder = orderInput.customerPhoneHash
       ? await this.findRecentPhoneOrder(orderInput.customerPhoneHash)
       : null;
+    const historicalSamePhoneOrder =
+      !recentSamePhoneOrder && orderInput.customerPhoneHash
+        ? await this.findHistoricalSamePhoneOrder(orderInput.customerPhoneHash)
+        : null;
+    const duplicateFlag: 'FLAGGED' | 'POSSIBLY_DUPLICATE' | null = recentSamePhoneOrder
+      ? 'FLAGGED'
+      : historicalSamePhoneOrder
+        ? 'POSSIBLY_DUPLICATE'
+        : null;
+    const duplicateOfId =
+      recentSamePhoneOrder?.id ?? historicalSamePhoneOrder?.id ?? null;
 
     const insertOrder = async (
       dbOrTx: PostgresJsDatabase<typeof schema> | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0],
@@ -1020,8 +1078,8 @@ export class OrdersService {
           status: 'UNPROCESSED',
           orderSource: orderSource === 'edge-form' ? 'edge-form' : null,
           customFields: orderInput.customFields ?? null,
-          isDuplicate: recentSamePhoneOrder ? 'FLAGGED' : null,
-          duplicateOfId: recentSamePhoneOrder?.id ?? null,
+          isDuplicate: duplicateFlag,
+          duplicateOfId,
         })
         .returning();
       const created = rows[0];
@@ -1054,7 +1112,7 @@ export class OrdersService {
       mediaBuyerId: order.mediaBuyerId ?? null,
     });
 
-    // Notify Head of CS + Head of Marketing only on new order (not every CS agent — they get
+    // Notify Head of CS + Head of Marketing only on new order (not every CS closer — they get
     // order:assigned when Hot Swap / auto-dispatch / claim assigns them). SuperAdmin excluded (volume).
     this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
       type: 'order:new',
@@ -1097,7 +1155,7 @@ export class OrdersService {
       });
     }
 
-    // Auto-dispatch to least-loaded CS agent
+    // Auto-dispatch to least-loaded CS closer
     await this.autoDispatchToCS(order.id);
 
     const mediaBuyerName = order.mediaBuyerId
@@ -1201,7 +1259,7 @@ export class OrdersService {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message:
-          'Possible duplicate: order(s) with same customer phone in the last 6 hours. Merge or dismiss existing before creating an offline order.',
+          'Possible duplicate: order(s) with same customer phone in the last 24 hours. Merge or dismiss existing before creating an offline order.',
       });
     }
 
@@ -1210,7 +1268,22 @@ export class OrdersService {
       mediaBuyerId: input.mediaBuyerId ?? null,
       fallbackBranchId: sessionBranchId ?? null,
     });
+    // Same two-tier flagging as the edge-form create path. The strict
+    // `detectDuplicates` check above already blocks offline creation when a
+    // 24h match exists, so `findRecentPhoneOrder` will normally be null
+    // here — `findHistoricalSamePhoneOrder` still tags week-old repeats as
+    // POSSIBLY_DUPLICATE for HoCS visibility.
     const recentSamePhoneOrder = await this.findRecentPhoneOrder(customerPhoneHash);
+    const historicalSamePhoneOrder = !recentSamePhoneOrder
+      ? await this.findHistoricalSamePhoneOrder(customerPhoneHash)
+      : null;
+    const offlineDuplicateFlag: 'FLAGGED' | 'POSSIBLY_DUPLICATE' | null = recentSamePhoneOrder
+      ? 'FLAGGED'
+      : historicalSamePhoneOrder
+        ? 'POSSIBLY_DUPLICATE'
+        : null;
+    const offlineDuplicateOfId =
+      recentSamePhoneOrder?.id ?? historicalSamePhoneOrder?.id ?? null;
 
     const order = await withActor(this.db, { id: actorId }, async (tx) => {
       const rows = await tx
@@ -1237,8 +1310,8 @@ export class OrdersService {
           totalAmount: input.totalAmount != null ? String(input.totalAmount) : null,
           status: 'CS_ASSIGNED',
           orderSource: 'offline',
-          isDuplicate: recentSamePhoneOrder ? 'FLAGGED' : null,
-          duplicateOfId: recentSamePhoneOrder?.id ?? null,
+          isDuplicate: offlineDuplicateFlag,
+          duplicateOfId: offlineDuplicateOfId,
         })
         .returning();
 
@@ -1704,11 +1777,11 @@ export class OrdersService {
       .where(eq(schema.logisticsLocations.status, 'ACTIVE'))
       .orderBy(asc(schema.logisticsLocations.name));
 
-    // CS_AGENT must NOT see remaining-stock numbers (per CEO directive). Hide both the
+    // CS_CLOSER must NOT see remaining-stock numbers (per CEO directive). Hide both the
     // per-product availability array AND the leaky "have X" details inside the reason text.
     // Everyone else with allocate authority (HoCS, HoLogistics, LogisticsManager, TPL_MANAGER,
     // BranchAdmin, StockManager, Admin, SuperAdmin, ...) sees the full breakdown.
-    const hideStockCounts = viewerRole === 'CS_AGENT';
+    const hideStockCounts = viewerRole === 'CS_CLOSER';
 
     type LocationResult = {
       id: string;
@@ -1907,7 +1980,11 @@ export class OrdersService {
   /**
    * List orders with filtering, search, and pagination.
    */
-  async list(input: ListOrdersInput, branchId?: string | null) {
+  async list(
+    input: ListOrdersInput,
+    branchId?: string | null,
+    listOpts?: { assignedCloserViewerId?: string },
+  ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
 
     if (input.status) {
@@ -1916,12 +1993,9 @@ export class OrdersService {
     if (input.statuses?.length) {
       conditions.push(inArray(schema.orders.status, input.statuses));
     }
-    if (input.assignedCsId) {
-      conditions.push(eq(schema.orders.assignedCsId, input.assignedCsId));
-    }
-    if (input.mediaBuyerId) {
-      conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
-    }
+    // Mirrors `appendOrdersAggregateScopeConditions` / `narrowOrdersAggregateFiltersForViewer`:
+    // supervisor OR-scope replaces single-ID filters — AND-ing `assignedCsId` would hide
+    // supervised MB funnel rows (`assigned_cs_id` IS NULL) from list/count parity.
     if (input.supervisorScope) {
       const { csUserIds, mediaBuyerIds } = input.supervisorScope;
       // Supervisor "my team only" scope (Phase B) — OR across the two dimensions:
@@ -1935,6 +2009,13 @@ export class OrdersService {
       } else {
         const combined = or(...orParts);
         if (combined) conditions.push(combined);
+      }
+    } else {
+      if (input.assignedCsId) {
+        conditions.push(eq(schema.orders.assignedCsId, input.assignedCsId));
+      }
+      if (input.mediaBuyerId) {
+        conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
       }
     }
     if (input.campaignId) {
@@ -1985,7 +2066,19 @@ export class OrdersService {
       conditions.push(lte(schema.orders.createdAt, end));
     }
     if (branchId) {
-      conditions.push(eq(schema.orders.branchId, branchId));
+      if (
+        listOpts?.assignedCloserViewerId &&
+        input.assignedCsId &&
+        input.assignedCsId === listOpts.assignedCloserViewerId
+      ) {
+        const branchOrAssigned = or(
+          eq(schema.orders.branchId, branchId),
+          eq(schema.orders.assignedCsId, input.assignedCsId),
+        );
+        if (branchOrAssigned) conditions.push(branchOrAssigned);
+      } else {
+        conditions.push(eq(schema.orders.branchId, branchId));
+      }
     }
 
     if (input.scheduleKind === 'callback_due') {
@@ -2185,8 +2278,6 @@ export class OrdersService {
 
     const base: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     if (branchId) base.push(eq(schema.orders.branchId, branchId));
-    if (input.assignedCsId) base.push(eq(schema.orders.assignedCsId, input.assignedCsId));
-    if (input.mediaBuyerId) base.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
     if (input.supervisorScope) {
       const { csUserIds, mediaBuyerIds } = input.supervisorScope;
       const orParts = [];
@@ -2198,6 +2289,9 @@ export class OrdersService {
         const combined = or(...orParts);
         if (combined) base.push(combined);
       }
+    } else {
+      if (input.assignedCsId) base.push(eq(schema.orders.assignedCsId, input.assignedCsId));
+      if (input.mediaBuyerId) base.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
     }
     if (input.status) base.push(eq(schema.orders.status, input.status));
 
@@ -2365,7 +2459,7 @@ export class OrdersService {
     const sameBranchAsOrder =
       !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
 
-    // CS-only transitions (engagement, confirm, cancel): assigned CS agent, anyone with
+    // CS-only transitions (engagement, confirm, cancel): assigned CS closer, anyone with
     // CS scope (`cs.scope.global`), or branch admin (`branches.manage` + same-branch).
     const csOnlyTransitions =
       (currentStatus === 'UNPROCESSED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
@@ -2390,13 +2484,13 @@ export class OrdersService {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message:
-              'Only the assigned CS agent, anyone with CS scope, a Branch Admin (same branch), or an Admin may perform this transition.',
+              'Only the assigned CS closer, anyone with CS scope, a Branch Admin (same branch), or an Admin may perform this transition.',
           });
         }
       }
     }
 
-    // CONFIRMED → ALLOCATED: assigned CS agent (CS-as-rider-proxy), anyone with logistics
+    // CONFIRMED → ALLOCATED: assigned CS closer (CS-as-rider-proxy), anyone with logistics
     // capability (`logistics.read` covers HoLogistics + LogisticsManager), or org-wide CS scope.
     if (currentStatus === 'CONFIRMED' && newStatus === 'AGENT_ASSIGNED') {
       const isAssignedCs = order.assignedCsId === actor.id;
@@ -2409,7 +2503,7 @@ export class OrdersService {
       if (!isAuthorized) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only the assigned CS agent, Logistics, or an Admin can allocate this order to a 3PL location.',
+          message: 'Only the assigned CS closer, Logistics, or an Admin can allocate this order to a 3PL location.',
         });
       }
     }
@@ -2426,14 +2520,14 @@ export class OrdersService {
       if (!isAuthorized) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only the assigned CS agent, Logistics, or an Admin can reallocate this order to another 3PL location.',
+          message: 'Only the assigned CS closer, Logistics, or an Admin can reallocate this order to another 3PL location.',
         });
       }
     }
 
     // {ALLOCATED|DISPATCHED|IN_TRANSIT} → DELIVERED/PARTIALLY_DELIVERED:
     //   - anyone holding `orders.delivery.confirm` (HoLogistics, CS, TPL_MANAGER w/ receipt, Admin via ALL),
-    //   - assigned CS agent (rider-proxy follow-up call),
+    //   - assigned CS closer (rider-proxy follow-up call),
     //   - TPL_MANAGER specifically requires the receipt to be present (resolveReceiptUrl).
     //   3PL isn't in-app yet, so CS / HoLogistics marks delivered directly after ALLOCATED.
     if (
@@ -2510,7 +2604,7 @@ export class OrdersService {
     }
 
     // Update agent's lastActionAt for dispatch tiebreaker + inactivity tracking.
-    // Tracked for anyone with CS scope (CS agents, anyone with cs.scope.global, etc.).
+    // Tracked for anyone with CS scope (CS closers, anyone with cs.scope.global, etc.).
     if (
       transitionPerms.includes(canonicalPermissionCode('orders.read')) &&
       (transitionPerms.includes(canonicalPermissionCode('cs.leaderboard')) ||
@@ -2888,7 +2982,7 @@ export class OrdersService {
       return row;
     });
 
-    const actorName = actor.name ?? 'CS agent';
+    const actorName = actor.name ?? 'CS closer';
     if (
       workingInput.customerAddress !== undefined ||
       workingInput.deliveryAddress !== undefined ||
@@ -3151,11 +3245,11 @@ export class OrdersService {
   }
 
   /**
-   * Manually assign an order to a CS agent.
+   * Manually assign an order to a CS closer.
    * Callers with `orders.reassign` (HoCS / Admin), or a branch CS team supervisor for in-team agents
    * on orders in UNPROCESSED or CS_ASSIGNED (supervisors only).
    */
-  async assignToCS(orderId: string, csAgentId: string, actor: SessionUser) {
+  async assignToCS(orderId: string, csCloserId: string, actor: SessionUser) {
     const existingRows = await this.db
       .select()
       .from(schema.orders)
@@ -3170,13 +3264,13 @@ export class OrdersService {
     if (!ob) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no branch context' });
     }
-    await this.assertCanManualAssignToCs(actor, csAgentId, ob, orderRow.status);
+    await this.assertCanManualAssignToCs(actor, csCloserId, ob, orderRow.status);
 
     const updated = await withActor(this.db, actor, async (tx) => {
       const updatedRows = await tx
         .update(schema.orders)
         .set({
-          assignedCsId: csAgentId,
+          assignedCsId: csCloserId,
           status: 'CS_ASSIGNED',
           updatedAt: new Date(),
         })
@@ -3191,7 +3285,7 @@ export class OrdersService {
     });
 
     // Notify the assigned agent (real-time + persistent)
-    this.events.emitToUser(csAgentId, 'order:assigned', {
+    this.events.emitToUser(csCloserId, 'order:assigned', {
       orderId,
       customerName: updated.customerName,
     });
@@ -3201,7 +3295,7 @@ export class OrdersService {
       customerName: updated.customerName,
     }, updated.branchId ?? null);
     this.notifications.enqueueCreate({
-      userId: csAgentId,
+      userId: csCloserId,
       type: 'order:assigned',
       title: 'Order assigned to you',
       body: this.formatAssignedOrderBody({
@@ -3218,14 +3312,14 @@ export class OrdersService {
 
     // Timeline event: manually assigned (or reassigned if a previous owner existed)
     const previousCsAgentId = orderRow.assignedCsId;
-    const isReassignment = !!previousCsAgentId && previousCsAgentId !== csAgentId;
-    const namesNeeded = isReassignment ? [csAgentId, previousCsAgentId!] : [csAgentId];
+    const isReassignment = !!previousCsAgentId && previousCsAgentId !== csCloserId;
+    const namesNeeded = isReassignment ? [csCloserId, previousCsAgentId!] : [csCloserId];
     const nameRows = await this.db
       .select({ id: schema.users.id, name: schema.users.name })
       .from(schema.users)
       .where(inArray(schema.users.id, namesNeeded));
     const nameById = new Map(nameRows.map((r) => [r.id, r.name]));
-    const agentName = nameById.get(csAgentId) ?? null;
+    const agentName = nameById.get(csCloserId) ?? null;
     const previousAgentName = previousCsAgentId ? nameById.get(previousCsAgentId) ?? null : null;
     const verb = isReassignment ? 'Reassigned' : 'Assigned';
     const fromClause = isReassignment ? ` from ${previousAgentName ?? previousCsAgentId}` : '';
@@ -3234,10 +3328,10 @@ export class OrdersService {
       eventType: isReassignment ? 'ORDER_REASSIGNED' : 'ORDER_MANUALLY_ASSIGNED',
       actorId: actor.id,
       actorName: actor.name ?? null,
-      description: `${verb} to ${agentName ?? csAgentId}${fromClause} by ${actor.name ?? 'Head of CS'}`,
+      description: `${verb} to ${agentName ?? csCloserId}${fromClause} by ${actor.name ?? 'Head of CS'}`,
       metadata: isReassignment
-        ? { csAgentId, fromAgentId: previousCsAgentId, toAgentId: csAgentId }
-        : { csAgentId },
+        ? { csCloserId, fromAgentId: previousCsAgentId, toAgentId: csCloserId }
+        : { csCloserId },
       branchId: updated.branchId ?? null,
     });
 
@@ -3344,7 +3438,7 @@ export class OrdersService {
   async redistributeCSOrders(actor: SessionUser): Promise<{ redistributed: number }> {
     await this.releaseExpiredLocks(actor.id);
 
-    const workloads = await this.getCSAgentWorkloads();
+    const workloads = await this.getCSCloserWorkloads();
     const workloadMap = new Map(
       workloads.map((w) => [
         w.agentId,
@@ -3370,7 +3464,7 @@ export class OrdersService {
     const strategy = dispatchSetting?.strategy === 'performance' ? 'performance' : 'load_balanced';
     let perfMap: Map<string, { deliveryRate: number; confirmationRate: number }> = new Map();
     if (strategy === 'performance') {
-      const leaderboard = await this.getCSAgentLeaderboard('this_month');
+      const leaderboard = await this.getCSCloserLeaderboard('this_month');
       perfMap = new Map(
         leaderboard.map((e) => [e.agentId, { deliveryRate: e.deliveryRate, confirmationRate: e.confirmationRate }]),
       );
@@ -3455,7 +3549,7 @@ export class OrdersService {
       return { redistributed: 0 };
     }
 
-    const workloads = await this.getCSAgentWorkloads();
+    const workloads = await this.getCSCloserWorkloads();
     const targetWorkloads = workloads.filter((w) => w.agentId !== agentId);
     const workloadMap = new Map(
       targetWorkloads.map((w) => [
@@ -3468,7 +3562,7 @@ export class OrdersService {
     const strategy = dispatchSetting?.strategy === 'performance' ? 'performance' : 'load_balanced';
     let perfMap: Map<string, { deliveryRate: number; confirmationRate: number }> = new Map();
     if (strategy === 'performance') {
-      const leaderboard = await this.getCSAgentLeaderboard('this_month');
+      const leaderboard = await this.getCSCloserLeaderboard('this_month');
       perfMap = new Map(
         leaderboard.map((e) => [e.agentId, { deliveryRate: e.deliveryRate, confirmationRate: e.confirmationRate }]),
       );
@@ -3558,10 +3652,10 @@ export class OrdersService {
   }
 
   /**
-   * List active CS agents (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
+   * List active CS closers (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
    * Agent-initiated order transfers have been removed — reassignment is management-only.
    */
-  async listCSAgents(actor: SessionUser): Promise<Array<{ agentId: string; agentName: string }>> {
+  async listCSClosers(actor: SessionUser): Promise<Array<{ agentId: string; agentName: string }>> {
     const hasReassign =
       (actor.permissions ?? [])
         .map((p) => canonicalPermissionCode(p))
@@ -3570,7 +3664,7 @@ export class OrdersService {
       const agents = await this.db
         .select({ id: schema.users.id, name: schema.users.name })
         .from(schema.users)
-        .where(and(eq(schema.users.role, 'CS_AGENT'), eq(schema.users.status, 'ACTIVE')));
+        .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
       return agents.map((a) => ({ agentId: a.id, agentName: a.name }));
     }
     const branchId = actor.currentBranchId;
@@ -3587,7 +3681,7 @@ export class OrdersService {
   /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
-   * Optional assignedCsId filters to that CS agent's orders (for CS Orders page).
+   * Optional assignedCsId filters to that CS closer's orders (for CS Orders page).
    * Optional logisticsLocationId filters to that 3PL location (for Logistics Orders page / TPL_MANAGER scoping).
    * Optional startDate/endDate filter by orders.createdAt (when provided: counts = orders created in period).
    */
@@ -3599,10 +3693,14 @@ export class OrdersService {
     logisticsLocationId?: string,
     branchId?: string | null,
     statuses?: Array<(typeof schema.orders.$inferSelect)['status']>,
+    supervisorScope?: OrdersAggregateSupervisorScope,
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
-    if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
-    if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
+    appendOrdersAggregateScopeConditions(conditions, {
+      mediaBuyerId,
+      assignedCsId,
+      supervisorScope,
+    });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
     if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
@@ -3631,21 +3729,30 @@ export class OrdersService {
   }
 
   /**
-   * Get order pipeline chart data — Volume, CS Engaged, Confirmed, Logistics distributed, Delivered.
+   * Get order pipeline chart data — Volume, Unconfirmed, Confirmed, Logistics distributed, Delivered.
    * For the CEO Executive Overview order funnel chart. Same date filter as getStatusCounts (created_at).
    */
   async getOrderPipelineChart(startDate?: string, endDate?: string, branchId?: string | null): Promise<{
     volume: number;
-    csEngaged: number;
+    unconfirmed: number;
     confirmed: number;
     logisticsDistributed: number;
     delivered: number;
   }> {
-    const counts = await this.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId);
+    const counts = await this.getStatusCounts(
+      undefined,
+      startDate,
+      endDate,
+      undefined,
+      undefined,
+      branchId,
+      undefined,
+      undefined,
+    );
     const volume = Object.values(counts).reduce((sum, c) => sum + (c ?? 0), 0);
     return {
       volume,
-      csEngaged: counts['CS_ENGAGED'] ?? 0,
+      unconfirmed: counts['CS_ENGAGED'] ?? 0,
       confirmed: counts['CONFIRMED'] ?? 0,
       logisticsDistributed: (counts['AGENT_ASSIGNED'] ?? 0) + (counts['DISPATCHED'] ?? 0),
       delivered: counts['DELIVERED'] ?? 0,
@@ -3653,7 +3760,7 @@ export class OrdersService {
   }
 
   /**
-   * Distinct orders per assigned CS agent whose CS stage closed today (Africa/Lagos calendar).
+   * Distinct orders per assigned CS closer whose CS stage closed today (Africa/Lagos calendar).
    * Uses timeline ORDER_CONFIRMED / ORDER_CANCELLED joined to orders by assigned_cs_id (display-only).
    * Attribution uses current assigned_cs_id — rare reassignment after close could mis-attribute.
    */
@@ -3692,25 +3799,44 @@ export class OrdersService {
   }
 
   /**
-   * Get CS agent workload — for dispatch algorithm and dashboard.
+   * Get CS closer workload — for dispatch algorithm and dashboard.
    * Single aggregation query + user list (no N+1).
    */
-  async getCSAgentWorkloads(branchId?: string | null) {
+  async getCSCloserWorkloads(
+    branchId?: string | null,
+    opts?: { pendingCountsAcrossAllBranches?: boolean },
+  ) {
+    const pendingCountsAcrossAllBranches = opts?.pendingCountsAcrossAllBranches === true;
+
+    const agentsPromise = branchId
+      ? this.db
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            capacity: schema.users.capacity,
+            lastActionAt: schema.users.lastActionAt,
+          })
+          .from(schema.users)
+          .innerJoin(
+            schema.userBranches,
+            and(
+              eq(schema.userBranches.userId, schema.users.id),
+              eq(schema.userBranches.branchId, branchId),
+            ),
+          )
+          .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')))
+      : this.db
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            capacity: schema.users.capacity,
+            lastActionAt: schema.users.lastActionAt,
+          })
+          .from(schema.users)
+          .where(and(eq(schema.users.role, 'CS_CLOSER'), eq(schema.users.status, 'ACTIVE')));
+
     const [agents, pendingByAgent, closesTodayMap] = await Promise.all([
-      this.db
-        .select({
-          id: schema.users.id,
-          name: schema.users.name,
-          capacity: schema.users.capacity,
-          lastActionAt: schema.users.lastActionAt,
-        })
-        .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.role, 'CS_AGENT'),
-            eq(schema.users.status, 'ACTIVE'),
-          ),
-        ),
+      agentsPromise,
       this.db
         .select({
           assignedCsId: schema.orders.assignedCsId,
@@ -3721,7 +3847,7 @@ export class OrdersService {
           and(
             isNull(schema.orders.deletedAt),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
-            ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+            ...(branchId && !pendingCountsAcrossAllBranches ? [eq(schema.orders.branchId, branchId)] : []),
           ),
         )
         .groupBy(schema.orders.assignedCsId),
@@ -3744,7 +3870,7 @@ export class OrdersService {
   }
 
   /**
-   * Pending workload orders for a CS agent (same status/branch rules as getCSAgentWorkloads),
+   * Pending workload orders for a CS closer (same status/branch rules as getCSCloserWorkloads),
    * with line items for HoCS queue modal. Sorted by updatedAt desc (most recently touched first).
    */
   async getCloserWorkloadOrdersWithItems(agentId: string, branchId?: string | null) {
@@ -3812,11 +3938,11 @@ export class OrdersService {
   }
 
   /**
-   * Get workload for the current CS agent — for \"My Orders\" page.
-   * Returns null for non–CS agents or inactive users.
+   * Get workload for the current CS closer — for \"My Orders\" page.
+   * Returns null for non–CS closers or inactive users.
    */
   async getMyCSWorkload(actor: SessionUser) {
-    if (actor.role !== 'CS_AGENT') {
+    if (actor.role !== 'CS_CLOSER') {
       return null;
     }
 
@@ -3826,7 +3952,7 @@ export class OrdersService {
       .where(
         and(
           eq(schema.users.id, actor.id),
-          eq(schema.users.role, 'CS_AGENT'),
+          eq(schema.users.role, 'CS_CLOSER'),
           eq(schema.users.status, 'ACTIVE'),
         ),
       )
@@ -3909,13 +4035,7 @@ export class OrdersService {
     startDate?: string,
     endDate?: string,
     branchId?: string | null,
-    extra?: {
-      mediaBuyerId?: string;
-      csAgentId?: string;
-      logisticsLocationId?: string;
-      status?: string;
-      statuses?: Array<(typeof schema.orders.$inferSelect)['status']>;
-    },
+    extra?: OrdersAggregateScopeFilters,
   ): Promise<{ date: string; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       isNull(schema.orders.deletedAt),
@@ -3929,8 +4049,11 @@ export class OrdersService {
       conditions.push(lte(schema.orders.deliveredAt, end));
     }
     if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
-    if (extra?.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, extra.mediaBuyerId));
-    if (extra?.csAgentId) conditions.push(eq(schema.orders.assignedCsId, extra.csAgentId));
+    appendOrdersAggregateScopeConditions(conditions, {
+      mediaBuyerId: extra?.mediaBuyerId,
+      assignedCsId: extra?.csCloserId,
+      supervisorScope: extra?.supervisorScope,
+    });
     if (extra?.logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, extra.logisticsLocationId));
     if (extra?.status) {
       conditions.push(eq(schema.orders.status, extra.status as (typeof schema.orders.$inferSelect)['status']));
@@ -3961,7 +4084,7 @@ export class OrdersService {
    * overview time-series chart and the "View data in chart" toggle on the per-role order list
    * pages (Marketing / CS / Logistics).
    *
-   * Optional `mediaBuyerId` / `csAgentId` / `status` filters mirror the matching filters on
+   * Optional `mediaBuyerId` / `csCloserId` / `status` filters mirror the matching filters on
    * `listOrders` so each list page can request a daily series scoped to the table filters.
    *
    * - `orderCount`: grouped by `created_at` (unchanged).
@@ -3975,13 +4098,7 @@ export class OrdersService {
     startDate?: string,
     endDate?: string,
     branchId?: string | null,
-    extra?: {
-      mediaBuyerId?: string;
-      csAgentId?: string;
-      logisticsLocationId?: string;
-      status?: string;
-      statuses?: Array<(typeof schema.orders.$inferSelect)['status']>;
-    },
+    extra?: OrdersAggregateScopeFilters,
   ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
@@ -3992,8 +4109,11 @@ export class OrdersService {
       conditions.push(lte(schema.orders.createdAt, end));
     }
     if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
-    if (extra?.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, extra.mediaBuyerId));
-    if (extra?.csAgentId) conditions.push(eq(schema.orders.assignedCsId, extra.csAgentId));
+    appendOrdersAggregateScopeConditions(conditions, {
+      mediaBuyerId: extra?.mediaBuyerId,
+      assignedCsId: extra?.csCloserId,
+      supervisorScope: extra?.supervisorScope,
+    });
     if (extra?.logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, extra.logisticsLocationId));
     if (extra?.status) {
       conditions.push(eq(schema.orders.status, extra.status as (typeof schema.orders.$inferSelect)['status']));
@@ -4074,7 +4194,7 @@ export class OrdersService {
   }
 
   /**
-   * Check for inactive CS agents (no action for > 10 min).
+   * Check for inactive CS closers (no action for > 10 min).
    * Returns agent IDs that should receive an inactivity alert.
    *
    * Implementation note (perf): previously this issued **one COUNT per agent**
@@ -4084,7 +4204,7 @@ export class OrdersService {
    * the SuperAdmin/Admin home page directly.
    *
    * The rewrite collapses everything into **2 queries in parallel**:
-   *   1) all active CS_AGENT rows (id, name, lastActionAt),
+   *   1) all active CS_CLOSER rows (id, name, lastActionAt),
    *   2) one grouped COUNT keyed on `assigned_cs_id` for orders in pending
    *      CS statuses, restricted to the same agent set via `IN (...)`.
    * Constant 2 RTTs regardless of agent count.
@@ -4101,7 +4221,7 @@ export class OrdersService {
       .from(schema.users)
       .where(
         and(
-          eq(schema.users.role, 'CS_AGENT'),
+          eq(schema.users.role, 'CS_CLOSER'),
           eq(schema.users.status, 'ACTIVE'),
         ),
       );
@@ -4153,13 +4273,13 @@ export class OrdersService {
   }
 
   /**
-   * Get CS agent leaderboard — performance metrics for ranking.
+   * Get CS closer leaderboard — performance metrics for ranking.
    * period: 'this_month' (default) or 'all_time'; optional startDate/endDate override for custom range.
    *
    * Implementation note (perf): previously this issued **6 queries per agent**
    * (engaged, confirmed, cancelled, delivered, call count, avg call duration)
    * inside a `Promise.all(agents.map(...))`, so leaderboard latency grew
-   * linearly with the active CS_AGENT count and routinely dominated the CS
+   * linearly with the active CS_CLOSER count and routinely dominated the CS
    * dashboard load (~22s `db` time observed in dev logs).
    *
    * The rewrite collapses everything into **3 grouped aggregations** by
@@ -4170,7 +4290,7 @@ export class OrdersService {
    * Total round-trips: 3 (in parallel) regardless of how many agents exist.
    * Output shape, sort, and counted-status semantics are unchanged.
    */
-  async getCSAgentLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
+  async getCSCloserLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
     const useCustomRange = startDate && endDate;
     const periodStart = useCustomRange
       ? new Date(startDate)
@@ -4185,7 +4305,7 @@ export class OrdersService {
       .from(schema.users)
       .where(
         and(
-          eq(schema.users.role, 'CS_AGENT'),
+          eq(schema.users.role, 'CS_CLOSER'),
           eq(schema.users.status, 'ACTIVE'),
         ),
       );
@@ -4323,7 +4443,7 @@ export class OrdersService {
   // ============================================
 
   /**
-   * Assign a single UNPROCESSED order to the best available CS agent using the configured
+   * Assign a single UNPROCESSED order to the best available CS closer using the configured
    * dispatch strategy. Used by auto-dispatch on creation and by distributeUnassignedOrders.
    * Returns true if the order was assigned, false if no capacity.
    */
@@ -4338,15 +4458,40 @@ export class OrdersService {
       .where(eq(schema.orders.id, orderId))
       .limit(1);
 
-    const workloads = await this.getCSAgentWorkloads();
-    const available = workloads.filter((w) => w.pendingCount < w.capacity);
+    const branchId = orderRow?.branchId ?? null;
+
+    const [firstLine] = await this.db
+      .select({ productId: schema.orderItems.productId })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId))
+      .orderBy(asc(schema.orderItems.createdAt))
+      .limit(1);
+    const primaryProductId = firstLine?.productId ?? null;
+
+    const routing =
+      branchId != null
+        ? await this.csOrderRouting.resolveRoutingForDispatch(branchId, primaryProductId, orderId)
+        : null;
+
+    const servicingBranchId = routing?.servicingBranchId ?? branchId ?? null;
+    const workloads = await this.getCSCloserWorkloads(servicingBranchId ?? undefined, {
+      pendingCountsAcrossAllBranches: routing?.crossBranchServicing === true,
+    });
+    let available = workloads.filter((w) => w.pendingCount < w.capacity);
     if (available.length === 0) return false;
+
+    const restrict = routing?.restrictToCloserIds;
+    if (Array.isArray(restrict) && restrict.length > 0) {
+      const rs = new Set(restrict);
+      const narrowed = available.filter((w) => rs.has(w.agentId));
+      if (narrowed.length > 0) available = narrowed;
+    }
 
     const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
     const strategy = dispatchSetting?.strategy === 'performance' ? 'performance' : 'load_balanced';
 
     if (strategy === 'performance') {
-      const leaderboard = await this.getCSAgentLeaderboard('this_month');
+      const leaderboard = await this.getCSCloserLeaderboard('this_month');
       const perfMap = new Map(
         leaderboard.map((e) => [e.agentId, { deliveryRate: e.deliveryRate, confirmationRate: e.confirmationRate }]),
       );
@@ -4410,7 +4555,7 @@ export class OrdersService {
   }
 
   /**
-   * Auto-dispatch a new order to a CS agent.
+   * Auto-dispatch a new order to a CS closer.
    * Strategy is configurable via system setting CS_DISPATCH_STRATEGY:
    * - manual (default): no auto-assignment; orders sit UNPROCESSED until HoCS assigns them.
    * - load_balanced: lowest pending count first, then most idle.
@@ -4448,8 +4593,8 @@ export class OrdersService {
    * Agent must have capacity (pending orders < claim_cap) to claim.
    */
   async claimOrder(orderId: string, actor: SessionUser): Promise<{ success: boolean; message?: string }> {
-    if (actor.role !== 'CS_AGENT') {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS agents can claim orders' });
+    if (actor.role !== 'CS_CLOSER') {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS closers can claim orders' });
     }
 
     // Claim-cap setting and the actor's current pending count are independent
@@ -4581,7 +4726,7 @@ export class OrdersService {
   }
 
   /**
-   * Distribute all UNPROCESSED (unassigned) orders to CS agents using the same algorithm as
+   * Distribute all UNPROCESSED (unassigned) orders to CS closers using the same algorithm as
    * auto-dispatch. Manual fallback when assignment on order creation did not run or failed.
    * Restricted to Head of CS and SuperAdmin.
    */
@@ -4618,7 +4763,7 @@ export class OrdersService {
   ) {
     switch (newStatus) {
       case 'CS_ENGAGED': {
-        const workloads = await this.getCSAgentWorkloads();
+        const workloads = await this.getCSCloserWorkloads(order.branchId ?? undefined);
         const agentWorkload = workloads.find((w) => w.agentId === actor.id);
         if (agentWorkload && agentWorkload.pendingCount >= agentWorkload.capacity) {
           throw new TRPCError({
@@ -5364,7 +5509,7 @@ export class OrdersService {
   }
 
   /**
-   * Cron: every 2 minutes, check for callbacks that are due and notify the assigned CS agent.
+   * Cron: every 2 minutes, check for callbacks that are due and notify the assigned CS closer.
    * Uses a Redis set to avoid duplicate notifications for the same order.
    */
   @Cron('0 */2 * * * *')
@@ -5431,7 +5576,7 @@ export class OrdersService {
     const flagged = await this.db
       .select()
       .from(schema.orders)
-      .where(eq(schema.orders.isDuplicate, 'FLAGGED'))
+      .where(inArray(schema.orders.isDuplicate, ['FLAGGED', 'POSSIBLY_DUPLICATE']))
       .orderBy(desc(schema.orders.createdAt));
 
     if (flagged.length === 0) return [];
@@ -5454,6 +5599,9 @@ export class OrdersService {
       return {
         duplicate: { ...dup, customerPhoneDisplay: this.maskPhone(dup.customerPhoneHash) },
         original,
+        flagKind: (dup.isDuplicate === 'POSSIBLY_DUPLICATE' ? 'POSSIBLY_DUPLICATE' : 'FLAGGED') as
+          | 'FLAGGED'
+          | 'POSSIBLY_DUPLICATE',
       };
     });
   }
@@ -5554,7 +5702,7 @@ export class OrdersService {
 
   /**
    * Detect potential duplicates for a new order.
-   * Checks for orders with the same phone hash + product within 6 hours.
+   * Checks for orders with the same phone hash + product within 24 hours.
    */
   async detectDuplicates(phoneHash: string, productIds: string[]) {
     if (productIds.length === 0) return [];
@@ -5575,7 +5723,7 @@ export class OrdersService {
                 ),
               ),
           ),
-          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '6 hours'`,
+          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
           sql`${schema.orders.isDuplicate} IS NULL OR ${schema.orders.isDuplicate} = 'DISMISSED'`,
           sql`${schema.orders.status} != 'CANCELLED'`,
         ),
@@ -5596,7 +5744,30 @@ export class OrdersService {
       .where(
         and(
           eq(schema.orders.customerPhoneHash, phoneHash),
-          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '6 hours'`,
+          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
+          sql`${schema.orders.status} != 'CANCELLED'`,
+        ),
+      )
+      .orderBy(desc(schema.orders.createdAt))
+      .limit(1);
+    return recent ?? null;
+  }
+
+  /**
+   * Soft-duplicate detection: same phone, non-cancelled order older than the
+   * 24h hard-flag window but within the past 30 days. Lets HoCS still spot
+   * "this customer ordered something a week ago, is this a real new order or
+   * a confused resubmission?" without the rapid-fire urgency of FLAGGED.
+   */
+  private async findHistoricalSamePhoneOrder(phoneHash: string) {
+    const [recent] = await this.db
+      .select({ id: schema.orders.id })
+      .from(schema.orders)
+      .where(
+        and(
+          eq(schema.orders.customerPhoneHash, phoneHash),
+          sql`${schema.orders.createdAt} < NOW() - INTERVAL '24 hours'`,
+          sql`${schema.orders.createdAt} >= NOW() - INTERVAL '30 days'`,
           sql`${schema.orders.status} != 'CANCELLED'`,
         ),
       )
@@ -5642,16 +5813,16 @@ export class OrdersService {
   }
 
   /**
-   * Bulk assign multiple orders to one or more CS agents.
+   * Bulk assign multiple orders to one or more CS closers.
    * - One agent: every order goes to that agent (same as before).
    * - Multiple agents: each order is assigned to a uniformly random pick from the list.
    */
   async bulkAssignToCS(
     orderIds: string[],
-    csAgentIds: string[],
+    csCloserIds: string[],
     actor: SessionUser,
   ) {
-    const agents = [...new Set(csAgentIds)].filter(Boolean);
+    const agents = [...new Set(csCloserIds)].filter(Boolean);
     if (agents.length === 0) {
       throw new Error('At least one closer is required');
     }
@@ -5832,7 +6003,7 @@ export class OrdersService {
       hasEventPerm('logistics.scope.global') ||
       hasEventPerm('cs.leaderboard') ||
       hasEventPerm('logistics.read') ||
-      actor.role === 'CS_AGENT';
+      actor.role === 'CS_CLOSER';
 
     return mergedRows.filter((row) => {
       const eventType = row.eventType as string;

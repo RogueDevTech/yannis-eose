@@ -79,78 +79,60 @@ export function LiveActivityCard({
       `}
     >
       {/* Stage indicator dot */}
-      <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
+      <span className="absolute top-2 right-2 flex h-2 w-2">
         {cfg.ping && !isNew ? (
           <>
             <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${cfg.dotColor} opacity-60`} />
-            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${cfg.dotColor}`} />
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${cfg.dotColor}`} />
           </>
         ) : isNew ? (
           <>
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success-500" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-success-500" />
           </>
         ) : (
-          <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${cfg.dotColor}`} />
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${cfg.dotColor}`} />
         )}
       </span>
 
-      <div className="p-3.5 pr-8">
-        {/* Status pill */}
-        <div className="mb-2">
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${cfg.badgeColor}`}>
-            {cfg.label}
-          </span>
-        </div>
-
-        {/* Name */}
-        <div className="mb-2">
-          <p className="text-sm font-semibold text-app-fg truncate leading-tight">
+      <div className="px-2.5 py-2 pr-5">
+        {/* Row 1: name + amount */}
+        <div className="flex items-baseline justify-between gap-2 mb-1">
+          <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
             {item.customerName}
           </p>
+          <NairaPrice amount={item.totalAmount} className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums" />
         </div>
 
-        {/* Product pill — always rendered on its own line; name truncates */}
-        <div className="mb-1.5 min-w-0">
-          <span className="inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-app-hover text-app-fg-muted">
-            <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        {/* Row 2: product pill + status pill */}
+        <div className="flex items-center gap-1.5 mb-1 min-w-0">
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-hover text-app-fg-muted">
+            <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
             </svg>
             <span className="truncate min-w-0">{item.productName ?? '—'}</span>
           </span>
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 ${cfg.badgeColor}`}>
+            {cfg.label}
+          </span>
         </div>
 
-        {/* Amount — always on its own new line so card height is uniform */}
-        <div className="mb-2 text-[11px] font-bold text-app-fg">
-          <NairaPrice amount={item.totalAmount} className="font-bold text-app-fg" />
-        </div>
-
-        {/* Timestamp */}
-        <div className="text-[11px] font-medium text-app-fg-muted">
+        {/* Row 3: timestamp */}
+        <div className="text-[10px] font-medium text-app-fg-muted truncate">
           {new Date(item.updatedAt).toLocaleString('en-NG', {
-            weekday: 'short', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit',
           })}
         </div>
 
         {/* NEW / UPDATED flash */}
         {(isNew || isUpdated) && (
-          <div className={`mt-2 pt-2 border-t flex items-center gap-1.5 ${isNew ? 'border-success-200 dark:border-success-800/50' : 'border-success-200/60 dark:border-success-800/30'}`}>
-            <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+          <div className="mt-1.5 flex items-center gap-1">
+            <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-[9px] font-bold bg-success-500 text-white">
               {isNew ? 'JUST NOW' : 'UPDATED'}
-            </span>
-            <span className={`text-[11px] ${cfg.textColor}`}>
-              {isNew ? cfg.label : 'Status changed'}
             </span>
           </div>
         )}
-      </div>
-
-      {/* Hover arrow */}
-      <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-        <svg className="w-3.5 h-3.5 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
       </div>
     </button>
   );

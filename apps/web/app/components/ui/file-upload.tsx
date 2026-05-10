@@ -158,10 +158,10 @@ export function FileUpload({
           onDragOver={(e) => e.preventDefault()}
           className={
             variant === 'minimal'
-              ? // Match TextInput md (`h-9` ≈ 2.25rem) so this dropzone aligns with sibling
-                // form controls in dense grids. Single dashed border (vs solid input border)
-                // keeps the "drop target" affordance without bumping height.
-                'flex items-center gap-2 h-9 px-3 border border-dashed border-app-border rounded-lg cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors text-left'
+              ? // Mirror the TextInput md size + chrome (`h-9`, `rounded-lg`, solid
+                // `border-app-border`, `bg-app-canvas`) so this dropzone aligns
+                // visually with sibling text/select inputs in dense grids.
+                'flex items-center gap-2 h-9 px-3 border border-app-border rounded-lg bg-app-canvas cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 transition-colors text-left'
               : `border-2 border-dashed border-app-border rounded-lg text-center cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 hover:bg-app-hover/50 transition-colors ${
                   size === 'sm' ? 'p-2.5' : 'p-4'
                 }`
@@ -170,7 +170,7 @@ export function FileUpload({
           {variant === 'minimal' ? (
             <>
               <svg
-                className="w-5 h-5 shrink-0 text-brand-500 dark:text-brand-400"
+                className="w-4 h-4 shrink-0 text-app-fg-muted"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -183,10 +183,9 @@ export function FileUpload({
                   d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"
                 />
               </svg>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-app-fg leading-tight">Choose or drop</p>
-                <p className="text-[10px] text-app-fg-muted leading-tight mt-0.5">Max {maxSizeMB}MB</p>
-              </div>
+              <span className="text-sm text-app-fg-muted truncate">
+                Choose file <span className="text-[11px]">· max {maxSizeMB}MB</span>
+              </span>
             </>
           ) : (
             <>

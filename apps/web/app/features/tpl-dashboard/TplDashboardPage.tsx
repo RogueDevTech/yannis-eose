@@ -244,7 +244,7 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
                       {formatNaira(Number(order.totalAmount))}
                     </span>
                   )}
-                  <OrderStatusBadge status={order.status} />
+                  <OrderStatusBadge status={order.status} expanded />
                 </div>
               </Link>
             ))}

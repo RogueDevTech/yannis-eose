@@ -16,14 +16,36 @@ const SCROLL_DELTA = 280;
 const labelClass = 'text-xs font-medium text-app-fg-muted uppercase tracking-wider';
 const valueClass = 'text-xl font-bold mt-0.5';
 
-export function OverviewStatStripSkeleton({ count }: { count: number }) {
+export function OverviewStatStripSkeleton({
+  count,
+  labels,
+  tileClassName = '',
+}: {
+  count: number;
+  /**
+   * Optional real labels for each tile. When provided, the labels render as
+   * real text and ONLY the value below pulses (App Shell pattern). When
+   * omitted, both label and value pulse — the legacy behaviour.
+   */
+  labels?: string[];
+  tileClassName?: string;
+}) {
+  const tiles = Array.from({ length: count });
+  const hasLabels = !!labels && labels.length > 0;
   return (
-    <div className="card !p-4 animate-pulse">
+    <div className="card !p-4">
       <div className="flex flex-nowrap gap-2 overflow-x-auto scrollbar-hide pb-0.5">
-        {Array.from({ length: count }).map((_, i) => (
-          <div key={i} className="shrink-0 min-w-[5rem] text-center px-2 py-1.5 rounded-lg bg-app-hover">
-            <div className="h-3 w-14 mx-auto rounded bg-app-hover" />
-            <div className="h-6 w-8 mx-auto rounded bg-app-hover mt-1.5" />
+        {tiles.map((_, i) => (
+          <div
+            key={i}
+            className={`shrink-0 min-w-[5rem] text-center px-2 py-1.5 rounded-lg bg-app-hover/50 ${tileClassName}`}
+          >
+            {hasLabels ? (
+              <div className={labelClass}>{labels[i] ?? ''}</div>
+            ) : (
+              <div className="h-3 w-14 mx-auto rounded bg-app-hover animate-pulse" />
+            )}
+            <div className="h-6 w-8 mx-auto rounded bg-app-hover mt-1.5 animate-pulse" />
           </div>
         ))}
       </div>

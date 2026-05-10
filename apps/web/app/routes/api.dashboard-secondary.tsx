@@ -11,7 +11,7 @@ import { extractTrpc } from '~/lib/trpc-extract.server';
 import { isAdminLevel } from '~/lib/rbac';
 import type { DashboardData } from '~/features/dashboard/types';
 
-const ROLES_NEED_METRICS = ['HEAD_OF_CS', 'CS_AGENT', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'] as const;
+const ROLES_NEED_METRICS = ['HEAD_OF_CS', 'CS_CLOSER', 'HEAD_OF_MARKETING', 'MEDIA_BUYER'] as const;
 
 const defaultMetrics: DashboardData['metrics'] = {
   totalSpend: 0,
@@ -64,7 +64,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' ? { mediaBuyerId: user.id } : {};
-  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam });
+  const assignedCsParam = role === 'CS_CLOSER' ? { assignedCsId: user.id } : {};
+  const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
   const needsMetrics =

@@ -13,7 +13,7 @@ import { EXPORT_DATE_PRESET_OPTIONS, type ExportConfig } from '~/lib/export-conf
 import type { ExportReportActionData } from '~/lib/export-report.server';
 
 export type ExportModalPicklists = {
-  csAgents?: Array<{ id: string; name: string }>;
+  csClosers?: Array<{ id: string; name: string }>;
   mediaBuyers?: Array<{ id: string; name: string }>;
   products?: Array<{ id: string; name: string }>;
   campaigns?: Array<{ id: string; name: string }>;
@@ -215,10 +215,10 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
     return [{ value: '', label: 'Any campaign' }, ...picklists.campaigns.map((c) => ({ value: c.id, label: c.name }))];
   }, [picklists?.campaigns]);
 
-  const csAgentOptions = useMemo(() => {
-    if (!picklists?.csAgents) return [];
-    return [{ value: '', label: 'Use page filter / all' }, ...picklists.csAgents.map((c) => ({ value: c.id, label: c.name }))];
-  }, [picklists?.csAgents]);
+  const csCloserOptions = useMemo(() => {
+    if (!picklists?.csClosers) return [];
+    return [{ value: '', label: 'Use page filter / all' }, ...picklists.csClosers.map((c) => ({ value: c.id, label: c.name }))];
+  }, [picklists?.csClosers]);
 
   const recipientOptions = useMemo(() => {
     if (!picklists?.recipients) return [];
@@ -262,21 +262,22 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
               onChange={(e) => setExportStatus(e.target.value)}
               options={[
                 { value: '', label: 'Any status' },
-                { value: 'UNPROCESSED', label: 'Unprocessed' },
-                { value: 'CS_ASSIGNED', label: 'CS assigned' },
-                { value: 'CS_ENGAGED', label: 'CS engaged' },
+                { value: 'UNPROCESSED', label: 'Unassigned' },
+                { value: 'CS_ASSIGNED', label: 'Assigned' },
+                { value: 'CS_ENGAGED', label: 'Unconfirmed' },
                 { value: 'CONFIRMED', label: 'Confirmed' },
                 { value: 'AGENT_ASSIGNED', label: 'Agent assigned' },
                 { value: 'DELIVERED', label: 'Delivered' },
+                { value: 'REMITTED', label: 'Cash Remitted' },
                 { value: 'CANCELLED', label: 'Cancelled' },
               ]}
             />
-            {csAgentOptions.length > 0 && (
+            {csCloserOptions.length > 0 && (
               <SearchableSelect
                 label="Assigned closer"
                 value={exportAssignedCsId}
                 onChange={setExportAssignedCsId}
-                options={csAgentOptions}
+                options={csCloserOptions}
                 placeholder="Use page filter / all"
                 controlSize="sm"
               />

@@ -84,6 +84,20 @@ export function MediaBuyerBalanceCard({ row, className = '', ordersDateFilters, 
           <span>Spent</span>
           <span>{formatNaira(Number(row.totalSpend))}</span>
         </div>
+        <div className="flex justify-between text-app-fg-muted">
+          <span>Orders</span>
+          {row.totalOrders != null ? (
+            <Link
+              to={buildOrdersHref(row.userId, ordersDateFilters)}
+              prefetch="intent"
+              className="font-medium tabular-nums text-app-fg hover:text-brand-600 dark:hover:text-brand-400"
+            >
+              {row.totalOrders.toLocaleString()}
+            </Link>
+          ) : (
+            <span className="tabular-nums">{'\u2014'}</span>
+          )}
+        </div>
         {row.confirmationRate != null && (
           <div className="flex justify-between text-app-fg-muted">
             <span>Confirmation rate</span>

@@ -49,7 +49,7 @@ function csOrdersShellPlaceholderRows(): Order[] {
 const CS_ORDERS_SHELL_ROW_DATA = csOrdersShellPlaceholderRows();
 
 function csOrdersShellTableColumns(
-  showCSAgentColumn: boolean,
+  showCSCloserColumn: boolean,
   showCampaignColumn: boolean,
 ): CompactTableColumn<Order>[] {
   const cols: CompactTableColumn<Order>[] = [
@@ -64,7 +64,7 @@ function csOrdersShellTableColumns(
       render: () => <TableCellTextPulse className="w-[9rem] max-w-[min(14rem,100%)]" />,
     },
   ];
-  if (showCSAgentColumn) {
+  if (showCSCloserColumn) {
     cols.push({
       key: 'closer',
       header: 'Assigned closer',
@@ -124,7 +124,6 @@ function csTeamShellTableColumns(): CompactTableColumn<{ id: string }>[] {
   return [
     { key: 'member', header: 'Member', render: () => <TableCellTextPulse className="w-[10rem]" /> },
     { key: 'workload', header: 'Workload', render: () => <TableCellTextPulse className="w-[6rem]" /> },
-    { key: 'activity', header: 'Activity', render: () => <TableCellTextPulse className="w-[8rem]" /> },
     {
       key: 'assigned',
       header: 'Assigned',
@@ -188,23 +187,23 @@ function csTeamShellTableColumns(): CompactTableColumn<{ id: string }>[] {
 /** CS orders list — mirrors OrdersListPage chrome (date strip, live dot, stat labels, chart shell, table pulses). */
 export function CSOrdersLoadingShell({
   filters,
-  isCSAgent,
+  isCSCloser,
   liveEvents,
-  showCSAgentColumn = false,
+  showCSCloserColumn = false,
   showCampaignColumn = false,
 }: {
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
-  isCSAgent: boolean;
+  isCSCloser: boolean;
   liveEvents?: string[];
-  showCSAgentColumn?: boolean;
+  showCSCloserColumn?: boolean;
   showCampaignColumn?: boolean;
 }) {
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title={isCSAgent ? 'My Orders' : 'CS Orders'}
+        title={isCSCloser ? 'My Orders' : 'CS Orders'}
         description={
-          isCSAgent ? 'Your assigned orders and pipeline' : 'All customer orders for the CS team'
+          isCSCloser ? 'Your assigned orders and pipeline' : 'All customer orders for the CS team'
         }
         actions={
           <PageHeaderMobileTools
@@ -246,7 +245,7 @@ export function CSOrdersLoadingShell({
       />
       <OverviewStatStrip items={csOrdersStatPulseStripItems()} />
 
-      {isCSAgent ? (
+      {isCSCloser ? (
         <div className="card animate-pulse space-y-3" aria-hidden>
           <div className="h-4 w-28 rounded bg-app-hover" />
           <div className="flex items-center gap-3">
@@ -264,7 +263,7 @@ export function CSOrdersLoadingShell({
       <CompactTable<Order>
         rows={CS_ORDERS_SHELL_ROW_DATA}
         rowKey={(o) => o.id}
-        columns={csOrdersShellTableColumns(showCSAgentColumn, showCampaignColumn)}
+        columns={csOrdersShellTableColumns(showCSCloserColumn, showCampaignColumn)}
         emptyTitle="Loading…"
         emptyDescription=""
       />
@@ -283,7 +282,7 @@ export function CSTeamLoadingShell({
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Team Analysis"
-        description="Closer workload, activity, and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
+        description="Closer workload and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
         actions={
           <PageHeaderMobileTools
             sheetTitle="CS team tools"

@@ -769,7 +769,19 @@ export function Header({
 
 /* ── Header Branch Switcher ───────────────────────────────────────────── */
 
-const ALL_BRANCHES_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
+// Anyone with "view all branches" capability gets the "All branches" toggle in the
+// switcher — admin-class AND org-wide department heads. CEO directive 2026-05-09:
+// these users land on their primary branch by default but must be able to flip
+// back to a global view through the switcher, same as SuperAdmin always could.
+// Mirrors `canViewAllBranches` (apps/web/app/lib/rbac.ts) — kept as a Set here so
+// the existing single-call callers (`ALL_BRANCHES_ROLES.has(role)`) work unchanged.
+const ALL_BRANCHES_ROLES = new Set([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'HEAD_OF_CS',
+  'HEAD_OF_MARKETING',
+  'HEAD_OF_LOGISTICS',
+]);
 
 function HeaderBranchSwitcher({
   branches,

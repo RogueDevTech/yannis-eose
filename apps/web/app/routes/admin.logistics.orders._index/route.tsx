@@ -7,6 +7,7 @@ import {
   apiRequest,
   BULK_ORDER_MUTATION_TIMEOUT_MS,
   getSessionCookie,
+  parsePerPage,
   requirePermission,
   safeStatus,
   defaultThisMonthRange,
@@ -22,7 +23,9 @@ export const meta: MetaFunction = () => [
   { title: 'Logistics Orders — Yannis EOSE' },
 ];
 
-const ORDERS_PER_PAGE = 40;
+/** Default page size for the logistics orders table — historical default is 40. The user
+ *  can switch via `?perPage=`. Keeps 40 in the allowed set so the default URL works. */
+const LOGISTICS_PAGE_SIZE_OPTIONS = [20, 40, 50, 100];
 const LOGISTICS_STATUS_SCOPE = [
   'CONFIRMED',
   'AGENT_ASSIGNED',
@@ -47,12 +50,18 @@ export interface LogisticsOrder extends Order {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'logistics.read');
   const cookie = getSessionCookie(request);
+  const url = new URL(request.url);
+  // URL-driven page size — defaults to 40 (this page's historical default), allows
+  // [20, 40, 50, 100]. The shared <Pagination> picker reads this from `?perPage=`.
+  const { perPage: ORDERS_PER_PAGE } = parsePerPage(url.searchParams, {
+    defaultPerPage: 40,
+    allowed: LOGISTICS_PAGE_SIZE_OPTIONS,
+  });
 
   const isTplManager = user.role === 'TPL_MANAGER';
   const effectiveLogisticsLocationId =
     isTplManager && user.logisticsLocationId ? user.logisticsLocationId : undefined;
 
-  const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const status = url.searchParams.get('status') || 'ALL';
   const search = url.searchParams.get('search') || undefined;

@@ -11,7 +11,7 @@ export const userRoleSchema = z.enum([
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'HEAD_OF_CS',
-  'CS_AGENT',
+  'CS_CLOSER',
   'FINANCE_OFFICER',
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
@@ -188,7 +188,7 @@ export type UpdateStaffInput = z.infer<typeof updateStaffSchema>;
 // ============================================
 
 export const listUsersSchema = z.object({
-  search: z.string().optional(),
+  search: z.string().max(120).optional(),
   role: userRoleSchema.optional(),
   status: z.enum(['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED']).optional(),
   branchId: z.string().uuid().optional(),
@@ -217,9 +217,24 @@ export const listUsersSchema = z.object({
    * one DB round-trip from the response.
    */
   includeBranchMemberships: z.boolean().optional(),
+  /** When true, only users currently on probation (`is_probation`). HR users list URL: `probationOnly=1`. */
+  probationOnly: z.boolean().optional(),
 });
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;
+
+/** Same filters as `listUsersSchema` without pagination/sort — HR roster KPI strip (`users.rosterSummary`). */
+export const usersRosterSummarySchema = listUsersSchema.pick({
+  search: true,
+  role: true,
+  status: true,
+  branchId: true,
+  userIds: true,
+  allBranches: true,
+  probationOnly: true,
+});
+
+export type ListUsersRosterSummaryInput = z.infer<typeof usersRosterSummarySchema>;
 
 /** Active-user name/email search for push broadcast recipient picker (narrow permission). */
 export const searchUsersForPushTargetSchema = z.object({

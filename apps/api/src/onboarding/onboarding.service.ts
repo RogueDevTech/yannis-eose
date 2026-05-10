@@ -221,10 +221,7 @@ export class OnboardingService {
       setBankIfPresent('payoutAccountNumber', 'payoutAccountNumber');
       setBankIfPresent('payoutBankCode', 'payoutBankCode');
       if (Object.keys(bankPatch).length > 0) {
-        await tx
-          .update(schema.users)
-          .set(bankPatch)
-          .where(eq(schema.users.id, targetUserId));
+        await tx.update(schema.users).set(bankPatch).where(eq(schema.users.id, targetUserId));
       }
 
       let onboardingRow: typeof schema.staffOnboarding.$inferSelect;
@@ -571,7 +568,9 @@ export class OnboardingService {
       actor.role === 'SUPER_ADMIN' ||
       (actor.permissions ?? []).includes(canonicalPermissionCode('branches.manage'));
     const skipBranchScope = input.allBranches === true && canViewAllBranches;
-    const branchFilter = skipBranchScope ? input.branchId : (input.branchId ?? currentBranchId ?? undefined);
+    const branchFilter = skipBranchScope
+      ? input.branchId
+      : (input.branchId ?? currentBranchId ?? undefined);
 
     if (branchFilter) {
       conditions.push(
@@ -680,7 +679,13 @@ export class OnboardingService {
     actor: SessionUser,
     currentBranchId: string | null,
     opts: { branchId?: string; allBranches?: boolean } = {},
-  ): Promise<{ total: number; NOT_STARTED: number; IN_PROGRESS: number; SUBMITTED: number; APPROVED: number }> {
+  ): Promise<{
+    total: number;
+    NOT_STARTED: number;
+    IN_PROGRESS: number;
+    SUBMITTED: number;
+    APPROVED: number;
+  }> {
     if (!this.canManageAnyOnboarding(actor)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
@@ -694,7 +699,9 @@ export class OnboardingService {
       actor.role === 'SUPER_ADMIN' ||
       (actor.permissions ?? []).includes(canonicalPermissionCode('branches.manage'));
     const skipBranchScope = opts.allBranches === true && canViewAllBranches;
-    const branchFilter = skipBranchScope ? opts.branchId : (opts.branchId ?? currentBranchId ?? undefined);
+    const branchFilter = skipBranchScope
+      ? opts.branchId
+      : (opts.branchId ?? currentBranchId ?? undefined);
 
     if (branchFilter) {
       conditions.push(

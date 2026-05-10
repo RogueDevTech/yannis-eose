@@ -79,6 +79,9 @@ function targetSummary(req: PermissionRequest): string {
   return '—';
 }
 
+/** Resolved from `branches.list` — maps permission-request payload branch UUIDs to labels in modals. */
+export type PermissionRequestBranchPicklist = ReadonlyArray<{ id: string; name: string }>;
+
 export function PermissionRequestsPage({
   requests,
   total = 0,
@@ -86,6 +89,7 @@ export function PermissionRequestsPage({
   totalPages = 1,
   limit: _limit = 20,
   statusCounts,
+  branches = [],
   canApprove = false,
   canApproveProductArchive = false,
   canApproveOrderLinePriceChange = false,
@@ -99,6 +103,8 @@ export function PermissionRequestsPage({
   totalPages?: number;
   limit?: number;
   statusCounts: { pending: number; approved: number; rejected: number; all: number };
+  /** Viewer-visible branches (SuperAdmin: all; others: memberships). Used to label USER_CREATION payloads. */
+  branches?: PermissionRequestBranchPicklist;
   canApprove?: boolean;
   /** Only Super Admin may approve/reject product archive requests (even if user has audit.read). */
   canApproveProductArchive?: boolean;
@@ -111,6 +117,14 @@ export function PermissionRequestsPage({
   const fetcher = useFetcher();
   const permissionReqSurface = useFetcherActionSurface(fetcher);
   const [viewing, setViewing] = useState<PermissionRequest | null>(null);
+
+  const branchNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const b of branches) {
+      if (b.id && b.name) m.set(b.id, b.name);
+    }
+    return m;
+  }, [branches]);
   const [modal, setModal] = useState<{ requestId: string; action: 'APPROVED' | 'REJECTED' } | null>(null);
   const [reason, setReason] = useState('');
   const fetcherError = (fetcher.data as { error?: string })?.error;
@@ -385,7 +399,7 @@ export function PermissionRequestsPage({
                   : []),
               ]}
             />
-            <RequestPayloadView request={viewing} />
+            <RequestPayloadView request={viewing} branchNameById={branchNameById} />
           </div>
           <div className="flex flex-wrap gap-2 justify-end shrink-0 pt-2 border-t border-app-border pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <Button type="button" variant="secondary" size="sm" onClick={() => setViewing(null)}>
@@ -550,7 +564,14 @@ interface ProductArchivePayload {
   reason?: string;
 }
 
-function RequestPayloadView({ request }: { request: PermissionRequest }) {
+function RequestPayloadView({
+  request,
+  branchNameById,
+}: {
+  request: PermissionRequest;
+  /** From loader `branches.list`; unknown IDs fall back to a short UUID hint. */
+  branchNameById: ReadonlyMap<string, string>;
+}) {
   const payload = request.payload as Record<string, unknown> | null;
   if (!payload) return null;
 
@@ -558,7 +579,9 @@ function RequestPayloadView({ request }: { request: PermissionRequest }) {
     return <OrderPayloadView payload={payload as OrderPayload} kind={request.type} />;
   }
   if (request.type === 'USER_CREATION') {
-    return <UserCreationPayloadView payload={payload as UserCreationPayload} />;
+    return (
+      <UserCreationPayloadView payload={payload as UserCreationPayload} branchNameById={branchNameById} />
+    );
   }
   if (request.type === 'PRODUCT_ARCHIVE') {
     return <ProductArchivePayloadView payload={payload as ProductArchivePayload} />;
@@ -651,7 +674,33 @@ function OrderPayloadView({ payload, kind }: { payload: OrderPayload; kind: 'ORD
   );
 }
 
-function UserCreationPayloadView({ payload }: { payload: UserCreationPayload }) {
+function userCreationBranchLabel(id: string, branchNameById: ReadonlyMap<string, string>): string {
+  const name = branchNameById.get(id);
+  if (name) return name;
+  return id.length >= 8 ? `Branch · ${id.slice(0, 8)}…` : id;
+}
+
+function UserCreationPayloadView({
+  payload,
+  branchNameById,
+}: {
+  payload: UserCreationPayload;
+  branchNameById: ReadonlyMap<string, string>;
+}) {
+  const branchIdsUnique = [
+    ...new Set([...(payload.branchIds ?? []), ...(payload.primaryBranchId ? [payload.primaryBranchId] : [])]),
+  ];
+  const sortedBranchIds = [...branchIdsUnique].sort((a, b) => {
+    const primary = payload.primaryBranchId;
+    if (primary) {
+      if (a === primary && b !== primary) return -1;
+      if (b === primary && a !== primary) return 1;
+    }
+    return userCreationBranchLabel(a, branchNameById).localeCompare(
+      userCreationBranchLabel(b, branchNameById),
+    );
+  });
+
   return (
     <div>
       <p className="text-xs font-medium text-app-fg-muted mb-1.5">User to create</p>
@@ -661,8 +710,24 @@ function UserCreationPayloadView({ payload }: { payload: UserCreationPayload }) 
           { label: 'Email', value: payload.email ?? '—' },
           { label: 'Role', value: payload.role ?? '—' },
           ...(payload.phone ? [{ label: 'Phone', value: payload.phone }] : []),
-          ...(payload.branchIds && payload.branchIds.length > 0
-            ? [{ label: 'Branches', value: `${payload.branchIds.length} branch(es)` }]
+          ...(sortedBranchIds.length > 0
+            ? [
+                {
+                  label: 'Branches',
+                  value: (
+                    <ul className="list-disc pl-4 text-sm text-app-fg space-y-0.5">
+                      {sortedBranchIds.map((id) => (
+                        <li key={id}>
+                          {userCreationBranchLabel(id, branchNameById)}
+                          {payload.primaryBranchId === id ? (
+                            <span className="text-app-fg-muted font-normal"> (primary)</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ),
+                },
+              ]
             : []),
         ]}
       />

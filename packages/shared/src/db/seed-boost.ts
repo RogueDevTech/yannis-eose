@@ -55,7 +55,7 @@ async function boostSeed() {
 
   const users = await sql`SELECT id, role, logistics_location_id FROM users WHERE status = 'ACTIVE'`;
   const superAdmin = users.find((u: Record<string, unknown>) => u.role === 'SUPER_ADMIN');
-  const csAgents = users.filter((u: Record<string, unknown>) => u.role === 'CS_AGENT');
+  const csClosers = users.filter((u: Record<string, unknown>) => u.role === 'CS_CLOSER');
   const mediaBuyers = users.filter((u: Record<string, unknown>) => u.role === 'MEDIA_BUYER');
   const riders = users.filter((u: Record<string, unknown>) => u.role === 'TPL_RIDER');
   const tplManagers = users.filter((u: Record<string, unknown>) => u.role === 'TPL_MANAGER');
@@ -63,7 +63,7 @@ async function boostSeed() {
   const headOfLogistics = users.find((u: Record<string, unknown>) => u.role === 'HEAD_OF_LOGISTICS');
   const hrManager = users.find((u: Record<string, unknown>) => u.role === 'HR_MANAGER');
 
-  if (!superAdmin || csAgents.length === 0 || mediaBuyers.length === 0 || riders.length === 0) {
+  if (!superAdmin || csClosers.length === 0 || mediaBuyers.length === 0 || riders.length === 0) {
     console.error('Required base data not found (users/roles). Prepare your base data, then run db:seed:boost.');
     await sql.end();
     process.exit(1);
@@ -198,9 +198,9 @@ async function boostSeed() {
     const mediaBuyerId = campaign.media_buyer_id as string;
     const campaignId = campaign.id as string;
 
-    // Pick CS agent
-    const csAgent = faker.helpers.arrayElement(csAgents);
-    const csAgentId = csAgent.id as string;
+    // Pick CS closer
+    const csCloser = faker.helpers.arrayElement(csClosers);
+    const csCloserId = csCloser.id as string;
 
     // Pick 3PL location and rider
     const tplLocation = faker.helpers.arrayElement(tplLocations);
@@ -254,7 +254,7 @@ async function boostSeed() {
         total_amount, landed_cost, delivery_fee, delivery_otp, delivery_gps_lat, delivery_gps_lng,
         items, created_at, delivered_at, preferred_delivery_date
       ) VALUES (
-        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
+        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csCloserId},
         ${providerId}, ${locationId}, ${riderId}, ${status},
         ${customerName}, ${phoneHash}, ${customerPhone}, ${address}, ${address},
         ${String(totalAmount)}, ${String(totalLandedCost)}, ${String(deliveryFee)},
@@ -272,7 +272,7 @@ async function boostSeed() {
     // Insert call log (all delivered orders had successful calls)
     await sql`
       INSERT INTO call_logs (id, order_id, agent_id, call_token, call_status, duration_seconds)
-      VALUES (gen_random_uuid(), ${orderId}, ${csAgentId}, ${randomUUID()}, 'COMPLETED', ${faker.number.int({ min: 20, max: 180 })})
+      VALUES (gen_random_uuid(), ${orderId}, ${csCloserId}, ${randomUUID()}, 'COMPLETED', ${faker.number.int({ min: 20, max: 180 })})
     `;
 
     if (status !== 'IN_TRANSIT') {
@@ -305,8 +305,8 @@ async function boostSeed() {
     const campaign = faker.helpers.arrayElement(campaigns);
     const mediaBuyerId = campaign.media_buyer_id as string;
     const campaignId = campaign.id as string;
-    const csAgent = faker.helpers.arrayElement(csAgents);
-    const csAgentId = csAgent.id as string;
+    const csCloser = faker.helpers.arrayElement(csClosers);
+    const csCloserId = csCloser.id as string;
 
     const tplLocation = faker.helpers.arrayElement(tplLocations);
     const locationId = tplLocation.id as string;
@@ -334,7 +334,7 @@ async function boostSeed() {
         rider_id, status, customer_name, customer_phone_hash, customer_phone, customer_address, delivery_address,
         total_amount, landed_cost, delivery_fee, delivery_otp, items, created_at, delivered_at, preferred_delivery_date
       ) VALUES (
-        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
+        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csCloserId},
         ${providerId}, ${locationId}, ${riderId}, 'IN_TRANSIT',
         ${customerName}, ${phoneHash}, ${customerPhone}, ${address}, ${address},
         ${String(totalAmount)}, ${String(totalLandedCost)}, ${String(deliveryFee)},
@@ -349,7 +349,7 @@ async function boostSeed() {
 
     await sql`
       INSERT INTO call_logs (id, order_id, agent_id, call_token, call_status, duration_seconds)
-      VALUES (gen_random_uuid(), ${orderId}, ${csAgentId}, ${randomUUID()}, 'COMPLETED', ${faker.number.int({ min: 20, max: 180 })})
+      VALUES (gen_random_uuid(), ${orderId}, ${csCloserId}, ${randomUUID()}, 'COMPLETED', ${faker.number.int({ min: 20, max: 180 })})
     `;
 
     pendingConfirmationInfos.push({ orderId, riderId });
@@ -453,8 +453,8 @@ async function boostSeed() {
     const campaign = faker.helpers.arrayElement(campaigns);
     const mediaBuyerId = campaign.media_buyer_id as string;
     const campaignId = campaign.id as string;
-    const csAgent = faker.helpers.arrayElement(csAgents);
-    const csAgentId = csAgent.id as string;
+    const csCloser = faker.helpers.arrayElement(csClosers);
+    const csCloserId = csCloser.id as string;
     const tplLocation = faker.helpers.arrayElement(tplLocations);
     const locationId = tplLocation.id as string;
     const providerId = tplLocation.provider_id as string;
@@ -478,7 +478,7 @@ async function boostSeed() {
         rider_id, status, customer_name, customer_phone_hash, customer_phone, customer_address, delivery_address,
         total_amount, landed_cost, delivery_fee, delivery_otp, items, created_at, delivered_at, preferred_delivery_date
       ) VALUES (
-        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csAgentId},
+        ${orderId}, ${defaultBranchId}, ${campaignId}, ${mediaBuyerId}, ${csCloserId},
         ${providerId}, ${locationId}, ${riderId}, 'DELIVERED',
         ${customerName}, ${phoneHash}, ${customerPhone}, ${address}, ${address},
         ${String(totalAmount)}, ${String(totalLandedCost)}, ${String(deliveryFee)},
@@ -572,7 +572,7 @@ async function boostSeed() {
   // ── Extra payout records for delivered orders ───────────────────
   console.log('  Creating performance-based payout records...');
   // Create bonus payouts for top-performing agents
-  const topCsAgents = csAgents.slice(0, 5);
+  const topCsAgents = csClosers.slice(0, 5);
   for (const agent of topCsAgents) {
     await sql`
       INSERT INTO payout_records (id, staff_id, period_start, period_end, base_salary, performance_bonus, add_ons_total, deductions_total, total_payout, status)
@@ -611,10 +611,10 @@ async function boostSeed() {
 
   // ── Positive earnings adjustments ──────────────────────────────
   console.log('  Creating positive earnings adjustments...');
-  for (let i = 0; i < Math.min(8, csAgents.length); i++) {
+  for (let i = 0; i < Math.min(8, csClosers.length); i++) {
     await sql`
       INSERT INTO earnings_adjustments (id, staff_id, amount, category, reason, approved_by)
-      VALUES (gen_random_uuid(), ${csAgents[i]!.id as string}, '3000.00', 'BONUS', 'Performance bonus — high delivery rate', ${hrManager?.id ?? superAdmin.id})
+      VALUES (gen_random_uuid(), ${csClosers[i]!.id as string}, '3000.00', 'BONUS', 'Performance bonus — high delivery rate', ${hrManager?.id ?? superAdmin.id})
     `;
   }
   for (let i = 0; i < Math.min(5, mediaBuyers.length); i++) {

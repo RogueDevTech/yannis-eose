@@ -4,7 +4,7 @@ export const ROLE_LABELS: Record<string, string> = {
   HEAD_OF_MARKETING: 'Head of Marketing',
   MEDIA_BUYER: 'Media Buyer',
   HEAD_OF_CS: 'Head of CS',
-  CS_AGENT: 'CS Agent',
+  CS_CLOSER: 'CS Closer',
   FINANCE_OFFICER: 'Finance Officer',
   HEAD_OF_LOGISTICS: 'Head of Logistics',
   LOGISTICS_MANAGER: 'Logistics Manager',

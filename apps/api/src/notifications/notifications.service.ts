@@ -1271,7 +1271,7 @@ export class NotificationsService {
 
           const userName = userRows[0]?.name ?? 'Team Member';
 
-          // Fetch pending order count for this user (CS agents context)
+          // Fetch pending order count for this user (CS closers context)
           const orderCountRows = await this.db
             .select({ count: count() })
             .from(schema.orders)

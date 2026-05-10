@@ -13,8 +13,17 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { formatNaira } from '~/lib/format-amount';
-import { STATUS_HEX, STATUS_LABELS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
+import { STATUS_HEX, STATUS_LABELS, STATUS_OPTIONS, STATUS_TEXT_CLASS } from '~/features/shared/order-status';
 import type { CEODashboardData, CEODashboardFilters, ChartDataPayload } from './types';
+
+/**
+ * The CEO's six top-level order buckets (CEO directive 2026-05-09):
+ * Unassigned, Assigned, Unconfirmed, Confirmed, Delivered, Cash Remitted.
+ * Logistics sub-stages and exception states are intentionally hidden from the
+ * pipeline pill / pie chart on this dashboard — they're still visible in the
+ * timeline and detail views. See order-status.ts for the source-of-truth list.
+ */
+const CEO_VISIBLE_STATUSES = new Set(STATUS_OPTIONS.filter((s) => s !== 'ALL'));
 
 function buildChartDataUrl(filters: CEODashboardFilters): string {
   const params = new URLSearchParams();
@@ -537,12 +546,12 @@ export function CEODashboardPage({
           Order Pipeline
         </h2>
 
-        {/* Order pipeline chart: Volume → CS Engaged → Confirmed → Logistics distributed → Delivered (chart view only) */}
+        {/* Order pipeline chart: Volume → Unconfirmed → Confirmed → Logistics distributed → Delivered (chart view only) */}
         {showChartView && !isChartLoading && (
         <div className="card mb-4">
           <h3 className="text-base font-semibold text-app-fg mb-2">Order funnel</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
+            Volume, Unconfirmed, Confirmed, Logistics distributed, and Delivered for the selected period.
           </p>
           <div className="h-64 min-h-[256px] w-full">
             <ClientOnly fallback={<div className="h-full min-h-[256px] animate-pulse rounded bg-app-hover" />}>
@@ -552,7 +561,7 @@ export function CEODashboardPage({
                 layout="vertical"
                 data={[
                   { stage: 'Volume', count: chartDisplayData.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
-                  { stage: 'CS Engaged', count: chartDisplayData.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
+                  { stage: 'Unconfirmed', count: chartDisplayData.orderPipelineChart?.unconfirmed ?? 0, fill: PIPELINE_CHART_COLORS[1] },
                   { stage: 'Confirmed', count: chartDisplayData.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
                   { stage: 'Logistics distributed', count: chartDisplayData.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
                   { stage: 'Delivered', count: chartDisplayData.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
@@ -592,7 +601,7 @@ export function CEODashboardPage({
                   data={
                     orderPipeline.total > 0
                       ? Object.entries(orderPipeline.statusCounts)
-                          .filter(([status, count]) => status !== 'REMITTED' && count > 0)
+                          .filter(([status, count]) => CEO_VISIBLE_STATUSES.has(status) && count > 0)
                           .sort(([, a], [, b]) => b - a)
                           .map(([status, value]) => ({
                             name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
@@ -611,7 +620,7 @@ export function CEODashboardPage({
                 >
                   {orderPipeline.total > 0
                     ? Object.entries(orderPipeline.statusCounts)
-                        .filter(([status, count]) => status !== 'REMITTED' && count > 0)
+                        .filter(([status, count]) => CEO_VISIBLE_STATUSES.has(status) && count > 0)
                         .sort(([, a], [, b]) => b - a)
                         .map(([status]) => (
                           <Cell key={status} fill={STATUS_HEX[status] ?? '#64748b'} />
@@ -632,11 +641,11 @@ export function CEODashboardPage({
           <OverviewStatStrip
             embedded
             showScrollControls={
-              Object.entries(orderPipeline.statusCounts).filter(([s, c]) => s !== 'REMITTED' && c > 0).length > 4
+              Object.entries(orderPipeline.statusCounts).filter(([s, c]) => CEO_VISIBLE_STATUSES.has(s) && c > 0).length > 4
             }
             tileClassName="min-w-[5.5rem]"
             items={Object.entries(orderPipeline.statusCounts)
-              .filter(([status, count]) => status !== 'REMITTED' && count > 0)
+              .filter(([status, count]) => CEO_VISIBLE_STATUSES.has(status) && count > 0)
               .sort(([, a], [, b]) => b - a)
               .map(([status, count]) => ({
                 label: STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status.replace(/_/g, ' '),
@@ -861,7 +870,7 @@ export function CEODashboardPage({
                     data={
                       orderPipeline.total > 0
                         ? Object.entries(orderPipeline.statusCounts)
-                            .filter(([status, count]) => status !== 'REMITTED' && count > 0)
+                            .filter(([status, count]) => CEO_VISIBLE_STATUSES.has(status) && count > 0)
                             .sort(([, a], [, b]) => b - a)
                             .map(([status, value]) => ({
                               name: STATUS_LABELS[status] ?? status.replace(/_/g, ' '),
@@ -880,7 +889,7 @@ export function CEODashboardPage({
                   >
                     {orderPipeline.total > 0
                       ? Object.entries(orderPipeline.statusCounts)
-                          .filter(([status, count]) => status !== 'REMITTED' && count > 0)
+                          .filter(([status, count]) => CEO_VISIBLE_STATUSES.has(status) && count > 0)
                           .sort(([, a], [, b]) => b - a)
                           .map(([status]) => (
                             <Cell key={status} fill={STATUS_HEX[status] ?? '#64748b'} />
@@ -901,7 +910,7 @@ export function CEODashboardPage({
         <div className="card">
           <h3 className="text-base font-semibold text-app-fg mb-2">Order funnel</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            Volume, CS engaged, Confirmed, Logistics distributed, and Delivered for the selected period.
+            Volume, Unconfirmed, Confirmed, Logistics distributed, and Delivered for the selected period.
           </p>
           <div className="h-64 min-h-[256px] w-full min-w-0">
             <ClientOnly fallback={<div className="h-64 min-h-[256px] w-full animate-pulse rounded bg-app-hover" />}>
@@ -911,7 +920,7 @@ export function CEODashboardPage({
                 layout="vertical"
                 data={[
                   { stage: 'Volume', count: chartDisplayData.orderPipelineChart?.volume ?? 0, fill: PIPELINE_CHART_COLORS[0] },
-                  { stage: 'CS Engaged', count: chartDisplayData.orderPipelineChart?.csEngaged ?? 0, fill: PIPELINE_CHART_COLORS[1] },
+                  { stage: 'Unconfirmed', count: chartDisplayData.orderPipelineChart?.unconfirmed ?? 0, fill: PIPELINE_CHART_COLORS[1] },
                   { stage: 'Confirmed', count: chartDisplayData.orderPipelineChart?.confirmed ?? 0, fill: PIPELINE_CHART_COLORS[2] },
                   { stage: 'Logistics distributed', count: chartDisplayData.orderPipelineChart?.logisticsDistributed ?? 0, fill: PIPELINE_CHART_COLORS[3] },
                   { stage: 'Delivered', count: chartDisplayData.orderPipelineChart?.delivered ?? 0, fill: PIPELINE_CHART_COLORS[4] },
@@ -996,7 +1005,7 @@ export function CEODashboardPage({
 
         {topic === 'cs' && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-app-fg mb-4">CS agent workload</h2>
+          <h2 className="text-lg font-semibold text-app-fg mb-4">CS closer workload</h2>
           <p className="text-sm text-app-fg-muted mb-4">
             Pipeline backlog (pre-confirm queue), per-agent daily duty target (capacity setting), and CS-stage closes
             today (confirm + cancel, Africa/Lagos calendar).
@@ -1043,7 +1052,7 @@ export function CEODashboardPage({
             </div>
           ) : (
             <div className="h-64 flex items-center justify-center rounded-lg bg-app-hover text-app-fg-muted text-sm">
-              No CS agents or workload data available.
+              No CS closers or workload data available.
             </div>
           )}
         </div>

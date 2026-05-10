@@ -24,7 +24,7 @@ const ALL_ROLES: RoleOption[] = [
   { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
   { value: 'MEDIA_BUYER', label: 'Media Buyer' },
   { value: 'HEAD_OF_CS', label: 'Head of CS' },
-  { value: 'CS_AGENT', label: 'CS Agent' },
+  { value: 'CS_CLOSER', label: 'CS Closer' },
   { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
   { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
   { value: 'LOGISTICS_MANAGER', label: 'Logistics Manager' },
@@ -39,7 +39,7 @@ const ROLE_LABELS: Record<string, string> = Object.fromEntries(ALL_ROLES.map((r)
 function getRolesForActor(actorRole: string): RoleOption[] {
   switch (actorRole) {
     case 'HEAD_OF_CS':
-      return ALL_ROLES.filter((r) => r.value === 'CS_AGENT');
+      return ALL_ROLES.filter((r) => r.value === 'CS_CLOSER');
     case 'HEAD_OF_MARKETING':
       return ALL_ROLES.filter((r) => r.value === 'MEDIA_BUYER');
     case 'HEAD_OF_LOGISTICS':
