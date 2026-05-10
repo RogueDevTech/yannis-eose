@@ -20,6 +20,11 @@ export type CsRoutingDispatchResolution = {
    */
   restrictToCloserIds: string[] | null;
   crossBranchServicing: boolean;
+  /**
+   * CS squad whose branch_team_settings control CS_DISPATCH_STRATEGY / CS_CLAIM_CAP for this order.
+   * When routing targets the whole branch (no squad), this is the branch's default CS team (first created).
+   */
+  dispatchSettingsTeamId: string | null;
 };
 
 function assertRoutingBranchScope(actor: SessionUser, ownerBranchId: string): void {
@@ -59,6 +64,17 @@ function stablePickUint32(seed: string, modulo: number): number {
 @Injectable()
 export class CsOrderRoutingService {
   constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>) {}
+
+  /** First CS squad on a branch — used for dispatch-setting inheritance when routing uses branch-wide pool. */
+  async resolveDefaultCsTeamIdForBranch(branchId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ id: schema.branchTeams.id })
+      .from(schema.branchTeams)
+      .where(and(eq(schema.branchTeams.branchId, branchId), eq(schema.branchTeams.department, 'CS')))
+      .orderBy(asc(schema.branchTeams.createdAt))
+      .limit(1);
+    return row?.id ?? null;
+  }
 
   async getRelationshipMode(ownerBranchId: string): Promise<CsRoutingRelationshipMode> {
     const [row] = await this.db
@@ -254,6 +270,7 @@ export class CsOrderRoutingService {
         servicingBranchId: orderBranchId,
         restrictToCloserIds: null,
         crossBranchServicing: false,
+        dispatchSettingsTeamId: await this.resolveDefaultCsTeamIdForBranch(orderBranchId),
       };
     }
 
@@ -280,6 +297,7 @@ export class CsOrderRoutingService {
         servicingBranchId: orderBranchId,
         restrictToCloserIds: null,
         crossBranchServicing: false,
+        dispatchSettingsTeamId: await this.resolveDefaultCsTeamIdForBranch(orderBranchId),
       };
     }
 
@@ -293,6 +311,7 @@ export class CsOrderRoutingService {
         servicingBranchId: orderBranchId,
         restrictToCloserIds: [],
         crossBranchServicing: false,
+        dispatchSettingsTeamId: await this.resolveDefaultCsTeamIdForBranch(orderBranchId),
       };
     }
 
@@ -307,6 +326,7 @@ export class CsOrderRoutingService {
         servicingBranchId: orderBranchId,
         restrictToCloserIds: [],
         crossBranchServicing: false,
+        dispatchSettingsTeamId: await this.resolveDefaultCsTeamIdForBranch(orderBranchId),
       };
     }
 
@@ -318,6 +338,7 @@ export class CsOrderRoutingService {
         servicingBranchId,
         restrictToCloserIds: null,
         crossBranchServicing,
+        dispatchSettingsTeamId: await this.resolveDefaultCsTeamIdForBranch(servicingBranchId),
       };
     }
 
@@ -338,6 +359,7 @@ export class CsOrderRoutingService {
         servicingBranchId,
         restrictToCloserIds: [],
         crossBranchServicing,
+        dispatchSettingsTeamId: chosen.teamId,
       };
     }
 
@@ -359,6 +381,7 @@ export class CsOrderRoutingService {
       servicingBranchId,
       restrictToCloserIds: filtered,
       crossBranchServicing,
+      dispatchSettingsTeamId: chosen.teamId,
     };
   }
 

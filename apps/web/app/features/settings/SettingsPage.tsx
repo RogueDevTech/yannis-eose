@@ -840,7 +840,7 @@ export function SettingsPage({
 
       {activeTab === 'push' && <SettingsPushPanel userId={user?.id ?? null} />}
 
-      {/* System Tab — grouped form: toggle VOIP, CS distribution then submit once */}
+      {/* System Tab — grouped form: toggle VOIP, CS routing + distribution then submit once */}
       {activeTab === 'system' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {isSuperAdmin ? (
@@ -932,7 +932,48 @@ export function SettingsPage({
                 </Collapsible>
               </div>
 
-              {/* CS Order Distribution */}
+              {/* CS order routing — evaluated before distribution */}
+              <div className="card lg:col-span-2">
+                <Collapsible
+                  contentClassName="mt-4"
+                  trigger={
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
+                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
+                          />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-app-fg">CS order routing</h3>
+                        <p className="text-sm text-app-fg-muted">
+                          Which servicing branch and squad handle each order — runs before load-balanced or performance assignment
+                        </p>
+                      </div>
+                    </div>
+                  }
+                >
+                <div className="rounded-lg border border-app-border p-4">
+                  <p className="text-sm text-app-fg-muted">
+                    Send orders from each funnel branch to the right servicing branch, team, or whole-branch closer pool. Reporting stays on
+                    the funnel branch; only assignment changes.
+                  </p>
+                  <p className="mt-3">
+                    <Link
+                      to="/admin/settings/cs-order-routing"
+                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Open CS order routing
+                    </Link>
+                  </p>
+                </div>
+                </Collapsible>
+              </div>
+
+              {/* CS order distribution — org default; per-squad overrides on each branch */}
               <div className="card lg:col-span-2">
                 <Collapsible
                   contentClassName="mt-4"
@@ -945,12 +986,18 @@ export function SettingsPage({
                       </div>
                       <div>
                         <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
-                        <p className="text-sm text-app-fg-muted">How new orders are assigned to CS closers when they come in</p>
+                        <p className="text-sm text-app-fg-muted">
+                          How new orders are assigned after routing — org default; squads can override on each branch
+                        </p>
                       </div>
                     </div>
                   }
                 >
                 <div className="rounded-lg border border-app-border p-4">
+                  <p className="text-xs text-app-fg-muted mb-3">
+                    Branch admins and heads can set per-CS-squad distribution (manual, load balanced, performance, claim, claim cap) under{' '}
+                    <strong className="text-app-fg">Admin → Branches → branch → CS team</strong>, keyed to the squad that services the order after routing.
+                  </p>
                   <div className="space-y-3">
                     <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
                       <input
@@ -1053,45 +1100,6 @@ export function SettingsPage({
                             : 'Manual assignment'
                     }</strong>
                     {hasSystemChanges && ' — you have unsaved changes'}
-                  </p>
-                </div>
-                </Collapsible>
-              </div>
-
-              {/* CS order routing — same card shell as VOIP / CS distribution */}
-              <div className="card lg:col-span-2">
-                <Collapsible
-                  contentClassName="mt-4"
-                  trigger={
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center">
-                        <svg className="w-5 h-5 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
-                          />
-                        </svg>
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-app-fg">CS order routing</h3>
-                        <p className="text-sm text-app-fg-muted">Cross-branch CS pools when load-balanced or performance dispatch runs</p>
-                      </div>
-                    </div>
-                  }
-                >
-                <div className="rounded-lg border border-app-border p-4">
-                  <p className="text-sm text-app-fg-muted">
-                    Send orders from each funnel branch to the right servicing branch, team, or whole-branch closer pool. Reporting stays on
-                    the funnel branch; only assignment changes.
-                  </p>
-                  <p className="mt-3">
-                    <Link
-                      to="/admin/settings/cs-order-routing"
-                      className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
-                    >
-                      Open CS order routing
-                    </Link>
                   </p>
                 </div>
                 </Collapsible>

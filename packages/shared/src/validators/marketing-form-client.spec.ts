@@ -68,7 +68,8 @@ describe('createAdSpendLogFormSchema', () => {
 describe('createAdSpendBatchSchema', () => {
   // Batch payload now requires a top-level `campaignId` (one form per batch)
   // and each line carries an `attributedOrderCount` for the manual split.
-  // Keep the fixture aligned with createAdSpendBatchObjectSchema.
+  // CEO directive 2026-05-10: ad URL is the required evidence; screenshot is
+  // optional. Keep the fixture aligned with createAdSpendBatchObjectSchema.
   const batchBase = {
     spendDate: '2026-04-27',
     campaignId: '550e8400-e29b-41d4-a716-446655440001',
@@ -77,7 +78,7 @@ describe('createAdSpendBatchSchema', () => {
     productId: '550e8400-e29b-41d4-a716-446655440002',
     spendAmount: 100,
     attributedOrderCount: 0,
-    screenshotUrl: 'https://example.com/a.png',
+    adUrl: 'https://example.com/ad',
     platform: 'OTHER' as const,
   };
 
@@ -95,6 +96,61 @@ describe('createAdSpendBatchSchema', () => {
       lines: [{ ...lineBase, platformCustomLabel: 'Taboola' }],
     });
     expect(r.success).toBe(true);
+  });
+
+  it('accepts a line without screenshotUrl (screenshot is optional)', () => {
+    const r = createAdSpendBatchSchema.safeParse({
+      ...batchBase,
+      lines: [
+        { ...lineBase, platform: 'FACEBOOK' as const, platformCustomLabel: undefined },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a line with a screenshotUrl when one is provided', () => {
+    const r = createAdSpendBatchSchema.safeParse({
+      ...batchBase,
+      lines: [
+        {
+          ...lineBase,
+          platform: 'FACEBOOK' as const,
+          platformCustomLabel: undefined,
+          screenshotUrl: 'https://example.com/a.png',
+        },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('rejects a line without adUrl (ad URL is required)', () => {
+    const { adUrl: _adUrl, ...lineWithoutAdUrl } = lineBase;
+    const r = createAdSpendBatchSchema.safeParse({
+      ...batchBase,
+      lines: [
+        {
+          ...lineWithoutAdUrl,
+          platform: 'FACEBOOK' as const,
+          platformCustomLabel: undefined,
+        },
+      ],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it('rejects a line with a non-URL adUrl', () => {
+    const r = createAdSpendBatchSchema.safeParse({
+      ...batchBase,
+      lines: [
+        {
+          ...lineBase,
+          platform: 'FACEBOOK' as const,
+          platformCustomLabel: undefined,
+          adUrl: 'not-a-url',
+        },
+      ],
+    });
+    expect(r.success).toBe(false);
   });
 });
 

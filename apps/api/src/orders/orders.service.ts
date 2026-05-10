@@ -4443,6 +4443,40 @@ export class OrdersService {
   // ============================================
 
   /**
+   * Effective CS_DISPATCH_STRATEGY + CS_CLAIM_CAP for a CS squad (`branch_team_settings`), else system defaults.
+   */
+  private async getEffectiveCsDispatchStrategy(teamId: string | null): Promise<{
+    strategy: string;
+    claimCap: number;
+  }> {
+    const [globalStrategyRow, globalCapRow] = await Promise.all([
+      this.settingsService.get('CS_DISPATCH_STRATEGY'),
+      this.settingsService.get('CS_CLAIM_CAP'),
+    ]);
+    const globalStrategy = (globalStrategyRow?.strategy as string | undefined) ?? 'manual';
+    const globalCap = typeof globalCapRow?.cap === 'number' ? globalCapRow.cap : 2;
+
+    if (!teamId) {
+      return { strategy: globalStrategy, claimCap: globalCap };
+    }
+
+    const [stratEff, capEff] = await Promise.all([
+      this.settingsService.getEffectiveTeamSetting(teamId, 'CS_DISPATCH_STRATEGY'),
+      this.settingsService.getEffectiveTeamSetting(teamId, 'CS_CLAIM_CAP'),
+    ]);
+
+    const strategy =
+      stratEff.value?.strategy !== undefined && stratEff.value?.strategy !== null
+        ? String(stratEff.value.strategy)
+        : globalStrategy;
+
+    const capRaw = capEff.value?.cap;
+    const claimCap = typeof capRaw === 'number' ? capRaw : globalCap;
+
+    return { strategy, claimCap };
+  }
+
+  /**
    * Assign a single UNPROCESSED order to the best available CS closer using the configured
    * dispatch strategy. Used by auto-dispatch on creation and by distributeUnassignedOrders.
    * Returns true if the order was assigned, false if no capacity.
@@ -4487,8 +4521,14 @@ export class OrdersService {
       if (narrowed.length > 0) available = narrowed;
     }
 
-    const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
-    const strategy = dispatchSetting?.strategy === 'performance' ? 'performance' : 'load_balanced';
+    const { strategy: dispatchMode } = await this.getEffectiveCsDispatchStrategy(
+      routing?.dispatchSettingsTeamId ?? null,
+    );
+    if (dispatchMode === 'manual' || dispatchMode === 'claim') {
+      return false;
+    }
+
+    const strategy = dispatchMode === 'performance' ? 'performance' : 'load_balanced';
 
     if (strategy === 'performance') {
       const leaderboard = await this.getCSCloserLeaderboard('this_month');
@@ -4565,8 +4605,26 @@ export class OrdersService {
   private async autoDispatchToCS(orderId: string) {
     await this.releaseExpiredLocks();
 
-    const dispatchSetting = await this.settingsService.get('CS_DISPATCH_STRATEGY');
-    const strategy = (dispatchSetting?.strategy as string | undefined) ?? 'manual';
+    const [orderRow] = await this.db
+      .select({ branchId: schema.orders.branchId })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    const branchId = orderRow?.branchId ?? null;
+
+    const [firstLine] = await this.db
+      .select({ productId: schema.orderItems.productId })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId))
+      .orderBy(asc(schema.orderItems.createdAt))
+      .limit(1);
+    const primaryProductId = firstLine?.productId ?? null;
+
+    const routing =
+      branchId != null
+        ? await this.csOrderRouting.resolveRoutingForDispatch(branchId, primaryProductId, orderId)
+        : null;
+    const { strategy } = await this.getEffectiveCsDispatchStrategy(routing?.dispatchSettingsTeamId ?? null);
 
     if (strategy === 'manual') {
       // Manual mode: no auto-assignment and no claim broadcast. Order remains UNPROCESSED
@@ -4576,12 +4634,7 @@ export class OrdersService {
 
     if (strategy === 'claim') {
       // Claim mode: leave order in UNPROCESSED, broadcast to claim queue
-      const [orderRow] = await this.db
-        .select({ branchId: schema.orders.branchId })
-        .from(schema.orders)
-        .where(eq(schema.orders.id, orderId))
-        .limit(1);
-      this.events.emitToRoom('cs-all', 'order:claim_available', { orderId }, orderRow?.branchId ?? null);
+      this.events.emitToRoom('cs-all', 'order:claim_available', { orderId }, branchId);
       return;
     }
 
@@ -4597,10 +4650,29 @@ export class OrdersService {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS closers can claim orders' });
     }
 
-    // Claim-cap setting and the actor's current pending count are independent
-    // — fan them out so the claim flow pays one wall-clock RTT instead of two.
-    const [capSetting, pendingCounts] = await Promise.all([
-      this.settingsService.get('CS_CLAIM_CAP'),
+    const [orderMeta] = await this.db
+      .select({ branchId: schema.orders.branchId })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    const [firstLine] = await this.db
+      .select({ productId: schema.orderItems.productId })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId))
+      .orderBy(asc(schema.orderItems.createdAt))
+      .limit(1);
+    const routing =
+      orderMeta?.branchId != null
+        ? await this.csOrderRouting.resolveRoutingForDispatch(
+            orderMeta.branchId,
+            firstLine?.productId ?? null,
+            orderId,
+          )
+        : null;
+
+    // Claim-cap (per CS squad when configured) and pending count — parallel where possible.
+    const [{ claimCap }, pendingCounts] = await Promise.all([
+      this.getEffectiveCsDispatchStrategy(routing?.dispatchSettingsTeamId ?? null),
       this.db
         .select({ count: count() })
         .from(schema.orders)
@@ -4611,8 +4683,6 @@ export class OrdersService {
           ),
         ),
     ]);
-
-    const claimCap = typeof capSetting?.cap === 'number' ? capSetting.cap : 2;
     const currentPending = pendingCounts[0]?.count ?? 0;
     if (currentPending >= claimCap) {
       return { success: false, message: `Claim cap reached (${claimCap} active orders). Confirm or cancel existing orders first.` };
