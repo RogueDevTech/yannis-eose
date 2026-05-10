@@ -1,5 +1,5 @@
 /**
- * CSMessagingPanel — Call (optional) + collapsible SMS/WhatsApp for CS agents.
+ * CSMessagingPanel — Call (optional) + collapsible SMS/WhatsApp for CS closers.
  * SMS/WhatsApp stays collapsed with zero template/outbox/prepare requests until expanded and a channel is chosen.
  * Phone is never revealed to the client — sends go through server actions / device handlers as before.
  */
@@ -371,7 +371,7 @@ export function CSMessagingPanel({
         <div className="mb-4 pb-4 border-b border-app-border">
           {callContent ?? (
             <p className="text-sm text-app-fg-muted">
-              VOIP call panel will appear here when the order is in CS Engaged status.
+              VOIP call panel will appear here when the order is in Unconfirmed status.
             </p>
           )}
         </div>

@@ -87,7 +87,7 @@ const FIELD_LABELS: Record<string, string> = {
   total_price: 'Total Price',
   delivery_fee: 'Delivery Fee',
   order_status: 'Order Status',
-  assigned_cs_id: 'CS Agent',
+  assigned_cs_id: 'CS Closer',
   assigned_rider_id: 'Rider',
   locked_by: 'Locked By',
   locked_until: 'Lock Expires',
@@ -1437,9 +1437,13 @@ export function AuditPage({
       </TableLoadingOverlay>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <Pagination page={filters.page} totalPages={totalPages} pageParam="page" />
-      )}
+      <Pagination
+        page={filters.page}
+        totalPages={totalPages}
+        pageParam="page"
+        pageSize={filters.limit}
+        showWhenSinglePage
+      />
 
       {/* Time Travel Panel — actor names loaded post-mount */}
       <TimeTravelPanel actorNames={actorNames} onPreviewImage={(url) => setPreviewImageUrl(url)} />

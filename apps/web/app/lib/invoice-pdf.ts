@@ -343,34 +343,37 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
 /**
  * Render the "MARKED AS PAID" rubber-stamp at the bottom-right corner of the
  * current page in the given jsPDF doc. Approximation of a real rubber-stamp:
- * rotated double rectangle border + bold uppercase text in red.
+ * rotated double rectangle border + bold uppercase text in green.
+ *
+ * Placement notes:
+ * - A4 page is 210 × 297 mm. Footer text sits at y=280; bottom margin = 297-280 ≈ 17mm.
+ * - We anchor the stamp at (pageWidth - 35, 260) — roughly 25mm from the right
+ *   edge and 37mm from the bottom, leaving room for the rotated bounding box
+ *   without overlapping the footer or running off the page.
+ * - Text font is 14pt so the rendered string ("MARKED AS PAID") fits within
+ *   the 70mm-wide border with comfortable padding (was 20pt + 60mm box, which
+ *   had the text running outside the border).
  */
 function drawPaidStamp(doc: jsPDF, fontFamily: string, pageWidth: number): void {
-  // Stamp box dimensions (mm) and position (bottom-right with margin).
-  const w = 60;
-  const h = 16;
-  const cx = pageWidth - 30; // centre x
-  const cy = 250; // centre y (above the footer at y=280)
-  const angle = -12; // degrees, like the HTML version
+  // Box dimensions (mm) and centre position (bottom-right, well clear of footer).
+  const w = 70;
+  const h = 14;
+  const cx = pageWidth - 35; // 25mm right margin gives the rotated corners breathing room
+  const cy = 260; // 37mm above the page bottom — clear of footer at y=280
+  const angle = -12; // degrees, matches HTML preview
 
-  // jsPDF supports `angle` only on `text()` and a few primitives; for the
-  // border we rotate via a rectangle's xform. Simplest portable approach:
-  // call `doc.rect` and `doc.text` with the `angle` option, anchored at (cx, cy).
-  doc.setDrawColor(192, 57, 43); // brand-red ink
-  doc.setTextColor(192, 57, 43);
+  // Green-700 ink (matches HTML stamp `#15803d`).
+  const ink: [number, number, number] = [21, 128, 61];
+  doc.setDrawColor(ink[0], ink[1], ink[2]);
+  doc.setTextColor(ink[0], ink[1], ink[2]);
   doc.setLineWidth(0.8);
 
-  // Outer border
-  // Note: jsPDF doesn't support rotation on rect directly. We use the lines
-  // option via xform. Simpler: draw the rect, then translate via the text
-  // angle. For a cleaner result use jsPDF's matrix transform helpers.
-  // Falling back to a rotated text-only stamp keeps this dependency-free.
+  // Text — sized so the string fits inside the 70mm border with padding.
   doc.setFont(fontFamily, 'bold');
-  doc.setFontSize(20);
+  doc.setFontSize(14);
   doc.text('MARKED AS PAID', cx, cy, { align: 'center', baseline: 'middle', angle });
 
-  // Border approximation — draw a rotated rectangle by stroking 4 lines using
-  // the standard rotation around (cx, cy).
+  // Outer border — 4 lines stroked along the rotated box's perimeter.
   const halfW = w / 2;
   const halfH = h / 2;
   const rad = (angle * Math.PI) / 180;
@@ -389,24 +392,20 @@ function drawPaidStamp(doc: jsPDF, fontFamily: string, pageWidth: number): void 
   doc.line(br[0], br[1], bl[0], bl[1]);
   doc.line(bl[0], bl[1], tl[0], tl[1]);
 
-  // Inner border — offset in slightly to read as a "double ring" stamp.
+  // Inner border — offset 1.5mm in to read as a double-ring stamp.
   const innerHalfW = halfW - 1.5;
   const innerHalfH = halfH - 1.5;
-  const cornerInner = (sx: number, sy: number): [number, number] => [
-    cx + sx * cos - sy * sin,
-    cy + sx * sin + sy * cos,
-  ];
-  const itl = cornerInner(-innerHalfW, -innerHalfH);
-  const itr = cornerInner(innerHalfW, -innerHalfH);
-  const ibr = cornerInner(innerHalfW, innerHalfH);
-  const ibl = cornerInner(-innerHalfW, innerHalfH);
+  const itl = corner(-innerHalfW, -innerHalfH);
+  const itr = corner(innerHalfW, -innerHalfH);
+  const ibr = corner(innerHalfW, innerHalfH);
+  const ibl = corner(-innerHalfW, innerHalfH);
   doc.setLineWidth(0.4);
   doc.line(itl[0], itl[1], itr[0], itr[1]);
   doc.line(itr[0], itr[1], ibr[0], ibr[1]);
   doc.line(ibr[0], ibr[1], ibl[0], ibl[1]);
   doc.line(ibl[0], ibl[1], itl[0], itl[1]);
 
-  // Reset draw state so callers downstream aren't surprised.
+  // Reset draw state so any callers downstream see a clean slate.
   doc.setDrawColor(0, 0, 0);
   doc.setTextColor(0, 0, 0);
   doc.setLineWidth(0.2);

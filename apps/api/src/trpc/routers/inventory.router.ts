@@ -326,7 +326,7 @@ export const inventoryRouter = router({
           ctx.currentBranchId ?? null,
         ),
         getProductsService().listOptions(
-          { status: 'ACTIVE' },
+          {},
           ctx.user.id,
           ctx.user.role,
         ),
@@ -421,7 +421,7 @@ export const inventoryRouter = router({
           ctx.currentBranchId ?? null,
         ),
         getProductsService().listOptions(
-          { status: 'ACTIVE' },
+          {},
           ctx.user.id,
           ctx.user.role,
         ),

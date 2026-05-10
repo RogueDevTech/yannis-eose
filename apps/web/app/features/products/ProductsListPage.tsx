@@ -34,6 +34,9 @@ interface ProductsListPageProps {
   canCreateProduct?: boolean;
   /** Super Admin archives immediately; others submit a permission request. */
   canInstantArchiveProduct?: boolean;
+  /** Per-page picker — caller threads the URL-resolved size + options through to <Pagination>. */
+  pageSize?: number;
+  pageSizeOptions?: number[];
 }
 
 function getDisplayCategory(product: Product): string {
@@ -99,6 +102,8 @@ export function ProductsListPage({
   canEditProduct = false,
   canCreateProduct = false,
   canInstantArchiveProduct = false,
+  pageSize,
+  pageSizeOptions,
 }: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ACTIVE');
@@ -368,6 +373,8 @@ export function ProductsListPage({
           page,
           totalPages: safeTotalPages,
           onPageChange: goToPage,
+          pageSize,
+          pageSizeOptions,
           summary: (
             <span>
               Showing {filteredProducts.length} of {total} products

@@ -34,7 +34,7 @@ interface MessageTemplate {
   body: string;
   status: 'ACTIVE' | 'ARCHIVED';
   createdAt: string;
-  /** CS agents can only edit templates they themselves created. Heads/Admins can edit any. */
+  /** CS closers can only edit templates they themselves created. Heads/Admins can edit any. */
   createdBy: string;
 }
 
@@ -50,10 +50,10 @@ function statusPillClass(status: MessageTemplate['status']): string {
     : 'bg-app-hover text-app-fg-muted';
 }
 
-// CS agents can read & contribute templates (own templates editable; others read-only).
+// CS closers can read & contribute templates (own templates editable; others read-only).
 // Heads/Admins (via cs.teamOverview) can edit anything.
 const TEMPLATE_ACCESS: { roles: string[]; permission: string } = {
-  roles: ['CS_AGENT'],
+  roles: ['CS_CLOSER'],
   permission: 'cs.teamOverview',
 };
 
@@ -329,7 +329,7 @@ function MessageTemplatesPage({
   const fetcher = useFetcher();
   const templateSurface = useFetcherActionSurface(fetcher);
   // Heads / Admins / `messaging.templates.update` holders can edit any template.
-  // CS agents can only edit ones they authored.
+  // CS closers can only edit ones they authored.
   const canEditTemplate = useCallback(
     (tpl: MessageTemplate) => canEditAnyTemplate || tpl.createdBy === currentUserId,
     [canEditAnyTemplate, currentUserId],

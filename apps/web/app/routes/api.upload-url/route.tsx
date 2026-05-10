@@ -41,6 +41,15 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!user) {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
+  // Mirror Mode is strictly view-only — S3 uploads bypass the tRPC mutation block, so we
+  // must reject them here too. Otherwise an admin mirroring a staff member could write
+  // files into their folder. See CLAUDE.md → "Mirror Mode".
+  if (user.mirroredBy) {
+    return jsonResponse(
+      { error: 'Read-only while mirroring user. Exit mirror mode to upload files.' },
+      403,
+    );
+  }
 
   const body = (await request.json().catch(() => ({}))) as UploadUrlRequest;
   const folder = body.folder ?? '';

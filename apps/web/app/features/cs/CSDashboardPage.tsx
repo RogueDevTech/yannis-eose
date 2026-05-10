@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useRef, useCallback, useEffect, useMemo, useTransition } from 'react';
 import { Await, Link, useFetcher, useRevalidator, useRouteLoaderData, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { StripToolbar } from '~/components/ui/strip-toolbar';
 import { Modal } from '~/components/ui/modal';
 import { Textarea } from '~/components/ui/textarea';
 import { SearchableSelect } from '~/components/ui/searchable-select';
@@ -21,7 +22,9 @@ import {
   CSHotSwapTabSkeleton,
 } from './CSDashboardDeferredFallbacks';
 import { Tabs } from '~/components/ui/tabs';
+import { SmartPick } from '~/components/ui/smart-pick';
 import { Checkbox } from '~/components/ui/checkbox';
+import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { TableActionButton } from '~/components/ui/table-action-button';
@@ -97,51 +100,46 @@ function AgentWorkloadCard({
   const barColor =
     dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
 
+  const pctRounded = Math.round(Math.min(dailyPct, 100));
   const inner = (
     <>
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-          <span className="text-sm font-bold text-brand-600 dark:text-brand-400">
+      <div className="flex items-center gap-2 mb-1.5">
+        <div className="w-6 h-6 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+          <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400">
             {agent.agentName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
           </span>
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-app-fg truncate">
-            {agent.agentName}
-          </p>
-          <p className="text-xs text-app-fg-muted">
-            Today&apos;s duty: {closesToday} / {agent.capacity}
-            <span className="text-app-fg-muted/80"> (Lagos)</span>
-          </p>
-          <p className="text-[11px] text-app-fg-muted mt-0.5">
-            Pipeline backlog: {agent.pendingCount}
-          </p>
+        <p className="text-sm font-medium text-app-fg truncate min-w-0 flex-1">
+          {agent.agentName}
+        </p>
+      </div>
+      <p className="text-[11px] text-app-fg-muted mb-1.5 truncate">
+        Duty {closesToday}/{agent.capacity} · Backlog {agent.pendingCount}
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 h-1.5 bg-app-hover rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+            style={{ width: `${Math.min(dailyPct, 100)}%` }}
+          />
         </div>
-      </div>
-      <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${Math.min(dailyPct, 100)}%` }}
-        />
-      </div>
-      <div className="flex items-center justify-between mt-2 gap-2 flex-wrap">
-        <span className="text-xs text-app-fg-muted">
-          {Math.round(Math.min(dailyPct, 100))}% of daily target
+        <span className="text-[10px] font-semibold text-app-fg-muted tabular-nums shrink-0">
+          {pctRounded}%
         </span>
-        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+      </div>
+      {(closesToday >= agent.capacity || agent.pendingCount >= agent.capacity || isNew) && (
+        <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
           {closesToday >= agent.capacity && (
-            <span className="text-xs font-medium text-success-600 dark:text-success-400">Target met</span>
+            <span className="text-[10px] font-medium text-success-600 dark:text-success-400">Target met</span>
           )}
           {agent.pendingCount >= agent.capacity && (
-            <span className="text-xs font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
+            <span className="text-[10px] font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
           )}
-        </div>
-      </div>
-      {isNew && (
-        <div className="mt-2 pt-2 border-t border-success-200 dark:border-success-800/50 flex items-center gap-1.5">
-          <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
-            NEW ORDER
-          </span>
+          {isNew && (
+            <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+              NEW ORDER
+            </span>
+          )}
         </div>
       )}
     </>
@@ -152,28 +150,38 @@ function AgentWorkloadCard({
     : '';
 
   const viewOrdersLink = (
-    <div className="flex items-center gap-1.5 w-full">
-      <Link
-        to={`/admin/cs/orders?csAgentId=${agent.agentId}&period=all_time`}
-        prefetch="intent"
-        className="flex-1 min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/25 hover:bg-brand-100 dark:hover:bg-brand-900/40 border border-brand-200/80 dark:border-brand-700/50 transition-colors"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-        </svg>
-        <span className="truncate">View orders</span>
-      </Link>
+    <div className="flex flex-wrap items-center gap-3 w-full">
+      {onOpen ? (
+        <button
+          type="button"
+          title="Quick view this closer's workload"
+          className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen(agent);
+          }}
+        >
+          View
+        </button>
+      ) : (
+        <Link
+          to={`/admin/cs/orders?csCloserId=${agent.agentId}&period=all_time`}
+          prefetch="intent"
+          title="View orders for this closer"
+          className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+          onClick={(e) => e.stopPropagation()}
+        >
+          View
+        </Link>
+      )}
       <Link
         to={`/admin/cs/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
         prefetch="intent"
-        className="flex-1 min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-xs font-semibold text-app-fg bg-app-hover hover:bg-app-border border border-app-border transition-colors"
+        title="Hot swap orders from this closer"
+        className="text-[11px] font-medium text-app-fg-muted hover:text-app-fg hover:underline"
         onClick={(e) => e.stopPropagation()}
       >
-        <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-        </svg>
-        <span className="truncate">Hot swap</span>
+        Swap
       </Link>
     </div>
   );
@@ -186,11 +194,11 @@ function AgentWorkloadCard({
         <button
           type="button"
           onClick={() => onOpen(agent)}
-          className="text-left cursor-pointer flex-1 px-5 pt-5 pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 rounded-t-xl"
+          className="text-left cursor-pointer flex-1 px-3.5 pt-3 pb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 rounded-t-xl"
         >
           {inner}
         </button>
-        <div className="px-5 pb-5 pt-0">
+        <div className="px-3.5 pb-3 pt-0">
           {viewOrdersLink}
         </div>
       </div>
@@ -198,8 +206,8 @@ function AgentWorkloadCard({
   }
   return (
     <div className={`${className ?? 'card'} ${newClass} flex flex-col overflow-hidden p-0`}>
-      <div className="px-5 pt-5 pb-3 flex-1">{inner}</div>
-      <div className="px-5 pb-5 pt-0">{viewOrdersLink}</div>
+      <div className="px-3.5 pt-3 pb-2 flex-1">{inner}</div>
+      <div className="px-3.5 pb-3 pt-0">{viewOrdersLink}</div>
     </div>
   );
 }
@@ -392,9 +400,9 @@ function AgentWorkloadDetailModal({
         )}
       </div>
 
-      <div className="px-5 pb-5">
+      <div className="px-5 pb-5 flex flex-col gap-2">
         <Link
-          to={`/admin/cs/orders?csAgentId=${agent.agentId}&period=all_time`}
+          to={`/admin/cs/orders?csCloserId=${agent.agentId}&period=all_time`}
           prefetch="intent"
           onClick={onClose}
           className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 transition-colors"
@@ -403,6 +411,17 @@ function AgentWorkloadDetailModal({
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
           View orders
+        </Link>
+        <Link
+          to={`/admin/cs/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
+          prefetch="intent"
+          onClick={onClose}
+          className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-app-fg bg-app-hover hover:bg-app-border border border-app-border transition-colors"
+        >
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+          </svg>
+          Hot swap
         </Link>
       </div>
     </Modal>
@@ -567,7 +586,7 @@ function CSQueueStaticHeader({
         <h1 className="text-2xl font-bold text-app-fg">Live activities</h1>
 
         <p className="text-xs text-app-fg-muted mt-1 flex items-center gap-1.5">
-          <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
           Showing today&apos;s data —{' '}
@@ -1029,6 +1048,7 @@ function CSDashboardPageLoaded({
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
   const unassignedQueueScrollRef = useRef<HTMLDivElement>(null);
+  const abandonedScrollRef = useRef<HTMLDivElement>(null);
   const [viewAllActivityOpen, setViewAllActivityOpen] = useState(false);
   const [viewAllActivityPage, setViewAllActivityPage] = useState(1);
   const scrollOverviewStrip = useCallback((delta: number) => {
@@ -1042,6 +1062,9 @@ function CSDashboardPageLoaded({
   }, []);
   const scrollUnassignedQueueStrip = useCallback((delta: number) => {
     unassignedQueueScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
+  const scrollAbandonedStrip = useCallback((delta: number) => {
+    abandonedScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
 
   const overviewStripOverflowKey = useMemo(() => {
@@ -1316,7 +1339,14 @@ function CSDashboardPageLoaded({
   const totalPending = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
   const totalCapacity = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
   const totalClosesToday = workloads.reduce((sum: number, w: AgentWorkload) => sum + (w.todayClosesCount ?? 0), 0);
-  const confirmedCount = (statusCounts as Record<string, number>)['CONFIRMED'] ?? 0;
+  // "Confirmed" rolls up the full post-confirmation in-flight pipeline so the
+  // CEO bucket count matches the OrderStatusBadge default (which collapses
+  // AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT into "Confirmed").
+  const confirmedCount =
+    ((statusCounts as Record<string, number>)['CONFIRMED'] ?? 0) +
+    ((statusCounts as Record<string, number>)['AGENT_ASSIGNED'] ?? 0) +
+    ((statusCounts as Record<string, number>)['DISPATCHED'] ?? 0) +
+    ((statusCounts as Record<string, number>)['IN_TRANSIT'] ?? 0);
   const cancelledCount = (statusCounts as Record<string, number>)['CANCELLED'] ?? 0;
   const assignableCloserOptions = useMemo(
     () =>
@@ -1451,6 +1481,22 @@ function CSDashboardPageLoaded({
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
             <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
+              Assigned
+            </p>
+            <p className="text-xl font-bold text-info-600 dark:text-info-400 mt-1">
+              {(statusCounts as Record<string, number>)['CS_ASSIGNED'] ?? 0}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
+              Unconfirmed
+            </p>
+            <p className="text-xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">
+              {(statusCounts as Record<string, number>)['CS_ENGAGED'] ?? 0}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
               Confirmed
             </p>
             <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">
@@ -1463,6 +1509,14 @@ function CSDashboardPageLoaded({
             </p>
             <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">
               {(statusCounts as Record<string, number>)['DELIVERED'] ?? 0}
+            </p>
+          </div>
+          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
+              Cash Remitted
+            </p>
+            <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
+              {(statusCounts as Record<string, number>)['REMITTED'] ?? 0}
             </p>
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
@@ -1485,14 +1539,6 @@ function CSDashboardPageLoaded({
               <span className="text-sm font-normal text-app-fg-muted">
                 /{totalCapacity}
               </span>
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              CS Engaged
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {(statusCounts as Record<string, number>)['CS_ENGAGED'] ?? 0}
             </p>
           </div>
           <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
@@ -1647,7 +1693,7 @@ function CSDashboardPageLoaded({
                     className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
                   >
                     {sorted.map((item) => (
-                      <div key={item.id} className="shrink-0 w-64">
+                      <div key={item.id} className="shrink-0 w-48">
                         <LiveActivityCard
                           item={item}
                           isNew={newCartIds.has(item.id)}
@@ -1836,7 +1882,7 @@ function CSDashboardPageLoaded({
                 <AgentWorkloadCard
                   key={agent.agentId}
                   agent={agent}
-                  className="card shrink-0 w-64"
+                  className="card shrink-0 w-44"
                   onOpen={setSelectedAgent}
                   isNew={newAgentIds.has(agent.agentId)}
                 />
@@ -1847,6 +1893,7 @@ function CSDashboardPageLoaded({
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-app-border">
         <Tabs
+          size="sm"
           value={activeTab}
           onChange={(v) => setActiveTab(v as typeof activeTab)}
           tabs={[
@@ -1860,7 +1907,7 @@ function CSDashboardPageLoaded({
                       <DeferredSection resolve={claimQueue} fallback={<CSTabCountBadgeSkeleton />}>
                         {(orders: CSOrder[]) =>
                           orders.length > 0 ? (
-                            <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 text-xs font-bold">
+                            <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 text-[10px] font-bold">
                               {orders.length}
                             </span>
                           ) : null
@@ -1871,17 +1918,13 @@ function CSDashboardPageLoaded({
                 ]
               : []),
             {
-              value: 'active',
-              label: `Active Orders (${activeTotal})`,
-            },
-            {
               value: 'duplicates',
               label: 'Duplicates',
               badge: (
                 <DeferredSection resolve={flaggedDuplicates} fallback={<CSTabCountBadgeSkeleton />}>
                   {(pairs: DuplicatePair[]) =>
                     pairs.length > 0 ? (
-                      <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400 text-xs font-bold">
+                      <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400 text-[10px] font-bold">
                         {pairs.length}
                       </span>
                     ) : null
@@ -1894,7 +1937,7 @@ function CSDashboardPageLoaded({
               label: 'Cart abandonment',
               badge:
                 abandonedPagination.total > 0 ? (
-                  <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-surface-200 dark:bg-surface-700 text-app-fg-muted text-xs font-bold">
+                  <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-surface-200 dark:bg-surface-700 text-app-fg-muted text-[10px] font-bold">
                     {abandonedPagination.total}
                   </span>
                 ) : undefined,
@@ -1906,7 +1949,7 @@ function CSDashboardPageLoaded({
                 <DeferredSection resolve={callbackOrders} fallback={<CSTabCountBadgeSkeleton />}>
                   {(orders: CSOrder[]) =>
                     orders.length > 0 ? (
-                      <span className="ml-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 text-xs font-bold">
+                      <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 text-[10px] font-bold">
                         {orders.length}
                       </span>
                     ) : null
@@ -1918,26 +1961,13 @@ function CSDashboardPageLoaded({
           ]}
           className="border-b-0 flex-1 min-w-0"
         />
-        {activeTab !== 'queue' && (
-          <Link
-            to="/admin/cs/orders?period=all_time"
-            className="btn-primary btn-sm shrink-0 -mb-px inline-flex items-center justify-center"
-          >
-            Go to Orders
-          </Link>
-        )}
       </div>
 
-      {/* Thin loading rail — visible only while we're optimistically switching tabs OR
-          the loader is revalidating the current URL. Tab content stays visible underneath
-          (data for all tabs is loaded upfront, so the new tab renders immediately) but the
-          user gets a clear signal that work is in flight. */}
-      {(isTabSwitching || isRouteLoaderBusy) && (
-        <div className="flex items-center gap-2 px-1 py-1 text-xs text-app-fg-muted" role="status" aria-live="polite">
-          <Spinner size="sm" />
-          <span>Loading…</span>
-        </div>
-      )}
+      {/* Per-tab loading is handled by `<NavProgressBar />` at the top of the
+          dashboard layout (the brand-coloured rail) plus tab-specific skeletons
+          below. The previous global "Loading…" rail kept showing even when data
+          was already on screen, so the user couldn't tell whether to wait or
+          act — removed per CEO feedback. */}
 
       {/* Tab Content — fixed height so layout does not shift */}
       {activeTab === 'queue' && (
@@ -1949,30 +1979,17 @@ function CSDashboardPageLoaded({
           {displayedUnassignedOrders.length > 0 && (
             <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  {selectedQueueIds.size === 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedQueueIds(new Set(displayedUnassignedOrders.map((o) => o.id)))}
-                      className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
-                    >
-                      Select all ({displayedUnassignedOrders.length})
-                    </button>
-                  ) : (
-                    <>
-                      <span className="text-xs font-medium text-app-fg">
-                        {selectedQueueIds.size} selected
-                      </span>
-                      <button
-                        type="button"
-                        onClick={clearQueueSelection}
-                        className="text-xs text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
-                      >
-                        Clear
-                      </button>
-                    </>
-                  )}
-                </div>
+                <SmartPick
+                  total={displayedUnassignedOrders.length}
+                  selectedCount={selectedQueueIds.size}
+                  onPick={(count) =>
+                    setSelectedQueueIds(
+                      new Set(displayedUnassignedOrders.slice(0, count).map((o) => o.id)),
+                    )
+                  }
+                  onClear={clearQueueSelection}
+                  itemNoun="orders"
+                />
                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                   <Button
                     type="button"
@@ -1988,7 +2005,7 @@ function CSDashboardPageLoaded({
                   </Button>
                 </div>
               </div>
-           
+
               {bulkAssignFetcher.data?.error && !bulkAssignFetcher.data?.success && (
                 <p className="text-xs text-danger-600 dark:text-danger-400">{bulkAssignFetcher.data.error}</p>
               )}
@@ -2001,33 +2018,14 @@ function CSDashboardPageLoaded({
             </div>
           ) : (
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <p className="text-xs text-app-fg-muted">
-                  Unassigned orders — click a card to select, or use View for details
-                </p>
-                <div className="hidden md:flex items-center gap-1 sm:gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => scrollUnassignedQueueStrip(-280)}
-                    className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-                    aria-label="Scroll unassigned queue left"
-                  >
-                    <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => scrollUnassignedQueueStrip(280)}
-                    className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-                    aria-label="Scroll unassigned queue right"
-                  >
-                    <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
+              <StripToolbar
+                title="Unassigned queue"
+                description="Fresh orders that have not been assigned to a closer yet — pick or bulk-assign."
+                onScrollLeft={() => scrollUnassignedQueueStrip(-280)}
+                onScrollRight={() => scrollUnassignedQueueStrip(280)}
+                scrollAriaSubject="unassigned queue"
+                viewAllTo="/admin/cs/orders?status=UNPROCESSED&period=all_time"
+              />
               <div
                 ref={unassignedQueueScrollRef}
                 className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
@@ -2047,24 +2045,19 @@ function CSDashboardPageLoaded({
                       role="checkbox"
                       aria-checked={isSelected}
                       tabIndex={0}
-                      className={`group relative shrink-0 w-64 text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                      className={`group relative shrink-0 w-48 text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                         isSelected
                           ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
                           : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
                       }`}
                     >
-                      <span className="absolute top-3 right-3 flex h-2.5 w-2.5 pointer-events-none">
+                      <span className="absolute top-2 right-2 flex h-2 w-2 pointer-events-none">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning-400 opacity-60" />
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning-500" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-warning-500" />
                       </span>
 
-                      {/* Selection checkbox — wired to the same toggle the whole card uses,
-                          but rendered as an explicit affordance so HoCS can see what's
-                          selected at a glance. `stopPropagation` prevents a double-toggle
-                          (the card's own click handler still toggles when other parts are
-                          clicked). */}
                       <span
-                        className="absolute top-3 left-3 z-10"
+                        className="absolute top-1.5 left-1.5 z-10"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <Checkbox
@@ -2074,41 +2067,38 @@ function CSDashboardPageLoaded({
                         />
                       </span>
 
-                      <div className="p-3.5 pl-10 pr-8">
-                        <div className="mb-2">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
-                            Unassigned
-                          </span>
-                        </div>
-                        <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2 pr-1">
-                          {order.customerName}
-                        </p>
-                        {order.totalAmount && (
-                          <div className="mb-2">
-                            <span className="text-[11px] font-bold text-app-fg">
+                      <div className="px-2.5 py-2 pl-7 pr-5">
+                        <div className="flex items-baseline justify-between gap-2 mb-1">
+                          <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
+                            {order.customerName}
+                          </p>
+                          {order.totalAmount && (
+                            <span className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums">
                               &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
                             </span>
-                          </div>
-                        )}
-                        <div className="text-[11px] font-medium text-app-fg-muted">
-                          {new Date(order.createdAt).toLocaleString('en-NG', {
-                            month: 'short', day: 'numeric',
-                            hour: '2-digit', minute: '2-digit',
-                          })}
+                          )}
                         </div>
-
-                        <div className="mt-2 pt-2 border-t border-app-border/80">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedQueueOrder(order);
-                            }}
-                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline"
-                          >
-                            View details
-                          </button>
+                        <div className="flex items-center gap-1.5 mb-1 min-w-0">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 shrink-0">
+                            Unassigned
+                          </span>
+                          <span className="text-[10px] font-medium text-app-fg-muted truncate">
+                            {new Date(order.createdAt).toLocaleString('en-NG', {
+                              month: 'short', day: 'numeric',
+                              hour: '2-digit', minute: '2-digit',
+                            })}
+                          </span>
                         </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedQueueOrder(order);
+                          }}
+                          className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        >
+                          View
+                        </button>
                       </div>
                     </div>
                   );
@@ -2120,110 +2110,38 @@ function CSDashboardPageLoaded({
       )}
 
       {/* Unassigned: pick closer in modal (no dropdowns on cards or toolbar) */}
-      <Modal
+      <AssignCloserModal
         open={assignCloserModalOpen}
         onClose={() => {
-          if (isBulkAssigning) return;
           setAssignCloserModalOpen(false);
           setBulkAssignAgentIds(new Set());
         }}
-        maxWidth="max-w-md"
-        aria-labelledby="assign-closer-title"
-        backdropBlur
-        contentClassName="p-0 max-h-[min(32rem,90dvh)] overflow-hidden flex flex-col"
-      >
-        <div className="shrink-0 border-b border-app-border px-4 py-3">
-          <h2 id="assign-closer-title" className="text-lg font-semibold text-app-fg">
-            Assign to closer
-          </h2>
-          <p className="text-sm text-app-fg-muted mt-0.5">
-            {selectedQueueIds.size} order{selectedQueueIds.size !== 1 ? 's' : ''} selected
-          </p>
-          <p className="text-xs text-app-fg-muted mt-1.5">
-            Select one or more closers — selected orders are split among them at random.
-          </p>
-        </div>
-        <ModalFetcherInlineError
-          message={bulkAssignSurface.errorMatchingIntent('bulkAssignToCS')}
-          className="shrink-0 px-4 pt-3"
-        />
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-1.5">
-          {assignableCloserOptions.length === 0 ? (
-            <p className="text-sm text-app-fg-muted">
-              No closers with free capacity. Free a slot or wait for a confirmation, then try again.
-            </p>
-          ) : (
-            assignableCloserOptions.map((opt) => {
-              const checked = bulkAssignAgentIds.has(opt.value);
-              return (
-                <label
-                  key={opt.value}
-                  className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                    checked
-                      ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40 text-app-fg ring-1 ring-brand-500/30'
-                      : 'border-app-border bg-app-elevated hover:border-brand-300 dark:hover:border-brand-700'
-                  }`}
-                >
-                  <Checkbox
-                    className="mt-0.5 shrink-0"
-                    checked={checked}
-                    onChange={() =>
-                      setBulkAssignAgentIds((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(opt.value)) next.delete(opt.value);
-                        else next.add(opt.value);
-                        return next;
-                      })
-                    }
-                    aria-label={opt.label}
-                  />
-                  <span className="min-w-0 flex-1 text-left leading-snug">{opt.label}</span>
-                </label>
-              );
-            })
-          )}
-        </div>
-        <div className="shrink-0 flex items-center justify-end gap-2 border-t border-app-border px-4 py-3">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={isBulkAssigning}
-            onClick={() => {
-              setAssignCloserModalOpen(false);
-              setBulkAssignAgentIds(new Set());
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            disabled={
-              selectedQueueIds.size === 0 ||
-                bulkAssignAgentIds.size === 0 ||
-                assignableCloserOptions.length === 0 ||
-                isBulkAssigning
-            }
-            loading={isBulkAssigning}
-            loadingText="Assigning…"
-            onClick={() => {
-              bulkAssignFetcher.submit(
-                {
-                  intent: 'bulkAssignToCS',
-                  orderIds: JSON.stringify(Array.from(selectedQueueIds)),
-                  csAgentIds: JSON.stringify(Array.from(bulkAssignAgentIds)),
-                  ...csMutationBranchPayload(unassignedOrders.filter((o) => selectedQueueIds.has(o.id))),
-                },
-                { method: 'post' },
-              );
-            }}
-          >
-            Assign
-          </Button>
-        </div>
-      </Modal>
+        selectedCount={selectedQueueIds.size}
+        options={assignableCloserOptions}
+        selectedIds={bulkAssignAgentIds}
+        onToggle={(id) =>
+          setBulkAssignAgentIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+          })
+        }
+        onSubmit={() => {
+          bulkAssignFetcher.submit(
+            {
+              intent: 'bulkAssignToCS',
+              orderIds: JSON.stringify(Array.from(selectedQueueIds)),
+              csCloserIds: JSON.stringify(Array.from(bulkAssignAgentIds)),
+              ...csMutationBranchPayload(unassignedOrders.filter((o) => selectedQueueIds.has(o.id))),
+            },
+            { method: 'post' },
+          );
+        }}
+        isSubmitting={isBulkAssigning}
+        errorMessage={bulkAssignSurface.errorMatchingIntent('bulkAssignToCS')}
+        emptyMessage="No closers with free capacity. Free a slot or wait for a confirmation, then try again."
+      />
 
       {/* ── Queue Order Detail Modal ── */}
       {selectedQueueOrder && (() => {
@@ -2439,85 +2357,6 @@ function CSDashboardPageLoaded({
         );
       })()}
 
-      {activeTab === 'active' && (
-        <div>
-          {/* Card grid — matches live activity style */}
-          {activeOrders.length === 0 ? (
-            <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
-              No active CS-engaged orders today
-            </div>
-          ) : (
-            <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
-              {activeOrders.map((order: CSOrder) => {
-                const agent = workloads.find((w: AgentWorkload) => w.agentId === order.assignedCsId);
-                return (
-                  <button
-                    key={order.id}
-                    type="button"
-                    onClick={() => setSelectedActiveOrder(order)}
-                    className="group relative shrink-0 w-64 text-left rounded-xl border border-indigo-200 dark:border-indigo-800 bg-app-elevated hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                  >
-                    {/* Live pulse dot */}
-                    <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-60" />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-indigo-500" />
-                    </span>
-
-                    <div className="p-3.5 pr-8">
-                      {/* Status badge */}
-                      <div className="mb-2">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400">
-                          With CS
-                        </span>
-                      </div>
-
-                      {/* Customer name */}
-                      <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-2">
-                        {order.customerName}
-                      </p>
-
-                      {/* Amount */}
-                      {order.totalAmount && (
-                        <div className="mb-2">
-                          <span className="text-[11px] font-bold text-app-fg">
-                            &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Closer pill */}
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <svg className="w-3 h-3 shrink-0 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
-                        <span className="text-[11px] font-medium text-app-fg-muted truncate">
-                          {agent?.agentName ?? 'Unassigned'}
-                        </span>
-                      </div>
-
-                      {/* Timestamp */}
-                      <div className="text-[11px] font-medium text-app-fg-muted">
-                        {new Date(order.createdAt).toLocaleString('en-NG', {
-                          month: 'short', day: 'numeric',
-                          hour: '2-digit', minute: '2-digit',
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Hover arrow */}
-                    <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <svg className="w-3.5 h-3.5 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
       {activeTab === 'hotswap' && (
         <Suspense fallback={<CSHotSwapTabSkeleton />}>
           <CSDashboardHotSwapTabPanel
@@ -2666,7 +2505,34 @@ function CSDashboardPageLoaded({
       {/* ── Cart abandonment Tab ──────────────────────────── */}
       {activeTab === 'abandoned' && (
         <div className="space-y-3">
-          {abandonedCartsList.length === 0 ? (
+          {abandonedCartsList.length === 0 && cartsFetcher.state === 'loading' ? (
+            // Skeleton cards — only while we genuinely have no data yet AND a
+            // fetch is in flight. Once carts land they replace the skeletons;
+            // background revalidation paints under the cards (no flicker).
+            <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
+              {Array.from({ length: 6 }, (_, i) => (
+                <div
+                  key={`abandoned-skeleton-${i}`}
+                  className="shrink-0 w-48 rounded-xl border border-app-border bg-app-elevated"
+                >
+                  <div className="px-2.5 py-2 space-y-2">
+                    <div className="h-3 rounded bg-app-hover animate-pulse w-3/4" />
+                    <div className="h-2.5 rounded bg-app-hover animate-pulse w-2/3" />
+                    <div className="flex items-center gap-1.5">
+                      <div className="h-3 w-12 rounded bg-app-hover animate-pulse" />
+                      <div className="h-2.5 rounded bg-app-hover animate-pulse flex-1" />
+                    </div>
+                    <div className="h-2.5 rounded bg-app-hover animate-pulse w-1/2" />
+                    <div className="flex gap-2 pt-1">
+                      <div className="h-3 w-8 rounded bg-app-hover animate-pulse" />
+                      <div className="h-3 w-10 rounded bg-app-hover animate-pulse" />
+                      <div className="h-3 w-8 rounded bg-app-hover animate-pulse" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : abandonedCartsList.length === 0 ? (
             <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
               {abandonedPagination.total === 0
                 ? 'No abandoned carts — dropped-off sessions appear here until cleared.'
@@ -2674,52 +2540,73 @@ function CSDashboardPageLoaded({
             </div>
           ) : (
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <p className="text-xs text-app-fg-muted">
-                  Dropped-off sessions — they stay until cleared. Use Clear when handled. Total backlog: {abandonedPagination.total}.
-                </p>
-              </div>
-              <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
+              <StripToolbar
+                title="Cart abandonment"
+                description={`Dropped-off sessions — they stay until cleared. Use Clear when handled. Total backlog: ${abandonedPagination.total}.`}
+                onScrollLeft={() => scrollAbandonedStrip(-280)}
+                onScrollRight={() => scrollAbandonedStrip(280)}
+                scrollAriaSubject="abandoned carts"
+                viewAllTo="/admin/cs/queue?tab=abandoned&abandonedPage=1"
+              />
+              <div
+                ref={abandonedScrollRef}
+                className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
+              >
                 {abandonedCartsList.map((c: PendingCart) => (
                   <div
                     key={c.id}
-                    className="group relative shrink-0 w-64 rounded-xl border border-app-border bg-app-elevated transition-all duration-200 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700"
+                    className="group relative shrink-0 w-48 rounded-xl border border-app-border bg-app-elevated transition-all duration-200 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700"
                   >
-                    <span className="absolute top-3 right-3 flex h-2.5 w-2.5 pointer-events-none">
+                    <span className="absolute top-2 right-2 flex h-2 w-2 pointer-events-none">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-app-fg-muted/40 opacity-60" />
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-app-fg-muted/70" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-app-fg-muted/70" />
                     </span>
 
-                    <div className="p-3.5 pr-8">
-                      <div className="mb-2">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-app-hover text-app-fg-muted">
-                          Dropped off
-                        </span>
+                    <div className="px-2.5 py-2 pr-5">
+                      <div className="flex items-baseline justify-between gap-2 mb-1">
+                        <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
+                          {c.customerName}
+                        </p>
                       </div>
-                      <p className="text-sm font-semibold text-app-fg truncate leading-tight mb-1 pr-1">
-                        {c.customerName}
-                      </p>
-                      <p className="text-[11px] font-mono text-app-fg-muted truncate mb-2">
+                      <p className="text-[10px] font-mono text-app-fg-muted truncate mb-1">
                         {c.customerPhoneDisplay}
                       </p>
-                      <p className="text-[11px] text-app-fg truncate mb-1">
-                        <span className="text-app-fg-muted">Product:</span>{' '}
-                        {c.productName ?? '—'}
-                        {c.offerLabel ? <span className="text-app-fg-muted"> · {c.offerLabel}</span> : null}
-                      </p>
-                      {c.campaignName ? (
-                        <p className="text-[11px] text-app-fg-muted truncate mb-1">
-                          Form: {c.campaignName}
-                        </p>
-                      ) : null}
-                      <div className="text-[11px] font-medium text-app-fg-muted">
+                      <div className="flex items-center gap-1.5 mb-1 min-w-0">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-app-hover text-app-fg-muted shrink-0">
+                          Dropped
+                        </span>
+                        <span className="text-[10px] text-app-fg-muted truncate min-w-0">
+                          {c.productName ?? '—'}
+                        </span>
+                      </div>
+                      <div className="text-[10px] font-medium text-app-fg-muted truncate mb-1.5">
                         {new Date(c.updatedAt).toLocaleString('en-NG', {
                           month: 'short', day: 'numeric',
                           hour: '2-digit', minute: '2-digit',
                         })}
                       </div>
 
-                      <div className="mt-2 pt-2 border-t border-app-border/80 flex flex-wrap items-center gap-2.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedLiveCart({
+                              id: c.id,
+                              customerName: c.customerName,
+                              customerPhoneDisplay: c.customerPhoneDisplay,
+                              productName: c.productName,
+                              offerLabel: c.offerLabel,
+                              cartStatus: 'ABANDONED',
+                              orderStatus: null,
+                              linkedOrderId: null,
+                              totalAmount: null,
+                              updatedAt: c.updatedAt,
+                            })
+                          }
+                          className="text-[11px] font-medium text-brand-700 dark:text-brand-300 hover:underline"
+                        >
+                          View
+                        </button>
                         {canDeleteCart ? (
                           <button
                             type="button"
@@ -2727,7 +2614,7 @@ function CSDashboardPageLoaded({
                               revealCartPhoneFetcher.state !== 'idle' && revealingCartId === c.id
                             }
                             onClick={() => revealAbandonedCartPhone(c.id)}
-                            className="text-xs font-medium text-success-600 dark:text-success-400 hover:underline disabled:opacity-50"
+                            className="text-[11px] font-medium text-success-600 dark:text-success-400 hover:underline disabled:opacity-50"
                           >
                             {revealCartPhoneFetcher.state !== 'idle' && revealingCartId === c.id
                               ? 'Calling…'
@@ -2742,22 +2629,19 @@ function CSDashboardPageLoaded({
                               setCreateOfflinePrefill({ customerName: c.customerName });
                               onCreateOfflineOpenChange(true);
                             }}
-                            className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50"
+                            className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50"
                           >
-                            Offline order
+                            Offline
                           </button>
                         ) : null}
                         {canDeleteCart ? (
                           <button
                             type="button"
                             onClick={() => setDeleteCartConfirm(c)}
-                            className="text-xs font-medium text-danger-600 dark:text-danger-400 hover:underline"
+                            className="text-[11px] font-medium text-danger-600 dark:text-danger-400 hover:underline"
                           >
                             Clear
                           </button>
-                        ) : null}
-                        {!canCreateOffline && !canDeleteCart ? (
-                          <span className="text-[11px] text-app-fg-muted">No actions — ask HoCS</span>
                         ) : null}
                       </div>
                     </div>

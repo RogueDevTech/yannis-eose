@@ -3,6 +3,9 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
+
+/** Narrow executor so default-team seeding can run inside `db.transaction` callbacks. */
+type BranchTeamsDbExecutor = Pick<PostgresJsDatabase<typeof schema>, 'select' | 'insert'>;
 import { TRPCError } from '@trpc/server';
 import { DRIZZLE } from '../database/database.module';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
@@ -89,9 +92,138 @@ export class BranchTeamsService {
 
       return teams.map((t) => ({
         ...t,
-        members: byTeam.get(t.id) ?? [],
+        members: (byTeam.get(t.id) ?? []).map((m) => ({
+          ...m,
+          teamId: t.id,
+        })),
       }));
     });
+  }
+
+  /**
+   * Departments (Marketing / CS) with teamless roster + nested squads — branch detail UI.
+   */
+  async listBranchOrgStructure(branchId: string) {
+    return this.safeBranchTeamsRead({ departments: [] }, async () => {
+      const departments = await this.db
+        .select()
+        .from(schema.branchDepartments)
+        .where(eq(schema.branchDepartments.branchId, branchId))
+        .orderBy(asc(schema.branchDepartments.department));
+
+      if (departments.length === 0) {
+        return { departments: [] };
+      }
+
+      const deptIds = departments.map((d) => d.id);
+
+      const rosterRows = await this.db
+        .select({
+          branchDepartmentId: schema.branchDepartmentMembers.branchDepartmentId,
+          userId: schema.branchDepartmentMembers.userId,
+          name: schema.users.name,
+          role: schema.users.role,
+        })
+        .from(schema.branchDepartmentMembers)
+        .innerJoin(schema.users, eq(schema.branchDepartmentMembers.userId, schema.users.id))
+        .where(inArray(schema.branchDepartmentMembers.branchDepartmentId, deptIds));
+
+      const rosterByDept = new Map<string, typeof rosterRows>();
+      for (const r of rosterRows) {
+        const list = rosterByDept.get(r.branchDepartmentId) ?? [];
+        list.push(r);
+        rosterByDept.set(r.branchDepartmentId, list);
+      }
+
+      const teams = await this.db
+        .select()
+        .from(schema.branchTeams)
+        .where(eq(schema.branchTeams.branchId, branchId))
+        .orderBy(asc(schema.branchTeams.createdAt));
+
+      const teamIds = teams.map((t) => t.id);
+      const members =
+        teamIds.length === 0
+          ? []
+          : await this.db
+              .select({
+                teamId: schema.branchTeamMembers.teamId,
+                userId: schema.branchTeamMembers.userId,
+                isSupervisor: schema.branchTeamMembers.isSupervisor,
+                name: schema.users.name,
+                role: schema.users.role,
+              })
+              .from(schema.branchTeamMembers)
+              .innerJoin(schema.users, eq(schema.branchTeamMembers.userId, schema.users.id))
+              .where(inArray(schema.branchTeamMembers.teamId, teamIds));
+
+      const byTeam = new Map<string, typeof members>();
+      for (const m of members) {
+        const list = byTeam.get(m.teamId) ?? [];
+        list.push(m);
+        byTeam.set(m.teamId, list);
+      }
+
+      const teamsWithMembers = teams.map((t) => ({
+        ...t,
+        members: (byTeam.get(t.id) ?? []).map((m) => ({
+          ...m,
+          teamId: t.id,
+        })),
+      }));
+
+      const teamsByDeptId = new Map<string, typeof teamsWithMembers>();
+      for (const tw of teamsWithMembers) {
+        const list = teamsByDeptId.get(tw.branchDepartmentId) ?? [];
+        list.push(tw);
+        teamsByDeptId.set(tw.branchDepartmentId, list);
+      }
+
+      const departmentsOut = departments.map((d) => {
+        const teamsInDept = teamsByDeptId.get(d.id) ?? [];
+        const teamUserIds = new Set<string>();
+        for (const tm of teamsInDept) {
+          for (const mem of tm.members) {
+            teamUserIds.add(mem.userId);
+          }
+        }
+        const rosterFull = rosterByDept.get(d.id) ?? [];
+        const roster = rosterFull.filter((r) => !teamUserIds.has(r.userId));
+
+        return {
+          department: d,
+          roster: roster.map((r) => ({
+            userId: r.userId,
+            name: r.name,
+            role: r.role,
+          })),
+          teams: teamsInDept,
+        };
+      });
+
+      return { departments: departmentsOut };
+    });
+  }
+
+  /** Ensures CS + Marketing department rows exist for a branch (idempotent). */
+  private async ensureBranchDepartmentsRows(
+    branchId: string,
+    executor: BranchTeamsDbExecutor = this.db,
+  ): Promise<void> {
+    for (const department of ['CS', 'MARKETING'] as const) {
+      const existing = await executor
+        .select({ id: schema.branchDepartments.id })
+        .from(schema.branchDepartments)
+        .where(
+          and(
+            eq(schema.branchDepartments.branchId, branchId),
+            eq(schema.branchDepartments.department, department),
+          ),
+        )
+        .limit(1);
+      if (existing[0]) continue;
+      await executor.insert(schema.branchDepartments).values({ branchId, department });
+    }
   }
 
   async createTeam(
@@ -101,10 +233,28 @@ export class BranchTeamsService {
     _actor: SessionUser,
   ) {
     return this.safeBranchTeamsWrite(async () => {
+      await this.ensureBranchDepartmentsRows(branchId, this.db);
+      const [deptRow] = await this.db
+        .select({ id: schema.branchDepartments.id })
+        .from(schema.branchDepartments)
+        .where(
+          and(
+            eq(schema.branchDepartments.branchId, branchId),
+            eq(schema.branchDepartments.department, department),
+          ),
+        )
+        .limit(1);
+      if (!deptRow) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Branch department row missing after ensure',
+        });
+      }
       const [row] = await this.db
         .insert(schema.branchTeams)
         .values({
           branchId,
+          branchDepartmentId: deptRow.id,
           department,
           name: name?.trim() || null,
         })
@@ -134,15 +284,70 @@ export class BranchTeamsService {
     });
   }
 
+  /**
+   * Idempotent default squads for a new branch: one CS + one Marketing team.
+   * Safe inside `db.transaction` — pass the transaction client as `executor`.
+   */
+  async ensureDefaultDepartmentTeams(
+    branchId: string,
+    executor: BranchTeamsDbExecutor = this.db,
+  ): Promise<void> {
+    await this.safeBranchTeamsWrite(async () => {
+      await this.ensureBranchDepartmentsRows(branchId, executor);
+      const defaults: Array<{ department: BranchTeamDepartment; name: string }> = [
+        { department: 'CS', name: 'Customer support' },
+        { department: 'MARKETING', name: 'Marketing' },
+      ];
+      for (const { department, name } of defaults) {
+        const existing = await executor
+          .select({ id: schema.branchTeams.id })
+          .from(schema.branchTeams)
+          .where(
+            and(eq(schema.branchTeams.branchId, branchId), eq(schema.branchTeams.department, department)),
+          )
+          .limit(1);
+        if (existing[0]) continue;
+        const [deptRow] = await executor
+          .select({ id: schema.branchDepartments.id })
+          .from(schema.branchDepartments)
+          .where(
+            and(
+              eq(schema.branchDepartments.branchId, branchId),
+              eq(schema.branchDepartments.department, department),
+            ),
+          )
+          .limit(1);
+        if (!deptRow) continue;
+        await executor.insert(schema.branchTeams).values({
+          branchId,
+          branchDepartmentId: deptRow.id,
+          department,
+          name,
+        });
+      }
+    });
+  }
+
   async addTeamMember(teamId: string, userId: string, isSupervisor: boolean, _actor: SessionUser) {
     await this.safeBranchTeamsWrite(async () => {
       const [team] = await this.db
-        .select({ branchId: schema.branchTeams.branchId })
+        .select({
+          branchId: schema.branchTeams.branchId,
+          branchDepartmentId: schema.branchTeams.branchDepartmentId,
+        })
         .from(schema.branchTeams)
         .where(eq(schema.branchTeams.id, teamId))
         .limit(1);
       if (!team) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
       await this.assertUserBranchMember(userId, team.branchId);
+      await this.db
+        .delete(schema.branchDepartmentMembers)
+        .where(
+          and(
+            eq(schema.branchDepartmentMembers.branchDepartmentId, team.branchDepartmentId),
+            eq(schema.branchDepartmentMembers.userId, userId),
+          ),
+        );
       await this.db
         .insert(schema.branchTeamMembers)
         .values({ teamId, userId, isSupervisor })
@@ -150,6 +355,61 @@ export class BranchTeamsService {
           target: [schema.branchTeamMembers.teamId, schema.branchTeamMembers.userId],
           set: { isSupervisor },
         });
+    });
+  }
+
+  async addDepartmentMember(branchDepartmentId: string, userId: string, _actor: SessionUser) {
+    await this.safeBranchTeamsWrite(async () => {
+      const [bd] = await this.db
+        .select({ branchId: schema.branchDepartments.branchId })
+        .from(schema.branchDepartments)
+        .where(eq(schema.branchDepartments.id, branchDepartmentId))
+        .limit(1);
+      if (!bd) throw new TRPCError({ code: 'NOT_FOUND', message: 'Department not found' });
+      await this.assertUserBranchMember(userId, bd.branchId);
+
+      const teamsInDept = await this.db
+        .select({ id: schema.branchTeams.id })
+        .from(schema.branchTeams)
+        .where(eq(schema.branchTeams.branchDepartmentId, branchDepartmentId));
+      const teamIds = teamsInDept.map((t) => t.id);
+      if (teamIds.length > 0) {
+        await this.db
+          .delete(schema.branchTeamMembers)
+          .where(
+            and(
+              eq(schema.branchTeamMembers.userId, userId),
+              inArray(schema.branchTeamMembers.teamId, teamIds),
+            ),
+          );
+      }
+
+      const already = await this.db
+        .select({ one: sql`1` })
+        .from(schema.branchDepartmentMembers)
+        .where(
+          and(
+            eq(schema.branchDepartmentMembers.branchDepartmentId, branchDepartmentId),
+            eq(schema.branchDepartmentMembers.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!already[0]) {
+        await this.db.insert(schema.branchDepartmentMembers).values({ branchDepartmentId, userId });
+      }
+    });
+  }
+
+  async removeDepartmentMember(branchDepartmentId: string, userId: string) {
+    await this.safeBranchTeamsWrite(async () => {
+      await this.db
+        .delete(schema.branchDepartmentMembers)
+        .where(
+          and(
+            eq(schema.branchDepartmentMembers.branchDepartmentId, branchDepartmentId),
+            eq(schema.branchDepartmentMembers.userId, userId),
+          ),
+        );
     });
   }
 
@@ -176,7 +436,7 @@ export class BranchTeamsService {
     });
   }
 
-  /** Same team, CS department, actor is supervisor, supervisee is non-supervisor CS_AGENT. */
+  /** Same team, CS department, actor is supervisor, supervisee is non-supervisor CS_CLOSER. */
   async isCsSupervisorOf(actorId: string, superviseeId: string, branchId: string): Promise<boolean> {
     return this.safeBranchTeamsRead(false, async () => {
       const sup = alias(schema.branchTeamMembers, 'sup');
@@ -195,7 +455,7 @@ export class BranchTeamsService {
             eq(mem.isSupervisor, false),
             eq(schema.branchTeams.branchId, branchId),
             eq(schema.branchTeams.department, 'CS'),
-            eq(schema.users.role, 'CS_AGENT'),
+            eq(schema.users.role, 'CS_CLOSER'),
           ),
         )
         .limit(1);
@@ -303,7 +563,7 @@ export class BranchTeamsService {
       const sup = alias(schema.branchTeamMembers, 'sup_l');
       const mem = alias(schema.branchTeamMembers, 'mem_l');
       const roleFilter =
-        department === 'CS' ? eq(schema.users.role, 'CS_AGENT') : eq(schema.users.role, 'MEDIA_BUYER');
+        department === 'CS' ? eq(schema.users.role, 'CS_CLOSER') : eq(schema.users.role, 'MEDIA_BUYER');
 
       const rows = await this.db
         .select({ id: mem.userId })
@@ -335,7 +595,7 @@ export class BranchTeamsService {
   ): Promise<boolean> {
     const branchId = actor.currentBranchId;
     if (!branchId) return false;
-    if (target.role === 'CS_AGENT') {
+    if (target.role === 'CS_CLOSER') {
       return this.isCsSupervisorOf(actor.id, target.id, branchId);
     }
     if (target.role === 'MEDIA_BUYER') {

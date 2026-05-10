@@ -35,7 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/dashboard.ceoOverviewTimeSeries?input=${encodeURIComponent(ceoInput)}`,
       opts,
     ),
-    apiRequest<{ result?: { data?: { volume: number; csEngaged: number; confirmed: number; logisticsDistributed: number; delivered: number } } }>(
+    apiRequest<{ result?: { data?: { volume: number; unconfirmed: number; confirmed: number; logisticsDistributed: number; delivered: number } } }>(
       `/trpc/dashboard.orderPipelineChart?input=${encodeURIComponent(ceoInput)}`,
       opts,
     ),
@@ -78,7 +78,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const orderPipelineChart =
     orderPipelineRes.ok && orderPipelineRes.data?.result?.data
       ? orderPipelineRes.data.result.data
-      : { volume: 0, csEngaged: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 };
+      : { volume: 0, unconfirmed: 0, confirmed: 0, logisticsDistributed: 0, delivered: 0 };
 
   const payload: ChartDataPayload = {
     timeSeries,

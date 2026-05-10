@@ -1,7 +1,9 @@
 import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
 import { Await, Link, useFetcher, useSearchParams, useNavigate } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { SmartPick } from '~/components/ui/smart-pick';
 import { Modal } from '~/components/ui/modal';
+import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { formatOrderTimestamp, formatOrderTimestampShort } from '~/lib/format-date';
 import { LiveIndicator } from '~/components/ui/live-indicator';
@@ -30,7 +32,6 @@ import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fe
 import { useFetcherToast } from '~/components/ui/toast';
 import {
   STATUS_OPTIONS,
-  CS_ORDERS_STATUS_DROPDOWN_OPTIONS,
   STATUS_LABELS,
   STATUS_TEXT_CLASS,
   formatStatus,
@@ -59,7 +60,7 @@ export type CsOrdersDeferredSecondary = {
     todayClosesCount?: number;
     lastActionAt: string | null;
   } | null;
-  csAgentsForFilter: Array<{ agentId: string; agentName: string }>;
+  csClosersForFilter: Array<{ agentId: string; agentName: string }>;
   logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }>;
   productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
 };
@@ -123,19 +124,21 @@ export interface OrdersListPageProps {
   searchFilter?: string;
   filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   userRole?: string;
-  /** CS agent sees only their assigned orders; when true, title is "My Orders". */
-  isCSAgent?: boolean;
+  /** Permission-driven (orders.bulkAssign) — controls the SmartPick toolbar visibility. */
+  canBulkPick?: boolean;
+  /** CS closer sees only their assigned orders; when true, title is "My Orders". */
+  isCSCloser?: boolean;
   /** HoS/SuperAdmin see "Assigned CS" column and can filter by agent. */
-  showCSAgentColumn?: boolean;
-  /** For "Filter by CS Agent" dropdown (HoS/SuperAdmin). */
-  csAgentsForFilter?: Array<{ agentId: string; agentName: string }>;
+  showCSCloserColumn?: boolean;
+  /** For "Filter by CS Closer" dropdown (HoS/SuperAdmin). */
+  csClosersForFilter?: Array<{ agentId: string; agentName: string }>;
   /** Logistics locations for the "Allocate to 3PL" bulk modal (HoS/SuperAdmin/Admin). */
   logisticsLocationsForBulk?: Array<{ id: string; name: string; providerName: string | null }>;
   /** HoS/SuperAdmin can assign directly. */
   canAssignDirectly?: boolean;
   /** Current user id. */
   currentUserId?: string;
-  /** Workload snapshot for current CS agent (My Orders). */
+  /** Workload snapshot for current CS closer (My Orders). */
   myWorkload?: {
     agentId: string;
     agentName: string;
@@ -160,7 +163,7 @@ export interface OrdersListPageProps {
   campaignsForFilter?: Array<{ id: string; name: string }>;
   /** Available products for the Product filter dropdown. */
   productsForFilter?: Array<{ id: string; name: string }>;
-  /** When true, show "Create offline order" button (CS_AGENT / HEAD_OF_CS). */
+  /** When true, show "Create offline order" button (CS_CLOSER / HEAD_OF_CS). */
   canCreateOffline?: boolean;
   /**
    * When false (default), the Export / Export Selected buttons are hidden.
@@ -197,14 +200,15 @@ function OrdersListPageImpl({
   searchFilter,
   filters,
   userRole,
-  isCSAgent = false,
-  showCSAgentColumn = false,
+  canBulkPick = false,
+  isCSCloser = false,
+  showCSCloserColumn = false,
   showCampaignColumn = false,
   campaignFilter,
   productFilter,
   campaignsForFilter,
   productsForFilter,
-  csAgentsForFilter,
+  csClosersForFilter,
   logisticsLocationsForBulk = [],
   canAssignDirectly = false,
   currentUserId = '',
@@ -374,7 +378,7 @@ function OrdersListPageImpl({
     });
   };
 
-  const buildQueryString = (overrides: { page?: number; status?: string; search?: string; csAgentId?: string }) => {
+  const buildQueryString = (overrides: { page?: number; status?: string; search?: string; csCloserId?: string }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
     if (overrides.status !== undefined) {
@@ -385,9 +389,9 @@ function OrdersListPageImpl({
       if (overrides.search) params.set('search', overrides.search);
       else params.delete('search');
     }
-    if (overrides.csAgentId !== undefined) {
-      if (overrides.csAgentId && overrides.csAgentId !== 'ALL') params.set('csAgentId', overrides.csAgentId);
-      else params.delete('csAgentId');
+    if (overrides.csCloserId !== undefined) {
+      if (overrides.csCloserId && overrides.csCloserId !== 'ALL') params.set('csCloserId', overrides.csCloserId);
+      else params.delete('csCloserId');
     }
     const qs = params.toString();
     return qs ? `?${qs}` : '?';
@@ -468,13 +472,13 @@ function OrdersListPageImpl({
   // Eligibility: initial queue assign — only unprocessed orders.
   const canBulkAssignToCS =
     selectedOrders.length > 0 &&
-    (csAgentsForFilter?.length ?? 0) > 0 &&
+    (csClosersForFilter?.length ?? 0) > 0 &&
     selectedOrders.every((o) => o.status === 'UNPROCESSED');
 
   // Eligibility: Hot-swap style reassignment — orders already with a closer (same bulk API + random split).
   const canBulkReassignToCS =
     selectedOrders.length > 0 &&
-    (csAgentsForFilter?.length ?? 0) > 0 &&
+    (csClosersForFilter?.length ?? 0) > 0 &&
     selectedOrders.every((o) => o.status === 'CS_ASSIGNED' || o.status === 'CS_ENGAGED');
 
   /** Unassigned + already-assigned mixed selection — cannot use Assign and Reassign in one batch. */
@@ -488,7 +492,7 @@ function OrdersListPageImpl({
     logisticsLocationsForBulk.length > 0 &&
     selectedOrders.every((o) => o.status === 'CONFIRMED');
 
-  const assignCloserOptions = (csAgentsForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName }));
+  const assignCloserOptions = (csClosersForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName }));
   const allocateLocationOptions = logisticsLocationsForBulk.map((loc) => ({
     value: loc.id,
     label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
@@ -506,7 +510,7 @@ function OrdersListPageImpl({
           {
             intent: 'bulkAssign',
             orderIds: JSON.stringify([...selectedIds]),
-            csAgentIds: JSON.stringify(Array.from(assignAgentIds)),
+            csCloserIds: JSON.stringify(Array.from(assignAgentIds)),
           },
           { method: 'post' },
         ),
@@ -568,7 +572,7 @@ function OrdersListPageImpl({
         ),
       },
     ];
-    if (showCSAgentColumn) {
+    if (showCSCloserColumn) {
       cols.push({
         key: 'closer',
         header: 'Assigned closer',
@@ -656,31 +660,31 @@ function OrdersListPageImpl({
       },
     );
     return cols;
-  }, [showCSAgentColumn, showCampaignColumn]);
+  }, [showCSCloserColumn, showCampaignColumn]);
 
-  const statusOptions = CS_ORDERS_STATUS_DROPDOWN_OPTIONS.map((status) => ({
+  const statusOptions = STATUS_OPTIONS.map((status) => ({
     value: status,
     label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
   }));
 
-  const csAgentOptions = [
+  const csCloserOptions = [
     { value: 'ALL', label: 'All closers' },
-    ...(csAgentsForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName })),
+    ...(csClosersForFilter ?? []).map((a) => ({ value: a.agentId, label: a.agentName })),
   ];
 
   const ordersListToolbarFilterBadge = useMemo(() => {
     let n = 0;
     if (selectedStatus !== 'ALL') n += 1;
-    const agent = searchParams.get('csAgentId') || 'ALL';
-    if (showCSAgentColumn && (csAgentsForFilter?.length ?? 0) > 0 && agent !== 'ALL') n += 1;
+    const agent = searchParams.get('csCloserId') || 'ALL';
+    if (showCSCloserColumn && (csClosersForFilter?.length ?? 0) > 0 && agent !== 'ALL') n += 1;
     if (scheduleFilters?.scheduleKind) n += 1;
     if (productFilter) n += 1;
     if (showCampaignColumn && campaignFilter) n += 1;
     return n;
   }, [
     selectedStatus,
-    showCSAgentColumn,
-    csAgentsForFilter?.length,
+    showCSCloserColumn,
+    csClosersForFilter?.length,
     searchParams,
     scheduleFilters?.scheduleKind,
     productFilter,
@@ -775,8 +779,8 @@ function OrdersListPageImpl({
 
       {/* Page header — Live tag sits directly in front of the refresh button per CS request. */}
       <PageHeader
-        title={isCSAgent ? 'My Orders' : 'CS Orders'}
-        description={isCSAgent ? 'Track your assigned orders' : 'Manage and track all customer orders'}
+        title={isCSCloser ? 'My Orders' : 'CS Orders'}
+        description={isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
           <>
             <PageHeaderMobileTools
@@ -878,8 +882,8 @@ function OrdersListPageImpl({
         />
       )}
 
-      {/* My workload (CS agent only) */}
-      {isCSAgent && (myWorkload || deferredLoading) && (
+      {/* My workload (CS closer only) */}
+      {isCSCloser && (myWorkload || deferredLoading) && (
         myWorkload ? (
           <div className="card">
             <h2 className="text-sm font-semibold text-app-fg mb-2">
@@ -950,6 +954,23 @@ function OrdersListPageImpl({
             <div className="h-2 w-full rounded-full bg-app-hover" />
           </div>
         ) : null
+      )}
+
+      {/* Smart pick — permission-driven (orders.bulkAssign). Held by HEAD_OF_CS by default;
+          admin-class inherits via ALL_PERMISSION_CODES. Picks the first N from the filtered
+          list; the existing per-row checkboxes still work alongside it. */}
+      {canBulkPick && filteredOrders.length > 0 && (
+        <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2">
+          <SmartPick
+            total={filteredOrders.length}
+            selectedCount={selectedIds.size}
+            onPick={(count) =>
+              setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)))
+            }
+            onClear={clearSelection}
+            itemNoun="orders"
+          />
+        </div>
       )}
 
       {/* Bulk Action Toolbar */}
@@ -1089,13 +1110,13 @@ function OrdersListPageImpl({
         columns={[
           { key: 'id', label: 'Order ID' },
           { key: 'customer', label: 'Customer' },
-          ...(showCSAgentColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
+          ...(showCSCloserColumn ? [{ key: 'assignedCs', label: 'Assigned closer' }] : []),
           { key: 'phone', label: 'Phone' },
           { key: 'status', label: 'Status' },
           { key: 'amount', label: 'Amount' },
           { key: 'created', label: 'Created' },
         ]}
-        defaultColumns={showCSAgentColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
+        defaultColumns={showCSCloserColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
       />
 
       <div className="card p-0 overflow-hidden">
@@ -1146,8 +1167,8 @@ function OrdersListPageImpl({
                   options={statusOptions}
                   wrapperClassName="w-full min-w-0 sm:w-48"
                 />
-                {showCSAgentColumn && ((csAgentsForFilter?.length ?? 0) > 0 || deferredLoading) ? (
-                  deferredLoading && !(csAgentsForFilter?.length) ? (
+                {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
+                  deferredLoading && !(csClosersForFilter?.length) ? (
                     <div
                       className="h-9 w-full min-w-0 sm:w-48 shrink-0 rounded-md bg-app-hover animate-pulse"
                       aria-hidden
@@ -1155,19 +1176,19 @@ function OrdersListPageImpl({
                   ) : (
                     <SearchableSelect
                       id="orders-filter-closer"
-                      value={searchParams.get('csAgentId') || 'ALL'}
+                      value={searchParams.get('csCloserId') || 'ALL'}
                       onChange={(v) => {
                         setSelectedIds(new Set());
                         setBulkResult(null);
                         setSearchParams((p) => {
                           const next = new URLSearchParams(p);
                           next.set('page', '1');
-                          if (v && v !== 'ALL') next.set('csAgentId', v);
-                          else next.delete('csAgentId');
+                          if (v && v !== 'ALL') next.set('csCloserId', v);
+                          else next.delete('csCloserId');
                           return next;
                         });
                       }}
-                      options={csAgentOptions}
+                      options={csCloserOptions}
                       wrapperClassName="w-full min-w-0 sm:w-48"
                       placeholder="All closers"
                       searchPlaceholder="Search closers..."
@@ -1252,27 +1273,27 @@ function OrdersListPageImpl({
                   wrapperClassName="w-full"
                 />
               </div>
-              {showCSAgentColumn && ((csAgentsForFilter?.length ?? 0) > 0 || deferredLoading) ? (
+              {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Closer</span>
-                  {deferredLoading && !(csAgentsForFilter?.length) ? (
+                  {deferredLoading && !(csClosersForFilter?.length) ? (
                     <div className="h-9 w-full rounded-md bg-app-hover animate-pulse" aria-hidden />
                   ) : (
                     <SearchableSelect
                       id="orders-filter-closer-sheet"
-                      value={searchParams.get('csAgentId') || 'ALL'}
+                      value={searchParams.get('csCloserId') || 'ALL'}
                       onChange={(v) => {
                         setSelectedIds(new Set());
                         setBulkResult(null);
                         setSearchParams((p) => {
                           const next = new URLSearchParams(p);
                           next.set('page', '1');
-                          if (v && v !== 'ALL') next.set('csAgentId', v);
-                          else next.delete('csAgentId');
+                          if (v && v !== 'ALL') next.set('csCloserId', v);
+                          else next.delete('csCloserId');
                           return next;
                         });
                       }}
-                      options={csAgentOptions}
+                      options={csCloserOptions}
                       wrapperClassName="w-full"
                       placeholder="All closers"
                       searchPlaceholder="Search closers..."
@@ -1505,7 +1526,7 @@ function OrdersListPageImpl({
                       </div>
                       <OrderStatusBadge status={order.status} />
                     </div>
-                    {showCSAgentColumn && (order.assignedCsName || order.assignedCsId) ? (
+                    {showCSCloserColumn && (order.assignedCsName || order.assignedCsId) ? (
                       <div className="mb-0.5 text-sm text-app-fg-muted">
                         {order.assignedCsId ? (
                           <Button
@@ -1556,7 +1577,7 @@ function OrdersListPageImpl({
               ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
               : 'No orders'}
           </p>
-          <Pagination page={page} totalPages={totalPages} pageParam="page" />
+          <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
         </div>
       )}
 
@@ -1627,92 +1648,29 @@ function OrdersListPageImpl({
 
       {/* Bulk assign / reassign to CS — checkbox list + random split (matches CS queue) */}
       {assignModalOpen && (
-        <Modal
+        <AssignCloserModal
           open
           onClose={() => {
-            if (isAssigning) return;
             setAssignModalOpen(false);
             setAssignAgentIds(new Set());
           }}
-          maxWidth="max-w-md"
-          contentClassName="p-0 max-h-[min(32rem,90dvh)] overflow-hidden flex flex-col"
-        >
-          <div className="shrink-0 border-b border-app-border px-4 py-3">
-            <h3 className="text-lg font-semibold text-app-fg">
-              {assignModalKind === 'reassign'
-                ? `Reassign ${selectedIds.size} order${selectedIds.size !== 1 ? 's' : ''} to closers`
-                : `Assign ${selectedIds.size} order${selectedIds.size !== 1 ? 's' : ''} to closers`}
-            </h3>
-            <p className="text-sm text-app-fg-muted mt-0.5">
-              {assignModalKind === 'reassign'
-                ? 'Choose new closers for these orders.'
-                : 'Choose closers to receive these orders from the unassigned queue.'}
-            </p>
-            <p className="text-xs text-app-fg-muted mt-1.5">
-              Select one or more closers — orders are split among them at random.
-            </p>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-1.5">
-            <ModalFetcherInlineError message={assignSurface.errorMatchingIntent('bulkAssign')} className="mb-2" />
-            {assignCloserOptions.length === 0 ? (
-              <p className="text-sm text-app-fg-muted">No closers available in your scope.</p>
-            ) : (
-              assignCloserOptions.map((opt) => {
-                const checked = assignAgentIds.has(opt.value);
-                return (
-                  <label
-                    key={opt.value}
-                    className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-                      checked
-                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/40 text-app-fg ring-1 ring-brand-500/30'
-                        : 'border-app-border bg-app-elevated hover:border-brand-300 dark:hover:border-brand-700'
-                    }`}
-                  >
-                    <Checkbox
-                      className="mt-0.5 shrink-0"
-                      checked={checked}
-                      onChange={() =>
-                        setAssignAgentIds((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(opt.value)) next.delete(opt.value);
-                          else next.add(opt.value);
-                          return next;
-                        })
-                      }
-                      aria-label={opt.label}
-                    />
-                    <span className="min-w-0 flex-1 text-left leading-snug">{opt.label}</span>
-                  </label>
-                );
-              })
-            )}
-          </div>
-          <div data-branch-scoped-action="true">
-            <div className="shrink-0 flex justify-end gap-2 border-t border-app-border px-4 py-3">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={isAssigning}
-                onClick={() => {
-                  setAssignModalOpen(false);
-                  setAssignAgentIds(new Set());
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                disabled={assignAgentIds.size === 0 || assignCloserOptions.length === 0 || isAssigning}
-                loading={isAssigning}
-                loadingText={assignModalKind === 'reassign' ? 'Reassigning…' : 'Assigning…'}
-                onClick={submitBulkAssign}
-              >
-                {assignModalKind === 'reassign' ? 'Reassign' : 'Assign'}
-              </Button>
-            </div>
-          </div>
-        </Modal>
+          selectedCount={selectedIds.size}
+          options={assignCloserOptions}
+          selectedIds={assignAgentIds}
+          onToggle={(id) =>
+            setAssignAgentIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })
+          }
+          onSubmit={submitBulkAssign}
+          isSubmitting={isAssigning}
+          errorMessage={assignSurface.errorMatchingIntent('bulkAssign')}
+          mode={assignModalKind}
+          emptyMessage="No closers available in your scope."
+        />
       )}
 
       {/* Bulk Allocate to 3PL modal */}
@@ -1778,12 +1736,12 @@ function OrdersListPageImpl({
         onClose={() => setShowExportModal(false)}
         config={EXPORT_CONFIGS.cs_orders}
         picklists={{
-          csAgents: (csAgentsForFilter ?? []).map((a) => ({ id: a.agentId, name: a.agentName })),
+          csClosers: (csClosersForFilter ?? []).map((a) => ({ id: a.agentId, name: a.agentName })),
         }}
         initialFilters={{
           status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
           search: searchQuery || undefined,
-          assignedCsId: searchParams.get('csAgentId') || undefined,
+          assignedCsId: searchParams.get('csCloserId') || undefined,
           ...(filters?.periodAllTime
             ? { periodAllTime: true as const }
             : filters?.startDate && filters?.endDate
@@ -1809,7 +1767,7 @@ export function OrdersListPage(props: OrdersListPageProps) {
             dailyCounts={undefined}
             scheduleHeat={undefined}
             myWorkload={null}
-            csAgentsForFilter={undefined}
+            csClosersForFilter={undefined}
             logisticsLocationsForBulk={[]}
             productsForOfflineOrder={[]}
           />
@@ -1823,7 +1781,7 @@ export function OrdersListPage(props: OrdersListPageProps) {
               dailyCounts={sec.dailyCounts}
               scheduleHeat={sec.scheduleHeat}
               myWorkload={sec.myWorkload}
-              csAgentsForFilter={sec.csAgentsForFilter}
+              csClosersForFilter={sec.csClosersForFilter}
               logisticsLocationsForBulk={sec.logisticsLocationsForBulk}
               productsForOfflineOrder={sec.productsForOfflineOrder}
             />

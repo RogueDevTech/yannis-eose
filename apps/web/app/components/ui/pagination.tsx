@@ -33,6 +33,17 @@ interface PaginationProps {
    * (buttons disabled as appropriate). Hidden when `totalPages` is 0.
    */
   showWhenSinglePage?: boolean;
+  /**
+   * Per-page picker. Pass an array of page-size choices (e.g. `[20, 50, 100]`) and the
+   * current `pageSize` to render a "Per page" picker beside the controls. URL mode reads
+   * from `?perPage=<n>` (or whatever `pageSizeParam` is) and resets to page 1 on change;
+   * callback mode fires `onPageSizeChange`. Without `pageSizeOptions` no picker renders —
+   * existing call sites are untouched.
+   */
+  pageSizeOptions?: number[];
+  pageSize?: number;
+  pageSizeParam?: string;
+  onPageSizeChange?: (size: number) => void;
 }
 
 function buildPages(page: number, total: number, siblings: number): (number | '...')[] {
@@ -59,8 +70,12 @@ export function Pagination({
   siblingCount = 1,
   className = '',
   showWhenSinglePage = false,
+  pageSizeOptions,
+  pageSize,
+  pageSizeParam = 'perPage',
+  onPageSizeChange,
 }: PaginationProps) {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Loader-refetch indicator: in URL mode the loader re-runs on click; in callback mode the
   // consumer manages loading. We arm a local "navigating" flag the moment a click happens so
@@ -82,8 +97,37 @@ export function Pagination({
     callbackTimerRef.current = setTimeout(() => setCallbackNavigating(false), 1200);
   };
 
-  if (totalPages < 1) return null;
-  if (totalPages === 1 && !showWhenSinglePage) return null;
+  // Picker is exposed when the caller passes a current `pageSize` (the URL-driven limit).
+  // We default the choices to [20, 50, 100] so individual list pages don't need to repeat
+  // the options array — just pass `pageSize={limit}` and the picker appears. Pages can
+  // still override with `pageSizeOptions` when they want a different set.
+  const resolvedPageSizeOptions =
+    Array.isArray(pageSizeOptions) && pageSizeOptions.length > 0
+      ? pageSizeOptions
+      : [20, 50, 100];
+  const showPageSizePicker = typeof pageSize === 'number';
+
+  if (totalPages < 1 && !showPageSizePicker) return null;
+  if (totalPages === 1 && !showWhenSinglePage && !showPageSizePicker) return null;
+
+  function commitPageSize(nextSize: number) {
+    if (typeof pageSize === 'number' && nextSize === pageSize) return;
+    if (onPageSizeChange) {
+      onPageSizeChange(nextSize);
+      return;
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set(pageSizeParam, String(nextSize));
+        // Always reset to page 1 — landing on "page 5 of /20" then switching to /50
+        // would silently scroll past rows.
+        next.delete(pageParam);
+        return next;
+      },
+      { replace: true, preventScrollReset: true },
+    );
+  }
 
   function buildHref(p: number) {
     const params = new URLSearchParams(searchParams);
@@ -232,6 +276,27 @@ export function Pagination({
       {showEdgeButtons && (
         <NavBtn p={totalPages} label="»" disabled={page === totalPages} />
       )}
+
+      {showPageSizePicker ? (
+        <div className="ml-3 inline-flex items-center gap-1.5 text-xs text-app-fg-muted">
+          <label htmlFor="pagination-per-page" className="whitespace-nowrap">
+            Per page
+          </label>
+          <select
+            id="pagination-per-page"
+            value={pageSize}
+            onChange={(e) => commitPageSize(Number.parseInt(e.target.value, 10))}
+            className="rounded-md border border-app-border bg-app-canvas px-2 py-1 text-xs font-medium text-app-fg hover:bg-app-hover focus:outline-none focus:ring-2 focus:ring-brand-500"
+            aria-label="Rows per page"
+          >
+            {resolvedPageSizeOptions.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
     </nav>
   );
 }

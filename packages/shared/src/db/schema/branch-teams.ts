@@ -5,7 +5,41 @@ import { branches } from './branches';
 import { users } from './users';
 
 /**
- * branch_teams — named or default squads within a branch (CS or Marketing only).
+ * branch_departments — fixed Marketing / CS bucket per branch (one row per department).
+ * Squads (branch_teams) and department-only roster rows hang off this.
+ */
+export const branchDepartments = pgTable(
+  'branch_departments',
+  {
+    id: uuidv7Pk(),
+    branchId: uuid('branch_id')
+      .notNull()
+      .references(() => branches.id, { onDelete: 'cascade' }),
+    department: branchTeamDepartmentEnum('department').notNull(),
+    ...timestampColumns,
+  },
+  (t) => ({
+    branchDeptUnique: uniqueIndex('branch_departments_branch_id_department_unique').on(t.branchId, t.department),
+  }),
+);
+
+export const branchDepartmentMembers = pgTable(
+  'branch_department_members',
+  {
+    branchDepartmentId: uuid('branch_department_id')
+      .notNull()
+      .references(() => branchDepartments.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.branchDepartmentId, t.userId] }),
+  }),
+);
+
+/**
+ * branch_teams — optional squads within a branch department (CS or Marketing only).
  * Supervisors and members are rows in branch_team_members.
  */
 export const branchTeams = pgTable('branch_teams', {
@@ -13,6 +47,9 @@ export const branchTeams = pgTable('branch_teams', {
   branchId: uuid('branch_id')
     .notNull()
     .references(() => branches.id),
+  branchDepartmentId: uuid('branch_department_id')
+    .notNull()
+    .references(() => branchDepartments.id),
   department: branchTeamDepartmentEnum('department').notNull(),
   name: text('name'),
   ...timestampColumns,

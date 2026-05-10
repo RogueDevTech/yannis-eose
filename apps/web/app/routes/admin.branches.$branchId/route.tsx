@@ -15,7 +15,6 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
-import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills';
 import { SearchInput } from '~/components/ui/search-input';
@@ -161,6 +160,7 @@ interface UserOption {
 interface BranchTeamWithMembers {
   id: string;
   branchId: string;
+  branchDepartmentId: string;
   department: 'CS' | 'MARKETING';
   name: string | null;
   createdAt: string;
@@ -172,6 +172,23 @@ interface BranchTeamWithMembers {
     name: string;
     role: string;
   }>;
+}
+
+/** `listBranchOrgStructure` — department bucket + teamless roster + squads per branch. */
+interface BranchOrgDepartmentBlock {
+  department: {
+    id: string;
+    branchId: string;
+    department: 'CS' | 'MARKETING';
+    createdAt: string;
+    updatedAt: string | null;
+  };
+  roster: Array<{ userId: string; name: string; role: string }>;
+  teams: BranchTeamWithMembers[];
+}
+
+interface BranchOrgStructurePayload {
+  departments: BranchOrgDepartmentBlock[];
 }
 
 type SettingSource = 'enforced-system' | 'team' | 'system' | 'unset';
@@ -191,16 +208,25 @@ interface TeamSettingsBundle {
   settings: EffectiveTeamSetting[];
 }
 
+/**
+ * CEO directive 2026-05-10: only Marketing, CS, and the branch-management
+ * role belong in the branching system. Org-wide roles (SuperAdmin, Admin,
+ * Finance, HR, Logistics, Stock, 3PL) are not assignable to a branch.
+ * Mirrored by migration 0136 which cleans up legacy assignments.
+ */
+const BRANCH_ELIGIBLE_ROLES = new Set([
+  'MEDIA_BUYER',
+  'HEAD_OF_MARKETING',
+  'CS_CLOSER',
+  'HEAD_OF_CS',
+  'BRANCH_ADMIN',
+]);
+
 const ROLE_OPTIONS = [
-  { value: 'CS_AGENT', label: 'CS Agent' },
+  { value: 'CS_CLOSER', label: 'CS Closer' },
   { value: 'HEAD_OF_CS', label: 'Head of CS' },
   { value: 'MEDIA_BUYER', label: 'Media Buyer' },
   { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
-  { value: 'LOGISTICS_MANAGER', label: 'Logistics Manager' },
-  { value: 'HEAD_OF_LOGISTICS', label: 'Head of Logistics' },
-  { value: 'FINANCE_OFFICER', label: 'Finance Officer' },
-  { value: 'HR_MANAGER', label: 'HR Manager' },
-  { value: 'STOCK_MANAGER', label: 'Stock Manager' },
   { value: 'BRANCH_ADMIN', label: 'Branch Admin' },
 ];
 
@@ -215,7 +241,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const pageData = (async () => {
-    const [overviewRes, usersRes, teamsRes] = await Promise.all([
+    const [overviewRes, usersRes, orgRes] = await Promise.all([
       apiRequest<{ result?: { data?: BranchOverview } }>(
         `/trpc/branches.overview?input=${encodeURIComponent(JSON.stringify({ branchId }))}`,
         { method: 'GET', cookie },
@@ -224,8 +250,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         `/trpc/users.list?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', status: 'ACTIVE', allBranches: true }))}`,
         { method: 'GET', cookie },
       ),
-      apiRequest<{ result?: { data?: BranchTeamWithMembers[] } }>(
-        `/trpc/branches.listTeamsWithMembers?input=${encodeURIComponent(JSON.stringify({ branchId }))}`,
+      apiRequest<{ result?: { data?: BranchOrgStructurePayload } }>(
+        `/trpc/branches.listBranchOrgStructure?input=${encodeURIComponent(JSON.stringify({ branchId }))}`,
         { method: 'GET', cookie },
       ),
     ]);
@@ -247,9 +273,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (u) => u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN',
     );
 
-    const teams: BranchTeamWithMembers[] = teamsRes.ok
-      ? (teamsRes.data?.result?.data as BranchTeamWithMembers[] | undefined) ?? []
-      : [];
+    const orgStructure: BranchOrgStructurePayload = orgRes.ok
+      ? (orgRes.data?.result?.data as BranchOrgStructurePayload | undefined) ?? { departments: [] }
+      : { departments: [] };
+    const teams: BranchTeamWithMembers[] = orgStructure.departments.flatMap((d) => d.teams);
 
     // Phase C — fetch overridable team settings for every team in parallel.
     // Each call returns { department, catalog, settings } where `settings` is
@@ -267,7 +294,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       teamSettingsEntries,
     );
 
-    return { overview, allUsers, teams, teamSettingsByTeamId };
+    return { overview, allUsers, teams, orgStructure, teamSettingsByTeamId };
   })();
 
   return defer({ pageData });
@@ -443,6 +470,46 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!res.ok) {
       return Response.json(
         { error: extractApiErrorMessage(res.data, 'Failed to update supervisor flag') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'addBranchDepartmentMember') {
+    const branchDepartmentId = form.get('branchDepartmentId')?.toString() ?? '';
+    const userId = form.get('userId')?.toString() ?? '';
+    if (!branchDepartmentId || !userId) {
+      return Response.json({ error: 'Department and user are required' }, { status: 400 });
+    }
+    const res = await apiRequest('/trpc/branches.addBranchDepartmentMember', {
+      method: 'POST',
+      cookie,
+      body: { branchDepartmentId, userId },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to add to department roster') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return Response.json({ success: true });
+  }
+
+  if (intent === 'removeBranchDepartmentMember') {
+    const branchDepartmentId = form.get('branchDepartmentId')?.toString() ?? '';
+    const userId = form.get('userId')?.toString() ?? '';
+    if (!branchDepartmentId || !userId) {
+      return Response.json({ error: 'Department and user are required' }, { status: 400 });
+    }
+    const res = await apiRequest('/trpc/branches.removeBranchDepartmentMember', {
+      method: 'POST',
+      cookie,
+      body: { branchDepartmentId, userId },
+    });
+    if (!res.ok) {
+      return Response.json(
+        { error: extractApiErrorMessage(res.data, 'Failed to remove from department roster') },
         { status: safeStatus(res.status) },
       );
     }
@@ -689,7 +756,9 @@ type SquadConfirmIntent =
       teamTitle: string;
       nextValue: boolean;
     }
-  | { kind: 'removeMember'; teamId: string; userId: string; memberName: string; teamTitle: string };
+  | { kind: 'removeMember'; teamId: string; userId: string; memberName: string; teamTitle: string }
+  | { kind: 'addRosterMember'; formData: FormData; memberLabel: string; deptLabel: string }
+  | { kind: 'removeRosterMember'; branchDepartmentId: string; userId: string; memberName: string; deptLabel: string };
 
 function buildBranchTeamMemberColumns(
   team: BranchTeamWithMembers,
@@ -1123,18 +1192,26 @@ function SettingEditorModal({
 }
 
 function BranchSupervisorTeamsPanel({
-  teams,
+  orgStructure,
   branchMembers,
   canManageCSTeams,
   canManageMarketingTeams,
+  canManageBranchPage,
   teamSettingsByTeamId,
+  onAddBranchMember,
 }: {
-  teams: BranchTeamWithMembers[];
+  orgStructure: BranchOrgStructurePayload;
   branchMembers: OverviewMember[];
   canManageCSTeams: boolean;
   canManageMarketingTeams: boolean;
+  canManageBranchPage: boolean;
   teamSettingsByTeamId: Record<string, TeamSettingsBundle | null>;
+  onAddBranchMember: () => void;
 }) {
+  // Master/detail navigation: null = master (department list), string = drilled
+  // into that BranchDepartment id (manage members + roster + squads).
+  const [selectedDeptId, setSelectedDeptId] = useState<string | null>(null);
+  const flatTeams = orgStructure.departments.flatMap((d) => d.teams);
   const canManageAny = canManageCSTeams || canManageMarketingTeams;
   const canManageForDept = (dept: 'CS' | 'MARKETING'): boolean =>
     dept === 'CS' ? canManageCSTeams : canManageMarketingTeams;
@@ -1142,8 +1219,7 @@ function BranchSupervisorTeamsPanel({
   const squadSurface = useFetcherActionSurface(squadFetcher);
   const revalidate = useRevalidator();
   const [confirmIntent, setConfirmIntent] = useState<SquadConfirmIntent | null>(null);
-  // Open the first team by default, others collapsed.
-  const [openTeamId, setOpenTeamId] = useState<string | null>(teams[0]?.id ?? null);
+  const [openTeamId, setOpenTeamId] = useState<string | null>(flatTeams[0]?.id ?? null);
 
   useFetcherToast(squadFetcher.data, {
     successMessage: 'Teams updated',
@@ -1159,10 +1235,34 @@ function BranchSupervisorTeamsPanel({
     }
   }, [squadFetcher.state, squadFetcher.data, revalidate]);
 
-  const addOptions = (dept: 'CS' | 'MARKETING', team: BranchTeamWithMembers) => {
+  const rosterAddOptions = (deptBlock: BranchOrgDepartmentBlock) => {
+    const lane = deptBlock.department.department;
+    const inSquads = new Set(deptBlock.teams.flatMap((t) => t.members.map((m) => m.userId)));
+    const onRoster = new Set(deptBlock.roster.map((r) => r.userId));
+    return branchMembers
+      .filter(
+        (m) =>
+          m.department === lane && !inSquads.has(m.userId) && !onRoster.has(m.userId),
+      )
+      .map((m) => ({
+        value: m.userId,
+        label: `${m.name} · ${m.effectiveRole.replace(/_/g, ' ')}`,
+      }));
+  };
+
+  const addOptions = (
+    dept: 'CS' | 'MARKETING',
+    team: BranchTeamWithMembers,
+    rosterUserIds: Set<string>,
+  ) => {
     const onTeam = new Set(team.members.map((m) => m.userId));
     return branchMembers
-      .filter((m) => m.department === dept && !onTeam.has(m.userId))
+      .filter(
+        (m) =>
+          m.department === dept &&
+          !onTeam.has(m.userId) &&
+          !rosterUserIds.has(m.userId),
+      )
       .map((m) => ({
         value: m.userId,
         label: `${m.name} · ${m.effectiveRole.replace(/_/g, ' ')}`,
@@ -1199,6 +1299,19 @@ function BranchSupervisorTeamsPanel({
           {
             intent: 'removeBranchTeamMember',
             teamId: confirmIntent.teamId,
+            userId: confirmIntent.userId,
+          },
+          { method: 'post' },
+        );
+        break;
+      case 'addRosterMember':
+        squadFetcher.submit(confirmIntent.formData, { method: 'post' });
+        break;
+      case 'removeRosterMember':
+        squadFetcher.submit(
+          {
+            intent: 'removeBranchDepartmentMember',
+            branchDepartmentId: confirmIntent.branchDepartmentId,
             userId: confirmIntent.userId,
           },
           { method: 'post' },
@@ -1290,6 +1403,31 @@ function BranchSupervisorTeamsPanel({
           confirmLabel: 'Remove',
           variant: 'danger' as const,
         };
+      case 'addRosterMember':
+        return {
+          title: 'Add to department roster?',
+          description: (
+            <>
+              Place <strong>{confirmIntent.memberLabel}</strong> on the{' '}
+              <strong>{confirmIntent.deptLabel}</strong> roster without assigning a team? They report
+              to the department head until you move them into a team.
+            </>
+          ),
+          confirmLabel: 'Add to roster',
+          variant: 'warning' as const,
+        };
+      case 'removeRosterMember':
+        return {
+          title: 'Remove from department roster?',
+          description: (
+            <>
+              Remove <strong>{confirmIntent.memberName}</strong> from the{' '}
+              <strong>{confirmIntent.deptLabel}</strong> roster? They remain on the branch.
+            </>
+          ),
+          confirmLabel: 'Remove',
+          variant: 'danger' as const,
+        };
     }
   }, [confirmIntent]);
 
@@ -1299,9 +1437,153 @@ function BranchSupervisorTeamsPanel({
   ].filter((o): o is { value: string; label: string } => o !== null);
   const defaultCreateDept = canManageCSTeams ? 'CS' : 'MARKETING';
 
+  // Resolve the selected dept block (or null = master view). Stale ids
+  // (deleted/migrated) gracefully fall back to master view.
+  const selectedDept = selectedDeptId
+    ? orgStructure.departments.find((d) => d.department.id === selectedDeptId) ?? null
+    : null;
+
+  // Members outside the formal dept structure (Logistics / Finance / HR /
+  // Other roles). Per CEO directive 2026-05-10 these should not be in branches
+  // at all — surface a warning card on the master view until the cleanup
+  // migration runs.
+  const nonDeptMembers = branchMembers.filter(
+    (m) => m.department !== 'CS' && m.department !== 'MARKETING',
+  );
+
   return (
     <div className="space-y-6">
-      <ModalFetcherInlineError message={squadSurface.friendlyError || null} />
+      {selectedDept === null ? (
+        // ── Master view: department cards. Help text + Add member CTA live
+        // inside each department's "Manage" detail view, not at the master level.
+        <>
+          {orgStructure.departments.length === 0 ? (
+            <EmptyState
+              title="No departments loaded"
+              description="Reload the page after migrations complete, or contact support."
+            />
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {orgStructure.departments.map((deptBlock) => {
+                const lane = deptBlock.department.department;
+                const deptTitle = DEPT_TEAM_LABEL[lane];
+                const memberCount = branchMembers.filter((m) => m.department === lane).length;
+                const supervisorCount = deptBlock.teams.reduce(
+                  (acc, t) => acc + t.members.filter((m) => m.isSupervisor).length,
+                  0,
+                );
+                return (
+                  <button
+                    key={deptBlock.department.id}
+                    type="button"
+                    onClick={() => setSelectedDeptId(deptBlock.department.id)}
+                    className="text-left card p-4 space-y-3 hover:border-brand-400 dark:hover:border-brand-500 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-flex items-center justify-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                            lane === 'CS'
+                              ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
+                              : 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300'
+                          }`}
+                        >
+                          {deptTitle}
+                        </span>
+                      </div>
+                      <svg className="w-4 h-4 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <p className="text-xl font-semibold text-app-fg tabular-nums">{memberCount}</p>
+                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide">Members</p>
+                      </div>
+                      <div>
+                        <p className="text-xl font-semibold text-app-fg tabular-nums">{deptBlock.teams.length}</p>
+                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide">
+                          Team{deptBlock.teams.length === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xl font-semibold text-app-fg tabular-nums">{supervisorCount}</p>
+                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide">
+                          Supervisor{supervisorCount === 1 ? '' : 's'}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-brand-600 dark:text-brand-400 font-medium">
+                      Manage {deptTitle.toLowerCase()} →
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {nonDeptMembers.length > 0 && (
+            <div className="rounded-lg border border-warning-300 dark:border-warning-700/50 bg-warning-50/50 dark:bg-warning-900/20 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-warning-900 dark:text-warning-200">
+                  Non-branch members on this branch
+                </h3>
+                <span className="text-xs font-medium text-warning-800 dark:text-warning-300">
+                  {nonDeptMembers.length} member{nonDeptMembers.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="text-xs text-warning-800 dark:text-warning-300">
+                These users have non-CS/Marketing roles (Logistics, Finance, HR, Admin, etc.). Per CEO directive 2026-05-10 they shouldn't be assigned to a branch.
+                Branch assignment will be removed by the next cleanup migration.
+              </p>
+            </div>
+          )}
+        </>
+      ) : (
+        // ── Detail view: one dept's members + roster + squads ──
+        <>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <button
+                type="button"
+                onClick={() => setSelectedDeptId(null)}
+                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline mb-1 inline-flex items-center gap-1"
+              >
+                ← Back to departments
+              </button>
+              <h2 className="text-lg font-semibold text-app-fg">
+                {DEPT_TEAM_LABEL[selectedDept.department.department]} department
+              </h2>
+              <p className="text-xs text-app-fg-muted">
+                {branchMembers.filter((m) => m.department === selectedDept.department.department).length} branch member
+                {branchMembers.filter((m) => m.department === selectedDept.department.department).length === 1 ? '' : 's'}
+                {' · '}{selectedDept.roster.length} on roster · {selectedDept.teams.length} team
+                {selectedDept.teams.length === 1 ? '' : 's'}
+              </p>
+            </div>
+            {canManageBranchPage && (
+              <Button variant="primary" size="sm" onClick={onAddBranchMember}>
+                + Add branch member
+              </Button>
+            )}
+          </div>
+
+          {/* Branch members in this department — formerly the top-level
+              "Branch members" tab, now scoped per-department. */}
+          <BranchMembersPanel
+            members={branchMembers.filter((m) => m.department === selectedDept.department.department)}
+            canManage={canManageBranchPage}
+          />
+
+          <p className="text-xs text-app-fg-muted rounded-lg border border-app-border bg-app-hover px-3 py-2">
+            Staff can sit on the <strong className="text-app-fg">department roster</strong> (no team) or join optional{' '}
+            <strong className="text-app-fg">teams</strong> with supervisors. Configure product → CS routing under{' '}
+            <Link to="/admin/settings/cs-order-routing" className="text-brand-600 dark:text-brand-400 underline font-medium">
+              Settings → CS order routing
+            </Link>
+            .
+          </p>
+          <ModalFetcherInlineError message={squadSurface.friendlyError || null} />
       {canManageAny ? (
       <div className="rounded-lg border border-app-border bg-app-elevated/40 p-4 space-y-3">
         <div>
@@ -1346,7 +1628,7 @@ function BranchSupervisorTeamsPanel({
             )}
           </div>
           <div className="flex-1 min-w-[12rem]">
-            <TextInput label="Team name (optional)" id="sq-new-name" name="name" placeholder="e.g. Squad A" />
+            <TextInput label="Team name (optional)" id="sq-new-name" name="name" placeholder="e.g. Team A" />
           </div>
           <Button
             type="submit"
@@ -1368,16 +1650,142 @@ function BranchSupervisorTeamsPanel({
         </div>
       )}
 
-      {teams.length === 0 ? (
-        <EmptyState
-          title="No supervisor teams yet"
-          description="Create a team, add branch members, and mark who is the supervisor."
-        />
-      ) : (
-        <div className="space-y-3">
-          {teams.map((team) => {
+      <div className="space-y-8">
+        {[selectedDept].map((deptBlock) => {
+            const lane = deptBlock.department.department;
+            const deptTitle = DEPT_TEAM_LABEL[lane];
+            const rosterPick = rosterAddOptions(deptBlock);
+            const rosterUserIds = new Set(deptBlock.roster.map((r) => r.userId));
+            const canManageThisDept = canManageForDept(lane);
+            const isRosterAddBusy =
+              isBusy && confirmIntent?.kind === 'addRosterMember';
+
+            return (
+              <div key={deptBlock.department.id} className="space-y-4">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h3 className="text-base font-semibold text-app-fg">{deptTitle} department</h3>
+                  <p className="text-xs text-app-fg-muted">
+                    {deptBlock.roster.length} on roster · {deptBlock.teams.length} team
+                    {deptBlock.teams.length === 1 ? '' : 's'}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-app-border bg-app-elevated/30 p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-app-fg">Department roster (no team)</p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">
+                      Teamless staff answer to the department head until placed on a team.
+                    </p>
+                  </div>
+                  {deptBlock.roster.length === 0 ? (
+                    <p className="text-xs text-app-fg-muted">Nobody on the department roster yet.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <CompactTable
+                        withCard={false}
+                        className="min-w-full text-sm"
+                        columns={[
+                          {
+                            key: 'name',
+                            header: 'Member',
+                            render: (r) => (
+                              <span className="font-medium text-app-fg">{r.name}</span>
+                            ),
+                          },
+                          {
+                            key: 'role',
+                            header: 'Role',
+                            render: (r) => <RoleBadge role={r.role} size="sm" />,
+                          },
+                          {
+                            key: 'actions',
+                            header: '',
+                            align: 'right',
+                            tight: true,
+                            nowrap: true,
+                            render: (r) =>
+                              canManageThisDept ? (
+                                <CompactTableActionButton
+                                  tone="danger"
+                                  disabled={isBusy}
+                                  onClick={() =>
+                                    setConfirmIntent({
+                                      kind: 'removeRosterMember',
+                                      branchDepartmentId: deptBlock.department.id,
+                                      userId: r.userId,
+                                      memberName: r.name,
+                                      deptLabel: deptTitle,
+                                    })
+                                  }
+                                >
+                                  Remove
+                                </CompactTableActionButton>
+                              ) : null,
+                          },
+                        ]}
+                        rows={deptBlock.roster}
+                        rowKey={(r) => r.userId}
+                      />
+                    </div>
+                  )}
+                  {canManageThisDept ? (
+                    <squadFetcher.Form
+                      method="post"
+                      className="flex flex-wrap gap-3 items-end border-t border-app-border pt-3"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const fd = new FormData(e.currentTarget);
+                        const userId = fd.get('userId')?.toString() ?? '';
+                        if (!userId) return;
+                        const opt = rosterPick.find((p) => p.value === userId);
+                        setConfirmIntent({
+                          kind: 'addRosterMember',
+                          formData: fd,
+                          memberLabel: opt?.label ?? 'this member',
+                          deptLabel: deptTitle,
+                        });
+                      }}
+                    >
+                      <input type="hidden" name="intent" value="addBranchDepartmentMember" />
+                      <input type="hidden" name="branchDepartmentId" value={deptBlock.department.id} />
+                      <div className="min-w-[12rem] flex-1">
+                        {rosterPick.length === 0 ? (
+                          <p className="text-xs text-app-fg-muted">
+                            No eligible branch members to add here (already on a team or roster).
+                          </p>
+                        ) : (
+                          <FormSelect
+                            label="Add to department roster"
+                            id={`roster-add-${deptBlock.department.id}`}
+                            name="userId"
+                            required
+                            placeholder="Choose member…"
+                            options={rosterPick}
+                          />
+                        )}
+                      </div>
+                      <Button
+                        type="submit"
+                        variant="secondary"
+                        size="sm"
+                        disabled={isBusy || rosterPick.length === 0}
+                        loading={isRosterAddBusy}
+                        loadingText="Adding…"
+                      >
+                        Add to roster
+                      </Button>
+                    </squadFetcher.Form>
+                  ) : null}
+                </div>
+
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-app-fg">Teams</p>
+                  {deptBlock.teams.length === 0 ? (
+                    <p className="text-xs text-app-fg-muted">No teams in this department yet.</p>
+                  ) : null}
+                  {deptBlock.teams.map((team) => {
             const title = team.name?.trim() || `${DEPT_TEAM_LABEL[team.department]} team`;
-            const pick = addOptions(team.department, team);
+            const pick = addOptions(team.department, team, rosterUserIds);
             const supervisorCount = team.members.filter((m) => m.isSupervisor).length;
             const isOpen = openTeamId === team.id;
             const canManageThisTeam = canManageForDept(team.department);
@@ -1559,8 +1967,13 @@ function BranchSupervisorTeamsPanel({
                 </Collapsible>
               </div>
             );
+                  })}
+                </div>
+              </div>
+            );
           })}
         </div>
+        </>
       )}
 
       {confirmIntent && confirmModalProps && (
@@ -1585,17 +1998,18 @@ function BranchSupervisorTeamsPanel({
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-type ActiveTab = 'overview' | 'team' | 'squads';
 
 function BranchOverviewPage({
   overview,
   allUsers,
   teams,
+  orgStructure,
   teamSettingsByTeamId,
 }: {
   overview: BranchOverview;
   allUsers: UserOption[];
   teams: BranchTeamWithMembers[];
+  orgStructure: BranchOrgStructurePayload;
   teamSettingsByTeamId: Record<string, TeamSettingsBundle | null>;
 }) {
   const { branch, counts } = overview;
@@ -1603,7 +2017,6 @@ function BranchOverviewPage({
 
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const branchDetailSurface = useFetcherActionSurface(fetcher);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [editOpen, setEditOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const [isPrimary, setIsPrimary] = useState(false);
@@ -1623,12 +2036,12 @@ function BranchOverviewPage({
   const isSubmitting = fetcher.state !== 'idle';
 
   const existingMemberIds = new Set(overview.members.map((m) => m.userId));
-  const availableUsers = allUsers.filter((u) => !existingMemberIds.has(u.id));
-
-  const deliveryRate =
-    counts.totalOrders > 0
-      ? Math.round((counts.deliveredOrders / counts.totalOrders) * 100)
-      : null;
+  // Per CEO directive 2026-05-10: only branch-eligible roles (Marketing, CS,
+  // Branch Admin) can be assigned to a branch. Org-wide roles are filtered
+  // out at the picker so the bad assignment can't be made in the first place.
+  const availableUsers = allUsers.filter(
+    (u) => !existingMemberIds.has(u.id) && BRANCH_ELIGIBLE_ROLES.has(u.role),
+  );
 
   const branchOverviewStatItems = useMemo(() => {
     const deliveryPct =
@@ -1704,14 +2117,6 @@ function BranchOverviewPage({
     ];
   }, [counts]);
 
-  const deptCounts = useMemo(() => {
-    const out = { CS: 0, MARKETING: 0, LOGISTICS: 0, FINANCE: 0, HR: 0, OTHER: 0 };
-    for (const m of overview.members) {
-      out[m.department]++;
-    }
-    return out;
-  }, [overview.members]);
-
   return (
     <div className="space-y-6">
 
@@ -1755,161 +2160,18 @@ function BranchOverviewPage({
       {/* ── KPI strip (same OverviewStatStrip as CS queue, orders list, team pages) ── */}
       <OverviewStatStrip items={branchOverviewStatItems} />
 
-      {/* Shared global Tabs component — matches the look used elsewhere in the app
-          (HRPage, Settings, Order Detail). */}
-      <Tabs
-        value={activeTab}
-        onChange={(v) => setActiveTab(v as ActiveTab)}
-        tabs={[
-          { value: 'overview', label: 'Overview' },
-          { value: 'team', label: `Branch members (${counts.totalMembers})` },
-          { value: 'squads', label: `Team (${teams.length})` },
-        ]}
+      {/* Tabs removed (CEO directive 2026-05-10) — the page is now a single
+          Departments view. KPI strip above + branch header give the same
+          at-a-glance Overview signal without an extra tab to click. */}
+      <BranchSupervisorTeamsPanel
+        orgStructure={orgStructure}
+        branchMembers={overview.members}
+        canManageCSTeams={overview.viewer?.canManageCSTeams ?? canManageBranchPage}
+        canManageMarketingTeams={overview.viewer?.canManageMarketingTeams ?? canManageBranchPage}
+        canManageBranchPage={canManageBranchPage}
+        teamSettingsByTeamId={teamSettingsByTeamId}
+        onAddBranchMember={() => setAddMemberOpen(true)}
       />
-
-      {/* ── Overview tab ── */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-
-          {/* Health summary */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-
-            {/* Order health */}
-            <div className="card p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
-                Order Health
-              </p>
-              <div className="space-y-2">
-                {[
-                  { label: 'Active pipeline', value: counts.activeOrders },
-                  { label: 'Delivered', value: counts.deliveredOrders },
-                  { label: 'Total', value: counts.totalOrders },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex items-center justify-between text-sm">
-                    <span className="text-app-fg-muted">{label}</span>
-                    <span className="font-semibold text-app-fg tabular-nums">{value}</span>
-                  </div>
-                ))}
-                {deliveryRate !== null && (
-                  <div className="pt-2 border-t border-app-border">
-                    <div className="flex items-center justify-between text-sm mb-1.5">
-                      <span className="text-app-fg-muted">Delivery rate</span>
-                      <span className={`font-semibold tabular-nums ${
-                        deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' :
-                        deliveryRate >= 40 ? 'text-warning-600 dark:text-warning-400' :
-                        'text-danger-600 dark:text-danger-400'
-                      }`}>{deliveryRate}%</span>
-                    </div>
-                    <div className="w-full bg-app-hover rounded-full h-1.5">
-                      <div
-                        className={`h-1.5 rounded-full transition-all ${
-                          deliveryRate >= 70 ? 'bg-success-500' :
-                          deliveryRate >= 40 ? 'bg-warning-500' : 'bg-danger-500'
-                        }`}
-                        style={{ width: `${deliveryRate}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Team composition */}
-            <div className="card p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
-                Team Composition
-              </p>
-              <div className="space-y-2">
-                {[
-                  { label: 'Customer support', value: deptCounts.CS },
-                  { label: 'Marketing', value: deptCounts.MARKETING },
-                  { label: 'Logistics', value: deptCounts.LOGISTICS },
-                  { label: 'Finance', value: deptCounts.FINANCE },
-                  { label: 'HR', value: deptCounts.HR },
-                  { label: 'Other roles', value: deptCounts.OTHER },
-                  { label: 'Total members', value: counts.totalMembers },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex items-center justify-between text-sm">
-                    <span className="text-app-fg-muted">{label}</span>
-                    <span className="font-semibold text-app-fg tabular-nums">{value}</span>
-                  </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveTab('team')}
-                className="text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-              >
-                Manage team →
-              </button>
-            </div>
-
-            {/* Marketing */}
-            <div className="card p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-app-fg-muted">
-                Marketing
-              </p>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-app-fg-muted">Campaigns</span>
-                  <span className="font-semibold text-app-fg tabular-nums">{counts.campaigns}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Empty state nudge */}
-          {counts.totalMembers === 0 && counts.totalOrders === 0 && (
-            <div className="rounded-xl border border-warning-300/70 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-warning-900 dark:text-warning-200">
-                    This branch has no data yet.
-                  </p>
-                  <p className="text-sm text-warning-800 dark:text-warning-300 mt-0.5">
-                    Add members to activate this branch.
-                  </p>
-                </div>
-                <Button variant="primary" size="sm" onClick={() => { setActiveTab('team'); setAddMemberOpen(true); }}>
-                  Add first member
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Team tab ── */}
-      {activeTab === 'team' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-app-fg-muted">
-              {counts.totalMembers} member{counts.totalMembers !== 1 ? 's' : ''} assigned to this branch.
-            </p>
-            {canManageBranchPage ? (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setAddMemberOpen(true)}
-              >
-                + Add member
-              </Button>
-            ) : null}
-          </div>
-
-          <BranchMembersPanel members={overview.members} canManage={canManageBranchPage} />
-        </div>
-      )}
-
-      {activeTab === 'squads' && (
-        <BranchSupervisorTeamsPanel
-          teams={teams}
-          branchMembers={overview.members}
-          canManageCSTeams={overview.viewer?.canManageCSTeams ?? canManageBranchPage}
-          canManageMarketingTeams={overview.viewer?.canManageMarketingTeams ?? canManageBranchPage}
-          teamSettingsByTeamId={teamSettingsByTeamId}
-        />
-      )}
 
       {/* ── Edit branch modal ── */}
       {canManageBranchPage && editOpen && (
@@ -2020,7 +2282,10 @@ function BranchOverviewPage({
                 Staff member
               </label>
               {availableUsers.length === 0 ? (
-                <p className="text-sm text-app-fg-muted">All active staff are already in this branch.</p>
+                <p className="text-sm text-app-fg-muted">
+                  No eligible staff to add. Branches only accept Marketing, CS, and Branch Admin roles —
+                  others are org-wide and don't belong to a branch.
+                </p>
               ) : (
                 <FormSelect
                   id="add-member-user"
@@ -2090,6 +2355,7 @@ export default function BranchDetailRoute() {
             overview={data.overview}
             allUsers={data.allUsers}
             teams={data.teams}
+            orgStructure={data.orgStructure}
             teamSettingsByTeamId={data.teamSettingsByTeamId}
           />
         )}

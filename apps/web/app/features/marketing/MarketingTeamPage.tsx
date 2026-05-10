@@ -100,6 +100,14 @@ const TEAM_SORT_MENU_OPTIONS = [
     defaultDir: 'desc' as const,
   },
   {
+    value: 'orders',
+    label: 'Orders',
+    description: 'Orders created in the period (by created date).',
+    ascLabel: 'Lowest first',
+    descLabel: 'Highest first',
+    defaultDir: 'desc' as const,
+  },
+  {
     value: 'cpa',
     label: 'CPA',
     description: 'Cost per order created.',
@@ -227,6 +235,23 @@ export function MarketingTeamPage({
         align: 'right',
         nowrap: true,
         render: (m) => <span className="text-app-fg-muted">{formatNaira(Number(m.totalSpend))}</span>,
+      },
+      {
+        key: 'orders',
+        header: 'Orders',
+        align: 'right',
+        nowrap: true,
+        render: (m) =>
+          m.totalOrders != null ? (
+            <Link
+              to={buildOrdersQuery(m.userId, dateFilters)}
+              className="tabular-nums text-app-fg hover:text-brand-600 dark:hover:text-brand-400 underline-offset-2 hover:underline"
+            >
+              {m.totalOrders.toLocaleString()}
+            </Link>
+          ) : (
+            '\u2014'
+          ),
       },
       {
         key: 'cpa',

@@ -106,7 +106,7 @@ export function isAdminLevelRole(role: string): boolean {
  * `users.update` mutation.
  *
  *   - `'full'`     — can change every field (admin-class, HR_MANAGER on branch).
- *   - `'limited'`  — direct-report scope: HoCS over CS_AGENT, HoM over
+ *   - `'limited'`  — direct-report scope: HoCS over CS_CLOSER, HoM over
  *                    MEDIA_BUYER, on the same branch. Restricted to
  *                    `capacity` / `productIds` / `visibleOrderStatuses` /
  *                    `restrictProductAccess`.
@@ -199,7 +199,7 @@ export function canEditUser(
   const sameBranch =
     !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
 
-  if (actorIsCsLead && target.role === 'CS_AGENT' && sameBranch) return 'limited';
+  if (actorIsCsLead && target.role === 'CS_CLOSER' && sameBranch) return 'limited';
   if (actorIsMarketingLead && target.role === 'MEDIA_BUYER' && sameBranch) return 'limited';
 
   return 'none';
@@ -221,7 +221,7 @@ const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
  *
  * Rules (per CEO directive):
  * - SuperAdmin / Admin can mirror anyone EXCEPT another admin-level user.
- * - HEAD_OF_CS can mirror any CS_AGENT (org-wide head — not limited to a single branch).
+ * - HEAD_OF_CS can mirror any CS_CLOSER (org-wide head — not limited to a single branch).
  * - HEAD_OF_MARKETING can mirror any MEDIA_BUYER.
  * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER org-wide.
  * - Branch team supervisors mirror via `BranchTeamsService.actorCanMirrorViaSupervision` (same branch).
@@ -259,7 +259,7 @@ export function canAccessStaffHrUserDetail(
   if (viewer.id === target.id) return true;
 
   const headOfCSViewingTeam =
-    viewer.role === 'HEAD_OF_CS' && ['CS_AGENT', 'HEAD_OF_CS'].includes(target.role);
+    viewer.role === 'HEAD_OF_CS' && ['CS_CLOSER', 'HEAD_OF_CS'].includes(target.role);
   const headOfMarketingViewingTeam =
     viewer.role === 'HEAD_OF_MARKETING' &&
     ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(target.role);
@@ -305,7 +305,7 @@ export function canMirror(
   if (perms.includes('mirror.any')) return true;
 
   if (isOrgWideDepartmentHead(actor)) {
-    if ((actor.role === 'HEAD_OF_CS' || perms.includes('mirror.cs_team')) && target.role === 'CS_AGENT')
+    if ((actor.role === 'HEAD_OF_CS' || perms.includes('mirror.cs_team')) && target.role === 'CS_CLOSER')
       return true;
     if (
       (actor.role === 'HEAD_OF_MARKETING' || perms.includes('mirror.marketing_team')) &&

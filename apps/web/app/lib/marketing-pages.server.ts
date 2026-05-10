@@ -287,7 +287,7 @@ export interface MarketingDateFilterResult {
   leaderboardPeriod: 'this_month' | 'all_time';
 }
 
-type MarketingDefaultDatePreset = 'this_month' | 'last_48_hours';
+type MarketingDefaultDatePreset = 'this_month' | 'last_48_hours' | 'today';
 
 function formatDateForQuery(date: Date): string {
   const year = date.getFullYear();
@@ -302,6 +302,11 @@ function defaultLast48HoursRange(): { startDate: string; endDate: string } {
   return { startDate: formatDateForQuery(start), endDate: formatDateForQuery(end) };
 }
 
+function defaultTodayRange(): { startDate: string; endDate: string } {
+  const today = formatDateForQuery(new Date());
+  return { startDate: today, endDate: today };
+}
+
 export function resolveMarketingDateFilters(
   url: URL,
   defaultPreset: MarketingDefaultDatePreset = 'this_month',
@@ -311,7 +316,12 @@ export function resolveMarketingDateFilters(
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
-    const range = defaultPreset === 'last_48_hours' ? defaultLast48HoursRange() : defaultThisMonthRange();
+    const range =
+      defaultPreset === 'today'
+        ? defaultTodayRange()
+        : defaultPreset === 'last_48_hours'
+          ? defaultLast48HoursRange()
+          : defaultThisMonthRange();
     startDate = range.startDate;
     endDate = range.endDate;
   }

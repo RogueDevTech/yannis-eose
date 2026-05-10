@@ -2,7 +2,7 @@
  * Yannis EOSE — Offline Sync Utility
  *
  * Provides IndexedDB-backed offline queue for mutations.
- * Used by riders (delivery confirmations) and CS agents (queue caching).
+ * Used by riders (delivery confirmations) and CS closers (queue caching).
  *
  * When offline, actions are saved to IndexedDB.
  * When online, the service worker background sync processes them.

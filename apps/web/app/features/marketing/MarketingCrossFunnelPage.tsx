@@ -197,7 +197,7 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
             loadingVariant="overlay"
             withCard={false}
             emptyTitle="No cross-funnel attempts in this period"
-            emptyDescription="When a customer fills your form for a product they've already ordered through someone else's funnel within 6 hours, the attempt shows up here."
+            emptyDescription="When a customer fills your form for a product they've already ordered through someone else's funnel within 24 hours, the attempt shows up here."
             pagination={
               list.totalPages >= 1
                 ? { page: list.page, totalPages: list.totalPages }

@@ -5,13 +5,14 @@
  */
 
 import { randomUUID } from 'crypto';
+import { and, eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type { OrderStatus } from '@yannis/shared';
 
 export type UserRole =
   | 'SUPER_ADMIN'
-  | 'CS_AGENT'
+  | 'CS_CLOSER'
   | 'HEAD_OF_CS'
   | 'MEDIA_BUYER'
   | 'HEAD_OF_MARKETING'
@@ -27,7 +28,7 @@ export async function createTestUser(
   overrides: { role?: UserRole; branchId?: string } = {},
 ) {
   const id = randomUUID();
-  const role = overrides.role ?? 'CS_AGENT';
+  const role = overrides.role ?? 'CS_CLOSER';
   await db.insert(schema.users).values({
     id,
     name: `Test User ${id.slice(0, 8)}`,
@@ -97,4 +98,44 @@ export async function createTestBranch(db: PostgresJsDatabase<typeof schema>) {
     status: 'ACTIVE',
   });
   return { id };
+}
+
+/** CS + Marketing department rows — required before inserting branch_teams (migration 0135). */
+export async function ensureTestBranchDepartments(
+  db: PostgresJsDatabase<typeof schema>,
+  branchId: string,
+): Promise<void> {
+  for (const department of ['CS', 'MARKETING'] as const) {
+    const existing = await db
+      .select({ id: schema.branchDepartments.id })
+      .from(schema.branchDepartments)
+      .where(
+        and(eq(schema.branchDepartments.branchId, branchId), eq(schema.branchDepartments.department, department)),
+      )
+      .limit(1);
+    if (existing[0]) continue;
+    await db.insert(schema.branchDepartments).values({ branchId, department });
+  }
+}
+
+export async function insertTestBranchTeam(
+  db: PostgresJsDatabase<typeof schema>,
+  branchId: string,
+  department: 'CS' | 'MARKETING',
+  name: string,
+) {
+  await ensureTestBranchDepartments(db, branchId);
+  const [dept] = await db
+    .select({ id: schema.branchDepartments.id })
+    .from(schema.branchDepartments)
+    .where(
+      and(eq(schema.branchDepartments.branchId, branchId), eq(schema.branchDepartments.department, department)),
+    )
+    .limit(1);
+  if (!dept) throw new Error('ensureTestBranchDepartments failed');
+  const [team] = await db
+    .insert(schema.branchTeams)
+    .values({ branchId, branchDepartmentId: dept.id, department, name })
+    .returning({ id: schema.branchTeams.id });
+  return team;
 }

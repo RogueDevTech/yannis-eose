@@ -28,6 +28,16 @@ import { isRoleProbationEligible } from '@yannis/shared';
 
 const HEAD_ROLES = ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'HR_MANAGER'];
 
+/** Roles where Marketing/CS squad placement on create is optional (org-first staff). */
+const COMPANY_WIDE_OPTIONAL_SQUAD_ROLES = new Set([
+  'FINANCE_OFFICER',
+  'HEAD_OF_LOGISTICS',
+  'STOCK_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'LOGISTICS_MANAGER',
+]);
+
 // ─── Constants ──────────────────────────────────────────
 
 // SUPER_ADMIN is intentionally excluded — it's a singleton created only via /auth/setup.
@@ -61,8 +71,8 @@ const ROLES = [
     description: 'Manages customer service team and order processing',
   },
   {
-    value: 'CS_AGENT',
-    label: 'CS Agent',
+    value: 'CS_CLOSER',
+    label: 'CS Closer',
     description: 'Handles customer calls and order confirmation',
   },
   {
@@ -240,10 +250,21 @@ export function UserCreatePage({
   const [commissionPlanId, setCommissionPlanId] = useState('');
   // Local 10-digit phone (the part after +234). Validated to start with 7/8/9
   // so we never submit a number outside the Nigerian mobile prefix range.
-  // In edit mode we deliberately start blank (= "keep current") so existing numbers aren't
-  // re-submitted on save — only a fresh 10-digit value triggers an update.
-  // In edit mode: start blank ("keep current"). In create mode there's no editingUser, so '' too.
-  const [phoneLocal, setPhoneLocal] = useState('');
+  // In edit mode: pre-fill with the user's current phone so the editor sees
+  // the existing number and can edit in place (CEO-asked behaviour 2026-05).
+  // The submission logic still only sends a phone update when the value is a
+  // complete 10-digit number, so re-saving without changes is a no-op at the
+  // API layer.
+  const [phoneLocal, setPhoneLocal] = useState(() => {
+    const raw = editingUser?.phone ?? '';
+    if (!raw) return '';
+    // Strip everything except digits, drop +234 prefix and any leading 0 the
+    // way the input's onChange does, then cap at 10 digits.
+    let digits = raw.replace(/\D/g, '');
+    if (digits.startsWith('234')) digits = digits.slice(3);
+    if (digits.startsWith('0')) digits = digits.slice(1);
+    return digits.slice(0, 10);
+  });
   const [selectedTemplateId, setSelectedTemplateId] = useState(editingUser?.roleTemplateId ?? '');
   const [permissionOverrides, setPermissionOverrides] = useState<Record<string, boolean>>(
     editingUser?.permissionOverrides ?? {},
@@ -252,9 +273,7 @@ export function UserCreatePage({
   const phoneError =
     phoneLocal.length > 0 && !phoneIsComplete
       ? phoneLocal.length < 10
-        ? isEditMode
-          ? 'Enter all 10 digits, or leave blank to keep current.'
-          : 'Enter all 10 digits.'
+        ? 'Enter all 10 digits.'
         : 'Number must start with 7, 8, or 9.'
       : undefined;
 
@@ -278,10 +297,10 @@ export function UserCreatePage({
     : (conflictingBranch?.name ?? 'This branch');
 
   // Role-conditional visibility
-  // Capacity is only meaningful for roles that work an individual workload — CS agents
+  // Capacity is only meaningful for roles that work an individual workload — CS closers
   // (max concurrent orders they can handle) and Media Buyers (max concurrent campaigns).
   // Managers / heads don't carry a personal load, so hiding it removes noise from their forms.
-  const showCapacity = ['CS_AGENT', 'MEDIA_BUYER'].includes(selectedRole);
+  const showCapacity = ['CS_CLOSER', 'MEDIA_BUYER'].includes(selectedRole);
   const showLogisticsLocation = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const is3PLRole = ['TPL_MANAGER', 'TPL_RIDER'].includes(selectedRole);
   const showProductAssignment = selectedRole === 'MEDIA_BUYER';
@@ -635,6 +654,18 @@ export function UserCreatePage({
               <p className="text-xs text-app-fg-muted mt-1">
                 Choose all branches this user belongs to, then pick one as their default branch.
               </p>
+              {selectedRole === 'MEDIA_BUYER' || selectedRole === 'CS_CLOSER' ? (
+                <p className="text-xs text-app-fg-muted mt-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2">
+                  After you save, place them on a <strong className="text-app-fg">department roster</strong> or{' '}
+                  <strong className="text-app-fg">team</strong> from{' '}
+                  <span className="font-medium text-app-fg">Admin → Branches → (branch) → Departments</span>.
+                </p>
+              ) : null}
+              {selectedRole && COMPANY_WIDE_OPTIONAL_SQUAD_ROLES.has(selectedRole) ? (
+                <p className="text-xs text-app-fg-muted mt-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2">
+                  Team and department placement is optional for this role — attach branches only when they need branch scope.
+                </p>
+              ) : null}
             </div>
 
             {conflictingHead && (
@@ -944,11 +975,8 @@ export function UserCreatePage({
                 required={!isEditMode}
                 maxLength={10}
               />
-              {isEditMode && (
-                <p className="text-xs text-app-fg-muted mt-1">
-                  Current: {editingUser?.phone ?? 'Not set'}. Leave blank to keep unchanged.
-                </p>
-              )}
+              {/* No "current value" hint anymore — the field is prefilled with
+                  the user's existing number, so the editor sees it directly. */}
               <input
                 type="hidden"
                 name="phone"

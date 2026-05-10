@@ -7,7 +7,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { canMirror, canViewAllBranches } from '../common/authz';
-import { and, eq, isNull, sql, desc } from 'drizzle-orm';
+import { and, eq, isNull, sql, desc, asc } from 'drizzle-orm';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -20,6 +20,22 @@ import { SessionStoreService } from './session-store.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { PermissionsService } from '../permissions/permissions.service';
 import { withActor } from '../common/db/with-actor';
+
+/**
+ * Pick session branch: prefer `users.primary_branch_id` when it matches a membership,
+ * else first row (ordered `is_primary` DESC, `branch_id` ASC — stable fallback when no primary flag).
+ */
+function resolveSessionBranchIdFromMemberships(
+  memberships: Array<{ branchId: string; isPrimary: boolean }>,
+  primaryBranchId: string | null | undefined,
+): string | null {
+  if (memberships.length === 0) return null;
+  if (primaryBranchId) {
+    const hit = memberships.find((m) => m.branchId === primaryBranchId);
+    if (hit) return hit.branchId as string;
+  }
+  return memberships[0]!.branchId as string;
+}
 
 const RATE_LIMIT_PREFIX = 'login_rate:';
 const RESET_TOKEN_PREFIX = 'pwd_reset:';
@@ -114,6 +130,7 @@ export class AuthService {
         scopeGlobal: schema.users.scopeGlobal,
         scopeOrgWideHead: schema.users.scopeOrgWideHead,
         scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
+        primaryBranchId: schema.users.primaryBranchId,
       })
       .from(schema.users)
       .where(eq(schema.users.email, email))
@@ -153,20 +170,24 @@ export class AuthService {
     // Resolve primary branch for multi-branch context.
     // Non-global users MUST have at least one user_branches row — no membership = login denied.
     //
-    // Org-wide heads (HEAD_OF_CS / HEAD_OF_MARKETING / HEAD_OF_LOGISTICS) and
-    // admin-class normally land with `currentBranchId = null` so they see
-    // every branch by default. BUT when they only belong to ONE branch (the
-    // common case while the org is single-branch), defaulting to that branch
-    // saves them the "Pick a branch" popup on every mutation. They still have
-    // org-wide visibility on reads — `canViewAllBranches` is unchanged — and
-    // they can switch back to "All branches" via the branch switcher.
+    // CEO directive (2026-05-09): every user — including admin-class and org-wide
+    // department heads — lands on their PRIMARY branch by default. They still have
+    // org-wide visibility (`canViewAllBranches` unchanged) and can flip the branch
+    // switcher to "All branches" or any other branch any time. Previously admin-class
+    // + org-wide heads landed at `currentBranchId = null` (All branches), which forced
+    // a "Pick a branch" prompt on every branch-scoped mutation; landing on the primary
+    // matches the CEO's mental model and skips the prompt for the common case.
+    //
+    // Membership order: primary flag first, then stable branch UUID — so when no row is
+    // marked primary, we still land on a deterministic "first" branch. Prefer
+    // `users.primary_branch_id` when it matches a membership (covers drift vs `is_primary`).
+    // SuperAdmin / Admin without any branch assignment fall through to `null` (All branches).
     let currentBranchId: string | null = null;
     const memberships = await this.db
       .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
       .from(schema.userBranches)
       .where(eq(schema.userBranches.userId, user.id))
-      .orderBy(desc(schema.userBranches.isPrimary)) // isPrimary=true sorts first
-      .limit(10);
+      .orderBy(desc(schema.userBranches.isPrimary), asc(schema.userBranches.branchId));
 
     if (!canViewAllBranches(user)) {
       if (memberships.length === 0) {
@@ -174,12 +195,11 @@ export class AuthService {
           'Your account has not been assigned to a branch. Contact your administrator.',
         );
       }
-      currentBranchId = memberships[0]!.branchId as string;
-    } else if (memberships.length === 1) {
-      // Single-branch org-wide head / admin: default to their one branch so
-      // mutations don't have to prompt. Multi-branch holders (handover,
-      // regional split) keep the All-branches default.
-      currentBranchId = memberships[0]!.branchId as string;
+      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, user.primaryBranchId);
+    } else if (memberships.length > 0) {
+      // All-branch user (admin-class, org-wide head) WITH a branch assignment →
+      // default to primary / first branch. Switcher still offers "All branches".
+      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, user.primaryBranchId);
     }
 
     // Resolve effective permissions at sign-in time so the very first request after the
@@ -349,16 +369,15 @@ export class AuthService {
       .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
       .from(schema.userBranches)
       .where(eq(schema.userBranches.userId, target.id))
-      .orderBy(desc(schema.userBranches.isPrimary))
-      .limit(10);
+      .orderBy(desc(schema.userBranches.isPrimary), asc(schema.userBranches.branchId));
 
     if (!targetIsGlobal) {
-      currentBranchId = targetMemberships[0]?.branchId ?? target.primaryBranchId ?? null;
+      currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
       if (!currentBranchId) {
         throw new BadRequestException('Target user has no branch — cannot mirror.');
       }
     } else if (targetMemberships.length === 1) {
-      currentBranchId = targetMemberships[0]!.branchId as string;
+      currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
     }
 
     const insertedRows = await this.db
@@ -474,9 +493,8 @@ export class AuthService {
         .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
         .from(schema.userBranches)
         .where(eq(schema.userBranches.userId, actor.id))
-        .orderBy(desc(schema.userBranches.isPrimary))
-        .limit(10);
-      currentBranchId = memberships[0]?.branchId ?? actor.primaryBranchId ?? null;
+        .orderBy(desc(schema.userBranches.isPrimary), asc(schema.userBranches.branchId));
+      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
     }
 
     const restored: SessionUser = {

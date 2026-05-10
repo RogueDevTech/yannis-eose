@@ -92,7 +92,7 @@ export const createOrderSchema = z.object({
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
 
 /**
- * Create offline order — used by CS agent or Head of CS.
+ * Create offline order — used by CS closer or Head of CS.
  * Accepts raw customerPhone; API hashes it server-side. Creator is set as assignee (no auto-dispatch).
  */
 export const createOfflineOrderSchema = z.object({
@@ -138,7 +138,7 @@ export const transitionOrderSchema = z.object({
     deliveryProofUrl: z.string().url().optional(),
     /** Discount amount applied at delivery when marking DELIVERED/PARTIALLY_DELIVERED; reduces order totalAmount */
     deliveryDiscountAmount: z.number().min(0).optional(),
-    /** Scheduled delivery date set by CS agent when confirming the order */
+    /** Scheduled delivery date set by CS closer when confirming the order */
     preferredDeliveryDate: z.string().optional(),
     /** Mandatory note when CS marks an order DELIVERED (e.g. "Customer confirmed receipt on call at 3:42pm"). */
     deliveryNote: z.string().min(10).max(500).optional(),
@@ -215,11 +215,11 @@ export const softDeleteOrderSchema = requestOrderDeletionSchema;
 export type SoftDeleteOrderInput = z.infer<typeof softDeleteOrderSchema>;
 
 /**
- * Assign order to CS agent — manual assignment or bulk reassign.
+ * Assign order to CS closer — manual assignment or bulk reassign.
  */
 export const assignOrderSchema = z.object({
   orderId: z.string().uuid(),
-  csAgentId: z.string().uuid(),
+  csCloserId: z.string().uuid(),
 });
 
 export type AssignOrderInput = z.infer<typeof assignOrderSchema>;

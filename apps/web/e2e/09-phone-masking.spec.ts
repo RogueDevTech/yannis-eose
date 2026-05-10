@@ -90,7 +90,7 @@ test.describe('Phone Masking — SuperAdmin', () => {
   });
 });
 
-test.describe('Phone Masking — CS Agent', () => {
+test.describe('Phone Masking — CS Closer', () => {
   test('no raw phone numbers in assigned orders UI', async ({ page }) => {
     await loginAsCsAgent(page);
     await page.goto('/admin/cs/queue');

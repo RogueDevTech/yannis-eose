@@ -27,13 +27,13 @@ async function seedDisputedDeliveryRemittances() {
   `;
   const superAdmin = users.find((u: Record<string, unknown>) => u.role === 'SUPER_ADMIN');
   const financeOfficer = users.find((u: Record<string, unknown>) => u.role === 'FINANCE_OFFICER');
-  const csAgent = users.find((u: Record<string, unknown>) => u.role === 'CS_AGENT');
+  const csCloser = users.find((u: Record<string, unknown>) => u.role === 'CS_CLOSER');
   const mediaBuyer = users.find((u: Record<string, unknown>) => u.role === 'MEDIA_BUYER');
   const tplManager = users.find((u: Record<string, unknown>) => u.role === 'TPL_MANAGER');
   const rider = users.find((u: Record<string, unknown>) => u.role === 'TPL_RIDER');
 
-  if (!superAdmin || !csAgent || !mediaBuyer || !tplManager) {
-    console.error('Missing required users (SUPER_ADMIN, CS_AGENT, MEDIA_BUYER, TPL_MANAGER).');
+  if (!superAdmin || !csCloser || !mediaBuyer || !tplManager) {
+    console.error('Missing required users (SUPER_ADMIN, CS_CLOSER, MEDIA_BUYER, TPL_MANAGER).');
     await sql.end();
     process.exit(1);
   }
@@ -89,7 +89,7 @@ async function seedDisputedDeliveryRemittances() {
         items, created_at, delivered_at, preferred_delivery_date
       ) VALUES (
         ${orderId}, ${branch.id as string}, ${campaign.id as string}, ${mediaBuyer.id as string},
-        ${csAgent.id as string}, ${location.provider_id as string}, ${location.id as string},
+        ${csCloser.id as string}, ${location.provider_id as string}, ${location.id as string},
         ${(rider?.id as string) ?? null}, 'DELIVERED', ${faker.person.fullName()},
         ${'seed_disputed_' + faker.string.alphanumeric(8)},
         ${'0' + faker.helpers.arrayElement(['7', '8', '9']) + faker.string.numeric(9)},

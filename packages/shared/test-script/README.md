@@ -63,7 +63,7 @@ All scripts load `.env` from the repo root. Every variable has a sensible defaul
 ### 2. cs-simulation
 
 - Logs in as Head of CS
-- Distributes all UNPROCESSED orders to CS agents
+- Distributes all UNPROCESSED orders to CS closers
 - For each order: calls `initiateCall` (auto-engages) then confirms (80%) or cancels (20%)
 - Works with VOIP disabled — uses MANUAL_CALL log to satisfy the confirm gate
 

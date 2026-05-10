@@ -38,18 +38,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ),
   ]);
 
-  const marketingMetrics =
-    marketingRes.ok
-      ? (((marketingRes.data as { result?: { data?: UserMarketingMetrics | null } })?.result?.data ??
-          null) as UserMarketingMetrics | null)
-      : null;
+  const marketingMetrics = marketingRes.ok
+    ? (((marketingRes.data as { result?: { data?: UserMarketingMetrics | null } })?.result?.data ??
+        null) as UserMarketingMetrics | null)
+    : null;
 
-  const fundingBalance =
-    fundingRes.ok
-      ? (((fundingRes.data as {
-            result?: { data?: { totalReceived: string; totalSpend: string; balance: string } };
-          })?.result?.data ?? null) as { totalReceived: string; totalSpend: string; balance: string } | null)
-      : null;
+  const fundingBalance = fundingRes.ok
+    ? (((
+        fundingRes.data as {
+          result?: { data?: { totalReceived: string; totalSpend: string; balance: string } };
+        }
+      )?.result?.data ?? null) as {
+        totalReceived: string;
+        totalSpend: string;
+        balance: string;
+      } | null)
+    : null;
 
   return secondaryCacheJson({
     ok: true as const,

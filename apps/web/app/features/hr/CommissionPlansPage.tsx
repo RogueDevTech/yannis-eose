@@ -39,7 +39,7 @@ const ROLE_FILTER_UNIVERSAL = '__UNIVERSAL__';
 /** Roles whose payroll engine currently auto-credits DELIVERED + pipeline orders from CRM attribution. */
 function planUsesOrderPipelineMetrics(role: string | null | undefined): boolean {
   if (role == null || role === '') return true;
-  return role === 'CS_AGENT' || role === 'MEDIA_BUYER';
+  return role === 'CS_CLOSER' || role === 'MEDIA_BUYER';
 }
 
 function deriveStatus(plan: CommissionPlan): PlanStatus {

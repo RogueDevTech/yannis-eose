@@ -8,8 +8,8 @@ import { loginAsHR, loginAsSuperAdmin } from './helpers';
  * base salary, per-order rate, clawback deductions.
  *
  * Requires seed data:
- *   - At least one commission plan (role=CS_AGENT, baseSalary, perOrderRate set)
- *   - At least one CS agent with delivered orders in the current period
+ *   - At least one commission plan (role=CS_CLOSER, baseSalary, perOrderRate set)
+ *   - At least one CS closer with delivered orders in the current period
  *   - At least one CLAWBACK adjustment for that agent
  */
 

@@ -28,7 +28,7 @@ interface AgentStatePayload {
  * Room naming:
  * - admin           → SuperAdmin dashboard
  * - finance         → Finance dashboard
- * - cs-{userId}     → Individual CS agent
+ * - cs-{userId}     → Individual CS closer
  * - cs-all          → Head of CS (all CS events)
  * - logistics       → Head of Logistics
  * - marketing-{userId} → Individual Media Buyer
@@ -94,7 +94,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
   }
 
   /**
-   * CS agent broadcasts their current UI state.
+   * CS closer broadcasts their current UI state.
    * Server broadcasts to cs-all for Team Live View.
    */
   @SubscribeMessage('agent:state_update')
@@ -103,7 +103,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
     @MessageBody() payload: Omit<AgentStatePayload, 'agentId'>,
   ) {
     const user = (client.data as { user?: SessionUser }).user;
-    if (!user || user.role !== 'CS_AGENT') return;
+    if (!user || user.role !== 'CS_CLOSER') return;
 
     const state: AgentStatePayload = {
       agentId: user.id,
@@ -153,7 +153,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
       case 'HEAD_OF_CS':
         if (user.currentBranchId) void client.join(`branch-${user.currentBranchId}:cs-all`);
         break;
-      case 'CS_AGENT':
+      case 'CS_CLOSER':
         void client.join(`cs-${user.id}`);
         break;
       case 'FINANCE_OFFICER':

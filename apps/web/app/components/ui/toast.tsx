@@ -55,7 +55,7 @@ export function useToast() {
  */
 export function useFetcherToast(
   fetcherData: unknown,
-  options?: { successMessage?: string; skipErrorToast?: boolean },
+  options?: { successMessage?: string; skipErrorToast?: boolean; skipSuccessToast?: boolean },
 ) {
   const { toast } = useToast();
   const prevRef = useRef(fetcherData);
@@ -65,11 +65,19 @@ export function useFetcherToast(
     if (!fetcherData || typeof fetcherData !== 'object') return;
     const data = fetcherData as { success?: boolean; error?: string };
     if (data.success) {
-      toast.success(options?.successMessage ?? 'Action completed');
+      if (!options?.skipSuccessToast) {
+        toast.success(options?.successMessage ?? 'Action completed');
+      }
     } else if (data.error && !options?.skipErrorToast) {
       toast.error('Error', data.error);
     }
-  }, [fetcherData, toast, options?.successMessage, options?.skipErrorToast]);
+  }, [
+    fetcherData,
+    toast,
+    options?.successMessage,
+    options?.skipErrorToast,
+    options?.skipSuccessToast,
+  ]);
 }
 
 let toastCounter = 0;

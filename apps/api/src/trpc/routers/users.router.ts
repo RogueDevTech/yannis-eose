@@ -4,6 +4,7 @@ import {
   createStaffSchema,
   updateStaffSchema,
   listUsersSchema,
+  usersRosterSummarySchema,
   searchUsersForPushTargetSchema,
   resetPasswordSchema,
   processEmailChangeSchema,
@@ -86,6 +87,13 @@ export const usersRouter = router({
       return getUsersService().list(input, ctx.user, ctx.currentBranchId);
     }),
 
+  /** HR Users page KPI strip — full-roster status/role aggregates matching list filters (minus status equality). */
+  rosterSummary: permissionProcedure('users.read')
+    .input(usersRosterSummarySchema)
+    .query(async ({ input, ctx }) => {
+      return getUsersService().rosterSummary(input, ctx.user, ctx.currentBranchId);
+    }),
+
   /**
    * Search active users by name/email for push broadcast "one user" picker.
    * Also allowed for users.read (e.g. global search) without notifications.broadcast.
@@ -98,7 +106,7 @@ export const usersRouter = router({
     }),
 
   /**
-   * List CS team (HEAD_OF_CS + CS_AGENT) for Team page. Gated by cs.teamOverview.
+   * List CS team (HEAD_OF_CS + CS_CLOSER) for Team page. Gated by cs.teamOverview.
    */
   listCSTeam: permissionProcedure('cs.teamOverview').query(async () => {
     return getUsersService().listCSTeam();

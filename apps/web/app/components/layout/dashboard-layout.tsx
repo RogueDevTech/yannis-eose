@@ -192,10 +192,10 @@ const navStructure: NavGroupDef[] = [
         label: 'Message Templates',
         href: '/admin/cs/message-templates',
         icon: SidebarIcons.notifications,
-        // CS agents need to author + use templates; HoCS / Admins manage shared ones via
+        // CS closers need to author + use templates; HoCS / Admins manage shared ones via
         // the same page (cs.teamOverview). Ownership-based edit gating is enforced server-side.
         permission: 'cs.teamOverview',
-        roles: ['CS_AGENT'],
+        roles: ['CS_CLOSER'],
       },
     ],
   },
@@ -376,11 +376,17 @@ const navStructure: NavGroupDef[] = [
         permission: 'rbac.manage_templates',
       },
       {
+        label: 'CS order routing',
+        href: '/admin/settings/cs-order-routing',
+        icon: SidebarIcons.orders,
+        permission: 'orders.routing',
+      },
+      {
         label: 'Permission Requests',
         href: '/admin/permission-requests',
         icon: SidebarIcons.audit,
         // Visible to anyone holding at least one approve code. SuperAdmin / ADMIN
-        // bypass via the standard permission middleware. Submitters (CS Agents
+        // bypass via the standard permission middleware. Submitters (CS Closers
         // tracking their own price-change requests) reach the page via direct URL
         // — we don't surface the sidebar link unless they can approve something.
         // Head of Logistics: default approver for CS order price / archive requests
@@ -408,7 +414,7 @@ const navStructure: NavGroupDef[] = [
  *
  * The label MUST mirror the data-scope rule, not the permission. The orders
  * router only narrows the result set to the actor's own orders when:
- *   - role === 'CS_AGENT'     (assignedCsId = self)
+ *   - role === 'CS_CLOSER'     (assignedCsId = self)
  *   - role === 'MEDIA_BUYER'  (mediaBuyerId = self)
  *
  * Heads / admins / SuperAdmin all carry the relevant permissions but see ALL
@@ -420,7 +426,7 @@ function getDisplayLabel(
   user: { role: string; permissions?: string[] } | null,
 ): string {
   const role = user?.role ?? '';
-  if (item.href === '/admin/cs/orders' && role === 'CS_AGENT') return 'My Orders';
+  if (item.href === '/admin/cs/orders' && role === 'CS_CLOSER') return 'My Orders';
   if (item.href === '/admin/marketing/orders' && role === 'MEDIA_BUYER') return 'My Orders';
   return item.label;
 }
@@ -481,7 +487,7 @@ function getNavGroupsForUser(
           );
         }
         // Permission Requests: any of the 6 approve codes → see the link. Submitters
-        // (CS Agent / Media Buyer / etc.) can still reach the page by URL — the
+        // (CS Closer / Media Buyer / etc.) can still reach the page by URL — the
         // server-side scope shows them only their own rows; we just don't surface
         // the sidebar entry for them.
         if (item.href === '/admin/permission-requests') {
@@ -558,7 +564,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/cs/orders',
     '/admin/cs/leaderboard',
   ],
-  CS_AGENT: ['/admin', '/admin/cs/queue', '/admin/cs/orders', '/admin/cs/leaderboard'],
+  CS_CLOSER: ['/admin', '/admin/cs/queue', '/admin/cs/orders', '/admin/cs/leaderboard'],
   HEAD_OF_LOGISTICS: [
     '/admin',
     '/admin/logistics/orders',

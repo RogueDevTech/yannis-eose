@@ -85,7 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
       : null;
 
-    const list = (bundle?.team ?? []).filter((m) => m.role === 'CS_AGENT');
+    const list = (bundle?.team ?? []).filter((m) => m.role === 'CS_CLOSER');
     const workloads: AgentWorkload[] = bundle?.workloads ?? [];
     const leaderboard: CSLeaderboardEntry[] = bundle?.leaderboard ?? [];
     const inactiveAgents: InactiveAgent[] = bundle?.inactiveAgents ?? [];

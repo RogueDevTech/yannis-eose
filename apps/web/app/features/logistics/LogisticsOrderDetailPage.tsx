@@ -38,7 +38,7 @@ export interface RichAllocatableLocation {
   reason: string | null;
   /**
    * Per-product remaining stock at this location for the order's line items.
-   * Server returns `null` when the viewer is not allowed to see counts (e.g. CS_AGENT).
+   * Server returns `null` when the viewer is not allowed to see counts (e.g. CS_CLOSER).
    */
   availabilityByProduct: Array<{
     productId: string;
@@ -71,7 +71,7 @@ export interface LogisticsOrderDetailPageProps {
 // Builds the row description for an entry in the allocate-location dropdown when
 // the rich allocatable list is available. When `availabilityByProduct` is non-null
 // (HoCS, HoLogistics, admins, LogisticsManager, TPL_MANAGER, ...), surface the
-// remaining stock per ordered product. CS_AGENTs receive `null` from the API and
+// remaining stock per ordered product. CS_CLOSERs receive `null` from the API and
 // just see the address — counts are intentionally hidden from them.
 function describeRichAllocatableLocation(loc: RichAllocatableLocation): string | undefined {
   if (!loc.eligible) return loc.reason ?? 'Unavailable';
@@ -367,7 +367,7 @@ function StatusPipeline({ status, order }: { status: string; order: OrderDetail 
       {/* Terminal status indicator */}
       {isTerminal && (
         <div className="mt-2 flex items-center gap-2">
-          <OrderStatusBadge status={status} />
+          <OrderStatusBadge status={status} expanded />
           <span className="text-xs text-app-fg-muted">
             Order diverted from standard pipeline
           </span>
@@ -479,7 +479,7 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
                     </span>
                     {statusChange && (
                       <span className="ml-2">
-                        <OrderStatusBadge status={String(statusChange.newValue)} className="text-[10px]" />
+                        <OrderStatusBadge status={String(statusChange.newValue)} className="text-[10px]" expanded />
                       </span>
                     )}
                   </div>
@@ -658,7 +658,7 @@ export function LogisticsOrderDetailPage({
                 <ClockIcon /> OVERDUE
               </span>
             )}
-            <OrderStatusBadge status={order.status} />
+            <OrderStatusBadge status={order.status} expanded />
           </>
         }
       />
@@ -889,7 +889,7 @@ export function LogisticsOrderDetailPage({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6">
               {order.assignedCsName && (
-                <InfoRow icon={<UserIcon />} label="CS Agent" value={order.assignedCsName} valueClass="font-medium text-sky-600 dark:text-sky-400" />
+                <InfoRow icon={<UserIcon />} label="CS Closer" value={order.assignedCsName} valueClass="font-medium text-sky-600 dark:text-sky-400" />
               )}
               {order.mediaBuyerName && (
                 <InfoRow icon={<UserIcon />} label="Media Buyer" value={order.mediaBuyerName} valueClass="font-medium text-purple-600 dark:text-purple-400" />

@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections } from '../test/setup-integration';
-import { createTestUser, createTestBranch } from '../test/factories/order.factory';
+import { createTestUser, createTestBranch, insertTestBranchTeam } from '../test/factories/order.factory';
 import { BranchTeamsService } from './branch-teams.service';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
@@ -27,18 +27,15 @@ describe.skipIf(SKIP_IF_NO_DB)('BranchTeamsService — supervision mirror helper
     await closeConnections();
   });
 
-  it('actorCanMirrorViaSupervision is true for CS supervisor → CS_AGENT on same branch', async () => {
+  it('actorCanMirrorViaSupervision is true for CS supervisor → CS_CLOSER on same branch', async () => {
     const branch = await createTestBranch(db as any);
-    const sup = await createTestUser(db as any, { role: 'CS_AGENT' });
-    const agent = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const sup = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    const agent = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await db.insert(schema.userBranches).values([
       { userId: sup.id, branchId: branch.id, isPrimary: true },
       { userId: agent.id, branchId: branch.id, isPrimary: true },
     ]);
-    const [team] = await db
-      .insert(schema.branchTeams)
-      .values({ branchId: branch.id, department: 'CS', name: 'Squad' })
-      .returning({ id: schema.branchTeams.id });
+    const team = await insertTestBranchTeam(db as any, branch.id, 'CS', 'Squad');
     await db.insert(schema.branchTeamMembers).values([
       { teamId: team!.id, userId: sup.id, isSupervisor: true },
       { teamId: team!.id, userId: agent.id, isSupervisor: false },
@@ -47,15 +44,15 @@ describe.skipIf(SKIP_IF_NO_DB)('BranchTeamsService — supervision mirror helper
     const svc = new BranchTeamsService(db as any);
     const ok = await svc.actorCanMirrorViaSupervision(
       { id: sup.id, currentBranchId: branch.id },
-      { id: agent.id, role: 'CS_AGENT' },
+      { id: agent.id, role: 'CS_CLOSER' },
     );
     expect(ok).toBe(true);
   });
 
   it('actorCanMirrorViaSupervision is false when no team edge exists', async () => {
     const branch = await createTestBranch(db as any);
-    const a = await createTestUser(db as any, { role: 'CS_AGENT' });
-    const b = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const a = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    const b = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await db.insert(schema.userBranches).values([
       { userId: a.id, branchId: branch.id, isPrimary: true },
       { userId: b.id, branchId: branch.id, isPrimary: true },
@@ -63,7 +60,7 @@ describe.skipIf(SKIP_IF_NO_DB)('BranchTeamsService — supervision mirror helper
     const svc = new BranchTeamsService(db as any);
     const ok = await svc.actorCanMirrorViaSupervision(
       { id: a.id, currentBranchId: branch.id },
-      { id: b.id, role: 'CS_AGENT' },
+      { id: b.id, role: 'CS_CLOSER' },
     );
     expect(ok).toBe(false);
   });

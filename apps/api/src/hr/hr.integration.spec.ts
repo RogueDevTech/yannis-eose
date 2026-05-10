@@ -42,7 +42,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
     await setSessionActor(pgClient, actor.id);
 
     const { id: planId, rules } = await createTestCommissionPlan(db as any, {
-      role: 'CS_AGENT',
+      role: 'CS_CLOSER',
       baseSalary: 50000,
       baseThreshold: 50,
       perOrderRate: 1000,
@@ -69,11 +69,11 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
 
   it('creates a payout record with DRAFT status', async () => {
     const hrActor = await createTestUser(db as any, { role: 'HR_MANAGER' });
-    const csAgent = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const csCloser = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, hrActor.id);
 
     const payoutRows = await db.insert(schema.payoutRecords).values({
-      staffId: csAgent.id,
+      staffId: csCloser.id,
       periodStart: new Date('2026-01-01'),
       periodEnd: new Date('2026-01-31'),
       baseSalary: '50000',
@@ -104,11 +104,11 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
 
   it('clawback adjustment creates a negative line item record', async () => {
     const hrActor = await createTestUser(db as any, { role: 'HR_MANAGER' });
-    const csAgent = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const csCloser = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, hrActor.id);
 
     const adjustmentRows = await db.insert(schema.earningsAdjustments).values({
-      staffId: csAgent.id,
+      staffId: csCloser.id,
       category: 'CLAWBACK',
       amount: '2000',
       reason: 'Customer returned the delivered order',
@@ -135,7 +135,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('delivered-in-January order is NOT in February payout window', async () => {
-    const actor = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const actor = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, actor.id);
 
     const januaryDate = new Date('2026-01-15T10:00:00Z');
@@ -170,7 +170,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('delivered-in-February order IS in February payout window', async () => {
-    const actor = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const actor = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, actor.id);
 
     const februaryDate = new Date('2026-02-10T14:00:00Z');
@@ -203,7 +203,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
   // ---------------------------------------------------------------------------
 
   it('agent with >= threshold delivered orders qualifies for base salary', async () => {
-    const actor = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const actor = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, actor.id);
 
     // Create 60 delivered orders in January
@@ -217,7 +217,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
     await Promise.all(insertPromises);
 
     const { rules } = await createTestCommissionPlan(db as any, {
-      role: 'CS_AGENT',
+      role: 'CS_CLOSER',
       baseSalary: 50000,
       baseThreshold: 50, // needs 50 to unlock base
     });
@@ -245,7 +245,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
   });
 
   it('agent with < threshold delivered orders does NOT earn base salary', async () => {
-    const actor = await createTestUser(db as any, { role: 'CS_AGENT' });
+    const actor = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, actor.id);
 
     // Only 40 delivered orders
@@ -259,7 +259,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Commission Engine — Integration', () => {
     await Promise.all(insertPromises);
 
     const { rules } = await createTestCommissionPlan(db as any, {
-      role: 'CS_AGENT',
+      role: 'CS_CLOSER',
       baseSalary: 50000,
       baseThreshold: 50,
     });

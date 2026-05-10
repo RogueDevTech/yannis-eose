@@ -322,7 +322,7 @@ const entries: ShellEntry[] = [
   {
     match: /^\/admin\/cs\/orders$/,
     render: (_m, sp) => (
-      <CSOrdersLoadingShell filters={parseDateFilters(sp)} isCSAgent={false} />
+      <CSOrdersLoadingShell filters={parseDateFilters(sp)} isCSCloser={false} />
     ),
   },
   {

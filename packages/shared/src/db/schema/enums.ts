@@ -3,6 +3,15 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 /** Branch supervisor teams — CS vs Marketing squads within a branch. */
 export const branchTeamDepartmentEnum = pgEnum('branch_team_department', ['CS', 'MARKETING']);
 
+/** CS auto-dispatch routing: weighted vs equal split across target teams. */
+export const csOrderRoutingStrategyEnum = pgEnum('cs_order_routing_strategy', ['WEIGHTED', 'EQUAL']);
+
+/** Per funnel branch: branch-target rules only vs product → servicing-branch mappings. */
+export const csRoutingRelationshipModeEnum = pgEnum('cs_routing_relationship_mode', [
+  'BRANCH_DEFAULT',
+  'PRODUCT_ALLOCATION',
+]);
+
 export const userRoleEnum = pgEnum('user_role', [
   'SUPER_ADMIN',
   // ADMIN = SuperAdmin-equivalent privileges EXCEPT cannot manage another Admin or the SuperAdmin.
@@ -12,7 +21,10 @@ export const userRoleEnum = pgEnum('user_role', [
   'HEAD_OF_MARKETING',
   'MEDIA_BUYER',
   'HEAD_OF_CS',
-  'CS_AGENT',
+  // Renamed from `CS_AGENT` per CEO directive 2026-05-10 (migration 0132).
+  // The DB enum value is `'CS_CLOSER'`; historical `'CS_AGENT'` references in
+  // audit log payloads stay frozen as the truthful name at write time.
+  'CS_CLOSER',
   'FINANCE_OFFICER',
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
@@ -178,7 +190,7 @@ export const payrollBatchStatusEnum = pgEnum('payroll_batch_status', [
 
 /**
  * Department a payroll batch belongs to. The owning Head role prepares the batch:
- *   CS        → HEAD_OF_CS prepares; covers CS_AGENT
+ *   CS        → HEAD_OF_CS prepares; covers CS_CLOSER
  *   MARKETING → HEAD_OF_MARKETING prepares; covers MEDIA_BUYER
  *   LOGISTICS → HEAD_OF_LOGISTICS prepares; covers LOGISTICS_MANAGER, TPL_MANAGER, TPL_RIDER, STOCK_MANAGER
  *   HR        → HR_MANAGER prepares (own bucket — covers Heads themselves, BRANCH_ADMIN, FINANCE_OFFICER, HR_MANAGER)

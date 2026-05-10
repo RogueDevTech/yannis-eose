@@ -64,7 +64,7 @@ async function _ceoOverviewFetch(params: {
     financeService!.getInvoiceSummary().catch(logErr('invoiceSummary')),
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId).catch(logErr('marketingMetrics')),
     hrService!.getPayoutSummary().catch(logErr('payoutSummary')),
-    ordersService!.getCSAgentWorkloads(branchId).catch(logErr('csWorkloads')),
+    ordersService!.getCSCloserWorkloads(branchId).catch(logErr('csWorkloads')),
   ]);
 
   let profitReport: {
@@ -138,7 +138,7 @@ async function _ceoOverviewFetch(params: {
   const cancelledOrders = statusCounts['CANCELLED'] ?? 0;
   const returnedOrders = statusCounts['RETURNED'] ?? 0;
 
-  const totalCSAgents = safeCSWorkloads.length;
+  const totalCSClosers = safeCSWorkloads.length;
   const totalCSPending = safeCSWorkloads.reduce(
     (sum: number, w: { pendingCount: number }) => sum + w.pendingCount,
     0,
@@ -180,7 +180,7 @@ async function _ceoOverviewFetch(params: {
       deliveryRate: safeMarketingMetrics.deliveryRate ?? 0,
     },
     csTeam: {
-      agentCount: totalCSAgents,
+      agentCount: totalCSClosers,
       pendingOrders: totalCSPending,
       utilization: Math.round(csDailyDutyProgress * 100),
     },
@@ -330,7 +330,7 @@ export const dashboardRouter = router({
     }),
 
   /**
-   * Order pipeline chart — Volume, CS Engaged, Confirmed, Logistics distributed, Delivered.
+   * Order pipeline chart — Volume, Unconfirmed, Confirmed, Logistics distributed, Delivered.
    * For the CEO Executive Overview order funnel/bar chart. SuperAdmin only.
    */
   orderPipelineChart: permissionProcedure('ceo.overview')
@@ -372,7 +372,7 @@ export const dashboardRouter = router({
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
       ordersService.getStatusCounts(undefined, undefined, undefined, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
       financeService.countPendingApprovalRequests().catch(() => 0),
-      ordersService.getCSAgentWorkloads(ctx.currentBranchId).catch(() => [] as Array<{ pendingCount: number }>),
+      ordersService.getCSCloserWorkloads(ctx.currentBranchId).catch(() => [] as Array<{ pendingCount: number }>),
       ordersService.getInactiveAgents(10).catch(() => [] as unknown[]),
     ]);
 

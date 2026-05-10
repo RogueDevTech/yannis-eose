@@ -27,7 +27,7 @@ const ROLE_COLOR_MAP: Record<string, RoleColor> = {
   BRANCH_ADMIN: 'red',
   // CS
   HEAD_OF_CS: 'blue',
-  CS_AGENT: 'blue',
+  CS_CLOSER: 'blue',
   // Marketing
   HEAD_OF_MARKETING: 'amber',
   MEDIA_BUYER: 'amber',

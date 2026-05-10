@@ -52,7 +52,10 @@ export const orders = pgTable('orders', {
   callbackAttempts: integer('callback_attempts').default(0).notNull(),
   callbackNotes: text('callback_notes'),
   // Duplicate order tracking: agent can merge or dismiss flagged duplicates
-  isDuplicate: text('is_duplicate'), // null = normal, 'FLAGGED' = potential duplicate, 'MERGED' = merged into another, 'DISMISSED' = agent cleared it
+  // null = normal | 'FLAGGED' = same phone non-cancelled order in last 24h
+  // 'POSSIBLY_DUPLICATE' = same phone non-cancelled order older than 24h but within 30d (softer signal)
+  // 'MERGED' = merged into another | 'DISMISSED' = agent cleared it
+  isDuplicate: text('is_duplicate'),
   duplicateOfId: uuid('duplicate_of_id'), // links to the original order if flagged
   // 15-min order lock: when an agent clicks Call, order is locked to them
   lockedUntil: timestamp('locked_until', { withTimezone: true }),

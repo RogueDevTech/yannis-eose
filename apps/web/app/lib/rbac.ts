@@ -94,7 +94,7 @@ export function canAccessGlobalAuditLog(user: {
  * Edit-access scope for `/hr/users/:id/edit` — mirrors
  * `apps/api/src/common/authz.ts::canEditUser`. Same three states + same rules.
  *
- * `'limited'` viewers (HoCS over CS_AGENT, HoM over MEDIA_BUYER) can ONLY
+ * `'limited'` viewers (HoCS over CS_CLOSER, HoM over MEDIA_BUYER) can ONLY
  * change `capacity` / `productIds` / `visibleOrderStatuses` /
  * `restrictProductAccess` — the form should reflect that whitelist.
  */
@@ -147,7 +147,7 @@ export function canEditUser(
   const sameBranch =
     !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
 
-  if (actorIsCsLead && target.role === 'CS_AGENT' && sameBranch) return 'limited';
+  if (actorIsCsLead && target.role === 'CS_CLOSER' && sameBranch) return 'limited';
   if (actorIsMarketingLead && target.role === 'MEDIA_BUYER' && sameBranch) return 'limited';
 
   return 'none';
@@ -189,7 +189,7 @@ export function canMirror(
   if (normalized.includes('mirror.any.manage')) return true;
 
   if (isOrgWideDepartmentHead(actor)) {
-    if ((actor.role === 'HEAD_OF_CS' || normalized.includes('mirror.cs_team.manage')) && target.role === 'CS_AGENT')
+    if ((actor.role === 'HEAD_OF_CS' || normalized.includes('mirror.cs_team.manage')) && target.role === 'CS_CLOSER')
       return true;
     if (
       (actor.role === 'HEAD_OF_MARKETING' || normalized.includes('mirror.marketing_team.manage')) &&

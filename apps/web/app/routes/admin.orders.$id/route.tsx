@@ -187,8 +187,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     });
 
   const [agentsRes, locationsRes, templatesRes] = await Promise.all([
-    apiRequest<unknown>('/trpc/orders.listCSAgents', deferredOpt).catch(
-      onError('orders.listCSAgents'),
+    apiRequest<unknown>('/trpc/orders.listCSClosers', deferredOpt).catch(
+      onError('orders.listCSClosers'),
     ),
     apiRequest<unknown>(
       `/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ page: 1, limit: 100 }))}`,
@@ -200,19 +200,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ).catch(onError('messaging.templates.list')),
   ]);
 
-  let csAgentsForAssign: Array<{ id: string; name: string }> | undefined;
-  // `orders.listCSAgents` returns the full roster for HoCS/Admin (`orders.reassign`) and supervised
-  // CS agents only for branch CS team supervisors; others get an empty list.
+  let csClosersForAssign: Array<{ id: string; name: string }> | undefined;
+  // `orders.listCSClosers` returns the full roster for HoCS/Admin (`orders.reassign`) and supervised
+  // CS closers only for branch CS team supervisors; others get an empty list.
   if (agentsRes.ok) {
     const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
     const list = agentsData?.result?.data ?? [];
-    csAgentsForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
+    csClosersForAssign = list.map((a) => ({ id: a.agentId, name: a.agentName }));
   } else {
-    logOrderDetailLoaderWarning(orderId, 'orders.listCSAgents', `status ${agentsRes.status}`);
+    logOrderDetailLoaderWarning(orderId, 'orders.listCSClosers', `status ${agentsRes.status}`);
   }
 
   // Logistics locations — used by the "Allocate to logistics company" action available to the assigned
-  // CS agent, Logistics, and admins when the order is CONFIRMED.
+  // CS closer, Logistics, and admins when the order is CONFIRMED.
   let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }> = [];
   if (locationsRes.ok) {
     const locationsData = locationsRes.data as {
@@ -265,7 +265,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       userId: user.id,
       currentBranchId: user.currentBranchId ?? null,
       permissions: user.permissions ?? [],
-      csAgentsForAssign: csAgentsForAssign,
+      csClosersForAssign: csClosersForAssign,
       logisticsLocations,
       allocatableLocations,
       allocatableLocationsDeferred,
@@ -301,7 +301,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const res = await apiRequest<unknown>('/trpc/orders.assignToCS', {
       method: 'POST',
       cookie,
-      body: { orderId, csAgentId: toCsAgentId, ...branchIdFromForm(formData) },
+      body: { orderId, csCloserId: toCsAgentId, ...branchIdFromForm(formData) },
     });
     if (!res.ok) {
       const err = extractApiErrorMessage(res.data, 'Assign failed');
@@ -474,7 +474,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'adjustOrderItems') {
     const allowedRoles = [
-      'CS_AGENT',
+      'CS_CLOSER',
       'HEAD_OF_CS',
       'HEAD_OF_LOGISTICS',
       'BRANCH_ADMIN',
@@ -529,7 +529,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'requestOrderLinePriceChange') {
     const allowedRoles = [
-      'CS_AGENT',
+      'CS_CLOSER',
       'HEAD_OF_CS',
       'HEAD_OF_LOGISTICS',
       'BRANCH_ADMIN',
@@ -599,7 +599,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'requestOrderDeletion') {
     const allowedRoles = [
-      'CS_AGENT',
+      'CS_CLOSER',
       'HEAD_OF_CS',
       'HEAD_OF_LOGISTICS',
       'BRANCH_ADMIN',
@@ -632,7 +632,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (intent === 'softDeleteOrder') {
     const allowedRoles = [
-      'CS_AGENT',
+      'CS_CLOSER',
       'HEAD_OF_CS',
       'HEAD_OF_LOGISTICS',
       'BRANCH_ADMIN',
@@ -689,7 +689,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
     if (csOnlyStatuses.includes(newStatus)) {
-      const allowedRoles = ['CS_AGENT', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
+      const allowedRoles = ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
       if (!allowedRoles.includes(user.role)) {
         return json({ error: 'Only CS or Head of CS can perform this action' }, { status: 403 });
       }
@@ -789,7 +789,7 @@ export default function OrderDetailRoute() {
           userId,
           currentBranchId,
           permissions,
-          csAgentsForAssign,
+          csClosersForAssign,
           logisticsLocations,
           allocatableLocations,
           allocatableLocationsDeferred,
@@ -832,7 +832,7 @@ export default function OrderDetailRoute() {
               userId={userId}
               currentBranchId={currentBranchId}
               permissions={permissions}
-              csAgentsForAssign={csAgentsForAssign}
+              csClosersForAssign={csClosersForAssign}
               logisticsLocations={logisticsLocations}
               allocatableLocations={allocatableLocations}
               allocatableLocationsDeferred={allocatableLocationsDeferred}

@@ -30,7 +30,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Orders, Leaderboard, Funding). The previous `last_48_hours` default hid every
   // entry older than 2 days, so users landing on the page from the sidebar saw
   // ₦0 even when their period had real spend.
-  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
+  // CEO directive 2026-05-10: ad-spend listing is a "today's spend" workflow
+  // for HoM / team leads, so default the date filter to today (not this month).
+  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url, 'today');
   const { isMediaBuyer, isFundingAdmin, canApproveAdSpend } = getMarketingRoleFlags(user);
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));

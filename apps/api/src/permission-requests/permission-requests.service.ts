@@ -125,7 +125,7 @@ export class PermissionRequestsService {
    * Returns the set of permission_request types the viewer is allowed to see in the
    * approval queue. Drives the server-side row filter — types the viewer can't
    * approve are hidden, but rows the viewer personally submitted always surface
-   * (so a CS Agent can track their own price-change asks).
+   * (so a CS Closer can track their own price-change asks).
    *
    * Permission-first: a viewer sees a type iff they hold its approve code (or are
    * admin-class). Adding a new request type is a one-line change to

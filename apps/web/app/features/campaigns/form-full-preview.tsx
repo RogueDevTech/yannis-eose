@@ -171,27 +171,19 @@ export function FormFullPreview({
     return (
       <div
         className={[
-          'card text-left p-4 space-y-3 overflow-y-auto',
-          'max-h-[min(800px,calc(100vh-var(--header-height,3.5rem)-1.5rem))]',
+          'card text-left p-3 space-y-3',
           className,
         ]
           .filter(Boolean)
           .join(' ')}
       >
-        <div className="rounded-lg border border-success-200 bg-success-50 dark:bg-success-950/20 dark:border-success-900 p-3">
-          <p className="text-sm font-semibold text-success-700 dark:text-success-400">Order received successfully!</p>
-          <p className="text-xs text-success-700/80 dark:text-success-300/90 mt-1">Preview-only submission. No API request was sent.</p>
-        </div>
-
         {validCallback ? (
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-app-fg-muted">Success callback preview (iframe)</p>
-            <iframe
-              src={callbackUrl}
-              title="Success callback preview"
-              className="w-full h-[420px] rounded-lg border border-app-border bg-app-canvas"
-            />
-          </div>
+          <iframe
+            src={callbackUrl}
+            title="Success callback preview"
+            className="w-full min-h-[480px] rounded-lg border border-app-border bg-app-canvas"
+            style={{ height: 'calc(100vh - var(--header-height, 3.5rem) - 10rem)' }}
+          />
         ) : (
           <div className="rounded-lg border border-app-border bg-app-elevated p-4">
             <p className="text-sm text-app-fg">Thank you. We will contact you shortly.</p>

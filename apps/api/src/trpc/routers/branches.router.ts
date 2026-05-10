@@ -117,7 +117,7 @@ export async function listBranchesForUser(user: {
   return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, fetchRows);
 }
 
-const CS_OVERVIEW_ROLES = new Set(['CS_AGENT', 'HEAD_OF_CS']);
+const CS_OVERVIEW_ROLES = new Set(['CS_CLOSER', 'HEAD_OF_CS']);
 const MARKETING_OVERVIEW_ROLES = new Set(['MEDIA_BUYER', 'HEAD_OF_MARKETING']);
 const LOGISTICS_OVERVIEW_ROLES = new Set([
   'LOGISTICS_MANAGER',
@@ -170,6 +170,19 @@ async function loadTeamDepartment(teamId: string): Promise<BranchTeamDepartment>
     .limit(1);
   if (!row) {
     throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
+  }
+  return row.department as BranchTeamDepartment;
+}
+
+async function loadBranchDepartmentDept(branchDepartmentId: string): Promise<BranchTeamDepartment> {
+  const db = getDb();
+  const [row] = await db
+    .select({ department: schema.branchDepartments.department })
+    .from(schema.branchDepartments)
+    .where(eq(schema.branchDepartments.id, branchDepartmentId))
+    .limit(1);
+  if (!row) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Department not found' });
   }
   return row.department as BranchTeamDepartment;
 }
@@ -413,15 +426,24 @@ export const branchesRouter = router({
     )
     .mutation(async ({ input }) => {
       const db = getDb();
-      const rows = await db
-        .insert(schema.branches)
-        .values({
-          name: input.name,
-          code: input.code,
-          status: 'ACTIVE',
-          settings: input.settings ?? null,
-        })
-        .returning();
+      const branchTeams = getBranchTeamsService();
+      const rows = await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(schema.branches)
+          .values({
+            name: input.name,
+            code: input.code,
+            status: 'ACTIVE',
+            settings: input.settings ?? null,
+          })
+          .returning();
+        const branch = inserted[0];
+        if (!branch) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Branch insert returned no row' });
+        }
+        await branchTeams.ensureDefaultDepartmentTeams(branch.id, tx);
+        return inserted;
+      });
       await invalidateBranchesListCache();
       return rows[0];
     }),
@@ -434,6 +456,10 @@ export const branchesRouter = router({
       z.object({
         branchId: z.string().uuid(),
         name: z.string().min(2).max(100).optional(),
+        // Mirrors `create`'s code validator — short unique label (LGS, ABJ, etc.).
+        // Uppercased + trimmed before write so the unique index is case-insensitive
+        // by convention even though the column itself is plain text.
+        code: z.string().min(2).max(20).toUpperCase().optional(),
         status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
         settings: z.record(z.unknown()).optional(),
       }),
@@ -442,15 +468,29 @@ export const branchesRouter = router({
       const db = getDb();
       const updateFields: Record<string, unknown> = { updatedAt: new Date() };
       if (input.name) updateFields.name = input.name;
+      if (input.code) updateFields.code = input.code;
       if (input.status) updateFields.status = input.status;
       if (input.settings !== undefined) updateFields.settings = input.settings;
-      const rows = await db
-        .update(schema.branches)
-        .set(updateFields)
-        .where(eq(schema.branches.id, input.branchId))
-        .returning();
-      await invalidateBranchesListCache();
-      return rows[0];
+      try {
+        const rows = await db
+          .update(schema.branches)
+          .set(updateFields)
+          .where(eq(schema.branches.id, input.branchId))
+          .returning();
+        await invalidateBranchesListCache();
+        return rows[0];
+      } catch (err) {
+        // 23505 = unique_violation. The only unique field we touch on update is
+        // `code` — surface a friendly error so the form can show "Code already
+        // in use" instead of leaking the raw Postgres message.
+        if ((err as { code?: string })?.code === '23505') {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'That branch code is already in use. Pick another.',
+          });
+        }
+        throw err;
+      }
     }),
 
   /**
@@ -468,6 +508,33 @@ export const branchesRouter = router({
     .mutation(async ({ input }) => {
       const db = getDb();
       const notifications = getBranchesNotificationsService();
+
+      // CEO directive 2026-05-10: only Marketing, CS, and Branch Admin roles
+      // belong in the branching system. Block server-side so a tampered
+      // request can't bypass the UI's role filter.
+      const BRANCH_ELIGIBLE_ROLES = new Set([
+        'MEDIA_BUYER',
+        'HEAD_OF_MARKETING',
+        'CS_CLOSER',
+        'HEAD_OF_CS',
+        'BRANCH_ADMIN',
+      ]);
+      const userRow = await db
+        .select({ role: schema.users.role })
+        .from(schema.users)
+        .where(eq(schema.users.id, input.userId))
+        .limit(1);
+      if (!userRow[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+      const effectiveRole = input.roleInBranch ?? userRow[0].role;
+      if (!BRANCH_ELIGIBLE_ROLES.has(effectiveRole)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message:
+            'Only Marketing, Customer Support, and Branch Admin roles can be assigned to a branch. Other roles are org-wide.',
+        });
+      }
 
       const existing = await db
         .select({ userId: schema.userBranches.userId })
@@ -676,10 +743,55 @@ export const branchesRouter = router({
         hasCSTeamsPermission ||
         hasMarketingTeamsPermission ||
         isBranchSupervisor;
-      if (!canAccessBranchPage || (!isSuperAdmin && !hasBranchManagePermission && !membership[0])) {
+      const bypassMembership =
+        isSuperAdmin ||
+        hasBranchManagePermission ||
+        (ctx.user.role === 'HEAD_OF_CS' && hasCSTeamsPermission);
+      if (!canAccessBranchPage || (!bypassMembership && !membership[0])) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access branch teams' });
       }
       return teams.listTeamsWithMembers(input.branchId);
+    }),
+
+  listBranchOrgStructure: authedProcedure
+    .input(z.object({ branchId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      const teams = getBranchTeamsService();
+      const db = getDb();
+      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
+      const perms = ctx.user.permissions ?? [];
+      const hasBranchManagePermission = perms.includes('branches.manage');
+      const hasBranchManageUsersPermission = perms.includes('branches.manage_users');
+      const hasCSTeamsPermission = perms.includes('branches.teams.cs');
+      const hasMarketingTeamsPermission = perms.includes('branches.teams.marketing');
+      const [membership, isBranchSupervisor] = await Promise.all([
+        db
+          .select({ branchId: schema.userBranches.branchId })
+          .from(schema.userBranches)
+          .where(
+            and(
+              eq(schema.userBranches.userId, ctx.user.id),
+              eq(schema.userBranches.branchId, input.branchId),
+            ),
+          )
+          .limit(1),
+        teams.isActorSupervisorOnBranch(ctx.user.id, input.branchId),
+      ]);
+      const canAccessBranchPage =
+        isSuperAdmin ||
+        hasBranchManagePermission ||
+        hasBranchManageUsersPermission ||
+        hasCSTeamsPermission ||
+        hasMarketingTeamsPermission ||
+        isBranchSupervisor;
+      const bypassMembership =
+        isSuperAdmin ||
+        hasBranchManagePermission ||
+        (ctx.user.role === 'HEAD_OF_CS' && hasCSTeamsPermission);
+      if (!canAccessBranchPage || (!bypassMembership && !membership[0])) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access branch teams' });
+      }
+      return teams.listBranchOrgStructure(input.branchId);
     }),
 
   createBranchTeam: authedProcedure
@@ -761,6 +873,31 @@ export const branchesRouter = router({
         input.teamId,
         input.userId,
         input.isSupervisor,
+      );
+      return { success: true as const };
+    }),
+
+  addBranchDepartmentMember: authedProcedure
+    .input(z.object({ branchDepartmentId: z.string().uuid(), userId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const dept = await loadBranchDepartmentDept(input.branchDepartmentId);
+      assertCanManageTeamDept(ctx.user, dept);
+      await getBranchTeamsService().addDepartmentMember(
+        input.branchDepartmentId,
+        input.userId,
+        ctx.user,
+      );
+      return { success: true as const };
+    }),
+
+  removeBranchDepartmentMember: authedProcedure
+    .input(z.object({ branchDepartmentId: z.string().uuid(), userId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const dept = await loadBranchDepartmentDept(input.branchDepartmentId);
+      assertCanManageTeamDept(ctx.user, dept);
+      await getBranchTeamsService().removeDepartmentMember(
+        input.branchDepartmentId,
+        input.userId,
       );
       return { success: true as const };
     }),

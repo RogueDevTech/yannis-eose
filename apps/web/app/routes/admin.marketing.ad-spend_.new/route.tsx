@@ -46,9 +46,9 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
   const result = await runMarketingAdSpendAction(cookie, formData);
   if (!result) return json({ error: 'Unknown action' }, { status: 400 });
-  if (intent === 'createAdSpendBatch' && result.ok) {
-    return redirect('/admin/marketing/ad-spend');
-  }
+  // Multi-form support: the client submits each form section as a separate
+  // createAdSpendBatch via fetch in a loop, then navigates after the last one
+  // succeeds. Returning JSON (not a redirect) lets the loop continue cleanly.
   return result;
 }
 

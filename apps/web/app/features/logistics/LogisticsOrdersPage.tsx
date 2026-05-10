@@ -376,7 +376,7 @@ function LogisticsOrdersPageImpl({
       {
         key: 'status',
         header: 'Status',
-        render: (order) => <OrderStatusBadge status={order.status} />,
+        render: (order) => <OrderStatusBadge status={order.status} expanded />,
       },
       {
         key: 'deliveryDate',
@@ -552,7 +552,7 @@ function LogisticsOrdersPageImpl({
             linkTo={`${orderDetailBasePath}/${order.id}`}
             textClassName="font-medium text-brand-500 hover:text-brand-600"
           />
-          <OrderStatusBadge status={order.status} />
+          <OrderStatusBadge status={order.status} expanded />
         </div>
         <p className="text-sm text-app-fg">{order.customerName}</p>
         <div className="flex flex-col gap-1 text-sm text-app-fg-muted">
@@ -977,8 +977,15 @@ function LogisticsOrdersPageImpl({
       </TableLoadingOverlay>
       )}
 
-      {!showChartView && totalPages > 1 && (
-        <Pagination page={page} totalPages={totalPages} pageParam="page" />
+      {!showChartView && (
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          pageParam="page"
+          pageSize={limit}
+          pageSizeOptions={[20, 40, 50, 100]}
+          showWhenSinglePage
+        />
       )}
 
       {/* Mark Delivered confirmation modal */}

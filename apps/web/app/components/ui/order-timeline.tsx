@@ -142,7 +142,7 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
   }
 
   if (event.eventType === 'ORDER_MANUALLY_ASSIGNED') {
-    const csId = strMeta(m, 'csAgentId');
+    const csId = strMeta(m, 'csCloserId');
     const match = /^Assigned to (.+?) by (.+)$/.exec(event.description);
     if (csId && isLinkableUserId(csId) && match) {
       const byPart = match[2];

@@ -215,8 +215,8 @@ export class ReportsService {
 
     const [team, workloads, leaderboard, inactive] = await Promise.all([
       this.usersService.listCSTeam(),
-      this.ordersService.getCSAgentWorkloads(currentBranchId),
-      this.ordersService.getCSAgentLeaderboard(period, startDate, endDate),
+      this.ordersService.getCSCloserWorkloads(currentBranchId),
+      this.ordersService.getCSCloserLeaderboard(period, startDate, endDate),
       this.ordersService.getInactiveAgents(10),
     ]);
 
@@ -224,7 +224,7 @@ export class ReportsService {
     const leaderboardById = new Map(leaderboard.map((l) => [l.agentId, l]));
     const idleSet = new Set(inactive.map((a) => a.agentId));
 
-    const closersOnly = team.filter((m) => m.role === 'CS_AGENT');
+    const closersOnly = team.filter((m) => m.role === 'CS_CLOSER');
 
     const rows = closersOnly.map((m) => {
       const wl = workloadById.get(m.id);
@@ -234,7 +234,7 @@ export class ReportsService {
         .join(' / ');
       return {
         name: m.name,
-        role: m.role === 'CS_AGENT' ? 'Closer' : m.role.replace(/_/g, ' '),
+        role: m.role === 'CS_CLOSER' ? 'Closer' : m.role.replace(/_/g, ' '),
         branches: branches || '—',
         pending: wl?.pendingCount ?? 0,
         capacity: wl?.capacity ?? 0,

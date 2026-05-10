@@ -21,7 +21,7 @@ export async function loginAsSuperAdmin(page: Page): Promise<void> {
   await login(page, 'admin@yannis.test', 'Test@12345');
 }
 
-/** Login as CS Agent. */
+/** Login as CS Closer. */
 export async function loginAsCsAgent(page: Page): Promise<void> {
   await login(page, 'cs.agent@yannis.test', 'Test@12345');
 }

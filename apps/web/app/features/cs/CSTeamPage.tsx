@@ -45,11 +45,11 @@ function formatLastActive(lastActionAt: string | null): string {
 }
 
 function csRoleLabel(role: string): string {
-  return role === 'CS_AGENT' ? 'Closer' : role.replace(/_/g, ' ');
+  return role === 'CS_CLOSER' ? 'Closer' : role.replace(/_/g, ' ');
 }
 
 function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; embedded?: boolean }) {
-  const isAgent = member.role === 'CS_AGENT';
+  const isAgent = member.role === 'CS_CLOSER';
   const workload = member.workload;
   const leaderboard = member.leaderboardEntry;
   const roleLabel = csRoleLabel(member.role);
@@ -135,21 +135,13 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
       )}
 
       <div className="inline-flex flex-nowrap items-center gap-1.5">
-        <CompactTableActionButton to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}>
+        <CompactTableActionButton to={`/admin/cs/orders?csCloserId=${member.id}&period=all_time`}>
           View orders
         </CompactTableActionButton>
         <CompactTableActionButton to={`/hr/users/${member.id}`}>View profile</CompactTableActionButton>
       </div>
     </div>
   );
-}
-
-function activityCell(member: CSTeamMemberOverview): string {
-  const isAgent = member.role === 'CS_AGENT';
-  if (!isAgent) return '\u2014';
-  if (member.isIdle) return 'Idle';
-  if (member.workload) return formatLastActive(member.workload.lastActionAt);
-  return '\u2014';
 }
 
 export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dateFilters }: CSTeamPageProps) {
@@ -169,7 +161,7 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
         header: 'Workload',
         nowrap: true,
         render: (member) => {
-          const isAgent = member.role === 'CS_AGENT';
+          const isAgent = member.role === 'CS_CLOSER';
           const workload = member.workload;
           const dailyPct =
             workload && workload.capacity > 0 ? ((workload.todayClosesCount ?? 0) / workload.capacity) * 100 : 0;
@@ -184,20 +176,6 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
             </span>
           ) : (
             <span className="text-sm text-app-fg-muted">{'\u2014'}</span>
-          );
-        },
-      },
-      {
-        key: 'activity',
-        header: 'Activity',
-        nowrap: true,
-        render: (member) => {
-          const act = activityCell(member);
-          const isIdleText = act === 'Idle';
-          return isIdleText ? (
-            <span className="text-sm font-medium text-warning-600 dark:text-warning-400">Idle</span>
-          ) : (
-            <span className="text-sm text-app-fg-muted">{act}</span>
           );
         },
       },
@@ -281,7 +259,7 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
         tight: true,
         render: (member) => (
           <div className="inline-flex items-center gap-1.5">
-            <CompactTableActionButton to={`/admin/cs/orders?csAgentId=${member.id}&period=all_time`}>
+            <CompactTableActionButton to={`/admin/cs/orders?csCloserId=${member.id}&period=all_time`}>
               View orders
             </CompactTableActionButton>
             <CompactTableActionButton to={`/hr/users/${member.id}`}>View profile</CompactTableActionButton>
@@ -296,7 +274,7 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
     <div className="space-y-6">
       <PageHeader
         title="Team Analysis"
-        description="Closer workload, activity, and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
+        description="Closer workload and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
         actions={
           dateFilters ? (
             <PageHeaderMobileTools

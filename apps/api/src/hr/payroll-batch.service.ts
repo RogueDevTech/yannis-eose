@@ -37,7 +37,7 @@ import { computeEarningsFromPlanRules } from './commission-rules-math';
  * same dept↔role mapping to scope what each Head can see + edit.
  */
 export const DEPARTMENT_ROLES: Record<PayrollDepartment, readonly string[]> = {
-  CS: ['CS_AGENT'],
+  CS: ['CS_CLOSER'],
   MARKETING: ['MEDIA_BUYER'],
   LOGISTICS: ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'],
   HR: ['HR_MANAGER', 'HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'BRANCH_ADMIN', 'FINANCE_OFFICER'],
@@ -54,7 +54,7 @@ export const DEPARTMENT_OWNER_ROLE: Record<PayrollDepartment, string> = {
  * Roles a viewer is allowed to manage commission plans for. Mirrors the batch ownership rules:
  *   - Admin: every role
  *   - HR Manager: every role (the catch-all owner)
- *   - HEAD_OF_CS: CS_AGENT
+ *   - HEAD_OF_CS: CS_CLOSER
  *   - HEAD_OF_MARKETING: MEDIA_BUYER
  *   - HEAD_OF_LOGISTICS: LOGISTICS_MANAGER + TPL_MANAGER + TPL_RIDER + STOCK_MANAGER
  *   - everyone else: empty

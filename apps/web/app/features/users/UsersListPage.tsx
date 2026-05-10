@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams, useFetcher } from '@remix-run/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -19,32 +19,122 @@ import { ProbationBadge } from '~/components/ui/probation-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { UsersImportModal } from './UsersImportModal';
+import { hrUsersShellColumns } from '~/features/hr/HRDeferredLoadingShells';
+import { shellPulsePlaceholderRows } from '~/components/ui/deferred-skeletons';
 
-interface UsersListPageProps {
+/** Matches `users.rosterSummary` — full-roster KPIs for the current URL filters. */
+export type UsersRosterSummary = {
+  active: number;
+  pending: number;
+  inactiveArchived: number;
+  distinctRoles: number;
+};
+
+type UsersRosterPayload = {
   users: User[];
   total: number;
   page: number;
+  limit: number;
   totalPages: number;
+  /** Present from HR loader (`users.rosterSummary`); absent on older cached payloads. */
+  summary?: UsersRosterSummary;
+};
+
+const EMPTY_ROSTER_SUMMARY: UsersRosterSummary = {
+  active: 0,
+  pending: 0,
+  inactiveArchived: 0,
+  distinctRoles: 0,
+};
+
+interface UsersListPageProps {
+  /**
+   * Resolved roster OR a Promise that resolves it. When a Promise, the page
+   * chrome (header, filter pills, search bar, action button, pagination
+   * shell) renders instantly and the table body shows skeleton rows until
+   * this promise resolves (App Shell pattern).
+   */
+  usersPromise: Promise<UsersRosterPayload> | UsersRosterPayload;
   statusParam?: string;
   roleParam?: string;
+  /** Trimmed search string applied server-side (`users.list`), mirrored from the URL. */
+  searchParam?: string;
   usersBasePath?: string;
   /** Finance roster: name + payment contact only — no HR stats, role grid, or invite actions. */
   variant?: 'default' | 'staffAccounts';
+  /** Per-page picker — caller supplies the clamped current size + the choices. */
+  pageSize?: number;
+  pageSizeOptions?: number[];
 }
 
+/** Type guard — distinguishes a pre-resolved payload (clientLoader cache hit)
+ *  from a Promise (first paint). */
+function isResolvedUsersPayload<T>(v: T | Promise<T>): v is T {
+  return typeof v === 'object' && v != null && !('then' in (v as object));
+}
+
+const SKELETON_ROW_COUNT = 8;
+
 export function UsersListPage({
-  users,
-  total,
-  page,
-  totalPages,
+  usersPromise,
   statusParam = 'ALL',
   roleParam = 'ALL',
+  searchParam = '',
   usersBasePath = '/hr/users',
   variant = 'default',
+  pageSize,
+  pageSizeOptions,
 }: UsersListPageProps) {
+  // Bridge the deferred roster to local state. Page chrome below renders
+  // immediately with `null` data + skeleton rows; once the promise resolves
+  // the table fills in.
+  const [roster, setRoster] = useState<UsersRosterPayload | null>(
+    isResolvedUsersPayload(usersPromise) ? usersPromise : null,
+  );
+  useEffect(() => {
+    if (isResolvedUsersPayload(usersPromise)) {
+      setRoster(usersPromise);
+      return;
+    }
+    let cancelled = false;
+    Promise.resolve(usersPromise)
+      .then((p) => {
+        if (!cancelled) setRoster(p);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setRoster({
+            users: [],
+            total: 0,
+            page: 1,
+            limit: 20,
+            totalPages: 0,
+            summary: EMPTY_ROSTER_SUMMARY,
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [usersPromise]);
+  const rosterLoading = roster === null;
+  const users: User[] = roster?.users ?? [];
+  const total: number = roster?.total ?? 0;
+  /** Server aggregates (`users.rosterSummary`); page-slice fallback for older cached payloads without `summary`. */
+  const rosterSummary: UsersRosterSummary =
+    roster?.summary ?? {
+      active: users.filter((u) => u.status === 'ACTIVE').length,
+      pending: users.filter((u) => u.status === 'PENDING').length,
+      inactiveArchived: users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length,
+      distinctRoles: new Set(users.map((u) => u.role)).size,
+    };
+  const page: number = roster?.page ?? 1;
+  const totalPages: number = roster?.totalPages ?? 0;
   const staffAccounts = variant === 'staffAccounts';
   const [searchParams, setSearchParams] = useSearchParams();
-  const [searchQuery, setSearchQuery] = useState('');
+  const searchFromUrl = searchParams.get('search') ?? '';
+  const [draftSearch, setDraftSearch] = useState(searchFromUrl);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFilterLoading = useLoaderRefetchBusy().busy;
   const safeTotalPages = Math.max(1, totalPages);
   const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
@@ -53,7 +143,45 @@ export function UsersListPage({
   // generated and emailed) which invalidates any older invite link. Easy to fire by accident
   // from a long table, so confirm before sending.
   const [resendConfirm, setResendConfirm] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const revalidator = useRevalidator();
   const isResending = resendFetcher.state !== 'idle';
+
+  useEffect(() => {
+    setDraftSearch(searchFromUrl);
+  }, [searchFromUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
+
+  const commitSearchToUrl = useCallback(
+    (raw: string) => {
+      const trimmed = raw.trim().slice(0, 120);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (trimmed) next.set('search', trimmed);
+          else next.delete('search');
+          next.set('page', '1');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const handleSearchChange = useCallback(
+    (val: string) => {
+      setDraftSearch(val);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => commitSearchToUrl(val), 300);
+    },
+    [commitSearchToUrl],
+  );
 
   const handleStatusChange = (value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -82,6 +210,7 @@ export function UsersListPage({
     let n = 0;
     if (statusParam !== 'ALL') n += 1;
     if (roleParam !== 'ALL') n += 1;
+    if ((searchParams.get('search') ?? '').trim().length > 0) n += 1;
     if (searchParams.get('probationOnly') === '1') n += 1;
     return n;
   }, [statusParam, roleParam, searchParams]);
@@ -95,18 +224,7 @@ export function UsersListPage({
     setSearchParams(params, { replace: true });
   };
 
-  const q = searchQuery.trim().toLowerCase();
-  const filteredUsers = users.filter((user) => {
-    if (statusParam !== 'ALL' && user.status !== statusParam) return false;
-    if (roleParam !== 'ALL' && user.role !== roleParam) return false;
-    if (probationOnly && !user.isProbation) return false;
-    if (!q) return true;
-    if (user.name.toLowerCase().includes(q)) return true;
-    if (user.email.toLowerCase().includes(q)) return true;
-    const phone = user.phone?.toLowerCase() ?? '';
-    if (phone && phone.includes(q)) return true;
-    return false;
-  });
+  // Status, role, search, and probation-only are applied server-side (`users.list`).
 
   const staffAccountsColumns: CompactTableColumn<User>[] = useMemo(
     () => [
@@ -273,6 +391,18 @@ export function UsersListPage({
             desktop={
               <>
                 <PageRefreshButton />
+                {!staffAccounts ? (
+                  <button
+                    type="button"
+                    onClick={() => setImportOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-surface px-3 py-1.5 text-sm font-medium text-app-fg hover:bg-app-hover"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                    </svg>
+                    Import users
+                  </button>
+                ) : null}
                 <BranchScopedLink
                   to={`${usersBasePath}/new`}
                   actionLabel="creating a user"
@@ -286,59 +416,92 @@ export function UsersListPage({
               </>
             }
             sheet={({ closeSheet }) => (
-              <BranchScopedLink
-                to={`${usersBasePath}/new`}
-                actionLabel="creating a user"
-                className="btn-primary inline-flex w-full items-center justify-center gap-2"
-                onClick={() => closeSheet()}
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                {staffAccounts ? 'Add staff' : 'Add User'}
-              </BranchScopedLink>
+              <div className="flex flex-col gap-2 w-full">
+                {!staffAccounts ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportOpen(true);
+                      closeSheet();
+                    }}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-app-border bg-app-surface px-3 py-2 text-sm font-medium text-app-fg hover:bg-app-hover"
+                  >
+                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                    </svg>
+                    Import users
+                  </button>
+                ) : null}
+                <BranchScopedLink
+                  to={`${usersBasePath}/new`}
+                  actionLabel="creating a user"
+                  className="btn-primary inline-flex w-full items-center justify-center gap-2"
+                  onClick={() => closeSheet()}
+                >
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  {staffAccounts ? 'Add staff' : 'Add User'}
+                </BranchScopedLink>
+              </div>
             )}
           />
         }
       />
 
       {!staffAccounts && (
-        <OverviewStatStrip
-          tileClassName="min-w-[6.5rem]"
-          items={[
-            { label: 'Total Users', value: total, valueClassName: 'text-app-fg' },
-            {
-              label: 'Active',
-              value: users.filter((u) => u.status === 'ACTIVE').length,
-              valueClassName: 'text-success-600 dark:text-success-400',
-            },
-            {
-              label: 'Pending',
-              value: users.filter((u) => u.status === 'PENDING').length,
-              valueClassName: 'text-info-600 dark:text-info-400',
-            },
-            {
-              label: 'Inactive / Archived',
-              value: users.filter((u) => u.status === 'INACTIVE' || u.status === 'ARCHIVED').length,
-              valueClassName: 'text-app-fg',
-            },
-            { label: 'Roles', value: new Set(users.map((u) => u.role)).size, valueClassName: 'text-app-fg' },
-          ]}
-        />
+        rosterLoading ? (
+          <OverviewStatStripSkeleton
+            count={5}
+            labels={['Total Users', 'Active', 'Pending', 'Inactive / Archived', 'Roles']}
+            tileClassName="min-w-[6.5rem]"
+          />
+        ) : (
+          <OverviewStatStrip
+            tileClassName="min-w-[6.5rem]"
+            items={[
+              { label: 'Total Users', value: total, valueClassName: 'text-app-fg' },
+              {
+                label: 'Active',
+                value: rosterSummary.active,
+                valueClassName: 'text-success-600 dark:text-success-400',
+              },
+              {
+                label: 'Pending',
+                value: rosterSummary.pending,
+                valueClassName: 'text-info-600 dark:text-info-400',
+              },
+              {
+                label: 'Inactive / Archived',
+                value: rosterSummary.inactiveArchived,
+                valueClassName: 'text-app-fg',
+              },
+              { label: 'Roles', value: rosterSummary.distinctRoles, valueClassName: 'text-app-fg' },
+            ]}
+          />
+        )
       )}
 
       {staffAccounts && (
-        <OverviewStatStrip
-          tileClassName="min-w-[6.5rem]"
-          items={[
-            { label: 'Total matching', value: total, valueClassName: 'text-app-fg tabular-nums' },
-            {
-              label: 'Page',
-              value: `${page} / ${safeTotalPages}`,
-              valueClassName: 'text-app-fg-muted tabular-nums',
-            },
-          ]}
-        />
+        rosterLoading ? (
+          <OverviewStatStripSkeleton
+            count={2}
+            labels={['Total matching', 'Page']}
+            tileClassName="min-w-[6.5rem]"
+          />
+        ) : (
+          <OverviewStatStrip
+            tileClassName="min-w-[6.5rem]"
+            items={[
+              { label: 'Total matching', value: total, valueClassName: 'text-app-fg tabular-nums' },
+              {
+                label: 'Page',
+                value: `${page} / ${safeTotalPages}`,
+                valueClassName: 'text-app-fg-muted tabular-nums',
+              },
+            ]}
+          />
+        )
       )}
 
       {staffAccounts ? (
@@ -346,11 +509,13 @@ export function UsersListPage({
           <ToolbarFiltersCollapsible
             className="!border-0"
             badgeCount={filtersToolbarBadge}
-            sheetSubtitle={<span>Status and role reload the list from the server. Search narrows the current page.</span>}
+            sheetSubtitle={
+              <span>Search runs on the full roster server-side. Status and role reload the list.</span>
+            }
             searchRow={
               <SearchInput
-                value={searchQuery}
-                onChange={setSearchQuery}
+                value={draftSearch}
+                onChange={handleSearchChange}
                 placeholder="Search by name, email, or phone…"
                 wrapperClassName="min-w-0 flex-1 md:min-w-0"
               />
@@ -408,34 +573,55 @@ export function UsersListPage({
               </>
             }
           />
-          <CompactTable<User>
-            key="staff"
-            columns={staffAccountsColumns}
-            rows={filteredUsers}
-            rowKey={(u) => u.id}
-            withCard={false}
-            loading={isFilterLoading}
-            loadingVariant="overlay"
-            emptyTitle={
-              users.length === 0 ? 'No staff found' : 'No matching staff'
-            }
-            emptyDescription={
-              users.length === 0
-                ? 'Staff records will appear here once added in HR.'
-                : 'Try a different search or filters.'
-            }
-            pagination={{
-              page,
-              totalPages: safeTotalPages,
-              onPageChange: goToPage,
-              summary: (
-                <span>
-                  Showing {filteredUsers.length} of {total} staff
-                </span>
-              ),
-              wrapperClassName: 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
-            }}
-          />
+          {rosterLoading ? (
+            <CompactTable<{ id: string }>
+              key="staff-skeleton"
+              columns={hrUsersShellColumns(true)}
+              rows={shellPulsePlaceholderRows('staff_accounts', SKELETON_ROW_COUNT)}
+              rowKey={(r) => r.id}
+              withCard={false}
+              emptyTitle="Loading…"
+              emptyDescription=""
+              pagination={{
+                page: 1,
+                totalPages: 1,
+                onPageChange: () => undefined,
+                summary: <span className="text-app-fg-muted">Loading staff…</span>,
+                wrapperClassName:
+                  'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1 opacity-60',
+              }}
+            />
+          ) : (
+            <CompactTable<User>
+              key="staff"
+              columns={staffAccountsColumns}
+              rows={users}
+              rowKey={(u) => u.id}
+              withCard={false}
+              loading={isFilterLoading}
+              loadingVariant="overlay"
+              emptyTitle={users.length === 0 ? 'No staff found' : 'No matching staff'}
+              emptyDescription={
+                users.length === 0
+                  ? 'Staff records will appear here once added in HR.'
+                  : 'Try a different search or filters.'
+              }
+              pagination={{
+                page,
+                totalPages: safeTotalPages,
+                onPageChange: goToPage,
+                pageSize,
+                pageSizeOptions,
+                summary: (
+                  <span>
+                    Showing {users.length} of {total} staff
+                  </span>
+                ),
+                wrapperClassName:
+                  'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
+              }}
+            />
+          )}
         </div>
       ) : (
         <>
@@ -443,12 +629,14 @@ export function UsersListPage({
             <ToolbarFiltersCollapsible
               className="!border-0"
               badgeCount={filtersToolbarBadge}
-              sheetSubtitle={<span>Status and role apply immediately</span>}
+              sheetSubtitle={
+                <span>Search runs on the full roster server-side. Status and role reload the list.</span>
+              }
               searchRow={
                 <SearchInput
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  placeholder="Search by name or email..."
+                  value={draftSearch}
+                  onChange={handleSearchChange}
+                  placeholder="Search by name, email, or phone…"
                   wrapperClassName="min-w-0 flex-1 md:min-w-0"
                 />
               }
@@ -526,31 +714,51 @@ export function UsersListPage({
             />
           </div>
 
-          <CompactTable<User>
-            key="hr"
-            columns={hrUserColumns}
-            rows={filteredUsers}
-            rowKey={(u) => u.id}
-            loading={isFilterLoading}
-            loadingVariant="overlay"
-            emptyTitle={
-              users.length === 0 ? 'No users yet' : 'No matching users found'
-            }
-            emptyDescription={
-              users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'
-            }
-            pagination={{
-              page,
-              totalPages: safeTotalPages,
-              onPageChange: goToPage,
-              summary: (
-                <span>
-                  Showing {filteredUsers.length} of {total} users
-                </span>
-              ),
-              wrapperClassName: 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
-            }}
-          />
+          {rosterLoading ? (
+            <CompactTable<{ id: string }>
+              key="hr-skeleton"
+              columns={hrUsersShellColumns(false)}
+              rows={shellPulsePlaceholderRows('hr_users', SKELETON_ROW_COUNT)}
+              rowKey={(r) => r.id}
+              emptyTitle="Loading…"
+              emptyDescription=""
+              pagination={{
+                page: 1,
+                totalPages: 1,
+                onPageChange: () => undefined,
+                summary: <span className="text-app-fg-muted">Loading users…</span>,
+                wrapperClassName:
+                  'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1 opacity-60',
+              }}
+            />
+          ) : (
+            <CompactTable<User>
+              key="hr"
+              columns={hrUserColumns}
+              rows={users}
+              rowKey={(u) => u.id}
+              loading={isFilterLoading}
+              loadingVariant="overlay"
+              emptyTitle={users.length === 0 ? 'No users yet' : 'No matching users found'}
+              emptyDescription={
+                users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'
+              }
+              pagination={{
+                page,
+                totalPages: safeTotalPages,
+                onPageChange: goToPage,
+                pageSize,
+                pageSizeOptions,
+                summary: (
+                  <span>
+                    Showing {users.length} of {total} users
+                  </span>
+                ),
+                wrapperClassName:
+                  'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 pb-3 pt-1',
+              }}
+            />
+          )}
         </>
       )}
 
@@ -588,6 +796,14 @@ export function UsersListPage({
       <ResendInviteAutoClose
         fetcher={resendFetcher}
         onClose={() => setResendConfirm(null)}
+      />
+      <UsersImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onComplete={() => {
+          // Refresh the user roster so newly-imported users appear immediately.
+          revalidator.revalidate();
+        }}
       />
     </div>
   );

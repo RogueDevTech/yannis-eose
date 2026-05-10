@@ -79,7 +79,7 @@ Creates test users for all roles:
 | Email | Role | Password |
 |-------|------|----------|
 | `admin@yannis.test` | SUPER_ADMIN | `Test@12345` |
-| `cs.agent@yannis.test` | CS_AGENT | `Test@12345` |
+| `cs.agent@yannis.test` | CS_CLOSER | `Test@12345` |
 | `media.buyer@yannis.test` | MEDIA_BUYER | `Test@12345` |
 | `finance@yannis.test` | FINANCE_OFFICER | `Test@12345` |
 | `hr@yannis.test` | HR_MANAGER | `Test@12345` |
@@ -275,7 +275,7 @@ pnpm --filter @yannis/shared db:audit-permission-coverage
 
 Run against a seeded dev/staging DB (`db:seed-permissions` applied).
 
-1. Open `/hr/users/new`, pick a role (e.g. CS Agent) — matrix appears and **Inherited:** is greater than zero when the template has grants.
+1. Open `/hr/users/new`, pick a role (e.g. CS Closer) — matrix appears and **Inherited:** is greater than zero when the template has grants.
 2. Submit without toggling any permission — new user can perform actions allowed by the template; `user_permissions` has no extra rows unless you had overrides.
 3. Toggle one permission off (explicit revoke) or on (explicit grant), submit — only divergences persist in `user_permissions`; inherited rest still come from the template.
 4. If multiple templates exist, change **Permission template** — inherited counts/labels update; saved user should carry the selected `roleTemplateId`.

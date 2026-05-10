@@ -58,12 +58,12 @@ const ENDPOINTS: TrpcEndpoint[] = [
     tag: 'Orders',
   },
   { procedure: 'orders.softDeleteOrder', method: 'POST', summary: 'Soft-delete (archive) an order', tag: 'Orders' },
-  { procedure: 'orders.assignToCS', method: 'POST', summary: 'Assign order to CS agent', tag: 'Orders' },
+  { procedure: 'orders.assignToCS', method: 'POST', summary: 'Assign order to CS closer', tag: 'Orders' },
   { procedure: 'orders.bulkReassign', method: 'POST', summary: 'Bulk reassign orders', tag: 'Orders' },
   { procedure: 'orders.redistributeCSOrders', method: 'POST', summary: 'Redistribute CS-assigned orders', tag: 'Orders' },
-  { procedure: 'orders.distributeUnassignedOrders', method: 'POST', summary: 'Distribute unassigned (UNPROCESSED) orders to CS agents', tag: 'Orders' },
+  { procedure: 'orders.distributeUnassignedOrders', method: 'POST', summary: 'Distribute unassigned (UNPROCESSED) orders to CS closers', tag: 'Orders' },
   { procedure: 'orders.statusCounts', method: 'GET', summary: 'Get order status counts', tag: 'Orders' },
-  { procedure: 'orders.csWorkloads', method: 'GET', summary: 'CS agent workloads', tag: 'Orders' },
+  { procedure: 'orders.csWorkloads', method: 'GET', summary: 'CS closer workloads', tag: 'Orders' },
   {
     procedure: 'orders.closerWorkloadOrders',
     method: 'GET',
@@ -71,8 +71,8 @@ const ENDPOINTS: TrpcEndpoint[] = [
     tag: 'Orders',
   },
   { procedure: 'orders.releaseExpiredLocks', method: 'POST', summary: 'Release expired order locks', tag: 'Orders' },
-  { procedure: 'orders.inactiveAgents', method: 'GET', summary: 'List inactive CS agents', tag: 'Orders' },
-  { procedure: 'orders.csLeaderboard', method: 'GET', summary: 'CS agent leaderboard', tag: 'Orders' },
+  { procedure: 'orders.inactiveAgents', method: 'GET', summary: 'List inactive CS closers', tag: 'Orders' },
+  { procedure: 'orders.csLeaderboard', method: 'GET', summary: 'CS closer leaderboard', tag: 'Orders' },
   { procedure: 'orders.revealPhoneForManualCall', method: 'POST', summary: 'Reveal phone for manual call', tag: 'Orders' },
   { procedure: 'orders.initiateCall', method: 'POST', summary: 'Initiate VOIP call', tag: 'Orders' },
   { procedure: 'orders.getCallLogs', method: 'GET', summary: 'Get order call logs', tag: 'Orders' },
@@ -235,7 +235,7 @@ const ENDPOINTS: TrpcEndpoint[] = [
   // Dashboard
   { procedure: 'dashboard.ceoOverview', method: 'GET', summary: 'CEO executive overview', tag: 'Dashboard' },
   { procedure: 'dashboard.ceoOverviewTimeSeries', method: 'GET', summary: 'CEO overview time-series (daily revenue & orders)', tag: 'Dashboard' },
-  { procedure: 'dashboard.orderPipelineChart', method: 'GET', summary: 'Order pipeline chart (Volume, CS Engaged, Confirmed, Logistics, Delivered)', tag: 'Dashboard' },
+  { procedure: 'dashboard.orderPipelineChart', method: 'GET', summary: 'Order pipeline chart (Volume, Unconfirmed, Confirmed, Logistics, Delivered)', tag: 'Dashboard' },
 
   // Settings
   { procedure: 'settings.getClientConfig', method: 'GET', summary: 'Get client UI config and effective theme', tag: 'Settings' },
