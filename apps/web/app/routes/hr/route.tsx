@@ -1,7 +1,7 @@
-import { Suspense } from 'react';
+import { useEffect, useState } from 'react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
-import { Await, useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
+import { useLoaderData, useRouteError, isRouteErrorResponse } from '@remix-run/react';
 import type { ShouldRevalidateFunction } from '@remix-run/react';
 import { DashboardLayout } from '~/components/layout/dashboard-layout';
 import { getCurrentUser, apiRequest, getSessionCookie } from '~/lib/api.server';
@@ -130,36 +130,47 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 /**
- * Admin layout route — wraps all /admin/* routes with the dashboard layout.
+ * HR layout route — wraps all /hr/* routes with the dashboard layout.
  * Child routes render inside the <Outlet /> within DashboardLayout.
+ *
+ * The branches promise is bridged into state instead of resolved via a
+ * Suspense boundary. The previous Suspense+Await pattern rendered
+ * `<DashboardLayout>` in two distinct React positions (fallback vs Await
+ * children); when branches resolved, React unmounted the fallback subtree
+ * and mounted the children subtree, which also remounted the `<Outlet />`
+ * and every child route's local state — child pages would re-fire their
+ * own deferred-promise skeletons, looking like a double flicker.
+ *
+ * Single mount + state bridge keeps the Outlet alive across resolution.
  */
-export default function AdminLayout() {
+export default function HrLayout() {
   const { user, notifications, branches } = useLoaderData<typeof loader>();
+  const [resolvedBranches, setResolvedBranches] = useState<
+    Array<{ id: string; name: string; code: string }> | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(branches)
+      .then((value) => {
+        if (!cancelled) setResolvedBranches(value);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [branches]);
 
   return (
-    <Suspense
-      fallback={
-        <DashboardLayout
-          user={user}
-          branches={[]}
-          branchesHydrationReady={false}
-          notificationsPromise={notifications}
-          notificationsActionUrl="/hr"
-        />
-      }
-    >
-      <Await resolve={branches}>
-        {(resolvedBranches) => (
-          <DashboardLayout
-            user={user}
-            branches={resolvedBranches}
-            branchesHydrationReady
-            notificationsPromise={notifications}
-            notificationsActionUrl="/hr"
-          />
-        )}
-      </Await>
-    </Suspense>
+    <DashboardLayout
+      user={user}
+      branches={resolvedBranches ?? []}
+      branchesHydrationReady={resolvedBranches !== null}
+      notificationsPromise={notifications}
+      notificationsActionUrl="/hr"
+    />
   );
 }
 

@@ -37,6 +37,7 @@ import { resolveRoleTemplateBaselineCodes } from '../permissions/role-template-b
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevelRole } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 
 type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
@@ -57,6 +58,7 @@ export class UsersService {
     private readonly eventsService: EventsService,
     @Inject(forwardRef(() => UserBundleCacheService))
     private readonly userBundleCache: UserBundleCacheService,
+    private readonly branchTeams: BranchTeamsService,
   ) {}
 
   private defaultScopeForRole(role: string): { scopeGlobal: boolean; scopeOrgWideHead: boolean } {
@@ -246,11 +248,7 @@ export class UsersService {
 
     if ((perms.includes('cs.teamOverview') || perms.includes('team.supervise_cs')) && target.role === 'CS_CLOSER')
       return true;
-    if (
-      (perms.includes('marketing.teamOverview') || perms.includes('team.supervise_marketing')) &&
-      target.role === 'MEDIA_BUYER'
-    )
-      return true;
+    if (perms.includes('marketing.teamOverview') && target.role === 'MEDIA_BUYER') return true;
     if (
       perms.includes('team.supervise_logistics') &&
       ['LOGISTICS_MANAGER', 'TPL_MANAGER', 'TPL_RIDER', 'STOCK_MANAGER'].includes(target.role)
@@ -756,6 +754,7 @@ export class UsersService {
         loginCount: schema.users.loginCount,
         lastLoginAt: schema.users.lastLoginAt,
         isProbation: schema.users.isProbation,
+        isTeamSupervisor: schema.users.isTeamSupervisor,
         probationStartedAt: schema.users.probationStartedAt,
         probationStartedBy: schema.users.probationStartedBy,
         probationUntil: schema.users.probationUntil,
@@ -800,7 +799,14 @@ export class UsersService {
   private buildUsersListConditions(
     input: Pick<
       ListUsersInput,
-      'search' | 'role' | 'status' | 'branchId' | 'userIds' | 'allBranches' | 'probationOnly'
+      | 'search'
+      | 'role'
+      | 'status'
+      | 'branchId'
+      | 'userIds'
+      | 'allBranches'
+      | 'probationOnly'
+      | 'supervisorOnly'
     >,
     actor: { id: string; role: string; permissions?: string[] } | null,
     currentBranchId: string | null,
@@ -835,6 +841,10 @@ export class UsersService {
 
     if (input.probationOnly === true) {
       conditions.push(eq(schema.users.isProbation, true));
+    }
+
+    if (input.supervisorOnly === true) {
+      conditions.push(eq(schema.users.isTeamSupervisor, true));
     }
 
     const actorPerms = (actor?.permissions ?? []).map((p) => canonicalPermissionCode(p));
@@ -884,6 +894,22 @@ export class UsersService {
    * procedure on `users.read` so any direct caller already qualifies, but the per-row check
    * still runs so a future caller without that permission falls back to the masked form.
    */
+  /**
+   * Picklist helper: resolve a small, caller-known set of user IDs to
+   * `{id, name}` rows. Bypasses the broad scope checks in `list()` because the
+   * caller has already proven the IDs belong to a constrained set (typically
+   * a marketing supervisor's supervised MBs, derived server-side). Returns
+   * empty array on empty input.
+   */
+  async listByIds(ids: readonly string[]): Promise<Array<{ id: string; name: string }>> {
+    if (ids.length === 0) return [];
+    const rows = await this.db
+      .select({ id: schema.users.id, name: schema.users.name })
+      .from(schema.users)
+      .where(inArray(schema.users.id, ids as string[]));
+    return rows;
+  }
+
   async list(
     input: ListUsersInput,
     actor: { id: string; role: string; permissions?: string[] } | null = null,
@@ -924,6 +950,7 @@ export class UsersService {
           payoutBankCode: schema.users.payoutBankCode,
           isProbation: schema.users.isProbation,
           probationUntil: schema.users.probationUntil,
+          isTeamSupervisor: schema.users.isTeamSupervisor,
         })
         .from(schema.users)
         .where(whereClause)
@@ -1301,6 +1328,24 @@ export class UsersService {
           code: 'FORBIDDEN',
           message: 'You can only edit team members in your own branch.',
         });
+      }
+      if (
+        actorIsMarketingLead &&
+        beforeRow.role === 'MEDIA_BUYER' &&
+        has('team.supervise_marketing') &&
+        !has('marketing.teamOverview')
+      ) {
+        const bid = actor.currentBranchId;
+        if (!bid) {
+          throw new TRPCError({ code: 'FORBIDDEN', message: 'Branch context required.' });
+        }
+        const ok = await this.branchTeams.isMarketingSupervisorOf(actor.id, input.userId, bid);
+        if (!ok) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You can only edit Media Buyers you supervise on this branch.',
+          });
+        }
       }
       if (input.userId === actor.id) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cannot edit your own account here.' });

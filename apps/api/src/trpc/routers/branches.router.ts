@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { eq, and, inArray, count } from 'drizzle-orm';
+import { eq, and, inArray, count, asc, sql } from 'drizzle-orm';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -25,7 +25,8 @@ export function setBranchesSettingsService(service: SettingsService) {
 }
 
 function getBranchesSettingsService(): SettingsService {
-  if (!branchesSettingsService) throw new Error('SettingsService not initialized for branches router');
+  if (!branchesSettingsService)
+    throw new Error('SettingsService not initialized for branches router');
   return branchesSettingsService;
 }
 
@@ -111,9 +112,7 @@ export async function listBranchesForUser(user: {
   };
 
   if (!branchesCacheService) return fetchRows();
-  const key =
-    'cache:branches:list:' +
-    CacheService.hashInput({ viewerId: user.id, isAdmin });
+  const key = 'cache:branches:list:' + CacheService.hashInput({ viewerId: user.id, isAdmin });
   return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, fetchRows);
 }
 
@@ -307,6 +306,8 @@ export const branchesRouter = router({
       const hasBranchManageUsersPermission = overviewPerms.includes('branches.manage_users');
       const hasCSTeamsPermission = overviewPerms.includes('branches.teams.cs');
       const hasMarketingTeamsPermission = overviewPerms.includes('branches.teams.marketing');
+      const isHeadOfMarketingRole = ctx.user.role === 'HEAD_OF_MARKETING';
+      const isHeadOfCsRole = ctx.user.role === 'HEAD_OF_CS';
 
       const membership = await db
         .select({ branchId: schema.userBranches.branchId })
@@ -323,6 +324,8 @@ export const branchesRouter = router({
         !hasBranchManagePermission &&
         !hasCSTeamsPermission &&
         !hasMarketingTeamsPermission &&
+        !isHeadOfMarketingRole &&
+        !isHeadOfCsRole &&
         !membership[0]
       ) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'Not a member of this branch' });
@@ -335,9 +338,14 @@ export const branchesRouter = router({
         hasBranchManageUsersPermission ||
         hasCSTeamsPermission ||
         hasMarketingTeamsPermission ||
+        isHeadOfMarketingRole ||
+        isHeadOfCsRole ||
         isBranchSupervisor;
       if (!canAccessBranchPage) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to access this branch page' });
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Not allowed to access this branch page',
+        });
       }
 
       const [branch] = await db
@@ -378,10 +386,33 @@ export const branchesRouter = router({
           department: departmentForBranchMemberRole(effectiveRole),
         };
       });
-      const canManageBranchPage = isSuperAdmin || hasBranchManagePermission || hasBranchManageUsersPermission;
+      const canManageBranchPage =
+        isSuperAdmin || hasBranchManagePermission || hasBranchManageUsersPermission;
       let visibleMembers = members;
       if (!canManageBranchPage) {
-        if (isBranchSupervisor) {
+        // Heads hold `branches.teams.*` on the template, but mirror/read paths must still match
+        // reality: HoM / HoCS are org-wide leads for their lane — they need the full dept roster
+        // on every branch (not only when `user_permissions` happens to include the teams codes).
+        const deptHeadVisibilityIds = new Set<string>();
+        let useDeptHeadVisibility = false;
+        if (hasMarketingTeamsPermission || isHeadOfMarketingRole) {
+          useDeptHeadVisibility = true;
+          deptHeadVisibilityIds.add(ctx.user.id);
+          for (const m of members) {
+            if (m.department === 'MARKETING') deptHeadVisibilityIds.add(m.userId);
+          }
+        }
+        if (hasCSTeamsPermission || isHeadOfCsRole) {
+          useDeptHeadVisibility = true;
+          deptHeadVisibilityIds.add(ctx.user.id);
+          for (const m of members) {
+            if (m.department === 'CS') deptHeadVisibilityIds.add(m.userId);
+          }
+        }
+
+        if (useDeptHeadVisibility) {
+          visibleMembers = members.filter((m) => deptHeadVisibilityIds.has(m.userId));
+        } else if (isBranchSupervisor) {
           const [supervisedCs, supervisedMarketing] = await Promise.all([
             teams.listSupervisedUserIds(ctx.user.id, input.branchId, 'CS'),
             teams.listSupervisedUserIds(ctx.user.id, input.branchId, 'MARKETING'),
@@ -423,9 +454,12 @@ export const branchesRouter = router({
         .where(eq(schema.messageTemplates.branchId, input.branchId));
 
       const canManageCSTeams =
-        isSuperAdmin || hasBranchManagePermission || hasCSTeamsPermission;
+        isSuperAdmin || hasBranchManagePermission || hasCSTeamsPermission || isHeadOfCsRole;
       const canManageMarketingTeams =
-        isSuperAdmin || hasBranchManagePermission || hasMarketingTeamsPermission;
+        isSuperAdmin ||
+        hasBranchManagePermission ||
+        hasMarketingTeamsPermission ||
+        isHeadOfMarketingRole;
 
       return {
         branch,
@@ -443,6 +477,159 @@ export const branchesRouter = router({
           isSupervisor: isBranchSupervisor,
           canManageCSTeams,
           canManageMarketingTeams,
+        },
+      };
+    }),
+
+  /**
+   * Server-backed members search for the branch detail page. Mirrors the
+   * visibility rules from `branches.overview` (admin / branch-manage roles
+   * see all; org-wide heads see only their dept; branch supervisors see
+   * their supervised set; everyone else sees only themselves). The search
+   * runs at SQL with `ILIKE %q%` against name + email so the page doesn't
+   * have to ship the full roster client-side once a branch grows past a
+   * few dozen members. Pagination is intentional — the panel uses
+   * `MEMBERS_PAGE_SIZE = 20` and we honour that with `limit + offset`.
+   */
+  searchMembers: authedProcedure
+    .input(
+      z.object({
+        branchId: z.string().uuid(),
+        search: z.string().trim().max(120).optional(),
+        /** Optional dept narrowing — the branch detail page calls this from
+         *  inside a per-department panel and only wants matches within that
+         *  bucket (e.g. searching "John" inside the Marketing tab shouldn't
+         *  return CS Johns). The values mirror `BranchMemberDepartment`. */
+        department: z.enum(['MARKETING', 'CS', 'OTHER']).optional(),
+        page: z.number().int().min(1).default(1),
+        limit: z.number().int().min(1).max(100).default(20),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      const db = getDb();
+      const teams = getBranchTeamsService();
+
+      // ── Auth: same matrix as overview ─────────────────────────────────
+      const isSuperAdmin = ctx.user.role === 'SUPER_ADMIN';
+      const perms = ctx.user.permissions ?? [];
+      const hasBranchManagePermission = perms.includes('branches.manage');
+      const hasBranchManageUsersPermission = perms.includes('branches.manage_users');
+      const hasCSTeamsPermission = perms.includes('branches.teams.cs');
+      const hasMarketingTeamsPermission = perms.includes('branches.teams.marketing');
+      const isHeadOfMarketingRole = ctx.user.role === 'HEAD_OF_MARKETING';
+      const isHeadOfCsRole = ctx.user.role === 'HEAD_OF_CS';
+
+      const membership = await db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(
+          and(
+            eq(schema.userBranches.userId, ctx.user.id),
+            eq(schema.userBranches.branchId, input.branchId),
+          ),
+        )
+        .limit(1);
+      if (
+        !isSuperAdmin &&
+        !hasBranchManagePermission &&
+        !hasCSTeamsPermission &&
+        !hasMarketingTeamsPermission &&
+        !isHeadOfMarketingRole &&
+        !isHeadOfCsRole &&
+        !membership[0]
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Not a member of this branch' });
+      }
+
+      // ── Build the SQL with ILIKE search baked in ──────────────────────
+      const trimmed = input.search?.trim() ?? '';
+      // Postgres ILIKE wildcard escape: \ % and _ are special inside the
+      // pattern. Escape them so a buyer named "Mary_Anne" or "%discount"
+      // searches as a literal substring rather than as a wildcard.
+      const escaped = trimmed.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const likePattern = `%${escaped}%`;
+      const conditions = [eq(schema.userBranches.branchId, input.branchId)];
+      if (trimmed.length > 0) {
+        conditions.push(
+          sql`(${schema.users.name} ILIKE ${likePattern} OR ${schema.users.email} ILIKE ${likePattern})`,
+        );
+      }
+      const whereClause = and(...conditions);
+
+      const memberRows = await db
+        .select({
+          userId: schema.users.id,
+          name: schema.users.name,
+          globalRole: schema.users.role,
+          roleInBranch: schema.userBranches.roleInBranch,
+          isPrimary: schema.userBranches.isPrimary,
+        })
+        .from(schema.userBranches)
+        .innerJoin(schema.users, eq(schema.userBranches.userId, schema.users.id))
+        .where(whereClause)
+        .orderBy(asc(schema.users.name));
+
+      const allMatching = memberRows
+        .map((row) => {
+          const effectiveRole = (row.roleInBranch ?? row.globalRole) as string;
+          return {
+            userId: row.userId,
+            name: row.name,
+            effectiveRole,
+            isPrimary: row.isPrimary,
+            department: departmentForBranchMemberRole(effectiveRole),
+          };
+        })
+        .filter((m) => !input.department || m.department === input.department);
+
+      // ── Apply the same dept-head visibility filter as overview ────────
+      const canManageBranchPage =
+        isSuperAdmin || hasBranchManagePermission || hasBranchManageUsersPermission;
+      const isBranchSupervisor = canManageBranchPage
+        ? false
+        : await teams.isActorSupervisorOnBranch(ctx.user.id, input.branchId);
+      let visibleMembers = allMatching;
+      if (!canManageBranchPage) {
+        const visibleIds = new Set<string>();
+        let useDeptHeadVisibility = false;
+        if (hasMarketingTeamsPermission || isHeadOfMarketingRole) {
+          useDeptHeadVisibility = true;
+          visibleIds.add(ctx.user.id);
+          for (const m of allMatching) {
+            if (m.department === 'MARKETING') visibleIds.add(m.userId);
+          }
+        }
+        if (hasCSTeamsPermission || isHeadOfCsRole) {
+          useDeptHeadVisibility = true;
+          visibleIds.add(ctx.user.id);
+          for (const m of allMatching) {
+            if (m.department === 'CS') visibleIds.add(m.userId);
+          }
+        }
+        if (useDeptHeadVisibility) {
+          visibleMembers = allMatching.filter((m) => visibleIds.has(m.userId));
+        } else if (isBranchSupervisor) {
+          const [supervisedCs, supervisedMarketing] = await Promise.all([
+            teams.listSupervisedUserIds(ctx.user.id, input.branchId, 'CS'),
+            teams.listSupervisedUserIds(ctx.user.id, input.branchId, 'MARKETING'),
+          ]);
+          const visibleSet = new Set([ctx.user.id, ...supervisedCs, ...supervisedMarketing]);
+          visibleMembers = allMatching.filter((m) => visibleSet.has(m.userId));
+        } else {
+          visibleMembers = allMatching.filter((m) => m.userId === ctx.user.id);
+        }
+      }
+
+      const total = visibleMembers.length;
+      const start = (input.page - 1) * input.limit;
+      const pageRows = visibleMembers.slice(start, start + input.limit);
+      return {
+        members: pageRows,
+        pagination: {
+          total,
+          page: input.page,
+          pageSize: input.limit,
+          totalPages: Math.max(1, Math.ceil(total / input.limit)),
         },
       };
     }),
@@ -473,7 +660,10 @@ export const branchesRouter = router({
           .returning();
         const branch = inserted[0];
         if (!branch) {
-          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Branch insert returned no row' });
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: 'Branch insert returned no row',
+          });
         }
         await branchTeams.ensureDefaultDepartmentTeams(branch.id, tx);
         return inserted;
@@ -588,7 +778,8 @@ export const branchesRouter = router({
       await db.insert(schema.userBranches).values({
         userId: input.userId,
         branchId: input.branchId,
-        roleInBranch: (input.roleInBranch as (typeof schema.userBranches.$inferInsert)['roleInBranch']) ?? null,
+        roleInBranch:
+          (input.roleInBranch as (typeof schema.userBranches.$inferInsert)['roleInBranch']) ?? null,
         isPrimary: input.isPrimary ?? false,
       });
       await invalidateBranchesListCache();
@@ -787,6 +978,24 @@ export const branchesRouter = router({
       return teams.listTeamsWithMembers(input.branchId);
     }),
 
+  /**
+   * Boolean check: does the caller supervise the given user on any branch
+   * team? Used by `/hr/users/:id` so a Marketing- / CS-team supervisor can
+   * open their squad-mates' profile cards without holding the full
+   * `users.staff.*` permission family (CEO directive 2026-05-11). The
+   * supervisor relationship lives in `branch_team_members.is_supervisor` and
+   * isn't reflected in any role enum, so a dedicated query is needed.
+   */
+  amISupervisorOfUser: authedProcedure
+    .input(z.object({ superviseeId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      if (ctx.user.id === input.superviseeId) return false;
+      return getBranchTeamsService().isSupervisorOfUserAnywhere(
+        ctx.user.id,
+        input.superviseeId,
+      );
+    }),
+
   listBranchOrgStructure: authedProcedure
     .input(z.object({ branchId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
@@ -838,7 +1047,12 @@ export const branchesRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       assertCanManageTeamDept(ctx.user, input.department);
-      return getBranchTeamsService().createTeam(input.branchId, input.department, input.name, ctx.user);
+      return getBranchTeamsService().createTeam(
+        input.branchId,
+        input.department,
+        input.name,
+        ctx.user,
+      );
     }),
 
   updateBranchTeam: authedProcedure
@@ -948,6 +1162,50 @@ export const branchesRouter = router({
         input.userId,
         input.isSupervisor,
       );
+
+      // Notify the user that they were promoted to / removed from supervisor
+      // on this team. Resolve team + branch names so the in-app card has
+      // useful context ("CS · Lagos HQ") and don't block the response on
+      // notification delivery — `enqueueCreate` is fire-and-forget.
+      try {
+        const db = getDb();
+        const notifications = getBranchesNotificationsService();
+        const [teamRow] = await db
+          .select({
+            teamName: schema.branchTeams.name,
+            department: schema.branchTeams.department,
+            branchId: schema.branchTeams.branchId,
+            branchName: schema.branches.name,
+            branchCode: schema.branches.code,
+          })
+          .from(schema.branchTeams)
+          .innerJoin(schema.branches, eq(schema.branches.id, schema.branchTeams.branchId))
+          .where(eq(schema.branchTeams.id, input.teamId))
+          .limit(1);
+        const teamLabel = teamRow?.teamName ?? 'a branch team';
+        const branchLabel = teamRow?.branchName ?? teamRow?.branchCode ?? 'a branch';
+        notifications.enqueueCreate({
+          userId: input.userId,
+          type: input.isSupervisor
+            ? 'account:supervisor_assigned'
+            : 'account:supervisor_revoked',
+          title: input.isSupervisor ? 'Promoted to supervisor' : 'Supervisor role removed',
+          body: input.isSupervisor
+            ? `You're now supervising the ${teamLabel} team at ${branchLabel}.`
+            : `You're no longer a supervisor of the ${teamLabel} team at ${branchLabel}.`,
+          data: {
+            teamId: input.teamId,
+            branchId: teamRow?.branchId ?? null,
+            department: teamRow?.department ?? null,
+            isSupervisor: input.isSupervisor,
+          },
+        });
+      } catch {
+        // Notification is a nice-to-have — the supervisor change has already
+        // been persisted by the time we hit this catch. Don't fail the
+        // mutation if the in-app notification fan-out blows up.
+      }
+
       return { success: true as const };
     }),
 
@@ -969,10 +1227,7 @@ export const branchesRouter = router({
     .mutation(async ({ input, ctx }) => {
       const dept = await loadBranchDepartmentDept(input.branchDepartmentId);
       assertCanManageTeamDept(ctx.user, dept);
-      await getBranchTeamsService().removeDepartmentMember(
-        input.branchDepartmentId,
-        input.userId,
-      );
+      await getBranchTeamsService().removeDepartmentMember(input.branchDepartmentId, input.userId);
       return { success: true as const };
     }),
 
@@ -1024,7 +1279,8 @@ export const branchesRouter = router({
       if (effective.systemEnforced) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'This setting is locked at the system level. Ask an admin to clear the enforcement before overriding.',
+          message:
+            'This setting is locked at the system level. Ask an admin to clear the enforcement before overriding.',
         });
       }
       await getBranchesSettingsService().setTeamSetting(
@@ -1057,6 +1313,11 @@ export const branchesRouter = router({
    * Pass branchId: null to clear branch context (SuperAdmin "All Branches" view).
    */
   switchBranch: authedProcedure
+    // View-only: flips the current-branch field in the Redis session bundle
+    // so the viewer (or an admin in mirror mode) can see what the user sees
+    // in branch X. No row in any business table is created/updated/deleted —
+    // so the mirror-mode mutation block is intentionally bypassed.
+    .meta({ viewOnlyOk: true })
     .input(z.object({ branchId: z.string().uuid().nullable() }))
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
@@ -1064,10 +1325,13 @@ export const branchesRouter = router({
 
       // null = "All Branches" — only SuperAdmin may clear branch context
       if (input.branchId === null) {
-        if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Only SuperAdmin can view all branches' });
+        if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Only SuperAdmin can view all branches',
+          });
         }
-      } else if ((ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN')) {
+      } else if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
         const membership = await db
           .select({ branchId: schema.userBranches.branchId })
           .from(schema.userBranches)

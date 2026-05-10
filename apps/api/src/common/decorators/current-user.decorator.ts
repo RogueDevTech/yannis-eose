@@ -49,6 +49,27 @@ export interface SessionUser {
    * Web uses this for the login onboarding nudge (suppress after `APPROVED`). Omitted for SUPER_ADMIN / ADMIN.
    */
   staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
+  /**
+   * Session-derived: true when `currentBranchId` is set and the user supervises at least one
+   * MEDIA_BUYER on a marketing branch team on that branch. Not stored in the Redis user bundle.
+   */
+  isMarketingTeamSupervisorOnActiveBranch?: boolean;
+  /**
+   * Session-derived (CS lane analogue): true when `currentBranchId` is set and the user
+   * supervises a CS branch team on that branch. Set by `attachCsSupervisorSessionFlag`
+   * in the same session-build paths as the marketing flag. Used by the dashboard, the
+   * orders supervisor scope helper, and any CS-team surface that needs to expand a
+   * single-supervisor view into team-aggregated data.
+   */
+  isCsTeamSupervisorOnActiveBranch?: boolean;
+  /**
+   * "Is supervisor anywhere" — denormalised from `users.is_team_supervisor`, which
+   * is kept in sync by `BranchTeamsService.syncUserSupervisorFlag` whenever
+   * supervisor membership is granted/revoked. Surfaced for UI badging (header
+   * chip, user-detail pill, Staff Accounts list/filter); capability gates use
+   * the per-branch `isMarketingTeamSupervisorOnActiveBranch` instead.
+   */
+  isTeamSupervisor?: boolean;
 }
 
 /**

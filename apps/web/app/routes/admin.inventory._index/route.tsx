@@ -38,10 +38,12 @@ export const meta: MetaFunction = () => [
 const inventoryReadOpts = { timeoutMs: DEFERRED_LOADER_TIMEOUT_MS } as const;
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  // Heads (HoM, HoCS) get inventory visibility by role so they can see stock levels
-  // when planning campaigns / CS priorities, even without the inventory.read permission.
+  // HoCS gets inventory visibility by role so they can see stock when CS is
+  // confirming orders. HEAD_OF_MARKETING was previously here too but was
+  // removed by CEO directive — Marketing plans against ad-spend / funding,
+  // not raw stock; Stock Manager and admins own inventory visibility.
   const user = await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
     permission: 'inventory.read',
   });
   const cookie = getSessionCookie(request);

@@ -24,7 +24,7 @@ const readOpts = { timeoutMs: DEFERRED_LOADER_TIMEOUT_MS } as const;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
     permission: 'inventory.read',
   });
   const cookie = getSessionCookie(request);

@@ -49,7 +49,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
   const { startDate, endDate, periodAllTime, filters } = resolveMarketingDateFilters(url);
-  const { isMediaBuyer, isFundingAdmin, canRequestFunding } = getMarketingRoleFlags(user.role);
+  // Pass the full user so the helper can honour `isMarketingTeamSupervisorOnActiveBranch`
+  // — supervisors get the same chrome as Head of Marketing on this page
+  // (CEO directive 2026-05-11). Passing just `user.role` would skip that branch.
+  const { isMediaBuyer, isFundingAdmin, canRequestFunding } = getMarketingRoleFlags(user);
 
   // HoM/Admin can disburse to MBs; Media Buyers cannot. Drives whether Section 2 renders.
   const canDistribute = !isMediaBuyer;

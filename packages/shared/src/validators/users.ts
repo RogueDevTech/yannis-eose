@@ -219,6 +219,11 @@ export const listUsersSchema = z.object({
   includeBranchMemberships: z.boolean().optional(),
   /** When true, only users currently on probation (`is_probation`). HR users list URL: `probationOnly=1`. */
   probationOnly: z.boolean().optional(),
+  /**
+   * When true, only users marked as a team supervisor anywhere
+   * (`users.is_team_supervisor`). HR users list URL: `supervisorOnly=1`.
+   */
+  supervisorOnly: z.boolean().optional(),
 });
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;
@@ -232,6 +237,7 @@ export const usersRosterSummarySchema = listUsersSchema.pick({
   userIds: true,
   allBranches: true,
   probationOnly: true,
+  supervisorOnly: true,
 });
 
 export type ListUsersRosterSummaryInput = z.infer<typeof usersRosterSummarySchema>;

@@ -139,13 +139,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
     userPerms.includes(canonicalPermissionCode('orders.export'));
-  // SmartPick (bulk N-pick toolbar) is gated by `orders.bulkAssign` — the same
-  // permission the bulkAssignToCS action requires. HEAD_OF_CS holds it by default;
-  // admin-class inherits via ALL_PERMISSION_CODES.
+  // SmartPick (bulk N-pick toolbar) requires BOTH `orders.bulkAssign` AND
+  // `orders.reassign`. `bulkAssignToCS` calls `assignToCS` per order and that
+  // service-level path checks `orders.reassign` (or same-branch + CS-supervisor)
+  // — so granting only `orders.bulkAssign` via per-user override would let the
+  // SmartPick render but the action would fail loudly. Both codes are bundled
+  // together by default in HEAD_OF_CS; admin-class inherits via ALL_PERMISSION_CODES.
   const canBulkPick =
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
-    userPerms.includes(canonicalPermissionCode('orders.bulkAssign'));
+    (userPerms.includes(canonicalPermissionCode('orders.bulkAssign')) &&
+      userPerms.includes(canonicalPermissionCode('orders.reassign')));
 
   // Schedule heat + list both key off callback / preferred delivery dates. The default
   // "this month" strip filters createdAt — that would hide e.g. an April-created order

@@ -371,21 +371,44 @@ export interface MarketingRoleFlags {
  * (filter queries to the buyer's own rows), not an authorization gate.
  */
 export function getMarketingRoleFlags(
-  user: { role: string; permissions?: string[] } | string,
+  user:
+    | {
+        role: string;
+        permissions?: string[];
+        isMarketingTeamSupervisorOnActiveBranch?: boolean;
+        currentBranchId?: string | null;
+      }
+    | string,
 ): MarketingRoleFlags {
   const role = typeof user === 'string' ? user : user.role;
   const perms = typeof user === 'string' ? [] : user.permissions ?? [];
   const has = (code: string) => perms.includes(code) || perms.includes(canonicalPermissionCode(code));
 
-  const isMediaBuyer = role === 'MEDIA_BUYER';
+  // Marketing-team supervisors are MEDIA_BUYERs by role but supervise a squad
+  // on their active branch (`branch_team_members.is_supervisor = true`). CEO
+  // directive 2026-05-11 — they should get the same funding-page chrome as
+  // Head of Marketing for their team (distribute section, funding-admin
+  // capability, request flow). The data scope itself stays enforced
+  // server-side by the funding tRPC procedures.
+  const isMarketingSupervisorOnBranch =
+    typeof user !== 'string' &&
+    user.isMarketingTeamSupervisorOnActiveBranch === true &&
+    !!user.currentBranchId;
+
+  const isMediaBuyer = role === 'MEDIA_BUYER' && !isMarketingSupervisorOnBranch;
   const isFundingAdmin =
     ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'FINANCE_OFFICER'].includes(role) ||
-    has('marketing.funding.approve');
+    has('marketing.funding.approve') ||
+    isMarketingSupervisorOnBranch;
   const canRequestFunding =
-    isMediaBuyer || role === 'HEAD_OF_MARKETING' || has('marketing.funding.request');
+    role === 'MEDIA_BUYER' ||
+    role === 'HEAD_OF_MARKETING' ||
+    has('marketing.funding.request') ||
+    isMarketingSupervisorOnBranch;
   const canApproveAdSpend =
     ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'].includes(role) ||
-    has('marketing.adSpend.approve');
+    has('marketing.adSpend.approve') ||
+    isMarketingSupervisorOnBranch;
   return { isMediaBuyer, isFundingAdmin, canRequestFunding, canApproveAdSpend };
 }
 

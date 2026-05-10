@@ -218,7 +218,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'orders.confirm.bypass_call_gate',
     'orders.delivery.confirm',
     'orders.assign',
-    'orders.routing',
+    // `orders.routing` is intentionally NOT granted to BRANCH_ADMIN. The CS
+    // routing page is global (writes fan out to every branch's settings) —
+    // a single Branch Admin shouldn't be able to flip the org-wide routing
+    // mode or reassign products globally. Admin-class + Head of CS only.
     // Branch admins approve order-domain requests for orders in their branch
     // (per-order context check still runs in the service).
     'permission_requests.order_line_price.approve',
@@ -249,7 +252,10 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'marketing.funding.approve',
     'marketing.adSpend',
     'marketing.adSpend.approve',
-    'products.read',
+    // `products.read` removed by CEO directive — Marketing should not access
+    // the catalogue admin page. Product pickers on ad-spend / campaign /
+    // funding forms still work because `products.list` / `products.options`
+    // / `products.getById` are `authedProcedure` (any authed user reads).
     'users.read',
     'users.staff.update_supervised',
     'audit.read',
@@ -266,7 +272,9 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'marketing.leaderboard',
     'marketing.campaigns',
     'marketing.orders',
-    'products.read',
+    // `products.read` removed by CEO directive — same reasoning as
+    // HEAD_OF_MARKETING above. The product picker on the ad-spend modal
+    // still works (authedProcedure on `products.list` / `products.options`).
     'marketing.funding.request',
   ],
   HEAD_OF_CS: [

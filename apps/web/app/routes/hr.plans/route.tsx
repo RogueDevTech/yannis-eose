@@ -18,15 +18,18 @@ import type { CommissionPlan } from '~/features/hr/types';
 export const meta: MetaFunction = () => [{ title: 'Commission Plans — Yannis EOSE' }];
 
 /**
- * Roles allowed on this page. Admins + HR Manager always; Heads of Department may manage their
- * own dept's plans (the service does the per-role guard, so this just gates entry).
+ * Roles allowed on this page. Admins + HR Manager always; HEAD_OF_CS and
+ * HEAD_OF_LOGISTICS may still manage their own dept's plans (per the original
+ * 2026-04-26 directive). HEAD_OF_MARKETING was removed per follow-up CEO
+ * directive — Marketing commission plans are managed by HR / admin only.
+ * The service still does the per-role guard via getManageableRolesForViewer,
+ * so this allowlist just gates entry.
  */
 const PLANS_VIEWER_ROLES = [
   'SUPER_ADMIN',
   'ADMIN',
   'HR_MANAGER',
   'HEAD_OF_CS',
-  'HEAD_OF_MARKETING',
   'HEAD_OF_LOGISTICS',
 ];
 

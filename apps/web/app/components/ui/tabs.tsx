@@ -12,6 +12,7 @@ export interface TabItem {
 export interface TabsProps {
   value: string;
   onChange: (value: string) => void;
+  /** When only one tab applies (e.g. role-gated views), the nav strip is omitted — callers still drive content from `value`. */
   tabs: TabItem[];
   variant?: 'underline' | 'pill';
   /** 'md' (default) — text-sm/pb-2.5/gap-6. 'sm' — text-xs/pb-1.5/gap-4 for dense pages. */
@@ -20,6 +21,10 @@ export interface TabsProps {
 }
 
 export function Tabs({ value, onChange, tabs, variant = 'underline', size = 'md', className = '' }: TabsProps) {
+  if (tabs.length <= 1) {
+    return null;
+  }
+
   if (variant === 'pill') {
     return (
       <div className={`flex rounded-lg bg-app-hover border border-app-border p-1 ${className}`.trim()}>

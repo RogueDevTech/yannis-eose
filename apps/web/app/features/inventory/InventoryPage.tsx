@@ -94,6 +94,11 @@ export function InventoryPage(props: InventoryStreamData) {
 
   const hasTransfers = !!transfers;
   const hasReturns = !!returnedOrders;
+  // Hide the Shipments tab when the viewer can't manage shipments AND has
+  // nothing to look at — keeps the tab strip lean for HoCS / Stock-read-only
+  // viewers who only need stock levels (CEO directive 2026-05-10). Anyone
+  // with intake perms always sees the tab so they can create new shipments.
+  const showShipmentsTab = canIntake || totalShipments > 0;
 
   type TabValue =
     | 'levels'
@@ -102,6 +107,12 @@ export function InventoryPage(props: InventoryStreamData) {
     | 'reconciliation'
     | 'shipments';
   const [activeTab, setActiveTab] = useState<TabValue>('levels');
+  // Defensive: if the viewer ends up on the shipments tab while it's no longer
+  // shown (e.g. count dropped to 0 mid-session for a non-intake user), snap
+  // back to Stock Levels so they don't see a blank pane with no tab to click.
+  useEffect(() => {
+    if (activeTab === 'shipments' && !showShipmentsTab) setActiveTab('levels');
+  }, [activeTab, showShipmentsTab]);
 
   // Stock Levels filter + sort are URL-driven so the backend can do the actual filter/sort/paginate.
   // `levelsProductFilter` empty string = no filter (backend default).
@@ -796,7 +807,9 @@ export function InventoryPage(props: InventoryStreamData) {
         onChange={(v) => setActiveTab(v as TabValue)}
         tabs={[
           { value: 'levels', label: `Stock Levels (${totalLevels})` },
-          { value: 'shipments', label: `Shipments (${totalShipments})` },
+          ...(showShipmentsTab
+            ? [{ value: 'shipments' as const, label: `Shipments (${totalShipments})` }]
+            : []),
           ...(hasTransfers ? [{ value: 'transfers' as const, label: `Transfers (${(transfers ?? []).length})` }] : []),
           ...(hasReturns ? [{ value: 'returns' as const, label: `Returns (${(returnedOrders ?? []).length})` }] : []),
           ...(reconciliations != null ? [{ value: 'reconciliation' as const, label: 'Reconciliation' }] : []),

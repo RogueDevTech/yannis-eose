@@ -84,6 +84,14 @@ export const users = pgTable('users', {
   terminatedBy: uuid('terminated_by'),
   /** Role snapshot taken at termination so the row stays filterable post-scrub. */
   originalRole: userRoleEnum('original_role'),
+  /**
+   * Denormalised "is supervisor anywhere" flag — kept in sync by
+   * `BranchTeamsService` whenever a user is granted/revoked supervisor on any
+   * `branch_team_members` row. Source of truth is the team-membership rows;
+   * this column exists so UI surfaces (header chip, user-detail pill, Staff
+   * Accounts list/filter) don't need a JOIN. See migration 0139.
+   */
+  isTeamSupervisor: boolean('is_team_supervisor').default(false).notNull(),
   ...temporalColumns,
   ...timestampColumns,
 });

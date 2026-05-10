@@ -1,11 +1,10 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useEffect, useState } from 'react';
+import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { DeferredError } from '~/components/ui/deferred-section';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
 import { MarketingAdSpendLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { AdSpendStatusCounts, AdSpendStatusFilter, Campaign, MarketingAdSpendLoaderData } from '~/features/marketing/types';
@@ -224,6 +223,52 @@ const AD_SPEND_PICKLISTS_FALLBACK: Pick<
   mediaBuyersForFilter: [],
 };
 
+type AdSpendPicklists = Pick<
+  MarketingAdSpendLoaderData,
+  'statusCounts' | 'campaigns' | 'mediaBuyersForFilter'
+>;
+
+/**
+ * Bridges the picklists promise into local state instead of resolving it via
+ * a Suspense boundary. The previous Suspense+Await pattern rendered
+ * `<MarketingAdSpendPage>` in two distinct React positions (fallback +
+ * Await children); when the picklists resolved, React unmounted the fallback
+ * subtree and mounted the children subtree, resetting the page's local state
+ * (filter modals, scroll position, accordion open/closed) and re-firing
+ * internal skeletons — the second flicker.
+ *
+ * Returning `<MarketingAdSpendPage>` at the same tree position on both
+ * branches lets React reconcile in place: same component type → keep mounted
+ * → just update props. No remount, no flicker.
+ */
+function AdSpendWithPicklists({
+  sync,
+  picklistsPromise,
+}: {
+  sync: Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
+  picklistsPromise: Promise<AdSpendPicklists>;
+}) {
+  const [picklists, setPicklists] = useState<AdSpendPicklists | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(picklistsPromise)
+      .then((p) => {
+        if (!cancelled) setPicklists(p);
+      })
+      .catch(() => {
+        if (!cancelled) setPicklists(AD_SPEND_PICKLISTS_FALLBACK);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [picklistsPromise]);
+
+  if (picklists === null) {
+    return <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />;
+  }
+  return <MarketingAdSpendPage {...sync} {...picklists} />;
+}
+
 export default function AdminMarketingAdSpendRoute() {
   const { adSpendShell, pageData } = useLoaderData<typeof loader>() as unknown as {
     adSpendShell: {
@@ -237,7 +282,6 @@ export default function AdminMarketingAdSpendRoute() {
     <CachedAwait
       resolve={pageData}
       fallback={<MarketingAdSpendLoadingShell {...adSpendShell} />}
-    
       loaderShell={{ adSpendShell }}
       deferredKey="pageData"
     >
@@ -245,17 +289,7 @@ export default function AdminMarketingAdSpendRoute() {
         if (data.adSpendPicklists) {
           const { adSpendPicklists, ...rest } = data;
           const sync = rest as Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
-          return (
-            <Suspense
-              fallback={
-                <MarketingAdSpendPage {...sync} {...AD_SPEND_PICKLISTS_FALLBACK} picklistsLoading />
-              }
-            >
-              <Await resolve={adSpendPicklists} errorElement={<DeferredError />}>
-                {(pick) => <MarketingAdSpendPage {...sync} {...pick} />}
-              </Await>
-            </Suspense>
-          );
+          return <AdSpendWithPicklists sync={sync} picklistsPromise={adSpendPicklists} />;
         }
         return <MarketingAdSpendPage {...data} />;
       }}

@@ -35,7 +35,7 @@ export function SmartPick({
   /** Tracks the most recently clicked preset (or 'custom') so we can highlight it
    *  even when the actual selection is clamped (e.g. user clicks 100, only 20 available). */
   const [lastPicked, setLastPicked] = useState<number | 'custom' | null>(null);
-  const toast = useToast();
+  const { toast } = useToast();
 
   function pickWithShortfallNotice(requested: number) {
     const effective = Math.min(requested, total);

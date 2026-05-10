@@ -18,6 +18,7 @@ import { UserBundleCacheService } from './user-bundle-cache.service';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, type SessionUser } from '../common/decorators/current-user.decorator';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 import { encodePermissionsToBitmask } from '@yannis/shared';
 import {
   BUNDLE_COOKIE_NAME,
@@ -99,6 +100,13 @@ function bundleInputFromSessionUser(user: SessionUser): SessionBundleInput {
     ...(user.staffOnboardingStatus !== undefined
       ? { staffOnboardingStatus: user.staffOnboardingStatus }
       : {}),
+    ...(user.isMarketingTeamSupervisorOnActiveBranch === true
+      ? { isMarketingTeamSupervisorOnActiveBranch: true }
+      : {}),
+    ...(user.isCsTeamSupervisorOnActiveBranch === true
+      ? { isCsTeamSupervisorOnActiveBranch: true }
+      : {}),
+    ...(user.isTeamSupervisor === true ? { isTeamSupervisor: true } : {}),
   };
 }
 
@@ -161,6 +169,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly usersService: UsersService,
     private readonly userBundleCache: UserBundleCacheService,
+    private readonly branchTeams: BranchTeamsService,
   ) {}
 
   /**
@@ -258,7 +267,7 @@ export class AuthController {
       req.socket.remoteAddress ??
       'unknown';
 
-    const { token, user, ttlSeconds } = await this.authService.login(
+    const { token, user: loginSession, ttlSeconds } = await this.authService.login(
       body.email,
       body.password,
       clientIp,
@@ -270,33 +279,31 @@ export class AuthController {
     // Issue an initial bundle so the Remix server can skip its first
     // `/auth/me` round-trip after login. Permissions/scope/theme are pulled
     // via the same cache the `/auth/me` handler uses.
-    const bundle = await this.userBundleCache.getOrLoad(user.id);
-    const sessionUser: SessionUser = {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: bundle.role || user.role,
+    const bundle = await this.userBundleCache.getOrLoad(loginSession.id);
+    let sessionUser: SessionUser = {
+      ...loginSession,
+      role: bundle.role || loginSession.role,
       roleTemplateId: bundle.roleTemplateId,
       scopeGlobal: bundle.scopeGlobal,
       scopeOrgWideHead: bundle.scopeOrgWideHead,
       scopeTeamSupervisor: bundle.scopeTeamSupervisor,
-      logisticsLocationId: null,
       permissions: bundle.permissions,
-      appTheme: bundle.appTheme,
-      fontScale: bundle.fontScale,
+      appTheme: bundle.appTheme ?? loginSession.appTheme,
+      fontScale: bundle.fontScale ?? loginSession.fontScale,
       ...(bundle.staffOnboardingStatus !== undefined
         ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
         : {}),
     };
+    sessionUser = await this.branchTeams.attachTeamSupervisorSessionFlags(sessionUser);
     setBundleCookie(res, sessionUser, ttlSeconds);
 
     return {
       message: 'Login successful',
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
+        id: loginSession.id,
+        email: loginSession.email,
+        name: loginSession.name,
+        role: loginSession.role,
       },
     };
   }
@@ -384,7 +391,10 @@ export class AuthController {
     // the Remix server reflects the target user (role, permissions, scope,
     // mirroredBy) on the very next loader. Without this, the original admin
     // would keep using their cached bundle for up to BUNDLE_TTL_SECONDS.
-    setBundleCookie(res, session as unknown as SessionUser, BUNDLE_TTL_SECONDS * 60);
+    const mirroredUser = await this.branchTeams.attachTeamSupervisorSessionFlags(
+      session as unknown as SessionUser,
+    );
+    setBundleCookie(res, mirroredUser, BUNDLE_TTL_SECONDS * 60);
 
     return {
       message: 'Mirror mode started.',
@@ -409,12 +419,46 @@ export class AuthController {
     const restored = await this.authService.stopMirror(sessionToken, current);
 
     // Bundle restored to the original admin identity — see startMirror note.
-    setBundleCookie(res, restored as unknown as SessionUser, BUNDLE_TTL_SECONDS * 60);
+    const restoredUser = await this.branchTeams.attachTeamSupervisorSessionFlags(
+      restored as unknown as SessionUser,
+    );
+    setBundleCookie(res, restoredUser, BUNDLE_TTL_SECONDS * 60);
 
     return {
       message: 'Exited mirror mode.',
       user: restored,
     };
+  }
+
+  /**
+   * Switch the active branch on the current session AND re-issue the bundle
+   * cookie so Remix loaders pick up the new currentBranchId on the very next
+   * render. Without re-issuing, the signed bundle cookie keeps the old
+   * currentBranchId for up to BUNDLE_TTL_SECONDS — branch switches appear
+   * to do nothing for ~60s. Especially visible during mirror mode, where
+   * startMirror just baked in the target's branch.
+   *
+   * `branchId = null` clears branch context ("All Branches"); only allowed
+   * for users that can view all branches (admin / org-wide heads / Finance).
+   */
+  @Post('switch-branch')
+  @HttpCode(HttpStatus.OK)
+  async switchBranch(
+    @Body() body: { branchId: string | null },
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const sessionToken = this.extractSessionToken(req);
+    if (!sessionToken) {
+      throw new ForbiddenException('No active session.');
+    }
+
+    const updated = await this.authService.switchBranch(sessionToken, body?.branchId ?? null);
+
+    const merged = await this.branchTeams.attachTeamSupervisorSessionFlags(updated);
+    setBundleCookie(res, merged, BUNDLE_TTL_SECONDS * 60);
+
+    return { currentBranchId: merged.currentBranchId, user: merged };
   }
 
   /**
@@ -439,7 +483,7 @@ export class AuthController {
   ) {
     const bundle = await this.userBundleCache.getOrLoad(user.id);
 
-    const merged: SessionUser = {
+    let merged: SessionUser = {
       ...user,
       role: bundle.role || user.role,
       roleTemplateId: bundle.roleTemplateId,
@@ -449,10 +493,13 @@ export class AuthController {
       permissions: bundle.permissions,
       appTheme: bundle.appTheme,
       fontScale: bundle.fontScale,
+      isTeamSupervisor: bundle.isTeamSupervisor,
       ...(bundle.staffOnboardingStatus !== undefined
         ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
         : {}),
     };
+
+    merged = await this.branchTeams.attachTeamSupervisorSessionFlags(merged);
 
     // Re-issue the lazy bundle cookie so subsequent Remix loaders can decode
     // locally without another `/auth/me` round-trip until BUNDLE_TTL_SECONDS.

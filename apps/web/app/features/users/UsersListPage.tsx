@@ -17,6 +17,7 @@ import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { ProbationBadge } from '~/components/ui/probation-badge';
+import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableActionButton } from '~/components/ui/table-action-button';
@@ -213,6 +214,7 @@ export function UsersListPage({
     if (roleParam !== 'ALL') n += 1;
     if ((searchParams.get('search') ?? '').trim().length > 0) n += 1;
     if (searchParams.get('probationOnly') === '1') n += 1;
+    if (searchParams.get('supervisorOnly') === '1') n += 1;
     return n;
   }, [statusParam, roleParam, searchParams]);
 
@@ -225,7 +227,16 @@ export function UsersListPage({
     setSearchParams(params, { replace: true });
   };
 
-  // Status, role, search, and probation-only are applied server-side (`users.list`).
+  const supervisorOnly = searchParams.get('supervisorOnly') === '1';
+  const handleSupervisorOnlyToggle = (next: boolean) => {
+    const params = new URLSearchParams(searchParams);
+    if (next) params.set('supervisorOnly', '1');
+    else params.delete('supervisorOnly');
+    params.set('page', '1');
+    setSearchParams(params, { replace: true });
+  };
+
+  // Status, role, search, probation-only, and supervisor-only are applied server-side (`users.list`).
 
   const staffAccountsColumns: CompactTableColumn<User>[] = useMemo(
     () => [
@@ -316,6 +327,7 @@ export function UsersListPage({
         render: (user) => (
           <span className="inline-flex items-center gap-1.5 flex-wrap">
             <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
+            {user.isTeamSupervisor && <SupervisorBadge size="sm" />}
             {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" showDaysRemaining={false} />}
           </span>
         ),
@@ -669,6 +681,17 @@ export function UsersListPage({
                   >
                     Probation only
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSupervisorOnlyToggle(!supervisorOnly)}
+                    className={`px-3 py-1.5 rounded-md border text-xs font-medium whitespace-nowrap transition-colors ${
+                      supervisorOnly
+                        ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-700'
+                        : 'bg-app-surface border-app-border text-app-fg-muted hover:bg-app-hover'
+                    }`}
+                  >
+                    Supervisors only
+                  </button>
                 </>
               }
               sheetFilterBody={
@@ -705,6 +728,14 @@ export function UsersListPage({
                       onChange={(e) => handleProbationOnlyToggle(e.target.checked)}
                     />
                     <span className="text-sm text-app-fg">Show probation users only</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={supervisorOnly}
+                      onChange={(e) => handleSupervisorOnlyToggle(e.target.checked)}
+                    />
+                    <span className="text-sm text-app-fg">Show team supervisors only</span>
                   </label>
                 </>
               }

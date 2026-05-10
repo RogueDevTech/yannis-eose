@@ -3,6 +3,7 @@ import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
@@ -34,7 +35,14 @@ const KNOWN_ROLES = [
   'HR_MANAGER',
 ] as const;
 
-export function DashboardPage({ data, role, userName, filters }: DashboardPageProps) {
+export function DashboardPage({
+  data,
+  role,
+  userName,
+  filters,
+  isMarketingTeamSupervisor = false,
+  isCsTeamSupervisor = false,
+}: DashboardPageProps) {
   const firstName = userName?.split(' ')[0] ?? 'User';
   const isKnownRole = role && KNOWN_ROLES.includes(role as (typeof KNOWN_ROLES)[number]);
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
@@ -47,16 +55,38 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
         title={`${getGreeting()}, ${firstName}`}
         description={getRoleDescription(role)}
         actions={
-          <>
-            <PageRefreshButton />
-            <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-              <DateFilterBar
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime ?? false}
-              />
-            </div>
-          </>
+          // Match the Inventory-page mobile pattern (CEO directive 2026-05-10):
+          // refresh + date filter would otherwise stack and squash the greeting
+          // + role description on narrow viewports. Below `md` we collapse
+          // them into the kebab sheet; icon-only refresh stays beside it for
+          // one-tap reload.
+          <PageHeaderMobileTools
+            sheetTitle="Dashboard tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Dashboard toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime ?? false}
+                  />
+                </div>
+              </>
+            }
+            sheet={
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={dateFilters.startDate}
+                  endDate={dateFilters.endDate}
+                  periodAllTime={dateFilters.periodAllTime ?? false}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            }
+          />
         }
       />
 
@@ -65,8 +95,17 @@ export function DashboardPage({ data, role, userName, filters }: DashboardPagePr
 
       {/* Role-specific dashboard */}
       {role && isAdminLevel({ role }) && <SuperAdminDashboard data={data} naira={naira} />}
-      {(role === 'HEAD_OF_CS' || role === 'CS_CLOSER') && <CSDashboard data={data} role={role} />}
-      {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && <MarketingDashboard data={data} role={role} naira={naira} />}
+      {(role === 'HEAD_OF_CS' || role === 'CS_CLOSER') && (
+        <CSDashboard data={data} role={role} isCsTeamSupervisor={isCsTeamSupervisor} />
+      )}
+      {(role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER') && (
+        <MarketingDashboard
+          data={data}
+          role={role}
+          naira={naira}
+          isMarketingTeamSupervisor={isMarketingTeamSupervisor}
+        />
+      )}
       {(role === 'FINANCE_OFFICER') && <FinanceDashboard data={data} naira={naira} />}
       {(role === 'HEAD_OF_LOGISTICS' || role === 'LOGISTICS_MANAGER' || role === 'TPL_MANAGER' || role === 'TPL_RIDER') && <LogisticsDashboard data={data} role={role} />}
       {(role === 'STOCK_MANAGER') && <WarehouseDashboard data={data} />}
@@ -244,7 +283,21 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
 
 // ── CS Dashboard ─────────────────────────────────────────
 
-function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) {
+function CSDashboard({
+  data,
+  role,
+  isCsTeamSupervisor = false,
+}: {
+  data: DashboardPageData;
+  role: string;
+  /** When the viewer is a CS Closer who supervises the branch's CS team,
+   *  render the HoCS-style "Team Management" card AND switch the layout
+   *  from the lean closer-only view to the operational HoCS view. Metric
+   *  tiles already reflect team-aggregated scope (the API auto-applies
+   *  supervisorScope via the orders.ts helper). */
+  isCsTeamSupervisor?: boolean;
+}) {
+  const showsTeamManagementCard = role === 'HEAD_OF_CS' || isCsTeamSupervisor;
   const counts = data.orderCounts as Record<string, number>;
   // `pendingQueue` rolls UNPROCESSED + CS_ASSIGNED into one waiting-on-engagement
   // bucket for the top stat strip. The legacy per-status pipeline (Agent assigned /
@@ -261,7 +314,10 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
   // No Order Pipeline (they don't manage flow), no Recent Orders feed (they have a dedicated
   // queue/orders page) — keeps the landing page fast and focused on the metrics they care
   // about: their own confirmation/delivery performance.
-  if (role === 'CS_CLOSER') {
+  // EXCEPT: a CS Closer who's been promoted to supervise their team falls through to the
+  // operational HoCS-style view below — same Pipeline / Team Management / metrics as HoCS,
+  // scoped to their team via `applySupervisorScope`.
+  if (role === 'CS_CLOSER' && !isCsTeamSupervisor) {
     return (
       <>
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
@@ -345,47 +401,52 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
           available on `/admin/cs/orders` via the status filter pills, so deep
           dives don't lose anything. */}
 
-      {role === 'HEAD_OF_CS' && (
-        <>
-          <div className="card">
-            <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
-            <p className="text-sm text-app-fg-muted mb-4">
-              Manage agent assignments and monitor queue health.
-            </p>
-            <div className="flex gap-2 flex-wrap">
-              <Link to="/admin/cs/queue" prefetch="intent" className="btn-primary btn-sm">CS Dashboard</Link>
-              <Link to="/admin/cs/orders" prefetch="intent" className="btn-secondary btn-sm">View All Orders</Link>
-            </div>
+      {showsTeamManagementCard && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
+            {role === 'HEAD_OF_CS'
+              ? 'Manage agent assignments and monitor queue health.'
+              : "Monitor your team's pipeline — metrics above aggregate across every closer you supervise on this branch."}
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <Link to="/admin/cs/queue" prefetch="intent" className="btn-primary btn-sm">CS Dashboard</Link>
+            <Link to="/admin/cs/orders" prefetch="intent" className="btn-secondary btn-sm">View All Orders</Link>
+            {/* Team Analysis is HoCS-style team performance — supervisors get the same lens. */}
+            <Link to="/admin/cs/team" prefetch="intent" className="btn-secondary btn-sm">Team Analysis</Link>
           </div>
+        </div>
+      )}
 
-          {/* Quick links to other CS-facing tools — replaces the previous Recent
-              Orders feed (which duplicated /admin/cs/orders) with surfaces the
-              Head of CS actually needs at a glance. */}
-          <div className="card">
-            <h2 className="text-lg font-semibold text-app-fg mb-2">Quick links</h2>
-            <p className="text-sm text-app-fg-muted mb-4">
-              Jump to the surfaces you use day-to-day.
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <Link to="/admin/cs/team" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
-                <p className="text-sm font-semibold text-app-fg">Team performance</p>
-                <p className="text-xs text-app-fg-muted mt-0.5">Confirm + delivery rates per agent</p>
-              </Link>
-              <Link to="/admin/cs/leaderboard" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
-                <p className="text-sm font-semibold text-app-fg">Leaderboard</p>
-                <p className="text-xs text-app-fg-muted mt-0.5">Top closers this period</p>
-              </Link>
-              <Link to="/admin/permission-requests" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
-                <p className="text-sm font-semibold text-app-fg">Approvals</p>
-                <p className="text-xs text-app-fg-muted mt-0.5">Price changes, deletions, etc.</p>
-              </Link>
-              <Link to="/admin/notifications" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
-                <p className="text-sm font-semibold text-app-fg">Notifications</p>
-                <p className="text-xs text-app-fg-muted mt-0.5">Broadcasts, automations, log</p>
-              </Link>
-            </div>
+      {/* Quick links is HoCS-only — Approvals + Notifications are privileged
+          surfaces a CS-team supervisor doesn't manage even when they own a
+          team. (Team Performance + Leaderboard are reachable via the Team
+          Management card above for supervisors.) */}
+      {role === 'HEAD_OF_CS' && (
+        <div className="card">
+          <h2 className="text-lg font-semibold text-app-fg mb-2">Quick links</h2>
+          <p className="text-sm text-app-fg-muted mb-4">
+            Jump to the surfaces you use day-to-day.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Link to="/admin/cs/team" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+              <p className="text-sm font-semibold text-app-fg">Team performance</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Confirm + delivery rates per agent</p>
+            </Link>
+            <Link to="/admin/cs/leaderboard" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+              <p className="text-sm font-semibold text-app-fg">Leaderboard</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Top closers this period</p>
+            </Link>
+            <Link to="/admin/permission-requests" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+              <p className="text-sm font-semibold text-app-fg">Approvals</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Price changes, deletions, etc.</p>
+            </Link>
+            <Link to="/admin/notifications" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+              <p className="text-sm font-semibold text-app-fg">Notifications</p>
+              <p className="text-xs text-app-fg-muted mt-0.5">Broadcasts, automations, log</p>
+            </Link>
           </div>
-        </>
+        </div>
       )}
     </>
   );
@@ -393,7 +454,21 @@ function CSDashboard({ data, role }: { data: DashboardPageData; role: string }) 
 
 // ── Marketing Dashboard ──────────────────────────────────
 
-function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; role: string; naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string }) {
+function MarketingDashboard({
+  data,
+  role,
+  naira,
+  isMarketingTeamSupervisor = false,
+}: {
+  data: DashboardPageData;
+  role: string;
+  naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string;
+  /** When the viewer is a Media Buyer who supervises the branch's marketing
+   *  team, render the HoM-style "Team Management" card. Metric tiles already
+   *  reflect the team-aggregated scope (the API auto-applies supervisorScope). */
+  isMarketingTeamSupervisor?: boolean;
+}) {
+  const showsTeamManagementCard = role === 'HEAD_OF_MARKETING' || isMarketingTeamSupervisor;
   return (
     <>
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
@@ -425,17 +500,36 @@ function MarketingDashboard({ data, role, naira }: { data: DashboardPageData; ro
         )}
       </DashboardMetricsSection>
 
-      {role === 'HEAD_OF_MARKETING' && (
+      {showsTeamManagementCard && (
         <div className="card">
           <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
           <p className="text-sm text-app-fg-muted mb-4">
-            Manage media buyers and monitor team performance.
+            {role === 'HEAD_OF_MARKETING'
+              ? 'Manage media buyers and monitor team performance.'
+              : "Monitor your team's performance — metrics above aggregate across every buyer you supervise on this branch."}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
-            <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding</Link>
-            <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
-            <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
+            <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">
+              Live Activities
+            </Link>
+            <Link to="/admin/marketing/team" prefetch="intent" className="btn-secondary btn-sm">
+              Team Analysis
+            </Link>
+            {/* Funding + Ad spend approvals are HoM-only privileges; supervisors see only the
+                surfaces they can actually act on (their team's funnels + the leaderboard). */}
+            {role === 'HEAD_OF_MARKETING' && (
+              <>
+                <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">
+                  Funding
+                </Link>
+                <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">
+                  Ad spend
+                </Link>
+              </>
+            )}
+            <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">
+              Leaderboard
+            </Link>
           </div>
         </div>
       )}

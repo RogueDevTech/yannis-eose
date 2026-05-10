@@ -7,12 +7,18 @@ import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
-import { createTestUser, createTestBranch, insertTestBranchTeam } from '../test/factories/order.factory';
+import {
+  createTestUser,
+  createTestBranch,
+  createTestProduct,
+  insertTestBranchTeam,
+} from '../test/factories/order.factory';
 import { MarketingService } from './marketing.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import type { EventsService } from '../events/events.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { SettingsService } from '../settings/settings.service';
+import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -454,5 +460,162 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
     );
     expect(row.receiverId).toBe(recvMb.id);
     expect(row.senderId).toBe(supMb.id);
+  });
+});
+
+describe.skipIf(SKIP_IF_NO_DB)('Marketing supervisor — funding balances + ad spend', () => {
+  const pgClient = getPgClient();
+  const db = getDb();
+
+  const eventsStub = {
+    emitToUser: () => undefined,
+    emitToRoom: () => undefined,
+  } as unknown as EventsService;
+
+  const notificationsStub = {
+    create: async () => undefined,
+    createForRole: async () => undefined,
+  } as unknown as NotificationsService;
+
+  const settingsStub = {
+    get: async () => null,
+  } as unknown as SettingsService;
+
+  const mkMarketing = () =>
+    new MarketingService(
+      db as never,
+      eventsStub,
+      notificationsStub,
+      new BranchTeamsService(db as never),
+      settingsStub,
+    );
+
+  function sessionUser(p: {
+    id: string;
+    role: string;
+    branchId: string;
+    permissions?: string[];
+  }): SessionUser {
+    return {
+      id: p.id,
+      email: `u-${p.id.slice(0, 8)}@test.local`,
+      name: 'Test',
+      role: p.role,
+      logisticsLocationId: null,
+      permissions: p.permissions ?? [],
+      currentBranchId: p.branchId,
+      branchIds: [p.branchId],
+    };
+  }
+
+  beforeEach(async () => {
+    await pgClient`BEGIN`;
+  });
+
+  afterEach(async () => {
+    await pgClient`ROLLBACK`;
+  });
+
+  afterAll(async () => {
+    await closeConnections();
+  });
+
+  it('listFundingBalances excludes non-supervised MBs for branch marketing supervisor', async () => {
+    const branch = await createTestBranch(db as never);
+    const supMb = await createTestUser(db as never, { role: 'MEDIA_BUYER' });
+    const recvMb = await createTestUser(db as never, { role: 'MEDIA_BUYER' });
+    const otherMb = await createTestUser(db as never, { role: 'MEDIA_BUYER' });
+    await db.insert(schema.userBranches).values([
+      { userId: supMb.id, branchId: branch.id, isPrimary: true },
+      { userId: recvMb.id, branchId: branch.id, isPrimary: true },
+      { userId: otherMb.id, branchId: branch.id, isPrimary: true },
+    ]);
+    const team = await insertTestBranchTeam(db as never, branch.id, 'MARKETING', 'MB squad');
+    await db.insert(schema.branchTeamMembers).values([
+      { teamId: team!.id, userId: supMb.id, isSupervisor: true },
+      { teamId: team!.id, userId: recvMb.id, isSupervisor: false },
+    ]);
+
+    const balances = await mkMarketing().listFundingBalances(
+      { id: supMb.id, role: 'MEDIA_BUYER', permissions: [] },
+      branch.id,
+    );
+    const ids = new Set(balances.map((b) => b.userId));
+    expect(ids.has(supMb.id)).toBe(true);
+    expect(ids.has(recvMb.id)).toBe(true);
+    expect(ids.has(otherMb.id)).toBe(false);
+  });
+
+  it('approveAdSpend allows marketing supervisor for supervisee row only', async () => {
+    const branch = await createTestBranch(db as never);
+    const supMb = await createTestUser(db as never, { role: 'MEDIA_BUYER' });
+    const recvMb = await createTestUser(db as never, { role: 'MEDIA_BUYER' });
+    const strangerMb = await createTestUser(db as never, { role: 'MEDIA_BUYER' });
+    await db.insert(schema.userBranches).values([
+      { userId: supMb.id, branchId: branch.id, isPrimary: true },
+      { userId: recvMb.id, branchId: branch.id, isPrimary: true },
+      { userId: strangerMb.id, branchId: branch.id, isPrimary: true },
+    ]);
+    const team = await insertTestBranchTeam(db as never, branch.id, 'MARKETING', 'MB squad 2');
+    await db.insert(schema.branchTeamMembers).values([
+      { teamId: team!.id, userId: supMb.id, isSupervisor: true },
+      { teamId: team!.id, userId: recvMb.id, isSupervisor: false },
+    ]);
+
+    const product = await createTestProduct(db as never);
+    const [recvCampaign] = await db
+      .insert(schema.campaigns)
+      .values({
+        mediaBuyerId: recvMb.id,
+        name: 'Recv camp',
+        branchId: branch.id,
+        productIds: [product.id],
+      })
+      .returning({ id: schema.campaigns.id });
+    const [strangerCampaign] = await db
+      .insert(schema.campaigns)
+      .values({
+        mediaBuyerId: strangerMb.id,
+        name: 'Stranger camp',
+        branchId: branch.id,
+        productIds: [product.id],
+      })
+      .returning({ id: schema.campaigns.id });
+
+    const [goodSpend] = await db
+      .insert(schema.adSpendLogs)
+      .values({
+        mediaBuyerId: recvMb.id,
+        productId: product.id,
+        campaignId: recvCampaign!.id,
+        spendAmount: '100',
+        screenshotUrl: 'https://x.test/g.png',
+        spendDate: new Date(),
+        status: 'PENDING',
+      })
+      .returning({ id: schema.adSpendLogs.id });
+    const [badSpend] = await db
+      .insert(schema.adSpendLogs)
+      .values({
+        mediaBuyerId: strangerMb.id,
+        productId: product.id,
+        campaignId: strangerCampaign!.id,
+        spendAmount: '200',
+        screenshotUrl: 'https://x.test/b.png',
+        spendDate: new Date(),
+        status: 'PENDING',
+      })
+      .returning({ id: schema.adSpendLogs.id });
+
+    await setSessionActor(pgClient, supMb.id, branch.id);
+    const svc = mkMarketing();
+    const supActor = sessionUser({ id: supMb.id, role: 'MEDIA_BUYER', branchId: branch.id });
+
+    const approved = await svc.approveAdSpend(goodSpend!.id, supActor);
+    expect(approved.status).toBe('APPROVED');
+
+    await expect(svc.approveAdSpend(badSpend!.id, supActor)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
   });
 });

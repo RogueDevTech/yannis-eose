@@ -33,11 +33,21 @@ export class PermissionSnapshotBackfillService implements OnApplicationBootstrap
     }
 
     try {
-      const markerCheck = await this.db.execute(
-        sql`SELECT 1 AS ok FROM _yannis_permission_snapshot_applied LIMIT 1`,
-      );
-      const asRows = markerCheck as unknown as Array<{ ok?: number }>;
-      if (Array.isArray(asRows) && asRows.length > 0) {
+      // Use COUNT(*) so the result has a stable, scalar shape regardless of
+      // how `db.execute` materialises rows (postgres-js sometimes returns a
+      // bare array, sometimes wraps in `{ rows: [...] }` depending on the
+      // call path). The earlier `SELECT 1 ... LIMIT 1` + `Array.isArray`
+      // dance failed silently when the wrapper was present — the check
+      // returned false even with the marker row in place, the service ran
+      // the backfill again, and the final INSERT blew up on the unique key.
+      const markerResult = (await this.db.execute(
+        sql`SELECT COUNT(*)::int AS n FROM _yannis_permission_snapshot_applied`,
+      )) as unknown;
+      const rows = Array.isArray(markerResult)
+        ? (markerResult as Array<{ n?: number }>)
+        : ((markerResult as { rows?: Array<{ n?: number }> })?.rows ?? []);
+      const count = Number(rows[0]?.n ?? 0);
+      if (count > 0) {
         return;
       }
     } catch (err) {
@@ -105,7 +115,12 @@ export class PermissionSnapshotBackfillService implements OnApplicationBootstrap
       }
     }
 
-    await this.db.execute(sql`INSERT INTO _yannis_permission_snapshot_applied (singleton_key) VALUES (1)`);
+    // ON CONFLICT DO NOTHING makes the marker insert idempotent — even if
+    // the early-return marker check above ever drifts again, the boot won't
+    // crash. Worst case we redo work; never crash.
+    await this.db.execute(
+      sql`INSERT INTO _yannis_permission_snapshot_applied (singleton_key) VALUES (1) ON CONFLICT (singleton_key) DO NOTHING`,
+    );
 
     // Drop every cached user bundle so any lingering pre-boot cache entries
     // (from a previous deploy that shared the Redis instance) cannot serve

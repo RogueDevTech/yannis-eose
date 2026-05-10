@@ -39,12 +39,17 @@ import { TRPCError } from '@trpc/server';
 import { router, publicProcedure, authedProcedure, permissionProcedure } from '../trpc';
 import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
-import { getOrdersService, narrowOrdersAggregateFiltersForViewer } from './orders.router';
+import {
+  applySupervisorScope,
+  getOrdersService,
+  narrowOrdersAggregateFiltersForViewer,
+} from './orders.router';
 import { getProductsService } from './products.router';
 import { getUsersService } from './users.router';
 import { getCartService } from './cart.router';
 import { isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
+import type { OrdersAggregateSupervisorScope } from '../../orders/orders.service';
 
 let marketingServiceInstance: MarketingService | null = null;
 
@@ -61,9 +66,18 @@ function getMarketingService(): MarketingService {
 
 /**
  * Phase B: when a non-admin / non-org-wide caller is a Marketing supervisor on
- * the active branch, scope ad spend list/count queries to their supervised MBs
- * (their own id is always included). Skips when the caller already pins a
- * specific `mediaBuyerId` (e.g. a MEDIA_BUYER seeing their own).
+ * the active branch, scope marketing list/count queries (ad spend, campaigns,
+ * etc.) to their team — supervisor + supervised MBs.
+ *
+ * Skips when the caller already pins a specific `mediaBuyerId` (e.g. an MB
+ * seeing their own, or HoM filtering by buyer in the dropdown).
+ *
+ * Important: gated on supervisor STATUS, not supervisee count. A supervisor
+ * of a freshly-created empty team gets scoped to `[self]` — they see only
+ * their own forms / spend until they assign MBs to the team. The previous
+ * behaviour returned `input` unchanged in that case, which let an empty-team
+ * supervisor see ALL campaigns in the branch (because the query then ran
+ * with no buyer filter at all).
  */
 async function applyMarketingSupervisorScope<
   T extends { mediaBuyerId?: string; mediaBuyerIds?: string[] },
@@ -78,14 +92,54 @@ async function applyMarketingSupervisorScope<
   const perms = ctx.user.permissions ?? [];
   if (perms.includes('marketing.scope.global')) return input;
   if (isAdminLevel(ctx.user)) return input;
-  const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
-  // Only act when the user is a supervisor on a Marketing team. Pure CS
-  // supervisors don't see the ad spend page — skip.
-  const marketingIdsExcludingSelf = scope.marketingUserIds.filter((id) => id !== ctx.user.id);
-  if (marketingIdsExcludingSelf.length === 0) return input;
+  if (ctx.user.role === 'HEAD_OF_MARKETING') return input;
+  const teams = getBranchTeamsService();
+  const isSupervisor = await teams.isMarketingSupervisorOnBranch(ctx.user.id, branchId);
+  if (!isSupervisor) return input;
+  const scope = await teams.listSupervisorScopeIds(ctx.user.id, branchId);
+  // `marketingUserIds` already includes the actor.
   return {
     ...input,
     mediaBuyerIds: scope.marketingUserIds,
+  };
+}
+
+function seesFullMarketingTeamSurfaces(user: SessionUser): boolean {
+  if (isAdminLevel(user)) return true;
+  if (user.role === 'HEAD_OF_MARKETING') return true;
+  return (user.permissions ?? []).includes('marketing.teamOverview');
+}
+
+/** HoM-class / perm holders, or branch marketing supervisor with an active branch session. */
+function assertMarketingTeamSurfacesAccess(ctx: { user: SessionUser; currentBranchId: string | null }) {
+  if (seesFullMarketingTeamSurfaces(ctx.user)) return;
+  if (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && ctx.currentBranchId) return;
+  throw new TRPCError({
+    code: 'FORBIDDEN',
+    message: 'Missing marketing.teamOverview access',
+  });
+}
+
+async function resolveMarketingTeamViewerScope(ctx: {
+  user: SessionUser;
+  currentBranchId: string | null;
+}): Promise<{
+  supervisorScope?: OrdersAggregateSupervisorScope;
+  restrictMediaBuyerIds?: string[];
+}> {
+  if (seesFullMarketingTeamSurfaces(ctx.user)) return {};
+  const branchId = ctx.currentBranchId;
+  if (!branchId || ctx.user.isMarketingTeamSupervisorOnActiveBranch !== true) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Marketing team overview access denied.' });
+  }
+  const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
+  const supervisedMbOnly = scope.marketingUserIds.filter((id) => id !== ctx.user.id);
+  if (supervisedMbOnly.length === 0) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Marketing team overview access denied.' });
+  }
+  return {
+    supervisorScope: { csUserIds: scope.csUserIds, mediaBuyerIds: scope.marketingUserIds },
+    restrictMediaBuyerIds: scope.marketingUserIds,
   };
 }
 
@@ -200,13 +254,18 @@ export const marketingRouter = router({
       return getMarketingService().listFundingBalances(ctx.user, ctx.currentBranchId);
     }),
 
-  /** Recipient candidates for the Request Funding modal (migration 0106). MBs get
+  /** Recipient candidates for the Request Funding modal (migration 0106).
+   *  MBs get their marketing-team supervisor (preselected when present) +
    *  HoMs in their branch + Finance Officers (org-wide); HoMs get Finance Officers. */
   listFundingRequestRecipients: permissionProcedure('marketing.funding.request')
     .query(async ({ ctx }) => {
       const requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING' =
         ctx.user.role === 'HEAD_OF_MARKETING' ? 'HEAD_OF_MARKETING' : 'MEDIA_BUYER';
-      return getMarketingService().listFundingRequestRecipients(requesterRole, ctx.currentBranchId);
+      return getMarketingService().listFundingRequestRecipients(
+        requesterRole,
+        ctx.currentBranchId,
+        ctx.user.id,
+      );
     }),
 
   /** Media Buyer or Head of Marketing: submit a funding request to a specific recipient.
@@ -244,27 +303,49 @@ export const marketingRouter = router({
   listFundingRequests: authedProcedure
     .input(listFundingRequestsSchema)
     .query(async ({ input, ctx }) => {
-      // MB visibility is always self-only (defense-in-depth). For other roles,
-      // honour the explicit `requesterId` or `excludeSelfAsRequester` filters from the caller.
-      const requesterId = ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : input.requesterId;
+      // A marketing-team supervisor (still role=MEDIA_BUYER) needs to act as
+      // an inbox holder for their team's requests — same shape as HoM. So we
+      // skip the MB-only "self as requester" pin and let the inbox-scope rule
+      // below do its job (`targetUserId = ctx.user.id`). Without this, a
+      // supervisor's `/admin/marketing/funding` page would only show their
+      // own outbound requests and never the ones their teammates sent them.
+      const isMarketingSupervisorViewer =
+        ctx.user.role === 'MEDIA_BUYER' &&
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true;
+
+      // MB visibility is always self-only (defense-in-depth) — except for
+      // supervisors (above). For other roles, honour the explicit
+      // `requesterId` or `excludeSelfAsRequester` filters from the caller.
+      const requesterId =
+        ctx.user.role === 'MEDIA_BUYER' && !isMarketingSupervisorViewer
+          ? ctx.user.id
+          : input.requesterId;
       const excludeSelfAsRequester =
-        ctx.user.role !== 'MEDIA_BUYER' && !requesterId && input.excludeSelfAsRequester;
+        (ctx.user.role !== 'MEDIA_BUYER' || isMarketingSupervisorViewer) &&
+        !requesterId &&
+        input.excludeSelfAsRequester;
 
       // Migration 0106 — auto-scope inbox views to requests targeted at the
       // caller. Admin-class (SuperAdmin / Admin) bypass scoping and see every
-      // request. MBs are already self-scoped via `requesterId`. For everyone
-      // else (HoM, Finance, branch heads), we apply `targetUserId = ctx.user.id`
-      // when the caller isn't asking for their own outbound — turning the
-      // "all pending requests" view into "my inbox". Legacy NULL-target rows
-      // (pre-migration broadcasts) are still included so historical audiences
-      // keep visibility until those rows close out.
+      // request. Plain MBs are already self-scoped via `requesterId` above.
+      // For everyone else (HoM, Finance, branch heads, AND marketing-team
+      // supervisors), we apply `targetUserId = ctx.user.id` when the caller
+      // isn't asking for their own outbound — turning the "all pending
+      // requests" view into "my inbox". Legacy NULL-target rows (pre-migration
+      // broadcasts) are still included so historical audiences keep
+      // visibility until those rows close out.
       const isAdminClass = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
       const askingForOwnOutbound = requesterId === ctx.user.id;
       const targetUserId =
         !isAdminClass && !askingForOwnOutbound
           ? (input.targetUserId ?? ctx.user.id)
           : input.targetUserId;
-      const includeLegacyNullTarget = !isAdminClass && !askingForOwnOutbound;
+      // Legacy NULL-target rows: include for HoM/Finance/branch heads (their
+      // historical broadcast audience) but NOT for marketing-team supervisors
+      // — they were never the target of pre-migration broadcasts and showing
+      // those rows would leak branch-wide history they shouldn't see.
+      const includeLegacyNullTarget =
+        !isAdminClass && !askingForOwnOutbound && !isMarketingSupervisorViewer;
 
       return getMarketingService().listFundingRequests(
         {
@@ -418,20 +499,22 @@ export const marketingRouter = router({
       );
     }),
 
-  /** Phase 20: gated by `marketing.adSpend.approve` (HoM + Admin templates). */
-  approveAdSpend: permissionProcedure('marketing.adSpend.approve')
+  /**
+   * Phase 20: `marketing.adSpend.approve` — plus branch marketing supervisors for supervisee rows only
+   * (enforced in MarketingService).
+   */
+  approveAdSpend: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(approveAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().approveAdSpend(input.adSpendId, ctx.user.id);
+      return getMarketingService().approveAdSpend(input.adSpendId, ctx.user);
     }),
 
-  /** Phase 20: same `marketing.adSpend.approve` covers both approve and reject. */
-  rejectAdSpend: permissionProcedure('marketing.adSpend.approve')
+  rejectAdSpend: authedProcedure
     .meta({ branchScopedMutation: true })
     .input(rejectAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().rejectAdSpend(input.adSpendId, input.reason, ctx.user.id);
+      return getMarketingService().rejectAdSpend(input.adSpendId, input.reason, ctx.user);
     }),
 
   updateAdSpend: authedProcedure
@@ -462,6 +545,31 @@ export const marketingRouter = router({
             code: 'FORBIDDEN',
             message: 'Cannot query another media buyer funnel.',
           });
+        }
+        // A Media Buyer who's been promoted to supervise their branch's
+        // marketing team gets the team-aggregated view (their own funnel +
+        // every supervised peer) — same plumbing the orders aggregates use.
+        // The narrow helper auto-derives `supervisorScope.mediaBuyerIds[]`
+        // from `applySupervisorScope` and drops the single `mediaBuyerId`
+        // filter; the metrics service then OR-aggregates across the IDs.
+        if (
+          ctx.user.isMarketingTeamSupervisorOnActiveBranch === true &&
+          ctx.currentBranchId
+        ) {
+          const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, ctx.currentBranchId, {
+            mediaBuyerId: ctx.user.id,
+            startDate: input.startDate,
+            endDate: input.endDate,
+          });
+          return getMarketingService().getPerformanceMetrics(
+            narrowed.mediaBuyerId,
+            input.startDate && input.endDate ? 'this_month' : 'all_time',
+            input.startDate,
+            input.endDate,
+            ctx.currentBranchId,
+            undefined,
+            narrowed.supervisorScope,
+          );
         }
         mediaBuyerId = ctx.user.id;
         assignedCsId = undefined;
@@ -543,9 +651,9 @@ export const marketingRouter = router({
    * (recent orders), and `cart.listActivity` — with one request. Same
    * fan-out runs server-side via `Promise.all`.
    *
-   * Permission gate matches the page (`marketing.teamOverview`).
+   * Permission gate: `marketing.teamOverview` / HoM / admin — **or** branch marketing supervisor.
    */
-  overviewPageBundle: permissionProcedure('marketing.teamOverview')
+  overviewPageBundle: authedProcedure
     .input(
       z.object({
         period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
@@ -556,22 +664,20 @@ export const marketingRouter = router({
       }),
     )
     .query(async ({ input, ctx }) => {
+      assertMarketingTeamSurfacesAccess(ctx);
       const branchId = ctx.currentBranchId;
+      const viewer = await resolveMarketingTeamViewerScope(ctx);
+      const supervisorScope = viewer.supervisorScope;
+      const restrictMbIds = viewer.restrictMediaBuyerIds;
+
       const perms = ctx.user.permissions ?? [];
       const canQueryLiveActivity =
         isAdminLevel(ctx.user) ||
         perms.includes('cart.read') ||
-        perms.includes('marketing.read');
+        perms.includes('marketing.read') ||
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true;
 
-      // Live activity scope mirrors the standalone `cart.listActivity` permission gate
-      // and the loader's per-role narrowing logic.
-      type LiveActivityScope = { limit: number; mediaBuyerId?: string; branchId?: string };
-      const liveActivityScope: LiveActivityScope =
-        ctx.user.role === 'MEDIA_BUYER'
-          ? { limit: input.liveActivityLimit, mediaBuyerId: ctx.user.id }
-          : { limit: input.liveActivityLimit };
-
-      const recentOrdersInput = {
+      const recentOrdersInputBase = {
         page: 1,
         limit: input.recentOrdersLimit,
         sortBy: 'createdAt' as const,
@@ -579,28 +685,66 @@ export const marketingRouter = router({
         ...(input.startDate && { startDate: input.startDate }),
         ...(input.endDate && { endDate: input.endDate }),
       };
+      const recentOrdersInput = await applySupervisorScope(ctx, recentOrdersInputBase, branchId);
 
-      const [metrics, leaderboard, balancesList, recentOrders, liveActivity] =
-        await Promise.all([
-          getMarketingService().getPerformanceMetrics(
-            undefined,
-            input.startDate && input.endDate ? 'this_month' : 'all_time',
-            input.startDate,
-            input.endDate,
-            branchId,
-          ),
-          getMarketingService().getMediaBuyerLeaderboard(
-            input.period,
-            input.startDate,
-            input.endDate,
-            branchId,
-          ),
-          getMarketingService().listFundingBalances(ctx.user, branchId),
-          getOrdersService().list(recentOrdersInput, branchId),
-          canQueryLiveActivity
-            ? getCartService().listActivity(liveActivityScope)
-            : Promise.resolve([]),
-        ]);
+      const fetchLiveActivity = async () => {
+        if (!canQueryLiveActivity) return [];
+        if (ctx.user.role === 'MEDIA_BUYER') {
+          return getCartService().listActivity({
+            limit: input.liveActivityLimit,
+            mediaBuyerId: ctx.user.id,
+            branchId: branchId ?? undefined,
+          });
+        }
+        if (restrictMbIds && restrictMbIds.length > 1) {
+          const perMb = Math.max(1, Math.ceil(input.liveActivityLimit / restrictMbIds.length));
+          const chunks = await Promise.all(
+            restrictMbIds.map((mediaBuyerId) =>
+              getCartService().listActivity({
+                limit: perMb,
+                mediaBuyerId,
+                branchId: branchId ?? undefined,
+              }),
+            ),
+          );
+          const merged = chunks.flat();
+          merged.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+          return merged.slice(0, input.liveActivityLimit);
+        }
+        if (restrictMbIds?.length === 1) {
+          return getCartService().listActivity({
+            limit: input.liveActivityLimit,
+            mediaBuyerId: restrictMbIds[0],
+            branchId: branchId ?? undefined,
+          });
+        }
+        return getCartService().listActivity({
+          limit: input.liveActivityLimit,
+          branchId: branchId ?? undefined,
+        });
+      };
+
+      const [metrics, leaderboard, balancesList, recentOrders, liveActivity] = await Promise.all([
+        getMarketingService().getPerformanceMetrics(
+          undefined,
+          input.startDate && input.endDate ? 'this_month' : 'all_time',
+          input.startDate,
+          input.endDate,
+          branchId,
+          undefined,
+          supervisorScope,
+        ),
+        getMarketingService().getMediaBuyerLeaderboard(
+          input.period,
+          input.startDate,
+          input.endDate,
+          branchId,
+          restrictMbIds,
+        ),
+        getMarketingService().listFundingBalances(ctx.user, branchId),
+        getOrdersService().list(recentOrdersInput, branchId),
+        fetchLiveActivity(),
+      ]);
 
       return {
         metrics,
@@ -717,7 +861,15 @@ export const marketingRouter = router({
   listCampaigns: authedProcedure
     .input(listCampaignsSchema)
     .query(async ({ input, ctx }) => {
-      return getMarketingService().listCampaigns(input, ctx.currentBranchId);
+      // Rank-and-file MB sees only their own forms. Supervisors get team scope
+      // injected by `applyMarketingSupervisorScope` (their team + themselves).
+      // Admin / HoM / global-scope perms pass through unchanged and see all.
+      let effectiveInput =
+        ctx.user.role === 'MEDIA_BUYER' && !input.mediaBuyerId
+          ? { ...input, mediaBuyerId: ctx.user.id }
+          : input;
+      effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
+      return getMarketingService().listCampaigns(effectiveInput, ctx.currentBranchId);
     }),
 
   /**
@@ -775,12 +927,19 @@ export const marketingRouter = router({
       // `getUsersService().list(...)` directly here bypasses that gate, so we
       // re-check the caller actually holds `users.read` before honouring
       // `includeMarketingExportPicklists`. MEDIA_BUYER does NOT hold it; HoM /
-      // admin-class do, which matches the loader's `loadMarketingExportPicklists`
-      // condition (`showMediaBuyerColumn && !isMediaBuyer`).
+      // admin-class do.
+      // Marketing team supervisors are also allowed — but we restrict their
+      // picklist to their supervised team (handled below where we feed
+      // `restrictBuyerIds` instead of opening the global users.list query).
       const callerPerms = ctx.user.permissions ?? [];
+      const isMarketingSupervisor =
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!branchId;
       const canSeeBuyerPicklist =
         includeMarketingExportPicklists &&
-        (isAdminLevel(ctx.user) || callerPerms.includes('users.read'));
+        (isAdminLevel(ctx.user) || callerPerms.includes('users.read') || isMarketingSupervisor);
+      const supervisorBuyerIds = isMarketingSupervisor && ordersScope.supervisorScope
+        ? ordersScope.supervisorScope.mediaBuyerIds
+        : null;
 
       const metricsBuyerId = ordersScope.mediaBuyerId ?? mediaBuyerId;
 
@@ -820,20 +979,27 @@ export const marketingRouter = router({
           status,
         }),
         canSeeBuyerPicklist
-          ? getUsersService().list(
-              {
-                page: 1,
-                limit: 100,
-                role: 'MEDIA_BUYER',
-                status: 'ACTIVE',
-                sortBy: 'createdAt',
-                sortOrder: 'desc',
-                // Picklist consumers only need id + name — skip the membership join.
-                includeBranchMemberships: false,
-              },
-              ctx.user,
-              ctx.currentBranchId,
-            )
+          ? supervisorBuyerIds && supervisorBuyerIds.length > 0
+            ? // Supervisor path: only their team's MBs (the supervisor themselves
+              // is included in `supervisorBuyerIds`). Skips users.list which
+              // requires `users.read` (MBs don't hold it).
+              getUsersService()
+                .listByIds(supervisorBuyerIds)
+                .then((rows) => ({ users: rows, total: rows.length }))
+            : getUsersService().list(
+                {
+                  page: 1,
+                  limit: 100,
+                  role: 'MEDIA_BUYER',
+                  status: 'ACTIVE',
+                  sortBy: 'createdAt',
+                  sortOrder: 'desc',
+                  // Picklist consumers only need id + name — skip the membership join.
+                  includeBranchMemberships: false,
+                },
+                ctx.user,
+                ctx.currentBranchId,
+              )
           : Promise.resolve(null),
         getProductsService().list(
           {
@@ -887,9 +1053,9 @@ export const marketingRouter = router({
    * balances list is empty (users.list MEDIA_BUYER + HEAD_OF_MARKETING). One
    * HTTP request, one auth pass, parallel service calls.
    *
-   * Permission gate: `marketing.teamOverview` — same as the page route requires.
+   * Permission gate: `marketing.teamOverview` / HoM / admin — **or** branch marketing supervisor.
    */
-  teamPageBundle: permissionProcedure('marketing.teamOverview')
+  teamPageBundle: authedProcedure
     .input(
       z.object({
         period: z.enum(['this_month', 'all_time']).optional().default('this_month'),
@@ -898,16 +1064,22 @@ export const marketingRouter = router({
       }),
     )
     .query(async ({ input, ctx }) => {
+      assertMarketingTeamSurfacesAccess(ctx);
       const branchId = ctx.currentBranchId;
+      const viewer = await resolveMarketingTeamViewerScope(ctx);
+      const restrictMbIds = viewer.restrictMediaBuyerIds;
+      const fundingOpts =
+        restrictMbIds && restrictMbIds.length > 0 ? { restrictToReceiverIds: restrictMbIds } : undefined;
 
       const [balances, fundingSummary, leaderboard, profitabilityConfig] = await Promise.all([
         getMarketingService().listFundingBalances(ctx.user, branchId),
-        getMarketingService().getFundingSummary(branchId),
+        getMarketingService().getFundingSummary(branchId, fundingOpts),
         getMarketingService().getMediaBuyerLeaderboard(
           input.period,
           input.startDate,
           input.endDate,
           branchId,
+          restrictMbIds,
         ),
         getMarketingService().getProfitabilityConfig(),
       ]);
@@ -948,6 +1120,29 @@ export const marketingRouter = router({
           name: u.name,
           role: u.role,
         }));
+      } else if (
+        balances.length === 0 &&
+        restrictMbIds &&
+        restrictMbIds.length > 0 &&
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true
+      ) {
+        const mbRes = await getUsersService().list(
+          {
+            page: 1,
+            limit: 100,
+            role: 'MEDIA_BUYER',
+            sortBy: 'createdAt',
+            sortOrder: 'desc',
+            includeBranchMemberships: false,
+          },
+          ctx.user,
+          branchId,
+        );
+        const allow = new Set(restrictMbIds);
+        const picked = (mbRes.users ?? [])
+          .filter((u) => allow.has(u.id))
+          .map((u) => ({ id: u.id, name: u.name, role: u.role }));
+        usersFallback = picked.length > 0 ? picked : null;
       }
 
       return {
@@ -985,40 +1180,61 @@ export const marketingRouter = router({
     .query(async ({ input, ctx }) => {
       const branchId = ctx.currentBranchId;
       const isMediaBuyer = ctx.user.role === 'MEDIA_BUYER';
+      const isMarketingSupervisor =
+        isMediaBuyer && ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!branchId;
       const callerPerms = ctx.user.permissions ?? [];
       const canSeeBuyerPicklist =
-        !isMediaBuyer && (isAdminLevel(ctx.user) || callerPerms.includes('users.read'));
+        (!isMediaBuyer && (isAdminLevel(ctx.user) || callerPerms.includes('users.read'))) ||
+        isMarketingSupervisor;
 
-      // Apply MB self-scoping the same way the standalone procedures do.
-      const adSpendCountsScope = {
+      // Auto-pin to self ONLY for rank-and-file MBs. Supervisors fall through
+      // so `applyMarketingSupervisorScope` can broaden to their team.
+      const pinToSelf = isMediaBuyer && !isMarketingSupervisor;
+      let adSpendCountsScope: typeof input & { mediaBuyerId?: string; mediaBuyerIds?: string[] } = {
         ...input,
-        ...(isMediaBuyer ? { mediaBuyerId: ctx.user.id } : {}),
+        ...(pinToSelf ? { mediaBuyerId: ctx.user.id } : {}),
       };
-      const campaignsScope: { mediaBuyerId?: string; page: number; limit: number } = {
+      let campaignsScope: { mediaBuyerId?: string; mediaBuyerIds?: string[]; page: number; limit: number } = {
         page: 1,
         limit: input.campaignsLimit,
-        ...(isMediaBuyer ? { mediaBuyerId: ctx.user.id } : {}),
+        ...(pinToSelf ? { mediaBuyerId: ctx.user.id } : {}),
       };
+      adSpendCountsScope = await applyMarketingSupervisorScope(ctx, adSpendCountsScope);
+      campaignsScope = await applyMarketingSupervisorScope(ctx, campaignsScope);
+
+      const supervisorBuyerIds =
+        isMarketingSupervisor && campaignsScope.mediaBuyerIds && campaignsScope.mediaBuyerIds.length > 0
+          ? campaignsScope.mediaBuyerIds
+          : null;
 
       const [adSpendStatusCounts, campaigns, buyersResult] = await Promise.all([
         getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId),
         getMarketingService().listCampaigns(campaignsScope, branchId),
         canSeeBuyerPicklist
-          ? getUsersService().list(
-              {
-                page: 1,
-                limit: 100,
-                role: 'MEDIA_BUYER',
-                status: 'ACTIVE',
-                sortBy: 'createdAt',
-                sortOrder: 'desc',
-                includeBranchMemberships: false,
-              },
-              ctx.user,
-              branchId,
-            )
+          ? supervisorBuyerIds
+            ? getUsersService()
+                .listByIds(supervisorBuyerIds)
+                .then((rows) => ({ users: rows, total: rows.length }))
+            : getUsersService().list(
+                {
+                  page: 1,
+                  limit: 100,
+                  role: 'MEDIA_BUYER',
+                  status: 'ACTIVE',
+                  sortBy: 'createdAt',
+                  sortOrder: 'desc',
+                  includeBranchMemberships: false,
+                },
+                ctx.user,
+                branchId,
+              )
           : Promise.resolve(null),
       ]);
+
+      const canApproveAdSpend =
+        isAdminLevel(ctx.user) ||
+        callerPerms.includes('marketing.adSpend.approve') ||
+        (ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!branchId);
 
       return {
         adSpendStatusCounts,
@@ -1029,6 +1245,7 @@ export const marketingRouter = router({
         mediaBuyersForFilter: buyersResult
           ? (buyersResult.users ?? []).map((u) => ({ id: u.id, name: u.name }))
           : [],
+        canApproveAdSpend,
       };
     }),
 
@@ -1262,7 +1479,11 @@ export const marketingRouter = router({
           : Promise.resolve([] as Array<{ id: string; name: string }>),
         canRequestFunding
           ? getMarketingService()
-              .listFundingRequestRecipients(role as 'MEDIA_BUYER' | 'HEAD_OF_MARKETING', branchId)
+              .listFundingRequestRecipients(
+                role as 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
+                branchId,
+                ctx.user.id,
+              )
               .catch(() => [] as Array<unknown>)
           : Promise.resolve([] as Array<unknown>),
         getMarketingService().fundingStatusCounts(

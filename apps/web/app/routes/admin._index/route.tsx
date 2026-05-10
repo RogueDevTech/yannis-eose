@@ -91,9 +91,28 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function AdminDashboard() {
   const loaderData = useLoaderData<typeof loader>();
-  const parentData = useRouteLoaderData('routes/admin') as { user: { name: string; role: string; email: string } } | undefined;
+  const parentData = useRouteLoaderData('routes/admin') as
+    | {
+        user: {
+          name: string;
+          role: string;
+          email: string;
+          /** From the session bundle — true when this Media Buyer supervises the
+           *  branch's marketing team. Unlocks the HoM-style dashboard layout. */
+          isMarketingTeamSupervisorOnActiveBranch?: boolean;
+          /** Symmetric for CS — true when this CS Closer supervises the branch's
+           *  CS team. Unlocks the HoCS-style dashboard layout (team-aggregated
+           *  metrics + Team Management card). */
+          isCsTeamSupervisorOnActiveBranch?: boolean;
+        };
+      }
+    | undefined;
   const role = parentData?.user?.role ?? null;
   const userName = parentData?.user?.name ?? 'User';
+  const isMarketingTeamSupervisor =
+    parentData?.user?.isMarketingTeamSupervisorOnActiveBranch === true;
+  const isCsTeamSupervisor =
+    parentData?.user?.isCsTeamSupervisorOnActiveBranch === true;
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   if (loaderData.variant === 'admin_quick') {
@@ -122,6 +141,8 @@ export default function AdminDashboard() {
             role={role}
             userName={userName}
             filters={loaderData.filters}
+            isMarketingTeamSupervisor={isMarketingTeamSupervisor}
+            isCsTeamSupervisor={isCsTeamSupervisor}
           />
         )}
       </Await>

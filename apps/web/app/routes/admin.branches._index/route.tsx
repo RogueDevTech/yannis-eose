@@ -3,7 +3,13 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 
 import { Link, useLoaderData, useFetcher } from '@remix-run/react';
 import { useCallback, useState } from 'react';
-import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import {
+  apiRequest,
+  getSessionCookie,
+  requirePermission,
+  requirePermissionOrRoles,
+  safeStatus,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -31,7 +37,15 @@ interface Branch {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requirePermission(request, 'branches.manage');
+  // Branches list is also visible to org-wide heads (HoM / HoCS / HoLogistics)
+  // so they can drill into the branches they're a department head for and
+  // manage their team via `branches.teams.*`. Branch-mutating actions
+  // (create/update/assignUser) are still gated by `branches.manage` in the
+  // tRPC layer + in the action handler below.
+  await requirePermissionOrRoles(request, {
+    roles: ['HEAD_OF_MARKETING', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
+    permission: 'branches.manage',
+  });
   const cookie = getSessionCookie(request);
 
   const pageData = (async () => {

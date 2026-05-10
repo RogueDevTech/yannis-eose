@@ -48,6 +48,11 @@ interface RawSessionBundlePayload {
   mirrorSessionId: string | null;
   staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
   isFinanceOfficer?: boolean;
+  isMarketingTeamSupervisorOnActiveBranch?: boolean;
+  /** CS branch-team supervisor on active branch — see SessionUser. */
+  isCsTeamSupervisorOnActiveBranch?: boolean;
+  /** "Is supervisor anywhere" — see API session-bundle-cookie.ts. */
+  isTeamSupervisor?: boolean;
 }
 
 /** Decoded shape that callers consume — `permissions` expanded back to `string[]`. */

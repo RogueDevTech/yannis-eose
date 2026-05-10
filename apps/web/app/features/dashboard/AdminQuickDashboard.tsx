@@ -66,7 +66,16 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
             ? 'Quick snapshot — open the Executive Overview for the full picture.'
             : 'Quick snapshot of today.'
         }
-        actions={<PageRefreshButton />}
+        actions={
+          // Match the Inventory-page mobile pattern (CEO directive 2026-05-10):
+          // below `md` the action collapses to an icon so the greeting +
+          // description get full width and don't truncate. No extra kebab
+          // sheet here — there's only the single refresh action.
+          <>
+            <span className="hidden md:inline-flex"><PageRefreshButton /></span>
+            <span className="md:hidden"><PageRefreshButton iconOnly /></span>
+          </>
+        }
       />
 
       {/* Marketing — today's order pulse. Click header to jump into the marketing module. */}

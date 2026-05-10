@@ -354,6 +354,28 @@ export function UserCreatePage({
     );
   };
 
+  // Mirrors the branch matrix above — checkbox in the list header that
+  // selects every product or clears them all. Goes indeterminate when only a
+  // subset is selected so the visual cue matches the data.
+  const allProductsSelected =
+    products.length > 0 && products.every((p) => selectedProductIds.includes(p.id));
+  const someProductsSelected =
+    products.length > 0 &&
+    !allProductsSelected &&
+    products.some((p) => selectedProductIds.includes(p.id));
+  const selectAllProductsRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = selectAllProductsRef.current;
+    if (el) el.indeterminate = someProductsSelected;
+  }, [someProductsSelected]);
+  const toggleSelectAllProducts = () => {
+    if (allProductsSelected) {
+      setSelectedProductIds([]);
+      return;
+    }
+    setSelectedProductIds(products.map((p) => p.id));
+  };
+
   const filteredPlans = plans.filter((p) => !selectedRole || p.role === selectedRole);
 
   const templateByRole = useMemo(() => {
@@ -691,16 +713,6 @@ export function UserCreatePage({
                     description: branch.code,
                   }))}
               />
-              <p className="text-xs text-app-fg-muted mt-1">
-                Choose all branches this user belongs to, then pick one as their default branch.
-              </p>
-              {selectedRole === 'MEDIA_BUYER' || selectedRole === 'CS_CLOSER' ? (
-                <p className="text-xs text-app-fg-muted mt-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2">
-                  After you save, place them on a <strong className="text-app-fg">department roster</strong> or{' '}
-                  <strong className="text-app-fg">team</strong> from{' '}
-                  <span className="font-medium text-app-fg">Admin → Branches → (branch) → Departments</span>.
-                </p>
-              ) : null}
               {selectedRole && COMPANY_WIDE_OPTIONAL_SQUAD_ROLES.has(selectedRole) ? (
                 <p className="text-xs text-app-fg-muted mt-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2">
                   Team and department placement is optional for this role — attach branches only when they need branch scope.
@@ -751,10 +763,7 @@ export function UserCreatePage({
                   <label className="block text-sm font-medium text-app-fg-muted mb-1.5">
                     Status
                   </label>
-                  <p className="text-sm text-app-fg-muted">
-                    New users are created as <strong>Pending</strong> and become{' '}
-                    <strong>Active</strong> after they log in for the first time.
-                  </p>
+                  <p className="text-sm text-app-fg">Pending</p>
                   <input type="hidden" name="status" value="PENDING" />
                 </>
               )}
@@ -825,22 +834,36 @@ export function UserCreatePage({
                   Leave blank to assign all products. Select specific products to restrict.
                 </p>
                 {products.length > 0 ? (
-                  <div className="border border-app-border rounded-lg max-h-48 overflow-y-auto">
-                    {products.map((product: UserCreateProduct) => (
-                      <label
-                        key={product.id}
-                        className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
-                      >
-                        <Checkbox
-                          checked={selectedProductIds.includes(product.id)}
-                          onChange={() => toggleProduct(product.id)}
-                        />
-                        <span className="text-sm text-app-fg">{product.name}</span>
-                        <span className="text-xs text-app-fg-muted ml-auto">
-                          {product.category ?? ''}
-                        </span>
-                      </label>
-                    ))}
+                  <div className="border border-app-border rounded-lg overflow-hidden flex flex-col">
+                    <label className="flex items-center gap-3 px-3 py-2.5 bg-app-hover/70 border-b border-app-border hover:bg-app-hover cursor-pointer shrink-0">
+                      <Checkbox
+                        ref={selectAllProductsRef}
+                        checked={allProductsSelected}
+                        onChange={toggleSelectAllProducts}
+                        aria-label="Select all products"
+                      />
+                      <span className="text-sm font-medium text-app-fg">Select all products</span>
+                      <span className="text-xs text-app-fg-muted ml-auto">
+                        {selectedProductIds.length} / {products.length}
+                      </span>
+                    </label>
+                    <div className="max-h-48 overflow-y-auto">
+                      {products.map((product: UserCreateProduct) => (
+                        <label
+                          key={product.id}
+                          className="flex items-center gap-3 px-3 py-2 hover:bg-app-hover/50 cursor-pointer border-b border-app-border last:border-b-0"
+                        >
+                          <Checkbox
+                            checked={selectedProductIds.includes(product.id)}
+                            onChange={() => toggleProduct(product.id)}
+                          />
+                          <span className="text-sm text-app-fg">{product.name}</span>
+                          <span className="text-xs text-app-fg-muted ml-auto">
+                            {product.category ?? ''}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-xs text-app-fg-muted">No products found.</p>

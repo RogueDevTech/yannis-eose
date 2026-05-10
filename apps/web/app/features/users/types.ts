@@ -25,6 +25,8 @@ export interface User {
   /** Probation status — drives the Probation badge in user lists. */
   isProbation?: boolean;
   probationUntil?: string | null;
+  /** "Is supervisor anywhere" — drives the Supervisor badge in user lists. */
+  isTeamSupervisor?: boolean;
 }
 
 export const ROLE_COLORS: Record<string, string> = {
@@ -173,6 +175,8 @@ export interface UserDetail {
   probationStartedAt?: string | null;
   probationStartedBy?: string | null;
   probationUntil?: string | null;
+  /** "Is supervisor anywhere" — drives the Supervisor badge on the user-detail page. */
+  isTeamSupervisor?: boolean;
   /** Stamped only when this user was scrubbed via the probation termination flow. */
   terminatedAt?: string | null;
   terminatedBy?: string | null;
