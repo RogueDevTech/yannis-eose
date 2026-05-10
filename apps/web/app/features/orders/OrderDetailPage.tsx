@@ -152,13 +152,24 @@ function describeAllocatableLocation(loc: AllocatableLocationDescriptor): string
 // ── Constants ────────────────────────────────────────────────────
 
 /**
- * "Order Progress" stepper visible to non-CS roles (admin / finance / logistics).
- * Includes `AGENT_ASSIGNED` (with-logistics state — DISPATCHED / IN_TRANSIT
- * collapse into it) and `REMITTED` (Finance has reconciled the cash).
+ * "Order Progress" stepper visible to logistics-side viewers (HEAD_OF_LOGISTICS,
+ * LOGISTICS_MANAGER, STOCK_MANAGER, TPL_MANAGER, TPL_RIDER). They need the
+ * `AGENT_ASSIGNED` step because that's their actionable handoff. `DISPATCHED`
+ * / `IN_TRANSIT` collapse into it (sub-stages happen offline).
  */
-const STATUS_FLOW_FULL = [
+const STATUS_FLOW_LOGISTICS = [
   'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'AGENT_ASSIGNED',
   'DELIVERED', 'REMITTED',
+] as const;
+
+/**
+ * "Order Progress" stepper for everyone else (Admin, SuperAdmin, HoM, HoCS,
+ * Finance, HR, Branch Admin) — CEO directive 2026-05-10. Drops the
+ * `AGENT_ASSIGNED` step that only logistics ops cares about, while keeping
+ * `REMITTED` so Finance still sees the cash-reconciliation milestone.
+ */
+const STATUS_FLOW_STANDARD = [
+  'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED', 'REMITTED',
 ] as const;
 
 /**
@@ -171,6 +182,15 @@ const STATUS_FLOW_FULL = [
 const STATUS_FLOW_CS = [
   'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED',
 ] as const;
+
+/** Logistics-side roles that need the AGENT_ASSIGNED step on the stepper. */
+const LOGISTICS_VIEWER_ROLES = new Set([
+  'HEAD_OF_LOGISTICS',
+  'LOGISTICS_MANAGER',
+  'STOCK_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+]);
 
 // Everything between ALLOCATED and DELIVERED happens offline (rider with the
 // parcel). DISPATCHED + IN_TRANSIT therefore collapse — for the full flow
@@ -896,13 +916,21 @@ export function OrderDetailPage({
     deliverModalOpen ||
     callCustomerModalOpen;
 
-  // CS closers see the 5-step CEO stepper (no AGENT_ASSIGNED, no REMITTED).
-  // Every other role sees the full 7-step lifecycle with REMITTED at the end.
-  // The stepper shape is the only thing this flips — actions, gates, and
-  // backend transitions are unchanged.
+  // Stepper shape (CEO directive 2026-05-10):
+  //   - CS closers: 5 steps (no AGENT_ASSIGNED, no REMITTED — neither
+  //     concerns them).
+  //   - Logistics-side viewers: 7 steps including AGENT_ASSIGNED — that's
+  //     their actionable handoff.
+  //   - Everyone else (Admin / HoM / HoCS / Finance / HR / Branch Admin):
+  //     6 steps without AGENT_ASSIGNED but with REMITTED.
+  // Actions, gates, and backend transitions are unchanged — only the
+  // stepper shape flips per role.
+  const isLogisticsViewer = LOGISTICS_VIEWER_ROLES.has(userRole);
   const orderStatusFlow = isCSCloser
     ? (STATUS_FLOW_CS as readonly string[])
-    : (STATUS_FLOW_FULL as readonly string[]);
+    : isLogisticsViewer
+      ? (STATUS_FLOW_LOGISTICS as readonly string[])
+      : (STATUS_FLOW_STANDARD as readonly string[]);
   const currentStatusIndex = getProgressIndex(order.status, orderStatusFlow);
   const actionError = (fetcher.data as { error?: string })?.error;
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
@@ -1386,7 +1414,15 @@ export function OrderDetailPage({
             <div className="card overflow-hidden order-[-3] lg:order-none">
               <h2 className="text-lg font-semibold text-app-fg mb-4">Order Progress</h2>
               <div className="w-full min-w-0 overflow-x-auto overflow-y-hidden pb-2 -mx-1 px-1 touch-pan-x overscroll-contain lg:overflow-x-visible lg:mx-0 lg:px-0 lg:pb-0">
-                <div className={`flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:gap-x-3 lg:gap-y-4 ${orderStatusFlow.length === 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-7'}`}>
+                <div
+                  className={`flex items-center flex-nowrap gap-0 min-w-max lg:min-w-0 lg:grid lg:gap-x-3 lg:gap-y-4 ${
+                    orderStatusFlow.length === 5
+                      ? 'lg:grid-cols-5'
+                      : orderStatusFlow.length === 6
+                        ? 'lg:grid-cols-6'
+                        : 'lg:grid-cols-7'
+                  }`}
+                >
                 {orderStatusFlow.map((status, idx) => {
                   const isPast = idx < currentStatusIndex;
                   const isCurrent = idx === currentStatusIndex;

@@ -4507,7 +4507,14 @@ export class OrdersService {
         ? await this.csOrderRouting.resolveRoutingForDispatch(branchId, primaryProductId, orderId)
         : null;
 
-    const servicingBranchId = routing?.servicingBranchId ?? branchId ?? null;
+    // Routing winner: when a routing rule resolved (`routing != null`), respect
+    // its `servicingBranchId` — including an explicit `null` which means
+    // "org-wide pool" (SPLIT_ALL_BRANCHES). Only fall back to the order's own
+    // branch when no routing was resolved at all (e.g., orders without a
+    // branch_id where `resolveRoutingForDispatch` short-circuits to null).
+    const servicingBranchId: string | null = routing
+      ? routing.servicingBranchId
+      : (branchId ?? null);
     const workloads = await this.getCSCloserWorkloads(servicingBranchId ?? undefined, {
       pendingCountsAcrossAllBranches: routing?.crossBranchServicing === true,
     });

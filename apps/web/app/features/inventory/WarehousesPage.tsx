@@ -17,7 +17,6 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { EmptyState } from '~/components/ui/empty-state';
-import { StatusBadge } from '~/components/ui/status-badge';
 import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -183,28 +182,14 @@ export function WarehousesPage({
       key: 'available',
       header: 'Available',
       nowrap: true,
-      render: (w) => (
-        <span className="tabular-nums text-sm text-success-600 dark:text-success-400">
-          {Math.max(0, w.stockSummary.totalStock - w.stockSummary.totalReserved)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      nowrap: true,
-      render: (w) => <StatusBadge status={w.status} />,
-    },
-    {
-      key: 'dispatch',
-      header: 'Dispatch',
-      nowrap: true,
-      render: (w) =>
-        w.dispatchLocked ? (
-          <StatusBadge status="LOCKED" variant="warning" label="Locked" />
-        ) : (
-          <span className="text-xs text-app-fg-muted">Open</span>
-        ),
+      render: (w) => {
+        const available = Math.max(0, w.stockSummary.totalStock - w.stockSummary.totalReserved);
+        const tone =
+          available === 0
+            ? 'text-danger-600 dark:text-danger-400'
+            : 'text-success-600 dark:text-success-400';
+        return <span className={`tabular-nums text-sm ${tone}`}>{available}</span>;
+      },
     },
     {
       key: 'created',
@@ -362,7 +347,10 @@ export function WarehousesPage({
             label: 'Total available units',
             value: overview.totalAvailable,
             title: `${overview.skuCount} SKU${overview.skuCount === 1 ? '' : 's'} · ${overview.totalReserved} reserved`,
-            valueClassName: 'text-info-600 dark:text-info-400',
+            valueClassName:
+              overview.totalAvailable === 0
+                ? 'text-danger-600 dark:text-danger-400'
+                : 'text-info-600 dark:text-info-400',
           },
         ]}
       />

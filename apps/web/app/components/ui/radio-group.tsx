@@ -5,7 +5,8 @@ interface RadioOption<T extends string = string> {
   disabled?: boolean;
 }
 
-type RadioGroupLayout = 'vertical' | 'horizontal' | 'card';
+/** `card` = grid (2 cols on sm+); `card-stack` = always stacked (1 col on every viewport). */
+type RadioGroupLayout = 'vertical' | 'horizontal' | 'card' | 'card-stack';
 
 interface RadioGroupProps<T extends string = string> {
   name: string;
@@ -40,6 +41,7 @@ export function RadioGroup<T extends string = string>({
     vertical: 'flex flex-col gap-2',
     horizontal: 'flex flex-wrap gap-3',
     card: 'grid grid-cols-1 gap-2 sm:grid-cols-2',
+    'card-stack': 'flex flex-col gap-2',
   }[layout];
 
   return (
@@ -55,7 +57,7 @@ export function RadioGroup<T extends string = string>({
         {options.map((opt) => {
           const isChecked = value !== undefined ? value === opt.value : undefined;
 
-          if (layout === 'card') {
+          if (layout === 'card' || layout === 'card-stack') {
             return (
               <label
                 key={opt.value}

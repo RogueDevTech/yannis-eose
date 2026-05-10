@@ -328,6 +328,32 @@ export class BranchTeamsService {
     });
   }
 
+  /**
+   * Reject promoting/adding a member as supervisor if the team already has a
+   * different supervisor. A team is allowed exactly one supervisor (CEO directive
+   * 2026-05-10). Pass the user-id being added/promoted in `exceptUserIds` so an
+   * idempotent re-add of the existing supervisor isn't blocked.
+   */
+  private async assertSingleSupervisor(teamId: string, exceptUserIds: string[]): Promise<void> {
+    const existing = await this.db
+      .select({ userId: schema.branchTeamMembers.userId })
+      .from(schema.branchTeamMembers)
+      .where(
+        and(
+          eq(schema.branchTeamMembers.teamId, teamId),
+          eq(schema.branchTeamMembers.isSupervisor, true),
+        ),
+      );
+    const conflicts = existing.filter((row) => !exceptUserIds.includes(row.userId));
+    if (conflicts.length > 0) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message:
+          'This team already has a supervisor. Only one supervisor is allowed per team — demote the current one first.',
+      });
+    }
+  }
+
   async addTeamMember(teamId: string, userId: string, isSupervisor: boolean, _actor: SessionUser) {
     await this.safeBranchTeamsWrite(async () => {
       const [team] = await this.db
@@ -340,6 +366,9 @@ export class BranchTeamsService {
         .limit(1);
       if (!team) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
       await this.assertUserBranchMember(userId, team.branchId);
+      if (isSupervisor) {
+        await this.assertSingleSupervisor(teamId, [userId]);
+      }
       await this.db
         .delete(schema.branchDepartmentMembers)
         .where(
@@ -356,6 +385,115 @@ export class BranchTeamsService {
           set: { isSupervisor },
         });
     });
+  }
+
+  /**
+   * Bulk add/move members into a team (CEO directive 2026-05-10).
+   *
+   * Per user, in a single transaction:
+   *   1. Verify they belong to the team's branch
+   *   2. Remove them from any sibling team in the same department (move semantics)
+   *   3. Remove them from the department roster (no-team)
+   *   4. Upsert into the target team with the supplied supervisor flag
+   *
+   * Returns `{ added, moved }` so the caller can surface "added 3 / moved 2".
+   */
+  async addTeamMembersBulk(
+    teamId: string,
+    userIds: string[],
+    isSupervisor: boolean,
+    _actor: SessionUser,
+  ): Promise<{ added: number; moved: number }> {
+    if (userIds.length === 0) return { added: 0, moved: 0 };
+    // Single-supervisor constraint: a bulk batch can't promote multiple users to
+    // supervisor in one shot, since that would leave the team with several.
+    if (isSupervisor && userIds.length > 1) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message:
+          'Only one supervisor is allowed per team. Add a single member as supervisor, or add several without the supervisor flag.',
+      });
+    }
+    let added = 0;
+    let moved = 0;
+    await this.safeBranchTeamsWrite(async () => {
+      const [team] = await this.db
+        .select({
+          branchId: schema.branchTeams.branchId,
+          branchDepartmentId: schema.branchTeams.branchDepartmentId,
+        })
+        .from(schema.branchTeams)
+        .where(eq(schema.branchTeams.id, teamId))
+        .limit(1);
+      if (!team) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team not found' });
+      if (isSupervisor) {
+        // Allow the candidate to already be the supervisor (idempotent re-add);
+        // anyone else holding the role blocks the batch.
+        await this.assertSingleSupervisor(teamId, userIds);
+      }
+
+      // Sibling teams in the same dept — used to move users away from before
+      // inserting them into the target team.
+      const siblings = await this.db
+        .select({ id: schema.branchTeams.id })
+        .from(schema.branchTeams)
+        .where(eq(schema.branchTeams.branchDepartmentId, team.branchDepartmentId));
+      const siblingIds = siblings.map((s) => s.id);
+      const otherTeamIds = siblingIds.filter((id) => id !== teamId);
+
+      for (const userId of userIds) {
+        await this.assertUserBranchMember(userId, team.branchId);
+
+        // Was the user already on a sibling team? Counts as a move, not an add.
+        let wasOnOtherTeam = false;
+        if (otherTeamIds.length > 0) {
+          const onOther = await this.db
+            .select({ teamId: schema.branchTeamMembers.teamId })
+            .from(schema.branchTeamMembers)
+            .where(
+              and(
+                eq(schema.branchTeamMembers.userId, userId),
+                inArray(schema.branchTeamMembers.teamId, otherTeamIds),
+              ),
+            )
+            .limit(1);
+          wasOnOtherTeam = onOther.length > 0;
+          if (wasOnOtherTeam) {
+            await this.db
+              .delete(schema.branchTeamMembers)
+              .where(
+                and(
+                  eq(schema.branchTeamMembers.userId, userId),
+                  inArray(schema.branchTeamMembers.teamId, otherTeamIds),
+                ),
+              );
+          }
+        }
+
+        // Always clear the dept roster row (a user shouldn't sit on both a
+        // team and the roster at once).
+        await this.db
+          .delete(schema.branchDepartmentMembers)
+          .where(
+            and(
+              eq(schema.branchDepartmentMembers.branchDepartmentId, team.branchDepartmentId),
+              eq(schema.branchDepartmentMembers.userId, userId),
+            ),
+          );
+
+        await this.db
+          .insert(schema.branchTeamMembers)
+          .values({ teamId, userId, isSupervisor })
+          .onConflictDoUpdate({
+            target: [schema.branchTeamMembers.teamId, schema.branchTeamMembers.userId],
+            set: { isSupervisor },
+          });
+
+        if (wasOnOtherTeam) moved += 1;
+        else added += 1;
+      }
+    });
+    return { added, moved };
   }
 
   async addDepartmentMember(branchDepartmentId: string, userId: string, _actor: SessionUser) {
@@ -425,6 +563,9 @@ export class BranchTeamsService {
 
   async setMemberSupervisor(teamId: string, userId: string, isSupervisor: boolean) {
     await this.safeBranchTeamsWrite(async () => {
+      if (isSupervisor) {
+        await this.assertSingleSupervisor(teamId, [userId]);
+      }
       const updated = await this.db
         .update(schema.branchTeamMembers)
         .set({ isSupervisor })
@@ -491,6 +632,48 @@ export class BranchTeamsService {
         )
         .limit(1);
       return rows.length > 0;
+    });
+  }
+
+  /**
+   * True if `actorId` is the supervisor on `teamId`. Used by the team-management
+   * permission gate (CEO directive 2026-05-10) so a team supervisor can manage
+   * members of their own team without being a department head.
+   */
+  async isSupervisorOfTeam(actorId: string, teamId: string): Promise<boolean> {
+    return this.safeBranchTeamsRead(false, async () => {
+      const rows = await this.db
+        .select({ x: sql`1` })
+        .from(schema.branchTeamMembers)
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, actorId),
+            eq(schema.branchTeamMembers.teamId, teamId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    });
+  }
+
+  /**
+   * Return every team-id where `actorId` is the supervisor (across all branches).
+   * Used by the loader so the UI can enable management controls only on teams
+   * the viewer supervises.
+   */
+  async getSupervisedTeamIds(actorId: string): Promise<string[]> {
+    return this.safeBranchTeamsRead([] as string[], async () => {
+      const rows = await this.db
+        .select({ teamId: schema.branchTeamMembers.teamId })
+        .from(schema.branchTeamMembers)
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, actorId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+          ),
+        );
+      return rows.map((r) => r.teamId);
     });
   }
 

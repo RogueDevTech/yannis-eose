@@ -166,8 +166,6 @@ function warehousesShellColumns(): CompactTableColumn<{ id: string }>[] {
         </span>
       ),
     },
-    { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5rem]" /> },
-    { key: 'dispatch', header: 'Dispatch', render: () => <TableCellTextPulse className="w-[6rem]" /> },
     {
       key: 'created',
       header: 'Created',

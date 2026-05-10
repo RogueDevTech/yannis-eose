@@ -948,9 +948,9 @@ export function SettingsPage({
                         </svg>
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-app-fg">CS order routing</h3>
+                        <h3 className="text-lg font-semibold text-app-fg">CS routing — which branch?</h3>
                         <p className="text-sm text-app-fg-muted">
-                          Which servicing branch and squad handle each order — runs before load-balanced or performance assignment
+                          Decides which CS branch handles each new marketing order. Marketing attribution stays on the funnel; only the servicing CS branch changes.
                         </p>
                       </div>
                     </div>
@@ -958,15 +958,14 @@ export function SettingsPage({
                 >
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-sm text-app-fg-muted">
-                    Send orders from each funnel branch to the right servicing branch, team, or whole-branch closer pool. Reporting stays on
-                    the funnel branch; only assignment changes.
+                    Three options: <strong className="text-app-fg">Split across all CS branches</strong> (default — load-balanced org-wide), <strong className="text-app-fg">Same branch as marketing</strong> (Lagos → Lagos, Abuja → Abuja), or <strong className="text-app-fg">By product</strong> (per-SKU mapping). Runs before the dispatch strategy below picks which closer in the chosen branch takes the order.
                   </p>
                   <p className="mt-3">
                     <Link
                       to="/admin/settings/cs-order-routing"
                       className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
                     >
-                      Open CS order routing
+                      Open CS routing
                     </Link>
                   </p>
                 </div>
@@ -985,9 +984,9 @@ export function SettingsPage({
                         </svg>
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
+                        <h3 className="text-lg font-semibold text-app-fg">CS dispatch — which closer?</h3>
                         <p className="text-sm text-app-fg-muted">
-                          How new orders are assigned after routing — org default; squads can override on each branch
+                          Once a CS branch is picked by routing, decides which closer in that branch takes the order. Org-wide default; per-squad overrides available on each branch.
                         </p>
                       </div>
                     </div>
@@ -995,7 +994,7 @@ export function SettingsPage({
                 >
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-xs text-app-fg-muted mb-3">
-                    Branch admins and heads can set per-CS-squad distribution (manual, load balanced, performance, claim, claim cap) under{' '}
+                    Branch admins and heads can set per-CS-squad dispatch (manual, load-balanced, performance, claim, claim cap) under{' '}
                     <strong className="text-app-fg">Admin → Branches → branch → CS team</strong>, keyed to the squad that services the order after routing.
                   </p>
                   <div className="space-y-3">
@@ -1241,15 +1240,17 @@ export function SettingsPage({
                         </svg>
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-app-fg">CS order distribution</h3>
-                        <p className="text-sm text-app-fg-muted">How new orders are assigned to CS closers when they come in</p>
+                        <h3 className="text-lg font-semibold text-app-fg">CS dispatch — which closer?</h3>
+                        <p className="text-sm text-app-fg-muted">
+                          After routing picks a CS branch, dispatch picks which closer in that branch takes the order.
+                        </p>
                       </div>
                     </div>
                   }
                 >
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-sm text-app-fg-muted">
-                    Only Super Admin can configure CS order distribution. Current: <strong>{
+                    Only Super Admin can configure CS dispatch. Current: <strong>{
                       dispatchStrategyFromSettings === 'performance'
                         ? 'Performance'
                         : dispatchStrategyFromSettings === 'claim'

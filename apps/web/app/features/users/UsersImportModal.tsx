@@ -273,12 +273,39 @@ function InfoCircleIcon({ className }: { className?: string }) {
 }
 
 /**
+ * Branch columns (`primary_branch`, `additional_branches`) ship with placeholder
+ * examples that the import-modal swaps for live branch data once the
+ * `branches.list` fetch returns. Falls back to the static placeholders when
+ * the list hasn't loaded yet (e.g. modal just opened, network slow).
+ */
+function resolveColumnExamples(spec: ColumnSpec, branches: BranchInfo[]): string[] {
+  if (branches.length === 0) return spec.examples;
+  if (spec.header === 'primary_branch') {
+    const first = branches[0];
+    if (!first) return spec.examples;
+    // Show the same branch by code AND by name so the operator sees both
+    // forms are accepted. Mirrors the "CODE first; NAME also works" copy.
+    return [first.code, first.name];
+  }
+  if (spec.header === 'additional_branches') {
+    const others = branches.slice(1, 3); // up to 2 other branches
+    if (others.length === 0) return spec.examples;
+    const codes = others.map((b) => b.code).join(', ');
+    const names = others.map((b) => b.name).join('; ');
+    return [codes, names].filter(Boolean);
+  }
+  return spec.examples;
+}
+
+/**
  * Compact columns reference — chips per header. The info control opens a full
  * modal so guidance is readable (popover was easy to miss / clipped).
  */
-function ColumnsReferenceGrid() {
+function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
   const [detailColumn, setDetailColumn] = useState<ColumnSpec | null>(null);
   const detailTitleId = 'users-import-column-guide-title';
+
+  const detailExamples = detailColumn ? resolveColumnExamples(detailColumn, branches) : [];
 
   return (
     <>
@@ -290,23 +317,12 @@ function ColumnsReferenceGrid() {
           >
             <code className="font-mono text-xs font-medium text-app-fg truncate" title={c.header}>
               {c.header}
+              {c.required ? (
+                <span className="ml-0.5 text-danger-500" aria-hidden="true">*</span>
+              ) : null}
+              {c.required ? <span className="sr-only"> (required)</span> : null}
             </code>
             <div className="flex items-center gap-1 shrink-0">
-              {c.required ? (
-                <span
-                  className="text-[9px] uppercase tracking-wider rounded-sm bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-1 py-0.5 font-semibold"
-                  title="Required column"
-                >
-                  Req
-                </span>
-              ) : (
-                <span
-                  className="text-[9px] uppercase tracking-wider rounded-sm bg-app-hover text-app-fg-muted px-1 py-0.5 font-semibold"
-                  title="Optional column"
-                >
-                  Opt
-                </span>
-              )}
               <button
                 type="button"
                 aria-label={`Open column guide: ${c.header}`}
@@ -385,13 +401,20 @@ function ColumnsReferenceGrid() {
                 </ul>
               </div>
             ) : null}
-            {detailColumn.examples.length > 0 ? (
+            {detailExamples.length > 0 ? (
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
                   Example values
+                  {(detailColumn.header === 'primary_branch' ||
+                    detailColumn.header === 'additional_branches') &&
+                  branches.length > 0 ? (
+                    <span className="ml-1.5 text-[10px] font-normal normal-case tracking-normal text-app-fg-muted">
+                      — pulled from your branches
+                    </span>
+                  ) : null}
                 </p>
                 <ul className="flex flex-col gap-1.5">
-                  {detailColumn.examples.map((ex, i) => (
+                  {detailExamples.map((ex, i) => (
                     <li key={`${detailColumn.header}-ex-${i}`}>
                       <code className="font-mono text-xs rounded-md bg-app-hover text-app-fg px-2 py-1.5 block w-fit max-w-full break-all">
                         {ex}
@@ -615,7 +638,7 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
                 Header names are case-insensitive
               </p>
             </div>
-            <ColumnsReferenceGrid />
+            <ColumnsReferenceGrid branches={branches} />
           </div>
         </div>
       )}

@@ -376,12 +376,6 @@ const navStructure: NavGroupDef[] = [
         permission: 'rbac.manage_templates',
       },
       {
-        label: 'CS order routing',
-        href: '/admin/settings/cs-order-routing',
-        icon: SidebarIcons.orders,
-        permission: 'orders.routing',
-      },
-      {
         label: 'Permission Requests',
         href: '/admin/permission-requests',
         icon: SidebarIcons.audit,

@@ -1,52 +1,11 @@
-const LEGACY_PERMISSION_CODE_MAP: Record<string, string> = {
-  'ceo.overview': 'dashboard.ceo.view',
-  'orders.read': 'orders.view',
-  'orders.bulkTransition': 'orders.transition.bulk',
-  'orders.bulkAssign': 'orders.assign.bulk',
-  'cs.teamOverview': 'cs.team.overview.view',
-  'products.read': 'catalog.products.view',
-  'products.create': 'catalog.products.create',
-  'products.update': 'catalog.products.update',
-  'categories.read': 'catalog.categories.view',
-  'categories.write': 'catalog.categories.manage',
-  'inventory.read': 'inventory.overview.view',
-  'inventory.intake': 'inventory.stock.intake',
-  'inventory.transfer': 'inventory.stock.transfer',
-  'inventory.verifyTransfer': 'inventory.transfer.verify',
-  'inventory.adjust': 'inventory.stock.adjust',
-  'logistics.read': 'logistics.overview.view',
-  'logistics.write': 'logistics.settings.manage',
-  'marketing.read': 'marketing.overview.view',
-  'marketing.funding': 'marketing.funding.create',
-  'marketing.fundingSummary': 'marketing.funding.summary.view',
-  'marketing.adSpend': 'marketing.ad_spend.log',
-  'marketing.teamOverview': 'marketing.team.overview.view',
-  'finance.read': 'finance.overview.view',
-  'finance.costView': 'finance.costs.view',
-  'finance.approve': 'finance.approvals.manage',
-  'finance.disburse': 'finance.disbursements.manage',
-  'hr.read': 'hr.overview.view',
-  'hr.write': 'hr.manage',
-  'hr.approveAdjustment': 'hr.adjustments.approve',
-  'users.read': 'users.staff.view',
-  'users.create': 'users.staff.create',
-  'users.update': 'users.staff.update',
-  'users.deactivate': 'users.staff.deactivate',
-  'audit.read': 'audit.logs.view',
-  'settings.write': 'settings.system.manage',
-  'branches.manage': 'branches.admin.manage',
-  'branches.view_all': 'branches.scope.global',
-  'notifications.broadcast': 'notifications.broadcast.manage',
-  'rbac.manage_templates': 'rbac.templates.manage',
-  'mirror.any': 'mirror.any.manage',
-  'mirror.cs_team': 'mirror.cs_team.manage',
-  'mirror.marketing_team': 'mirror.marketing_team.manage',
-  'mirror.logistics_chain': 'mirror.logistics_chain.manage',
-};
-
-export function canonicalPermissionCode(code: string): string {
-  return LEGACY_PERMISSION_CODE_MAP[code] ?? code;
-}
+/**
+ * Must match `packages/shared/src/rbac/permission-codes.ts`. Session `/auth/me`
+ * stores canonical codes (e.g. `marketing.campaigns.manage`); loaders pass stable
+ * catalog keys (e.g. `marketing.campaigns`). The shared mapper aligns both — the
+ * old web-only duplicate omitted `marketing.campaigns`, which denied Marketing →
+ * Forms for Media Buyers who **do** hold that capability in the catalog.
+ */
+export { canonicalPermissionCode } from '@yannis/shared';
 
 /**
  * Acronyms that should display as ALL-CAPS rather than Title Case.
