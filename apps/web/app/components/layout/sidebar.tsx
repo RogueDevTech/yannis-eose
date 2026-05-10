@@ -40,7 +40,19 @@ function saveGroupState(state: Record<string, boolean>) {
 export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose, activePathname, notificationCount, isDarkTheme = false }: SidebarProps) {
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
+  // Sync persisted group state BEFORE the browser paints.
+  //
+  // Previously a regular `useEffect` ran *after* paint, so on every nav click
+  // the user saw the sidebar mount with the empty `{}` state (which expands
+  // every group via `autoOpenAll` for small role-sets, or collapses every
+  // group otherwise) for one frame, then snap back to the saved state — the
+  // "collapse all then re-open" flash.
+  //
+  // `useLayoutEffect` runs synchronously after DOM mutations and before paint
+  // — React commits the state update inside it, then paints once with the
+  // already-applied saved state. SSR doesn't run useLayoutEffect at all, so
+  // the server still emits the `{}` markup and there's no hydration mismatch.
+  useLayoutEffect(() => {
     setGroupCollapsed(loadGroupState());
   }, []);
 

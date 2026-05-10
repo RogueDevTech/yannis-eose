@@ -81,9 +81,51 @@ async function main(): Promise<void> {
 
     console.warn('[standalone-backfill] Running legacy union → user_permissions…');
     const staffRows = await db
-      .select({ id: schema.users.id })
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
       .from(schema.users)
       .where(ne(schema.users.role, 'SUPER_ADMIN'));
+
+    const total = staffRows.length;
+    const startedAt = Date.now();
+    /** Emit a rolling-rate / ETA line. Frequent enough to feel live, sparse
+     *  enough not to flood logs on a slow remote DB (Aiven ~150 ms / row). */
+    const PROGRESS_EVERY = total <= 50 ? 5 : total <= 200 ? 10 : total <= 1000 ? 25 : 50;
+    /** Heartbeat — even if no user has finished in a while, print elapsed
+     *  time every 10 s so the operator knows the script is still running. */
+    const HEARTBEAT_MS = 10_000;
+    let lastHeartbeatAt = startedAt;
+    let lastEmittedAt = startedAt;
+    let lastEmittedDone = 0;
+
+    const fmtMs = (ms: number) => {
+      const s = Math.round(ms / 1000);
+      if (s < 60) return `${s}s`;
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return `${m}m${r.toString().padStart(2, '0')}s`;
+    };
+    const printProgress = (done: number, currentLabel?: string) => {
+      const now = Date.now();
+      const elapsed = now - startedAt;
+      const remaining = total - done;
+      const overallRate = done > 0 ? done / (elapsed / 1000) : 0;
+      // Recent-window rate is more honest than overall when the DB warms up.
+      const windowDone = done - lastEmittedDone;
+      const windowMs = now - lastEmittedAt;
+      const recentRate = windowDone > 0 && windowMs > 0 ? windowDone / (windowMs / 1000) : overallRate;
+      const etaSec = recentRate > 0 ? remaining / recentRate : 0;
+      const pct = total > 0 ? Math.round((done / total) * 100) : 100;
+      const tail = currentLabel ? ` · last: ${currentLabel}` : '';
+      console.warn(
+        `[standalone-backfill] ${done}/${total} (${pct}%) — elapsed ${fmtMs(elapsed)} · ` +
+          `${recentRate.toFixed(1)}/s · ETA ${fmtMs(etaSec * 1000)} · ${remaining} remaining${tail}`,
+      );
+      lastEmittedAt = now;
+      lastEmittedDone = done;
+      lastHeartbeatAt = now;
+    };
+
+    console.warn(`[standalone-backfill] Roster: ${total} non-SuperAdmin users to re-stamp.`);
 
     let done = 0;
     for (const u of staffRows) {
@@ -116,13 +158,24 @@ async function main(): Promise<void> {
         }
       });
       done++;
-      if (done % 200 === 0) {
-        console.warn(`[standalone-backfill] Progress: ${done}/${staffRows.length}`);
+      const label = u.name ?? u.email ?? u.id;
+      if (done % PROGRESS_EVERY === 0 || done === total) {
+        printProgress(done, label);
+      } else if (Date.now() - lastHeartbeatAt > HEARTBEAT_MS) {
+        // No batch boundary recently — emit a heartbeat so the script doesn't
+        // look hung when one user's row takes longer than usual.
+        printProgress(done, label);
       }
     }
 
-    await db.execute(sql`INSERT INTO _yannis_permission_snapshot_applied (singleton_key) VALUES (1)`);
-    console.warn(`[standalone-backfill] Complete (${done} users).`);
+    // Idempotent — same rationale as the boot-time backfill service. Even
+    // when --force ran moments earlier and re-stamped the marker, this
+    // doesn't error if a parallel boot beat us to it.
+    await db.execute(
+      sql`INSERT INTO _yannis_permission_snapshot_applied (singleton_key) VALUES (1) ON CONFLICT (singleton_key) DO NOTHING`,
+    );
+    const totalElapsed = fmtMs(Date.now() - startedAt);
+    console.warn(`[standalone-backfill] Complete (${done} users · ${totalElapsed}).`);
   } finally {
     await sqlPg.end({ timeout: 15 });
   }

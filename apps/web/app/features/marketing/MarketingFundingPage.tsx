@@ -890,10 +890,21 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               <SearchableSelect
                 value={requestTargetUserId}
                 onChange={setRequestTargetUserId}
-                options={fundingRequestRecipients.map((r) => ({
-                  value: r.id,
-                  label: `${r.name} — ${r.isFinance ? 'Finance' : 'Head of Marketing'}${r.isPreferred ? ' (default)' : ''}`,
-                }))}
+                options={fundingRequestRecipients.map((r) => {
+                  // Label maps to role / supervisor relationship — supervisor
+                  // takes precedence over the underlying MEDIA_BUYER role so
+                  // the picker reads "Jane Doe — Team supervisor (default)"
+                  // instead of "Jane Doe — Media Buyer".
+                  const roleLabel = r.isSupervisor
+                    ? 'Team supervisor'
+                    : r.isFinance
+                      ? 'Finance'
+                      : 'Head of Marketing';
+                  return {
+                    value: r.id,
+                    label: `${r.name} — ${roleLabel}${r.isPreferred ? ' (default)' : ''}`,
+                  };
+                })}
                 placeholder={fundingRequestRecipients.length === 0 ? 'No recipients available' : 'Select recipient'}
                 searchPlaceholder="Search recipients..."
               />

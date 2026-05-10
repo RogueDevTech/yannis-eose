@@ -117,6 +117,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const searchRaw = url.searchParams.get('search')?.trim() ?? '';
   const searchParam = searchRaw.length > 120 ? searchRaw.slice(0, 120) : searchRaw;
   const probationOnlyParam = url.searchParams.get('probationOnly') === '1';
+  const supervisorOnlyParam = url.searchParams.get('supervisorOnly') === '1';
   const pageParam = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
   const { perPage, pageSizeOptions } = parsePerPage(url.searchParams);
@@ -125,6 +126,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (roleParam && roleParam !== 'ALL') input.role = roleParam;
   if (searchParam.length > 0) input.search = searchParam;
   if (probationOnlyParam) input.probationOnly = true;
+  if (supervisorOnlyParam) input.supervisorOnly = true;
 
   const inputEnc = encodeURIComponent(JSON.stringify(input));
 
@@ -133,6 +135,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   if (roleParam && roleParam !== 'ALL') summaryPayload.role = roleParam;
   if (searchParam.length > 0) summaryPayload.search = searchParam;
   if (probationOnlyParam) summaryPayload.probationOnly = true;
+  if (supervisorOnlyParam) summaryPayload.supervisorOnly = true;
   const summaryEnc = encodeURIComponent(JSON.stringify(summaryPayload));
 
   type RosterSummary = {

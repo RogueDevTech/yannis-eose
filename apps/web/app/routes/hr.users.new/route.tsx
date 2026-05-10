@@ -65,6 +65,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const data = result?.data as Record<string, unknown> | undefined;
     return (data?.[key] as unknown[]) ?? [];
   };
+  /**
+   * Helper for tRPC procedures that return an array directly under
+   * `result.data` (e.g. `products.options`, `logistics.locationOptions`)
+   * instead of `{ items: [...] }` / `{ products: [...] }`. Without this,
+   * `extractData(res, 'products')` returns `[]` because the array has no
+   * `.products` key — that's why the Media Buyer product picker was empty.
+   */
+  const extractDataArray = (res: { ok: boolean; data: unknown }) => {
+    if (!res.ok) return [];
+    const d = res.data as { result?: { data?: unknown[] } };
+    const arr = d?.result?.data;
+    return Array.isArray(arr) ? arr : [];
+  };
 
   /** Same SYSTEM templates as `roleTemplates.list`, returned when staff has baselines but list failed (defensive). */
   const roleTemplatesFromBaselines = (): RoleTemplateOption[] => {
@@ -114,8 +127,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   return {
-    products: extractData(productsRes, 'products') as UserCreateProduct[],
-    locations: (extractData(locationsRes, 'locations') as Array<{ id: string; name: string; address: string; providerName?: string | null }>).map(
+    products: extractDataArray(productsRes) as UserCreateProduct[],
+    locations: (extractDataArray(locationsRes) as Array<{ id: string; name: string; address: string; providerName?: string | null }>).map(
       (l) => ({ id: l.id, name: l.name, address: l.address, providerName: l.providerName ?? null }),
     ) as UserCreateLocation[],
     plans: extractData(plansRes, 'plans') as UserCreateCommissionPlan[],

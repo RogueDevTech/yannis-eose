@@ -49,6 +49,7 @@ import type {
 import { USER_STATUS_COLORS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { ProbationBadge } from '~/components/ui/probation-badge';
+import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 const PermissionsPreview = lazy(() =>
@@ -831,11 +832,56 @@ export function UserDetailPage({
     }
 
     items.push({ label: 'Onboarding', value: onboardingValue });
+
+    // Assigned products — visible for Media Buyers (the only role that gets a
+    // catalog restriction). Resolves IDs against the products list shipped on
+    // the core bundle. If `restrictProductAccess` is off, the user effectively
+    // has the whole catalog regardless of `assignedProductIds`.
+    if (user.role === 'MEDIA_BUYER') {
+      const productsCatalog = coreBundle?.products ?? [];
+      const assignedIds = user.assignedProductIds ?? [];
+      const productById = new Map(productsCatalog.map((p) => [p.id, p.name]));
+      let productsValue: ReactNode;
+      if (!user.restrictProductAccess || assignedIds.length === 0) {
+        productsValue = (
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-app-hover text-app-fg-muted">
+            All products
+          </span>
+        );
+      } else if (productsCatalog.length === 0) {
+        // Catalog hasn't loaded yet — show count so at least the user knows
+        // the field is non-empty while the names hydrate.
+        productsValue = (
+          <span className="text-xs text-app-fg-muted">
+            Loading {assignedIds.length} product{assignedIds.length === 1 ? '' : 's'}…
+          </span>
+        );
+      } else {
+        productsValue = (
+          <div className="flex flex-wrap gap-1.5">
+            {assignedIds.map((id) => (
+              <span
+                key={id}
+                className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300"
+                title={productById.get(id) ?? id}
+              >
+                {productById.get(id) ?? `Unknown (${id.slice(0, 8)}…)`}
+              </span>
+            ))}
+          </div>
+        );
+      }
+      items.push({ label: 'Assigned products', value: productsValue });
+    }
     return items;
   }, [
     memberSince,
     user.updatedAt,
     user.id,
+    user.role,
+    user.restrictProductAccess,
+    user.assignedProductIds,
+    coreBundle?.products,
     showOnboardingTab,
     onboardingOverviewLoading,
     onboardingSummaryResolved,
@@ -1085,6 +1131,7 @@ export function UserDetailPage({
           {/* Quick info pills */}
           <div className="flex flex-wrap items-center gap-2 mt-4">
             <RoleBadge role={user.role} label={formatRole(user.role)} />
+            {user.isTeamSupervisor && <SupervisorBadge />}
             {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} />}
             <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">

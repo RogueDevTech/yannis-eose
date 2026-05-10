@@ -10,16 +10,31 @@ import { decodeSessionBundleCookie } from './session-bundle-cookie.server';
  */
 
 /** Legacy + granular staff-directory capability codes (see seed — `users.read` aliases `users.staff.view`). */
+/**
+ * Permission codes that grant access to `/admin/finance/staff-accounts`
+ * (the finance-side staff list — surfaces payout bank fields, finance-hat
+ * assignment, etc).
+ *
+ * Intentionally restricted to the `users.staff.*` codes — the broader
+ * `users.read` / `users.create` / etc legacy aliases are NOT included here
+ * because they're held by Heads of Marketing / CS / Logistics for their
+ * own team management UIs. Conflating them lets HoM/HoCS browse the
+ * finance-side staff page just by typing the URL — flagged by CEO 2026-05.
+ *
+ * If you need to grant a non-finance role access to this page, do it via
+ * an explicit per-user override of `users.staff.view` rather than adding
+ * a legacy alias here.
+ */
 const STAFF_ACCOUNTS_PERMISSION_CODES = [
   'users.staff.view',
   'users.staff.create',
   'users.staff.update',
   'users.staff.deactivate',
-  'users.read',
-  'users.create',
-  'users.update',
-  'users.deactivate',
 ] as const;
+
+/** Roles that always have access to the finance staff-accounts page,
+ *  regardless of what permission codes their template carries. */
+const STAFF_ACCOUNTS_ROLES = ['FINANCE_OFFICER', 'HR_MANAGER'] as const;
 
 /** Vite dev server (must match `vite.config` server.port — used only for `/trpc` SSR in dev). */
 const DEV_VITE_ORIGIN = 'http://127.0.0.1:4003';
@@ -513,6 +528,13 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
         ...(bundle.staffOnboardingStatus !== undefined
           ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
           : {}),
+        ...(bundle.isMarketingTeamSupervisorOnActiveBranch === true
+          ? { isMarketingTeamSupervisorOnActiveBranch: true as const }
+          : {}),
+        ...(bundle.isCsTeamSupervisorOnActiveBranch === true
+          ? { isCsTeamSupervisorOnActiveBranch: true as const }
+          : {}),
+        ...(bundle.isTeamSupervisor === true ? { isTeamSupervisor: true as const } : {}),
       };
     }
   }
@@ -537,6 +559,10 @@ async function getCurrentUserUncached(request: Request, options?: GetCurrentUser
       mirroredBy?: { id: string; name: string; role: string } | null;
       /** Staff onboarding packet — `/auth/me` omits for admin-class roles. */
       staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
+      /** Branch marketing team supervisor — scoped surfaces; see BranchTeamsService. */
+      isMarketingTeamSupervisorOnActiveBranch?: boolean;
+      /** "Is supervisor anywhere" — for UI badging. Mirrors users.is_team_supervisor. */
+      isTeamSupervisor?: boolean;
     };
   }>('/auth/me', {
     method: 'POST',
@@ -629,6 +655,10 @@ export async function requirePermission(
   logisticsLocationId?: string | null;
   currentBranchId?: string | null;
   branchIds?: string[];
+  /** Surfaces the marketing-supervisor session flag so loaders can treat them HoM-like. */
+  isMarketingTeamSupervisorOnActiveBranch?: boolean;
+  /** "Is supervisor anywhere" — for UI badging on user lists / detail pages. */
+  isTeamSupervisor?: boolean;
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
@@ -679,7 +709,12 @@ export async function requireOnboardingHrPagesAccess(request: Request): Promise<
  */
 export async function requirePermissionOrRoles(
   request: Request,
-  options: { roles: string[]; permission: string | string[] },
+  options: {
+    roles: string[];
+    permission: string | string[];
+    /** Allows branch marketing team supervisors (session flag + active branch). */
+    orMarketingTeamSupervisorOnBranch?: boolean;
+  },
 ): Promise<{
   id: string;
   email: string;
@@ -688,6 +723,7 @@ export async function requirePermissionOrRoles(
   permissions?: string[];
   logisticsLocationId?: string | null;
   currentBranchId?: string | null;
+  isMarketingTeamSupervisorOnActiveBranch?: boolean;
 }> {
   const user = await getCurrentUser(request);
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
@@ -698,7 +734,16 @@ export async function requirePermissionOrRoles(
   );
   const perms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const hasAny = codes.some((c) => perms.includes(c));
-  if (!hasAny) throw redirect(buildUnauthorizedRedirect(request, codes, { roles: options.roles }));
+  if (!hasAny) {
+    if (
+      options.orMarketingTeamSupervisorOnBranch === true &&
+      user.isMarketingTeamSupervisorOnActiveBranch === true &&
+      user.currentBranchId
+    ) {
+      return user;
+    }
+    throw redirect(buildUnauthorizedRedirect(request, codes, { roles: options.roles }));
+  }
   return user;
 }
 
@@ -727,19 +772,22 @@ export async function requireStaffAccountsAccess(
   if (!user) throw redirect(`/auth?redirectTo=${new URL(request.url).pathname}`);
   if (user.role === 'SUPER_ADMIN') return user;
   if (isAdminLevel(user)) return user;
+  if ((STAFF_ACCOUNTS_ROLES as readonly string[]).includes(user.role)) {
+    return user;
+  }
   const perms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
   const allowed = STAFF_ACCOUNTS_PERMISSION_CODES.some((c) => perms.has(canonicalPermissionCode(c)));
   if (allowed) {
-    return user;
-  }
-  if (user.role === 'FINANCE_OFFICER') {
     return user;
   }
   throw redirect(
     buildUnauthorizedRedirect(
       request,
       [...STAFF_ACCOUNTS_PERMISSION_CODES],
-      { roles: ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'], action: 'manage staff accounts' },
+      {
+        roles: ['SUPER_ADMIN', 'ADMIN', ...STAFF_ACCOUNTS_ROLES],
+        action: 'manage staff accounts',
+      },
     ),
   );
 }
@@ -769,12 +817,20 @@ export async function requireGlobalAuditAccess(
 
 /**
  * Map an API status code to a safe Remix action status.
- * Never forward 5xx to the client — Remix treats action 5xx as unhandled errors.
+ *
+ * Preserves 4xx as-is (UI surfaces field-level errors).
+ * Preserves 503/504 — these are the synthesized statuses `apiRequest`
+ * returns on TCP failure / timeout; if we mask them as 422 the browser
+ * console shows "Unprocessable Entity" and developers chase a phantom
+ * validation bug while the real cause is "API server down".
+ * Other 5xx (500/502/etc.) still collapse to 422 because Remix v2 treats a
+ * thrown 5xx as an unhandled error — and some callers `throw` the result.
  */
 export function safeStatus(apiStatus: number): number {
   if (apiStatus === 401) return 401;
   if (apiStatus === 403) return 403;
   if (apiStatus >= 400 && apiStatus < 500) return apiStatus;
+  if (apiStatus === 503 || apiStatus === 504) return apiStatus;
   return 422;
 }
 

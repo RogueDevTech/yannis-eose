@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Form, Link, useNavigate, useFetcher, useSubmit, useNavigation, useLocation } from '@remix-run/react';
+import { Form, Link, useNavigate, useSubmit, useNavigation, useLocation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
@@ -794,7 +794,16 @@ function HeaderBranchSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const fetcher = useFetcher();
+  // Use top-level `useSubmit` (full navigation), NOT `useFetcher`. With a
+  // fetcher, the action's `redirect(referer, { headers })` is followed but the
+  // parent /admin loader is not re-validated — leaving the layout's React
+  // state pointed at the pre-switch user even though the freshly-issued
+  // bundle cookie has the new currentBranchId. The result was the entire
+  // sidebar nav going blank after a switch (mirror mode made it most visible).
+  // Top-level submit triggers a real navigation so all loaders revalidate.
+  const submit = useSubmit();
+  const navigation = useNavigation();
+  const isSubmitting = navigation.state !== 'idle' && navigation.formAction === '/admin/branches/switch';
 
   const canSeeAllBranches = ALL_BRANCHES_ROLES.has(userRole);
   const currentBranch = branches.find((b) => b.id === currentBranchId) ?? null;
@@ -816,7 +825,7 @@ function HeaderBranchSwitcher({
   // null branchId = "All Branches"; empty string submitted to action = null on backend
   const handleSwitch = (branchId: string | null) => {
     if (branchId === currentBranchId) { setOpen(false); return; }
-    fetcher.submit(
+    submit(
       { intent: 'switchBranch', branchId: branchId ?? '' },
       { method: 'post', action: '/admin/branches/switch' },
     );
@@ -851,7 +860,7 @@ function HeaderBranchSwitcher({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-app-hover border border-app-border hover:bg-app-hover transition-colors duration-150 text-left"
-        disabled={fetcher.state !== 'idle'}
+        disabled={isSubmitting}
       >
         {isAllBranches ? (
           <svg className="w-3.5 h-3.5 text-brand-500 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -870,7 +879,7 @@ function HeaderBranchSwitcher({
             {triggerCode}
           </span>
         )}
-        {fetcher.state !== 'idle' ? (
+        {isSubmitting ? (
           <svg
             className="w-3 h-3 ml-0.5 flex-shrink-0 animate-spin text-brand-500 dark:text-brand-400"
             fill="none" viewBox="0 0 24 24"

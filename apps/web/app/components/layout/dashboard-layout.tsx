@@ -27,6 +27,7 @@ import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
 import { BranchesCatalogProvider } from '~/contexts/branches-catalog-context';
 import { OnboardingNudge } from './onboarding-nudge';
 import { canAccessGlobalAuditLog, isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import {
   LoginModalGateProvider,
   type OnboardingModalGate,
@@ -61,6 +62,8 @@ interface DashboardLayoutProps {
     mirroredBy?: { id: string; name: string; role: string } | null;
     /** From `/auth/me` — login onboarding nudge skips users HR has approved. */
     staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
+    /** Branch marketing supervisor — nav parity with `marketing.teamOverview` surfaces. */
+    isMarketingTeamSupervisorOnActiveBranch?: boolean;
   } | null;
   notificationsPromise: NotificationsPromise;
   /** Route action URL for notification mark-read (e.g. /admin or /hr). */
@@ -126,30 +129,37 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/marketing/orders',
         icon: SidebarIcons.orders,
         permission: 'marketing.orders',
+        // HoM / admin-class: same pattern as Live Activities — role fallback if session
+        // permission bitmask/decoding is stale; Media Buyers still need marketing.orders.
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Funding',
         href: '/admin/marketing/funding',
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Ads Expense',
         href: '/admin/marketing/ad-spend',
         icon: SidebarIcons.marketing,
         permission: 'marketing.read',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Forms',
         href: '/admin/marketing/forms',
         icon: SidebarIcons.campaigns,
         permission: 'marketing.campaigns',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Leaderboard',
         href: '/admin/marketing/leaderboard',
         icon: SidebarIcons.leaderboards,
         permission: 'marketing.leaderboard',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
       },
       {
         label: 'Cross-funnel',
@@ -264,10 +274,16 @@ const navStructure: NavGroupDef[] = [
         permission: 'finance.disburse',
       },
       {
+        // Sidebar gate is OR(permission, roles). Listing `permission: 'users.read'`
+        // here let HoM in (they hold `users.read` for team management).
+        // CEO directive 2026-05-10: HoM does NOT manage staff accounts.
+        // Roles-only restricts to HR_MANAGER + FINANCE_OFFICER (+ admin-class
+        // via `navBypass`). The page itself is also gated by
+        // `requireStaffAccountsAccess` so an unauthorized user typing the URL
+        // is redirected anyway.
         label: 'Staff Accounts',
         href: '/admin/finance/staff-accounts',
         icon: SidebarIcons.users,
-        permission: 'users.read',
         roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
       },
     ],
@@ -280,8 +296,12 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/inventory',
         icon: SidebarIcons.inventory,
         permission: 'inventory.read',
-        // Heads see inventory read-only by role so they can plan against stock.
-        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
+        // HEAD_OF_CS sees inventory read-only by role so CS can plan against
+        // stock when confirming orders. HEAD_OF_MARKETING was previously here
+        // too but was removed by CEO directive — Marketing should plan
+        // against ad-spend / funding, not raw stock; Stock Manager and admins
+        // own inventory visibility.
+        roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
         label: 'Our warehouse',
@@ -327,15 +347,16 @@ const navStructure: NavGroupDef[] = [
         permission: 'hr.read',
         roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS', 'FINANCE_OFFICER'],
       },
-      // Commission Plans: separate page so Heads can manage their own dept's plans (CEO directive
-      // 2026-04-26). Backend `hr.listPlans` / `hr.createPlan` / `hr.updatePlan` auto-scope per
-      // viewer — Heads only see/edit roles in their dept; HR + admins see/edit all.
+      // Commission Plans: separate page so HoCS / HoLogistics can manage their own dept's plans
+      // (CEO directive 2026-04-26, refined later — HEAD_OF_MARKETING was removed; Marketing
+      // commission plans are managed by HR / admin only). Backend `hr.listPlans` /
+      // `hr.createPlan` / `hr.updatePlan` auto-scope per viewer.
       {
         label: 'Commission Plans',
         href: '/hr/plans',
         icon: SidebarIcons.leaderboards,
         permission: 'hr.read',
-        roles: ['HEAD_OF_CS', 'HEAD_OF_MARKETING', 'HEAD_OF_LOGISTICS'],
+        roles: ['HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
       },
       // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
       // Head of Marketing / Head of CS hold `users.read` for other features but must not see
@@ -368,6 +389,12 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/branches',
         icon: SidebarIcons.settings,
         permission: 'branches.manage',
+        // Org-wide heads see this entry too so they can drill into branches
+        // they're a department head for and manage their team via
+        // `branches.teams.*`. Inside each branch they only see + act on
+        // controls the API gates them on (team CRUD for their dept; branch
+        // CRUD itself stays admin / Branch Admin).
+        roles: ['HEAD_OF_MARKETING', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
       },
       {
         label: 'Role templates',
@@ -417,18 +444,23 @@ const navStructure: NavGroupDef[] = [
  */
 function getDisplayLabel(
   item: NavItemDef,
-  user: { role: string; permissions?: string[] } | null,
+  user: { role: string; permissions?: string[]; isMarketingTeamSupervisorOnActiveBranch?: boolean } | null,
 ): string {
   const role = user?.role ?? '';
+  const isMarketingSupervisor = user?.isMarketingTeamSupervisorOnActiveBranch === true;
   if (item.href === '/admin/cs/orders' && role === 'CS_CLOSER') return 'My Orders';
-  if (item.href === '/admin/marketing/orders' && role === 'MEDIA_BUYER') return 'My Orders';
+  // For MEDIA_BUYER who is also a marketing team supervisor, the marketing
+  // orders page is HoM-like (their team's orders, not just theirs) — keep the
+  // generic "Orders" label there. The "My Orders" override is only for the
+  // rank-and-file MB whose page truly is self-only.
+  if (item.href === '/admin/marketing/orders' && role === 'MEDIA_BUYER' && !isMarketingSupervisor) return 'My Orders';
   return item.label;
 }
 
 /** Label for mobile (bottom nav + More modal): uses labelShort when set. */
 function getDisplayLabelMobile(
   item: NavItemDef,
-  user: { role: string; permissions?: string[] } | null,
+  user: { role: string; permissions?: string[]; isMarketingTeamSupervisorOnActiveBranch?: boolean } | null,
 ): string {
   return item.labelShort ?? getDisplayLabel(item, user);
 }
@@ -441,14 +473,32 @@ function showLoginOnboardingNudge(user: {
   return !!user && !isAdminLevel(user) && user.staffOnboardingStatus !== 'APPROVED';
 }
 
+/** Session + bitmask expose canonical codes; `navStructure` uses catalog keys — align both. */
+function buildCanonicalPermSet(permissions: readonly string[] | undefined): Set<string> {
+  const set = new Set<string>();
+  for (const p of permissions ?? []) {
+    set.add(canonicalPermissionCode(p));
+  }
+  return set;
+}
+
+function permSetHas(set: Set<string>, catalogOrLegacyCode: string): boolean {
+  return set.has(canonicalPermissionCode(catalogOrLegacyCode));
+}
+
 function getNavGroupsForUser(
-  user: { role: string; permissions?: string[]; currentBranchId?: string | null } | null,
+  user: {
+    role: string;
+    permissions?: string[];
+    currentBranchId?: string | null;
+    isMarketingTeamSupervisorOnActiveBranch?: boolean;
+  } | null,
   options?: { forMobile?: boolean },
 ): SidebarGroup[] {
   const result: SidebarGroup[] = [];
+  const permSet = buildCanonicalPermSet(user?.permissions);
   // Broad sidebar visibility: SuperAdmin (system role) or explicit CEO/overview capability.
-  const navBypass = user?.role === 'SUPER_ADMIN' || (user?.permissions?.includes('ceo.overview') ?? false);
-  const perms = user?.permissions ?? [];
+  const navBypass = user?.role === 'SUPER_ADMIN' || permSetHas(permSet, 'ceo.overview');
   const role = user?.role ?? '';
   const forMobile = options?.forMobile === true;
 
@@ -475,9 +525,9 @@ function getNavGroupsForUser(
         if (item.href === '/hr/staff-onboarding-documents') {
           if (user?.role === 'SUPER_ADMIN') return true;
           return (
-            perms.includes('hr.onboarding.read') ||
-            perms.includes('hr.onboarding.write') ||
-            perms.includes('hr.onboarding.approve')
+            permSetHas(permSet, 'hr.onboarding.read') ||
+            permSetHas(permSet, 'hr.onboarding.write') ||
+            permSetHas(permSet, 'hr.onboarding.approve')
           );
         }
         // Permission Requests: any of the 6 approve codes → see the link. Submitters
@@ -488,12 +538,12 @@ function getNavGroupsForUser(
           if (user?.role === 'SUPER_ADMIN') return true;
           if (user?.role === 'HEAD_OF_LOGISTICS') return true;
           return (
-            perms.includes('permission_requests.user_creation.approve') ||
-            perms.includes('permission_requests.role_change.approve') ||
-            perms.includes('permission_requests.permission_grant.approve') ||
-            perms.includes('permission_requests.product_archive.approve') ||
-            perms.includes('permission_requests.order_line_price.approve') ||
-            perms.includes('permission_requests.order_deletion.approve')
+            permSetHas(permSet, 'permission_requests.user_creation.approve') ||
+            permSetHas(permSet, 'permission_requests.role_change.approve') ||
+            permSetHas(permSet, 'permission_requests.permission_grant.approve') ||
+            permSetHas(permSet, 'permission_requests.product_archive.approve') ||
+            permSetHas(permSet, 'permission_requests.order_line_price.approve') ||
+            permSetHas(permSet, 'permission_requests.order_deletion.approve')
           );
         }
         // Disbursements: Finance → HoM only; HoM must not see this (they use Marketing → Funding).
@@ -504,7 +554,19 @@ function getNavGroupsForUser(
         if (!item.permission && !item.roles) return true;
         if (navBypass) return true;
         if (item.roles?.includes(user?.role ?? '')) return true;
-        if (item.permission && perms.includes(item.permission)) return true;
+        if (item.permission && permSetHas(permSet, item.permission)) return true;
+        // Marketing team supervisor on the active branch: full HoM-like sidebar
+        // for marketing surfaces (Live Activities, Team Analysis, Orders, Funding,
+        // Ads Expense, Forms, Leaderboard). Backend procedures scope the data
+        // to their team via `applySupervisorScope` / `applyMarketingSupervisorScope`,
+        // so granting sidebar visibility here is safe — they can't reach data
+        // outside their supervised MBs even if the link is exposed.
+        if (
+          MARKETING_SUPERVISOR_NAV_HREFS.has(item.href) &&
+          user?.isMarketingTeamSupervisorOnActiveBranch === true &&
+          user.currentBranchId
+        )
+          return true;
         return false;
       })
       .map((item) => ({
@@ -520,6 +582,22 @@ function getNavGroupsForUser(
 
   return result;
 }
+
+/**
+ * Sidebar items that a Marketing team supervisor on the active branch sees
+ * even without the underlying HoM permission. Excluded by design:
+ *   - /admin/branches/* — branch management stays admin-class
+ *   - /admin/marketing/cross-funnel — already visible to all MEDIA_BUYERs via role
+ */
+const MARKETING_SUPERVISOR_NAV_HREFS: ReadonlySet<string> = new Set([
+  '/admin/marketing/overview',
+  '/admin/marketing/team',
+  '/admin/marketing/orders',
+  '/admin/marketing/funding',
+  '/admin/marketing/ad-spend',
+  '/admin/marketing/forms',
+  '/admin/marketing/leaderboard',
+]);
 
 /** Priority hrefs for bottom nav per role (max 5). Order matters. */
 const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
@@ -585,14 +663,19 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
 const FLAT_NAV_ITEMS = navStructure.flatMap((g) => g.items);
 
 function getBottomNavItemsForUser(
-  user: { role: string; permissions?: string[] } | null,
+  user: {
+    role: string;
+    permissions?: string[];
+    currentBranchId?: string | null;
+    isMarketingTeamSupervisorOnActiveBranch?: boolean;
+  } | null,
 ): BottomNavItem[] {
   if (!user) return [];
   const role = user.role ?? '';
   const priorityHrefs = BOTTOM_NAV_PRIORITY_BY_ROLE[role];
   if (priorityHrefs) {
-    const navBypass = user.role === 'SUPER_ADMIN' || (user.permissions?.includes('ceo.overview') ?? false);
-    const perms = user.permissions ?? [];
+    const permSet = buildCanonicalPermSet(user.permissions);
+    const navBypass = user.role === 'SUPER_ADMIN' || permSetHas(permSet, 'ceo.overview');
     const result: BottomNavItem[] = [];
     const hrefToItem = new Map(FLAT_NAV_ITEMS.map((item) => [item.href, item]));
     for (const href of priorityHrefs) {
@@ -605,22 +688,25 @@ function getBottomNavItemsForUser(
         (!item.permission && !item.roles) ||
         navBypass ||
         (item.roles?.includes(role) ?? false) ||
-        (!!item.permission && perms.includes(item.permission)) ||
+        (!!item.permission && permSetHas(permSet, item.permission)) ||
         (item.href === '/admin/analytics/audit' && canAccessGlobalAuditLog(user)) ||
         (item.href === '/hr/staff-onboarding-documents' &&
           (user.role === 'SUPER_ADMIN' ||
-            perms.includes('hr.onboarding.read') ||
-            perms.includes('hr.onboarding.write') ||
-            perms.includes('hr.onboarding.approve'))) ||
+            permSetHas(permSet, 'hr.onboarding.read') ||
+            permSetHas(permSet, 'hr.onboarding.write') ||
+            permSetHas(permSet, 'hr.onboarding.approve'))) ||
         (item.href === '/admin/permission-requests' &&
           (user.role === 'SUPER_ADMIN' ||
             user.role === 'HEAD_OF_LOGISTICS' ||
-            perms.includes('permission_requests.user_creation.approve') ||
-            perms.includes('permission_requests.role_change.approve') ||
-            perms.includes('permission_requests.permission_grant.approve') ||
-            perms.includes('permission_requests.product_archive.approve') ||
-            perms.includes('permission_requests.order_line_price.approve') ||
-            perms.includes('permission_requests.order_deletion.approve')));
+            permSetHas(permSet, 'permission_requests.user_creation.approve') ||
+            permSetHas(permSet, 'permission_requests.role_change.approve') ||
+            permSetHas(permSet, 'permission_requests.permission_grant.approve') ||
+            permSetHas(permSet, 'permission_requests.product_archive.approve') ||
+            permSetHas(permSet, 'permission_requests.order_line_price.approve') ||
+            permSetHas(permSet, 'permission_requests.order_deletion.approve'))) ||
+        (MARKETING_SUPERVISOR_NAV_HREFS.has(item.href) &&
+          user.isMarketingTeamSupervisorOnActiveBranch === true &&
+          !!user.currentBranchId);
       if (allowed) {
         result.push({
           label: getDisplayLabelMobile(item, user),

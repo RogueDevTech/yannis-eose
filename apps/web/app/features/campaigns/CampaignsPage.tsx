@@ -265,9 +265,7 @@ export function FormsPage({
         }}
         tabs={
           isMediaBuyer
-            ? [
-                { value: 'mine', label: `My forms (${mineFormsCount})` },
-              ]
+            ? [{ value: 'mine', label: `My forms (${mineFormsCount})` }]
             : [
                 { value: 'all', label: `All forms (${allFormsCount})` },
                 { value: 'mine', label: `My forms (${mineFormsCount})` },

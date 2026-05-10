@@ -7,6 +7,7 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { canViewAllBranches } from '../common/authz';
 import { SessionStoreService } from '../auth/session-store.service';
 import { UserBundleCacheService } from '../auth/user-bundle-cache.service';
+import { BranchTeamsService } from '../branches/branch-teams.service';
 
 @Injectable()
 export class TrpcMiddleware implements NestMiddleware {
@@ -15,6 +16,7 @@ export class TrpcMiddleware implements NestMiddleware {
   constructor(
     @Inject(SessionStoreService) private readonly sessionStore: SessionStoreService,
     private readonly userBundleCache: UserBundleCacheService,
+    private readonly branchTeams: BranchTeamsService,
   ) {}
 
   async use(req: Request, res: Response, _next: NextFunction) {
@@ -104,7 +106,7 @@ export class TrpcMiddleware implements NestMiddleware {
     // the session blob and are merged on top below.
     const bundle = await this.userBundleCache.getOrLoad(user.id);
 
-    const merged: SessionUser = {
+    let merged: SessionUser = {
       ...user,
       role: bundle.role || user.role,
       roleTemplateId: bundle.roleTemplateId,
@@ -112,7 +114,15 @@ export class TrpcMiddleware implements NestMiddleware {
       scopeOrgWideHead: bundle.scopeOrgWideHead,
       scopeTeamSupervisor: bundle.scopeTeamSupervisor,
       permissions: bundle.permissions,
+      appTheme: bundle.appTheme ?? user.appTheme,
+      fontScale: bundle.fontScale ?? user.fontScale,
+      isTeamSupervisor: bundle.isTeamSupervisor,
+      ...(bundle.staffOnboardingStatus !== undefined
+        ? { staffOnboardingStatus: bundle.staffOnboardingStatus }
+        : {}),
     };
+
+    merged = await this.branchTeams.attachTeamSupervisorSessionFlags(merged);
 
     (req as Request & { user: SessionUser }).user = merged;
 

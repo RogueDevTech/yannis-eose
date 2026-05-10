@@ -47,10 +47,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
   const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
 
-  const isMediaBuyer = user.role === 'MEDIA_BUYER';
+  // Marketing team supervisors on the active branch get HoM-like UX here:
+  // they see the MB column, the buyer filter, and don't get auto-pinned to
+  // their own orders. Backend `orders.list` narrows to their team via
+  // `applySupervisorScope` so passing no mediaBuyerId returns team-scoped data
+  // (NOT branch-wide). See orders.router.ts narrowOrdersAggregateFiltersForViewer.
+  const isMarketingSupervisor =
+    user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true;
+  const isMediaBuyer = user.role === 'MEDIA_BUYER' && !isMarketingSupervisor;
   const mediaBuyerId = isMediaBuyer ? user.id : mediaBuyerIdParam;
   const showMediaBuyerColumn =
-    user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+    user.role === 'HEAD_OF_MARKETING' ||
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    isMarketingSupervisor;
   const loadMarketingExportPicklists = showMediaBuyerColumn && !isMediaBuyer;
 
   const productIdParam = url.searchParams.get('productId') || undefined;

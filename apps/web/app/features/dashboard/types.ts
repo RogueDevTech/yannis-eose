@@ -63,4 +63,17 @@ export interface DashboardPageProps {
   role: string | null;
   userName: string;
   filters?: DashboardFilters;
+  /**
+   * True when the viewer is a Media Buyer who has been promoted to supervise
+   * their branch's marketing team. The dashboard then renders the HoM-style
+   * "Team Management" card and the metrics endpoint (`marketing.metrics`)
+   * auto-aggregates across the supervisor's team via `supervisorScope`.
+   */
+  isMarketingTeamSupervisor?: boolean;
+  /**
+   * Symmetric for CS — true when the viewer is a CS Closer promoted to
+   * supervise their branch's CS team. Renders the HoCS-style "Team Management"
+   * card; metrics already aggregate via `applySupervisorScope`.
+   */
+  isCsTeamSupervisor?: boolean;
 }

@@ -60,6 +60,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   //  - Self-view: any authenticated user may open their own profile (drives /admin/profile).
   //  - Head of CS  may view their CS team (CS_CLOSER, HEAD_OF_CS) — nothing else.
   //  - Head of Marketing may view their Marketing team (MEDIA_BUYER, HEAD_OF_MARKETING) — nothing else.
+  //  - Branch-team supervisors may view the squad-mates they supervise
+  //    (CEO directive 2026-05-11). The supervisor flag lives on
+  //    `branch_team_members.is_supervisor` so we ask the API.
   //  - Everyone else must hold `hr.read` (HR_MANAGER) or be admin-level.
   // HoM/HoCS still carry `users.read` globally for other features (team leaderboards, push
   // target search, etc.), so we can't just require `users.read` — we'd leak unrelated profiles.
@@ -72,10 +75,35 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(profileUser.role);
   const isHoMOrHoCS = currentUser.role === 'HEAD_OF_MARKETING' || currentUser.role === 'HEAD_OF_CS';
 
+  // Branch-team supervisor relationship check — only fires when no cheaper
+  // gate already passed. A MEDIA_BUYER who supervises a marketing squad can
+  // see their squad-mates here; same for CS_CLOSER supervisors over their
+  // CS team. The check is server-authoritative — we don't trust the session
+  // flag alone since it's per active branch and the profile may be on the
+  // viewer's other branch teams.
+  let isSupervisorViewingSupervisee = false;
+  if (!isSelfView && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
+    const supervisorCheck = await apiRequest<unknown>(
+      `/trpc/branches.amISupervisorOfUser?input=${encodeURIComponent(
+        JSON.stringify({ superviseeId: profileUser.id }),
+      )}`,
+      { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
+    );
+    if (supervisorCheck.ok) {
+      const data = (supervisorCheck.data as { result?: { data?: boolean } })?.result?.data;
+      isSupervisorViewingSupervisee = data === true;
+    }
+  }
+
   if (!isSelfView && isHoMOrHoCS && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
     throw new Response('This user is not on your team.', { status: 403 });
   }
-  if (!isSelfView && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {
+  if (
+    !isSelfView &&
+    !headOfCSViewingTeam &&
+    !headOfMarketingViewingTeam &&
+    !isSupervisorViewingSupervisee
+  ) {
     await requireStaffAccountsAccess(request);
   }
 
@@ -587,7 +615,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
         { status: safeStatus(res.status) },
       );
     }
-    throw redirect('/admin');
+    // Forward API Set-Cookie (session bundle with mirrored identity + supervisor flags).
+    // Without this, Remix keeps decoding the stale bundle cookie and loaders still see the admin.
+    const headers = new Headers();
+    for (const c of res.setCookies) {
+      headers.append('Set-Cookie', c);
+    }
+    throw redirect('/admin', { headers });
   }
 
   return json({ error: 'Unknown action' }, { status: 400 });

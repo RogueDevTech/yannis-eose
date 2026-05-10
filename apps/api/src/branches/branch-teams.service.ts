@@ -1,5 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
@@ -279,9 +279,28 @@ export class BranchTeamsService {
   }
 
   async deleteTeam(teamId: string) {
+    // Capture supervisor user IDs BEFORE the cascade so we can resync their
+    // user-level supervisor flag after the team's rows are gone (an ex-
+    // supervisor whose only team just got deleted should drop the flag).
+    const supervisorRows = await this.safeBranchTeamsRead<Array<{ userId: string }>>(
+      [],
+      async () =>
+        this.db
+          .select({ userId: schema.branchTeamMembers.userId })
+          .from(schema.branchTeamMembers)
+          .where(
+            and(
+              eq(schema.branchTeamMembers.teamId, teamId),
+              eq(schema.branchTeamMembers.isSupervisor, true),
+            ),
+          ),
+    );
     await this.safeBranchTeamsWrite(async () => {
       await this.db.delete(schema.branchTeams).where(eq(schema.branchTeams.id, teamId));
     });
+    for (const row of supervisorRows) {
+      await this.syncUserSupervisorFlag(row.userId);
+    }
   }
 
   /**
@@ -354,6 +373,45 @@ export class BranchTeamsService {
     }
   }
 
+  /**
+   * Recompute `users.is_team_supervisor` for a single user from the current
+   * `branch_team_members` rows. Call this after any mutation that could change
+   * the user's supervisor status (add/remove member, promote/demote, bulk add).
+   *
+   * Cheap: one EXISTS query + one conditional UPDATE. No-ops when the column
+   * already matches, so it's safe to call defensively.
+   *
+   * Source of truth stays the team-membership rows; this column is denormalised
+   * state for UI surfaces (header chip, user-detail pill, Staff Accounts list/
+   * filter) that don't want to JOIN.
+   */
+  async syncUserSupervisorFlag(userId: string): Promise<void> {
+    await this.safeBranchTeamsWrite(async () => {
+      const supervisorRows = await this.db
+        .select({ id: schema.branchTeamMembers.userId })
+        .from(schema.branchTeamMembers)
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, userId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+          ),
+        )
+        .limit(1);
+      const shouldBeSupervisor = supervisorRows.length > 0;
+      await this.db
+        .update(schema.users)
+        .set({ isTeamSupervisor: shouldBeSupervisor })
+        .where(
+          and(
+            eq(schema.users.id, userId),
+            // Only update when the value actually changes — keeps the temporal
+            // history clean (no spurious rows for repeat sync calls).
+            ne(schema.users.isTeamSupervisor, shouldBeSupervisor),
+          ),
+        );
+    });
+  }
+
   async addTeamMember(teamId: string, userId: string, isSupervisor: boolean, _actor: SessionUser) {
     await this.safeBranchTeamsWrite(async () => {
       const [team] = await this.db
@@ -385,6 +443,7 @@ export class BranchTeamsService {
           set: { isSupervisor },
         });
     });
+    await this.syncUserSupervisorFlag(userId);
   }
 
   /**
@@ -493,6 +552,12 @@ export class BranchTeamsService {
         else added += 1;
       }
     });
+    // Sync the supervisor flag for every user touched. The bulk caller can only
+    // promote one supervisor at a time (validated above), so this only flips
+    // the flag for that one user and is a no-op for the rest. Cheap either way.
+    for (const userId of userIds) {
+      await this.syncUserSupervisorFlag(userId);
+    }
     return { added, moved };
   }
 
@@ -559,6 +624,7 @@ export class BranchTeamsService {
           and(eq(schema.branchTeamMembers.teamId, teamId), eq(schema.branchTeamMembers.userId, userId)),
         );
     });
+    await this.syncUserSupervisorFlag(userId);
   }
 
   async setMemberSupervisor(teamId: string, userId: string, isSupervisor: boolean) {
@@ -575,6 +641,7 @@ export class BranchTeamsService {
         .returning();
       if (!updated[0]) throw new TRPCError({ code: 'NOT_FOUND', message: 'Team member not found' });
     });
+    await this.syncUserSupervisorFlag(userId);
   }
 
   /** Same team, CS department, actor is supervisor, supervisee is non-supervisor CS_CLOSER. */
@@ -628,6 +695,36 @@ export class BranchTeamsService {
             eq(schema.branchTeams.branchId, branchId),
             eq(schema.branchTeams.department, 'MARKETING'),
             eq(schema.users.role, 'MEDIA_BUYER'),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    });
+  }
+
+  /**
+   * Branch/department-agnostic version of `isCsSupervisorOf` / `isMarketingSupervisorOf`.
+   * True if `actorId` is a team supervisor anywhere they share a team with
+   * `superviseeId` (where the supervisee row has `is_supervisor = false`).
+   *
+   * Used by `/hr/users/:id` (CEO directive 2026-05-11) so a Marketing- or CS-
+   * team supervisor can open their squad-mates' profile cards without
+   * needing the full `users.staff.*` permission family.
+   */
+  async isSupervisorOfUserAnywhere(actorId: string, superviseeId: string): Promise<boolean> {
+    return this.safeBranchTeamsRead(false, async () => {
+      const sup = alias(schema.branchTeamMembers, 'sup_any');
+      const mem = alias(schema.branchTeamMembers, 'mem_any');
+      const rows = await this.db
+        .select({ x: sql`1` })
+        .from(sup)
+        .innerJoin(mem, eq(mem.teamId, sup.teamId))
+        .where(
+          and(
+            eq(sup.userId, actorId),
+            eq(sup.isSupervisor, true),
+            eq(mem.userId, superviseeId),
+            eq(mem.isSupervisor, false),
           ),
         )
         .limit(1);
@@ -734,6 +831,176 @@ export class BranchTeamsService {
     const marketingUserIds = [...new Set([actorId, ...marketingIds])];
     const isSupervisor = csIds.length > 0 || marketingIds.length > 0;
     return { csUserIds, marketingUserIds, isSupervisor };
+  }
+
+  /**
+   * True when the actor is a marketing team supervisor on this branch with at least one
+   * supervised MEDIA_BUYER on the same squad — used for scoped HoM-like marketing surfaces.
+   */
+  async hasMarketingSuperviseesOnBranch(actorId: string, branchId: string): Promise<boolean> {
+    const ids = await this.listSupervisedUserIds(actorId, branchId, 'MARKETING');
+    return ids.length > 0;
+  }
+
+  /**
+   * True when the actor is marked as supervisor on at least one MARKETING team in this branch,
+   * regardless of whether the team currently has any supervisees. Use this for capability gates
+   * (e.g. "should this user see the supervisor surfaces?") — a supervisor of a freshly-created
+   * empty team is still a supervisor and should see Live Activities / Team Analysis so they can
+   * onboard members. Use {@link hasMarketingSuperviseesOnBranch} only when the surface is
+   * meaningless without supervisees (e.g. team-scope filters that would render empty).
+   */
+  async isMarketingSupervisorOnBranch(actorId: string, branchId: string): Promise<boolean> {
+    return this.safeBranchTeamsRead(false, async () => {
+      const rows = await this.db
+        .select({ id: schema.branchTeamMembers.userId })
+        .from(schema.branchTeamMembers)
+        .innerJoin(
+          schema.branchTeams,
+          eq(schema.branchTeams.id, schema.branchTeamMembers.teamId),
+        )
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, actorId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+            eq(schema.branchTeams.branchId, branchId),
+            eq(schema.branchTeams.department, 'MARKETING'),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    });
+  }
+
+  /**
+   * Sets {@link SessionUser.isMarketingTeamSupervisorOnActiveBranch} from branch-team graph;
+   * omit/false when no active branch or actor is not a supervisor on the active branch.
+   * Note: gated on supervisor STATUS, not supervisee count — a supervisor of an empty team
+   * still gets the flag so they can reach the surfaces needed to onboard members.
+   */
+  async attachMarketingSupervisorSessionFlag(user: SessionUser): Promise<SessionUser> {
+    const bid = user.currentBranchId;
+    if (!bid) {
+      const { isMarketingTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
+      return rest;
+    }
+    const ok = await this.isMarketingSupervisorOnBranch(user.id, bid);
+    if (!ok) {
+      const { isMarketingTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
+      return rest;
+    }
+    return { ...user, isMarketingTeamSupervisorOnActiveBranch: true };
+  }
+
+  /**
+   * Symmetric to {@link isMarketingSupervisorOnBranch} for the CS lane.
+   * True when the actor supervises at least one CS team on this branch,
+   * regardless of whether that team currently has supervisees — same
+   * "empty-team supervisor still has the surfaces" rationale.
+   */
+  async isCsSupervisorOnBranch(actorId: string, branchId: string): Promise<boolean> {
+    return this.safeBranchTeamsRead(false, async () => {
+      const rows = await this.db
+        .select({ id: schema.branchTeamMembers.userId })
+        .from(schema.branchTeamMembers)
+        .innerJoin(
+          schema.branchTeams,
+          eq(schema.branchTeams.id, schema.branchTeamMembers.teamId),
+        )
+        .where(
+          and(
+            eq(schema.branchTeamMembers.userId, actorId),
+            eq(schema.branchTeamMembers.isSupervisor, true),
+            eq(schema.branchTeams.branchId, branchId),
+            eq(schema.branchTeams.department, 'CS'),
+          ),
+        )
+        .limit(1);
+      return rows.length > 0;
+    });
+  }
+
+  /**
+   * Symmetric to {@link attachMarketingSupervisorSessionFlag} for the CS lane.
+   * Sets {@link SessionUser.isCsTeamSupervisorOnActiveBranch}; drops the field
+   * when no active branch or actor is not a CS supervisor on the active branch.
+   */
+  async attachCsSupervisorSessionFlag(user: SessionUser): Promise<SessionUser> {
+    const bid = user.currentBranchId;
+    if (!bid) {
+      const { isCsTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
+      return rest;
+    }
+    const ok = await this.isCsSupervisorOnBranch(user.id, bid);
+    if (!ok) {
+      const { isCsTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
+      return rest;
+    }
+    return { ...user, isCsTeamSupervisorOnActiveBranch: true };
+  }
+
+  /**
+   * One-shot helper that attaches BOTH lane flags in parallel. Use this from
+   * session-build paths (login / mirror / `/auth/me` / tRPC middleware) so a
+   * future third lane (e.g. logistics) only needs to be added in one place
+   * rather than across half a dozen call sites.
+   */
+  async attachTeamSupervisorSessionFlags(user: SessionUser): Promise<SessionUser> {
+    // Cheap two-query fan-out — both helpers short-circuit when there's no
+    // active branch, so this is a no-op for global / admin sessions.
+    const [marketing, cs] = await Promise.all([
+      this.attachMarketingSupervisorSessionFlag(user),
+      this.attachCsSupervisorSessionFlag(user),
+    ]);
+    // Each helper returns a fresh user object with one field added or
+    // dropped. Compose by taking the marketing result as the base then
+    // overlaying the CS flag (or its absence) from the CS result.
+    return {
+      ...marketing,
+      ...(cs.isCsTeamSupervisorOnActiveBranch === true
+        ? { isCsTeamSupervisorOnActiveBranch: true }
+        : { isCsTeamSupervisorOnActiveBranch: undefined }),
+    } as SessionUser;
+  }
+
+  /**
+   * Reverse direction of {@link listSupervisedUserIds} — given a supervisee
+   * (`userId`), return the user IDs of every supervisor on every team they
+   * belong to on this branch in the given department. Used by the funding
+   * request recipient picker so an MB's modal can preselect "their"
+   * supervisor as the default approver.
+   *
+   * Excludes `userId` themselves (a supervisor of an empty team can be both
+   * supervisor and member of the same row in some edge schemas — we never
+   * want to suggest "send funding to yourself").
+   */
+  async listSupervisorIdsForUser(
+    userId: string,
+    branchId: string,
+    department: BranchTeamDepartment,
+  ): Promise<string[]> {
+    return this.safeBranchTeamsRead([], async () => {
+      // Find every team the user is a (non-supervisor) member of, then
+      // return every OTHER member on those teams flagged as supervisor.
+      const mem = alias(schema.branchTeamMembers, 'mem_self');
+      const sup = alias(schema.branchTeamMembers, 'sup_for_self');
+      const rows = await this.db
+        .select({ supervisorId: sup.userId })
+        .from(mem)
+        .innerJoin(sup, eq(sup.teamId, mem.teamId))
+        .innerJoin(schema.branchTeams, eq(schema.branchTeams.id, mem.teamId))
+        .where(
+          and(
+            eq(mem.userId, userId),
+            eq(mem.isSupervisor, false),
+            eq(sup.isSupervisor, true),
+            ne(sup.userId, userId),
+            eq(schema.branchTeams.branchId, branchId),
+            eq(schema.branchTeams.department, department),
+          ),
+        );
+      return [...new Set(rows.map((r) => r.supervisorId))];
+    });
   }
 
   /** Supervisee user IDs on this branch for CS or Marketing teams where actor is a supervisor. */

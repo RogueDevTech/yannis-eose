@@ -91,12 +91,26 @@ export const publicProcedure = t.procedure;
  * `_def.mutation` on the params; instead we look at the `type` field on the
  * runtime call info. `next()` returns the result wrapper either way.
  */
-const blockMutationsWhileMirroring = t.middleware(async ({ ctx, type, next }) => {
+/**
+ * Mutations that ONLY change the viewer's session/UI state (no business data
+ * touched) can opt-in via `.meta({ viewOnlyOk: true })`. Examples:
+ *   - `branches.switchBranch` — flips the active branch in the Redis session
+ *     so the admin can see what the mirrored user sees in branch X. No row
+ *     in any business table is created/updated/deleted.
+ * Anything that writes business data (orders, users, inventory, finance,
+ * etc.) MUST NOT carry this flag — the whole point of mirror mode is that
+ * the admin acts as a passive observer.
+ */
+const blockMutationsWhileMirroring = t.middleware(async ({ ctx, type, meta, next }) => {
   if (type === 'mutation' && ctx.user?.mirroredBy) {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: 'Read-only while mirroring user. Exit mirror mode to make changes.',
-    });
+    const viewOnlyOk =
+      (meta as Record<string, unknown> | undefined)?.['viewOnlyOk'] === true;
+    if (!viewOnlyOk) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Read-only while mirroring user. Exit mirror mode to make changes.',
+      });
+    }
   }
   return next();
 });

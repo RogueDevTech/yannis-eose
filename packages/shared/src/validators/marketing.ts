@@ -624,6 +624,14 @@ export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;
 
 export const listCampaignsSchema = z.object({
   mediaBuyerId: z.string().uuid().optional(),
+  /**
+   * Plural form for supervisor-scoped views: returns campaigns owned by any
+   * MB in the set (typically `[supervisorId, ...supervisedMbIds]`). When set
+   * alongside `mediaBuyerId`, the singular wins (router-injected scope is
+   * always the broader filter — explicit single-buyer pin from the URL takes
+   * precedence so the buyer-filter dropdown still works).
+   */
+  mediaBuyerIds: z.array(z.string().uuid()).max(2000).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),
   page: z.number().int().min(1).default(1),
   limit: z.number().int().min(1).max(500).default(20),

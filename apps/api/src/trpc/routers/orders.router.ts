@@ -17,6 +17,7 @@ import {
   getCsRoutingBranchSettingsSchema,
   setCsRoutingRelationshipModeSchema,
   type ListOrdersInput,
+  type ScheduleCalendarHeatInput,
   type OrderStatus,
 } from '@yannis/shared';
 import { z } from 'zod';
@@ -184,11 +185,11 @@ function canAccessDeliveryMovementCustomerNames(user: SessionUser): boolean {
  * Returns the input unchanged when there's no active branch or the viewer is
  * not a supervisor on it.
  */
-type SupervisorScopeInput = {
-  supervisorScope?: { csUserIds: string[]; mediaBuyerIds: string[] };
-};
+/** Inputs that accept router-injected `supervisorScope` (`orders.list`, `scheduleCalendarHeat`). */
+export type SupervisorScopeListInput = ListOrdersInput | ScheduleCalendarHeatInput;
 
-async function applySupervisorScope<T extends SupervisorScopeInput>(
+/** Exported for marketing page bundles that call `OrdersService.list` with the same narrowing as `orders.list`. */
+export async function applySupervisorScope<T extends SupervisorScopeListInput>(
   ctx: { user: SessionUser; currentBranchId: string | null },
   input: T,
   branchId: string | null,
@@ -202,8 +203,17 @@ async function applySupervisorScope<T extends SupervisorScopeInput>(
     perms.includes('logistics.scope.global');
   if (hasOrgWideScope) return input;
   if (isAdminLevel(ctx.user)) return input;
+  // Trust the session flag first — it's set by `attachTeamSupervisorSessionFlags`
+  // which checks supervisor STATUS (not supervisee count) so a fresh supervisor
+  // of an empty team still gets scope = [self]. Without this, the call below
+  // returned `isSupervisor=false` and the empty-team supervisor saw the full
+  // branch-wide list (because the MEDIA_BUYER / CS_CLOSER pin had been
+  // dropped by `narrowOrdersAggregateFiltersForViewer`).
+  const flagOn =
+    ctx.user.isMarketingTeamSupervisorOnActiveBranch === true ||
+    ctx.user.isCsTeamSupervisorOnActiveBranch === true;
   const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
-  if (!scope.isSupervisor) return input;
+  if (!scope.isSupervisor && !flagOn) return input;
   return {
     ...input,
     supervisorScope: {
@@ -423,7 +433,15 @@ export const ordersRouter = router({
         perms.includes('cs.scope.global') ||
         perms.includes('marketing.scope.global') ||
         perms.includes('logistics.scope.global');
-      if (!hasOrdersRead && !hasMarketingOrders && !hasLogisticsRead && !hasOrgWideScope) {
+      const marketingTeamSupervisorOrders =
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!ctx.currentBranchId;
+      if (
+        !hasOrdersRead &&
+        !hasMarketingOrders &&
+        !hasLogisticsRead &&
+        !hasOrgWideScope &&
+        !marketingTeamSupervisorOrders
+      ) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Missing orders.read, marketing.orders, or logistics.read permission',
@@ -465,7 +483,15 @@ export const ordersRouter = router({
         perms.includes('cs.scope.global') ||
         perms.includes('marketing.scope.global') ||
         perms.includes('logistics.scope.global');
-      if (!hasOrdersRead && !hasMarketingOrders && !hasLogisticsRead && !hasOrgWideScope) {
+      const marketingTeamSupervisorOrders =
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!ctx.currentBranchId;
+      if (
+        !hasOrdersRead &&
+        !hasMarketingOrders &&
+        !hasLogisticsRead &&
+        !hasOrgWideScope &&
+        !marketingTeamSupervisorOrders
+      ) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Missing orders.read, marketing.orders, or logistics.read permission',

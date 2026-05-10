@@ -121,6 +121,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'SUPER_ADMIN' ||
     user.role === 'ADMIN' ||
     permSet.has(canonicalPermissionCode('products.offers'));
+  // Anyone who can read products can also see how many active offers exist —
+  // it's a public count, not a management capability. Lets HoM / Media Buyers
+  // surface "Offers available: 12" on the products page without granting them
+  // create / update / archive rights (those still require `products.offers`).
+  const canSeeOfferCount =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    permSet.has(canonicalPermissionCode('products.read')) ||
+    permSet.has(canonicalPermissionCode('products.offers'));
 
   const pageParam = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
@@ -160,7 +169,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       loadError: 'Products could not be loaded. Try Reload data.',
     }));
 
-  const offerGroupsCountPromise = canManageOffers
+  const offerGroupsCountPromise = canSeeOfferCount
     ? apiRequest<unknown>(
         `/trpc/marketing.listOfferGroups?input=${encodeURIComponent(
           JSON.stringify({ page: 1, limit: 1, status: 'ACTIVE' }),

@@ -66,7 +66,7 @@ const PAGE_SIZE = 20;
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
-    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING', 'HEAD_OF_CS'],
+    roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
     permission: 'inventory.read',
   });
 

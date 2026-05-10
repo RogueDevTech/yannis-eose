@@ -105,7 +105,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const user = await requirePermission(request, 'marketing.campaigns');
 
-  const isMediaBuyer = user.role === 'MEDIA_BUYER';
+  // Marketing team supervisor on the active branch sees their team's forms
+  // (server-side `applyMarketingSupervisorScope` injects `mediaBuyerIds = team`
+  // when no explicit buyer filter). Auto-pinning to self would override that
+  // and limit them to their own forms only — drop it for supervisors.
+  const isMarketingSupervisor =
+    user.role === 'MEDIA_BUYER' && user.isMarketingTeamSupervisorOnActiveBranch === true;
+  const isMediaBuyer = user.role === 'MEDIA_BUYER' && !isMarketingSupervisor;
   const mediaBuyerId = isMediaBuyer ? user.id : undefined;
 
   const listInput = {
@@ -117,7 +123,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const formsShell = {
     isMediaBuyer,
-    showMediaBuyerColumn: user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
+    showMediaBuyerColumn:
+      user.role === 'HEAD_OF_MARKETING' ||
+      user.role === 'SUPER_ADMIN' ||
+      user.role === 'ADMIN' ||
+      isMarketingSupervisor,
     currentUserId: user.id,
     currentUserName: user.name,
     canManageOfferTemplates: userCanManageOfferTemplates(user),

@@ -355,10 +355,12 @@ export class AuthService {
       throw new ForbiddenException('You are not allowed to mirror this user.');
     }
 
-    // Resolve the target user's branch context the same way login does.
-    // Single-branch global users (org-wide heads / admin-class) default to
-    // their one branch so mirrored sessions don't have to prompt for it on
-    // every mutation.
+    // Resolve branch context to match `login` (CEO 2026-05-09): any user with branch
+    // membership defaults to primary / first branch so supervisor flags and branch-scoped
+    // mutations see a concrete `currentBranchId`. Global users with zero memberships keep
+    // null (all-branches). Mirror previously only set a branch when global + exactly one
+    // membership — that left HoM-style globals with 2+ branches at null and broke
+    // `isMarketingTeamSupervisorOnActiveBranch` + Remix loaders vs real login.
     let currentBranchId: string | null = null;
     const targetPermSet = await this.permissions.getEffectivePermissions(target.id);
     const targetIsGlobal = canViewAllBranches({
@@ -372,11 +374,11 @@ export class AuthService {
       .orderBy(desc(schema.userBranches.isPrimary), asc(schema.userBranches.branchId));
 
     if (!targetIsGlobal) {
-      currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
-      if (!currentBranchId) {
+      if (targetMemberships.length === 0) {
         throw new BadRequestException('Target user has no branch — cannot mirror.');
       }
-    } else if (targetMemberships.length === 1) {
+      currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
+    } else if (targetMemberships.length > 0) {
       currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
     }
 
@@ -403,6 +405,10 @@ export class AuthService {
       scopeGlobal: target.scopeGlobal === true,
       scopeOrgWideHead: target.scopeOrgWideHead === true,
       scopeTeamSupervisor: target.scopeTeamSupervisor === true,
+      // Same as login: tRPC `permissionProcedure` reads `ctx.user.permissions`
+      // from the session payload — without this array every mirrored request
+      // appears to have zero grants (false "Missing permission" UX).
+      permissions: Array.from(targetPermSet),
       logisticsLocationId: target.logisticsLocationId,
       currentBranchId,
       branchIds: targetMemberships.map((m) => m.branchId as string),
@@ -481,19 +487,21 @@ export class AuthService {
       throw new BadRequestException('Original actor no longer exists; please log in again.');
     }
 
-    let currentBranchId: string | null = null;
     const actorPermSet = await this.permissions.getEffectivePermissions(actor.id);
-    if (
-      !canViewAllBranches({
-        role: actor.role,
-        permissions: Array.from(actorPermSet),
-      })
-    ) {
-      const memberships = await this.db
-        .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
-        .from(schema.userBranches)
-        .where(eq(schema.userBranches.userId, actor.id))
-        .orderBy(desc(schema.userBranches.isPrimary), asc(schema.userBranches.branchId));
+    const memberships = await this.db
+      .select({ branchId: schema.userBranches.branchId, isPrimary: schema.userBranches.isPrimary })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, actor.id))
+      .orderBy(desc(schema.userBranches.isPrimary), asc(schema.userBranches.branchId));
+
+    let currentBranchId: string | null = null;
+    const actorGlobal = canViewAllBranches({
+      role: actor.role,
+      permissions: Array.from(actorPermSet),
+    });
+    if (!actorGlobal) {
+      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
+    } else if (memberships.length > 0) {
       currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
     }
 
@@ -506,10 +514,12 @@ export class AuthService {
       scopeGlobal: actor.scopeGlobal === true,
       scopeOrgWideHead: actor.scopeOrgWideHead === true,
       scopeTeamSupervisor: actor.scopeTeamSupervisor === true,
+      permissions: Array.from(actorPermSet),
       logisticsLocationId: actor.logisticsLocationId,
       currentBranchId,
-      appTheme: currentSession.appTheme ?? null,
-      fontScale: currentSession.fontScale ?? null,
+      branchIds: memberships.map((m) => m.branchId as string),
+      appTheme: actor.appTheme ?? null,
+      fontScale: actor.fontScale ?? null,
       mirroredBy: null,
       mirrorSessionId: null,
     };
@@ -643,10 +653,13 @@ export class AuthService {
 
   /**
    * Switch the active branch in the current session.
-   * User must be a member of the target branch (or SuperAdmin).
-   * Updates Redis session — takes effect on next request.
+   * User must be a member of the target branch (or admin-class).
+   * `branchId = null` clears branch context ("All Branches"); only allowed
+   * for users that can view all branches.
+   * Updates Redis session and returns the full updated SessionUser so the
+   * controller can re-issue the bundle cookie in the same response.
    */
-  async switchBranch(sessionToken: string, branchId: string): Promise<{ currentBranchId: string }> {
+  async switchBranch(sessionToken: string, branchId: string | null): Promise<SessionUser> {
     const sessionData = await this.sessionStore.getSession(sessionToken);
     if (!sessionData) {
       throw new UnauthorizedException('Session not found');
@@ -654,8 +667,12 @@ export class AuthService {
 
     const user: SessionUser = sessionData;
 
-    // Global scope / explicit view-all can switch to any branch; others must be a member
-    if (!canViewAllBranches(user)) {
+    if (branchId === null) {
+      if (!canViewAllBranches(user)) {
+        throw new ForbiddenException('Only org-wide users can clear branch context');
+      }
+    } else if (!canViewAllBranches(user)) {
+      // Scoped users must be a member of the target branch
       const membership = await this.db
         .select({ branchId: schema.userBranches.branchId })
         .from(schema.userBranches)
@@ -672,7 +689,7 @@ export class AuthService {
     const updated: SessionUser = { ...user, currentBranchId: branchId };
     await this.sessionStore.updateSession(sessionToken, updated, this.sessionTtl);
 
-    return { currentBranchId: branchId };
+    return updated;
   }
 
   /**

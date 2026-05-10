@@ -1,11 +1,21 @@
 import { defer, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 
-import { Link, useLoaderData, useFetcher, useRevalidator, Await } from '@remix-run/react';
+import { Link, useLoaderData, useFetcher, useRevalidator } from '@remix-run/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
-import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
-import { apiRequest, getCurrentUser, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
+import {
+  ModalFetcherInlineError,
+  useFetcherActionSurface,
+} from '~/hooks/use-fetcher-action-surface';
+import {
+  apiRequest,
+  getCurrentUser,
+  getSessionCookie,
+  requirePermission,
+  requirePermissionOrRoles,
+  safeStatus,
+} from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
@@ -19,7 +29,11 @@ import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills
 import { RoleBadge } from '~/components/ui/role-badge';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Pagination } from '~/components/ui/pagination';
-import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
+import {
+  CompactTable,
+  type CompactTableColumn,
+  CompactTableActionButton,
+} from '~/components/ui/compact-table';
 import { BranchDetailLoadingShell } from '~/features/branches/BranchesDeferredLoadingShells';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Collapsible } from '~/components/ui/collapsible';
@@ -29,13 +43,7 @@ import { cachedClientLoader, invalidateCachedLoader } from '~/lib/loader-cache';
 
 // ── Remove confirmation modal ─────────────────────────────────────────────────
 
-function RemoveModal({
-  member,
-  onClose,
-}: {
-  member: OverviewMember;
-  onClose: () => void;
-}) {
+function RemoveModal({ member, onClose }: { member: OverviewMember; onClose: () => void }) {
   const removeFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const removeSurface = useFetcherActionSurface(removeFetcher);
   useFetcherToast(removeFetcher.data, {
@@ -62,8 +70,18 @@ function RemoveModal({
       <div className="px-5 pt-5 pb-4">
         <div className="flex items-start gap-3">
           <div className="shrink-0 w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center">
-            <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            <svg
+              className="w-5 h-5 text-danger-600 dark:text-danger-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+              />
             </svg>
           </div>
           <div>
@@ -71,7 +89,8 @@ function RemoveModal({
               Remove from branch?
             </h3>
             <p className="text-sm text-app-fg-muted mt-1">
-              <span className="font-medium text-app-fg-muted">{member.name}</span> will lose access to this branch. Their global account will not be affected.
+              <span className="font-medium text-app-fg-muted">{member.name}</span> will lose access
+              to this branch. Their global account will not be affected.
             </p>
           </div>
         </div>
@@ -82,7 +101,13 @@ function RemoveModal({
       </div>
 
       <div className="border-t border-app-border px-5 py-3 flex items-center justify-end gap-2">
-        <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={isSubmitting}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onClose}
+          disabled={isSubmitting}
+        >
           Cancel
         </Button>
         <removeFetcher.Form method="post">
@@ -190,6 +215,196 @@ interface BranchOrgStructurePayload {
   departments: BranchOrgDepartmentBlock[];
 }
 
+/**
+ * Pending team-mutation payload extracted from `squadFetcher`'s in-flight
+ * submission. While the post-action loader revalidates, we overlay this onto
+ * `orgStructure` so the panel reflects the change on the same React tick the
+ * server confirms — instead of waiting for the network round-trip refresh.
+ *
+ * Lifecycle (matches `useOptimisticListMerge`, CEO directive 2026-05):
+ *   - Returns null while `fetcher.state === 'submitting'` — no overlay until
+ *     the server confirms.
+ *   - Returns the payload from success → idle, including the
+ *     loader-revalidation window. The overlay drops cleanly when the
+ *     canonical orgStructure lands.
+ *
+ * Covered intents:
+ *   - `addBranchTeamMember` / `addBranchTeamMembersBulk` → MOVE: add to target
+ *     team, remove from any sibling team in the same dept (move semantics
+ *     mirroring the API's `addTeamMember` behaviour).
+ *   - `removeBranchTeamMember` → REMOVE: drop the member row from the team.
+ *   - `setBranchTeamMemberSupervisor` → SUPERVISOR_TOGGLE: patch isSupervisor
+ *     on the existing member row.
+ */
+type PendingTeamMutation =
+  | {
+      kind: 'move';
+      userIds: string[];
+      targetTeamId: string;
+      isSupervisor: boolean;
+    }
+  | {
+      kind: 'remove';
+      userId: string;
+      teamId: string;
+    }
+  | {
+      kind: 'setSupervisor';
+      userId: string;
+      teamId: string;
+      isSupervisor: boolean;
+    };
+
+function usePendingTeamMutation(
+  fetcher: ReturnType<typeof useFetcher<{ success?: boolean; error?: string }>>,
+): PendingTeamMutation | null {
+  const { state: revalidatorState } = useRevalidator();
+  return useMemo<PendingTeamMutation | null>(() => {
+    const isMutating = fetcher.state !== 'idle' || revalidatorState !== 'idle';
+    if (!isMutating) return null;
+    if (fetcher.state === 'submitting') return null;
+    const data = fetcher.data;
+    const succeeded = !!data && (data as { success?: boolean }).success === true;
+    if (!succeeded) return null;
+
+    const fd = fetcher.formData;
+    if (!fd) return null;
+    const intent = fd.get('intent')?.toString() ?? '';
+    const teamId = fd.get('teamId')?.toString();
+    if (!teamId) return null;
+    const isSupervisor = fd.get('isSupervisor') === 'true';
+
+    if (intent === 'addBranchTeamMember') {
+      const userId = fd.get('userId')?.toString();
+      if (!userId) return null;
+      return { kind: 'move', userIds: [userId], targetTeamId: teamId, isSupervisor };
+    }
+    if (intent === 'addBranchTeamMembersBulk') {
+      const userIdsRaw = fd.get('userIds')?.toString() ?? '[]';
+      try {
+        const parsed = JSON.parse(userIdsRaw);
+        if (!Array.isArray(parsed)) return null;
+        const userIds = parsed.filter((v): v is string => typeof v === 'string');
+        if (userIds.length === 0) return null;
+        return { kind: 'move', userIds, targetTeamId: teamId, isSupervisor };
+      } catch {
+        return null;
+      }
+    }
+    if (intent === 'removeBranchTeamMember') {
+      const userId = fd.get('userId')?.toString();
+      if (!userId) return null;
+      return { kind: 'remove', userId, teamId };
+    }
+    if (intent === 'setBranchTeamMemberSupervisor') {
+      const userId = fd.get('userId')?.toString();
+      if (!userId) return null;
+      return { kind: 'setSupervisor', userId, teamId, isSupervisor };
+    }
+    return null;
+  }, [fetcher.formData, fetcher.state, fetcher.data, revalidatorState]);
+}
+
+/**
+ * Pure overlay: applies a pending team mutation on top of the server
+ * orgStructure. Each branch of the dept tree that's untouched passes through
+ * by reference so React only reconciles the changed subtree.
+ */
+function applyPendingTeamMutation(
+  orgStructure: BranchOrgStructurePayload,
+  pending: PendingTeamMutation | null,
+  branchMembers: OverviewMember[],
+): BranchOrgStructurePayload {
+  if (!pending) return orgStructure;
+
+  // ── MOVE (add or bulk-add) ────────────────────────────────────────
+  if (pending.kind === 'move') {
+    if (pending.userIds.length === 0) return orgStructure;
+
+    let owningDeptId: string | null = null;
+    for (const d of orgStructure.departments) {
+      if (d.teams.some((t) => t.id === pending.targetTeamId)) {
+        owningDeptId = d.department.id;
+        break;
+      }
+    }
+    if (!owningDeptId) return orgStructure;
+
+    const memberById = new Map(branchMembers.map((m) => [m.userId, m]));
+    const userIdSet = new Set(pending.userIds);
+
+    return {
+      departments: orgStructure.departments.map((d) => {
+        if (d.department.id !== owningDeptId) return d;
+        const newRoster = d.roster.filter((r) => !userIdSet.has(r.userId));
+        const newTeams = d.teams.map((t) => {
+          if (t.id === pending.targetTeamId) {
+            // Add pending users (dedupe — handles idempotent re-add).
+            const existingIds = new Set(t.members.map((m) => m.userId));
+            const additions = pending.userIds
+              .filter((uid) => !existingIds.has(uid))
+              .map((uid) => {
+                const bm = memberById.get(uid);
+                return {
+                  teamId: t.id,
+                  userId: uid,
+                  isSupervisor: pending.isSupervisor,
+                  name: bm?.name ?? 'Member',
+                  role: bm?.effectiveRole ?? '',
+                };
+              });
+            return additions.length === 0 ? t : { ...t, members: [...t.members, ...additions] };
+          }
+          // Move semantics: drop the user from any sibling team they were on.
+          const filtered = t.members.filter((m) => !userIdSet.has(m.userId));
+          return filtered.length === t.members.length ? t : { ...t, members: filtered };
+        });
+        return { ...d, roster: newRoster, teams: newTeams };
+      }),
+    };
+  }
+
+  // ── REMOVE ───────────────────────────────────────────────────────
+  if (pending.kind === 'remove') {
+    return {
+      departments: orgStructure.departments.map((d) => {
+        const ownsTeam = d.teams.some((t) => t.id === pending.teamId);
+        if (!ownsTeam) return d;
+        const newTeams = d.teams.map((t) => {
+          if (t.id !== pending.teamId) return t;
+          const filtered = t.members.filter((m) => m.userId !== pending.userId);
+          return filtered.length === t.members.length ? t : { ...t, members: filtered };
+        });
+        return { ...d, teams: newTeams };
+      }),
+    };
+  }
+
+  // ── SUPERVISOR_TOGGLE ────────────────────────────────────────────
+  if (pending.kind === 'setSupervisor') {
+    return {
+      departments: orgStructure.departments.map((d) => {
+        const ownsTeam = d.teams.some((t) => t.id === pending.teamId);
+        if (!ownsTeam) return d;
+        const newTeams = d.teams.map((t) => {
+          if (t.id !== pending.teamId) return t;
+          let touched = false;
+          const newMembers = t.members.map((m) => {
+            if (m.userId !== pending.userId) return m;
+            if (m.isSupervisor === pending.isSupervisor) return m;
+            touched = true;
+            return { ...m, isSupervisor: pending.isSupervisor };
+          });
+          return touched ? { ...t, members: newMembers } : t;
+        });
+        return { ...d, teams: newTeams };
+      }),
+    };
+  }
+
+  return orgStructure;
+}
+
 type SettingSource = 'enforced-system' | 'team' | 'system' | 'unset';
 
 interface EffectiveTeamSetting {
@@ -273,7 +488,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
 
     const orgStructure: BranchOrgStructurePayload = orgRes.ok
-      ? (orgRes.data?.result?.data as BranchOrgStructurePayload | undefined) ?? { departments: [] }
+      ? ((orgRes.data?.result?.data as BranchOrgStructurePayload | undefined) ?? {
+          departments: [],
+        })
       : { departments: [] };
     const teams: BranchTeamWithMembers[] = orgStructure.departments.flatMap((d) => d.teams);
 
@@ -286,12 +503,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           `/trpc/branches.listTeamSettings?input=${encodeURIComponent(JSON.stringify({ teamId: team.id }))}`,
           { method: 'GET', cookie },
         );
-        return [team.id, res.ok ? res.data?.result?.data ?? null : null] as const;
+        return [team.id, res.ok ? (res.data?.result?.data ?? null) : null] as const;
       }),
     );
-    const teamSettingsByTeamId: Record<string, TeamSettingsBundle | null> = Object.fromEntries(
-      teamSettingsEntries,
-    );
+    const teamSettingsByTeamId: Record<string, TeamSettingsBundle | null> =
+      Object.fromEntries(teamSettingsEntries);
 
     return { overview, allUsers, teams, orgStructure, teamSettingsByTeamId };
   })();
@@ -305,7 +521,18 @@ clientLoader.hydrate = false;
 // ── Action ───────────────────────────────────────────────────────────────────
 
 export async function action({ request, params }: ActionFunctionArgs) {
-  await requirePermission(request, 'branches.manage');
+  // Page-level gate is permissive: branches.manage (admin / Branch Admin) OR
+  // any org-wide department head. Per-intent enforcement is done by the tRPC
+  // procedures themselves: branch-CRUD intents (update / assignUser /
+  // removeUser) call `permissionProcedure('branches.manage')` and team
+  // intents call `assertCanManageTeamDept` / `assertCanManageTeamOrSupervisor`
+  // (which check `branches.teams.cs` / `branches.teams.marketing`). So a HoM
+  // can hit this action handler for createBranchTeam(MARKETING) but a CS
+  // intent or a branch-update intent will be rejected by the API.
+  await requirePermissionOrRoles(request, {
+    roles: ['HEAD_OF_MARKETING', 'HEAD_OF_CS', 'HEAD_OF_LOGISTICS'],
+    permission: 'branches.manage',
+  });
   const cookie = getSessionCookie(request);
   const branchId = params.branchId ?? '';
   const form = await request.formData();
@@ -423,7 +650,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const teamId = form.get('teamId')?.toString() ?? '';
     const userId = form.get('userId')?.toString() ?? '';
     const isSupervisor = form.get('isSupervisor') === 'true';
-    if (!teamId || !userId) return Response.json({ error: 'Team and user are required' }, { status: 400 });
+    if (!teamId || !userId)
+      return Response.json({ error: 'Team and user are required' }, { status: 400 });
     const res = await apiRequest('/trpc/branches.addBranchTeamMember', {
       method: 'POST',
       cookie,
@@ -469,7 +697,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (intent === 'removeBranchTeamMember') {
     const teamId = form.get('teamId')?.toString() ?? '';
     const userId = form.get('userId')?.toString() ?? '';
-    if (!teamId || !userId) return Response.json({ error: 'Team and user are required' }, { status: 400 });
+    if (!teamId || !userId)
+      return Response.json({ error: 'Team and user are required' }, { status: 400 });
     const res = await apiRequest('/trpc/branches.removeBranchTeamMember', {
       method: 'POST',
       cookie,
@@ -488,7 +717,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const teamId = form.get('teamId')?.toString() ?? '';
     const userId = form.get('userId')?.toString() ?? '';
     const isSupervisor = form.get('isSupervisor') === 'true';
-    if (!teamId || !userId) return Response.json({ error: 'Team and user are required' }, { status: 400 });
+    if (!teamId || !userId)
+      return Response.json({ error: 'Team and user are required' }, { status: 400 });
     const res = await apiRequest('/trpc/branches.setBranchTeamMemberSupervisor', {
       method: 'POST',
       cookie,
@@ -547,7 +777,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
     const teamId = form.get('teamId')?.toString() ?? '';
     const key = form.get('key')?.toString() ?? '';
     const valueJson = form.get('value')?.toString() ?? '';
-    if (!teamId || !key) return Response.json({ error: 'Team and key are required' }, { status: 400 });
+    if (!teamId || !key)
+      return Response.json({ error: 'Team and key are required' }, { status: 400 });
     let value: Record<string, unknown>;
     try {
       value = JSON.parse(valueJson) as Record<string, unknown>;
@@ -571,7 +802,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (intent === 'clearTeamSetting') {
     const teamId = form.get('teamId')?.toString() ?? '';
     const key = form.get('key')?.toString() ?? '';
-    if (!teamId || !key) return Response.json({ error: 'Team and key are required' }, { status: 400 });
+    if (!teamId || !key)
+      return Response.json({ error: 'Team and key are required' }, { status: 400 });
     const res = await apiRequest('/trpc/branches.clearTeamSetting', {
       method: 'POST',
       cookie,
@@ -593,6 +825,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
 const MEMBERS_PAGE_SIZE = 20;
 
 function BranchMembersPanel({
+  branchId,
+  department,
   members,
   canManage,
   teamByUserId = {},
@@ -600,6 +834,11 @@ function BranchMembersPanel({
   teamsForBulk = [],
   onBulkAddToTeam,
 }: {
+  /** Branch context for the backend search call. */
+  branchId: string;
+  /** Department this panel is scoped to — passed to the search API so a
+   *  search inside the Marketing tab doesn't return CS matches. */
+  department?: 'MARKETING' | 'CS' | 'OTHER';
   members: OverviewMember[];
   canManage: boolean;
   /** userId → team name. When set, the table shows a Team column instead of
@@ -614,16 +853,37 @@ function BranchMembersPanel({
    *  enables row selection + a bulk action bar above the table. Supervisor
    *  promotion is intentionally not part of this flow — promote a single
    *  member from the Teams tab instead. */
-  onBulkAddToTeam?: (
-    teamId: string,
-    userIds: string[],
-    teamLabel: string,
-  ) => void;
+  onBulkAddToTeam?: (teamId: string, userIds: string[], teamLabel: string) => void;
 }) {
   // The panel is rendered inside a department's detail view (already filtered
   // to that dept's members), so the dept-filter pills the panel used to show
   // were always showing a single locked option. Removed (CEO 2026-05-10).
   const [search, setSearch] = useState('');
+  // Backend-search fetcher — fires when `search` is non-empty. Falls back to
+  // the in-memory `members` prop when search is cleared so the initial paint
+  // never has to wait for a network roundtrip. Debounced via the SearchInput's
+  // own `debounceMs={200}` (see input below).
+  const searchFetcher = useFetcher<{
+    data?: {
+      members: OverviewMember[];
+      pagination: { total: number; page: number; pageSize: number; totalPages: number };
+    };
+    error?: string;
+  }>();
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length === 0) return; // empty search → use prop members; no fetch
+    const params = new URLSearchParams({ branchId, q });
+    if (department) params.set('department', department);
+    searchFetcher.load(`/api/branch-members-search?${params.toString()}`);
+    // We intentionally do NOT include searchFetcher in deps — fetcher refs
+    // change identity every render which would cause a loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, branchId, department]);
+  const isSearching = search.trim().length > 0;
+  const isFetcherBusy = searchFetcher.state !== 'idle';
+  const fetcherError = searchFetcher.data?.error ?? null;
+  const fetchedMembers = searchFetcher.data?.data?.members ?? null;
   const [removeTarget, setRemoveTarget] = useState<OverviewMember | null>(null);
   const [page, setPage] = useState(1);
   const [selectedUserIds, setSelectedUserIds] = useState<ReadonlySet<string>>(new Set());
@@ -650,16 +910,25 @@ function BranchMembersPanel({
     ];
   }, [members, teamByUserId]);
 
+  // Source of truth swap: when the user has typed a search query, we render
+  // the server-side matches from `searchFetcher`; otherwise we render the
+  // panel's `members` prop (already dept-scoped). Either source still goes
+  // through the team-filter pass below.
+  const sourceMembers = isSearching
+    ? // While the very first response is in flight, fall back to a
+      //   client-side `name.includes(q)` against the prop list so the panel
+      //   doesn't blank out for ~200ms; once the fetcher returns we switch
+      //   to the authoritative server result.
+      (fetchedMembers ?? members.filter((m) => m.name.toLowerCase().includes(search.trim().toLowerCase())))
+    : members;
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return members.filter((m) => {
-      if (q && !m.name.toLowerCase().includes(q)) return false;
+    return sourceMembers.filter((m) => {
       const onTeam = !!teamByUserId[m.userId];
       if (teamFilter === 'ASSIGNED' && !onTeam) return false;
       if (teamFilter === 'UNASSIGNED' && onTeam) return false;
       return true;
     });
-  }, [members, search, teamFilter, teamByUserId]);
+  }, [sourceMembers, teamFilter, teamByUserId]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / MEMBERS_PAGE_SIZE));
 
@@ -692,11 +961,7 @@ function BranchMembersPanel({
   const submitBulk = () => {
     if (!onBulkAddToTeam || selectedCount === 0 || !bulkTeamId) return;
     const team = teamsForBulk.find((t) => t.id === bulkTeamId);
-    onBulkAddToTeam(
-      bulkTeamId,
-      Array.from(selectedUserIds),
-      team?.label ?? 'this team',
-    );
+    onBulkAddToTeam(bulkTeamId, Array.from(selectedUserIds), team?.label ?? 'this team');
   };
 
   return (
@@ -720,11 +985,16 @@ function BranchMembersPanel({
             <SearchInput
               value={search}
               onChange={setSearch}
-              placeholder="Search by name…"
-              aria-label="Filter members by name"
+              placeholder="Search by name or email…"
+              aria-label="Search members by name or email"
               controlSize="sm"
               debounceMs={200}
             />
+            {isSearching && isFetcherBusy ? (
+              <p className="mt-1 text-[11px] text-app-fg-muted">Searching…</p>
+            ) : isSearching && fetcherError ? (
+              <p className="mt-1 text-[11px] text-danger-600 dark:text-danger-400">{fetcherError}</p>
+            ) : null}
           </div>
         </div>
       </div>
@@ -777,27 +1047,28 @@ function BranchMembersPanel({
         <>
           {/* Bulk select-all helper for the current page (mirrors the table
               header checkbox we removed when switching to cards). */}
-          {bulkEnabled && (() => {
-            const visibleIds = pageRows.map((m) => m.userId);
-            const allOnPageSelected =
-              visibleIds.length > 0 && visibleIds.every((id) => selectedUserIds.has(id));
-            return (
-              <label className="flex items-center gap-2 text-xs text-app-fg-muted cursor-pointer select-none">
-                <Checkbox
-                  checked={allOnPageSelected}
-                  onChange={(e) =>
-                    setSelectedUserIds((prev) => {
-                      const next = new Set(prev);
-                      if (e.target.checked) for (const id of visibleIds) next.add(id);
-                      else for (const id of visibleIds) next.delete(id);
-                      return next;
-                    })
-                  }
-                />
-                Select all on this page ({visibleIds.length})
-              </label>
-            );
-          })()}
+          {bulkEnabled &&
+            (() => {
+              const visibleIds = pageRows.map((m) => m.userId);
+              const allOnPageSelected =
+                visibleIds.length > 0 && visibleIds.every((id) => selectedUserIds.has(id));
+              return (
+                <label className="flex items-center gap-2 text-xs text-app-fg-muted cursor-pointer select-none">
+                  <Checkbox
+                    checked={allOnPageSelected}
+                    onChange={(e) =>
+                      setSelectedUserIds((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) for (const id of visibleIds) next.add(id);
+                        else for (const id of visibleIds) next.delete(id);
+                        return next;
+                      })
+                    }
+                  />
+                  Select all on this page ({visibleIds.length})
+                </label>
+              );
+            })()}
 
           {/* CompactTable mirrors the Team-card member table shape (Member /
               Role / Supervisor / actions) but adds a Team column scoped to the
@@ -878,7 +1149,10 @@ function BranchMembersPanel({
                           Profile
                         </CompactTableActionButton>
                         {canManage ? (
-                          <CompactTableActionButton tone="danger" onClick={() => setRemoveTarget(m)}>
+                          <CompactTableActionButton
+                            tone="danger"
+                            onClick={() => setRemoveTarget(m)}
+                          >
                             Remove
                           </CompactTableActionButton>
                         ) : null}
@@ -893,7 +1167,8 @@ function BranchMembersPanel({
           {totalPages > 1 && (
             <div className="card p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-app-fg-muted">
-                Showing {pageStart + 1}–{Math.min(pageStart + MEMBERS_PAGE_SIZE, filtered.length)} of {filtered.length}
+                Showing {pageStart + 1}–{Math.min(pageStart + MEMBERS_PAGE_SIZE, filtered.length)}{' '}
+                of {filtered.length}
               </p>
               <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
             </div>
@@ -919,7 +1194,13 @@ type SquadConfirmIntent =
   | { kind: 'createTeam'; formData: FormData; deptLabel: string; teamLabel: string }
   | { kind: 'renameTeam'; formData: FormData; teamId: string; oldName: string; newName: string }
   | { kind: 'deleteTeam'; teamId: string; teamTitle: string }
-  | { kind: 'addMember'; formData: FormData; teamTitle: string; memberLabel: string; asSupervisor: boolean }
+  | {
+      kind: 'addMember';
+      formData: FormData;
+      teamTitle: string;
+      memberLabel: string;
+      asSupervisor: boolean;
+    }
   | {
       kind: 'toggleSupervisor';
       teamId: string;
@@ -930,7 +1211,13 @@ type SquadConfirmIntent =
     }
   | { kind: 'removeMember'; teamId: string; userId: string; memberName: string; teamTitle: string }
   | { kind: 'addRosterMember'; formData: FormData; memberLabel: string; deptLabel: string }
-  | { kind: 'removeRosterMember'; branchDepartmentId: string; userId: string; memberName: string; deptLabel: string }
+  | {
+      kind: 'removeRosterMember';
+      branchDepartmentId: string;
+      userId: string;
+      memberName: string;
+      deptLabel: string;
+    }
   | {
       kind: 'bulkAddMembers';
       formData: FormData;
@@ -1062,7 +1349,10 @@ function describeSettingValue(key: string, value: Record<string, unknown> | null
   return JSON.stringify(value);
 }
 
-function sourceBadge(setting: EffectiveTeamSetting): { label: string; tone: 'neutral' | 'success' | 'warning' | 'danger' } {
+function sourceBadge(setting: EffectiveTeamSetting): {
+  label: string;
+  tone: 'neutral' | 'success' | 'warning' | 'danger';
+} {
   if (setting.source === 'enforced-system') return { label: 'System (locked)', tone: 'danger' };
   if (setting.source === 'team') return { label: 'Team override', tone: 'success' };
   if (setting.source === 'system') return { label: 'Inherited from system', tone: 'neutral' };
@@ -1115,7 +1405,8 @@ function TeamSettingsSection({
       <div>
         <p className="text-sm font-semibold text-app-fg">Team configuration</p>
         <p className="text-xs text-app-fg-muted mt-0.5">
-          Inherited from system defaults unless overridden here. An admin can <strong>lock</strong> a setting at the system level — locked settings ignore team overrides.
+          Inherited from system defaults unless overridden here. An admin can <strong>lock</strong>{' '}
+          a setting at the system level — locked settings ignore team overrides.
         </p>
       </div>
       <div className="space-y-2">
@@ -1136,10 +1427,13 @@ function TeamSettingsSection({
                 <p className="text-xs text-app-fg-muted mt-0.5">{cat.description}</p>
                 <p className="text-sm text-app-fg mt-1">
                   Effective:{' '}
-                  <span className="font-semibold">{describeSettingValue(setting.key, setting.value)}</span>
+                  <span className="font-semibold">
+                    {describeSettingValue(setting.key, setting.value)}
+                  </span>
                   {setting.source === 'team' && setting.systemValue !== null && (
                     <span className="text-app-fg-muted">
-                      {' '}· system default: {describeSettingValue(setting.key, setting.systemValue)}
+                      {' '}
+                      · system default: {describeSettingValue(setting.key, setting.systemValue)}
                     </span>
                   )}
                 </p>
@@ -1194,7 +1488,8 @@ function TeamSettingsSection({
           title="Reset to system default?"
           description={
             <>
-              Remove the team override on <strong>{catalogByKey.get(confirmClear.key)?.label ?? confirmClear.key}</strong>?{' '}
+              Remove the team override on{' '}
+              <strong>{catalogByKey.get(confirmClear.key)?.label ?? confirmClear.key}</strong>?{' '}
               <strong>{teamTitle}</strong> will fall back to the system value (
               <strong>{describeSettingValue(confirmClear.key, confirmClear.systemValue)}</strong>).
             </>
@@ -1239,7 +1534,12 @@ function SettingEditorModal({
   const initialValue = editor.setting.teamValue ?? editor.setting.systemValue ?? null;
   const [strategy, setStrategy] = useState<'manual' | 'load_balanced' | 'performance' | 'claim'>(
     editor.setting.key === 'CS_DISPATCH_STRATEGY'
-      ? ((initialValue?.strategy as 'manual' | 'load_balanced' | 'performance' | 'claim' | undefined) ?? 'manual')
+      ? ((initialValue?.strategy as
+          | 'manual'
+          | 'load_balanced'
+          | 'performance'
+          | 'claim'
+          | undefined) ?? 'manual')
       : 'manual',
   );
   const [claimCap, setClaimCap] = useState<string>(
@@ -1294,7 +1594,13 @@ function SettingEditorModal({
           className="text-app-fg-muted hover:text-app-fg shrink-0"
           aria-label="Close"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -1346,7 +1652,10 @@ function SettingEditorModal({
         {editor.setting.systemValue !== null && (
           <div className="rounded-lg border border-app-border bg-app-elevated/40 p-3">
             <p className="text-xs text-app-fg-muted">
-              System default: <strong>{describeSettingValue(editor.setting.key, editor.setting.systemValue)}</strong>
+              System default:{' '}
+              <strong>
+                {describeSettingValue(editor.setting.key, editor.setting.systemValue)}
+              </strong>
             </p>
           </div>
         )}
@@ -1374,7 +1683,7 @@ function SettingEditorModal({
 }
 
 function BranchSupervisorTeamsPanel({
-  orgStructure,
+  orgStructure: serverOrgStructure,
   branchMembers,
   canManageCSTeams,
   canManageMarketingTeams,
@@ -1404,13 +1713,21 @@ function BranchSupervisorTeamsPanel({
   useEffect(() => {
     if (!createTeamOpen) setCreateTeamName('');
   }, [createTeamOpen]);
+  const squadFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  // Optimistic overlay for assign / remove / supervisor-toggle so the panel
+  // reflects the change on the same React tick the server confirms — instead
+  // of waiting for the loader's network revalidation. The overlay drops
+  // cleanly when the canonical orgStructure lands.
+  const pendingTeamMutation = usePendingTeamMutation(squadFetcher);
+  const orgStructure = useMemo(
+    () => applyPendingTeamMutation(serverOrgStructure, pendingTeamMutation, branchMembers),
+    [serverOrgStructure, pendingTeamMutation, branchMembers],
+  );
   const flatTeams = orgStructure.departments.flatMap((d) => d.teams);
   const canManageAny = canManageCSTeams || canManageMarketingTeams;
   const canManageForDept = (dept: 'CS' | 'MARKETING'): boolean =>
     dept === 'CS' ? canManageCSTeams : canManageMarketingTeams;
-  const squadFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const squadSurface = useFetcherActionSurface(squadFetcher);
-  const revalidate = useRevalidator();
   const [confirmIntent, setConfirmIntent] = useState<SquadConfirmIntent | null>(null);
   const [openTeamId, setOpenTeamId] = useState<string | null>(flatTeams[0]?.id ?? null);
 
@@ -1423,16 +1740,27 @@ function BranchSupervisorTeamsPanel({
 
   useEffect(() => {
     if (squadFetcher.state === 'idle' && squadFetcher.data?.success) {
-      // The route uses cachedClientLoader which serves stale data on the
-      // post-mutation revalidate unless we drop its entry first. Without
-      // this, adding a member to a team only shows up after a hard reload.
+      setConfirmIntent(null);
+    }
+  }, [squadFetcher.state, squadFetcher.data]);
+
+  /**
+   * The route is served by `cachedClientLoader`. Remix's automatic post-action
+   * revalidation runs `clientLoader` first — if we let it hit a warm cache it
+   * returns the pre-mutation snapshot and the panel keeps showing the deleted
+   * team / removed member until the user hits refresh. Drop the cache BEFORE
+   * the submit so that auto-revalidation falls through to the server on the
+   * very first round-trip.
+   */
+  const submitSquadMutation = useCallback(
+    (payload: Record<string, string>) => {
       if (typeof window !== 'undefined') {
         invalidateCachedLoader(window.location.pathname);
       }
-      revalidate.revalidate();
-      setConfirmIntent(null);
-    }
-  }, [squadFetcher.state, squadFetcher.data, revalidate]);
+      squadFetcher.submit(payload, { method: 'post' });
+    },
+    [squadFetcher],
+  );
 
   // Auto-close the create-team modal once the create finishes successfully.
   useEffect(() => {
@@ -1447,10 +1775,7 @@ function BranchSupervisorTeamsPanel({
     const inSquads = new Set(deptBlock.teams.flatMap((t) => t.members.map((m) => m.userId)));
     const onRoster = new Set(deptBlock.roster.map((r) => r.userId));
     return branchMembers
-      .filter(
-        (m) =>
-          m.department === lane && !inSquads.has(m.userId) && !onRoster.has(m.userId),
-      )
+      .filter((m) => m.department === lane && !inSquads.has(m.userId) && !onRoster.has(m.userId))
       .map((m) => ({
         value: m.userId,
         label: `${m.name} · ${m.effectiveRole.replace(/_/g, ' ')}`,
@@ -1464,12 +1789,7 @@ function BranchSupervisorTeamsPanel({
   ) => {
     const onTeam = new Set(team.members.map((m) => m.userId));
     return branchMembers
-      .filter(
-        (m) =>
-          m.department === dept &&
-          !onTeam.has(m.userId) &&
-          !rosterUserIds.has(m.userId),
-      )
+      .filter((m) => m.department === dept && !onTeam.has(m.userId) && !rosterUserIds.has(m.userId))
       .map((m) => ({
         value: m.userId,
         label: `${m.name} · ${m.effectiveRole.replace(/_/g, ' ')}`,
@@ -1490,64 +1810,52 @@ function BranchSupervisorTeamsPanel({
         for (const [k, v] of confirmIntent.formData.entries()) {
           payload[k] = typeof v === 'string' ? v : '';
         }
-        squadFetcher.submit(payload, { method: 'post' });
+        submitSquadMutation(payload);
         break;
       }
       case 'deleteTeam':
-        squadFetcher.submit(
-          { intent: 'deleteBranchTeam', teamId: confirmIntent.teamId },
-          { method: 'post' },
-        );
+        submitSquadMutation({ intent: 'deleteBranchTeam', teamId: confirmIntent.teamId });
         break;
       case 'toggleSupervisor':
-        squadFetcher.submit(
-          {
-            intent: 'setBranchTeamMemberSupervisor',
-            teamId: confirmIntent.teamId,
-            userId: confirmIntent.userId,
-            isSupervisor: confirmIntent.nextValue ? 'true' : 'false',
-          },
-          { method: 'post' },
-        );
+        submitSquadMutation({
+          intent: 'setBranchTeamMemberSupervisor',
+          teamId: confirmIntent.teamId,
+          userId: confirmIntent.userId,
+          isSupervisor: confirmIntent.nextValue ? 'true' : 'false',
+        });
         break;
       case 'removeMember':
-        squadFetcher.submit(
-          {
-            intent: 'removeBranchTeamMember',
-            teamId: confirmIntent.teamId,
-            userId: confirmIntent.userId,
-          },
-          { method: 'post' },
-        );
+        submitSquadMutation({
+          intent: 'removeBranchTeamMember',
+          teamId: confirmIntent.teamId,
+          userId: confirmIntent.userId,
+        });
         break;
       case 'addRosterMember': {
         const payload: Record<string, string> = {};
         for (const [k, v] of confirmIntent.formData.entries()) {
           payload[k] = typeof v === 'string' ? v : '';
         }
-        squadFetcher.submit(payload, { method: 'post' });
+        submitSquadMutation(payload);
         break;
       }
       case 'removeRosterMember':
-        squadFetcher.submit(
-          {
-            intent: 'removeBranchDepartmentMember',
-            branchDepartmentId: confirmIntent.branchDepartmentId,
-            userId: confirmIntent.userId,
-          },
-          { method: 'post' },
-        );
+        submitSquadMutation({
+          intent: 'removeBranchDepartmentMember',
+          branchDepartmentId: confirmIntent.branchDepartmentId,
+          userId: confirmIntent.userId,
+        });
         break;
       case 'bulkAddMembers': {
         const payload: Record<string, string> = {};
         for (const [k, v] of confirmIntent.formData.entries()) {
           payload[k] = typeof v === 'string' ? v : '';
         }
-        squadFetcher.submit(payload, { method: 'post' });
+        submitSquadMutation(payload);
         break;
       }
     }
-  }, [confirmIntent, squadFetcher]);
+  }, [confirmIntent, submitSquadMutation]);
 
   const confirmModalProps = useMemo(() => {
     if (!confirmIntent) return null;
@@ -1638,8 +1946,8 @@ function BranchSupervisorTeamsPanel({
           description: (
             <>
               Place <strong>{confirmIntent.memberLabel}</strong> on the{' '}
-              <strong>{confirmIntent.deptLabel}</strong> roster without assigning a team? They report
-              to the department head until you move them into a team.
+              <strong>{confirmIntent.deptLabel}</strong> roster without assigning a team? They
+              report to the department head until you move them into a team.
             </>
           ),
           confirmLabel: 'Add to roster',
@@ -1664,8 +1972,8 @@ function BranchSupervisorTeamsPanel({
             <>
               Add <strong>{confirmIntent.memberCount}</strong> selected member
               {confirmIntent.memberCount === 1 ? '' : 's'} to{' '}
-              <strong>{confirmIntent.teamLabel}</strong>?
-              {' '}Anyone already on a different team in this department will be moved.
+              <strong>{confirmIntent.teamLabel}</strong>? Anyone already on a different team in this
+              department will be moved.
             </>
           ),
           confirmLabel: 'Add to team',
@@ -1680,19 +1988,38 @@ function BranchSupervisorTeamsPanel({
   ].filter((o): o is { value: string; label: string } => o !== null);
   const defaultCreateDept = canManageCSTeams ? 'CS' : 'MARKETING';
 
+  // Per-viewer dept visibility (CEO directive 2026-05-10): Head of Marketing
+  // shouldn't see the CS department, Head of CS shouldn't see Marketing —
+  // they only manage one of the two. SuperAdmin / Admin / Branch Admin /
+  // HR Manager keep `canManageCSTeams && canManageMarketingTeams` so they
+  // see both. The same `canManage*` flags drive both visibility AND
+  // management since "view-only on a foreign dept" isn't a CEO-supported
+  // role on this page.
+  const visibleDepartments = useMemo(
+    () =>
+      orgStructure.departments.filter((d) =>
+        d.department.department === 'CS' ? canManageCSTeams : canManageMarketingTeams,
+      ),
+    [orgStructure.departments, canManageCSTeams, canManageMarketingTeams],
+  );
+
   // Resolve the selected dept block (or null = master view). Stale ids
-  // (deleted/migrated) gracefully fall back to master view.
+  // (deleted/migrated) gracefully fall back to master view. Defensive: if
+  // the URL/state points to a dept the viewer can't see, treat it as null
+  // so the master view shows the cards they're allowed to see.
   const selectedDept = selectedDeptId
-    ? orgStructure.departments.find((d) => d.department.id === selectedDeptId) ?? null
+    ? (visibleDepartments.find((d) => d.department.id === selectedDeptId) ?? null)
     : null;
 
   // Members outside the formal dept structure (Logistics / Finance / HR /
   // Other roles). Per CEO directive 2026-05-10 these should not be in branches
   // at all — surface a warning card on the master view until the cleanup
-  // migration runs.
-  const nonDeptMembers = branchMembers.filter(
-    (m) => m.department !== 'CS' && m.department !== 'MARKETING',
-  );
+  // migration runs. Only Heads who can manage both depts (i.e. admin-class
+  // viewers) see the warning; HoM/HoCS shouldn't be diagnosing branch hygiene.
+  const canSeeBothDepts = canManageCSTeams && canManageMarketingTeams;
+  const nonDeptMembers = canSeeBothDepts
+    ? branchMembers.filter((m) => m.department !== 'CS' && m.department !== 'MARKETING')
+    : [];
 
   return (
     <div className="space-y-6">
@@ -1700,10 +2027,10 @@ function BranchSupervisorTeamsPanel({
         // ── Master view: department cards. Help text + Add member CTA live
         // inside each department's "Manage" detail view, not at the master level.
         <>
-          {orgStructure.departments.length === 0 ? (
+          {visibleDepartments.length === 0 ? (
             <EmptyState
-              title="No departments loaded"
-              description="Reload the page after migrations complete, or contact support."
+              title="No departments to manage"
+              description="You don't have permission to manage any department on this branch."
             />
           ) : (
             // Department cards — same shape as `/admin/branches` list cards
@@ -1711,7 +2038,7 @@ function BranchSupervisorTeamsPanel({
             // `bg-app-elevated rounded-xl border` shell, brand-coloured hover,
             // whole-card-clickable via an overlay button.
             <div className="grid gap-4 sm:grid-cols-2">
-              {orgStructure.departments.map((deptBlock) => {
+              {visibleDepartments.map((deptBlock) => {
                 const lane = deptBlock.department.department;
                 const deptTitle = DEPT_TEAM_LABEL[lane];
                 const memberCount = branchMembers.filter((m) => m.department === lane).length;
@@ -1751,17 +2078,25 @@ function BranchSupervisorTeamsPanel({
 
                     <div className="relative z-10 grid grid-cols-3 gap-2 text-center mb-4 flex-1 pointer-events-none">
                       <div>
-                        <p className="text-2xl font-semibold text-app-fg tabular-nums">{memberCount}</p>
-                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide mt-0.5">Members</p>
+                        <p className="text-2xl font-semibold text-app-fg tabular-nums">
+                          {memberCount}
+                        </p>
+                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide mt-0.5">
+                          Members
+                        </p>
                       </div>
                       <div>
-                        <p className="text-2xl font-semibold text-app-fg tabular-nums">{deptBlock.teams.length}</p>
+                        <p className="text-2xl font-semibold text-app-fg tabular-nums">
+                          {deptBlock.teams.length}
+                        </p>
                         <p className="text-[10px] text-app-fg-muted uppercase tracking-wide mt-0.5">
                           Team{deptBlock.teams.length === 1 ? '' : 's'}
                         </p>
                       </div>
                       <div>
-                        <p className="text-2xl font-semibold text-app-fg tabular-nums">{supervisorCount}</p>
+                        <p className="text-2xl font-semibold text-app-fg tabular-nums">
+                          {supervisorCount}
+                        </p>
                         <p className="text-[10px] text-app-fg-muted uppercase tracking-wide mt-0.5">
                           Supervisor{supervisorCount === 1 ? '' : 's'}
                         </p>
@@ -1771,7 +2106,13 @@ function BranchSupervisorTeamsPanel({
                     <div className="relative z-10 flex items-center justify-end pt-3 border-t border-app-border pointer-events-none">
                       <span className="text-xs font-medium text-app-fg-muted group-hover:text-brand-600 dark:group-hover:text-brand-400 inline-flex items-center gap-1 transition-colors">
                         Manage {deptTitle.toLowerCase()}
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg
+                          className="w-3.5 h-3.5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                         </svg>
                       </span>
@@ -1793,8 +2134,9 @@ function BranchSupervisorTeamsPanel({
                 </span>
               </div>
               <p className="text-xs text-warning-800 dark:text-warning-300">
-                These users have non-CS/Marketing roles (Logistics, Finance, HR, Admin, etc.). Per CEO directive 2026-05-10 they shouldn't be assigned to a branch.
-                Branch assignment will be removed by the next cleanup migration.
+                These users have non-CS/Marketing roles (Logistics, Finance, HR, Admin, etc.). Per
+                CEO directive 2026-05-10 they shouldn't be assigned to a branch. Branch assignment
+                will be removed by the next cleanup migration.
               </p>
             </div>
           )}
@@ -1852,82 +2194,104 @@ function BranchSupervisorTeamsPanel({
             );
           })()}
 
-          {deptTab === 'overview' && (() => {
-            const lane = selectedDept.department.department;
-            const deptMembers = branchMembers.filter((m) => m.department === lane);
-            const supervisorCount = selectedDept.teams.reduce(
-              (acc, t) => acc + t.members.filter((m) => m.isSupervisor).length,
-              0,
-            );
-            const inTeamUserIds = new Set(
-              selectedDept.teams.flatMap((t) => t.members.map((m) => m.userId)),
-            );
-            // Roster removed (CEO 2026-05-10) — every dept member is either on
-            // a team or unassigned. The "On roster" tile went with it.
-            const unassignedCount = deptMembers.filter((m) => !inTeamUserIds.has(m.userId)).length;
-            const overviewStats: Array<{ label: string; value: number; tone: string }> = [
-              { label: 'Members', value: deptMembers.length, tone: 'text-app-fg' },
-              { label: 'Teams', value: selectedDept.teams.length, tone: 'text-brand-600 dark:text-brand-400' },
-              { label: 'Supervisors', value: supervisorCount, tone: 'text-success-600 dark:text-success-400' },
-            ];
-            return (
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3">
-                  {overviewStats.map((s) => (
-                    <div key={s.label} className="card p-3">
-                      <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">{s.label}</p>
-                      <p className={`text-2xl font-bold tabular-nums mt-1 ${s.tone}`}>{s.value}</p>
-                    </div>
-                  ))}
-                </div>
-                {unassignedCount > 0 && (
-                  <div className="rounded-md border border-warning-300 dark:border-warning-700/50 bg-warning-50/50 dark:bg-warning-900/20 px-3 py-2 text-sm text-warning-800 dark:text-warning-300">
-                    {unassignedCount} member{unassignedCount === 1 ? '' : 's'} not on a team yet — assign them under <strong>Members</strong> (select + bulk add) or <strong>Teams</strong>.
+          {deptTab === 'overview' &&
+            (() => {
+              const lane = selectedDept.department.department;
+              const deptMembers = branchMembers.filter((m) => m.department === lane);
+              const supervisorCount = selectedDept.teams.reduce(
+                (acc, t) => acc + t.members.filter((m) => m.isSupervisor).length,
+                0,
+              );
+              const inTeamUserIds = new Set(
+                selectedDept.teams.flatMap((t) => t.members.map((m) => m.userId)),
+              );
+              // Roster removed (CEO 2026-05-10) — every dept member is either on
+              // a team or unassigned. The "On roster" tile went with it.
+              const unassignedCount = deptMembers.filter(
+                (m) => !inTeamUserIds.has(m.userId),
+              ).length;
+              const overviewStats: Array<{ label: string; value: number; tone: string }> = [
+                { label: 'Members', value: deptMembers.length, tone: 'text-app-fg' },
+                {
+                  label: 'Teams',
+                  value: selectedDept.teams.length,
+                  tone: 'text-brand-600 dark:text-brand-400',
+                },
+                {
+                  label: 'Supervisors',
+                  value: supervisorCount,
+                  tone: 'text-success-600 dark:text-success-400',
+                },
+              ];
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    {overviewStats.map((s) => (
+                      <div key={s.label} className="card p-3">
+                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                          {s.label}
+                        </p>
+                        <p className={`text-2xl font-bold tabular-nums mt-1 ${s.tone}`}>
+                          {s.value}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
-            );
-          })()}
+                  {unassignedCount > 0 && (
+                    <div className="rounded-md border border-warning-300 dark:border-warning-700/50 bg-warning-50/50 dark:bg-warning-900/20 px-3 py-2 text-sm text-warning-800 dark:text-warning-300">
+                      {unassignedCount} member{unassignedCount === 1 ? '' : 's'} not on a team yet —
+                      assign them under <strong>Members</strong> (select + bulk add) or{' '}
+                      <strong>Teams</strong>.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
-          {deptTab === 'members' && (() => {
-            // Build userId → team-name map so the Members table can show the
-            // member's team membership in place of the (now-redundant) Department.
-            const teamByUserId: Record<string, string> = {};
-            const supervisorUserIds = new Set<string>();
-            const teamsForBulk: Array<{ id: string; label: string }> = [];
-            for (const team of selectedDept.teams) {
-              const teamName = team.name?.trim() || `${DEPT_TEAM_LABEL[team.department]} team`;
-              teamsForBulk.push({ id: team.id, label: teamName });
-              for (const m of team.members) {
-                teamByUserId[m.userId] = teamName;
-                if (m.isSupervisor) supervisorUserIds.add(m.userId);
+          {deptTab === 'members' &&
+            (() => {
+              // Build userId → team-name map so the Members table can show the
+              // member's team membership in place of the (now-redundant) Department.
+              const teamByUserId: Record<string, string> = {};
+              const supervisorUserIds = new Set<string>();
+              const teamsForBulk: Array<{ id: string; label: string }> = [];
+              for (const team of selectedDept.teams) {
+                const teamName = team.name?.trim() || `${DEPT_TEAM_LABEL[team.department]} team`;
+                teamsForBulk.push({ id: team.id, label: teamName });
+                for (const m of team.members) {
+                  teamByUserId[m.userId] = teamName;
+                  if (m.isSupervisor) supervisorUserIds.add(m.userId);
+                }
               }
-            }
-            return (
-              <BranchMembersPanel
-                members={branchMembers.filter((m) => m.department === selectedDept.department.department)}
-                canManage={canManageBranchPage}
-                teamByUserId={teamByUserId}
-                supervisorUserIds={supervisorUserIds}
-                teamsForBulk={teamsForBulk}
-                onBulkAddToTeam={(teamId, userIds, teamLabel) => {
-                  // Always send isSupervisor=false from bulk — supervisor
-                  // promotion happens per-member from the Teams tab.
-                  const fd = new FormData();
-                  fd.set('intent', 'addBranchTeamMembersBulk');
-                  fd.set('teamId', teamId);
-                  fd.set('userIds', JSON.stringify(userIds));
-                  fd.set('isSupervisor', 'false');
-                  setConfirmIntent({
-                    kind: 'bulkAddMembers',
-                    formData: fd,
-                    teamLabel,
-                    memberCount: userIds.length,
-                  });
-                }}
-              />
-            );
-          })()}
+              return (
+                <BranchMembersPanel
+                  branchId={selectedDept.department.branchId}
+                  department={selectedDept.department.department}
+                  members={branchMembers.filter(
+                    (m) => m.department === selectedDept.department.department,
+                  )}
+                  canManage={canManageBranchPage}
+                  teamByUserId={teamByUserId}
+                  supervisorUserIds={supervisorUserIds}
+                  teamsForBulk={teamsForBulk}
+                  onBulkAddToTeam={(teamId, userIds, teamLabel) => {
+                    // Always send isSupervisor=false from bulk — supervisor
+                    // promotion happens per-member from the Teams tab.
+                    const fd = new FormData();
+                    fd.set('intent', 'addBranchTeamMembersBulk');
+                    fd.set('teamId', teamId);
+                    fd.set('userIds', JSON.stringify(userIds));
+                    fd.set('isSupervisor', 'false');
+                    setConfirmIntent({
+                      kind: 'bulkAddMembers',
+                      formData: fd,
+                      teamLabel,
+                      memberCount: userIds.length,
+                    });
+                  }}
+                />
+              );
+            })()}
 
           {deptTab === 'teams' && (
             <div className="space-y-4">
@@ -1936,216 +2300,241 @@ function BranchSupervisorTeamsPanel({
               {/* Teams list — collapsible cards. The Create team button lives
                   alongside the tabs (always visible, not duplicated here). */}
               {[selectedDept].map((deptBlock) => {
-                  const rosterUserIds = new Set(deptBlock.roster.map((r) => r.userId));
-                  return (
-                    <div key={deptBlock.department.id} className="space-y-3">
-                  {deptBlock.teams.length === 0 ? (
-                    <p className="text-xs text-app-fg-muted text-center py-6">
-                      No teams in this department yet. Click <strong>+ Create team</strong> in the tab bar to add one.
-                    </p>
-                  ) : null}
-                  {deptBlock.teams.map((team) => {
-            const title = team.name?.trim() || `${DEPT_TEAM_LABEL[team.department]} team`;
-            const pick = addOptions(team.department, team, rosterUserIds);
-            const supervisorCount = team.members.filter((m) => m.isSupervisor).length;
-            const isOpen = openTeamId === team.id;
-            const canManageThisTeam = canManageForDept(team.department);
-            const isRenameBusy =
-              isBusy &&
-              confirmIntent?.kind === 'renameTeam' &&
-              confirmIntent.teamId === team.id;
-            const isDeleteBusy =
-              isBusy &&
-              confirmIntent?.kind === 'deleteTeam' &&
-              confirmIntent.teamId === team.id;
-            const isAddMemberBusy =
-              isBusy &&
-              confirmIntent?.kind === 'addMember' &&
-              confirmIntent.teamTitle === title;
-
-            return (
-              <div key={team.id} className="card p-0 overflow-hidden">
-                <Collapsible
-                  open={isOpen}
-                  onOpenChange={(next) => setOpenTeamId(next ? team.id : null)}
-                  triggerClassName="px-4 py-3"
-                  contentClassName="border-t border-app-border"
-                  trigger={
-                    <div className="flex flex-wrap items-center gap-3 min-w-0">
-                      <div
-                        className={`shrink-0 inline-flex items-center justify-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                          team.department === 'CS'
-                            ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
-                            : 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300'
-                        }`}
-                      >
-                        {DEPT_TEAM_LABEL[team.department]}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-app-fg truncate">{title}</p>
-                        <p className="text-xs text-app-fg-muted">
-                          {team.members.length} member{team.members.length === 1 ? '' : 's'}
-                          {supervisorCount > 0 ? ` · ${supervisorCount} supervisor${supervisorCount === 1 ? '' : 's'}` : ''}
-                        </p>
-                      </div>
-                    </div>
-                  }
-                >
-                  <div className="p-4 space-y-4">
-                    {canManageThisTeam ? (
-                      <div className="flex flex-wrap items-end gap-2 justify-between">
-                        <squadFetcher.Form
-                          method="post"
-                          className="flex flex-wrap items-end gap-2"
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            const fd = new FormData(e.currentTarget);
-                            const newName = fd.get('name')?.toString().trim() ?? '';
-                            const oldName = team.name?.trim() ?? '';
-                            if (newName === oldName) return;
-                            setConfirmIntent({
-                              kind: 'renameTeam',
-                              formData: fd,
-                              teamId: team.id,
-                              oldName: oldName || title,
-                              newName,
-                            });
-                          }}
-                        >
-                          <input type="hidden" name="intent" value="updateBranchTeam" />
-                          <input type="hidden" name="teamId" value={team.id} />
-                          <TextInput
-                            label="Rename"
-                            id={`rn-${team.id}`}
-                            name="name"
-                            defaultValue={team.name ?? ''}
-                            placeholder="Team name"
-                            controlSize="sm"
-                          />
-                          <Button
-                            type="submit"
-                            variant="secondary"
-                            size="sm"
-                            disabled={isBusy}
-                            loading={isRenameBusy}
-                            loadingText="Saving…"
-                          >
-                            Save name
-                          </Button>
-                        </squadFetcher.Form>
-                        <Button
-                          type="button"
-                          variant="danger"
-                          size="sm"
-                          disabled={isBusy}
-                          loading={isDeleteBusy}
-                          loadingText="Deleting…"
-                          onClick={() =>
-                            setConfirmIntent({
-                              kind: 'deleteTeam',
-                              teamId: team.id,
-                              teamTitle: title,
-                            })
-                          }
-                        >
-                          Delete team
-                        </Button>
-                      </div>
+                const rosterUserIds = new Set(deptBlock.roster.map((r) => r.userId));
+                return (
+                  <div key={deptBlock.department.id} className="space-y-3">
+                    {deptBlock.teams.length === 0 ? (
+                      <p className="text-xs text-app-fg-muted text-center py-6">
+                        No teams in this department yet. Click <strong>+ Create team</strong> in the
+                        tab bar to add one.
+                      </p>
                     ) : null}
+                    {deptBlock.teams.map((team) => {
+                      const title = team.name?.trim() || `${DEPT_TEAM_LABEL[team.department]} team`;
+                      const pick = addOptions(team.department, team, rosterUserIds);
+                      const supervisorCount = team.members.filter((m) => m.isSupervisor).length;
+                      const isOpen = openTeamId === team.id;
+                      const canManageThisTeam = canManageForDept(team.department);
+                      const isRenameBusy =
+                        isBusy &&
+                        confirmIntent?.kind === 'renameTeam' &&
+                        confirmIntent.teamId === team.id;
+                      const isDeleteBusy =
+                        isBusy &&
+                        confirmIntent?.kind === 'deleteTeam' &&
+                        confirmIntent.teamId === team.id;
+                      const isAddMemberBusy =
+                        isBusy &&
+                        confirmIntent?.kind === 'addMember' &&
+                        confirmIntent.teamTitle === title;
 
-                    <div className="overflow-x-auto">
-                      <CompactTable
-                        withCard={false}
-                        className="min-w-full text-sm"
-                        columns={buildBranchTeamMemberColumns(team, title, canManageThisTeam, isBusy, setConfirmIntent)}
-                        rows={team.members}
-                        rowKey={(m) => m.userId}
-                      />
-                    </div>
-
-                    {teamSettingsByTeamId[team.id] && (teamSettingsByTeamId[team.id] as TeamSettingsBundle).catalog.length > 0 && (
-                      <TeamSettingsSection
-                        team={team}
-                        teamTitle={title}
-                        bundle={teamSettingsByTeamId[team.id] as TeamSettingsBundle}
-                        canManage={canManageThisTeam}
-                      />
-                    )}
-
-                    {canManageThisTeam ? (
-                      <div className="border-t border-app-border pt-3 space-y-2">
-                        <p className="text-sm font-semibold text-app-fg">+ Add member</p>
-                        {pick.length === 0 ? (
-                          <p className="text-xs text-app-fg-muted">All eligible {DEPT_TEAM_LABEL[team.department].toLowerCase()} members are already on this team.</p>
-                        ) : (
-                          <squadFetcher.Form
-                            method="post"
-                            className="flex flex-wrap gap-3 items-end"
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              const fd = new FormData(e.currentTarget);
-                              const userId = fd.get('userId')?.toString() ?? '';
-                              if (!userId) return;
-                              const asSupervisor = fd.get('isSupervisor') === 'true';
-                              const memberOption = pick.find((p) => p.value === userId);
-                              setConfirmIntent({
-                                kind: 'addMember',
-                                formData: fd,
-                                teamTitle: title,
-                                memberLabel: memberOption?.label ?? 'this member',
-                                asSupervisor,
-                              });
-                            }}
+                      return (
+                        <div key={team.id} className="card p-0 overflow-hidden">
+                          <Collapsible
+                            open={isOpen}
+                            onOpenChange={(next) => setOpenTeamId(next ? team.id : null)}
+                            triggerClassName="px-4 py-3"
+                            contentClassName="border-t border-app-border"
+                            trigger={
+                              <div className="flex flex-wrap items-center gap-3 min-w-0">
+                                <div
+                                  className={`shrink-0 inline-flex items-center justify-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                    team.department === 'CS'
+                                      ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
+                                      : 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300'
+                                  }`}
+                                >
+                                  {DEPT_TEAM_LABEL[team.department]}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-app-fg truncate">
+                                    {title}
+                                  </p>
+                                  <p className="text-xs text-app-fg-muted">
+                                    {team.members.length} member
+                                    {team.members.length === 1 ? '' : 's'}
+                                    {supervisorCount > 0
+                                      ? ` · ${supervisorCount} supervisor${supervisorCount === 1 ? '' : 's'}`
+                                      : ''}
+                                  </p>
+                                </div>
+                              </div>
+                            }
                           >
-                            <input type="hidden" name="intent" value="addBranchTeamMember" />
-                            <input type="hidden" name="teamId" value={team.id} />
-                            <div className="min-w-[12rem] flex-1">
-                              <FormSelect
-                                id={`add-${team.id}`}
-                                name="userId"
-                                required
-                                placeholder="Pick a member…"
-                                options={pick}
-                              />
+                            <div className="p-4 space-y-4">
+                              {canManageThisTeam ? (
+                                <div className="flex flex-wrap items-end gap-2 justify-between">
+                                  <squadFetcher.Form
+                                    method="post"
+                                    className="flex flex-wrap items-end gap-2"
+                                    onSubmit={(e) => {
+                                      e.preventDefault();
+                                      const fd = new FormData(e.currentTarget);
+                                      const newName = fd.get('name')?.toString().trim() ?? '';
+                                      const oldName = team.name?.trim() ?? '';
+                                      if (newName === oldName) return;
+                                      setConfirmIntent({
+                                        kind: 'renameTeam',
+                                        formData: fd,
+                                        teamId: team.id,
+                                        oldName: oldName || title,
+                                        newName,
+                                      });
+                                    }}
+                                  >
+                                    <input type="hidden" name="intent" value="updateBranchTeam" />
+                                    <input type="hidden" name="teamId" value={team.id} />
+                                    <TextInput
+                                      label="Rename"
+                                      id={`rn-${team.id}`}
+                                      name="name"
+                                      defaultValue={team.name ?? ''}
+                                      placeholder="Team name"
+                                      controlSize="sm"
+                                    />
+                                    <Button
+                                      type="submit"
+                                      variant="secondary"
+                                      size="sm"
+                                      disabled={isBusy}
+                                      loading={isRenameBusy}
+                                      loadingText="Saving…"
+                                    >
+                                      Save name
+                                    </Button>
+                                  </squadFetcher.Form>
+                                  <Button
+                                    type="button"
+                                    variant="danger"
+                                    size="sm"
+                                    disabled={isBusy}
+                                    loading={isDeleteBusy}
+                                    loadingText="Deleting…"
+                                    onClick={() =>
+                                      setConfirmIntent({
+                                        kind: 'deleteTeam',
+                                        teamId: team.id,
+                                        teamTitle: title,
+                                      })
+                                    }
+                                  >
+                                    Delete team
+                                  </Button>
+                                </div>
+                              ) : null}
+
+                              <div className="overflow-x-auto">
+                                <CompactTable
+                                  withCard={false}
+                                  className="min-w-full text-sm"
+                                  columns={buildBranchTeamMemberColumns(
+                                    team,
+                                    title,
+                                    canManageThisTeam,
+                                    isBusy,
+                                    setConfirmIntent,
+                                  )}
+                                  rows={team.members}
+                                  rowKey={(m) => m.userId}
+                                />
+                              </div>
+
+                              {teamSettingsByTeamId[team.id] &&
+                                (teamSettingsByTeamId[team.id] as TeamSettingsBundle).catalog
+                                  .length > 0 && (
+                                  <TeamSettingsSection
+                                    team={team}
+                                    teamTitle={title}
+                                    bundle={teamSettingsByTeamId[team.id] as TeamSettingsBundle}
+                                    canManage={canManageThisTeam}
+                                  />
+                                )}
+
+                              {canManageThisTeam ? (
+                                <div className="border-t border-app-border pt-3 space-y-2">
+                                  <p className="text-sm font-semibold text-app-fg">+ Add member</p>
+                                  {pick.length === 0 ? (
+                                    <p className="text-xs text-app-fg-muted">
+                                      All eligible {DEPT_TEAM_LABEL[team.department].toLowerCase()}{' '}
+                                      members are already on this team.
+                                    </p>
+                                  ) : (
+                                    <squadFetcher.Form
+                                      method="post"
+                                      className="flex flex-wrap gap-3 items-end"
+                                      onSubmit={(e) => {
+                                        e.preventDefault();
+                                        const fd = new FormData(e.currentTarget);
+                                        const userId = fd.get('userId')?.toString() ?? '';
+                                        if (!userId) return;
+                                        const asSupervisor = fd.get('isSupervisor') === 'true';
+                                        const memberOption = pick.find((p) => p.value === userId);
+                                        setConfirmIntent({
+                                          kind: 'addMember',
+                                          formData: fd,
+                                          teamTitle: title,
+                                          memberLabel: memberOption?.label ?? 'this member',
+                                          asSupervisor,
+                                        });
+                                      }}
+                                    >
+                                      <input
+                                        type="hidden"
+                                        name="intent"
+                                        value="addBranchTeamMember"
+                                      />
+                                      <input type="hidden" name="teamId" value={team.id} />
+                                      <div className="min-w-[12rem] flex-1">
+                                        <FormSelect
+                                          id={`add-${team.id}`}
+                                          name="userId"
+                                          required
+                                          placeholder="Pick a member…"
+                                          options={pick}
+                                        />
+                                      </div>
+                                      <label
+                                        className={[
+                                          'flex items-center gap-2 text-xs pb-2',
+                                          supervisorCount > 0
+                                            ? 'text-app-fg-muted/60 cursor-not-allowed'
+                                            : 'text-app-fg-muted',
+                                        ].join(' ')}
+                                        title={
+                                          supervisorCount > 0
+                                            ? 'This team already has a supervisor'
+                                            : undefined
+                                        }
+                                      >
+                                        <Checkbox
+                                          name="isSupervisor"
+                                          value="true"
+                                          disabled={supervisorCount > 0}
+                                        />
+                                        Add as supervisor
+                                      </label>
+                                      <Button
+                                        type="submit"
+                                        variant="primary"
+                                        size="sm"
+                                        disabled={isBusy || pick.length === 0}
+                                        loading={isAddMemberBusy}
+                                        loadingText="Adding…"
+                                      >
+                                        Add member
+                                      </Button>
+                                    </squadFetcher.Form>
+                                  )}
+                                </div>
+                              ) : null}
                             </div>
-                            <label
-                              className={[
-                                'flex items-center gap-2 text-xs pb-2',
-                                supervisorCount > 0
-                                  ? 'text-app-fg-muted/60 cursor-not-allowed'
-                                  : 'text-app-fg-muted',
-                              ].join(' ')}
-                              title={supervisorCount > 0 ? 'This team already has a supervisor' : undefined}
-                            >
-                              <Checkbox
-                                name="isSupervisor"
-                                value="true"
-                                disabled={supervisorCount > 0}
-                              />
-                              Add as supervisor
-                            </label>
-                            <Button
-                              type="submit"
-                              variant="primary"
-                              size="sm"
-                              disabled={isBusy || pick.length === 0}
-                              loading={isAddMemberBusy}
-                              loadingText="Adding…"
-                            >
-                              Add member
-                            </Button>
-                          </squadFetcher.Form>
-                        )}
-                      </div>
-                    ) : null}
+                          </Collapsible>
+                        </div>
+                      );
+                    })}
                   </div>
-                </Collapsible>
-              </div>
-            );
-                  })}
-                </div>
-              );
-            })}
+                );
+              })}
             </div>
           )}
         </>
@@ -2188,7 +2577,10 @@ function BranchSupervisorTeamsPanel({
                 Create team
               </h3>
               <p className="text-sm text-app-fg-muted mt-0.5">
-                New team in <span className="font-medium">{DEPT_TEAM_LABEL[selectedDept.department.department]}</span>
+                New team in{' '}
+                <span className="font-medium">
+                  {DEPT_TEAM_LABEL[selectedDept.department.department]}
+                </span>
               </p>
             </div>
             <button
@@ -2198,7 +2590,13 @@ function BranchSupervisorTeamsPanel({
               className="text-app-fg-muted hover:text-app-fg shrink-0"
               aria-label="Close"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -2228,7 +2626,9 @@ function BranchSupervisorTeamsPanel({
               maxLength={120}
             />
             {squadSurface.friendlyError && (
-              <p className="text-sm text-danger-600 dark:text-danger-400">{squadSurface.friendlyError}</p>
+              <p className="text-sm text-danger-600 dark:text-danger-400">
+                {squadSurface.friendlyError}
+              </p>
             )}
             <p className="text-xs text-app-fg-muted">
               You can rename or delete the team later from the Teams tab.
@@ -2275,7 +2675,6 @@ function BranchSupervisorTeamsPanel({
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-
 function BranchOverviewPage({
   overview,
   allUsers,
@@ -2303,16 +2702,20 @@ function BranchOverviewPage({
     skipErrorToast: editOpen || addMemberOpen,
   });
 
+  // Drop the cachedClientLoader entry the moment a submit starts so Remix's
+  // auto-revalidation (which fires after the action completes) falls through
+  // to the server on its FIRST round-trip. Doing this on success was too late
+  // — the auto-revalidate had already returned the pre-mutation snapshot.
+  useEffect(() => {
+    if (fetcher.state === 'submitting' && typeof window !== 'undefined') {
+      invalidateCachedLoader(window.location.pathname);
+    }
+  }, [fetcher.state]);
+
   const handleBranchDetailSuccess = useCallback(() => {
     setEditOpen(false);
     setAddMemberOpen(false);
     setIsPrimary(false);
-    // The route uses cachedClientLoader — without dropping the entry, the
-    // post-mutation auto-revalidate serves stale data and the new branch
-    // edit / member assignment doesn't show until a hard reload.
-    if (typeof window !== 'undefined') {
-      invalidateCachedLoader(window.location.pathname);
-    }
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleBranchDetailSuccess);
 
@@ -2328,7 +2731,6 @@ function BranchOverviewPage({
 
   return (
     <div className="space-y-6">
-
       {/* ── Header — card-styled hero matching `/admin/branches` list cards
           (CEO directive 2026-05-10). Visual continuity between list and
           detail surfaces; the card surface also tones down the dense
@@ -2339,7 +2741,13 @@ function BranchOverviewPage({
           prefetch="intent"
           className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
           All branches
@@ -2425,7 +2833,13 @@ function BranchOverviewPage({
               className="text-app-fg-muted hover:text-app-fg shrink-0"
               aria-label="Close"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -2455,10 +2869,23 @@ function BranchOverviewPage({
             />
             <ModalFetcherInlineError message={branchDetailSurface.errorMatchingIntent('update')} />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setEditOpen(false)} disabled={isSubmitting}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setEditOpen(false)}
+                disabled={isSubmitting}
+              >
                 Cancel
               </Button>
-              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting} loading={isSubmitting} loadingText="Saving...">
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                disabled={isSubmitting}
+                loading={isSubmitting}
+                loadingText="Saving..."
+              >
                 Save
               </Button>
             </div>
@@ -2492,7 +2919,13 @@ function BranchOverviewPage({
               className="text-app-fg-muted hover:text-app-fg shrink-0"
               aria-label="Close"
             >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -2504,13 +2937,16 @@ function BranchOverviewPage({
             <input type="hidden" name="intent" value="assignUser" />
             <input type="hidden" name="isPrimary" value={String(isPrimary)} />
             <div>
-              <label className="block text-xs font-medium text-app-fg-muted mb-1" htmlFor="add-member-user">
+              <label
+                className="block text-xs font-medium text-app-fg-muted mb-1"
+                htmlFor="add-member-user"
+              >
                 Staff member
               </label>
               {availableUsers.length === 0 ? (
                 <p className="text-sm text-app-fg-muted">
-                  No eligible staff to add. Branches only accept Marketing, CS, and Branch Admin roles —
-                  others are org-wide and don't belong to a branch.
+                  No eligible staff to add. Branches only accept Marketing, CS, and Branch Admin
+                  roles — others are org-wide and don't belong to a branch.
                 </p>
               ) : (
                 <FormSelect
@@ -2540,13 +2976,24 @@ function BranchOverviewPage({
                 onChange={(e) => setIsPrimary(e.target.checked)}
                 className="rounded border-app-border text-brand-600"
               />
-              <label htmlFor="add-member-primary" className="text-sm text-app-fg-muted cursor-pointer">
+              <label
+                htmlFor="add-member-primary"
+                className="text-sm text-app-fg-muted cursor-pointer"
+              >
                 Set as primary branch for this user
               </label>
             </div>
-            <ModalFetcherInlineError message={branchDetailSurface.errorMatchingIntent('assignUser')} />
+            <ModalFetcherInlineError
+              message={branchDetailSurface.errorMatchingIntent('assignUser')}
+            />
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setAddMemberOpen(false)} disabled={isSubmitting}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setAddMemberOpen(false)}
+                disabled={isSubmitting}
+              >
                 Cancel
               </Button>
               <Button
@@ -2576,15 +3023,15 @@ export default function BranchDetailRoute() {
       loaderShell={{}}
       deferredKey="pageData"
     >
-        {(data) => (
-          <BranchOverviewPage
-            overview={data.overview}
-            allUsers={data.allUsers}
-            teams={data.teams}
-            orgStructure={data.orgStructure}
-            teamSettingsByTeamId={data.teamSettingsByTeamId}
-          />
-        )}
-      </CachedAwait>
+      {(data) => (
+        <BranchOverviewPage
+          overview={data.overview}
+          allUsers={data.allUsers}
+          teams={data.teams}
+          orgStructure={data.orgStructure}
+          teamSettingsByTeamId={data.teamSettingsByTeamId}
+        />
+      )}
+    </CachedAwait>
   );
 }

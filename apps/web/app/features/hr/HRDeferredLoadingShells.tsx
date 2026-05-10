@@ -363,9 +363,6 @@ export function UserCreateEditLoadingShell({ mode }: { mode: 'create' | 'edit' }
             <div className="space-y-1.5">
               <label className={labelClass}>Primary Branch *</label>
               {inputPulse}
-              <p className="text-xs text-app-fg-muted">
-                Choose all branches this user belongs to, then pick one as their default branch.
-              </p>
             </div>
           </div>
 

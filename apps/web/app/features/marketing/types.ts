@@ -317,15 +317,20 @@ export interface MarketingFundingLoaderData {
    */
   activeBranchName?: string | null;
   /**
-   * Recipient candidates for the Request Funding modal (migration 0106). MBs see
-   * HoMs in their branch + Finance Officers org-wide; HoMs see Finance Officers.
-   * Sorted with preferred recipient (HoM for MB, first Finance for HoM) first.
+   * Recipient candidates for the Request Funding modal. MBs on a supervised
+   * marketing team see their supervisor first (preselected default); MBs
+   * without a supervisor see HoMs in their branch (default) + Finance Officers
+   * (org-wide). HoMs see Finance Officers.
    */
   fundingRequestRecipients?: Array<{
     id: string;
     name: string;
     role: string;
     isFinance: boolean;
+    /** True when this recipient is the requester's marketing-team supervisor
+     *  on the active branch — drives the "Team supervisor" picker label and
+     *  takes preselection precedence over HoM. */
+    isSupervisor: boolean;
     isPreferred: boolean;
     branchId: string | null;
   }>;

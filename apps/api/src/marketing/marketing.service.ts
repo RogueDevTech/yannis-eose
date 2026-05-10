@@ -1,6 +1,24 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, ne, and, desc, gte, lte, gt, count, sum, inArray, or, ilike, getTableColumns, isNull, sql, exists, type SQL } from 'drizzle-orm';
+import {
+  eq,
+  ne,
+  and,
+  desc,
+  gte,
+  lte,
+  gt,
+  count,
+  sum,
+  inArray,
+  or,
+  ilike,
+  getTableColumns,
+  isNull,
+  sql,
+  exists,
+  type SQL,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema, canonicalPermissionCode } from '@yannis/shared';
@@ -36,6 +54,8 @@ import { withActor } from '../common/db/with-actor';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
+import type { SessionUser } from '../common/decorators/current-user.decorator';
+import { isAdminLevel } from '../common/authz';
 import {
   appendOrdersAggregateScopeConditions,
   type OrdersAggregateSupervisorScope,
@@ -47,7 +67,9 @@ const DEFAULT_PROFITABILITY_GREEN_THRESHOLD = 2.5;
 export const MARKETING_PROFITABILITY_KEY = 'MARKETING_PROFITABILITY';
 
 /** Drizzle transaction client (same as `withActor` callback `tx`). */
-type MarketingFundingTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
+type MarketingFundingTx = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]
+>[0];
 
 export type ProfitabilityConfig = {
   /** True-ROAS multiple where the profitability score caps at 1.0 (default 3). */
@@ -114,9 +136,7 @@ export class MarketingService {
     const has = (code: string) =>
       actor.role === 'SUPER_ADMIN' || perms.includes(canonicalPermissionCode(code));
     const isOrgWide =
-      actor.role === 'SUPER_ADMIN' ||
-      has('branches.manage') ||
-      has('marketing.scope.global');
+      actor.role === 'SUPER_ADMIN' || has('branches.manage') || has('marketing.scope.global');
 
     if (currentBranchId === null) {
       if (isOrgWide) return;
@@ -203,7 +223,9 @@ export class MarketingService {
           and(
             eq(schema.adSpendLogs.mediaBuyerId, userId),
             eq(schema.adSpendLogs.status, 'APPROVED'),
-            branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
+            branchCampaignIds
+              ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds)
+              : undefined,
           ),
         );
       spendTotalStr = spendRow?.total ?? '0';
@@ -416,7 +438,12 @@ export class MarketingService {
 
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       for (const r of rows) {
-        const k = this.adSpendLineSnapshotKey(r.mediaBuyerId, r.campaignId, r.productId, r.spendYmd);
+        const k = this.adSpendLineSnapshotKey(
+          r.mediaBuyerId,
+          r.campaignId,
+          r.productId,
+          r.spendYmd,
+        );
         out.set(k, zeroSnap());
       }
       return out;
@@ -542,10 +569,20 @@ export class MarketingService {
         ? params.branchCampaignIds
         : await this.getBranchCampaignIds(params.branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
-      return { orderCount: 0, priorSpendDate: null, windowStartExclusive: null, indicativeCpa: null };
+      return {
+        orderCount: 0,
+        priorSpendDate: null,
+        windowStartExclusive: null,
+        indicativeCpa: null,
+      };
     }
     if (branchCampaignIds && !branchCampaignIds.includes(params.campaignId)) {
-      return { orderCount: 0, priorSpendDate: null, windowStartExclusive: null, indicativeCpa: null };
+      return {
+        orderCount: 0,
+        priorSpendDate: null,
+        windowStartExclusive: null,
+        indicativeCpa: null,
+      };
     }
 
     const priorDateLt = sql`${schema.adSpendLogs.spendDate}::date < ${params.spendDate}::date`;
@@ -738,7 +775,10 @@ export class MarketingService {
           : 'Only Head of Marketing or a branch marketing supervisor may disburse to Media Buyers',
       });
     }
-    throw new TRPCError({ code: 'BAD_REQUEST', message: 'Receiver must be Head of Marketing or Media Buyer' });
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Receiver must be Head of Marketing or Media Buyer',
+    });
   }
 
   // ============================================
@@ -767,8 +807,16 @@ export class MarketingService {
 
     const funding = await withActor(this.db, { id: senderId }, async (tx) => {
       const [sender, receiver] = await Promise.all([
-        tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, senderId)).limit(1),
-        tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, input.receiverId)).limit(1),
+        tx
+          .select({ role: schema.users.role })
+          .from(schema.users)
+          .where(eq(schema.users.id, senderId))
+          .limit(1),
+        tx
+          .select({ role: schema.users.role })
+          .from(schema.users)
+          .where(eq(schema.users.id, input.receiverId))
+          .limit(1),
       ]);
       const receiverRole = receiver[0]?.role;
       const senderRole = sender[0]?.role;
@@ -784,7 +832,11 @@ export class MarketingService {
         receiverRole === 'MEDIA_BUYER' &&
         (senderRole === 'HEAD_OF_MARKETING' || marketingSupervisorToMb)
       ) {
-        const disbursable = await this.computeMarketingDisbursableInTx(tx, senderId, currentBranchId);
+        const disbursable = await this.computeMarketingDisbursableInTx(
+          tx,
+          senderId,
+          currentBranchId,
+        );
         this.assertSufficientMarketingDisbursable(disbursable, input.amount);
       }
 
@@ -836,15 +888,24 @@ export class MarketingService {
       }
 
       if (found.receiverId !== receiverId) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only the receiver can verify this funding' });
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only the receiver can verify this funding',
+        });
       }
 
       if (found.status !== 'SENT') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'Funding has already been verified' });
       }
 
-      if (input.action === 'DISPUTED' && (!input.disputeReason || input.disputeReason.length < 10)) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Dispute requires a reason with at least 10 characters' });
+      if (
+        input.action === 'DISPUTED' &&
+        (!input.disputeReason || input.disputeReason.length < 10)
+      ) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Dispute requires a reason with at least 10 characters',
+        });
       }
 
       const updatedRows = await tx
@@ -1010,7 +1071,12 @@ export class MarketingService {
 
   async fundingRequestStatusCounts(
     input: FundingRequestStatusCountsInput,
-    user: { id: string; role: string; permissions?: string[] },
+    user: {
+      id: string;
+      role: string;
+      permissions?: string[];
+      isMarketingTeamSupervisorOnActiveBranch?: boolean;
+    },
     branchId?: string | null,
   ) {
     const conditions: SQL[] = [];
@@ -1023,12 +1089,17 @@ export class MarketingService {
     const canApproveFunding =
       user.role === 'SUPER_ADMIN' ||
       userPerms.includes(canonicalPermissionCode('marketing.funding.approve'));
+    // Marketing-team supervisors don't hold `marketing.funding.approve` but
+    // they DO act as the approver of inbox requests (CEO directive 2026-05-11).
+    // Bypass the "own requests only" default so the inbox-pin from the
+    // tRPC layer (`targetUserId = ctx.user.id`) drives the counts.
+    const isMarketingSupervisor = user.isMarketingTeamSupervisorOnActiveBranch === true;
     if (input.requesterId) {
       conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
     } else if (input.excludeSelfAsRequester) {
       conditions.push(ne(schema.marketingFundingRequests.requesterId, user.id));
-    } else if (!canApproveFunding) {
-      // Default visibility for non-approvers: own requests only.
+    } else if (!canApproveFunding && !isMarketingSupervisor) {
+      // Default visibility for non-approvers (and non-supervisors): own requests only.
       conditions.push(eq(schema.marketingFundingRequests.requesterId, user.id));
     }
     // Migration 0106 — caller-supplied targetUserId (their inbox); legacy NULL-target
@@ -1073,7 +1144,10 @@ export class MarketingService {
     return out;
   }
 
-  async getFundingSummary(branchId?: string | null) {
+  async getFundingSummary(
+    branchId?: string | null,
+    opts?: { restrictToReceiverIds?: string[] },
+  ) {
     const branchUserIds = await this.getBranchUserIds(branchId);
     if (branchUserIds && branchUserIds.length === 0) {
       return {
@@ -1082,24 +1156,39 @@ export class MarketingService {
         totalDisputed: '0',
       };
     }
-    const branchScope = branchUserIds
-      ? inArray(schema.marketingFunding.receiverId, branchUserIds)
-      : undefined;
+
+    const restrict = opts?.restrictToReceiverIds;
+    let receiverScope: SQL | undefined;
+    if (branchUserIds && restrict?.length) {
+      const intersect = branchUserIds.filter((id) => restrict.includes(id));
+      if (intersect.length === 0) {
+        return {
+          totalSent: '0',
+          totalCompleted: '0',
+          totalDisputed: '0',
+        };
+      }
+      receiverScope = inArray(schema.marketingFunding.receiverId, intersect);
+    } else if (branchUserIds) {
+      receiverScope = inArray(schema.marketingFunding.receiverId, branchUserIds);
+    } else if (restrict?.length) {
+      receiverScope = inArray(schema.marketingFunding.receiverId, restrict);
+    }
 
     const totalSent = await this.db
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
-      .where(and(eq(schema.marketingFunding.status, 'SENT'), branchScope));
+      .where(and(eq(schema.marketingFunding.status, 'SENT'), receiverScope));
 
     const totalCompleted = await this.db
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
-      .where(and(eq(schema.marketingFunding.status, 'COMPLETED'), branchScope));
+      .where(and(eq(schema.marketingFunding.status, 'COMPLETED'), receiverScope));
 
     const totalDisputed = await this.db
       .select({ total: sum(schema.marketingFunding.amount) })
       .from(schema.marketingFunding)
-      .where(and(eq(schema.marketingFunding.status, 'DISPUTED'), branchScope));
+      .where(and(eq(schema.marketingFunding.status, 'DISPUTED'), receiverScope));
 
     return {
       totalSent: totalSent[0]?.total ?? '0',
@@ -1133,37 +1222,47 @@ export class MarketingService {
     }
 
     // Total received (any status) — gives the headline number HoMs/MBs see.
-    const incomingWhere = and(
-      eq(schema.marketingFunding.receiverId, actorId),
-      ...dateConditions,
-    );
-    const outgoingWhere = and(
-      eq(schema.marketingFunding.senderId, actorId),
-      ...dateConditions,
-    );
+    const incomingWhere = and(eq(schema.marketingFunding.receiverId, actorId), ...dateConditions);
+    const outgoingWhere = and(eq(schema.marketingFunding.senderId, actorId), ...dateConditions);
 
-    const [received, distributed, pendingReceiveRow, disputedReceiveRow, disputedSendRow] = await Promise.all([
-      this.db
-        .select({ total: sum(schema.marketingFunding.amount) })
-        .from(schema.marketingFunding)
-        .where(incomingWhere),
-      this.db
-        .select({ total: sum(schema.marketingFunding.amount) })
-        .from(schema.marketingFunding)
-        .where(outgoingWhere),
-      this.db
-        .select({ c: count() })
-        .from(schema.marketingFunding)
-        .where(and(eq(schema.marketingFunding.receiverId, actorId), eq(schema.marketingFunding.status, 'SENT'))),
-      this.db
-        .select({ c: count() })
-        .from(schema.marketingFunding)
-        .where(and(eq(schema.marketingFunding.receiverId, actorId), eq(schema.marketingFunding.status, 'DISPUTED'))),
-      this.db
-        .select({ c: count() })
-        .from(schema.marketingFunding)
-        .where(and(eq(schema.marketingFunding.senderId, actorId), eq(schema.marketingFunding.status, 'DISPUTED'))),
-    ]);
+    const [received, distributed, pendingReceiveRow, disputedReceiveRow, disputedSendRow] =
+      await Promise.all([
+        this.db
+          .select({ total: sum(schema.marketingFunding.amount) })
+          .from(schema.marketingFunding)
+          .where(incomingWhere),
+        this.db
+          .select({ total: sum(schema.marketingFunding.amount) })
+          .from(schema.marketingFunding)
+          .where(outgoingWhere),
+        this.db
+          .select({ c: count() })
+          .from(schema.marketingFunding)
+          .where(
+            and(
+              eq(schema.marketingFunding.receiverId, actorId),
+              eq(schema.marketingFunding.status, 'SENT'),
+            ),
+          ),
+        this.db
+          .select({ c: count() })
+          .from(schema.marketingFunding)
+          .where(
+            and(
+              eq(schema.marketingFunding.receiverId, actorId),
+              eq(schema.marketingFunding.status, 'DISPUTED'),
+            ),
+          ),
+        this.db
+          .select({ c: count() })
+          .from(schema.marketingFunding)
+          .where(
+            and(
+              eq(schema.marketingFunding.senderId, actorId),
+              eq(schema.marketingFunding.status, 'DISPUTED'),
+            ),
+          ),
+      ]);
 
     return {
       totalReceived: received[0]?.total ?? '0',
@@ -1226,7 +1325,14 @@ export class MarketingService {
     caller: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
   ): Promise<
-    Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }>
+    Array<{
+      userId: string;
+      name: string;
+      role: string;
+      totalReceived: string;
+      totalSpend: string;
+      balance: string;
+    }>
   > {
     const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasGlobalView =
@@ -1251,6 +1357,19 @@ export class MarketingService {
         .where(eq(schema.users.role, 'MEDIA_BUYER'));
       for (const u of mediaBuyers) {
         if (u.id !== caller.id) recipientUserIds.push(u.id);
+      }
+    }
+
+    const holdsTeamOverview =
+      caller.role === 'HEAD_OF_MARKETING' ||
+      callerPerms.includes(canonicalPermissionCode('marketing.teamOverview'));
+    if (!hasGlobalView && branchId && !holdsTeamOverview && !isAdminLevel({ role: caller.role })) {
+      const supervisedMb = await this.branchTeams.listSupervisedUserIds(caller.id, branchId, 'MARKETING');
+      if (supervisedMb.length > 0) {
+        const keep = new Set<string>([caller.id, ...supervisedMb]);
+        const narrowed = recipientUserIds.filter((id) => keep.has(id));
+        recipientUserIds.length = 0;
+        recipientUserIds.push(...narrowed);
       }
     }
 
@@ -1292,7 +1411,9 @@ export class MarketingService {
           and(
             inArray(schema.adSpendLogs.mediaBuyerId, recipientUserIds),
             eq(schema.adSpendLogs.status, 'APPROVED'),
-            branchCampaignIds ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds) : undefined,
+            branchCampaignIds
+              ? inArray(schema.adSpendLogs.campaignId, branchCampaignIds)
+              : undefined,
           ),
         )
         .groupBy(schema.adSpendLogs.mediaBuyerId),
@@ -1311,7 +1432,14 @@ export class MarketingService {
       spendMap.set(s.mediaBuyerId, s.total ?? '0');
     }
 
-    const result: Array<{ userId: string; name: string; role: string; totalReceived: string; totalSpend: string; balance: string }> = [];
+    const result: Array<{
+      userId: string;
+      name: string;
+      role: string;
+      totalReceived: string;
+      totalSpend: string;
+      balance: string;
+    }> = [];
     for (const u of userRows) {
       const totalReceived = receivedMap.get(u.id) ?? '0';
       const totalSpend = spendMap.get(u.id) ?? '0';
@@ -1373,7 +1501,10 @@ export class MarketingService {
       return this.getFundingBalance(userId, branchId);
     }
 
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to view this user\'s funding balance' });
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: "You do not have permission to view this user's funding balance",
+    });
   }
 
   /**
@@ -1391,13 +1522,44 @@ export class MarketingService {
   async listFundingRequestRecipients(
     requesterRole: 'MEDIA_BUYER' | 'HEAD_OF_MARKETING',
     branchId: string | null | undefined,
+    /**
+     * MB requester id — when supplied alongside a `branchId`, the picker also
+     * surfaces the requester's marketing-team supervisor(s) on that branch
+     * and marks the supervisor as the preselected default. Falls back to the
+     * legacy "HoM is the default" behavior when no supervisor exists.
+     */
+    requesterId?: string,
   ): Promise<
-    Array<{ id: string; name: string; role: string; isFinance: boolean; isPreferred: boolean; branchId: string | null }>
+    Array<{
+      id: string;
+      name: string;
+      role: string;
+      isFinance: boolean;
+      /** True when this row is the requester's marketing-team supervisor on
+       *  the active branch — drives the "Team supervisor" UI label and is
+       *  given highest sort/preselect priority. */
+      isSupervisor: boolean;
+      isPreferred: boolean;
+      branchId: string | null;
+    }>
   > {
-    const allowedRoles: Array<'FINANCE_OFFICER' | 'HEAD_OF_MARKETING'> =
+    const allowedRoles: Array<'FINANCE_OFFICER' | 'HEAD_OF_MARKETING' | 'MEDIA_BUYER'> =
       requesterRole === 'MEDIA_BUYER'
-        ? ['FINANCE_OFFICER', 'HEAD_OF_MARKETING']
+        ? ['FINANCE_OFFICER', 'HEAD_OF_MARKETING', 'MEDIA_BUYER']
         : ['FINANCE_OFFICER'];
+
+    // Resolve the requester's marketing supervisors on this branch. When
+    // present, they become the preferred recipients; HoM stays in the list
+    // as a secondary option.
+    const supervisorIdsSet = new Set<string>();
+    if (requesterRole === 'MEDIA_BUYER' && requesterId && branchId) {
+      const ids = await this.branchTeams.listSupervisorIdsForUser(
+        requesterId,
+        branchId,
+        'MARKETING',
+      );
+      for (const id of ids) supervisorIdsSet.add(id);
+    }
 
     const rows = await this.db
       .select({
@@ -1409,18 +1571,19 @@ export class MarketingService {
       })
       .from(schema.users)
       .where(
-        and(
-          eq(schema.users.status, 'ACTIVE' as const),
-          inArray(schema.users.role, allowedRoles),
-        ),
+        and(eq(schema.users.status, 'ACTIVE' as const), inArray(schema.users.role, allowedRoles)),
       );
+
+    const hasSupervisor = supervisorIdsSet.size > 0;
 
     return rows
       .filter((r) => {
-        // HoM target only valid for MB requesters; branch must match. Finance
-        // is org-wide and always available regardless of branch.
+        // Finance is org-wide and always valid.
         if (r.role === 'FINANCE_OFFICER') return true;
         if (requesterRole !== 'MEDIA_BUYER') return false;
+        // Marketing-team supervisor on this branch — the new preferred path.
+        if (r.role === 'MEDIA_BUYER') return supervisorIdsSet.has(r.id);
+        // HoM target — branch must match.
         if (r.role !== 'HEAD_OF_MARKETING') return false;
         if (!branchId) return true;
         return r.primaryBranchId === branchId;
@@ -1428,22 +1591,31 @@ export class MarketingService {
       .map((r) => {
         const isFinance = r.role === 'FINANCE_OFFICER';
         const isHoM = r.role === 'HEAD_OF_MARKETING';
-        // MB → HoM in their branch is the preferred / preselected default.
-        // HoM → first Finance Officer is preferred.
+        const isSupervisor = supervisorIdsSet.has(r.id);
+        // Preferred / preselected order:
+        //   MB requester w/ supervisor → supervisor wins
+        //   MB requester w/o supervisor → HoM (legacy)
+        //   HoM requester → first Finance Officer
         const isPreferred =
           requesterRole === 'MEDIA_BUYER'
-            ? isHoM
+            ? hasSupervisor
+              ? isSupervisor
+              : isHoM
             : isFinance;
         return {
           id: r.id,
           name: r.name,
           role: r.role,
           isFinance,
+          isSupervisor,
           isPreferred,
           branchId: r.primaryBranchId ?? null,
         };
       })
       .sort((a, b) => {
+        // Supervisors first, then other preferred, then alphabetical.
+        if (a.isSupervisor && !b.isSupervisor) return -1;
+        if (!a.isSupervisor && b.isSupervisor) return 1;
         if (a.isPreferred && !b.isPreferred) return -1;
         if (!a.isPreferred && b.isPreferred) return 1;
         return a.name.localeCompare(b.name);
@@ -1486,16 +1658,30 @@ export class MarketingService {
       }
       const targetIsFinance = target.role === 'FINANCE_OFFICER';
       const targetIsHoM = target.role === 'HEAD_OF_MARKETING';
+      const targetIsMediaBuyer = target.role === 'MEDIA_BUYER';
       const requesterIsMb = requesterRole === 'MEDIA_BUYER';
-      if (!targetIsFinance && !(requesterIsMb && targetIsHoM)) {
+      // MB → another MEDIA_BUYER is allowed when that MB is the requester's
+      // marketing-team supervisor on the same branch (CEO directive 2026-05-11
+      // — supervisors are the new default funding-approval recipient for MBs
+      // on supervised teams).
+      let targetIsSupervisor = false;
+      if (requesterIsMb && targetIsMediaBuyer && branchId) {
+        targetIsSupervisor = await this.branchTeams.isMarketingSupervisorOf(
+          target.id,
+          requesterId,
+          branchId,
+        );
+      }
+      if (!targetIsFinance && !(requesterIsMb && (targetIsHoM || targetIsSupervisor))) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: requesterIsMb
-            ? 'Funding requests must be sent to a Head of Marketing or Finance Officer'
+            ? 'Funding requests must be sent to your team supervisor, Head of Marketing, or a Finance Officer'
             : 'Funding requests must be sent to a Finance Officer',
         });
       }
-      // Branch check for HoM targets only — Finance is org-wide.
+      // Branch check for HoM targets only — Finance is org-wide; the supervisor
+      // path already enforced same-branch via `isMarketingSupervisorOf`.
       if (targetIsHoM && branchId) {
         if (target.primaryBranchId && target.primaryBranchId !== branchId) {
           throw new TRPCError({
@@ -1521,7 +1707,10 @@ export class MarketingService {
 
       const inserted = rows[0];
       if (!inserted) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding request' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create funding request',
+        });
       }
 
       const [foundRequester] = await tx
@@ -1533,7 +1722,9 @@ export class MarketingService {
       return { request: inserted, requester: foundRequester };
     });
 
-    const name = requester?.name ?? (requesterRole === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'A Media Buyer');
+    const name =
+      requester?.name ??
+      (requesterRole === 'HEAD_OF_MARKETING' ? 'Head of Marketing' : 'A Media Buyer');
     const bodySuffix = reason.trim() ? ` Reason: ${reason}` : '';
     const body = `${name} requested ₦${Number(amount).toLocaleString()}.${bodySuffix}`;
 
@@ -1695,7 +1886,10 @@ export class MarketingService {
     const sentCents = Math.round(sentAmount * 100);
     const requestedCents = Math.round(requestedAmount * 100);
     if (!Number.isFinite(sentAmount) || sentCents <= 0) {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Approved amount must be a positive number' });
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Approved amount must be a positive number',
+      });
     }
     if (sentCents > requestedCents) {
       throw new TRPCError({
@@ -1733,7 +1927,11 @@ export class MarketingService {
 
     const { updated, ledger } = await withActor(this.db, { id: approverId }, async (tx) => {
       const [sender, receiver] = await Promise.all([
-        tx.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, approverId)).limit(1),
+        tx
+          .select({ role: schema.users.role })
+          .from(schema.users)
+          .where(eq(schema.users.id, approverId))
+          .limit(1),
         tx
           .select({ role: schema.users.role })
           .from(schema.users)
@@ -1748,7 +1946,11 @@ export class MarketingService {
       this.assertLedgerTransferAllowed(senderRole, receiverRole, { viaFundingRequest: true });
 
       if (senderRole === 'HEAD_OF_MARKETING' && receiverRole === 'MEDIA_BUYER') {
-        const disbursable = await this.computeMarketingDisbursableInTx(tx, approverId, currentBranchId);
+        const disbursable = await this.computeMarketingDisbursableInTx(
+          tx,
+          approverId,
+          currentBranchId,
+        );
         this.assertSufficientMarketingDisbursable(disbursable, sentAmount);
       }
 
@@ -1765,7 +1967,10 @@ export class MarketingService {
         .returning();
 
       if (!row) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to update funding request',
+        });
       }
 
       const [inserted] = await tx
@@ -1781,7 +1986,10 @@ export class MarketingService {
         .returning();
 
       if (!inserted) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create funding ledger row' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create funding ledger row',
+        });
       }
 
       return { updated: row, ledger: inserted };
@@ -1858,7 +2066,10 @@ export class MarketingService {
         .returning();
 
       if (!row) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update funding request' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to update funding request',
+        });
       }
       return row;
     });
@@ -1927,9 +2138,11 @@ export class MarketingService {
     const transferRow = input.transferId
       ? (await transferQuery.where(eq(schema.marketingFunding.id, input.transferId)).limit(1))[0]
       : input.requestId
-        ? (await transferQuery
-            .where(eq(schema.marketingFunding.sourceFundingRequestId, input.requestId))
-            .limit(1))[0]
+        ? (
+            await transferQuery
+              .where(eq(schema.marketingFunding.sourceFundingRequestId, input.requestId))
+              .limit(1)
+          )[0]
         : undefined;
 
     // Resolve request (with requester + resolver names) — by id, or by transfer link.
@@ -1956,11 +2169,15 @@ export class MarketingService {
       .leftJoin(resolver, eq(schema.marketingFundingRequests.resolvedBy, resolver.id));
 
     const requestRow = input.requestId
-      ? (await requestQuery.where(eq(schema.marketingFundingRequests.id, input.requestId)).limit(1))[0]
+      ? (
+          await requestQuery.where(eq(schema.marketingFundingRequests.id, input.requestId)).limit(1)
+        )[0]
       : transferRow?.sourceFundingRequestId
-        ? (await requestQuery
-            .where(eq(schema.marketingFundingRequests.id, transferRow.sourceFundingRequestId))
-            .limit(1))[0]
+        ? (
+            await requestQuery
+              .where(eq(schema.marketingFundingRequests.id, transferRow.sourceFundingRequestId))
+              .limit(1)
+          )[0]
         : undefined;
 
     if (!requestRow && !transferRow) {
@@ -2102,20 +2319,24 @@ export class MarketingService {
   // Ad Spend Logs
   // ============================================
 
-  async createAdSpend(
-    input: CreateAdSpendInput,
-    mediaBuyerId: string,
-    branchId?: string | null,
-  ) {
+  async createAdSpend(input: CreateAdSpendInput, mediaBuyerId: string, branchId?: string | null) {
     return withActor(this.db, { id: mediaBuyerId }, async (tx) => {
       if (branchId) {
         const [campaign] = await tx
           .select({ id: schema.campaigns.id })
           .from(schema.campaigns)
-          .where(and(eq(schema.campaigns.id, input.campaignId ?? ''), eq(schema.campaigns.branchId, branchId)))
+          .where(
+            and(
+              eq(schema.campaigns.id, input.campaignId ?? ''),
+              eq(schema.campaigns.branchId, branchId),
+            ),
+          )
           .limit(1);
         if (!campaign) {
-          throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Campaign is not in your active branch',
+          });
         }
       }
 
@@ -2164,10 +2385,7 @@ export class MarketingService {
         .select({ id: schema.campaigns.id })
         .from(schema.campaigns)
         .where(
-          and(
-            eq(schema.campaigns.id, input.campaignId),
-            eq(schema.campaigns.branchId, branchId),
-          ),
+          and(eq(schema.campaigns.id, input.campaignId), eq(schema.campaigns.branchId, branchId)),
         )
         .limit(1);
       if (!validCampaign) {
@@ -2228,7 +2446,10 @@ export class MarketingService {
     });
 
     if (inserted.length !== input.lines.length) {
-      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to log ad spend batch' });
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to log ad spend batch',
+      });
     }
 
     // One notification per batch — not per line. HoM should never wake up to
@@ -2295,20 +2516,56 @@ export class MarketingService {
     return { count: inserted.length, total: String(total) };
   }
 
-  /** Head of Marketing / SuperAdmin: approve a PENDING ad spend entry. */
-  async approveAdSpend(adSpendId: string, approverId: string) {
-    const [existing] = await this.db
-      .select()
+  private async assertMayApproveOrRejectAdSpend(
+    actor: SessionUser,
+    mediaBuyerId: string,
+    campaignBranchId: string | null,
+  ): Promise<void> {
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    if (perms.includes(canonicalPermissionCode('marketing.adSpend.approve'))) {
+      return;
+    }
+    const sessionBranch = actor.currentBranchId ?? null;
+    if (!sessionBranch || !campaignBranchId || sessionBranch !== campaignBranchId) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Cannot moderate ad spend for this record.',
+      });
+    }
+    const ok = await this.branchTeams.isMarketingSupervisorOf(actor.id, mediaBuyerId, sessionBranch);
+    if (!ok) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Cannot moderate ad spend for this record.',
+      });
+    }
+  }
+
+  /** Head of Marketing / SuperAdmin / branch marketing supervisor (supervisee rows only). */
+  async approveAdSpend(adSpendId: string, actor: SessionUser) {
+    const approverId = actor.id;
+    const [joined] = await this.db
+      .select({
+        row: schema.adSpendLogs,
+        campaignBranchId: schema.campaigns.branchId,
+      })
       .from(schema.adSpendLogs)
+      .innerJoin(schema.campaigns, eq(schema.campaigns.id, schema.adSpendLogs.campaignId))
       .where(eq(schema.adSpendLogs.id, adSpendId))
       .limit(1);
 
-    if (!existing) {
+    if (!joined) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
     }
+    const existing = joined.row;
     if (existing.status !== 'PENDING') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING ad spend can be approved' });
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only PENDING ad spend can be approved',
+      });
     }
+
+    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, joined.campaignBranchId);
 
     const updated = await withActor(this.db, { id: approverId }, async (tx) => {
       const [row] = await tx
@@ -2332,20 +2589,31 @@ export class MarketingService {
     return updated;
   }
 
-  /** Head of Marketing / SuperAdmin / Admin: reject a PENDING ad spend entry. */
-  async rejectAdSpend(adSpendId: string, reason: string | undefined, rejectorId: string) {
-    const [existing] = await this.db
-      .select()
+  /** Same gate as {@link approveAdSpend}. */
+  async rejectAdSpend(adSpendId: string, reason: string | undefined, actor: SessionUser) {
+    const rejectorId = actor.id;
+    const [joined] = await this.db
+      .select({
+        row: schema.adSpendLogs,
+        campaignBranchId: schema.campaigns.branchId,
+      })
       .from(schema.adSpendLogs)
+      .innerJoin(schema.campaigns, eq(schema.campaigns.id, schema.adSpendLogs.campaignId))
       .where(eq(schema.adSpendLogs.id, adSpendId))
       .limit(1);
 
-    if (!existing) {
+    if (!joined) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
     }
+    const existing = joined.row;
     if (existing.status !== 'PENDING') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING ad spend can be rejected' });
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only PENDING ad spend can be rejected',
+      });
     }
+
+    await this.assertMayApproveOrRejectAdSpend(actor, existing.mediaBuyerId, joined.campaignBranchId);
 
     const updated = await withActor(this.db, { id: rejectorId }, async (tx) => {
       const [row] = await tx
@@ -2388,7 +2656,10 @@ export class MarketingService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Ad spend record not found' });
     }
     if (existing.status !== 'PENDING' && existing.status !== 'REJECTED') {
-      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Only PENDING or REJECTED ad spend can be edited' });
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Only PENDING or REJECTED ad spend can be edited',
+      });
     }
 
     const adSpendPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
@@ -2420,10 +2691,15 @@ export class MarketingService {
       const [campaign] = await this.db
         .select({ id: schema.campaigns.id })
         .from(schema.campaigns)
-        .where(and(eq(schema.campaigns.id, nextCampaignId), eq(schema.campaigns.branchId, branchId)))
+        .where(
+          and(eq(schema.campaigns.id, nextCampaignId), eq(schema.campaigns.branchId, branchId)),
+        )
         .limit(1);
       if (!campaign) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Campaign is not in your active branch',
+        });
       }
     }
 
@@ -2453,7 +2729,10 @@ export class MarketingService {
         .returning();
 
       if (!row) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update ad spend' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to update ad spend',
+        });
       }
       return row;
     });
@@ -2473,10 +2752,15 @@ export class MarketingService {
       const [campaign] = await this.db
         .select({ id: schema.campaigns.id })
         .from(schema.campaigns)
-        .where(and(eq(schema.campaigns.id, input.campaignId), eq(schema.campaigns.branchId, branchId)))
+        .where(
+          and(eq(schema.campaigns.id, input.campaignId), eq(schema.campaigns.branchId, branchId)),
+        )
         .limit(1);
       if (!campaign) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Campaign is not in your active branch',
+        });
       }
     }
 
@@ -2518,10 +2802,15 @@ export class MarketingService {
       const [campaign] = await this.db
         .select({ id: schema.campaigns.id })
         .from(schema.campaigns)
-        .where(and(eq(schema.campaigns.id, input.campaignId), eq(schema.campaigns.branchId, branchId)))
+        .where(
+          and(eq(schema.campaigns.id, input.campaignId), eq(schema.campaigns.branchId, branchId)),
+        )
         .limit(1);
       if (!campaign) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'Campaign is not in your active branch' });
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Campaign is not in your active branch',
+        });
       }
     }
 
@@ -2755,15 +3044,18 @@ export class MarketingService {
         mediaBuyerName: sql<string>`MAX(${buyer.name})`.mapWith(String),
         lineCount: count(),
         totalAmount: sum(schema.adSpendLogs.spendAmount),
-        pendingLines: sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'PENDING' THEN 1 ELSE 0 END), 0)::int`.mapWith(
-          Number,
-        ),
-        approvedLines: sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'APPROVED' THEN 1 ELSE 0 END), 0)::int`.mapWith(
-          Number,
-        ),
-        rejectedLines: sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'REJECTED' THEN 1 ELSE 0 END), 0)::int`.mapWith(
-          Number,
-        ),
+        pendingLines:
+          sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'PENDING' THEN 1 ELSE 0 END), 0)::int`.mapWith(
+            Number,
+          ),
+        approvedLines:
+          sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'APPROVED' THEN 1 ELSE 0 END), 0)::int`.mapWith(
+            Number,
+          ),
+        rejectedLines:
+          sql<number>`COALESCE(SUM(CASE WHEN ${schema.adSpendLogs.status} = 'REJECTED' THEN 1 ELSE 0 END), 0)::int`.mapWith(
+            Number,
+          ),
       })
       .from(schema.adSpendLogs)
       .leftJoin(buyer, eq(schema.adSpendLogs.mediaBuyerId, buyer.id))
@@ -2783,7 +3075,10 @@ export class MarketingService {
     }
 
     const tupleOrParts = pageGroupRows.map((g) =>
-      and(eq(schema.adSpendLogs.mediaBuyerId, g.mediaBuyerId), sql`${spendDayUtc} = ${g.spendDay}::date`),
+      and(
+        eq(schema.adSpendLogs.mediaBuyerId, g.mediaBuyerId),
+        sql`${spendDayUtc} = ${g.spendDay}::date`,
+      ),
     );
     const tupleOr: SQL | undefined =
       tupleOrParts.length === 0
@@ -2875,7 +3170,9 @@ export class MarketingService {
     );
 
     const overallKey = (spendDay: string, mediaBuyerId: string) => `${spendDay}::${mediaBuyerId}`;
-    const uniqueOverallKeys = [...new Set(pageGroupRows.map((g) => overallKey(g.spendDay, g.mediaBuyerId)))];
+    const uniqueOverallKeys = [
+      ...new Set(pageGroupRows.map((g) => overallKey(g.spendDay, g.mediaBuyerId))),
+    ];
     const overallCounts = new Map<string, number>();
     await Promise.all(
       uniqueOverallKeys.map(async (key) => {
@@ -3045,7 +3342,9 @@ export class MarketingService {
       periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     }
 
-    const spendConditions: Parameters<typeof and>[0][] = [eq(schema.adSpendLogs.status, 'APPROVED')];
+    const spendConditions: Parameters<typeof and>[0][] = [
+      eq(schema.adSpendLogs.status, 'APPROVED'),
+    ];
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
       return {
@@ -3061,7 +3360,16 @@ export class MarketingService {
       };
     }
     if (mediaBuyerId) spendConditions.push(eq(schema.adSpendLogs.mediaBuyerId, mediaBuyerId));
-    if (branchCampaignIds) spendConditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+    if (branchCampaignIds)
+      spendConditions.push(inArray(schema.adSpendLogs.campaignId, branchCampaignIds));
+    if (
+      supervisorScope &&
+      !mediaBuyerId &&
+      supervisorScope.mediaBuyerIds &&
+      supervisorScope.mediaBuyerIds.length > 0
+    ) {
+      spendConditions.push(inArray(schema.adSpendLogs.mediaBuyerId, supervisorScope.mediaBuyerIds));
+    }
     if (periodStart) spendConditions.push(gte(schema.adSpendLogs.spendDate, periodStart));
     if (periodEnd) spendConditions.push(lte(schema.adSpendLogs.spendDate, periodEnd));
     const spendWhere = and(...spendConditions);
@@ -3090,7 +3398,9 @@ export class MarketingService {
             ? eq(schema.orders.assignedCsId, assignedCsId)
             : undefined;
 
-    const deliveredConditions: Parameters<typeof and>[0][] = [eq(schema.orders.status, 'DELIVERED')];
+    const deliveredConditions: Parameters<typeof and>[0][] = [
+      eq(schema.orders.status, 'DELIVERED'),
+    ];
     appendMetricsOrderScope(deliveredConditions);
     if (periodStart) deliveredConditions.push(gte(schema.orders.deliveredAt, periodStart));
     if (periodEnd) deliveredConditions.push(lte(schema.orders.deliveredAt, periodEnd));
@@ -3109,7 +3419,9 @@ export class MarketingService {
       'WRITTEN_OFF',
       'REMITTED',
     ] as const;
-    const confirmedConditions: Parameters<typeof and>[0][] = [inArray(schema.orders.status, [...confirmedStatuses])];
+    const confirmedConditions: Parameters<typeof and>[0][] = [
+      inArray(schema.orders.status, [...confirmedStatuses]),
+    ];
     appendMetricsOrderScope(confirmedConditions);
     if (periodStart) confirmedConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) confirmedConditions.push(lte(schema.orders.createdAt, periodEnd));
@@ -3126,22 +3438,13 @@ export class MarketingService {
         .select({ total: sum(schema.adSpendLogs.spendAmount) })
         .from(schema.adSpendLogs)
         .where(spendWhere),
-      this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(orderWhere),
-      this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(deliveredWhere),
+      this.db.select({ count: count() }).from(schema.orders).where(orderWhere),
+      this.db.select({ count: count() }).from(schema.orders).where(deliveredWhere),
       this.db
         .select({ total: sum(schema.orders.totalAmount) })
         .from(schema.orders)
         .where(deliveredWhere),
-      this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(confirmedWhere),
+      this.db.select({ count: count() }).from(schema.orders).where(confirmedWhere),
     ]);
 
     const totalSpend = Number(totalSpendRows[0]?.total ?? 0);
@@ -3280,22 +3583,19 @@ export class MarketingService {
     if (periodEnd) inDeliveredPeriod.push(lte(schema.orders.deliveredAt, periodEnd));
 
     const isDelivered = eq(schema.orders.status, 'DELIVERED');
-    const isConfirmedOrBeyond = inArray(
-      schema.orders.status,
-      [...MarketingService.CONFIRMED_OR_BEYOND_STATUSES],
-    );
+    const isConfirmedOrBeyond = inArray(schema.orders.status, [
+      ...MarketingService.CONFIRMED_OR_BEYOND_STATUSES,
+    ]);
 
     const totalOrdersFilter =
-      inCreatedPeriod.length > 0
-        ? and(...inCreatedPeriod) ?? sql`true`
-        : sql`true`;
+      inCreatedPeriod.length > 0 ? (and(...inCreatedPeriod) ?? sql`true`) : sql`true`;
     const confirmedOrdersFilter =
       inCreatedPeriod.length > 0
-        ? and(isConfirmedOrBeyond, ...inCreatedPeriod) ?? isConfirmedOrBeyond
+        ? (and(isConfirmedOrBeyond, ...inCreatedPeriod) ?? isConfirmedOrBeyond)
         : isConfirmedOrBeyond;
     const deliveredFilter =
       inDeliveredPeriod.length > 0
-        ? and(isDelivered, ...inDeliveredPeriod) ?? isDelivered
+        ? (and(isDelivered, ...inDeliveredPeriod) ?? isDelivered)
         : isDelivered;
 
     const [spendRows, orderRows] = await Promise.all([
@@ -3315,9 +3615,10 @@ export class MarketingService {
             Number,
           ),
           deliveredOrders: sql<number>`count(*) FILTER (WHERE ${deliveredFilter})`.mapWith(Number),
-          deliveredRevenue: sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${deliveredFilter}), 0)`.mapWith(
-            Number,
-          ),
+          deliveredRevenue:
+            sql<number>`coalesce(sum(${schema.orders.totalAmount}) FILTER (WHERE ${deliveredFilter}), 0)`.mapWith(
+              Number,
+            ),
         })
         .from(schema.orders)
         .where(inArray(schema.orders.mediaBuyerId, buyerIds))
@@ -3358,23 +3659,23 @@ export class MarketingService {
     startDate?: string,
     endDate?: string,
     branchId?: string | null,
+    restrictToMediaBuyerIds?: string[],
   ) {
     // Include ALL active media buyers so the leaderboard is always populated,
     // not just those who have approved ad spend in the period.
     const allBuyers = await this.db
       .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email })
       .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.role, 'MEDIA_BUYER'),
-          eq(schema.users.status, 'ACTIVE'),
-        ),
-      );
+      .where(and(eq(schema.users.role, 'MEDIA_BUYER'), eq(schema.users.status, 'ACTIVE')));
 
     const branchUserIds = await this.getBranchUserIds(branchId);
-    const eligibleBuyers = branchUserIds
+    let eligibleBuyers = branchUserIds
       ? allBuyers.filter((buyer) => branchUserIds.includes(buyer.id))
       : allBuyers;
+    if (restrictToMediaBuyerIds && restrictToMediaBuyerIds.length > 0) {
+      const allow = new Set(restrictToMediaBuyerIds);
+      eligibleBuyers = eligibleBuyers.filter((b) => allow.has(b.id));
+    }
 
     if (eligibleBuyers.length === 0) return [];
 
@@ -3400,9 +3701,7 @@ export class MarketingService {
           confirmedOrders: 0,
         });
       const profitabilityScore =
-        metrics.totalSpend > 0
-          ? Math.min(1, metrics.trueRoas / profitability.targetRoas)
-          : null;
+        metrics.totalSpend > 0 ? Math.min(1, metrics.trueRoas / profitability.targetRoas) : null;
       return {
         mediaBuyerId: buyer.id,
         name: buyer.name,
@@ -3412,10 +3711,28 @@ export class MarketingService {
       };
     });
 
-    // Sort by True ROAS descending, then by confirmation rate descending (tiebreaker)
+    // Sort by True ROAS descending. Tiebreakers in order:
+    //   1. deliveredRevenue (real revenue beats no revenue)
+    //   2. deliveredOrders  (real deliveries beat zero)
+    //   3. totalOrders      (volume — beats a single-sample buyer)
+    //   4. confirmationRate (only after volume — keeps a buyer with 7/23
+    //      ahead of one with 1/1 when everyone else is tied)
+    //   5. name             (deterministic order so the list is stable)
+    //
+    // Why the layered tiebreaker: most periods start with everyone at
+    // trueRoas = 0 (no ad spend logged yet), so the primary sort produces
+    // ties for the entire roster. The previous code used confirmationRate
+    // alone, which let a buyer with 1 confirmed / 1 order (100%) beat a
+    // buyer with 7 confirmed / 23 orders (30%) — the small-sample problem.
+    // Revenue + delivered count + volume put real performance ahead of a
+    // statistical fluke before rate even enters the picture.
     leaderboard.sort((a, b) => {
       if (b.trueRoas !== a.trueRoas) return b.trueRoas - a.trueRoas;
-      return b.confirmationRate - a.confirmationRate;
+      if (b.deliveredRevenue !== a.deliveredRevenue) return b.deliveredRevenue - a.deliveredRevenue;
+      if (b.deliveredOrders !== a.deliveredOrders) return b.deliveredOrders - a.deliveredOrders;
+      if (b.totalOrders !== a.totalOrders) return b.totalOrders - a.totalOrders;
+      if (b.confirmationRate !== a.confirmationRate) return b.confirmationRate - a.confirmationRate;
+      return (a.name ?? '').localeCompare(b.name ?? '');
     });
 
     return leaderboard;
@@ -3428,9 +3745,7 @@ export class MarketingService {
       undefined,
       branchId,
     );
-    const alerts = leaderboard.filter(
-      (buyer) => buyer.cpa > cpaThreshold && buyer.totalOrders > 0,
-    );
+    const alerts = leaderboard.filter((buyer) => buyer.cpa > cpaThreshold && buyer.totalOrders > 0);
 
     // Emit alerts and notify SuperAdmin + Head of Marketing for each high-CPA buyer
     for (const buyer of alerts) {
@@ -3533,10 +3848,7 @@ export class MarketingService {
       })
       .from(schema.crossFunnelAttempts)
       .leftJoin(productAlias, eq(schema.crossFunnelAttempts.productId, productAlias.id))
-      .leftJoin(
-        winnerAlias,
-        eq(schema.crossFunnelAttempts.originalMediaBuyerId, winnerAlias.id),
-      )
+      .leftJoin(winnerAlias, eq(schema.crossFunnelAttempts.originalMediaBuyerId, winnerAlias.id))
       .leftJoin(ownerAlias, eq(schema.crossFunnelAttempts.mediaBuyerId, ownerAlias.id))
       .where(whereClause)
       .orderBy(desc(schema.crossFunnelAttempts.attemptedAt))
@@ -3694,7 +4006,10 @@ export class MarketingService {
 
       const template = rows[0];
       if (!template) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offer template' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create offer template',
+        });
       }
       await this.syncProductBaseSalePriceFromTemplates(tx, input.productId);
       return template;
@@ -3741,7 +4056,10 @@ export class MarketingService {
    * campaign `form_config` and legacy `offer_template_id` when they pointed at archived tiers.
    * Catalog list price is only recomputed when at least one ACTIVE tier remains (otherwise unchanged).
    */
-  async archiveAllOfferTemplatesForProduct(productId: string, actorId: string): Promise<{ archivedCount: number }> {
+  async archiveAllOfferTemplatesForProduct(
+    productId: string,
+    actorId: string,
+  ): Promise<{ archivedCount: number }> {
     return withActor(this.db, { id: actorId }, async (tx) => {
       const [productRow] = await tx
         .select({ id: schema.products.id })
@@ -3785,7 +4103,9 @@ export class MarketingService {
 
         const sel = fc['selectedOfferTemplateIds'];
         if (Array.isArray(sel)) {
-          const filtered = sel.filter((x): x is string => typeof x === 'string' && !archivedIds.has(x));
+          const filtered = sel.filter(
+            (x): x is string => typeof x === 'string' && !archivedIds.has(x),
+          );
           if (filtered.length !== sel.length) {
             dirtyForm = true;
             if (filtered.length === 0) delete fc['selectedOfferTemplateIds'];
@@ -3885,7 +4205,8 @@ export class MarketingService {
       if (it.productId !== pid) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'All items in an offer must use the same catalog product (single-SKU Edge forms).',
+          message:
+            'All items in an offer must use the same catalog product (single-SKU Edge forms).',
         });
       }
     }
@@ -3904,7 +4225,9 @@ export class MarketingService {
       .where(eq(schema.products.id, productId))
       .limit(1);
     if (!p) throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
-    const gallery = Array.isArray(p.gallery) ? p.gallery.filter((x): x is string => typeof x === 'string') : [];
+    const gallery = Array.isArray(p.gallery)
+      ? p.gallery.filter((x): x is string => typeof x === 'string')
+      : [];
     if (!gallery.includes(imageUrl)) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
@@ -3940,18 +4263,27 @@ export class MarketingService {
 
       // Verify product exists once (and validate all chosen images are from gallery).
       const [p] = await tx
-        .select({ id: schema.products.id, gallery: schema.products.galleryImageUrls, baseSalePrice: schema.products.baseSalePrice })
+        .select({
+          id: schema.products.id,
+          gallery: schema.products.galleryImageUrls,
+          baseSalePrice: schema.products.baseSalePrice,
+        })
         .from(schema.products)
         .where(eq(schema.products.id, productId))
         .limit(1);
       if (!p) throw new TRPCError({ code: 'NOT_FOUND', message: 'Product not found' });
-      const gallery = Array.isArray(p.gallery) ? p.gallery.filter((x): x is string => typeof x === 'string') : [];
+      const gallery = Array.isArray(p.gallery)
+        ? p.gallery.filter((x): x is string => typeof x === 'string')
+        : [];
       const inheritedUnitPrice = p.baseSalePrice != null ? Number(p.baseSalePrice) : NaN;
 
       for (const it of input.items) {
         const img = typeof it.imageUrl === 'string' ? it.imageUrl : undefined;
         if (img && !gallery.includes(img)) {
-          throw new TRPCError({ code: 'BAD_REQUEST', message: 'Selected image must be from the product gallery.' });
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Selected image must be from the product gallery.',
+          });
         }
       }
 
@@ -3963,7 +4295,8 @@ export class MarketingService {
           status: 'ACTIVE',
         })
         .returning();
-      if (!group) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offer' });
+      if (!group)
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create offer' });
 
       const itemValues = input.items.map((it, idx) => ({
         offerGroupId: group.id,
@@ -4015,13 +4348,16 @@ export class MarketingService {
           .from(schema.products)
           .where(eq(schema.products.id, productId))
           .limit(1);
-        const inheritedUnitPrice = priceRow?.baseSalePrice != null ? Number(priceRow.baseSalePrice) : NaN;
+        const inheritedUnitPrice =
+          priceRow?.baseSalePrice != null ? Number(priceRow.baseSalePrice) : NaN;
         // Validate images against product gallery.
         for (const it of input.items) {
           await this.assertOfferItemImageInProductGallery(tx, productId, it.imageUrl);
         }
 
-        await tx.delete(schema.offerGroupItems).where(eq(schema.offerGroupItems.offerGroupId, input.id));
+        await tx
+          .delete(schema.offerGroupItems)
+          .where(eq(schema.offerGroupItems.offerGroupId, input.id));
 
         const itemValues = input.items.map((it, idx) => ({
           offerGroupId: input.id,
@@ -4046,7 +4382,12 @@ export class MarketingService {
         })
         .from(schema.offerGroupItems)
         .innerJoin(schema.products, eq(schema.offerGroupItems.productId, schema.products.id))
-        .where(and(eq(schema.offerGroupItems.offerGroupId, input.id), eq(schema.offerGroupItems.status, 'ACTIVE')))
+        .where(
+          and(
+            eq(schema.offerGroupItems.offerGroupId, input.id),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+          ),
+        )
         .orderBy(schema.offerGroupItems.sortOrder);
 
       return { group: updatedGroup, items };
@@ -4068,7 +4409,12 @@ export class MarketingService {
       })
       .from(schema.offerGroupItems)
       .innerJoin(schema.products, eq(schema.offerGroupItems.productId, schema.products.id))
-      .where(and(eq(schema.offerGroupItems.offerGroupId, id), eq(schema.offerGroupItems.status, 'ACTIVE')))
+      .where(
+        and(
+          eq(schema.offerGroupItems.offerGroupId, id),
+          eq(schema.offerGroupItems.status, 'ACTIVE'),
+        ),
+      )
       .orderBy(schema.offerGroupItems.sortOrder);
 
     return { group, items };
@@ -4102,7 +4448,12 @@ export class MarketingService {
             })
             .from(schema.offerGroupItems)
             .innerJoin(schema.products, eq(schema.offerGroupItems.productId, schema.products.id))
-            .where(and(inArray(schema.offerGroupItems.offerGroupId, ids), eq(schema.offerGroupItems.status, 'ACTIVE')))
+            .where(
+              and(
+                inArray(schema.offerGroupItems.offerGroupId, ids),
+                eq(schema.offerGroupItems.status, 'ACTIVE'),
+              ),
+            )
             .orderBy(schema.offerGroupItems.offerGroupId, schema.offerGroupItems.sortOrder);
 
     const itemsByGroup = new Map<string, typeof items>();
@@ -4276,7 +4627,10 @@ export class MarketingService {
 
       const campaign = rows[0];
       if (!campaign) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create campaign' });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to create campaign',
+        });
       }
       return campaign;
     });
@@ -4321,7 +4675,10 @@ export class MarketingService {
       if (input.offerGroupId !== undefined) {
         updateData['offerGroupId'] = input.offerGroupId;
         if (input.offerGroupId !== null) {
-          updateData['productIds'] = await this.deriveProductIdsFromOfferGroup(tx, input.offerGroupId);
+          updateData['productIds'] = await this.deriveProductIdsFromOfferGroup(
+            tx,
+            input.offerGroupId,
+          );
         }
       }
       if (input.status !== undefined) updateData['status'] = input.status;
@@ -4374,10 +4731,7 @@ export class MarketingService {
     const campaignRows = await this.db
       .select()
       .from(schema.campaigns)
-      .where(and(
-        eq(schema.campaigns.id, campaignId),
-        eq(schema.campaigns.status, 'ACTIVE'),
-      ))
+      .where(and(eq(schema.campaigns.id, campaignId), eq(schema.campaigns.status, 'ACTIVE')))
       .limit(1);
 
     const campaign = campaignRows[0];
@@ -4495,7 +4849,12 @@ export class MarketingService {
         if (p) {
           const galleryImageUrls = parseGallery(p.galleryImageUrls);
 
-          let offerList: Array<{ label: string; qty: number; price: string; imageUrls?: string[] }> = [];
+          let offerList: Array<{
+            label: string;
+            qty: number;
+            price: string;
+            imageUrls?: string[];
+          }> = [];
 
           const templateConditions = [
             eq(schema.offerTemplates.productId, p.id),
@@ -4540,7 +4899,8 @@ export class MarketingService {
                     label: o.label,
                     qty: o.qty,
                     price: typeof o.price === 'string' ? o.price : String(o.price),
-                    imageUrls: o.imageUrls ?? (galleryImageUrls.length ? galleryImageUrls : undefined),
+                    imageUrls:
+                      o.imageUrls ?? (galleryImageUrls.length ? galleryImageUrls : undefined),
                   }))
                 : [
                     {
@@ -4590,6 +4950,9 @@ export class MarketingService {
     const conditions = [];
     if (input.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, input.mediaBuyerId));
+    } else if (input.mediaBuyerIds && input.mediaBuyerIds.length > 0) {
+      // Supervisor-scoped: any MB in the set (their team + themselves).
+      conditions.push(inArray(schema.campaigns.mediaBuyerId, input.mediaBuyerIds));
     }
     if (input.status) {
       conditions.push(eq(schema.campaigns.status, input.status));
@@ -4602,13 +4965,19 @@ export class MarketingService {
     const offset = (input.page - 1) * input.limit;
 
     const [campaigns, totalRows] = await Promise.all([
-      this.db.select().from(schema.campaigns).where(whereClause)
+      this.db
+        .select()
+        .from(schema.campaigns)
+        .where(whereClause)
         .orderBy(desc(schema.campaigns.createdAt))
-        .limit(input.limit).offset(offset),
+        .limit(input.limit)
+        .offset(offset),
       this.db.select({ count: count() }).from(schema.campaigns).where(whereClause),
     ]);
 
-    const mediaBuyerIds = [...new Set(campaigns.map((c) => c.mediaBuyerId).filter(Boolean))] as string[];
+    const mediaBuyerIds = [
+      ...new Set(campaigns.map((c) => c.mediaBuyerId).filter(Boolean)),
+    ] as string[];
     const mediaBuyerNames: Map<string, string> = new Map();
     if (mediaBuyerIds.length > 0) {
       const users = await this.db
@@ -4621,7 +4990,7 @@ export class MarketingService {
     return {
       campaigns: campaigns.map((c) => ({
         ...c,
-        mediaBuyerName: c.mediaBuyerId ? mediaBuyerNames.get(c.mediaBuyerId) ?? null : null,
+        mediaBuyerName: c.mediaBuyerId ? (mediaBuyerNames.get(c.mediaBuyerId) ?? null) : null,
       })),
       pagination: { page: input.page, limit: input.limit, total: totalRows[0]?.count ?? 0 },
     };

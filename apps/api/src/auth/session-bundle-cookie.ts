@@ -91,6 +91,16 @@ export interface SessionBundlePayload {
   mirrorSessionId: string | null;
   staffOnboardingStatus?: 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
   isFinanceOfficer?: boolean;
+  /** Marketing branch-team supervisor on active branch — see SessionUser. */
+  isMarketingTeamSupervisorOnActiveBranch?: boolean;
+  /** CS branch-team supervisor on active branch — see SessionUser. */
+  isCsTeamSupervisorOnActiveBranch?: boolean;
+  /**
+   * "Is supervisor anywhere" — denormalised from `users.is_team_supervisor`.
+   * Surfaced for UI badging (header chip, user-detail pill, Staff Accounts).
+   * Capability gates use the per-branch flag above instead.
+   */
+  isTeamSupervisor?: boolean;
 }
 
 /**

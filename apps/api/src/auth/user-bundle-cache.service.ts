@@ -43,6 +43,13 @@ export interface UserBundle {
    * recomputing — equivalent to `isAdminLevel` of the cached `role` value.
    */
   isAdminLevel: boolean;
+  /**
+   * Denormalised "is supervisor anywhere" flag mirrored from `users.is_team_supervisor`
+   * (kept in sync by `BranchTeamsService.syncUserSupervisorFlag`). Used purely for
+   * UI badging / list filtering — capability gates still use the per-branch session
+   * flag `isMarketingTeamSupervisorOnActiveBranch`.
+   */
+  isTeamSupervisor: boolean;
 }
 
 const KEY_PREFIX = 'cache:auth:userBundle:';
@@ -107,6 +114,7 @@ export class UserBundleCacheService {
         scopeTeamSupervisor: schema.users.scopeTeamSupervisor,
         appTheme: schema.users.appTheme,
         fontScale: schema.users.fontScale,
+        isTeamSupervisor: schema.users.isTeamSupervisor,
       })
       .from(schema.users)
       .where(eq(schema.users.id, userId))
@@ -120,6 +128,7 @@ export class UserBundleCacheService {
     const appTheme = dbUser?.appTheme ?? null;
     const fontScale = dbUser?.fontScale ?? null;
     const isAdminLevel = ADMIN_LEVEL_ROLES.has(role);
+    const isTeamSupervisor = dbUser?.isTeamSupervisor ?? false;
 
     const permsSet = await this.permissions.getEffectivePermissions(userId);
     const permissions = Array.from(permsSet);
@@ -144,6 +153,7 @@ export class UserBundleCacheService {
       appTheme,
       fontScale,
       isAdminLevel,
+      isTeamSupervisor,
       ...(staffOnboardingStatus !== undefined ? { staffOnboardingStatus } : {}),
     };
 

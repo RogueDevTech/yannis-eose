@@ -27,6 +27,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_MARKETING'],
     permission: 'marketing.teamOverview',
+    orMarketingTeamSupervisorOnBranch: true,
   });
   const cookie = getSessionCookie(request);
   if (!cookie) throw new Response('Session cookie missing', { status: 401 });
