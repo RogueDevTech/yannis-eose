@@ -34,7 +34,11 @@ export const listCsRoutingRulesSchema = z.object({
   ownerBranchId: z.string().uuid(),
 });
 
-export const csRoutingRelationshipModeSchema = z.enum(['BRANCH_DEFAULT', 'PRODUCT_ALLOCATION']);
+export const csRoutingRelationshipModeSchema = z.enum([
+  'BRANCH_DEFAULT',
+  'PRODUCT_ALLOCATION',
+  'SPLIT_ALL_BRANCHES',
+]);
 
 export const getCsRoutingBranchSettingsSchema = z.object({
   ownerBranchId: z.string().uuid(),

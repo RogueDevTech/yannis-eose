@@ -86,12 +86,21 @@ export function SearchableSelect({
     [options, query, effectiveFilter],
   );
   const firstEnabled = filtered.findIndex((o) => !o.disabled);
+  /** Ignore scroll/resize close briefly after open — iOS scrolls focused inputs into view and fires capture scroll; VK opens resize. */
+  const suppressCloseUntilRef = useRef(0);
 
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setActiveIndex(firstEnabled);
-    const t = setTimeout(() => searchRef.current?.focus(), 0);
+    suppressCloseUntilRef.current =
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) + 450;
+    // Auto-focus search only on fine pointers; on touch, focus opens the keyboard → resize → we close, or iOS scroll-into-view → scroll close.
+    const coarse =
+      typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
+    const t = setTimeout(() => {
+      if (!coarse) searchRef.current?.focus();
+    }, 0);
     return () => clearTimeout(t);
   }, [open, firstEnabled]);
 
@@ -126,12 +135,24 @@ export function SearchableSelect({
   useEffect(() => {
     if (!open) return;
     const onScroll = (e: Event) => {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < suppressCloseUntilRef.current) return;
       // Keep dropdown open when scrolling inside its own list.
       const target = e.target as Node | null;
       if (target && popoverRef.current?.contains(target)) return;
       setOpen(false);
     };
-    const onResize = () => setOpen(false);
+    // Keyboard / dynamic bars change height, not width; closing on height-only resize caused mobile flicker.
+    let lastInnerWidth = window.innerWidth;
+    const onResize = () => {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < suppressCloseUntilRef.current) return;
+      const w = window.innerWidth;
+      if (w !== lastInnerWidth) {
+        lastInnerWidth = w;
+        setOpen(false);
+      }
+    };
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize, true);
     return () => {

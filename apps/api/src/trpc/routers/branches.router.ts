@@ -204,6 +204,40 @@ function assertCanManageTeamDept(
   }
 }
 
+/**
+ * Permission gate for team-management procedures (CEO directive 2026-05-10):
+ *   - SuperAdmin / `branches.manage` / dept-level manage → allow (existing).
+ *   - Team supervisor on the target team → allow, but ONLY for that team.
+ *
+ * Use this on procedures that take a `teamId` and need to allow either a
+ * department head OR the team's own supervisor:
+ *   - addBranchTeamMember / addBranchTeamMembersBulk
+ *   - removeBranchTeamMember
+ *   - updateBranchTeam (rename)
+ *
+ * Do NOT use for `setBranchTeamMemberSupervisor` — that one stays Head-only
+ * because a supervisor must not be able to crown a successor or self-demote
+ * (single-supervisor invariant + no privilege handoff).
+ */
+async function assertCanManageTeamOrSupervisor(
+  ctxUser: { id: string; role: string; permissions?: ReadonlyArray<string> | null },
+  teamId: string,
+  dept: BranchTeamDepartment,
+): Promise<void> {
+  const isSuperAdmin = ctxUser.role === 'SUPER_ADMIN';
+  const perms = ctxUser.permissions ?? [];
+  if (actorCanManageTeamDept(perms, isSuperAdmin, dept)) return;
+  const isSupervisor = await getBranchTeamsService().isSupervisorOfTeam(ctxUser.id, teamId);
+  if (isSupervisor) return;
+  throw new TRPCError({
+    code: 'FORBIDDEN',
+    message:
+      dept === 'CS'
+        ? 'You don’t have permission to manage this CS team'
+        : 'You don’t have permission to manage this Marketing team',
+  });
+}
+
 export const branchesRouter = router({
   /**
    * List all branches (SuperAdmin) or branches the current user belongs to.
@@ -816,7 +850,8 @@ export const branchesRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const dept = await loadTeamDepartment(input.teamId);
-      assertCanManageTeamDept(ctx.user, dept);
+      // Supervisor of this team can rename it; deletion stays Head-only.
+      await assertCanManageTeamOrSupervisor(ctx.user, input.teamId, dept);
       return getBranchTeamsService().updateTeam(input.teamId, { name: input.name });
     }),
 
@@ -839,7 +874,12 @@ export const branchesRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       const dept = await loadTeamDepartment(input.teamId);
-      assertCanManageTeamDept(ctx.user, dept);
+      await assertCanManageTeamOrSupervisor(ctx.user, input.teamId, dept);
+      // Promotion to supervisor stays Head-only — supervisors can't crown a
+      // successor or hand off privilege via the add-member path.
+      if (input.isSupervisor) {
+        assertCanManageTeamDept(ctx.user, dept);
+      }
       await getBranchTeamsService().addTeamMember(
         input.teamId,
         input.userId,
@@ -849,11 +889,45 @@ export const branchesRouter = router({
       return { success: true as const };
     }),
 
+  /**
+   * Bulk add/move members into a team (CEO directive 2026-05-10) — used by
+   * the Members tab's multi-select toolbar. Members already on a sibling team
+   * in the same dept are moved (not duplicated). Returns counts so the UI can
+   * show "added 3 / moved 2".
+   */
+  addBranchTeamMembersBulk: authedProcedure
+    .input(
+      z.object({
+        teamId: z.string().uuid(),
+        userIds: z.array(z.string().uuid()).min(1).max(200),
+        isSupervisor: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const dept = await loadTeamDepartment(input.teamId);
+      await assertCanManageTeamOrSupervisor(ctx.user, input.teamId, dept);
+      // Bulk-promotion to supervisor stays Head-only (UI also routes that path
+      // through a separate per-member action).
+      if (input.isSupervisor) {
+        assertCanManageTeamDept(ctx.user, dept);
+      }
+      const result = await getBranchTeamsService().addTeamMembersBulk(
+        input.teamId,
+        input.userIds,
+        input.isSupervisor,
+        ctx.user,
+      );
+      return { success: true as const, ...result };
+    }),
+
   removeBranchTeamMember: authedProcedure
     .input(z.object({ teamId: z.string().uuid(), userId: z.string().uuid() }))
     .mutation(async ({ input, ctx }) => {
       const dept = await loadTeamDepartment(input.teamId);
-      assertCanManageTeamDept(ctx.user, dept);
+      // Supervisor can remove members from their own team. They cannot remove
+      // themselves from the supervisor role via this path — that requires
+      // setBranchTeamMemberSupervisor (Head-only).
+      await assertCanManageTeamOrSupervisor(ctx.user, input.teamId, dept);
       await getBranchTeamsService().removeTeamMember(input.teamId, input.userId);
       return { success: true as const };
     }),

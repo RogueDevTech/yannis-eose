@@ -6,10 +6,16 @@ export const branchTeamDepartmentEnum = pgEnum('branch_team_department', ['CS', 
 /** CS auto-dispatch routing: weighted vs equal split across target teams. */
 export const csOrderRoutingStrategyEnum = pgEnum('cs_order_routing_strategy', ['WEIGHTED', 'EQUAL']);
 
-/** Per funnel branch: branch-target rules only vs product → servicing-branch mappings. */
+/**
+ * Per funnel branch routing mode:
+ *   - BRANCH_DEFAULT       — orders served by CS in the same branch as marketing
+ *   - PRODUCT_ALLOCATION   — orders served per per-product → CS branch mapping
+ *   - SPLIT_ALL_BRANCHES   — orders distributed (load-balanced) across CS in every branch
+ */
 export const csRoutingRelationshipModeEnum = pgEnum('cs_routing_relationship_mode', [
   'BRANCH_DEFAULT',
   'PRODUCT_ALLOCATION',
+  'SPLIT_ALL_BRANCHES',
 ]);
 
 export const userRoleEnum = pgEnum('user_role', [

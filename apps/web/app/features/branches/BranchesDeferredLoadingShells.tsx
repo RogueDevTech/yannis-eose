@@ -3,8 +3,7 @@ import {
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
-import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { shellPulsePlaceholderRows, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 
@@ -72,16 +71,6 @@ export function BranchDetailLoadingShell() {
           </div>
         </div>
       </div>
-
-      <OverviewStatStrip
-        items={[
-          { label: 'Total orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Active', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Delivered', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Delivery rate', value: <StatValuePulse className="min-w-[3rem]" /> },
-          { label: 'Campaigns', value: <StatValuePulse className="min-w-[2rem]" /> },
-        ]}
-      />
 
       {/* Department cards skeleton — mirrors the post-load Departments grid. */}
       <div className="grid gap-4 sm:grid-cols-2">

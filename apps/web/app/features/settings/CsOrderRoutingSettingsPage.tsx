@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Form, useFetcher, useRevalidator } from '@remix-run/react';
+import { useFetcher, useRevalidator } from '@remix-run/react';
 import type { CsRoutingRelationshipMode } from '@yannis/shared';
 import { PageHeader } from '~/components/ui/page-header';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
-import { TextInput } from '~/components/ui/text-input';
 import { Checkbox } from '~/components/ui/checkbox';
-import { Modal } from '~/components/ui/modal';
-import { CompactTable } from '~/components/ui/compact-table';
 import { EmptyState } from '~/components/ui/empty-state';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { RadioGroup } from '~/components/ui/radio-group';
+import { SearchInput } from '~/components/ui/search-input';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 
 export interface CsRoutingRuleRow {
@@ -46,22 +44,48 @@ interface CsOrderRoutingSettingsPageProps {
   products: ProductOpt[];
   /** CS squads keyed by branch id (optional teams when routing uses branch-wide pool). */
   teamsByBranchId: Record<string, TeamOpt[]>;
+  /** One row per product (consolidated across branches; writes fan out globally). */
   rules: CsRoutingRuleRow[];
-  selectedBranchId: string | null;
-  branchAdminLocked: boolean;
-  relationshipMode: CsRoutingRelationshipMode | null;
+  /** Single global routing mode. */
+  relationshipMode: CsRoutingRelationshipMode;
 }
 
-type TargetDraft = { servicingBranchId: string; teamId: string; weight: number };
+/**
+ * Three routing methods — global, no per-branch picker:
+ *   - split_all   (SPLIT_ALL_BRANCHES, default) → org-wide load-balanced pool.
+ *                 Every order is dispatched to whichever CS closer (across
+ *                 ALL branches) has the lowest pending workload. Marketing
+ *                 branch is irrelevant for routing (kept for attribution).
+ *   - same_branch (BRANCH_DEFAULT) → marketing branch == servicing CS branch.
+ *                 Lagos marketing → Lagos CS, Abuja → Abuja CS.
+ *   - by_product  (PRODUCT_ALLOCATION) → per-product assignment to a servicing
+ *                 branch. Same product routes the same way regardless of
+ *                 which marketing branch generated the order.
+ *
+ * Saves fan out to every branch's `cs_order_routing_branch_settings` /
+ * `cs_order_routing_rules` row server-side, so the editor presents one view of
+ * the world but the underlying per-branch dispatcher keeps working unchanged.
+ */
+type RoutingUxMethod = 'split_all' | 'same_branch' | 'by_product';
+
+const UX_METHOD_TO_MODE: Record<RoutingUxMethod, CsRoutingRelationshipMode> = {
+  split_all: 'SPLIT_ALL_BRANCHES',
+  same_branch: 'BRANCH_DEFAULT',
+  by_product: 'PRODUCT_ALLOCATION',
+};
+
+function modeToUxMethod(mode: CsRoutingRelationshipMode): RoutingUxMethod {
+  if (mode === 'PRODUCT_ALLOCATION') return 'by_product';
+  if (mode === 'BRANCH_DEFAULT') return 'same_branch';
+  return 'split_all';
+}
 
 export function CsOrderRoutingSettingsPage({
   branches,
   products,
   teamsByBranchId,
   rules,
-  selectedBranchId,
-  branchAdminLocked,
-  relationshipMode: relationshipModeProp,
+  relationshipMode,
 }: CsOrderRoutingSettingsPageProps) {
   const rev = useRevalidator();
   const toast = useToast();
@@ -70,74 +94,60 @@ export function CsOrderRoutingSettingsPage({
   const handledSuccessRef = useRef(false);
   const handledModeSuccessRef = useRef(false);
 
-  const activeRelationshipMode: CsRoutingRelationshipMode = selectedBranchId
-    ? relationshipModeProp ?? 'BRANCH_DEFAULT'
-    : 'BRANCH_DEFAULT';
-
-  const [relationshipDraft, setRelationshipDraft] = useState<CsRoutingRelationshipMode>(activeRelationshipMode);
+  const initialUxMethod: RoutingUxMethod = modeToUxMethod(relationshipMode);
+  const [uxMethod, setUxMethod] = useState<RoutingUxMethod>(initialUxMethod);
 
   useEffect(() => {
-    setRelationshipDraft(activeRelationshipMode);
-  }, [activeRelationshipMode, selectedBranchId]);
+    setUxMethod(initialUxMethod);
+  }, [initialUxMethod]);
 
-  useFetcherToast(fetcher.data, {
-    successMessage: 'Saved',
-    skipErrorToast: false,
-  });
+  /** Local-state radio change. The product list reflects the local choice
+   *  immediately so HoCS can preview / browse the catalogue, but nothing is
+   *  persisted until the explicit Save button is clicked. */
+  const applyUxMethod = (m: RoutingUxMethod) => {
+    setUxMethod(m);
+  };
 
-  useFetcherToast(modeFetcher.data, {
-    successMessage: 'Relationship mode saved',
-    skipErrorToast: false,
-  });
+  const draftMode: CsRoutingRelationshipMode = UX_METHOD_TO_MODE[uxMethod];
+  const modeIsDirty = draftMode !== relationshipMode;
 
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editingRule, setEditingRule] = useState<CsRoutingRuleRow | null>(null);
-  const [deleteRuleId, setDeleteRuleId] = useState<string | null>(null);
+  /** Click handler — validates, then opens the confirm modal. */
+  const requestSaveRelationshipMode = () => {
+    if (!modeIsDirty) return;
+    if (branches.length === 0) {
+      toast.toast.error('No branches', 'Set up a branch before changing routing.');
+      return;
+    }
+    setSaveModeConfirmOpen(true);
+  };
 
-  const [priority, setPriority] = useState('0');
-  const [enabled, setEnabled] = useState(true);
-  const [strategy, setStrategy] = useState<'WEIGHTED' | 'EQUAL'>('EQUAL');
-  const [productId, setProductId] = useState('');
-  const [targets, setTargets] = useState<TargetDraft[]>([{ servicingBranchId: '', teamId: '', weight: 1 }]);
+  /** Modal confirm — fires the global mode change. The modal stays open while
+   *  the request is in flight; the success/failure effect below closes it on
+   *  success or surfaces the inline error on failure. */
+  const confirmSaveRelationshipMode = () => {
+    const fd = new FormData();
+    fd.set(
+      'json',
+      JSON.stringify({ intent: 'setCsRoutingRelationshipMode', relationshipMode: draftMode }),
+    );
+    modeFetcher.submit(fd, { method: 'post' });
+  };
 
-  const productNameById = useMemo(() => new Map(products.map((p) => [p.id, p.name])), [products]);
+  useFetcherToast(fetcher.data, { successMessage: 'Saved', skipErrorToast: false });
+  useFetcherToast(modeFetcher.data, { successMessage: 'Routing saved', skipErrorToast: false });
+
+  const [deleteProductId, setDeleteProductId] = useState<string | null>(null);
+  const [assignConfirmOpen, setAssignConfirmOpen] = useState(false);
+  const [saveModeConfirmOpen, setSaveModeConfirmOpen] = useState(false);
+
+  const [productSearch, setProductSearch] = useState('');
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(() => new Set());
+  const [bulkServicingBranchId, setBulkServicingBranchId] = useState('');
+
   const branchNameById = useMemo(
     () => new Map(branches.map((b) => [b.id, b.code ? `${b.name} (${b.code})` : b.name])),
     [branches],
   );
-
-  const resetDraft = () => {
-    setEditingRule(null);
-    setPriority('0');
-    setEnabled(true);
-    setStrategy('EQUAL');
-    setProductId('');
-    const defaultServicing = selectedBranchId ?? branches[0]?.id ?? '';
-    setTargets([{ servicingBranchId: defaultServicing, teamId: '', weight: 1 }]);
-  };
-
-  const openCreate = () => {
-    resetDraft();
-    setEditorOpen(true);
-  };
-
-  const openEdit = (r: CsRoutingRuleRow) => {
-    setEditingRule(r);
-    setPriority(String(r.priority));
-    setEnabled(r.enabled);
-    setStrategy(r.strategy);
-    setProductId(r.productId ?? '');
-    setTargets(
-      r.targets.length > 0
-        ? r.targets.map((t) => ({
-            servicingBranchId: t.servicingBranchId,
-            teamId: t.teamId ?? '',
-            weight: t.weight,
-          }))
-        : [{ servicingBranchId: selectedBranchId ?? branches[0]?.id ?? '', teamId: '', weight: 1 }],
-    );
-    setEditorOpen(true);
-  };
 
   useEffect(() => {
     if (fetcher.state !== 'idle') {
@@ -146,8 +156,8 @@ export function CsOrderRoutingSettingsPage({
     }
     if (!fetcher.data?.success || handledSuccessRef.current) return;
     handledSuccessRef.current = true;
-    setEditorOpen(false);
-    resetDraft();
+    setSelectedProductIds(new Set());
+    setAssignConfirmOpen(false); // close confirm modal on success
     rev.revalidate();
   }, [fetcher.state, fetcher.data, rev]);
 
@@ -156,384 +166,385 @@ export function CsOrderRoutingSettingsPage({
       handledModeSuccessRef.current = false;
       return;
     }
-    if (!modeFetcher.data?.success || handledModeSuccessRef.current) return;
+    if (!modeFetcher.data) return;
+    if (handledModeSuccessRef.current) return;
     handledModeSuccessRef.current = true;
-    rev.revalidate();
-  }, [modeFetcher.state, modeFetcher.data, rev]);
+    if (modeFetcher.data.success) {
+      setSaveModeConfirmOpen(false); // close confirm modal on success
+      rev.revalidate();
+    } else {
+      // Save failed — keep modal open so the inline error is visible. Revert
+      // local radio state so the dirty banner reflects the still-current
+      // server value if the user dismisses without retrying.
+      setUxMethod(modeToUxMethod(relationshipMode));
+    }
+  }, [modeFetcher.state, modeFetcher.data, relationshipMode, rev]);
 
   const busy = fetcher.state !== 'idle';
   const modeBusy = modeFetcher.state !== 'idle';
 
-  const saveRelationshipMode = () => {
-    if (!selectedBranchId) return;
+  /** Product list shows whenever the user is in by-product mode (local state).
+   *  Mode auto-saves on radio change so the list is meaningful immediately. */
+  const showProductStep = uxMethod === 'by_product';
+
+  const filteredProductsForBulk = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(
+      (p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
+    );
+  }, [products, productSearch]);
+
+  const ruleByProductId = useMemo(() => {
+    const m = new Map<string, CsRoutingRuleRow>();
+    for (const r of rules) {
+      if (r.productId) m.set(r.productId, r);
+    }
+    return m;
+  }, [rules]);
+
+  /** Click handler — validates inputs and opens the confirm modal. */
+  const requestBulkProductAssign = () => {
+    if (modeIsDirty) {
+      toast.toast.error('Save routing method first', 'Click Save above before assigning products.');
+      return;
+    }
+    if (selectedProductIds.size === 0) {
+      toast.toast.error('Select products', 'Tick at least one product to assign.');
+      return;
+    }
+    if (!bulkServicingBranchId.trim()) {
+      toast.toast.error(
+        'Servicing branch required',
+        'Choose which branch supplies CS for the selected products.',
+      );
+      return;
+    }
+    setAssignConfirmOpen(true);
+  };
+
+  /** Modal confirm handler — fires the upsert. Modal stays open while the
+   *  request is in flight; the success effect below closes it on success;
+   *  on failure the inline error stays visible so the user can retry. */
+  const submitBulkProductAssign = () => {
     const fd = new FormData();
     fd.set(
       'json',
       JSON.stringify({
-        intent: 'setCsRoutingRelationshipMode',
-        ownerBranchId: selectedBranchId,
-        relationshipMode: relationshipDraft,
+        intent: 'bulkUpsertProductRoutingRules',
+        productIds: [...selectedProductIds],
+        servicingBranchId: bulkServicingBranchId.trim(),
+        teamId: null,
       }),
     );
-    modeFetcher.submit(fd, { method: 'post' });
-  };
-
-  const saveRule = () => {
-    if (!selectedBranchId) return;
-    if (activeRelationshipMode === 'PRODUCT_ALLOCATION' && !productId.trim()) {
-      toast.toast.error('Product required', 'Choose a product for each allocation rule.');
-      return;
-    }
-
-    const cleanedTargets = targets
-      .filter((t) => t.servicingBranchId)
-      .map((t) => ({
-        servicingBranchId: t.servicingBranchId,
-        teamId: t.teamId.trim() ? t.teamId : null,
-        weight: Math.max(1, Math.floor(Number(t.weight) || 1)),
-      }));
-    if (cleanedTargets.length === 0) return;
-
-    const resolvedProductId = activeRelationshipMode === 'BRANCH_DEFAULT' ? null : productId.trim() || null;
-
-    const payload = editingRule
-      ? {
-          intent: 'updateCsRoutingRule',
-          ruleId: editingRule.id,
-          productId: resolvedProductId,
-          priority: Math.max(0, Math.floor(Number(priority) || 0)),
-          enabled,
-          strategy,
-          targets: cleanedTargets,
-        }
-      : {
-          intent: 'createCsRoutingRule',
-          ownerBranchId: selectedBranchId,
-          productId: resolvedProductId,
-          priority: Math.max(0, Math.floor(Number(priority) || 0)),
-          enabled,
-          strategy,
-          targets: cleanedTargets,
-        };
-
-    const fd = new FormData();
-    fd.set('json', JSON.stringify(payload));
     fetcher.submit(fd, { method: 'post' });
   };
 
   const confirmDelete = () => {
-    if (!deleteRuleId) return;
+    if (!deleteProductId) return;
     const fd = new FormData();
-    fd.set('json', JSON.stringify({ intent: 'deleteCsRoutingRule', ruleId: deleteRuleId }));
+    fd.set('json', JSON.stringify({ intent: 'deleteProductRouting', productId: deleteProductId }));
     fetcher.submit(fd, { method: 'post' });
-    setDeleteRuleId(null);
+    setDeleteProductId(null);
   };
 
-  const defaultServicing = selectedBranchId ?? branches[0]?.id ?? '';
-
-  const formatTargetLine = (r: CsRoutingRuleRow, t: CsRoutingRuleRow['targets'][0]) => {
+  const formatTargetLine = (t: CsRoutingRuleRow['targets'][0]) => {
     const b = branchNameById.get(t.servicingBranchId) ?? t.servicingBranchId;
     const teamLabel =
       t.teamId && teamsByBranchId[t.servicingBranchId]
         ? teamsByBranchId[t.servicingBranchId]!.find((x) => x.id === t.teamId)?.label ?? t.teamId
         : null;
     const narrow = teamLabel ? teamLabel : 'All CS closers';
-    return `${b} · ${narrow}${r.strategy === 'WEIGHTED' ? ` ×${t.weight}` : ''}`;
+    return `${b} · ${narrow}`;
   };
-
-  const ruleColumns = [
-    {
-      key: 'priority',
-      header: 'Priority',
-      render: (r: CsRoutingRuleRow) => <span className="tabular-nums">{r.priority}</span>,
-    },
-    ...(activeRelationshipMode === 'PRODUCT_ALLOCATION'
-      ? [
-          {
-            key: 'product',
-            header: 'Product',
-            render: (r: CsRoutingRuleRow) =>
-              r.productId ? (
-                <span className="truncate max-w-[14rem]" title={productNameById.get(r.productId) ?? r.productId}>
-                  {productNameById.get(r.productId) ?? r.productId}
-                </span>
-              ) : (
-                <span className="text-app-fg-muted">—</span>
-              ),
-          },
-        ]
-      : []),
-    {
-      key: 'strategy',
-      header: 'Strategy',
-      render: (r: CsRoutingRuleRow) => <span className="text-xs font-medium text-app-fg">{r.strategy}</span>,
-    },
-    {
-      key: 'enabled',
-      header: 'Enabled',
-      render: (r: CsRoutingRuleRow) => <span className="text-xs text-app-fg-muted">{r.enabled ? 'Yes' : 'No'}</span>,
-    },
-    {
-      key: 'targets',
-      header: 'Servicing targets',
-      render: (r: CsRoutingRuleRow) => (
-        <span className="text-xs text-app-fg-muted">{r.targets.map((t) => formatTargetLine(r, t)).join(' · ')}</span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '',
-      align: 'right' as const,
-      mobileShowLabel: false,
-      render: (r: CsRoutingRuleRow) => (
-        <div className="flex justify-end gap-2">
-          <TableActionButton type="button" variant="neutral" onClick={() => openEdit(r)}>
-            Edit
-          </TableActionButton>
-          <TableActionButton type="button" variant="danger" onClick={() => setDeleteRuleId(r.id)}>
-            Delete
-          </TableActionButton>
-        </div>
-      ),
-    },
-  ];
 
   return (
     <div className="space-y-6">
-      <PageHeader title="CS order routing" />
+      <PageHeader
+        title="CS routing — which branch?"
+        description="Decides which CS branch handles each new marketing order. Once a branch is picked here, the CS dispatch strategy (Settings → System) chooses which closer in that branch actually takes the order."
+      />
 
       <Card>
-        <CardHeader title="Funnel branch" />
+        <CardHeader
+          title={
+            <span className="flex items-center gap-2">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
+                1
+              </span>
+              Routing method
+            </span>
+          }
+          description="Applies to every marketing branch."
+        />
         <CardBody className="space-y-4">
-          <Form method="get" className="flex flex-wrap gap-3 items-end">
-            <div className="min-w-[min(100%,18rem)] flex-1">
-              <FormSelect
-                label="Campaign / order branch"
-                hint="Rules below apply only to orders attributed to this branch."
-                id="branchId"
-                name="branchId"
-                disabled={branchAdminLocked}
-                defaultValue={selectedBranchId ?? ''}
-                options={[
-                  { value: '', label: branchAdminLocked ? 'Your branch (fixed)' : 'Choose a branch…' },
-                  ...branches.map((b) => ({
-                    value: b.id,
-                    label: b.code ? `${b.name} (${b.code})` : b.name,
-                  })),
-                ]}
-              />
-            </div>
-            {!branchAdminLocked ? (
-              <Button type="submit" variant="secondary" size="sm">
-                Load rules for this branch
+          <RadioGroup<RoutingUxMethod>
+            name="csRoutingUxMethod"
+            layout="card-stack"
+            value={uxMethod}
+            onChange={applyUxMethod}
+            options={[
+              {
+                value: 'split_all',
+                label: 'Split across all CS branches (default)',
+                description:
+                  'Every order is load-balanced across CS in every branch — lowest pending wins.',
+              },
+              {
+                value: 'same_branch',
+                label: 'Same branch as marketing',
+                description: 'Lagos marketing → Lagos CS. Abuja → Abuja CS. No setup.',
+              },
+              {
+                value: 'by_product',
+                label: 'By product',
+                description: 'Each product is handled by the CS branch you assign.',
+              },
+            ]}
+          />
+
+          {modeIsDirty ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-warning-200 dark:border-warning-800 bg-warning-50 dark:bg-warning-950/40 px-3 py-2">
+              <p className="text-sm text-warning-700 dark:text-warning-400">
+                Unsaved change — click Save to apply.
+              </p>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={modeBusy}
+                loadingText="Saving…"
+                disabled={modeBusy || branches.length === 0}
+                onClick={requestSaveRelationshipMode}
+              >
+                Save
               </Button>
-            ) : null}
-          </Form>
+            </div>
+          ) : null}
         </CardBody>
       </Card>
 
-      {selectedBranchId ? (
-        <>
-          <Card>
-            <CardHeader title="Relationship mode" />
-            <CardBody className="space-y-4">
-              <RadioGroup<CsRoutingRelationshipMode>
-                name="csRoutingRelationshipMode"
-                layout="card"
-                label="Match rules for this funnel branch"
-                value={relationshipDraft}
-                onChange={setRelationshipDraft}
-                options={[
-                  {
-                    value: 'BRANCH_DEFAULT',
-                    label: 'Branch relationship',
-                    description: 'Rules route by servicing branch / team only (no product filter).',
-                  },
-                  {
-                    value: 'PRODUCT_ALLOCATION',
-                    label: 'Product allocation',
-                    description: 'Each rule maps one product to the CS branch (and optional team) that handles it.',
-                  },
-                ]}
+      {showProductStep ? (
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
+                  2
+                </span>
+                Assign products
+              </span>
+            }
+            description="Tick products, choose a servicing branch, then click Assign. Re-assigning a product overwrites its previous route. Remove a row to revert that product to same-branch."
+          />
+          <CardBody className="space-y-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+              <div className="min-w-[min(100%,14rem)] flex-1">
+                <FormSelect
+                  label="Servicing branch"
+                  value={bulkServicingBranchId}
+                  onChange={(e) => setBulkServicingBranchId(e.target.value)}
+                  options={[
+                    { value: '', label: 'Choose branch…' },
+                    ...branches.map((b) => ({
+                      value: b.id,
+                      label: b.code ? `${b.name} (${b.code})` : b.name,
+                    })),
+                  ]}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                loading={busy}
+                loadingText="Saving…"
+                disabled={modeBusy || branches.length === 0}
+                onClick={requestBulkProductAssign}
+              >
+                Assign selected
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <SearchInput
+                placeholder="Search products…"
+                value={productSearch}
+                onChange={setProductSearch}
+                controlSize="sm"
+                wrapperClassName="max-w-md"
               />
-              <div className="flex justify-end">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
-                  loading={modeBusy}
-                  loadingText="Saving…"
-                  disabled={relationshipDraft === activeRelationshipMode || modeBusy}
-                  onClick={saveRelationshipMode}
-                >
-                  Save relationship mode
-                </Button>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardHeader
-              title={activeRelationshipMode === 'PRODUCT_ALLOCATION' ? 'Product → CS routing' : 'Servicing targets'}
-              actions={
-                <Button type="button" variant="primary" size="sm" onClick={openCreate} disabled={branches.length === 0}>
-                  + Add rule
-                </Button>
-              }
-            />
-            <CardBody>
-              {rules.length === 0 ? (
-                <EmptyState
-                  title="No rules yet"
-                  description={
-                    activeRelationshipMode === 'PRODUCT_ALLOCATION'
-                      ? 'Add a rule: pick a product and the CS servicing branch.'
-                      : 'Add a rule: set which branch supplies CS capacity (and optional team).'
+                  onClick={() =>
+                    setSelectedProductIds(
+                      new Set(
+                        filteredProductsForBulk
+                          .filter((p) => !ruleByProductId.has(p.id))
+                          .map((p) => p.id),
+                      ),
+                    )
                   }
-                />
-              ) : (
-                <CompactTable<CsRoutingRuleRow>
-                  rows={rules}
-                  rowKey={(r, _i) => r.id}
-                  columns={ruleColumns}
-                />
-              )}
-            </CardBody>
-          </Card>
-        </>
-      ) : (
-        <EmptyState title="Select a funnel branch" description="Choose a branch and load rules to add or edit rows." />
-      )}
-
-      <Modal
-        open={editorOpen}
-        onClose={() => {
-          if (!busy && !modeBusy) setEditorOpen(false);
-        }}
-        maxWidth="max-w-lg"
-        backdropBlur
-        contentClassName="p-6 flex flex-col gap-4 border border-app-border bg-app-elevated"
-        aria-labelledby="cs-routing-editor-title"
-      >
-        <h3 id="cs-routing-editor-title" className="text-lg font-semibold text-app-fg">
-          {editingRule ? 'Edit routing rule' : 'New routing rule'}
-        </h3>
-        <div className="space-y-4">
-          <TextInput label="Priority" type="number" min={0} value={priority} onChange={(e) => setPriority(e.target.value)} />
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            Enabled
-          </label>
-          <FormSelect
-            label="Strategy"
-            value={strategy}
-            onChange={(e) => setStrategy(e.target.value as 'WEIGHTED' | 'EQUAL')}
-            options={[
-              { value: 'EQUAL', label: 'Equal split (stable hash per order)' },
-              { value: 'WEIGHTED', label: 'Weighted' },
-            ]}
-          />
-          {activeRelationshipMode === 'PRODUCT_ALLOCATION' ? (
-            <FormSelect
-              label="Product"
-              required
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-              options={[{ value: '', label: 'Select product…' }, ...products.map((p) => ({ value: p.id, label: p.name }))]}
-            />
-          ) : null}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs font-medium text-app-fg">Servicing targets</p>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  setTargets((prev) => [...prev, { servicingBranchId: defaultServicing, teamId: '', weight: 1 }])
-                }
-              >
-                + Target
-              </Button>
-            </div>
-            {targets.map((row, idx) => (
-              <div key={idx} className="flex flex-col gap-2 border border-app-border rounded-md p-3">
-                <div className="flex flex-wrap gap-2 items-end">
-                  <div className="flex-1 min-w-[12rem]">
-                    <FormSelect
-                      label={idx === 0 ? 'Servicing branch (CS capacity)' : undefined}
-                      value={row.servicingBranchId}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setTargets((prev) =>
-                          prev.map((t, i) => (i === idx ? { ...t, servicingBranchId: v, teamId: '' } : t)),
-                        );
-                      }}
-                      options={branches.map((b) => ({
-                        value: b.id,
-                        label: b.code ? `${b.name} (${b.code})` : b.name,
-                      }))}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-[12rem]">
-                    <FormSelect
-                      label={idx === 0 ? 'CS team (optional)' : undefined}
-                      value={row.teamId}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setTargets((prev) => prev.map((t, i) => (i === idx ? { ...t, teamId: v } : t)));
-                      }}
-                      options={[
-                        { value: '', label: 'All CS closers on servicing branch' },
-                        ...(teamsByBranchId[row.servicingBranchId] ?? []).map((x) => ({
-                          value: x.id,
-                          label: x.label,
-                        })),
-                      ]}
-                    />
-                  </div>
-                  <div className="w-28">
-                    <TextInput
-                      label={idx === 0 ? 'Weight' : undefined}
-                      type="number"
-                      min={1}
-                      value={String(row.weight)}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setTargets((prev) =>
-                          prev.map((t, i) => (i === idx ? { ...t, weight: Math.max(1, Number(v) || 1) } : t)),
-                        );
-                      }}
-                    />
-                  </div>
-                  {targets.length > 1 ? (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setTargets((prev) => prev.filter((_, i) => i !== idx))}>
-                      Remove
-                    </Button>
-                  ) : null}
-                </div>
+                  disabled={filteredProductsForBulk.every((p) => ruleByProductId.has(p.id))}
+                >
+                  Select visible
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedProductIds(new Set())}
+                  disabled={selectedProductIds.size === 0}
+                >
+                  Clear
+                </Button>
               </div>
-            ))}
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 pt-2 border-t border-app-border">
-          <Button type="button" variant="ghost" onClick={() => setEditorOpen(false)} disabled={busy || modeBusy}>
-            Cancel
-          </Button>
-          <Button type="button" variant="primary" loading={busy} loadingText="Saving…" disabled={modeBusy} onClick={saveRule}>
-            Save
-          </Button>
-        </div>
-      </Modal>
+            </div>
+
+            {products.length === 0 ? (
+              <EmptyState title="No products" description="Add active products in the catalogue first." />
+            ) : (
+              <div className="max-h-[min(28rem,60vh)] overflow-y-auto rounded-lg border border-app-border divide-y divide-app-border">
+                {filteredProductsForBulk.map((p) => {
+                  const rule = ruleByProductId.get(p.id);
+                  const assigned =
+                    rule && rule.targets.length > 0
+                      ? rule.targets.map(formatTargetLine).join(' · ')
+                      : null;
+                  // A product can only live in one CS branch at a time. The
+                  // checkbox is disabled while an assignment exists so the user
+                  // is forced to Remove the old route first — prevents an
+                  // accidental overwrite during a bulk action that crosses an
+                  // already-routed row.
+                  const isAlreadyAssigned = Boolean(rule);
+                  return (
+                    <div
+                      key={p.id}
+                      className={`flex flex-wrap items-center gap-3 px-3 py-2.5 ${
+                        isAlreadyAssigned ? 'bg-app-hover/30' : 'hover:bg-app-hover/40'
+                      }`}
+                    >
+                      <Checkbox
+                        checked={selectedProductIds.has(p.id)}
+                        disabled={isAlreadyAssigned}
+                        onChange={() => {
+                          if (isAlreadyAssigned) return;
+                          setSelectedProductIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(p.id)) next.delete(p.id);
+                            else next.add(p.id);
+                            return next;
+                          });
+                        }}
+                        aria-label={
+                          isAlreadyAssigned
+                            ? `${p.name} is already assigned — remove the existing route to re-assign`
+                            : `Select ${p.name}`
+                        }
+                        title={
+                          isAlreadyAssigned
+                            ? 'Already assigned — click Remove to free this product, then re-assign.'
+                            : undefined
+                        }
+                      />
+                      <span
+                        className="min-w-0 flex-1 text-sm font-medium text-app-fg truncate"
+                        title={p.name}
+                      >
+                        {p.name}
+                      </span>
+                      <span
+                        className={`text-xs max-w-[14rem] truncate sm:max-w-xs ${
+                          assigned
+                            ? 'text-app-fg-muted'
+                            : 'text-warning-700 dark:text-warning-400 italic'
+                        }`}
+                        title={
+                          assigned ?? 'No CS branch assigned — pick one and click Assign selected.'
+                        }
+                      >
+                        {assigned ?? 'Not assigned'}
+                      </span>
+                      {rule ? (
+                        <TableActionButton
+                          type="button"
+                          variant="danger"
+                          onClick={() => setDeleteProductId(p.id)}
+                        >
+                          Remove
+                        </TableActionButton>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {filteredProductsForBulk.length === 0 && products.length > 0 ? (
+              <p className="text-xs text-app-fg-muted">No products match your search.</p>
+            ) : null}
+          </CardBody>
+        </Card>
+      ) : null}
 
       <ConfirmActionModal
-        open={!!deleteRuleId}
-        onClose={() => setDeleteRuleId(null)}
-        title="Delete routing rule?"
-        description="Dispatch uses default servicing when nothing matches."
-        confirmLabel="Delete"
+        open={!!deleteProductId}
+        onClose={() => setDeleteProductId(null)}
+        title="Remove product route?"
+        description="This product will become unassigned. New orders for it will fall through to the order's marketing branch as a safety net until you assign a CS branch."
+        confirmLabel="Remove"
         variant="danger"
         onConfirm={confirmDelete}
+      />
+
+      <ConfirmActionModal
+        open={assignConfirmOpen}
+        onClose={() => {
+          if (busy) return; // block dismiss while in flight
+          setAssignConfirmOpen(false);
+        }}
+        title={`Assign ${selectedProductIds.size} product${selectedProductIds.size === 1 ? '' : 's'}?`}
+        description={(() => {
+          const branchLabel =
+            branchNameById.get(bulkServicingBranchId) ?? 'the chosen servicing branch';
+          const verbing = selectedProductIds.size === 1 ? 'this product' : 'these products';
+          return `New orders for ${verbing} will be routed to CS at ${branchLabel}. Any existing route on a re-assigned product will be overwritten.`;
+        })()}
+        confirmLabel="Assign"
+        variant="warning"
+        loading={busy}
+        error={fetcher.data && !fetcher.data.success ? fetcher.data.error ?? null : null}
+        onConfirm={submitBulkProductAssign}
+      />
+
+      <ConfirmActionModal
+        open={saveModeConfirmOpen}
+        onClose={() => {
+          if (modeBusy) return; // block dismiss while in flight
+          setSaveModeConfirmOpen(false);
+        }}
+        title={(() => {
+          if (draftMode === 'SPLIT_ALL_BRANCHES') return 'Switch to org-wide split routing?';
+          if (draftMode === 'PRODUCT_ALLOCATION') return 'Switch to per-product routing?';
+          return 'Switch to same-branch routing?';
+        })()}
+        description={(() => {
+          if (draftMode === 'SPLIT_ALL_BRANCHES') {
+            return 'New marketing orders will be distributed across CS in every branch — whichever closer has the lowest pending workload wins. Marketing branch is kept on the order for attribution but no longer constrains who handles it.';
+          }
+          if (draftMode === 'PRODUCT_ALLOCATION') {
+            return 'New marketing orders will start routing per-product as soon as you save. Products without an explicit assignment will fall back to CS in the order’s marketing branch as a safety net.';
+          }
+          return 'Every new marketing order will be handled by CS in the same branch as the marketing funnel that created it. Existing product routes are kept in the database and will reactivate if you switch back.';
+        })()}
+        confirmLabel="Save"
+        variant="warning"
+        loading={modeBusy}
+        error={modeFetcher.data && !modeFetcher.data.success ? modeFetcher.data.error ?? null : null}
+        onConfirm={confirmSaveRelationshipMode}
       />
     </div>
   );

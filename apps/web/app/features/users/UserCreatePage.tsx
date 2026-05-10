@@ -38,6 +38,26 @@ const COMPANY_WIDE_OPTIONAL_SQUAD_ROLES = new Set([
   'LOGISTICS_MANAGER',
 ]);
 
+/**
+ * Roles that belong in the branching system. Mirrors the backend's
+ * `BRANCH_ELIGIBLE_ROLES` set in `branches.router.ts::assignUser` (CEO directive
+ * 2026-05-10): only Marketing, CS, and Branch Admin live in branches. Every
+ * other role is org-wide — Finance, Stock Manager, HR, Logistics (which has
+ * its own location-scoping via `logistics_locations`), Admin, etc. — and the
+ * Branch Memberships section hides for them entirely.
+ *
+ * Keep this list in lockstep with the backend; if the two diverge a tampered
+ * client could submit branches the server rejects, or a legitimate role would
+ * lose its UI section while still being branch-eligible on the server.
+ */
+const BRANCH_ELIGIBLE_ROLES = new Set([
+  'MEDIA_BUYER',
+  'HEAD_OF_MARKETING',
+  'CS_CLOSER',
+  'HEAD_OF_CS',
+  'BRANCH_ADMIN',
+]);
+
 // ─── Constants ──────────────────────────────────────────
 
 // SUPER_ADMIN is intentionally excluded — it's a singleton created only via /auth/setup.
@@ -221,6 +241,13 @@ export function UserCreatePage({
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
     editingUser?.branchIds ?? [],
   );
+  /**
+   * True only for roles that the backend's `branches.assignUser` accepts —
+   * Marketing, CS, and Branch Admin. Org-wide roles (Finance, Stock Manager,
+   * Logistics, HR, Admin, etc.) hide the Branch Memberships block entirely
+   * and skip its validation/submit gating. Mirrors the server-side allowlist.
+   */
+  const roleNeedsBranch = !!selectedRole && BRANCH_ELIGIBLE_ROLES.has(selectedRole);
 
   useEffect(() => {
     // Skip auto-fill when editing — the user already has assigned branches we shouldn't override.
@@ -499,8 +526,20 @@ export function UserCreatePage({
         {showProductAssignment && selectedProductIds.length > 0 && (
           <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
         )}
-        <input type="hidden" name="branchIds" value={JSON.stringify(selectedBranchIds)} />
-        <input type="hidden" name="primaryBranchId" value={selectedBranchId} />
+        {/* Org-wide roles (Finance, Stock Manager, Logistics, HR, Admin, etc.)
+            don't carry branch scope — submit empty arrays so the action layer
+            can handle them like the explicit "no branches" case. The backend's
+            `branches.assignUser` rejects org-wide roles regardless. */}
+        <input
+          type="hidden"
+          name="branchIds"
+          value={roleNeedsBranch ? JSON.stringify(selectedBranchIds) : '[]'}
+        />
+        <input
+          type="hidden"
+          name="primaryBranchId"
+          value={roleNeedsBranch ? selectedBranchId : ''}
+        />
         {selectedTemplateId ? (
           <input type="hidden" name="roleTemplateId" value={selectedTemplateId} />
         ) : null}
@@ -603,6 +642,7 @@ export function UserCreatePage({
               />
             </div>
 
+            {roleNeedsBranch ? (
             <div className="sm:col-span-2 space-y-3">
               <label className="block text-sm font-medium text-app-fg-muted">
                 Branch Memberships
@@ -667,6 +707,12 @@ export function UserCreatePage({
                 </p>
               ) : null}
             </div>
+            ) : selectedRole ? (
+              <div className="sm:col-span-2 rounded-md border border-app-border bg-app-hover/60 px-3 py-2 text-xs text-app-fg-muted">
+                <span className="font-medium text-app-fg">{formatRole(selectedRole)}</span> is an
+                {' '}org-wide role — branch assignment is not required. They have visibility across every branch.
+              </div>
+            ) : null}
 
             {conflictingHead && (
               <div className="sm:col-span-2">
@@ -1003,14 +1049,12 @@ export function UserCreatePage({
             disabled={
               isEditMode
                 ? !selectedRole ||
-                  selectedBranchIds.length === 0 ||
-                  !selectedBranchId ||
+                  (roleNeedsBranch && (selectedBranchIds.length === 0 || !selectedBranchId)) ||
                   // phoneLocal is optional on edit — if non-empty, it must be a complete value
                   (phoneLocal.length > 0 && !phoneIsComplete)
                 : !selectedRole ||
                   !phoneIsComplete ||
-                  selectedBranchIds.length === 0 ||
-                  !selectedBranchId
+                  (roleNeedsBranch && (selectedBranchIds.length === 0 || !selectedBranchId))
             }
           >
             {isEditMode ? 'Save changes' : 'Create User'}

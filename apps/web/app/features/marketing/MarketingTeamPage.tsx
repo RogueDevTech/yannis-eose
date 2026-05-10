@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { CompactTable, type CompactTableColumn, CompactTableActionButton } from '~/components/ui/compact-table';
+import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -207,9 +208,10 @@ export function MarketingTeamPage({
           <Link
             to={`/hr/users/${m.userId}`}
             prefetch="intent"
-            className="font-medium text-app-fg truncate hover:text-brand-600 dark:hover:text-brand-400"
+            className="inline-flex items-center gap-2.5 min-w-0 font-medium text-app-fg hover:text-brand-600 dark:hover:text-brand-400"
           >
-            {m.name}
+            <CompactUserAvatar name={m.name} />
+            <span className="truncate">{m.name}</span>
           </Link>
         ),
       },

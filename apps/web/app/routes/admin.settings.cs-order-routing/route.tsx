@@ -8,7 +8,7 @@ import {
   loadCsOrderRoutingPageData,
 } from '~/lib/cs-order-routing.server';
 
-export const meta: MetaFunction = () => [{ title: 'CS order routing — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'CS routing — which branch? — Yannis EOSE' }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'orders.routing');
@@ -26,12 +26,11 @@ export default function CsOrderRoutingRoute() {
 
   return (
     <CsOrderRoutingSettingsPage
+      key={data.relationshipMode}
       branches={data.branches}
       products={data.products}
       teamsByBranchId={data.teamsByBranchId}
       rules={data.rules}
-      selectedBranchId={data.selectedBranchId}
-      branchAdminLocked={data.branchAdminLocked}
       relationshipMode={data.relationshipMode}
     />
   );

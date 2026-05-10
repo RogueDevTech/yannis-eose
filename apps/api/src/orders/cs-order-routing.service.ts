@@ -13,7 +13,12 @@ import { DRIZZLE } from '../database/database.module';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 
 export type CsRoutingDispatchResolution = {
-  servicingBranchId: string;
+  /**
+   * Servicing branch for this order:
+   *   - string  → narrow CS pool to this branch
+   *   - null    → org-wide pool (every active CS_CLOSER everywhere); used by SPLIT_ALL_BRANCHES
+   */
+  servicingBranchId: string | null;
   /**
    * When non-null, auto-dispatch must only consider these CS_CLOSER ids (subset of servicing branch pool).
    * When null, no routing rule applied — use default servicing branch (order branch) with no id filter.
@@ -264,6 +269,20 @@ export class CsOrderRoutingService {
     if (!orderBranchId) return null;
 
     const mode = await this.getRelationshipMode(orderBranchId);
+
+    // SPLIT_ALL_BRANCHES — bypass branch + product matching entirely. Return a
+    // null servicingBranchId so the dispatcher loads every active CS_CLOSER
+    // org-wide and lets the configured strategy (load_balanced / performance /
+    // claim) pick the lowest-loaded one. The order's marketing branch becomes
+    // irrelevant for routing (it stays attached to the order for attribution).
+    if (mode === 'SPLIT_ALL_BRANCHES') {
+      return {
+        servicingBranchId: null,
+        restrictToCloserIds: null,
+        crossBranchServicing: true,
+        dispatchSettingsTeamId: null,
+      };
+    }
 
     if (mode === 'PRODUCT_ALLOCATION' && !primaryProductId) {
       return {

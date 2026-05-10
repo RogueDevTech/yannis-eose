@@ -956,23 +956,6 @@ function OrdersListPageImpl({
         ) : null
       )}
 
-      {/* Smart pick — permission-driven (orders.bulkAssign). Held by HEAD_OF_CS by default;
-          admin-class inherits via ALL_PERMISSION_CODES. Picks the first N from the filtered
-          list; the existing per-row checkboxes still work alongside it. */}
-      {canBulkPick && filteredOrders.length > 0 && (
-        <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2">
-          <SmartPick
-            total={filteredOrders.length}
-            selectedCount={selectedIds.size}
-            onPick={(count) =>
-              setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)))
-            }
-            onClear={clearSelection}
-            itemNoun="orders"
-          />
-        </div>
-      )}
-
       {/* Bulk Action Toolbar */}
       {selectedIds.size > 0 && canBulkAction && (
         <div className="card bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-700/50">
@@ -1359,6 +1342,25 @@ function OrdersListPageImpl({
           }
         />
       </div>
+
+      {/* Smart pick — sits directly under the filters card so the bulk-pick
+          toolbar reads as a continuation of the filter row. Permission-driven
+          (orders.bulkAssign); held by HEAD_OF_CS by default and admin-class
+          inherits via ALL_PERMISSION_CODES. Picks the first N from the
+          filtered list; per-row checkboxes still work alongside it. */}
+      {canBulkPick && filteredOrders.length > 0 && (
+        <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2">
+          <SmartPick
+            total={filteredOrders.length}
+            selectedCount={selectedIds.size}
+            onPick={(count) =>
+              setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)))
+            }
+            onClear={clearSelection}
+            itemNoun="orders"
+          />
+        </div>
+      )}
 
       {/* Schedule heat calendar — modal only. The Schedule dropdown's "…on date" options
           open this; the date badge next to the dropdown reopens it to change the day. */}

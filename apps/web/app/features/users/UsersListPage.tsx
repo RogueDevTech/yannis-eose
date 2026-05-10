@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
+import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -233,9 +234,7 @@ export function UsersListPage({
         header: 'Name',
         render: (user) => (
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center shrink-0">
-              <span className="text-xs font-semibold text-white">{user.name.charAt(0).toUpperCase()}</span>
-            </div>
+            <CompactUserAvatar name={user.name} />
             <span className="font-medium text-app-fg truncate">{user.name}</span>
           </div>
         ),
@@ -301,9 +300,7 @@ export function UsersListPage({
         header: 'Name',
         render: (user) => (
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-brand-500 flex items-center justify-center shrink-0">
-              <span className="text-xs font-semibold text-white">{user.name.charAt(0).toUpperCase()}</span>
-            </div>
+            <CompactUserAvatar name={user.name} />
             <span className="font-medium text-app-fg">{user.name}</span>
           </div>
         ),

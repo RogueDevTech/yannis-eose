@@ -1,8 +1,8 @@
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 
-import { Await, useLoaderData, useFetcher } from '@remix-run/react';
-import { useCallback, useMemo, useState } from 'react';
+import { Link, useLoaderData, useFetcher } from '@remix-run/react';
+import { useCallback, useState } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
@@ -14,11 +14,7 @@ import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
-import {
-  CompactTable,
-  CompactTableActionButton,
-  type CompactTableColumn,
-} from '~/components/ui/compact-table';
+import { EmptyState } from '~/components/ui/empty-state';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { BranchesListLoadingShell } from '~/features/branches/BranchesDeferredLoadingShells';
@@ -123,55 +119,6 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
 
   const isSubmitting = fetcher.state !== 'idle';
 
-  const branchColumns: CompactTableColumn<Branch>[] = useMemo(
-    () => [
-      {
-        key: 'name',
-        header: 'Name',
-        render: (branch) => <span className="font-medium text-app-fg">{branch.name}</span>,
-      },
-      {
-        key: 'code',
-        header: 'Code',
-        render: (branch) => <span className="font-mono text-xs text-app-fg-muted">{branch.code}</span>,
-      },
-      {
-        key: 'status',
-        header: 'Status',
-        render: (branch) => <StatusBadge status={branch.status} />,
-      },
-      {
-        key: 'created',
-        header: 'Created',
-        render: (branch) => (
-          <span className="text-xs text-app-fg-muted">
-            {new Date(branch.createdAt).toLocaleDateString('en-NG', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </span>
-        ),
-      },
-      {
-        key: 'actions',
-        header: '',
-        mobileLabel: 'Actions',
-        align: 'right',
-        tight: true,
-        render: (branch) => (
-          <div className="inline-flex items-center justify-end gap-2">
-            <CompactTableActionButton to={`/admin/branches/${branch.id}`}>View</CompactTableActionButton>
-            <Button variant="secondary" size="sm" onClick={() => setEditBranch(branch)}>
-              Edit
-            </Button>
-          </div>
-        ),
-      },
-    ],
-    [],
-  );
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -184,16 +131,77 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
         }
       />
 
-      {/* Branches Table */}
-      <div className="card p-0 overflow-hidden">
-        <CompactTable<Branch>
-          columns={branchColumns}
-          rows={branches}
-          rowKey={(b) => b.id}
-          withCard={false}
-          emptyTitle="No branches yet"
-          emptyDescription="Create one to enable multi-branch mode."
-        />
+      {/* Branches grid — same card shape as `/admin/marketing/forms`. The
+          whole card is a click target that routes to the branch detail page
+          (overlay link with `inset-0`); the Edit button sits on top via
+          `relative z-10` so it stays interactive without bubbling to the
+          card's link. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {branches.map((branch) => (
+          <article
+            key={branch.id}
+            className="group relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700 transition-all duration-200 flex flex-col min-h-[180px] focus-within:ring-2 focus-within:ring-brand-500"
+          >
+            {/* Card-level link — covers the whole surface so any click
+                outside the action buttons opens the detail view. The link
+                itself has no children; the visible content sits above it. */}
+            <Link
+              to={`/admin/branches/${branch.id}`}
+              prefetch="intent"
+              aria-label={`View ${branch.name}`}
+              className="absolute inset-0 z-0 rounded-xl focus:outline-none"
+            />
+            <div className="relative z-10 flex items-start justify-between gap-3 mb-2 pointer-events-none">
+              <h3 className="font-semibold text-app-fg text-base leading-snug line-clamp-2 min-w-0 flex-1 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
+                {branch.name}
+              </h3>
+              <StatusBadge status={branch.status} className="shrink-0" />
+            </div>
+
+            <div className="relative z-10 text-sm text-app-fg-muted mb-4 flex-1 pointer-events-none">
+              <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-[11px] font-semibold text-app-fg-muted">
+                {branch.code}
+              </span>
+              <span className="mx-1.5">·</span>
+              <time dateTime={branch.createdAt}>
+                {new Date(branch.createdAt).toLocaleDateString('en-NG', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </time>
+            </div>
+
+            <div className="relative z-10 flex items-center gap-2 pt-3 border-t border-app-border">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEditBranch(branch);
+                }}
+                className="gap-1.5 shrink-0"
+              >
+                Edit
+              </Button>
+              <span className="ml-auto text-xs font-medium text-app-fg-muted group-hover:text-brand-600 dark:group-hover:text-brand-400 inline-flex items-center gap-1 transition-colors pointer-events-none">
+                View details
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+            </div>
+          </article>
+        ))}
+        {branches.length === 0 && (
+          <div className="col-span-full">
+            <EmptyState
+              title="No branches yet"
+              description="Create one to enable multi-branch mode."
+            />
+          </div>
+        )}
       </div>
 
       {/* Create Modal */}

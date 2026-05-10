@@ -103,7 +103,13 @@ const entries: ShellEntry[] = [
     match: /^\/hr\/users\/[^/]+\/onboarding$/,
     render: () => <UserOnboardingLoadingShell />,
   },
-  { match: /^\/hr\/users\/[^/]+$/, render: () => <UserDetailShellSkeleton /> },
+  // /hr/users/:id intentionally has NO transition shell. The route renders
+  // <CachedAwait fallback={<UserDetailShellSkeleton />}> which owns the
+  // loading state cleanly — registering the same skeleton here too caused a
+  // double-flicker on first visit (transition skeleton mounts → loader
+  // returns → Outlet swaps in → CachedAwait remounts the same skeleton at a
+  // new tree position → unmount/remount visible as a flash).
+  // NavProgressBar at the top covers the brief deferred-loader window.
   { match: /^\/hr\/users$/, render: () => <HRUsersListLoadingShell /> },
   { match: /^\/hr\/payroll\/generate$/, render: () => <GeneratePayrollLoadingShell /> },
   { match: /^\/hr\/payroll$/, render: () => <MonthlyPayrollsLoadingShell /> },

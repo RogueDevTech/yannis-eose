@@ -165,8 +165,7 @@ export function MarketingOverviewPage({
 
   const statsScrollRef = useRef<HTMLDivElement>(null);
   const mediaBuyerScrollRef = useRef<HTMLDivElement>(null);
-  const [viewAllMediaBuyersOpen, setViewAllMediaBuyersOpen] = useState(false);
-  const [viewAllMediaBuyerPage, setViewAllMediaBuyerPage] = useState(1);
+  const liveOrdersScrollRef = useRef<HTMLDivElement>(null);
 
   // ─── Live Activity strip (mirror of CSDashboardPage strip) ───
   const cartsFetcher = useFetcher<{ activityItems?: LiveActivityItem[] }>();
@@ -252,6 +251,9 @@ export function MarketingOverviewPage({
   const scrollMediaBuyerStrip = useCallback((delta: number) => {
     mediaBuyerScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
+  const scrollLiveOrdersStrip = useCallback((delta: number) => {
+    liveOrdersScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
+  }, []);
   const liveOrdersTotalPages = Math.max(1, Math.ceil(localOrders.length / pageSize));
   const prevOrdersLengthRef = useRef(localOrders.length);
   useEffect(() => {
@@ -269,17 +271,6 @@ export function MarketingOverviewPage({
       if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
     };
   }, []);
-  useEffect(() => {
-    if (viewAllMediaBuyersOpen) setViewAllMediaBuyerPage(1);
-  }, [viewAllMediaBuyersOpen]);
-  useEffect(() => {
-    if (!viewAllMediaBuyersOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setViewAllMediaBuyersOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [viewAllMediaBuyersOpen]);
   const periodLabel = leaderboardPeriod === 'all_time'
     ? 'all time'
     : (filters?.startDate && filters?.endDate)
@@ -488,7 +479,7 @@ export function MarketingOverviewPage({
                   className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
                 >
                   {stripVisible.map((item) => (
-                    <div key={item.id} className="shrink-0 w-64">
+                    <div key={item.id} className="shrink-0 w-48">
                       <LiveActivityCard
                         item={item}
                         isNew={newCartIds.has(item.id)}
@@ -537,7 +528,9 @@ export function MarketingOverviewPage({
                       const rows = sorted.slice(start, start + allPageSize);
                       return (
                         <>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* Match the strip card width (w-48) so cards look
+                              identical inside the modal — auto-fill the row. */}
+                          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(192px,1fr))]">
                             {rows.map((item) => (
                               <LiveActivityCard
                                 key={item.id}
@@ -610,12 +603,37 @@ export function MarketingOverviewPage({
               </p>
             </div>
           </div>
-          <Link
-            to="/admin/marketing/orders"
-            className="btn-primary btn-sm shrink-0 inline-flex items-center justify-center"
-          >
-            View all
-          </Link>
+          {localOrders.length > 0 && (
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => scrollLiveOrdersStrip(-280)}
+                className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center"
+                aria-label="Scroll live orders left"
+              >
+                <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollLiveOrdersStrip(280)}
+                className="p-1 sm:p-2 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover disabled:opacity-50 disabled:pointer-events-none transition-colors flex items-center justify-center"
+                aria-label="Scroll live orders right"
+              >
+                <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              <Link
+                to="/admin/marketing/orders"
+                prefetch="intent"
+                className="btn-secondary btn-sm inline-flex items-center justify-center"
+              >
+                View all
+              </Link>
+            </div>
+          )}
         </div>
         {localOrders.length === 0 ? (
           <div className="rounded-xl border border-app-border bg-app-elevated flex flex-col items-center justify-center py-12 gap-2">
@@ -630,8 +648,12 @@ export function MarketingOverviewPage({
             const rows = localOrders.slice(0, 50);
             return (
               <>
-                {/* Horizontal-scroll strip — same density as the CS Unassigned Queue. */}
-                <div className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1">
+                {/* Compact horizontal-scroll strip — mirrors the LiveActivityCard
+                    density (w-48 cards, text-xs/[10px] sizes, px-2.5 py-2). */}
+                <div
+                  ref={liveOrdersScrollRef}
+                  className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
+                >
                   {rows.map((order) => {
                     const isHighlighted = highlightedIds.has(order.id);
                     const statusBadge = STATUS_COLORS[order.status] ?? 'badge';
@@ -641,7 +663,7 @@ export function MarketingOverviewPage({
                         to={`/admin/orders/${order.id}`}
                         prefetch="intent"
                         className={`
-                          group relative shrink-0 w-64 block rounded-xl border transition-all duration-200 cursor-pointer
+                          group relative shrink-0 w-48 block rounded-xl border transition-all duration-200 cursor-pointer
                           ${isHighlighted
                             ? 'animate-slide-in-up border-success-400 dark:border-success-500 bg-gradient-to-br from-success-50 to-white dark:from-success-900/20 dark:to-surface-800 shadow-md'
                             : 'bg-app-elevated border-app-border hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
@@ -650,74 +672,58 @@ export function MarketingOverviewPage({
                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500
                         `}
                       >
-                        {/* Live dot */}
-                        <span className="absolute top-3 right-3 flex h-2.5 w-2.5">
+                        {/* Live dot — top-right, smaller */}
+                        <span className="absolute top-2 right-2 flex h-2 w-2">
                           {isHighlighted ? (
                             <>
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success-500" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-success-500" />
                             </>
                           ) : (
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-app-border" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-app-border" />
                           )}
                         </span>
 
-                        <div className="p-3.5 pr-8">
-                          {/* Status pill */}
-                          <div className="mb-2">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${statusBadge}`}>
+                        <div className="px-2.5 py-2 pr-5">
+                          {/* Row 1: customer name + amount */}
+                          <div className="flex items-baseline justify-between gap-2 mb-1">
+                            <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
+                              {order.customerName}
+                            </p>
+                            <span className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums">
+                              {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
+                            </span>
+                          </div>
+
+                          {/* Row 2: media buyer pill + status pill */}
+                          <div className="flex items-center gap-1.5 mb-1 min-w-0">
+                            <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-hover text-app-fg-muted">
+                              <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                              </svg>
+                              <span className="truncate min-w-0">{order.mediaBuyerName ?? 'No MB'}</span>
+                            </span>
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 ${statusBadge}`}>
                               {formatStatus(order.status)}
                             </span>
                           </div>
 
-                          {/* Customer name */}
-                          <div className="mb-2">
-                            <p className="text-sm font-semibold text-app-fg truncate leading-tight">
-                              {order.customerName}
-                            </p>
-                          </div>
-
-                          {/* Media buyer pill */}
-                          <div className="mb-1.5 min-w-0">
-                            <span className="inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-app-hover text-app-fg-muted">
-                              <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                              </svg>
-                              <span className="truncate min-w-0">{order.mediaBuyerName ?? 'No media buyer'}</span>
-                            </span>
-                          </div>
-
-                          {/* Amount — own line for uniform card height */}
-                          <div className="mb-2 text-[11px] font-bold text-app-fg">
-                            {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
-                          </div>
-
-                          {/* Timestamp */}
-                          <div className="text-[11px] font-medium text-app-fg-muted">
+                          {/* Row 3: timestamp */}
+                          <div className="text-[10px] font-medium text-app-fg-muted truncate">
                             {new Date(order.createdAt).toLocaleString('en-NG', {
-                              weekday: 'short', month: 'short', day: 'numeric',
+                              month: 'short', day: 'numeric',
                               hour: '2-digit', minute: '2-digit',
                             })}
                           </div>
 
-                          {/* LIVE flash */}
+                          {/* LIVE flash — compact */}
                           {isHighlighted && (
-                            <div className="mt-2 pt-2 border-t flex items-center gap-1.5 border-success-200 dark:border-success-800/50">
-                              <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
-                                LIVE
-                              </span>
-                              <span className="text-[11px] text-success-600 dark:text-success-400">
-                                Just received
+                            <div className="mt-1.5 flex items-center gap-1">
+                              <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-[9px] font-bold bg-success-500 text-white">
+                                JUST NOW
                               </span>
                             </div>
                           )}
-                        </div>
-
-                        {/* Hover arrow */}
-                        <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <svg className="w-3.5 h-3.5 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
                         </div>
                       </Link>
                     );
@@ -774,9 +780,13 @@ export function MarketingOverviewPage({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
-                <Button type="button" variant="secondary" size="sm" onClick={() => setViewAllMediaBuyersOpen(true)}>
+                <Link
+                  to="/admin/marketing/team"
+                  prefetch="intent"
+                  className="btn-secondary btn-sm inline-flex items-center justify-center"
+                >
                   View all
-                </Button>
+                </Link>
               </div>
             );
           })()}
@@ -818,101 +828,6 @@ export function MarketingOverviewPage({
           );
         })()}
       </div>
-
-      {/* View all Media Buyer Performance modal — 20 per page, Prev/Next */}
-      {viewAllMediaBuyersOpen && (() => {
-        const teamFromBalances = balancesList.filter((b) => b.role === 'MEDIA_BUYER');
-        const hasLeaderboard = leaderboard.length > 0;
-        const showCardsFromBalances = !hasLeaderboard && teamFromBalances.length > 0;
-        const cardsSource = hasLeaderboard ? leaderboard : null;
-        const balanceOnlySource = showCardsFromBalances ? teamFromBalances : null;
-        type CardItem = { type: 'leaderboard'; data: import('./types').LeaderboardEntry } | { type: 'balance'; data: import('./types').FundingBalanceRow };
-        const allItems: CardItem[] = [
-          ...(cardsSource ?? [])
-            .slice()
-            .sort((a, b) => (newBuyerIds.has(b.mediaBuyerId) ? 1 : 0) - (newBuyerIds.has(a.mediaBuyerId) ? 1 : 0))
-            .map((e) => ({ type: 'leaderboard' as const, data: e })),
-          ...(balanceOnlySource ?? []).map((r) => ({ type: 'balance' as const, data: r })),
-        ];
-        const modalPageSize = 20;
-        const totalPages = Math.max(1, Math.ceil(allItems.length / modalPageSize));
-        const page = Math.min(viewAllMediaBuyerPage, totalPages);
-        const start = (page - 1) * modalPageSize;
-        const pageItems = allItems.slice(start, start + modalPageSize);
-
-        return (
-          <Modal
-            open
-            onClose={() => setViewAllMediaBuyersOpen(false)}
-            maxWidth="max-w-4xl"
-            role="dialog"
-            aria-labelledby="view-all-media-buyers-title"
-            contentClassName="p-0 max-h-[90dvh] overflow-hidden flex flex-col"
-          >
-              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-app-border shrink-0">
-                <h2 id="view-all-media-buyers-title" className="text-lg font-semibold text-app-fg">
-                  Media Buyer Performance
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setViewAllMediaBuyersOpen(false)}
-                  className="p-2 rounded-lg text-app-fg-muted hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
-                  aria-label="Close"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div className="px-4 py-2 border-b border-app-border shrink-0">
-                <p className="text-sm text-app-fg-muted">
-                  {allItems.length} media buyer{allItems.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-              <div className="flex-1 min-h-0 overflow-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-                  {pageItems.map((item) =>
-                    item.type === 'leaderboard' ? (
-                      <div key={item.data.mediaBuyerId}>{renderMediaBuyerLeaderboardCard(item.data, balancesList, '', newBuyerIds.has(item.data.mediaBuyerId))}</div>
-                    ) : (
-                      <MediaBuyerBalanceCard key={item.data.userId} row={item.data} />
-                    )
-                  )}
-                </div>
-                <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-app-border">
-                  <span className="text-sm text-app-fg-muted">
-                    Page {page} of {totalPages}
-                    {allItems.length > 0 && (
-                      <span className="ml-1">
-                        ({start + 1}–{Math.min(start + modalPageSize, allItems.length)} of {allItems.length})
-                      </span>
-                    )}
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={page <= 1}
-                      onClick={() => setViewAllMediaBuyerPage((p) => Math.max(1, p - 1))}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      disabled={page >= totalPages}
-                      onClick={() => setViewAllMediaBuyerPage((p) => Math.min(totalPages, p + 1))}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </div>
-              </div>
-          </Modal>
-        );
-      })()}
 
     </div>
   );
