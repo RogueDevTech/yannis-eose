@@ -12,7 +12,7 @@ import { canViewAllBranches } from '~/lib/rbac';
  *
  * Scoping rules (loader-side — also enforced server-side via the tRPC input):
  *   - MEDIA_BUYER → `mediaBuyerId = viewer.id`
- *   - admin-class / HoM / anyone with `marketing.scope.global` → no scope (org-wide)
+ *   - admin-class / explicit global-scope holders → no scope (org-wide)
  *   - everyone else → `branchId = viewer.currentBranchId` (when set)
  */
 type ActivityItem = {
@@ -42,12 +42,8 @@ function buildScopeInput(user: {
   if (user.role === 'MEDIA_BUYER') {
     return { limit, mediaBuyerId: user.id };
   }
-  // Admin-class, HEAD_OF_MARKETING (org-wide head), anyone with `marketing.scope.global` —
-  // org-wide visibility, no filter.
+  // Admin-class or explicit global-scope holder — org-wide visibility, no filter.
   if (canViewAllBranches(user)) {
-    return { limit };
-  }
-  if (user.role === 'HEAD_OF_MARKETING' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
     return { limit };
   }
   // Otherwise scope to the viewer's active branch when set.

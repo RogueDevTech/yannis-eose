@@ -73,7 +73,7 @@ export class UsersService {
     if (isAdminLevelRole(role)) {
       return { scopeGlobal: true, scopeOrgWideHead: false };
     }
-    if (role === 'HEAD_OF_CS' || role === 'HEAD_OF_MARKETING' || role === 'HEAD_OF_LOGISTICS') {
+    if (role === 'HEAD_OF_CS' || role === 'HEAD_OF_LOGISTICS') {
       return { scopeGlobal: false, scopeOrgWideHead: true };
     }
     return { scopeGlobal: false, scopeOrgWideHead: false };
@@ -1787,6 +1787,7 @@ export class UsersService {
   async restampPermissions(
     userId: string,
     actor: SessionUser,
+    options?: { dropGrantedCodes?: readonly string[] },
   ): Promise<{ stampedGranted: number; stampedRevoked: number; templateBaselineCount: number }> {
     const result = await withActor(this.db, actor, async (tx) => {
       const [target] = await tx
@@ -1841,12 +1842,20 @@ export class UsersService {
         target.role as string,
       );
       const templateSet = new Set(templateCodes.map((c) => canonicalPermissionCode(c)));
+      const dropGrantedCodeSet = new Set(
+        (options?.dropGrantedCodes ?? []).map((code) => canonicalPermissionCode(code)),
+      );
 
       const overrides: Record<string, boolean> = {};
       for (const row of existingRows) {
         const code = canonicalPermissionCode(row.code);
         const inTpl = templateSet.has(code);
         if (row.granted) {
+          if (dropGrantedCodeSet.has(code)) {
+            // One-time backfills may need to strip legacy inherited grants that
+            // now masquerade as per-user extras in the snapshot model.
+            continue;
+          }
           // explicit grant only when the code is NOT in the template (otherwise it's just inherited)
           if (!inTpl) overrides[code] = true;
         } else if (inTpl) {

@@ -202,13 +202,12 @@ export class ShipmentsService {
     actor: SessionUser,
     currentBranchId: string | null,
   ) {
-    const conditions = [];
-    if (input.status) conditions.push(eq(schema.shipments.status, input.status));
+    const baseConditions = [];
     if (input.destinationLocationId)
-      conditions.push(eq(schema.shipments.destinationLocationId, input.destinationLocationId));
+      baseConditions.push(eq(schema.shipments.destinationLocationId, input.destinationLocationId));
     if (input.search) {
       const q = `%${input.search}%`;
-      conditions.push(
+      baseConditions.push(
         or(
           ilike(schema.shipments.label, q),
           ilike(schema.shipments.supplierName, q),
@@ -217,17 +216,17 @@ export class ShipmentsService {
       );
     }
     if (input.fromDate) {
-      conditions.push(gte(schema.shipments.createdAt, new Date(input.fromDate)));
+      baseConditions.push(gte(schema.shipments.createdAt, new Date(input.fromDate)));
     }
     if (input.toDate) {
       const to = new Date(input.toDate);
       to.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.shipments.createdAt, to));
+      baseConditions.push(lte(schema.shipments.createdAt, to));
     }
 
     const branchFilter = await this.resolveBranchFilter(actor, currentBranchId);
     if (branchFilter) {
-      conditions.push(
+      baseConditions.push(
         sql<boolean>`EXISTS (
           SELECT 1 FROM logistics_locations ll
           WHERE ll.id = ${schema.shipments.destinationLocationId}
@@ -236,10 +235,14 @@ export class ShipmentsService {
       );
     }
 
+    const conditions = [...baseConditions];
+    if (input.status) conditions.push(eq(schema.shipments.status, input.status));
+
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const summaryWhereClause = baseConditions.length > 0 ? and(...baseConditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
-    const [rows, totalRows] = await Promise.all([
+    const [rows, totalRows, summaryRows] = await Promise.all([
       this.db
         .select({
           id: schema.shipments.id,
@@ -270,6 +273,18 @@ export class ShipmentsService {
         .select({ count: sql<number>`count(*)::int` })
         .from(schema.shipments)
         .where(whereClause),
+      this.db
+        .select({
+          total: sql<number>`count(*)::int`,
+          created: sql<number>`count(*) filter (where ${schema.shipments.status} = 'CREATED')::int`,
+          inTransit: sql<number>`count(*) filter (where ${schema.shipments.status} = 'IN_TRANSIT')::int`,
+          arrived: sql<number>`count(*) filter (where ${schema.shipments.status} = 'ARRIVED')::int`,
+          verified: sql<number>`count(*) filter (where ${schema.shipments.status} = 'VERIFIED')::int`,
+          closed: sql<number>`count(*) filter (where ${schema.shipments.status} = 'CLOSED')::int`,
+          cancelled: sql<number>`count(*) filter (where ${schema.shipments.status} = 'CANCELLED')::int`,
+        })
+        .from(schema.shipments)
+        .where(summaryWhereClause),
     ]);
 
     // Pull line counts in one batch query so the list table can show "3 lines".
@@ -293,6 +308,8 @@ export class ShipmentsService {
       ]),
     );
 
+    const summary = summaryRows[0];
+
     return {
       rows: rows.map((row) => ({
         ...row,
@@ -307,6 +324,15 @@ export class ShipmentsService {
         limit: input.limit,
         total: Number(totalRows[0]?.count ?? 0),
         totalPages: Math.ceil(Number(totalRows[0]?.count ?? 0) / input.limit),
+      },
+      summary: {
+        total: Number(summary?.total ?? 0),
+        created: Number(summary?.created ?? 0),
+        inTransit: Number(summary?.inTransit ?? 0),
+        arrived: Number(summary?.arrived ?? 0),
+        verified: Number(summary?.verified ?? 0),
+        closed: Number(summary?.closed ?? 0),
+        cancelled: Number(summary?.cancelled ?? 0),
       },
     };
   }
@@ -381,6 +407,113 @@ export class ShipmentsService {
       .where(eq(schema.shipmentLines.shipmentId, shipmentId))
       .orderBy(asc(schema.shipmentLines.createdAt));
 
+    const batchIds = Array.from(
+      new Set(lines.map((line) => line.batchId).filter((batchId): batchId is string => typeof batchId === 'string' && batchId.length > 0)),
+    );
+    const productIds = Array.from(new Set(lines.map((line) => line.productId)));
+
+    const [batchRows, levelRows] = await Promise.all([
+      batchIds.length > 0
+        ? this.db
+            .select({
+              id: schema.stockBatches.id,
+              remainingQuantity: schema.stockBatches.remainingQuantity,
+            })
+            .from(schema.stockBatches)
+            .where(inArray(schema.stockBatches.id, batchIds))
+        : Promise.resolve([]),
+      productIds.length > 0
+        ? this.db
+            .select({
+              productId: schema.inventoryLevels.productId,
+              stockCount: schema.inventoryLevels.stockCount,
+              reservedCount: schema.inventoryLevels.reservedCount,
+            })
+            .from(schema.inventoryLevels)
+            .where(
+              and(
+                eq(schema.inventoryLevels.locationId, row.destinationLocationId),
+                inArray(schema.inventoryLevels.productId, productIds),
+              ),
+            )
+        : Promise.resolve([]),
+    ]);
+
+    const batchRemainingById = new Map(
+      batchRows.map((batch) => [batch.id, Number(batch.remainingQuantity ?? 0)]),
+    );
+    const levelByProductId = new Map(
+      levelRows.map((level) => [
+        level.productId,
+        {
+          stockCount: Number(level.stockCount ?? 0),
+          reservedCount: Number(level.reservedCount ?? 0),
+        },
+      ]),
+    );
+
+    const linesWithStatus = lines.map((line) => {
+      const receivedQuantity = line.receivedQuantity != null ? Number(line.receivedQuantity) : null;
+      const batchRemaining =
+        line.batchId && batchRemainingById.has(line.batchId)
+          ? batchRemainingById.get(line.batchId) ?? 0
+          : null;
+      const currentLevel = line.batchId ? levelByProductId.get(line.productId) : null;
+      const currentStockCount = currentLevel ? currentLevel.stockCount : null;
+      const currentReservedCount = currentLevel ? currentLevel.reservedCount : null;
+      const currentAvailableCount =
+        currentLevel ? Math.max(currentLevel.stockCount - currentLevel.reservedCount, 0) : null;
+      return {
+        ...line,
+        batchRemainingQuantity: batchRemaining,
+        consumedQuantity:
+          receivedQuantity != null && batchRemaining != null
+            ? Math.max(receivedQuantity - batchRemaining, 0)
+            : null,
+        currentStockCount,
+        currentReservedCount,
+        currentAvailableCount,
+      };
+    });
+
+    const inventoryContext = levelRows.reduce(
+      (acc, level) => {
+        const stockCount = Number(level.stockCount ?? 0);
+        const reservedCount = Number(level.reservedCount ?? 0);
+        acc.currentStock += stockCount;
+        acc.currentReserved += reservedCount;
+        acc.currentAvailable += Math.max(stockCount - reservedCount, 0);
+        return acc;
+      },
+      {
+        currentStock: 0,
+        currentReserved: 0,
+        currentAvailable: 0,
+      },
+    );
+
+    const summary = linesWithStatus.reduce(
+      (acc, line) => {
+        const received = line.receivedQuantity != null ? Number(line.receivedQuantity) : 0;
+        const remaining = line.batchRemainingQuantity ?? 0;
+        const consumed = line.consumedQuantity ?? 0;
+        if (line.batchId) acc.verifiedLineCount += 1;
+        acc.totalReceived += received;
+        acc.remainingFromShipment += remaining;
+        acc.consumedFromShipment += consumed;
+        return acc;
+      },
+      {
+        totalReceived: 0,
+        remainingFromShipment: 0,
+        consumedFromShipment: 0,
+        currentStock: inventoryContext.currentStock,
+        currentReserved: inventoryContext.currentReserved,
+        currentAvailable: inventoryContext.currentAvailable,
+        verifiedLineCount: 0,
+      },
+    );
+
     return {
       shipment: {
         ...row,
@@ -389,7 +522,8 @@ export class ShipmentsService {
           row.createdAt instanceof Date ? row.createdAt.getFullYear() : new Date().getFullYear(),
         ),
       },
-      lines,
+      lines: linesWithStatus,
+      summary,
       allowedTransitions: this.getAllowedTransitions({ status: row.status }, actor),
     };
   }

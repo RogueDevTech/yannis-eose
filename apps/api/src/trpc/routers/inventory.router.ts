@@ -470,13 +470,13 @@ export const inventoryRouter = router({
   // Inbound shipments — multi-line supplier receipts
   // ============================================
   shipments: router({
-    list: permissionProcedure('inventory.read')
+    list: permissionProcedure('inventory.shipments.read')
       .input(listShipmentsSchema)
       .query(async ({ input, ctx }) => {
         return getShipmentsService().listShipments(input, ctx.user, ctx.user.currentBranchId ?? null);
       }),
 
-    get: permissionProcedure('inventory.read')
+    get: permissionProcedure('inventory.shipments.read')
       .input(getShipmentSchema)
       .query(async ({ input, ctx }) => {
         return getShipmentsService().getShipment(

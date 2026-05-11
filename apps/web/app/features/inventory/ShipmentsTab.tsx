@@ -110,7 +110,7 @@ export function ShipmentsTab({
             </TableActionButton>
           ) : (
             <TableActionButton
-              to={`/admin/inventory/shipments/${s.id}`}
+              to={`/admin/shipments/${s.id}`}
               prefetch="intent"
               variant="primary"
             >
@@ -129,7 +129,7 @@ export function ShipmentsTab({
           {totalShipments} shipment{totalShipments === 1 ? '' : 's'}
         </div>
         {canIntake ? (
-          <Link to="/admin/inventory/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
+          <Link to="/admin/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
             Receive shipment
           </Link>
         ) : null}
@@ -146,7 +146,7 @@ export function ShipmentsTab({
           }
           action={
             canIntake ? (
-              <Link to="/admin/inventory/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
+              <Link to="/admin/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
                 Receive shipment
               </Link>
             ) : undefined

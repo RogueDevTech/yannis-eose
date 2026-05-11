@@ -192,6 +192,41 @@ function transfersWorkspaceTableShellColumns(): CompactTableColumn<{ id: string 
   ];
 }
 
+function TransferFilterValueShell({ widthClassName }: { widthClassName: string }) {
+  return <div className={`h-3 rounded bg-app-hover animate-pulse ${widthClassName}`} aria-hidden />;
+}
+
+function TransfersStockFilterControlShell({
+  label,
+  widthClassName,
+}: {
+  label: string;
+  widthClassName: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="text-xs font-medium text-app-fg">{label}</div>
+      <div className="relative">
+        <div className="flex h-9 items-center rounded-lg border border-app-border bg-app-canvas px-2.5 pr-7">
+          <TransferFilterValueShell widthClassName={widthClassName} />
+        </div>
+        <span
+          className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-app-fg-muted"
+          aria-hidden
+        >
+          <svg viewBox="0 0 20 20" fill="currentColor" className="h-full w-full">
+            <path
+              fillRule="evenodd"
+              d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /** Logistics orders list — date strip + stat/table pulse. */
 export function LogisticsOrdersLoadingShell({
   filters,
@@ -481,14 +516,22 @@ function TransfersWorkspaceLoadingShell({
             ]}
           />
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {(['From location', 'To location', 'Product'] as const).map((label) => (
-            <div key={label} className="space-y-1">
-              <div className="text-xs font-medium text-app-fg">{label}</div>
-              <div className="h-9 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-            </div>
-          ))}
-        </div>
+        {variant === 'stock' ? (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <TransfersStockFilterControlShell label="From location" widthClassName="w-24" />
+            <TransfersStockFilterControlShell label="To location" widthClassName="w-24" />
+            <TransfersStockFilterControlShell label="Product" widthClassName="w-20" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {(['From location', 'To location', 'Product'] as const).map((label) => (
+              <div key={label} className="space-y-1">
+                <div className="text-xs font-medium text-app-fg">{label}</div>
+                <div className="h-9 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card p-4 sm:p-6">

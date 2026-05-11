@@ -3802,8 +3802,11 @@ export class MarketingService {
       caller.role === 'SUPER_ADMIN' || callerPerms.includes(canonicalPermissionCode(code));
 
     if (hasCallerPerm('marketing.scope.global')) {
-      // Org-wide marketing scope (HoM, admin) → optionally narrow to a branch.
+      // Explicit org-wide marketing scope → optionally narrow to a branch.
       if (branchId) conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else if (caller.role === 'HEAD_OF_MARKETING' && branchId) {
+      // Branch-scoped HoM sees every Media Buyer's attempts on the active branch.
+      conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
     } else if (hasCallerPerm('marketing.read')) {
       // Branch-scoped marketing reader: only their own rows (MB) — broader marketing.read
       // without org-wide does NOT bleed into other MBs' funnels (Pillar 4).
@@ -3880,6 +3883,8 @@ export class MarketingService {
 
     if (hasCallerPerm('marketing.scope.global')) {
       if (branchId) conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
+    } else if (caller.role === 'HEAD_OF_MARKETING' && branchId) {
+      conditions.push(eq(schema.crossFunnelAttempts.branchId, branchId));
     } else if (hasCallerPerm('marketing.read')) {
       conditions.push(eq(schema.crossFunnelAttempts.mediaBuyerId, caller.id));
     } else {

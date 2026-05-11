@@ -53,7 +53,26 @@ export function BranchesListLoadingShell() {
 }
 
 /** `/admin/branches/:id` — detail shell (branch name unknown until load). */
-export function BranchDetailLoadingShell() {
+export function BranchDetailLoadingShell({
+  canManageCSTeams = true,
+  canManageMarketingTeams = true,
+}: {
+  canManageCSTeams?: boolean;
+  canManageMarketingTeams?: boolean;
+}) {
+  const departments = [
+    { title: 'Customer support', code: 'CS', description: 'Manage customer support' },
+    { title: 'Marketing', code: 'MARKETING', description: 'Manage marketing' },
+  ].filter((dept) =>
+    dept.code === 'CS' ? canManageCSTeams : canManageMarketingTeams,
+  );
+  const visibleDepartments = departments.length > 0
+    ? departments
+    : [
+        { title: 'Customer support', code: 'CS', description: 'Manage customer support' },
+        { title: 'Marketing', code: 'MARKETING', description: 'Manage marketing' },
+      ];
+
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <div className="bg-app-elevated rounded-xl border border-app-border shadow-sm p-5">
@@ -96,10 +115,7 @@ export function BranchDetailLoadingShell() {
       {/* Department cards skeleton — same shell as the loaded cards, with only
           API-driven values pulsing. Static labels / actions stay readable. */}
       <div className="grid gap-4 sm:grid-cols-2">
-        {[
-          { title: 'Customer support', code: 'CS', description: 'Manage customer support' },
-          { title: 'Marketing', code: 'MARKETING', description: 'Manage marketing' },
-        ].map((dept) => (
+        {visibleDepartments.map((dept) => (
           <article
             key={dept.code}
             className="relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm flex flex-col min-h-[180px]"

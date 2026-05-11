@@ -39,10 +39,9 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type {
   InventoryLevel, InventoryStreamData, ProductOption, LocationOption,
-  Transfer, ReturnedOrder, Reconciliation, LocationWithLock, LowStockAlertsResult,
+  Transfer, ReturnedOrder, Reconciliation, LocationWithLock, LowStockAlertsResult, ShipmentFilterOption,
 } from './types';
 import { REASON_LABELS } from './types';
-import { ShipmentsTab } from './ShipmentsTab';
 import { LowStockAlertsDeferredFallback, ReconciliationTableDeferredFallback } from './InventoryDeferredFallbacks';
 
 export function InventoryPage(props: InventoryStreamData) {
@@ -55,8 +54,7 @@ export function InventoryPage(props: InventoryStreamData) {
             {...rest}
             lowStockThreshold={extras.lowStockThreshold}
             lowStockAlerts={Promise.resolve(extras.lowStockAlerts)}
-            shipments={extras.shipments}
-            totalShipments={extras.totalShipments}
+            shipmentOptions={extras.shipmentOptions}
             warehouses={extras.warehouses}
           />
         )}
@@ -83,36 +81,25 @@ export function InventoryPage(props: InventoryStreamData) {
     products,
     locations,
     canIntake = false,
+    canReadShipments = false,
     canAdjust = false,
     canExport = false,
     transfers, returnedOrders, reconciliations, locationsWithLock,
     lowStockThreshold = 10, canEditLowStock = false, lowStockAlerts,
-    shipments = [], totalShipments = 0,
+    shipmentOptions = [] as ShipmentFilterOption[],
     levelsLoadError = null,
     movementsLoadError = null,
   } = props;
 
   const hasTransfers = !!transfers;
   const hasReturns = !!returnedOrders;
-  // Hide the Shipments tab when the viewer can't manage shipments AND has
-  // nothing to look at — keeps the tab strip lean for HoCS / Stock-read-only
-  // viewers who only need stock levels (CEO directive 2026-05-10). Anyone
-  // with intake perms always sees the tab so they can create new shipments.
-  const showShipmentsTab = canIntake || totalShipments > 0;
 
   type TabValue =
     | 'levels'
     | 'transfers'
     | 'returns'
-    | 'reconciliation'
-    | 'shipments';
+    | 'reconciliation';
   const [activeTab, setActiveTab] = useState<TabValue>('levels');
-  // Defensive: if the viewer ends up on the shipments tab while it's no longer
-  // shown (e.g. count dropped to 0 mid-session for a non-intake user), snap
-  // back to Stock Levels so they don't see a blank pane with no tab to click.
-  useEffect(() => {
-    if (activeTab === 'shipments' && !showShipmentsTab) setActiveTab('levels');
-  }, [activeTab, showShipmentsTab]);
 
   // Stock Levels filter + sort are URL-driven so the backend can do the actual filter/sort/paginate.
   // `levelsProductFilter` empty string = no filter (backend default).
@@ -200,7 +187,7 @@ export function InventoryPage(props: InventoryStreamData) {
   const currentSort: LevelsSort = serverSort;
 
   const goToReceiveShipment = () => {
-    window.location.href = '/admin/inventory/shipments/receive';
+    window.location.href = '/admin/shipments/receive';
   };
 
   type AdjustDirection = 'increase' | 'decrease';
@@ -319,14 +306,24 @@ export function InventoryPage(props: InventoryStreamData) {
         return (
           <div className="flex flex-wrap gap-1 justify-end sm:justify-start max-w-[16rem]">
             {layers.map((s) => (
-              <Link
-                key={s.id}
-                to={`/admin/inventory/shipments/${s.id}`}
-                prefetch="intent"
-                className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
-              >
-                {s.referenceLabel}
-              </Link>
+              canReadShipments ? (
+                <Link
+                  key={s.id}
+                  to={`/admin/shipments/${s.id}`}
+                  prefetch="intent"
+                  className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
+                >
+                  {s.referenceLabel}
+                </Link>
+              ) : (
+                <span
+                  key={s.id}
+                  className="text-xs font-medium text-app-fg-muted whitespace-nowrap"
+                  title="Shipment detail page requires shipment access"
+                >
+                  {s.referenceLabel}
+                </span>
+              )
             ))}
             {manual && (
               <span className="text-xs rounded px-1.5 py-0.5 border border-app-border bg-app-hover text-app-fg-muted whitespace-nowrap">
@@ -409,7 +406,7 @@ export function InventoryPage(props: InventoryStreamData) {
       {/* Page header */}
       <PageHeader
         title="Inventory"
-        description="Pick Stock levels or Shipments below — shelf totals vs inbound receive/verify."
+        description="Track on-hand stock, reservations, and reconciliation. Manage inbound supplier receipts from the separate Shipments page."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Inventory tools"
@@ -443,7 +440,7 @@ export function InventoryPage(props: InventoryStreamData) {
                 </button>
                 {canIntake && (
                   <Link
-                    to="/admin/inventory/shipments/receive"
+                    to="/admin/shipments/receive"
                     prefetch="intent"
                     className="btn-primary btn-sm flex-1 sm:flex-initial whitespace-nowrap inline-flex items-center justify-center gap-2"
                   >
@@ -493,8 +490,7 @@ export function InventoryPage(props: InventoryStreamData) {
                     className="w-full justify-center"
                     onClick={() => {
                       closeSheet();
-                      // Use the dedicated page for large multi-line shipments.
-                      window.location.href = '/admin/inventory/shipments/receive';
+                      window.location.href = '/admin/shipments/receive';
                     }}
                   >
                     Receive Shipment
@@ -717,17 +713,11 @@ export function InventoryPage(props: InventoryStreamData) {
         </Modal>
       )}
 
-      {/* Overview stats — summary for Stock Levels + Shipments */}
-      <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={5} />}>
+      {/* Overview stats — stock posture for the current filtered result set. */}
+      <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
         {(count) => (
           <OverviewStatStrip
             items={[
-              {
-                label: 'Shipments',
-                value: totalShipments.toLocaleString(),
-                valueClassName: 'text-app-fg',
-                title: 'Inbound shipments visible for your branch (all statuses)',
-              },
               { label: 'Total Stock', value: totalStock.toLocaleString(), valueClassName: 'text-app-fg' },
               { label: 'Reserved', value: totalReserved.toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
               {
@@ -801,15 +791,12 @@ export function InventoryPage(props: InventoryStreamData) {
         </DeferredSection>
       )}
 
-      {/* Tabs directly under the overview stats (primary: Levels + Shipments; optional: other inventory tabs). */}
+      {/* Tabs directly under the overview stats (stock levels plus optional inventory sub-views). */}
       <Tabs
         value={activeTab}
         onChange={(v) => setActiveTab(v as TabValue)}
         tabs={[
           { value: 'levels', label: `Stock Levels (${totalLevels})` },
-          ...(showShipmentsTab
-            ? [{ value: 'shipments' as const, label: `Shipments (${totalShipments})` }]
-            : []),
           ...(hasTransfers ? [{ value: 'transfers' as const, label: `Transfers (${(transfers ?? []).length})` }] : []),
           ...(hasReturns ? [{ value: 'returns' as const, label: `Returns (${(returnedOrders ?? []).length})` }] : []),
           ...(reconciliations != null ? [{ value: 'reconciliation' as const, label: 'Reconciliation' }] : []),
@@ -874,12 +861,9 @@ export function InventoryPage(props: InventoryStreamData) {
               searchPlaceholder="Search SHIP ref…"
               options={[
                 { value: 'ALL', label: 'All shipments' },
-                ...shipments.map((s) => ({
-                  value: s.id,
-                  label:
-                    s.label != null && s.label.trim() !== ''
-                      ? `${s.referenceLabel} — ${s.label}`
-                      : s.referenceLabel,
+                ...shipmentOptions.map((shipment) => ({
+                  value: shipment.id,
+                  label: shipment.label,
                 })),
               ]}
             />
@@ -966,7 +950,7 @@ export function InventoryPage(props: InventoryStreamData) {
             levelsLoadError
               ? 'Use Reload data above or refresh the page. Empty totals here do not mean you have no stock.'
               : levels.length === 0
-                ? 'Add products, then receive supplier stock via the Shipments panel (verify to post into inventory).'
+                ? 'Add products, then receive supplier stock from the Shipments page and verify it to post into inventory.'
                 : 'Try changing filters (product, location, shipment) or sort.'
           }
         />
@@ -1012,14 +996,6 @@ export function InventoryPage(props: InventoryStreamData) {
         />
       )}
 
-      {/* Keep mounted so Receive Shipment nonce + modal state survive tab switches */}
-      <div className={activeTab === 'shipments' ? '' : 'hidden'} aria-hidden={activeTab !== 'shipments'}>
-        <ShipmentsTab
-          shipments={shipments}
-          totalShipments={totalShipments}
-          canIntake={canIntake}
-        />
-      </div>
     </div>
   );
 }

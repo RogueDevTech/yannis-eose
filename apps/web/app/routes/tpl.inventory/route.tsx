@@ -7,6 +7,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { InventoryPage } from '~/features/inventory/InventoryPage';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import type {
   InventoryLevel,
   StockMovement,
@@ -27,6 +28,7 @@ export const meta: MetaFunction = () => [
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'inventory.read' });
   const cookie = getSessionCookie(request);
+  const actorPerms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
 
   const pageData = (async (): Promise<InventoryStreamData> => {
     const locationId = user.role === 'TPL_MANAGER' && user.logisticsLocationId ? user.logisticsLocationId : undefined;
@@ -57,17 +59,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
         pagination: { total: number };
       };
       movements: { movements: StockMovement[]; pagination: { total: number } };
-      products: { products: { id: string; name: string }[] };
-      locations: {
-        locations: Array<{
-          id: string;
-          name: string;
-          address: string;
-          dispatchLocked?: boolean;
-          status: string;
-          providerName?: string | null;
-        }>;
-      };
+      products: Array<{ id: string; name: string }>;
+      locations: Array<{
+        id: string;
+        name: string;
+        address?: string;
+        dispatchLocked?: boolean;
+        status: string;
+        providerName?: string | null;
+      }>;
       transfers: Transfer[];
       returnedOrders: ReturnedOrder[];
       reconciliations: Reconciliation[];
@@ -83,12 +83,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
       movementsLoadError = describeApiFetchFailure('Movement history', bundleRes);
     }
 
-    const products: ProductOption[] = (bundle?.products?.products ?? []).map((p) => ({
+    const products: ProductOption[] = (bundle?.products ?? []).map((p) => ({
       id: p.id,
       name: p.name,
     }));
 
-    const locationRows = bundle?.locations?.locations ?? [];
+    const locationRows = bundle?.locations ?? [];
     const locations: LocationOption[] = locationRows.map((l) => ({
       id: l.id,
       name: l.name,
@@ -111,6 +111,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       products,
       locations,
       canIntake: false,
+      canReadShipments:
+        user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || actorPerms.has(canonicalPermissionCode('inventory.shipments.read')),
       transfers: bundle?.transfers ?? [],
       returnedOrders: bundle?.returnedOrders ?? [],
       reconciliations: bundle?.reconciliations ?? [],

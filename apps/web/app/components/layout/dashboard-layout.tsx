@@ -304,6 +304,12 @@ const navStructure: NavGroupDef[] = [
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
+        label: 'Shipments',
+        href: '/admin/shipments',
+        icon: SidebarIcons.inventory,
+        permission: 'inventory.shipments.read',
+      },
+      {
         label: 'Our warehouse',
         href: '/admin/inventory/warehouses',
         icon: SidebarIcons.inventory,
@@ -639,6 +645,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
   CS_CLOSER: ['/admin', '/admin/cs/queue', '/admin/cs/orders', '/admin/cs/leaderboard'],
   HEAD_OF_LOGISTICS: [
     '/admin',
+    '/admin/shipments',
     '/admin/logistics/orders',
     '/admin/logistics/partners',
     '/admin/logistics/transfers',
@@ -656,7 +663,7 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/finance/delivery-remittances',
     '/admin/finance/disbursements',
   ],
-  STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/transfers'],
+  STOCK_MANAGER: ['/admin', '/admin/inventory', '/admin/shipments', '/admin/transfers'],
   HR_MANAGER: ['/admin', '/hr/payroll', '/hr/users'],
 };
 

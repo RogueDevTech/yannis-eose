@@ -23,6 +23,7 @@ import type {
   InventoryStreamData,
   ProductOption,
   LocationOption,
+  ShipmentFilterOption,
   ShipmentRow,
   WarehouseRowLite,
   LowStockAlertsResult,
@@ -128,9 +129,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       pagination: { total: number; totalPages: number };
     };
     movements: { movements: StockMovement[]; pagination: { total: number } };
-    products: { products: { id: string; name: string }[] };
-    warehouseLocations: { locations: { id: string; name: string; providerName?: string | null }[] };
-    displayLocations: { locations: { id: string; name: string; providerName?: string | null }[] };
+    products: Array<{ id: string; name: string }>;
+    warehouseLocations: Array<{ id: string; name: string; providerName?: string | null }>;
+    displayLocations: Array<{ id: string; name: string; providerName?: string | null }>;
     systemSettings: Array<{ key: string; value: unknown }>;
     lowStockAlerts: LowStockAlertsResult;
     shipments: { rows: ShipmentRow[]; pagination: { total: number } } | null;
@@ -191,17 +192,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   }
 
-  const products: ProductOption[] = (bundle?.products?.products ?? []).map((p) => ({
+  const products: ProductOption[] = (bundle?.products ?? []).map((p) => ({
     id: p.id,
     name: p.name,
   }));
 
-  const locations: LocationOption[] = (bundle?.warehouseLocations?.locations ?? []).map((l) => ({
+  const locations: LocationOption[] = (bundle?.warehouseLocations ?? []).map((l) => ({
     id: l.id,
     name: l.name,
     providerName: l.providerName ?? null,
   }));
-  const displayLocations: LocationOption[] = (bundle?.displayLocations?.locations ?? []).map(
+  const displayLocations: LocationOption[] = (bundle?.displayLocations ?? []).map(
     (l) => ({
       id: l.id,
       name: l.name,
@@ -220,8 +221,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const lowStockAlertsData: LowStockAlertsResult =
     bundle?.lowStockAlerts ?? { threshold: lowStockThreshold, items: [] };
 
-  const shipments: ShipmentRow[] = bundle?.shipments?.rows ?? [];
-  const totalShipments = bundle?.shipments?.pagination?.total ?? 0;
+  const shipmentOptions: ShipmentFilterOption[] = (bundle?.shipments?.rows ?? []).map((shipment) => ({
+    id: shipment.id,
+    label:
+      shipment.label != null && shipment.label.trim() !== ''
+        ? `${shipment.referenceLabel} — ${shipment.label}`
+        : shipment.referenceLabel,
+  }));
 
   const warehouses: WarehouseRowLite[] = (bundle?.warehouses?.warehouses ?? []).map((w) => ({
     id: w.id,
@@ -234,8 +240,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const extras = {
     lowStockThreshold,
     lowStockAlerts: lowStockAlertsData,
-    shipments,
-    totalShipments,
     warehouses,
   };
 
@@ -266,6 +270,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Receive shipment (same gate as legacy intake); single-product intake UI removed — receipts go through shipments.
     canIntake:
       isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.intake')),
+    canReadShipments:
+      isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.shipments.read')),
     canAdjust:
       isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.adjust')),
     // Inventory CSV export is permission-gated via `inventory.export`. Admin-class
@@ -275,8 +281,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canEditLowStock: isAdminLevel(user),
     lowStockThreshold: extras.lowStockThreshold,
     lowStockAlerts: Promise.resolve(extras.lowStockAlerts),
-    shipments: extras.shipments,
-    totalShipments: extras.totalShipments,
+    shipmentOptions,
     warehouses: extras.warehouses,
     levelsLoadError,
     movementsLoadError,
@@ -319,90 +324,6 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to adjust stock') }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
-
-  if (intent === 'createShipment') {
-    await requirePermission(request, 'inventory.intake');
-    const destinationLocationId = formData.get('destinationLocationId')?.toString() ?? '';
-    const label = formData.get('label')?.toString() ?? '';
-    const supplierName = formData.get('supplierName')?.toString() ?? '';
-    const supplierReference = formData.get('supplierReference')?.toString() ?? '';
-    const expectedArrivalDate = formData.get('expectedArrivalDate')?.toString() ?? '';
-    const totalLandingCost = formData.get('totalLandingCost')?.toString() ?? '0';
-    const notes = formData.get('notes')?.toString() ?? '';
-    const arrivedNow = formData.get('arrivedNow')?.toString() === 'true';
-    const linesRaw = formData.get('lines')?.toString() ?? '[]';
-
-    let lines: Array<{ productId: string; expectedQuantity: number; factoryCost: number }>;
-    try {
-      const parsed = JSON.parse(linesRaw);
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        return json({ error: 'Add at least one line item to the shipment.' }, { status: 400 });
-      }
-      lines = parsed;
-    } catch {
-      return json({ error: 'Invalid shipment line payload.' }, { status: 400 });
-    }
-    if (!destinationLocationId) {
-      return json({ error: 'Destination location is required.' }, { status: 400 });
-    }
-
-    const res = await apiRequest<unknown>('/trpc/inventory.shipments.create', {
-      method: 'POST',
-      cookie,
-      body: {
-        destinationLocationId,
-        label,
-        supplierName,
-        supplierReference,
-        expectedArrivalDate,
-        totalLandingCost: Number(totalLandingCost) || 0,
-        notes,
-        arrivedNow,
-        lines,
-      },
-    });
-
-    if (!res.ok) {
-      return json({ error: extractApiErrorMessage(res.data, 'Failed to create shipment') }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
-
-  if (intent === 'shipmentMarkInTransit' || intent === 'shipmentMarkArrived') {
-    await requirePermission(request, 'inventory.intake');
-    const shipmentId = formData.get('shipmentId')?.toString() ?? '';
-    if (!shipmentId) return json({ error: 'Missing shipment id.' }, { status: 400 });
-    const procedure =
-      intent === 'shipmentMarkInTransit'
-        ? 'inventory.shipments.markInTransit'
-        : 'inventory.shipments.markArrived';
-    const res = await apiRequest<unknown>(`/trpc/${procedure}`, {
-      method: 'POST',
-      cookie,
-      body: { shipmentId },
-    });
-    if (!res.ok) {
-      return json({ error: extractApiErrorMessage(res.data, 'Failed to update shipment') }, { status: safeStatus(res.status) });
-    }
-    return json({ success: true });
-  }
-
-  if (intent === 'shipmentCancel') {
-    await requirePermission(request, 'inventory.intake');
-    const shipmentId = formData.get('shipmentId')?.toString() ?? '';
-    const reason = formData.get('reason')?.toString().trim() ?? '';
-    if (!shipmentId) return json({ error: 'Missing shipment id.' }, { status: 400 });
-    if (reason.length < 10) return json({ error: 'Reason must be at least 10 characters.' }, { status: 400 });
-    const res = await apiRequest<unknown>('/trpc/inventory.shipments.cancel', {
-      method: 'POST',
-      cookie,
-      body: { shipmentId, reason },
-    });
-    if (!res.ok) {
-      return json({ error: extractApiErrorMessage(res.data, 'Failed to cancel shipment') }, { status: safeStatus(res.status) });
     }
     return json({ success: true });
   }
