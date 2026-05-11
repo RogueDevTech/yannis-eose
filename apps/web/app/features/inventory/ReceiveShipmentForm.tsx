@@ -258,7 +258,7 @@ export function ReceiveShipmentForm({
 
       <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-app-elevated border-t border-app-border">
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <LinkButton to="/admin/inventory/shipments" disabled={isCreating}>
+          <LinkButton to="/admin/shipments" disabled={isCreating}>
             Cancel
           </LinkButton>
           <Button

@@ -13,6 +13,7 @@ import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { DescriptionList } from '~/components/ui/description-list';
 import { Modal } from '~/components/ui/modal';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -55,7 +56,7 @@ function isStatusReached(current: ShipmentStatus, target: ShipmentStatus): boole
 }
 
 export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps) {
-  const { shipment, lines, allowedTransitions } = data;
+  const { shipment, lines, summary, allowedTransitions } = data;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const navigation = useNavigation();
@@ -251,6 +252,50 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         ),
       },
       {
+        key: 'remaining',
+        header: 'Remaining',
+        align: 'right',
+        nowrap: true,
+        render: (l) => (
+          <span className="tabular-nums">
+            {l.batchRemainingQuantity != null ? l.batchRemainingQuantity : <span className="text-app-fg-muted">—</span>}
+          </span>
+        ),
+      },
+      {
+        key: 'consumed',
+        header: 'Consumed',
+        align: 'right',
+        nowrap: true,
+        render: (l) => (
+          <span className="tabular-nums">
+            {l.consumedQuantity != null ? l.consumedQuantity : <span className="text-app-fg-muted">—</span>}
+          </span>
+        ),
+      },
+      {
+        key: 'available',
+        header: 'Available now',
+        align: 'right',
+        nowrap: true,
+        render: (l) => (
+          <span className="tabular-nums text-success-600 dark:text-success-400">
+            {l.currentAvailableCount != null ? l.currentAvailableCount : <span className="text-app-fg-muted">—</span>}
+          </span>
+        ),
+      },
+      {
+        key: 'reserved',
+        header: 'Reserved now',
+        align: 'right',
+        nowrap: true,
+        render: (l) => (
+          <span className="tabular-nums text-warning-600 dark:text-warning-400">
+            {l.currentReservedCount != null ? l.currentReservedCount : <span className="text-app-fg-muted">—</span>}
+          </span>
+        ),
+      },
+      {
         key: 'factory',
         header: 'Factory cost',
         align: 'right',
@@ -283,8 +328,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
     <div className="space-y-4">
       <Breadcrumb
         items={[
-          { label: 'Inventory', to: '/admin/inventory' },
-          { label: 'Shipments', to: '/admin/inventory?tab=shipments' },
+          { label: 'Shipments', to: '/admin/shipments' },
           { label: shipment.referenceLabel },
         ]}
       />
@@ -427,6 +471,35 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                 : []),
             ]}
           />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Current shipment status" />
+        <CardBody className="space-y-3">
+          {summary.verifiedLineCount > 0 ? (
+            <>
+              <OverviewStatStrip
+                embedded
+                items={[
+                  { label: 'Received', value: summary.totalReceived, valueClassName: 'text-app-fg' },
+                  { label: 'Remaining', value: summary.remainingFromShipment, valueClassName: 'text-brand-600 dark:text-brand-400' },
+                  { label: 'Consumed', value: summary.consumedFromShipment, valueClassName: 'text-app-fg' },
+                  { label: 'Available now', value: summary.currentAvailable, valueClassName: 'text-success-600 dark:text-success-400' },
+                  { label: 'Reserved now', value: summary.currentReserved, valueClassName: 'text-warning-600 dark:text-warning-400' },
+                  { label: 'Stock now', value: summary.currentStock, valueClassName: 'text-app-fg' },
+                ]}
+              />
+              <p className="text-xs text-app-fg-muted">
+                Remaining and consumed are exact from the FIFO batches created by this shipment. Available,
+                reserved, and stock reflect the current destination-warehouse inventory context for these shipment SKUs.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-app-fg-muted">
+              This shipment has not been verified into inventory yet, so there is no live remaining-stock report to show.
+            </p>
+          )}
         </CardBody>
       </Card>
 

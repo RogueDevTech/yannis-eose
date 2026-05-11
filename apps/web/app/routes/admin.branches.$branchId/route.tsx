@@ -216,6 +216,37 @@ interface BranchOrgStructurePayload {
   departments: BranchOrgDepartmentBlock[];
 }
 
+type BranchDetailLoadingVisibility = {
+  canManageCSTeams: boolean;
+  canManageMarketingTeams: boolean;
+};
+
+function getBranchDetailLoadingVisibility(viewer: Awaited<ReturnType<typeof getCurrentUser>>): BranchDetailLoadingVisibility {
+  if (!viewer) {
+    return {
+      canManageCSTeams: true,
+      canManageMarketingTeams: true,
+    };
+  }
+
+  const perms = new Set(viewer.permissions ?? []);
+  const isSuperAdmin = viewer.role === 'SUPER_ADMIN';
+  const hasBranchManagePermission = perms.has('branches.manage');
+  const hasBranchManageUsersPermission = perms.has('branches.manage_users');
+  const hasCSTeamsPermission = perms.has('branches.teams.cs');
+  const hasMarketingTeamsPermission = perms.has('branches.teams.marketing');
+  const isHeadOfCsRole = viewer.role === 'HEAD_OF_CS';
+  const canManageBranchPage =
+    isSuperAdmin || hasBranchManagePermission || hasBranchManageUsersPermission;
+
+  return {
+    canManageCSTeams:
+      canManageBranchPage || hasCSTeamsPermission || isHeadOfCsRole,
+    canManageMarketingTeams:
+      canManageBranchPage || hasMarketingTeamsPermission,
+  };
+}
+
 /**
  * Pending team-mutation payload extracted from `squadFetcher`'s in-flight
  * submission. While the post-action loader revalidates, we overlay this onto
@@ -557,6 +588,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!branchId) throw new Response('Missing branch', { status: 400 });
 
   const cookie = getSessionCookie(request);
+  const loadingVisibility = getBranchDetailLoadingVisibility(viewer);
 
   const pageData = (async () => {
     const [overviewRes, usersRes, orgRes] = await Promise.all([
@@ -616,7 +648,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return { overview, allUsers, teams, orgStructure, teamSettingsByTeamId };
   })();
 
-  return defer({ pageData });
+  return defer({ pageData, loadingVisibility });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -932,7 +964,8 @@ function BranchMembersPanel({
   branchId,
   department,
   members,
-  canManage,
+  canManageBranchMembership,
+  canManageTeamAssignments,
   teamByUserId = {},
   supervisorUserIds,
   teamsForBulk = [],
@@ -944,7 +977,10 @@ function BranchMembersPanel({
    *  search inside the Marketing tab doesn't return CS matches. */
   department?: 'MARKETING' | 'CS' | 'OTHER';
   members: OverviewMember[];
-  canManage: boolean;
+  /** Branch membership changes (remove from branch) stay branch-manage only. */
+  canManageBranchMembership: boolean;
+  /** Team assignment changes follow per-department team-management access. */
+  canManageTeamAssignments: boolean;
   /** userId → team name. When set, the table shows a Team column instead of
    *  Department; "—" if the member isn't on any team yet. */
   teamByUserId?: Record<string, string>;
@@ -992,7 +1028,7 @@ function BranchMembersPanel({
   const [page, setPage] = useState(1);
   const [selectedUserIds, setSelectedUserIds] = useState<ReadonlySet<string>>(new Set());
   const [bulkTeamId, setBulkTeamId] = useState('');
-  const bulkEnabled = canManage && !!onBulkAddToTeam && teamsForBulk.length > 0;
+  const bulkEnabled = canManageTeamAssignments && !!onBulkAddToTeam && teamsForBulk.length > 0;
 
   // Filter state. Binary team filter (CEO 2026-05-10): the per-team pills
   // were noisy (one pill per team, most empty), so we collapsed to the only
@@ -1257,7 +1293,7 @@ function BranchMembersPanel({
                         <CompactTableActionButton to={`/hr/users/${m.userId}`}>
                           Profile
                         </CompactTableActionButton>
-                        {canManage ? (
+                        {canManageBranchMembership ? (
                           <CompactTableActionButton
                             tone="danger"
                             onClick={() => setRemoveTarget(m)}
@@ -1285,7 +1321,7 @@ function BranchMembersPanel({
         </>
       )}
 
-      {canManage && removeTarget && (
+      {canManageBranchMembership && removeTarget && (
         <RemoveModal member={removeTarget} onClose={() => setRemoveTarget(null)} />
       )}
     </div>
@@ -2575,7 +2611,8 @@ function BranchSupervisorTeamsPanel({
                   members={branchMembers.filter(
                     (m) => m.department === selectedDept.department.department,
                   )}
-                  canManage={canManageBranchPage}
+                  canManageBranchMembership={canManageBranchPage}
+                  canManageTeamAssignments={canManageForDept(selectedDept.department.department)}
                   teamByUserId={teamByUserId}
                   supervisorUserIds={supervisorUserIds}
                   teamsForBulk={teamsForBulk}
@@ -3334,11 +3371,11 @@ function BranchOverviewPage({
 }
 
 export default function BranchDetailRoute() {
-  const { pageData } = useLoaderData<typeof loader>();
+  const { pageData, loadingVisibility } = useLoaderData<typeof loader>();
   return (
     <CachedAwait
       resolve={pageData}
-      fallback={<BranchDetailLoadingShell />}
+      fallback={<BranchDetailLoadingShell {...loadingVisibility} />}
       loaderShell={{}}
       deferredKey="pageData"
     >

@@ -82,6 +82,11 @@ export interface LocationOption {
   providerName: string | null;
 }
 
+export interface ShipmentFilterOption {
+  id: string;
+  label: string;
+}
+
 export interface WarehouseRowLite {
   id: string;
   name: string;
@@ -122,6 +127,8 @@ export interface InventoryStreamData {
   locations: LocationOption[];
   /** When false, Receive Shipment actions are hidden (`inventory.intake` gate). */
   canIntake?: boolean;
+  /** When false, shipment detail links are rendered as plain labels in inventory context. */
+  canReadShipments?: boolean;
   /** When false, the row-level "Edit" (stock adjust) action is hidden. */
   canAdjust?: boolean;
   /** When false, the Generate report button is hidden. SuperAdmin/Admin + STOCK_MANAGER only. */
@@ -138,21 +145,18 @@ export interface InventoryStreamData {
   canEditLowStock?: boolean;
   /** Low-stock items currently below threshold — drives the inline banner. Streamed. */
   lowStockAlerts?: Promise<LowStockAlertsResult> | LowStockAlertsResult;
-  /** Inbound shipments visible to the actor (auto-scoped to current branch for non-admins). */
-  shipments?: ShipmentRow[];
-  /** Total shipments matching the page's filters (for pagination). */
-  totalShipments?: number;
+  /** Lightweight shipment labels for the stock-level `shipmentId` filter. */
+  shipmentOptions?: ShipmentFilterOption[];
   /** Inhouse warehouses summary list (so warehouse stock is visible on /admin/inventory). */
   warehouses?: WarehouseRowLite[];
   /**
-   * When set, streams threshold + low-stock banner + shipments + warehouses after levels/movements paint.
+   * When set, streams threshold + low-stock banner + shipment filter options + warehouses after levels/movements paint.
    * Resolved fields are merged into the page (see `InventoryPage`).
    */
   inventoryExtras?: Promise<{
     lowStockThreshold: number;
     lowStockAlerts: LowStockAlertsResult;
-    shipments: ShipmentRow[];
-    totalShipments: number;
+    shipmentOptions: ShipmentFilterOption[];
     warehouses: WarehouseRowLite[];
   }>;
   /** Set when `inventory.levels` failed — avoids silent empty state after timeout/API errors. */
@@ -311,9 +315,23 @@ export interface ShipmentDetail {
     factoryCost: string;
     allocatedLandingCost: string | null;
     batchId: string | null;
+    batchRemainingQuantity: number | null;
+    consumedQuantity: number | null;
+    currentStockCount: number | null;
+    currentReservedCount: number | null;
+    currentAvailableCount: number | null;
     varianceReason: string | null;
     createdAt: string;
   }>;
+  summary: {
+    totalReceived: number;
+    remainingFromShipment: number;
+    consumedFromShipment: number;
+    currentStock: number;
+    currentReserved: number;
+    currentAvailable: number;
+    verifiedLineCount: number;
+  };
   allowedTransitions: string[];
 }
 

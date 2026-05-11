@@ -206,14 +206,14 @@ const CATEGORIES_SHELL_COLS: CompactTableColumn<{ id: string }>[] = [
   },
 ];
 
-/** Main inventory hub — stock levels / shipments tabs + labeled stat strip + CompactTable pulse. */
+/** Main inventory hub — stock levels plus summary stats and compact table pulse. */
 export function InventoryOverviewLoadingShell() {
   const levelRows = shellPulsePlaceholderRows('inv_levels', 8);
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Inventory"
-        description="Pick Stock levels or Shipments below — shelf totals vs inbound receive/verify."
+        description="Track on-hand stock, reservations, and reconciliation. Manage inbound supplier receipts from the separate Shipments page."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Inventory tools"
@@ -237,13 +237,12 @@ export function InventoryOverviewLoadingShell() {
         onChange={() => {}}
         tabs={[
           { value: 'levels', label: 'Stock levels' },
-          { value: 'movements', label: 'Movements' },
-          { value: 'shipments', label: 'Shipments' },
+          { value: 'transfers', label: 'Transfers' },
+          { value: 'reconciliation', label: 'Reconciliation' },
         ]}
       />
       <OverviewStatStrip
         items={[
-          { label: 'Shipments', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Total Stock', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Reserved', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Available', value: <StatValuePulse className="min-w-[2.5rem]" /> },
@@ -360,7 +359,7 @@ export function WarehouseShipmentsLoadingShell() {
   );
 }
 
-/** Global shipments list (Shipments tab route). */
+/** Global standalone shipments list. */
 export function ShipmentsListLoadingShell() {
   const rows = shellPulsePlaceholderRows('ship_list', 8);
   return (
@@ -476,11 +475,10 @@ export function ShipmentDetailLoadingShell() {
 
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
-      {/* Breadcrumb — first two crumbs are static, the trailing reference is a pulse */}
+      {/* Breadcrumb — the section crumb is static, the trailing reference is a pulse */}
       <Breadcrumb
         items={[
-          { label: 'Inventory', to: '/admin/inventory' },
-          { label: 'Shipments', to: '/admin/inventory?tab=shipments' },
+          { label: 'Shipments', to: '/admin/shipments' },
           {
             label: (
               <span className="inline-block h-4 w-32 align-middle rounded bg-app-border/75 dark:bg-app-border/55 animate-pulse" />

@@ -188,11 +188,15 @@ const entries: ShellEntry[] = [
 
   // ── Admin / Inventory ───────────────────────────────────────────────────────
   {
-    match: /^\/admin\/inventory\/shipments\/[^/]+$/,
+    match: /^\/admin\/shipments\/receive$/,
+    render: () => <ShipmentsListLoadingShell />,
+  },
+  {
+    match: /^\/admin\/shipments\/[^/]+$/,
     render: () => <ShipmentDetailLoadingShell />,
   },
   {
-    match: /^\/admin\/inventory\/shipments$/,
+    match: /^\/admin\/shipments$/,
     render: () => <ShipmentsListLoadingShell />,
   },
   {

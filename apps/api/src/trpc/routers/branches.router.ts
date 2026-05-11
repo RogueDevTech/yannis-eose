@@ -89,14 +89,11 @@ export async function listBranchesForUser(user: {
   role: string;
 }): Promise<Array<{ id: string; name: string; code?: string }>> {
   const db = getDb();
-  // Org-wide roles see every branch — they aren't members of any branch
-  // (per `BRANCH_ELIGIBLE_ROLES`), but their work spans the whole org:
-  // SuperAdmin / Admin manage anything; HR Manager creates / edits staff on
-  // any branch; Finance Officer reconciles every branch's payroll; Head of
-  // Logistics oversees all 3PL locations; org-wide department heads
-  // (HoCS / HoM) need to see every branch when their `currentBranchId` is
-  // null. Without this bypass, `branches.list` returned `[]` for these
-  // roles and the user-create branch dropdown was empty.
+  // Org-wide roles see every branch even without explicit branch memberships:
+  // SuperAdmin / Admin manage anything; HR creates / edits staff across the
+  // org; Finance reconciles every branch; Head of Logistics and Head of CS
+  // keep cross-branch visibility. Head of Marketing is intentionally excluded:
+  // branch assignments define the branches they can switch between.
   const SEES_ALL_BRANCHES_ROLES = new Set([
     'SUPER_ADMIN',
     'ADMIN',
@@ -104,7 +101,6 @@ export async function listBranchesForUser(user: {
     'FINANCE_OFFICER',
     'HEAD_OF_LOGISTICS',
     'HEAD_OF_CS',
-    'HEAD_OF_MARKETING',
   ]);
   const seesAll = SEES_ALL_BRANCHES_ROLES.has(user.role);
 
@@ -285,7 +281,6 @@ export const branchesRouter = router({
       const hasBranchManageUsersPermission = overviewPerms.includes('branches.manage_users');
       const hasCSTeamsPermission = overviewPerms.includes('branches.teams.cs');
       const hasMarketingTeamsPermission = overviewPerms.includes('branches.teams.marketing');
-      const isHeadOfMarketingRole = ctx.user.role === 'HEAD_OF_MARKETING';
       const isHeadOfCsRole = ctx.user.role === 'HEAD_OF_CS';
 
       const membership = await db
@@ -303,7 +298,6 @@ export const branchesRouter = router({
         !hasBranchManagePermission &&
         !hasCSTeamsPermission &&
         !hasMarketingTeamsPermission &&
-        !isHeadOfMarketingRole &&
         !isHeadOfCsRole &&
         !membership[0]
       ) {
@@ -317,7 +311,6 @@ export const branchesRouter = router({
         hasBranchManageUsersPermission ||
         hasCSTeamsPermission ||
         hasMarketingTeamsPermission ||
-        isHeadOfMarketingRole ||
         isHeadOfCsRole ||
         isBranchSupervisor;
       if (!canAccessBranchPage) {
@@ -374,7 +367,7 @@ export const branchesRouter = router({
         // on every branch (not only when `user_permissions` happens to include the teams codes).
         const deptHeadVisibilityIds = new Set<string>();
         let useDeptHeadVisibility = false;
-        if (hasMarketingTeamsPermission || isHeadOfMarketingRole) {
+        if (hasMarketingTeamsPermission) {
           useDeptHeadVisibility = true;
           deptHeadVisibilityIds.add(ctx.user.id);
           for (const m of members) {
@@ -437,8 +430,7 @@ export const branchesRouter = router({
       const canManageMarketingTeams =
         isSuperAdmin ||
         hasBranchManagePermission ||
-        hasMarketingTeamsPermission ||
-        isHeadOfMarketingRole;
+        hasMarketingTeamsPermission;
 
       return {
         branch,
@@ -495,7 +487,6 @@ export const branchesRouter = router({
       const hasBranchManageUsersPermission = perms.includes('branches.manage_users');
       const hasCSTeamsPermission = perms.includes('branches.teams.cs');
       const hasMarketingTeamsPermission = perms.includes('branches.teams.marketing');
-      const isHeadOfMarketingRole = ctx.user.role === 'HEAD_OF_MARKETING';
       const isHeadOfCsRole = ctx.user.role === 'HEAD_OF_CS';
 
       const membership = await db
@@ -513,7 +504,6 @@ export const branchesRouter = router({
         !hasBranchManagePermission &&
         !hasCSTeamsPermission &&
         !hasMarketingTeamsPermission &&
-        !isHeadOfMarketingRole &&
         !isHeadOfCsRole &&
         !membership[0]
       ) {
@@ -571,7 +561,7 @@ export const branchesRouter = router({
       if (!canManageBranchPage) {
         const visibleIds = new Set<string>();
         let useDeptHeadVisibility = false;
-        if (hasMarketingTeamsPermission || isHeadOfMarketingRole) {
+        if (hasMarketingTeamsPermission) {
           useDeptHeadVisibility = true;
           visibleIds.add(ctx.user.id);
           for (const m of allMatching) {

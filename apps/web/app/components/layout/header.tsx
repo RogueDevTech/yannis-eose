@@ -4,6 +4,10 @@ import { Form, Link, useNavigate, useSubmit, useNavigation, useLocation } from '
 import { Button } from '~/components/ui/button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
+import {
+  canRoleSeeAllBranchesInHeader,
+  shouldShowHeaderBranchSwitcher,
+} from './header-branch-scope';
 import { getNotificationLink, getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
 import { useNotificationsState } from '~/contexts/notifications-state';
 interface Notification {
@@ -129,9 +133,9 @@ export function Header({
   const isMobileBranchSwitching =
     navigation.state !== 'idle' && navigation.formAction?.includes('/admin/branches/switch');
 
-  const canSeeAllBranches = ALL_BRANCHES_ROLES.has(user?.role ?? '');
+  const canSeeAllBranches = canRoleSeeAllBranchesInHeader(user?.role ?? '');
   const mobileCurrentBranch = branches?.find((b) => b.id === (currentBranchId ?? null)) ?? null;
-  const mobileCanSwitchBranches = !!branches && (branches.length > 1 || canSeeAllBranches);
+  const mobileCanSwitchBranches = !!branches && shouldShowHeaderBranchSwitcher(branches.length, user?.role ?? '');
   const isMobileAllBranches = canSeeAllBranches && currentBranchId == null;
 
   // Close menus on outside click
@@ -769,20 +773,6 @@ export function Header({
 
 /* ── Header Branch Switcher ───────────────────────────────────────────── */
 
-// Anyone with "view all branches" capability gets the "All branches" toggle in the
-// switcher — admin-class AND org-wide department heads. CEO directive 2026-05-09:
-// these users land on their primary branch by default but must be able to flip
-// back to a global view through the switcher, same as SuperAdmin always could.
-// Mirrors `canViewAllBranches` (apps/web/app/lib/rbac.ts) — kept as a Set here so
-// the existing single-call callers (`ALL_BRANCHES_ROLES.has(role)`) work unchanged.
-const ALL_BRANCHES_ROLES = new Set([
-  'SUPER_ADMIN',
-  'ADMIN',
-  'HEAD_OF_CS',
-  'HEAD_OF_MARKETING',
-  'HEAD_OF_LOGISTICS',
-]);
-
 function HeaderBranchSwitcher({
   branches,
   currentBranchId,
@@ -805,11 +795,11 @@ function HeaderBranchSwitcher({
   const navigation = useNavigation();
   const isSubmitting = navigation.state !== 'idle' && navigation.formAction === '/admin/branches/switch';
 
-  const canSeeAllBranches = ALL_BRANCHES_ROLES.has(userRole);
+  const canSeeAllBranches = canRoleSeeAllBranchesInHeader(userRole);
   const currentBranch = branches.find((b) => b.id === currentBranchId) ?? null;
   // "All Branches" is active when currentBranchId is null (and user can see all)
   const isAllBranches = canSeeAllBranches && currentBranchId === null;
-  const canSwitch = branches.length > 1 || canSeeAllBranches;
+  const canSwitch = shouldShowHeaderBranchSwitcher(branches.length, userRole);
 
   useEffect(() => {
     if (!open) return;
