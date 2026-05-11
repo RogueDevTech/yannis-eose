@@ -128,19 +128,25 @@ export function canEditUser(
 ): EditUserAccessLevel {
   if (!viewer) return 'none';
   if (actorUserIdsMatch(viewer.id, target.id)) return 'none';
+
+  // SuperAdmin can edit anyone, including admin-class accounts
+  // (CLAUDE.md → "SuperAdmin-only: manage admin-level users"). The earlier
+  // blanket admin-class exclusion blocked SuperAdmin from this page too.
+  if (viewer.role === 'SUPER_ADMIN') return 'full';
+
+  // HR_MANAGER can reach the edit form on any non-self target — admin-class
+  // updates are routed through the SuperAdmin approval queue at the service
+  // layer (CEO directive 2026-05-11). The form looks identical; the submit
+  // is intercepted server-side.
+  if (viewer.role === 'HR_MANAGER') return 'full';
+
+  // Plain ADMIN can edit non-admin targets only — admin-class targets stay
+  // SuperAdmin-handoff per CLAUDE.md.
   if (ADMIN_LEVEL_ROLES.has(target.role)) return 'none';
   if (isAdminLevel(viewer)) return 'full';
 
   const perms = (viewer.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const has = (code: string) => perms.includes(canonicalPermissionCode(code));
-
-  // HR_MANAGER is an org-wide role (CEO directive 2026-05-10 — multiple
-  // holders allowed, no branch binding). Their session typically has
-  // `currentBranchId = null` since the branch switcher hides for org-wide
-  // roles. Gating on `sameBranch` always evaluated to `none`, locking HR
-  // out of editing anyone — fix is to grant full access to non-admin
-  // targets. The admin-class target exclusion at line 131 still applies.
-  if (viewer.role === 'HR_MANAGER') return 'full';
 
   if (has('users.staff.update') || has('users.update')) {
     if (isOrgWideDepartmentHead(viewer)) return 'full';

@@ -173,9 +173,15 @@ export function canEditUser(
   // Self-edit goes through /admin/profile, not the staff-management form.
   if (viewer.id === target.id) return 'none';
 
-  // Admin-level accounts can't be edited from the staff-management page —
-  // mirrors the SUPER_ADMIN/ADMIN guard in users.service.ts and the loader
-  // gate at hr.users.$id.edit/route.tsx:78-80.
+  // SuperAdmin reaches every target including admin-class.
+  if (viewer.role === 'SUPER_ADMIN') return 'full';
+
+  // HR_MANAGER reaches every non-self target including admin-class — the
+  // service layer reroutes admin-class edits through the SuperAdmin
+  // approval queue (CEO directive 2026-05-11).
+  if (viewer.role === 'HR_MANAGER') return 'full';
+
+  // Plain ADMIN cannot edit other admin-class accounts (SuperAdmin-handoff).
   if (ADMIN_LEVEL_ROLES.has(target.role)) return 'none';
 
   // Admin-class viewers can change anything on a non-admin target.
@@ -183,14 +189,6 @@ export function canEditUser(
 
   const perms = new Set((viewer.permissions ?? []).map((p) => p));
   const has = (code: string) => perms.has(code);
-
-  // HR_MANAGER is an org-wide role (CEO directive 2026-05-10 — multiple
-  // holders allowed, no branch binding). Their session typically has
-  // `currentBranchId = null` since the branch switcher hides for org-wide
-  // roles. The previous `sameBranch` gate always evaluated to false,
-  // locking HR out of editing anyone — fix is to grant full access to
-  // non-admin targets. The admin-class target exclusion above still applies.
-  if (viewer.role === 'HR_MANAGER') return 'full';
 
   // Anyone holding `users.staff.update` outright (catalog-granted) — full,
   // bounded by branch (org-wide heads with currentBranchId === null get

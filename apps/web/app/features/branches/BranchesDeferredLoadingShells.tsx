@@ -1,34 +1,8 @@
-import {
-  CompactTable,
-  CompactTableActionButton,
-  type CompactTableColumn,
-} from '~/components/ui/compact-table';
-import { shellPulsePlaceholderRows, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
 
-const BRANCH_LIST_COLS: CompactTableColumn<{ id: string }>[] = [
-  { key: 'name', header: 'Name', render: () => <TableCellTextPulse className="w-[14rem]" /> },
-  { key: 'code', header: 'Code', render: () => <TableCellTextPulse className="w-[6rem]" /> },
-  { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5rem]" /> },
-  {
-    key: 'created',
-    header: 'Created',
-    nowrap: true,
-    render: () => <TableCellTextPulse className="w-[9rem]" />,
-  },
-  {
-    key: 'actions',
-    header: '',
-    align: 'right',
-    tight: true,
-    render: () => <CompactTableActionButton disabled>View</CompactTableActionButton>,
-  },
-];
-
 /** `/admin/branches` — list shell. */
 export function BranchesListLoadingShell() {
-  const rows = shellPulsePlaceholderRows('branches', 8);
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -40,13 +14,40 @@ export function BranchesListLoadingShell() {
           </Button>
         }
       />
-      <CompactTable<{ id: string }>
-        columns={BRANCH_LIST_COLS}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <article
+            key={i}
+            className="relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm flex flex-col min-h-[180px]"
+            aria-hidden
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="h-6 w-40 rounded bg-app-hover animate-pulse" />
+              <div className="h-6 w-16 rounded-full bg-app-hover animate-pulse shrink-0" />
+            </div>
+
+            <div className="text-sm text-app-fg-muted mb-4 flex-1">
+              <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5">
+                <span className="h-3 w-10 rounded bg-app-border/80 animate-pulse" />
+              </span>
+              <span className="mx-1.5">·</span>
+              <span className="inline-block h-3 w-24 rounded bg-app-hover animate-pulse align-middle" />
+            </div>
+
+            <div className="flex items-center gap-2 pt-3 border-t border-app-border">
+              <Button type="button" variant="primary" size="sm" disabled className="gap-1.5 shrink-0">
+                Edit
+              </Button>
+              <span className="ml-auto text-xs font-medium text-app-fg-muted inline-flex items-center gap-1">
+                View details
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -55,41 +56,92 @@ export function BranchesListLoadingShell() {
 export function BranchDetailLoadingShell() {
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <div>
-        <div className="h-4 w-28 rounded bg-app-hover animate-pulse mb-4" aria-hidden />
+      <div className="bg-app-elevated rounded-xl border border-app-border shadow-sm p-5">
+        <div className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 dark:text-brand-400">
+          <svg
+            className="w-4 h-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          All branches
+        </div>
+
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-app-hover animate-pulse shrink-0" aria-hidden />
-            <div className="space-y-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-12 h-12 rounded-xl bg-app-hover animate-pulse shrink-0" aria-hidden />
+            <div className="min-w-0 space-y-2">
               <div className="h-7 w-48 rounded bg-app-hover animate-pulse" aria-hidden />
-              <div className="h-4 w-64 rounded bg-app-hover animate-pulse" aria-hidden />
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5">
+                  <span className="h-3 w-10 rounded bg-app-border/80 animate-pulse" aria-hidden />
+                </span>
+                <span aria-hidden>·</span>
+                <span className="inline-block h-3 w-24 rounded bg-app-hover animate-pulse" aria-hidden />
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <div className="h-6 w-16 rounded-full bg-app-hover animate-pulse" aria-hidden />
-            <div className="h-8 w-14 rounded-md bg-app-hover animate-pulse" aria-hidden />
+            <Button type="button" variant="primary" size="sm" disabled>
+              Edit
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Department cards skeleton — mirrors the post-load Departments grid. */}
+      {/* Department cards skeleton — same shell as the loaded cards, with only
+          API-driven values pulsing. Static labels / actions stay readable. */}
       <div className="grid gap-4 sm:grid-cols-2">
-        {[1, 2].map((i) => (
-          <div key={i} className="card p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="h-5 w-24 rounded-md bg-app-hover animate-pulse" aria-hidden />
-              <div className="h-4 w-4 rounded bg-app-hover animate-pulse" aria-hidden />
+        {[
+          { title: 'Customer support', code: 'CS', description: 'Manage customer support' },
+          { title: 'Marketing', code: 'MARKETING', description: 'Manage marketing' },
+        ].map((dept) => (
+          <article
+            key={dept.code}
+            className="relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm flex flex-col min-h-[180px]"
+          >
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <h3 className="font-semibold text-app-fg text-base leading-snug min-w-0 flex-1">
+                {dept.title}
+              </h3>
+              <span className="shrink-0 inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-app-hover text-app-fg-muted">
+                {dept.code}
+              </span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              {[1, 2, 3].map((j) => (
-                <div key={j} className="space-y-1">
-                  <div className="h-6 w-full rounded bg-app-hover animate-pulse" aria-hidden />
-                  <div className="h-2 w-12 mx-auto rounded bg-app-hover animate-pulse" aria-hidden />
+
+            <div className="text-sm text-app-fg-muted mb-4 flex-1">
+              <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-[11px] font-semibold text-app-fg-muted">
+                {dept.code}
+              </span>
+              <span className="mx-1.5">·</span>
+              <span className="inline-block h-3 w-20 rounded bg-app-hover animate-pulse align-middle" aria-hidden />
+              <p className="mt-2 text-sm text-app-fg-muted">{dept.description}</p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {['Members', 'Teams', 'Supervisors'].map((label) => (
+                <div key={label} className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                    {label}
+                  </p>
+                  <div className="mt-1 h-6 w-8 rounded bg-app-hover animate-pulse" aria-hidden />
                 </div>
               ))}
             </div>
-            <div className="h-3 w-32 rounded bg-app-hover animate-pulse" aria-hidden />
-          </div>
+
+            <div className="flex items-center gap-2 pt-3 border-t border-app-border">
+              <span className="ml-auto text-xs font-medium text-app-fg-muted inline-flex items-center gap-1">
+                View details
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </span>
+            </div>
+          </article>
         ))}
       </div>
     </div>
