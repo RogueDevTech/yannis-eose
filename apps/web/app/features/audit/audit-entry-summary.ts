@@ -4,7 +4,7 @@
  */
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
 import { formatNaira } from '~/lib/format-amount';
-import type { ActorMap, AuditEntry } from './types';
+import type { ActorMap, AuditEntry, PermissionNameMap } from './types';
 
 /** Read the first present field from history payloads (snake_case vs camelCase). */
 export function pickDataField(data: Record<string, unknown>, ...keys: string[]): unknown {
@@ -180,6 +180,21 @@ export function lookupName(value: unknown, actorNames: ActorMap, asOf: string): 
   return actor?.name ?? null;
 }
 
+function lookupActorLabel(value: unknown, actorNames: ActorMap, asOf: string): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const actor = resolveActor(actorNames, value, asOf);
+  if (!actor) return null;
+  const role = ROLE_LABELS[actor.role] ?? actor.role;
+  return `${actor.name} (${role})`;
+}
+
+function resolvePermissionLabel(permissionId: string | null, permissionNames?: PermissionNameMap): string | null {
+  if (!permissionId) return null;
+  const code = permissionNames?.[permissionId];
+  if (code && code.trim().length > 0) return code;
+  return `${permissionId.slice(0, 8)}…`;
+}
+
 function formatCurrency(val: unknown): string {
   const num = Number(val);
   if (Number.isNaN(num)) return String(val);
@@ -338,6 +353,7 @@ export function getAuditSummaryParts(
   entry: AuditEntry,
   actorNames: ActorMap,
   locationNames?: Record<string, string>,
+  permissionNames?: PermissionNameMap,
 ): AuditSummaryParts {
   const data = entry.data;
   const table = entry.tableName;
@@ -766,8 +782,36 @@ export function getAuditSummaryParts(
   }
 
   if (table === 'user_permissions') {
-    const verb = entry.action === 'INSERT' ? 'granted' : entry.action === 'DELETE' ? 'revoked' : 'updated';
-    return { prefix: `${actor} ${verb} access for someone`, entityLabel: recordLabel, suffix: '.' };
+    const targetId = pickStr(data, 'user_id', 'userId');
+    const targetLabel =
+      lookupActorLabel(targetId, actorNames, asOf) ??
+      lookupName(targetId, actorNames, asOf) ??
+      (targetId ? `${targetId.slice(0, 8)}…` : null);
+    const permissionId = pickStr(data, 'permission_id', 'permissionId');
+    const permissionLabel = resolvePermissionLabel(permissionId, permissionNames);
+    const granted = pickDataField(data, 'granted');
+    const isGrant = entry.action === 'INSERT' || granted === true;
+    const isRevoke = entry.action === 'DELETE' || granted === false;
+
+    if (isGrant) {
+      return {
+        prefix: `${actor} granted `,
+        entityLabel: permissionLabel ?? 'a permission',
+        suffix: targetLabel ? ` to ${targetLabel}.` : '.',
+      };
+    }
+    if (isRevoke) {
+      return {
+        prefix: `${actor} revoked `,
+        entityLabel: permissionLabel ?? 'a permission',
+        suffix: targetLabel ? ` from ${targetLabel}.` : '.',
+      };
+    }
+    return {
+      prefix: `${actor} updated direct access`,
+      entityLabel: null,
+      suffix: `${permissionLabel ? ` (${permissionLabel})` : ''}${targetLabel ? ` for ${targetLabel}` : ''}.`,
+    };
   }
 
   const label = formatAuditTableName(table);
@@ -780,8 +824,14 @@ export function generateAuditDescription(
   entry: AuditEntry,
   actorNames: ActorMap,
   locationNames?: Record<string, string>,
+  permissionNames?: PermissionNameMap,
 ): string {
-  const { prefix, entityLabel, suffix } = getAuditSummaryParts(entry, actorNames, locationNames);
+  const { prefix, entityLabel, suffix } = getAuditSummaryParts(
+    entry,
+    actorNames,
+    locationNames,
+    permissionNames,
+  );
   const label = entityLabel ? `"${entityLabel}"` : '';
   return prefix + label + suffix;
 }

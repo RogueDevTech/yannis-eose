@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Link, useFetcher, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
@@ -21,6 +21,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { DescriptionList } from '~/components/ui/description-list';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 import type { PermissionRequest, PermissionRequestStatusFilter } from './types';
 
 const REQUEST_TYPE_LABELS: Record<string, string> = {
@@ -130,13 +131,19 @@ export function PermissionRequestsPage({
   const fetcherError = (fetcher.data as { error?: string })?.error;
   const [dismissedError, setDismissedError] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+  const revalidator = useRevalidator();
 
   useFetcherToast(fetcher.data, { successMessage: 'Request processed', skipErrorToast: modal != null });
 
   const onApproveRejectSuccess = useCallback(() => {
+    // This route opts into the full-loader cache for instant revisits.
+    // After approve/reject, force-drop every cached status slice and immediately
+    // revalidate so `?status=PENDING` stops showing rows that are now processed.
+    invalidateCachedLoader('/admin/permission-requests');
+    revalidator.revalidate();
     setModal(null);
     setReason('');
-  }, []);
+  }, [revalidator]);
   useCloseOnFetcherSuccess(fetcher, onApproveRejectSuccess, {
     intent: ['approve', 'reject'],
   });

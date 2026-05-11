@@ -102,6 +102,14 @@ interface LogoForPdf {
   aspect: number;
 }
 
+interface PaidStampForPdf {
+  dataUrl: string;
+  aspect: number;
+}
+
+let paidStampPdfImage: PaidStampForPdf | null = null;
+let paidStampPdfInflight: Promise<PaidStampForPdf | null> | null = null;
+
 /**
  * Loads the PNG logo in the browser for embedding in jsPDF. Returns null on
  * failure or when not in a browser (SSR).
@@ -138,6 +146,88 @@ function loadInvoiceLogoForPdf(): Promise<LogoForPdf | null> {
     img.onerror = () => resolve(null);
     img.src = INVOICE_LOGO_SRC;
   });
+}
+
+/**
+ * Render the exact rubber-stamp look as an offscreen image for jsPDF.
+ *
+ * Root cause:
+ * The modal preview uses browser text/layout (Courier + rotation + border),
+ * while the old PDF path redrew the stamp using jsPDF text metrics and a fixed
+ * rectangle. Those two renderers do not shape text the same way, which is why
+ * the download looked distorted even when the modal preview was fine.
+ *
+ * Fix:
+ * Let the browser render the stamp once, then embed that result as an image in
+ * the PDF. This keeps the original design while removing jsPDF font-metric
+ * drift from the equation.
+ */
+function loadPaidStampForPdf(): Promise<PaidStampForPdf | null> {
+  if (paidStampPdfImage) return Promise.resolve(paidStampPdfImage);
+  if (paidStampPdfInflight) return paidStampPdfInflight;
+  if (typeof window === 'undefined' || typeof Image === 'undefined' || typeof document === 'undefined') {
+    return Promise.resolve(null);
+  }
+
+  paidStampPdfInflight = new Promise((resolve) => {
+    const svgW = 380;
+    const svgH = 180;
+    const ink = '#15803d';
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+        <g transform="rotate(-12 ${svgW / 2} ${svgH / 2})" opacity="0.85">
+          <rect x="34" y="58" width="312" height="58" rx="6" ry="6"
+            fill="none" stroke="${ink}" stroke-width="6" />
+          <rect x="40" y="64" width="300" height="46" rx="4" ry="4"
+            fill="none" stroke="${ink}" stroke-width="2" />
+          <text
+            x="${svgW / 2}"
+            y="${svgH / 2 + 2}"
+            text-anchor="middle"
+            dominant-baseline="middle"
+            fill="${ink}"
+            font-family="'Courier New', Courier, monospace"
+            font-size="30"
+            font-weight="800"
+            letter-spacing="2.2"
+          >MARKED AS PAID</text>
+        </g>
+      </svg>
+    `.trim();
+
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = svgW * scale;
+        canvas.height = svgH * scale;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(null);
+          return;
+        }
+        ctx.scale(scale, scale);
+        ctx.drawImage(img, 0, 0, svgW, svgH);
+        paidStampPdfImage = {
+          dataUrl: canvas.toDataURL('image/png'),
+          aspect: svgW / svgH,
+        };
+        resolve(paidStampPdfImage);
+      } catch {
+        resolve(null);
+      } finally {
+        paidStampPdfInflight = null;
+      }
+    };
+    img.onerror = () => {
+      paidStampPdfInflight = null;
+      resolve(null);
+    };
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+
+  return paidStampPdfInflight;
 }
 
 /**
@@ -182,7 +272,10 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   let y = margin;
 
   // ── Header: INVOICE left; logo right (replaces “Yannis” wordmark when loaded) ──
-  const logo = await loadInvoiceLogoForPdf();
+  const [logo, paidStamp] = await Promise.all([
+    loadInvoiceLogoForPdf(),
+    invoice.markedPaid ? loadPaidStampForPdf() : Promise.resolve(null),
+  ]);
   const headerBaseline = margin;
 
   doc.setFontSize(24);
@@ -215,10 +308,18 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   doc.setFontSize(9);
   doc.setFont(ff, 'normal');
   doc.setTextColor(100, 100, 100);
-  doc.text(`Date: ${new Date(invoice.createdAt).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}`, margin, y);
+  doc.text(
+    `Date: ${new Date(invoice.createdAt).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}`,
+    margin,
+    y,
+  );
   if (invoice.dueDate) {
     y += 5;
-    doc.text(`Due: ${new Date(invoice.dueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}`, margin, y);
+    doc.text(
+      `Due: ${new Date(invoice.dueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' })}`,
+      margin,
+      y,
+    );
   }
   y += 10;
 
@@ -329,12 +430,10 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
   doc.text(`Page 1 of ${doc.getNumberOfPages()}`, pageWidth - margin, 280, { align: 'right' });
 
   // ── "MARKED AS PAID" rubber stamp ─────────
-  // Drawn last so it sits above any totals/footer it overlaps. Bottom-right,
-  // rotated, double border, ink-red — mirrors the HTML preview's `<PaidStamp>`.
-  // Only renders when the API set `markedPaid` (server-derived from
-  // delivery_remittances.status === 'RECEIVED').
+  // Render after the invoice content, but above the footer, so it never covers
+  // line items or totals. Mirrors the HTML preview layout.
   if (invoice.markedPaid) {
-    drawPaidStamp(doc, ff, pageWidth);
+    drawPaidStamp(doc, ff, pageWidth, paidStamp, y);
   }
 
   return doc;
@@ -354,12 +453,27 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
  *   the 70mm-wide border with comfortable padding (was 20pt + 60mm box, which
  *   had the text running outside the border).
  */
-function drawPaidStamp(doc: jsPDF, fontFamily: string, pageWidth: number): void {
+function drawPaidStamp(
+  doc: jsPDF,
+  fontFamily: string,
+  pageWidth: number,
+  paidStamp: PaidStampForPdf | null,
+  contentBottomY: number,
+): void {
+  const y = Math.min(contentBottomY + 6, 228);
+  if (paidStamp) {
+    const w = 82;
+    const h = w / paidStamp.aspect;
+    const x = pageWidth - 22 - w;
+    doc.addImage(paidStamp.dataUrl, 'PNG', x, y, w, h);
+    return;
+  }
+
   // Box dimensions (mm) and centre position (bottom-right, well clear of footer).
   const w = 70;
   const h = 14;
   const cx = pageWidth - 35; // 25mm right margin gives the rotated corners breathing room
-  const cy = 260; // 37mm above the page bottom — clear of footer at y=280
+  const cy = y + h / 2;
   const angle = -12; // degrees, matches HTML preview
 
   // Green-700 ink (matches HTML stamp `#15803d`).

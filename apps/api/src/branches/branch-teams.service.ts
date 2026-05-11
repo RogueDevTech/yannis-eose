@@ -1036,21 +1036,19 @@ export class BranchTeamsService {
   }
 
   /**
-   * Mirror fallback: true when actor may mirror target via branch team supervision
-   * (same branch session as actor.currentBranchId).
+   * Mirror fallback: true when actor may mirror target via the branch-team
+   * supervision graph anywhere they directly supervise that user.
+   *
+   * This intentionally matches `/trpc/branches.amISupervisorOfUser` and the
+   * `/hr/users/:id` profile-access rule: if a supervisor can open a direct
+   * report's staff profile, they should also see the mirror affordance there,
+   * even before their active branch is switched to that supervisee's branch.
    */
   async actorCanMirrorViaSupervision(
     actor: { id: string; currentBranchId?: string | null },
     target: { id: string; role: string },
   ): Promise<boolean> {
-    const branchId = actor.currentBranchId;
-    if (!branchId) return false;
-    if (target.role === 'CS_CLOSER') {
-      return this.isCsSupervisorOf(actor.id, target.id, branchId);
-    }
-    if (target.role === 'MEDIA_BUYER') {
-      return this.isMarketingSupervisorOf(actor.id, target.id, branchId);
-    }
-    return false;
+    if (target.role !== 'CS_CLOSER' && target.role !== 'MEDIA_BUYER') return false;
+    return this.isSupervisorOfUserAnywhere(actor.id, target.id);
   }
 }

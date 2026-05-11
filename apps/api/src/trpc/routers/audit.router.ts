@@ -143,6 +143,19 @@ export const auditRouter = router({
     }),
 
   /**
+   * Permission code labels for `user_permissions` audit rows.
+   */
+  permissionNames: authedProcedure
+    .input(z.object({ permissionIds: z.array(z.string().uuid()).max(400) }))
+    .query(async ({ input, ctx }) => {
+      const u = ctx.user;
+      if (!canAccessGlobalAuditLog(u)) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'You do not have permission to resolve audit labels.' });
+      }
+      return getAuditService().getPermissionCodeMap(input.permissionIds);
+    }),
+
+  /**
    * Staff picker for `/admin/analytics/audit` actor filter — org/branch scope matches `globalLog`.
    *
    * Cached for 5 minutes keyed by (scope, branchId): the dropdown lists every active staff

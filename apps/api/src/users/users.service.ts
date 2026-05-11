@@ -38,6 +38,7 @@ import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { ADMIN_LEVEL_ROLES, isAdminLevelRole } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 
 type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
@@ -119,6 +120,46 @@ export class UsersService {
       code: 'CONFLICT',
       message: `Phone number already in use by ${hit.name} (${hit.email}). Each user must have a unique number.`,
     });
+  }
+
+  private async selectPendingUserCreationRequestDuplicate(params: {
+    email: string;
+    phone: string;
+  }): Promise<{ id: string } | undefined> {
+    const normalizedEmail = params.email.trim().toLowerCase();
+    const normalizedPhone = params.phone.trim();
+    const [duplicate] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'USER_CREATION'),
+          or(
+            sql`LOWER((${schema.permissionRequests.payload}->>'email')) = ${normalizedEmail}`,
+            sql`(${schema.permissionRequests.payload}->>'phone') = ${normalizedPhone}`,
+          ),
+        ),
+      )
+      .limit(1);
+    return duplicate;
+  }
+
+  private async selectPendingRoleChangeRequestDuplicate(
+    targetUserId: string,
+  ): Promise<{ id: string } | undefined> {
+    const [duplicate] = await this.db
+      .select({ id: schema.permissionRequests.id })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ROLE_CHANGE'),
+          eq(schema.permissionRequests.targetUserId, targetUserId),
+        ),
+      )
+      .limit(1);
+    return duplicate;
   }
 
   /**
@@ -428,6 +469,16 @@ export class UsersService {
         throw new TRPCError({
           code: 'CONFLICT',
           message: 'A user with this email already exists',
+        });
+      }
+      const duplicatePending = await this.selectPendingUserCreationRequestDuplicate({
+        email: input.email,
+        phone: input.phone,
+      });
+      if (duplicatePending) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'A pending user-creation approval request already exists for this email or phone number.',
         });
       }
 
@@ -1406,6 +1457,13 @@ export class UsersService {
         const phoneConflictRows = await this.selectStaffPhoneConflictRows(input.phone, input.userId);
         this.throwIfStaffPhoneConflictRows(phoneConflictRows);
       }
+      const duplicatePending = await this.selectPendingRoleChangeRequestDuplicate(input.userId);
+      if (duplicatePending) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'A pending edit approval request already exists for this user.',
+        });
+      }
       const queuedPayload: UpdateStaffInput = {
         ...input,
         role: input.role ?? (beforeRow.role as UpdateStaffInput['role']),
@@ -1467,6 +1525,13 @@ export class UsersService {
       if (input.phone) {
         const phoneConflictRows = await this.selectStaffPhoneConflictRows(input.phone, input.userId);
         this.throwIfStaffPhoneConflictRows(phoneConflictRows);
+      }
+      const duplicatePending = await this.selectPendingRoleChangeRequestDuplicate(input.userId);
+      if (duplicatePending) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: 'A pending role-change approval request already exists for this user.',
+        });
       }
 
       const [req] = await withActor(this.db, actor, async (tx) =>
