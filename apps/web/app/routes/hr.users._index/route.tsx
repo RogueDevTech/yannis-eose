@@ -5,6 +5,7 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
 import type { User } from '~/features/users/types';
+import { BRANCH_ELIGIBLE_IMPORT_ROLES } from '~/features/users/users-import-shared';
 
 export const meta: MetaFunction = () => [
   { title: 'Users — Yannis EOSE' },
@@ -52,21 +53,28 @@ export async function action({ request }: ActionFunctionArgs) {
     const branchIdsRaw = formData.get('branchIds')?.toString().trim() ?? '';
     const isProbation = formData.get('isProbation')?.toString() === 'true';
     const probationUntil = formData.get('probationUntil')?.toString().trim() || undefined;
+    const roleNeedsBranch = BRANCH_ELIGIBLE_IMPORT_ROLES.has(role);
 
-    if (!name || !email || !role || !phone || !primaryBranchId) {
+    if (!name || !email || !role || !phone) {
       return json(
-        { error: 'name, email, role, phone, and primary branch are required.', rowIndex },
+        { error: 'name, email, role, and phone are required.', rowIndex },
+        { status: 400 },
+      );
+    }
+    if (roleNeedsBranch && !primaryBranchId) {
+      return json(
+        { error: 'primary branch is required for Marketing, Customer Support, and Branch Admin roles.', rowIndex },
         { status: 400 },
       );
     }
 
     let branchIds: string[] = [];
     try {
-      branchIds = branchIdsRaw ? (JSON.parse(branchIdsRaw) as string[]) : [primaryBranchId];
+      branchIds = branchIdsRaw ? (JSON.parse(branchIdsRaw) as string[]) : primaryBranchId ? [primaryBranchId] : [];
     } catch {
-      branchIds = [primaryBranchId];
+      branchIds = primaryBranchId ? [primaryBranchId] : [];
     }
-    if (!branchIds.includes(primaryBranchId)) branchIds.push(primaryBranchId);
+    if (primaryBranchId && !branchIds.includes(primaryBranchId)) branchIds.push(primaryBranchId);
 
     const body: Record<string, unknown> = {
       name,
@@ -74,10 +82,12 @@ export async function action({ request }: ActionFunctionArgs) {
       role,
       status: 'PENDING',
       phone,
-      primaryBranchId,
-      branchIds,
       restrictProductAccess: false,
     };
+    if (roleNeedsBranch) {
+      body.primaryBranchId = primaryBranchId;
+      body.branchIds = branchIds;
+    }
     if (isProbation) {
       body.isProbation = true;
       if (probationUntil) body.probationUntil = probationUntil;

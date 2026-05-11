@@ -125,7 +125,7 @@ export function isAdminLevelRole(role: string): boolean {
  * Edit-access scope for `/hr/users/:id/edit` and the underlying
  * `users.update` mutation.
  *
- *   - `'full'`     — can change every field (admin-class, HR_MANAGER on branch).
+ *   - `'full'`     — can change every field (admin-class, HR_MANAGER org-wide).
  *   - `'limited'`  — direct-report scope: HoCS over CS_CLOSER, HoM over
  *                    MEDIA_BUYER, on the same branch. Restricted to
  *                    `capacity` / `productIds` / `visibleOrderStatuses` /
@@ -157,7 +157,7 @@ export interface CanEditUserTarget {
  * Returns the edit-access scope a viewer has over a specific target user.
  *
  * SuperAdmin / Admin → always `'full'` unless the target is also admin-class.
- * HR_MANAGER → `'full'` on users in their branch.
+ * HR_MANAGER → `'full'` on any non-admin user (org-wide role).
  * Org-wide / branch-supervisor heads with `users.staff.update_supervised` →
  * `'limited'` over their direct-report role on the same branch.
  * Everyone else → `'none'`.
@@ -184,13 +184,13 @@ export function canEditUser(
   const perms = new Set((viewer.permissions ?? []).map((p) => p));
   const has = (code: string) => perms.has(code);
 
-  // HR_MANAGER on the target's branch — full access.
-  if (viewer.role === 'HR_MANAGER') {
-    const sameBranch =
-      !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
-    if (sameBranch) return 'full';
-    return 'none';
-  }
+  // HR_MANAGER is an org-wide role (CEO directive 2026-05-10 — multiple
+  // holders allowed, no branch binding). Their session typically has
+  // `currentBranchId = null` since the branch switcher hides for org-wide
+  // roles. The previous `sameBranch` gate always evaluated to false,
+  // locking HR out of editing anyone — fix is to grant full access to
+  // non-admin targets. The admin-class target exclusion above still applies.
+  if (viewer.role === 'HR_MANAGER') return 'full';
 
   // Anyone holding `users.staff.update` outright (catalog-granted) — full,
   // bounded by branch (org-wide heads with currentBranchId === null get

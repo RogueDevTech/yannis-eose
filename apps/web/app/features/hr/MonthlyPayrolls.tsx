@@ -36,10 +36,14 @@ function formatMonth(periodMonth: string): string {
 
 function canPrepareDept(viewer: ViewerInfo, dept: PayrollDepartment, branchId: string): boolean {
   if (ADMIN_ROLES.has(viewer.role)) return true;
+  // HR Manager is an org-wide role (CEO directive 2026-05-10) — they don't have
+  // a branch binding. The server-side `getPrepareAccess` returns every
+  // department + every branch for anyone holding `hr.write` (which HR has by
+  // default), so the catch-all `prepareDepartments + prepareBranchIds` check
+  // below covers HR for non-branch-scoped flows. Short-circuit here for
+  // clarity so we never accidentally tie HR's prep capability to a branch.
+  if (viewer.role === 'HR_MANAGER') return true;
   if (viewer.prepareDepartments?.includes(dept) && viewer.prepareBranchIds?.includes(branchId)) return true;
-  if (viewer.role === 'HR_MANAGER' && viewer.currentBranchId === branchId && (dept === 'LOGISTICS' || dept === 'HR')) {
-    return true;
-  }
   if (viewer.role !== DEPT_OWNER_ROLE[dept]) return false;
   if (viewer.currentBranchId == null && viewer.role.startsWith('HEAD_OF_')) return true;
   return viewer.currentBranchId === branchId;

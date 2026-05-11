@@ -133,6 +133,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       name: string;
       role: string;
       isFinance: boolean;
+      isSupervisor: boolean;
       isPreferred: boolean;
       branchId: string | null;
     }>;
@@ -299,7 +300,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const fundingBalance = showFundingBalance ? bundle?.fundingBalance ?? undefined : undefined;
   const usersList = bundle?.users ?? [];
   const balancesList = isFundingAdmin ? bundle?.balancesList ?? undefined : undefined;
-  const fundingRequestRecipients = canRequestFunding ? bundle?.fundingRequestRecipients ?? [] : [];
+  const fundingRequestRecipients = canRequestFunding
+    ? (bundle?.fundingRequestRecipients ?? []).map((recipient) => ({
+        ...recipient,
+        isSupervisor: recipient.isSupervisor === true,
+      }))
+    : [];
 
   // Resolve active branch name from the bundle's branches list — null if the user has
   // no active branch (admin in global view) or the branch can't be found in the response.
