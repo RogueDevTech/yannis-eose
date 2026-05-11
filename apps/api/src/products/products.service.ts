@@ -15,6 +15,7 @@ import { DRIZZLE } from '../database/database.module';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { GalleryImageIngestService } from './gallery-image-ingest.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isSuperAdminOnly } from '../common/authz';
 
@@ -83,6 +84,7 @@ export class ProductsService {
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly inventory: InventoryService,
     private readonly notifications: NotificationsService,
+    private readonly galleryIngest: GalleryImageIngestService,
   ) {}
 
   private async assertProductNameAvailable(
@@ -247,6 +249,15 @@ export class ProductsService {
             },
             actor,
           );
+        }
+        // Fire-and-forget rehost of any external gallery URLs (CEO directive
+        // 2026-05-11 — bulk import via Excel often paste supplier-CDN links
+        // that vanish without notice). Service no-ops gracefully when S3 env
+        // is unset, and keeps the original URL on per-image failure.
+        const galleryUrls = input.galleryImageUrls ?? [];
+        const needsIngest = galleryUrls.filter((u) => this.galleryIngest.shouldIngestUrl(u));
+        if (needsIngest.length > 0) {
+          void this.galleryIngest.ingestForProduct(product.id, galleryUrls);
         }
         return product;
       });
@@ -514,6 +525,18 @@ export class ProductsService {
         const updated = updatedRows[0];
         if (!updated) {
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update product' });
+        }
+
+        // Fire-and-forget rehost of any newly-set external gallery URLs.
+        // Matches the create path — runs only when the caller explicitly
+        // touched `galleryImageUrls` and at least one entry isn't on our
+        // bucket already.
+        if (input.galleryImageUrls !== undefined) {
+          const galleryUrls = input.galleryImageUrls;
+          const needsIngest = galleryUrls.filter((u) => this.galleryIngest.shouldIngestUrl(u));
+          if (needsIngest.length > 0) {
+            void this.galleryIngest.ingestForProduct(input.productId, galleryUrls);
+          }
         }
 
         return updated;

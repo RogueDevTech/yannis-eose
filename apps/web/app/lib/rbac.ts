@@ -38,6 +38,18 @@ export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
   'HEAD_OF_LOGISTICS',
 ]);
 
+const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'FINANCE_OFFICER',
+  'HEAD_OF_LOGISTICS',
+  'STOCK_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'LOGISTICS_MANAGER',
+  'HR_MANAGER',
+]);
+
 export function isOrgWideDepartmentHead(user: {
   role: string;
   scopeOrgWideHead?: boolean;
@@ -52,6 +64,7 @@ export function canViewAllBranches(user: {
   scopeOrgWideHead?: boolean;
 } | null | undefined): boolean {
   if (!user) return false;
+  if (NON_BRANCH_ASSIGNED_ROLES.has(user.role)) return true;
   if (isAdminLevel(user)) return true;
   if (isOrgWideDepartmentHead(user)) return true;
   const normalized = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));

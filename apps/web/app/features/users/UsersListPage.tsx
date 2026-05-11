@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/react';
+import { Link, useSearchParams, useFetcher } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
@@ -21,7 +21,8 @@ import { SupervisorBadge } from '~/components/ui/supervisor-badge';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableActionButton } from '~/components/ui/table-action-button';
-import { UsersImportModal } from './UsersImportModal';
+// Legacy modal removed (CEO directive 2026-05-11) — Import now opens its own
+// page at `/hr/users/import` so HR can edit rows inline before submitting.
 import { hrUsersShellColumns } from '~/features/hr/HRDeferredLoadingShells';
 import { shellPulsePlaceholderRows } from '~/components/ui/deferred-skeletons';
 
@@ -145,8 +146,6 @@ export function UsersListPage({
   // generated and emailed) which invalidates any older invite link. Easy to fire by accident
   // from a long table, so confirm before sending.
   const [resendConfirm, setResendConfirm] = useState<{ id: string; name: string; email: string } | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
-  const revalidator = useRevalidator();
   const isResending = resendFetcher.state !== 'idle';
 
   useEffect(() => {
@@ -401,16 +400,16 @@ export function UsersListPage({
               <>
                 <PageRefreshButton />
                 {!staffAccounts ? (
-                  <button
-                    type="button"
-                    onClick={() => setImportOpen(true)}
+                  <Link
+                    to="/hr/users/import"
+                    prefetch="intent"
                     className="inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-surface px-3 py-1.5 text-sm font-medium text-app-fg hover:bg-app-hover"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
                     </svg>
                     Import users
-                  </button>
+                  </Link>
                 ) : null}
                 <BranchScopedLink
                   to={`${usersBasePath}/new`}
@@ -427,19 +426,17 @@ export function UsersListPage({
             sheet={({ closeSheet }) => (
               <div className="flex flex-col gap-2 w-full">
                 {!staffAccounts ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setImportOpen(true);
-                      closeSheet();
-                    }}
+                  <Link
+                    to="/hr/users/import"
+                    prefetch="intent"
+                    onClick={closeSheet}
                     className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-app-border bg-app-surface px-3 py-2 text-sm font-medium text-app-fg hover:bg-app-hover"
                   >
                     <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
                     </svg>
                     Import users
-                  </button>
+                  </Link>
                 ) : null}
                 <BranchScopedLink
                   to={`${usersBasePath}/new`}
@@ -825,14 +822,10 @@ export function UsersListPage({
         fetcher={resendFetcher}
         onClose={() => setResendConfirm(null)}
       />
-      <UsersImportModal
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        onComplete={() => {
-          // Refresh the user roster so newly-imported users appear immediately.
-          revalidator.revalidate();
-        }}
-      />
+      {/* The legacy <UsersImportModal/> render-block lived here. Removed
+          alongside the new dedicated /hr/users/import page (CEO directive
+          2026-05-11). The list auto-refreshes when the user navigates back
+          from /hr/users/import via Remix's normal loader cycle. */}
     </div>
   );
 }
