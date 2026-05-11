@@ -25,6 +25,7 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { useToast } from '~/components/ui/toast';
 
 export interface ImportColumn<TResolved> {
   /** Header text shown in the editor's `<thead>`. */
@@ -105,6 +106,10 @@ export interface ImportBulkDataProps<
   parseSuccessMeta?: (data: unknown) => string | undefined;
   /** Fired after the import loop finishes, regardless of outcome. */
   onComplete?: (summary: { created: number; failed: number; total: number }) => void;
+  /** Auto-navigate to `doneHref ?? backHref` once the import loop finishes.
+   *  A summary toast fires first so the operator sees the result; the
+   *  redirect runs ~1.2s later to give them time to read it. */
+  redirectOnComplete?: boolean;
 }
 
 export function ImportBulkData<
@@ -130,8 +135,10 @@ export function ImportBulkData<
   columns,
   parseSuccessMeta,
   onComplete,
+  redirectOnComplete = false,
 }: ImportBulkDataProps<TParsed, TResolved>) {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [parsed, setParsed] = useState<TParsed[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<RowStatus[]>([]);
@@ -268,6 +275,30 @@ export function ImportBulkData<
     setIsImporting(false);
     setImportDone(true);
     onComplete?.({ created: createdAcc, failed: failedAcc, total: resolved.length });
+
+    // Summary toast — single round-up regardless of outcome. Created-count
+    // and resource label come from the consumer's `resourceLabel` prop so it
+    // reads naturally for whichever resource ("3 users created", "5 products
+    // created").
+    const noun = `${resourceLabel}${createdAcc === 1 ? '' : 's'}`;
+    if (createdAcc > 0 && failedAcc === 0) {
+      toast.success(`Import complete`, `${createdAcc} ${noun} created.`);
+    } else if (createdAcc > 0 && failedAcc > 0) {
+      toast.warning(
+        `Import finished with errors`,
+        `${createdAcc} ${noun} created, ${failedAcc} failed.`,
+      );
+    } else if (failedAcc > 0) {
+      toast.error(`Import failed`, `${failedAcc} of ${resolved.length} rows failed.`);
+    }
+
+    if (redirectOnComplete) {
+      // Brief delay so the toast + completed status icons are visible before
+      // we navigate away. The dest defaults to backHref so the operator
+      // lands on the listing they came from.
+      const dest = doneHref ?? backHref;
+      window.setTimeout(() => navigate(dest), 1200);
+    }
   }
 
   const completedCount = statuses.filter((s) => s.state === 'created').length;
@@ -787,17 +818,11 @@ function CellErrorInfoButton({
     <button
       type="button"
       onClick={() => onOpen({ rowNumber, fieldLabel, value, errors })}
-      className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-danger-100 text-danger-700 hover:bg-danger-200 dark:bg-danger-900/40 dark:text-danger-300 dark:hover:bg-danger-900/60 transition-colors"
+      className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-danger-500 text-white shadow-sm ring-2 ring-danger-100 dark:ring-danger-900/60 hover:bg-danger-600 hover:ring-danger-200 dark:bg-danger-500 dark:hover:bg-danger-400 transition-colors"
       aria-label={`Show ${fieldLabel} error details for row ${rowNumber}`}
       title={`Show ${fieldLabel} error details`}
     >
-      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
-        <path
-          fillRule="evenodd"
-          d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-          clipRule="evenodd"
-        />
-      </svg>
+      <span className="font-serif text-[12px] font-bold leading-none italic">i</span>
     </button>
   );
 }

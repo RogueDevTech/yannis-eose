@@ -140,10 +140,11 @@ export class PayrollBatchService {
 
   private async canPrepareDept(user: SessionUser, branchId: string, dept: PayrollDepartment): Promise<boolean> {
     if (canPrepareDeptByRole(user, branchId, dept)) return true;
-    // Departments without branch-team supervisor coverage can be prepared by branch HR manager.
-    if (user.role === 'HR_MANAGER' && user.currentBranchId === branchId && (dept === 'LOGISTICS' || dept === 'HR')) {
-      return true;
-    }
+    // HR Manager is an org-wide role (CEO directive 2026-05-10) — they
+    // can prepare any department on any branch. `canPrepareDeptByRole` above
+    // already catches HR via the `hr.write` permission gate, but be explicit
+    // here so a future tweak to that helper can't accidentally lock HR out.
+    if (user.role === 'HR_MANAGER') return true;
     return this.isBranchTeamSupervisorForDept(user.id, branchId, dept);
   }
 

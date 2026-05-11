@@ -89,10 +89,27 @@ export async function listBranchesForUser(user: {
   role: string;
 }): Promise<Array<{ id: string; name: string; code?: string }>> {
   const db = getDb();
-  const isAdmin = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  // Org-wide roles see every branch — they aren't members of any branch
+  // (per `BRANCH_ELIGIBLE_ROLES`), but their work spans the whole org:
+  // SuperAdmin / Admin manage anything; HR Manager creates / edits staff on
+  // any branch; Finance Officer reconciles every branch's payroll; Head of
+  // Logistics oversees all 3PL locations; org-wide department heads
+  // (HoCS / HoM) need to see every branch when their `currentBranchId` is
+  // null. Without this bypass, `branches.list` returned `[]` for these
+  // roles and the user-create branch dropdown was empty.
+  const SEES_ALL_BRANCHES_ROLES = new Set([
+    'SUPER_ADMIN',
+    'ADMIN',
+    'HR_MANAGER',
+    'FINANCE_OFFICER',
+    'HEAD_OF_LOGISTICS',
+    'HEAD_OF_CS',
+    'HEAD_OF_MARKETING',
+  ]);
+  const seesAll = SEES_ALL_BRANCHES_ROLES.has(user.role);
 
   const fetchRows = async (): Promise<Array<{ id: string; name: string; code?: string }>> => {
-    if (isAdmin) {
+    if (seesAll) {
       return db.select().from(schema.branches);
     }
     const memberships = await db
@@ -112,7 +129,9 @@ export async function listBranchesForUser(user: {
   };
 
   if (!branchesCacheService) return fetchRows();
-  const key = 'cache:branches:list:' + CacheService.hashInput({ viewerId: user.id, isAdmin });
+  // Cache key includes `seesAll` (was `isAdmin`) so an HR Manager and a
+  // Media Buyer can't share a cache entry — they get different rowsets.
+  const key = 'cache:branches:list:' + CacheService.hashInput({ viewerId: user.id, seesAll });
   return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, fetchRows);
 }
 
@@ -239,57 +258,17 @@ async function assertCanManageTeamOrSupervisor(
 
 export const branchesRouter = router({
   /**
-   * List all branches (SuperAdmin) or branches the current user belongs to.
+   * List all branches (SuperAdmin / Admin / HR Manager / Finance Officer /
+   * org-wide department heads) or branches the current user belongs to.
+   *
+   * Delegates to the shared `listBranchesForUser` helper so the role/scope
+   * rules live in exactly one place. The earlier copy of this gate was
+   * out of sync — it only allowed SUPER_ADMIN / ADMIN, locking HR Manager
+   * out of the branch picker on `/hr/users/new` even though they're an
+   * org-wide role (CEO directive 2026-05-10).
    */
   list: authedProcedure.query(async ({ ctx }) => {
-    const db = getDb();
-    const isAdmin = ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
-    if (!branchesCacheService) {
-      if (isAdmin) {
-        return db.select().from(schema.branches);
-      }
-      const memberships = await db
-        .select({ branchId: schema.userBranches.branchId })
-        .from(schema.userBranches)
-        .where(eq(schema.userBranches.userId, ctx.user.id));
-      if (memberships.length === 0) return [];
-      const branchIds: string[] = memberships.map((m) => m.branchId);
-      return db
-        .select()
-        .from(schema.branches)
-        .where(
-          branchIds.length === 1
-            ? eq(schema.branches.id, branchIds[0]!)
-            : inArray(schema.branches.id, branchIds),
-        );
-    }
-
-    const key =
-      'cache:branches:list:' +
-      CacheService.hashInput({
-        viewerId: ctx.user.id,
-        isAdmin,
-      });
-
-    return branchesCacheService.getOrSet(key, BRANCHES_LIST_TTL_SECONDS, async () => {
-      if (isAdmin) {
-        return db.select().from(schema.branches);
-      }
-      const memberships = await db
-        .select({ branchId: schema.userBranches.branchId })
-        .from(schema.userBranches)
-        .where(eq(schema.userBranches.userId, ctx.user.id));
-      if (memberships.length === 0) return [];
-      const branchIds: string[] = memberships.map((m) => m.branchId);
-      return db
-        .select()
-        .from(schema.branches)
-        .where(
-          branchIds.length === 1
-            ? eq(schema.branches.id, branchIds[0]!)
-            : inArray(schema.branches.id, branchIds),
-        );
-    });
+    return listBranchesForUser({ id: ctx.user.id, role: ctx.user.role });
   }),
 
   /**

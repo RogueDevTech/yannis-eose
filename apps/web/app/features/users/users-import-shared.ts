@@ -12,6 +12,15 @@ export interface BranchInfo {
   status: string;
 }
 
+/** Mirrors the backend branching rule: only Marketing, CS, and Branch Admin live in `user_branches`. */
+export const BRANCH_ELIGIBLE_IMPORT_ROLES = new Set([
+  'MEDIA_BUYER',
+  'HEAD_OF_MARKETING',
+  'CS_CLOSER',
+  'HEAD_OF_CS',
+  'BRANCH_ADMIN',
+]);
+
 /**
  * Importable roles — single source for VALID_ROLES + the column-guide reference.
  * SUPER_ADMIN is intentionally omitted (cannot be imported).
@@ -86,17 +95,26 @@ export interface ResolvedRow extends ParsedRow {
 }
 
 export function pickHeaderValue(row: Record<string, unknown>, header: string): string {
-  // Excel header lookups are case-insensitive and treat whitespace / dashes as
-  // equivalent to underscores so the template + a hand-typed sheet both parse.
-  const target = header.toLowerCase().replace(/[\s-]+/g, '_');
+  // Excel header lookups are aggressively normalised: lowercase, treat any run
+  // of whitespace / dashes / dots / slashes as a single underscore, then strip
+  // leading + trailing underscores. That way " Primary Branch", "primary-branch",
+  // "PRIMARY  BRANCH", and a stray BOM all resolve to "primary_branch".
+  const target = normalizeHeader(header);
   for (const key of Object.keys(row)) {
-    if (key.toLowerCase().replace(/[\s-]+/g, '_') === target) {
+    if (normalizeHeader(key) === target) {
       const v = row[key];
       if (v == null) return '';
       return String(v).trim();
     }
   }
   return '';
+}
+
+function normalizeHeader(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[\s\-./]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 export function parseTruthy(v: string): boolean {
@@ -130,14 +148,17 @@ export function resolveRow(parsed: ParsedRow, branches: BranchInfo[]): ResolvedR
       `Unknown role "${parsed.role}". Use a valid role enum (e.g. CS_CLOSER) or label (e.g. "CS Closer").`,
     );
   }
-  const primaryBranchId = resolveBranchId(parsed.primaryBranchInput, branches);
-  if (!primaryBranchId) {
+  const roleNeedsBranch = !!resolvedRole && BRANCH_ELIGIBLE_IMPORT_ROLES.has(resolvedRole);
+  const primaryBranchId = roleNeedsBranch
+    ? resolveBranchId(parsed.primaryBranchInput, branches)
+    : null;
+  if (roleNeedsBranch && !primaryBranchId) {
     errors.push(
       `Unknown primary branch "${parsed.primaryBranchInput}". Use a branch code or full name.`,
     );
   }
   const additionalBranchIds: string[] = [];
-  if (parsed.additionalBranchesInput) {
+  if (roleNeedsBranch && parsed.additionalBranchesInput) {
     const tokens = parsed.additionalBranchesInput
       .split(/[,;|]/)
       .map((t) => t.trim())

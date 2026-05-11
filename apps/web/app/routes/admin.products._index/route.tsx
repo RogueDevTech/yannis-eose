@@ -1,7 +1,7 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import * as React from 'react';
-import { Await, Link, useFetcher, useLoaderData, useRevalidator } from '@remix-run/react';
+import { Await, Link, useFetcher, useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader, invalidateCachedLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, safeStatus } from '~/lib/api.server';
@@ -17,7 +17,6 @@ import { Button } from '~/components/ui/button';
 import { MarketingOffersTab } from '~/features/campaigns/MarketingOffersTab';
 import { OfferGroupCreateModal } from '~/features/campaigns/OfferGroupCreateModal';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
-import { ProductsImportModal } from '~/features/products/ProductsImportModal';
 import { ProductsHubLoadingShell } from '~/features/products/ProductsDeferredLoadingShells';
 import type { Product } from '~/features/products/types';
 import type { OfferGroupRow } from '~/features/campaigns/types';
@@ -281,7 +280,7 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'importProduct') {
-    // Per-row submit from <ProductsImportModal>. Each row is one POST that
+    // Per-row submit from the /admin/products/import page. Each row is one POST that
     // calls `products.create` so the same permission gate, RLS, and audit
     // triggers run as the manual + Add product form. Failure surfaces with
     // `{ error, rowIndex }` so the modal can mark the row failed and keep
@@ -415,8 +414,6 @@ function ProductsRouteInner(
 ) {
   const [uiTab, setUiTab] = React.useState<'product' | 'offers'>(data.initialTab);
   const [showCreateOffer, setShowCreateOffer] = React.useState(false);
-  const [showImportProducts, setShowImportProducts] = React.useState(false);
-  const revalidator = useRevalidator();
 
   const offersFetcher = useFetcher<OffersSummaryApiResponse>();
   const offersFetchStartedRef = React.useRef(false);
@@ -510,14 +507,11 @@ function ProductsRouteInner(
               </Button>
             ) : null}
             {data.canCreateProduct ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowImportProducts(true)}
-              >
-                + Import product
-              </Button>
+              <Link to="/admin/products/import" prefetch="intent">
+                <Button type="button" variant="secondary" size="sm">
+                  + Import product
+                </Button>
+              </Link>
             ) : null}
             {data.canCreateProduct ? (
               <Link to="/admin/products/new" prefetch="intent">
@@ -530,18 +524,7 @@ function ProductsRouteInner(
         }
       />
 
-      {/* Bulk-import modal — lazy-loaded categories, per-row create via the
-          page action's `importProduct` intent. Revalidate on Done so the new
-          rows show up immediately. */}
-      {data.canCreateProduct ? (
-        <ProductsImportModal
-          open={showImportProducts}
-          onClose={() => setShowImportProducts(false)}
-          onComplete={() => revalidator.revalidate()}
-        />
-      ) : null}
-
-      <OverviewStatStrip
+<OverviewStatStrip
         items={[
           { label: 'Products', value: resolved.total, valueClassName: 'text-app-fg' },
           {

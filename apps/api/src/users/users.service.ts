@@ -46,6 +46,14 @@ function sanitizeListUsersSearch(raw: string): string {
   return raw.replace(/[%_\\]/g, ' ').trim();
 }
 
+const BRANCH_ELIGIBLE_ROLES = new Set([
+  'MEDIA_BUYER',
+  'HEAD_OF_MARKETING',
+  'CS_CLOSER',
+  'HEAD_OF_CS',
+  'BRANCH_ADMIN',
+]);
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -462,17 +470,20 @@ export class UsersService {
         message: 'Phone number is required.',
       });
     }
-    const requestedBranchIds = [...new Set(input.branchIds ?? [])];
-    if (input.primaryBranchId && !requestedBranchIds.includes(input.primaryBranchId)) {
+    const roleNeedsBranch = BRANCH_ELIGIBLE_ROLES.has(input.role);
+    const requestedBranchIds = roleNeedsBranch
+      ? [...new Set(input.branchIds ?? [])]
+      : [];
+    if (roleNeedsBranch && input.primaryBranchId && !requestedBranchIds.includes(input.primaryBranchId)) {
       requestedBranchIds.push(input.primaryBranchId);
     }
-    if (requestedBranchIds.length === 0) {
+    if (roleNeedsBranch && requestedBranchIds.length === 0) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'At least one branch is required',
       });
     }
-    if (!input.primaryBranchId) {
+    if (roleNeedsBranch && !input.primaryBranchId) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'Primary branch is required',
@@ -500,15 +511,17 @@ export class UsersService {
         .from(schema.users)
         .where(eq(schema.users.phone, input.phone))
         .limit(1),
-      this.db
-        .select({ id: schema.branches.id })
-        .from(schema.branches)
-        .where(
-          and(
-            inArray(schema.branches.id, requestedBranchIds),
-            eq(schema.branches.status, 'ACTIVE'),
-          ),
-        ),
+      requestedBranchIds.length > 0
+        ? this.db
+            .select({ id: schema.branches.id })
+            .from(schema.branches)
+            .where(
+              and(
+                inArray(schema.branches.id, requestedBranchIds),
+                eq(schema.branches.status, 'ACTIVE'),
+              ),
+            )
+        : Promise.resolve([] as Array<{ id: string }>),
     ]);
 
     if (existingRows[0]) {
@@ -645,14 +658,16 @@ export class UsersService {
         });
       }
 
-      await tx.insert(schema.userBranches).values(
-        requestedBranchIds.map((branchId) => ({
-          userId: createdUser.id,
-          branchId,
-          isPrimary: branchId === input.primaryBranchId,
-          roleInBranch: null,
-        })),
-      );
+      if (requestedBranchIds.length > 0) {
+        await tx.insert(schema.userBranches).values(
+          requestedBranchIds.map((branchId) => ({
+            userId: createdUser.id,
+            branchId,
+            isPrimary: branchId === input.primaryBranchId,
+            roleInBranch: null,
+          })),
+        );
+      }
 
       if (input.productIds && input.productIds.length > 0) {
         await tx.insert(schema.userProductAssignments).values(

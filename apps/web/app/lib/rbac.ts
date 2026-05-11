@@ -134,11 +134,13 @@ export function canEditUser(
   const perms = (viewer.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const has = (code: string) => perms.includes(canonicalPermissionCode(code));
 
-  if (viewer.role === 'HR_MANAGER') {
-    const sameBranch =
-      !!viewer.currentBranchId && target.primaryBranchId === viewer.currentBranchId;
-    return sameBranch ? 'full' : 'none';
-  }
+  // HR_MANAGER is an org-wide role (CEO directive 2026-05-10 — multiple
+  // holders allowed, no branch binding). Their session typically has
+  // `currentBranchId = null` since the branch switcher hides for org-wide
+  // roles. Gating on `sameBranch` always evaluated to `none`, locking HR
+  // out of editing anyone — fix is to grant full access to non-admin
+  // targets. The admin-class target exclusion at line 131 still applies.
+  if (viewer.role === 'HR_MANAGER') return 'full';
 
   if (has('users.staff.update') || has('users.update')) {
     if (isOrgWideDepartmentHead(viewer)) return 'full';
