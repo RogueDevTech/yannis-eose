@@ -7,7 +7,7 @@ import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { AuditPage } from '~/features/audit/AuditPage';
 import { AuditLoadingShell } from '~/features/audit/AuditLoadingShell';
-import type { AuditActorFilterOption, AuditEntry, AuditStreamData } from '~/features/audit/types';
+import type { AuditActorFilterOption, AuditEntry, AuditStreamData, PermissionNameMap } from '~/features/audit/types';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 
@@ -85,6 +85,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       actorIds: [],
       actorFilterOptions,
       locationNames: {},
+      permissionNames: {},
       error,
     } satisfies AuditStreamData;
   }
@@ -115,28 +116,51 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const actorIds = [...ids];
 
   const LOCATION_REF_KEYS = ['from_location_id', 'fromLocationId', 'to_location_id', 'toLocationId'] as const;
+  const PERMISSION_REF_KEYS = ['permission_id', 'permissionId'] as const;
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
   const locationIdsSet = new Set<string>();
+  const permissionIdsSet = new Set<string>();
   for (const row of result.rows) {
-    if (row.tableName !== 'stock_transfers') continue;
     const data = row.data as Record<string, unknown>;
-    for (const field of LOCATION_REF_KEYS) {
-      const v = data[field];
-      if (typeof v === 'string' && UUID_RE.test(v)) locationIdsSet.add(v);
+    if (row.tableName === 'stock_transfers') {
+      for (const field of LOCATION_REF_KEYS) {
+        const v = data[field];
+        if (typeof v === 'string' && UUID_RE.test(v)) locationIdsSet.add(v);
+      }
+    }
+    if (row.tableName === 'user_permissions') {
+      for (const field of PERMISSION_REF_KEYS) {
+        const v = data[field];
+        if (typeof v === 'string' && UUID_RE.test(v)) permissionIdsSet.add(v);
+      }
     }
   }
 
   let locationNames: Record<string, string> = {};
+  let permissionNames: PermissionNameMap = {};
   const locationIds = [...locationIdsSet];
-  if (locationIds.length > 0) {
-    const locRes = await apiRequest<unknown>(
-      `/trpc/audit.locationNames?input=${encodeURIComponent(JSON.stringify({ locationIds }))}`,
-      { method: 'GET', cookie },
-    );
-    if (locRes.ok) {
-      const locParsed = locRes.data as { result?: { data?: Record<string, string> } };
-      locationNames = locParsed?.result?.data ?? {};
-    }
+  const permissionIds = [...permissionIdsSet];
+  const [locRes, permRes] = await Promise.all([
+    locationIds.length > 0
+      ? apiRequest<unknown>(
+          `/trpc/audit.locationNames?input=${encodeURIComponent(JSON.stringify({ locationIds }))}`,
+          { method: 'GET', cookie },
+        )
+      : Promise.resolve(null),
+    permissionIds.length > 0
+      ? apiRequest<unknown>(
+          `/trpc/audit.permissionNames?input=${encodeURIComponent(JSON.stringify({ permissionIds }))}`,
+          { method: 'GET', cookie },
+        )
+      : Promise.resolve(null),
+  ]);
+  if (locRes?.ok) {
+    const locParsed = locRes.data as { result?: { data?: Record<string, string> } };
+    locationNames = locParsed?.result?.data ?? {};
+  }
+  if (permRes?.ok) {
+    const permParsed = permRes.data as { result?: { data?: PermissionNameMap } };
+    permissionNames = permParsed?.result?.data ?? {};
   }
 
   return {
@@ -145,6 +169,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     actorIds,
     actorFilterOptions,
     locationNames,
+    permissionNames,
   } satisfies AuditStreamData;
   })();
 
@@ -209,6 +234,7 @@ export default function AuditRoute() {
             actorIds={data.actorIds}
             actorFilterOptions={data.actorFilterOptions ?? []}
             locationNames={data.locationNames ?? {}}
+            permissionNames={data.permissionNames ?? {}}
             error={data.error}
             canExport={canExport}
           />

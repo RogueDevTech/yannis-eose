@@ -15,6 +15,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { OrderDetailPage } from '~/features/orders/OrderDetailPage';
 import { OrderDetailSkeleton } from '~/features/orders/OrderDetailSkeleton';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import type {
   CallLogEntry,
   OrderDetail,
@@ -39,6 +40,15 @@ function logOrderDetailLoaderWarning(orderId: string, callName: string, detail?:
 function branchIdFromForm(formData: FormData): { branchId: string } | Record<string, never> {
   const b = formData.get('branchId')?.toString()?.trim();
   return b ? { branchId: b } : {};
+}
+
+const ORDER_DETAIL_ACTION_PERMISSION = canonicalPermissionCode('orders.detail.manage');
+
+function canManageOrderDetail(user: { role: string; permissions?: string[] } | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === 'SUPER_ADMIN') return true;
+  const perms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
+  return perms.has(ORDER_DETAIL_ACTION_PERMISSION);
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -260,7 +270,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   return defer({
     pageData: orderDetailPromise.then((orderDetail) => ({
       orderDetail,
-      canEditOrder: user.role !== 'MEDIA_BUYER',
+      canEditOrder: canManageOrderDetail(user),
       userRole: user.role,
       userId: user.id,
       currentBranchId: user.currentBranchId ?? null,
@@ -291,6 +301,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getCurrentUser(request);
   if (!user) {
     return json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
+  if (intent && !canManageOrderDetail(user)) {
+    return json(
+      { error: 'This order is view-only for your permissions' },
+      { status: 403 },
+    );
   }
 
   if (intent === 'assignToCS') {

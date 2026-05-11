@@ -42,19 +42,29 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
         </div>
 
         {/* Dates — PDF labels "Date:" / "Due:" */}
-        <div className="mt-2 space-y-1 text-[9px] leading-snug" style={{ color: 'rgb(100, 100, 100)' }}>
+        <div
+          className="mt-2 space-y-1 text-[9px] leading-snug"
+          style={{ color: 'rgb(100, 100, 100)' }}
+        >
           <p>Date: {dateStr(invoice.createdAt)}</p>
           {invoice.dueDate ? <p>Due: {dateStr(invoice.dueDate)}</p> : null}
         </div>
 
         {/* BILL TO */}
         <div className="mt-6">
-          <p className="text-[9px] font-bold uppercase tracking-normal" style={{ color: 'rgb(100, 100, 100)' }}>
+          <p
+            className="text-[9px] font-bold uppercase tracking-normal"
+            style={{ color: 'rgb(100, 100, 100)' }}
+          >
             BILL TO
           </p>
-          <p className="mt-1 text-[10px] font-normal leading-snug text-black">{invoice.recipientInfo.name?.trim() || '—'}</p>
+          <p className="mt-1 text-[10px] font-normal leading-snug text-black">
+            {invoice.recipientInfo.name?.trim() || '—'}
+          </p>
           {invoice.recipientInfo.address ? (
-            <p className="mt-1 text-[9px] leading-snug text-black whitespace-pre-wrap">{invoice.recipientInfo.address}</p>
+            <p className="mt-1 text-[9px] leading-snug text-black whitespace-pre-wrap">
+              {invoice.recipientInfo.address}
+            </p>
           ) : null}
           {invoice.recipientInfo.email ? (
             <p className="mt-1 text-[9px] leading-snug text-black">{invoice.recipientInfo.email}</p>
@@ -69,16 +79,28 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
           <table className="w-full table-fixed border-collapse text-[9px]">
             <thead>
               <tr style={{ backgroundColor: 'rgb(245, 245, 245)' }}>
-                <th className="px-1.5 py-2 text-left font-bold align-bottom" style={{ color: 'rgb(80, 80, 80)' }}>
+                <th
+                  className="px-1.5 py-2 text-left font-bold align-bottom"
+                  style={{ color: 'rgb(80, 80, 80)' }}
+                >
                   Description
                 </th>
-                <th className="w-10 px-1 py-2 text-right font-bold align-bottom" style={{ color: 'rgb(80, 80, 80)' }}>
+                <th
+                  className="w-10 px-1 py-2 text-right font-bold align-bottom"
+                  style={{ color: 'rgb(80, 80, 80)' }}
+                >
                   Qty
                 </th>
-                <th className="w-[72px] px-1 py-2 text-right font-bold align-bottom" style={{ color: 'rgb(80, 80, 80)' }}>
+                <th
+                  className="w-[72px] px-1 py-2 text-right font-bold align-bottom"
+                  style={{ color: 'rgb(80, 80, 80)' }}
+                >
                   Unit Price
                 </th>
-                <th className="w-[72px] px-1 py-2 text-right font-bold align-bottom" style={{ color: 'rgb(80, 80, 80)' }}>
+                <th
+                  className="w-[72px] px-1 py-2 text-right font-bold align-bottom"
+                  style={{ color: 'rgb(80, 80, 80)' }}
+                >
                   Amount
                 </th>
               </tr>
@@ -91,10 +113,16 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
                     <td className="px-1.5 py-1.5 pr-2 align-top">{li.description}</td>
                     <td className="py-1.5 text-right tabular-nums align-top">{li.quantity}</td>
                     <td className="py-1.5 text-right tabular-nums align-top">
-                      {formatNaira(Number(li.unitPrice), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatNaira(Number(li.unitPrice), {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                     <td className="py-1.5 text-right tabular-nums align-top">
-                      {formatNaira(lineTotal, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatNaira(lineTotal, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
                     </td>
                   </tr>
                 );
@@ -125,22 +153,30 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
           <div className="flex w-[200px] max-w-full justify-between gap-4 text-[11px] font-bold">
             <span className="text-black">TOTAL:</span>
             <span className="tabular-nums text-right text-black">
-              {formatNaira(Number(invoice.totalAmount), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatNaira(Number(invoice.totalAmount), {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </span>
           </div>
         </div>
 
+        {/* Paid stamp — render after the invoice content so it never covers rows/totals. */}
+        {invoice.markedPaid ? (
+          <div className="mt-5 flex justify-end pr-2">
+            <PaidStamp />
+          </div>
+        ) : null}
+
         {/* Footer — PDF: Generated by Yannis left, Page 1 of N right */}
-        <div className="mt-10 flex justify-between text-[8px] leading-none" style={{ color: 'rgb(150, 150, 150)' }}>
+        <div
+          className="mt-10 flex justify-between text-[8px] leading-none"
+          style={{ color: 'rgb(150, 150, 150)' }}
+        >
           <span>Generated by Yannis</span>
           <span>Page 1 of 1</span>
         </div>
       </div>
-
-      {/* Rubber stamp — bottom-right, rotated, double border, brand red. Only
-          renders when the order's cash remittance has been confirmed received.
-          `pointer-events-none` so the stamp doesn't block clicks on text behind. */}
-      {invoice.markedPaid ? <PaidStamp /> : null}
     </div>
   );
 }
@@ -152,11 +188,11 @@ function PaidStamp() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute bottom-6 right-6 select-none"
+      className="pointer-events-none select-none"
       style={{ transform: 'rotate(-12deg)', opacity: 0.85 }}
     >
       <div
-        className="rounded-md border-[3px] px-3 py-1.5"
+        className="rounded-md border-[3px] px-4 py-1.5"
         style={{
           borderColor: PAID_STAMP_INK,
           color: PAID_STAMP_INK,

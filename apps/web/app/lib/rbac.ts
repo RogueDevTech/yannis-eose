@@ -208,31 +208,19 @@ export function canMirror(
   const normalized = perms.map((p) => canonicalPermissionCode(p));
   if (normalized.includes('mirror.any.manage')) return true;
 
-  if (isOrgWideDepartmentHead(actor)) {
-    if ((actor.role === 'HEAD_OF_CS' || normalized.includes('mirror.cs_team.manage')) && target.role === 'CS_CLOSER')
-      return true;
-    if (
-      (actor.role === 'HEAD_OF_MARKETING' || normalized.includes('mirror.marketing_team.manage')) &&
-      target.role === 'MEDIA_BUYER'
-    )
-      return true;
-    if (
-      (actor.role === 'HEAD_OF_LOGISTICS' || normalized.includes('mirror.logistics_chain.manage')) &&
-      HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role)
-    )
-      return true;
-    return false;
-  }
+  if ((actor.role === 'HEAD_OF_CS' || normalized.includes('mirror.cs_team.manage')) && target.role === 'CS_CLOSER')
+    return true;
+  if (
+    (actor.role === 'HEAD_OF_MARKETING' || normalized.includes('mirror.marketing_team.manage')) &&
+    target.role === 'MEDIA_BUYER'
+  )
+    return true;
+  if (
+    (actor.role === 'HEAD_OF_LOGISTICS' || normalized.includes('mirror.logistics_chain.manage')) &&
+    HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role)
+  )
+    return true;
 
-  const sameBranch =
-    !!actor.currentBranchId && target.primaryBranchId === actor.currentBranchId;
-  if (!sameBranch) return false;
-
-  // Branch supervisors + delegated mirror permissions are enforced server-side in
-  // `branches.canMirrorToUser` / `AuthService.startMirror`. UI stays conservative.
-  return (
-    normalized.includes('mirror.cs_team.manage') ||
-    normalized.includes('mirror.marketing_team.manage') ||
-    normalized.includes('mirror.logistics_chain.manage')
-  );
+  // Branch supervisors are still resolved server-side from the live branch-team graph.
+  return false;
 }

@@ -41,6 +41,7 @@ export interface ActorRecord {
 }
 
 export type ActorMap = Record<string, ActorRecord>;
+export type PermissionNameMap = Record<string, string>;
 
 /** Preloaded `/admin/analytics/audit` actor filter options (SSR). */
 export interface AuditActorFilterOption {
@@ -58,6 +59,8 @@ export interface AuditPageProps {
   actorFilterOptions: AuditActorFilterOption[];
   /** Logistics location display names keyed by UUID (SSR-resolved for `stock_transfers` rows). */
   locationNames: Record<string, string>;
+  /** Permission codes keyed by permission UUID (SSR-resolved for `user_permissions` rows). */
+  permissionNames: PermissionNameMap;
   error?: string;
   /**
    * When false (default), the Export button is hidden. Server still enforces
@@ -74,5 +77,6 @@ export interface AuditStreamData {
   actorIds: string[];
   actorFilterOptions: AuditActorFilterOption[];
   locationNames: Record<string, string>;
+  permissionNames: PermissionNameMap;
   error?: string;
 }

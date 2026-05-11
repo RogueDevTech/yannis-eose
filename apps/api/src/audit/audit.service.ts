@@ -2,7 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
 import type postgres from 'postgres';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { and, asc, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db as schema } from '@yannis/shared';
 import { PG_CLIENT, DRIZZLE } from '../database/database.module';
 import { shouldScopeGlobalAuditToBranch, type GlobalAuditAccessUser } from '../common/authz';
@@ -252,6 +252,25 @@ export class AuditService {
     const map: Record<string, string> = {};
     for (const r of rows) {
       map[r.id] = r.name;
+    }
+    return map;
+  }
+
+  /**
+   * Resolve permission UUIDs to canonical permission codes for audit copy.
+   * Used by `/admin/analytics/audit` when rendering `user_permissions` rows.
+   */
+  async getPermissionCodeMap(permissionIds: string[]): Promise<Record<string, string>> {
+    if (permissionIds.length === 0) return {};
+    const uniqueIds = [...new Set(permissionIds)];
+    const rows = await this.db
+      .select({ id: schema.permissions.id, code: schema.permissions.code })
+      .from(schema.permissions)
+      .where(and(inArray(schema.permissions.id, uniqueIds), isNull(schema.permissions.validTo)));
+
+    const map: Record<string, string> = {};
+    for (const row of rows) {
+      map[row.id] = row.code;
     }
     return map;
   }

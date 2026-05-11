@@ -19,7 +19,13 @@ import { CompactTable, CompactTableActionButton, type CompactTableColumn } from 
 import { TextInput } from '~/components/ui/text-input';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { Spinner } from '~/components/ui/spinner';
-import type { ActorMap, AuditActorFilterOption, AuditEntry, AuditPageProps } from './types';
+import type {
+  ActorMap,
+  AuditActorFilterOption,
+  AuditEntry,
+  AuditPageProps,
+  PermissionNameMap,
+} from './types';
 import {
   resolveActor,
   getActorDisplay,
@@ -168,6 +174,8 @@ const FIELD_LABELS: Record<string, string> = {
   requester_id: 'Requester',
   submitted_by: 'Submitted By',
   resolved_by: 'Resolved By',
+  permission_id: 'Permission',
+  permissionId: 'Permission',
   digital_count: 'Digital Count',
   physical_count: 'Physical Count',
   discrepancy: 'Discrepancy',
@@ -289,7 +297,13 @@ function formatOffers(val: unknown): string {
   }).join('\n');
 }
 
-function formatValue(key: string, val: unknown, actorNames: ActorMap, asOf: string): string {
+function formatValue(
+  key: string,
+  val: unknown,
+  actorNames: ActorMap,
+  asOf: string,
+  permissionNames: PermissionNameMap,
+): string {
   if (val === null || val === undefined) return '-';
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
 
@@ -302,6 +316,10 @@ function formatValue(key: string, val: unknown, actorNames: ActorMap, asOf: stri
   // Status/role enum values
   if (STATUS_LABELS[strVal]) return STATUS_LABELS[strVal];
   if (ROLE_LABELS[strVal]) return ROLE_LABELS[strVal];
+
+  if (isUUID(val) && (key === 'permission_id' || key === 'permissionId')) {
+    return permissionNames[strVal] ?? `${strVal.slice(0, 8)}...`;
+  }
 
   // UUID fields that reference users — resolve to name AS OF the audit row's timestamp.
   // Renamed/role-changed users still render with their identity at that moment in history.
@@ -462,17 +480,24 @@ function AuditDescription({
   entry,
   actorNames,
   locationNames,
+  permissionNames,
 }: {
   entry: AuditEntry;
   actorNames: ActorMap;
   locationNames: Record<string, string>;
+  permissionNames: PermissionNameMap;
 }) {
   const warePieces = getAuditDescriptionPieces(entry, actorNames, locationNames);
   if (warePieces) {
     return <span className="break-words whitespace-normal text-app-fg">{describeAuditPieces(warePieces)}</span>;
   }
 
-  const { prefix, entityLabel, suffix } = getAuditSummaryParts(entry, actorNames, locationNames);
+  const { prefix, entityLabel, suffix } = getAuditSummaryParts(
+    entry,
+    actorNames,
+    locationNames,
+    permissionNames,
+  );
   const href = getEntityLink(entry.tableName, entry.recordId, entry.data);
 
   if (href && entityLabel) {
@@ -500,6 +525,7 @@ type StructuredValueProps = {
   value: unknown;
   fieldKey?: string;
   actorNames: ActorMap;
+  permissionNames: PermissionNameMap;
   /** Audit row's `validFrom` — drives time-aware actor resolution inside the structured display. */
   asOf: string;
   depth?: number;
@@ -510,6 +536,7 @@ function formatLeafValue(
   val: unknown,
   actorNames: ActorMap,
   asOf: string,
+  permissionNames: PermissionNameMap,
 ): React.ReactNode {
   if (val === null || val === undefined) return <span className="text-app-fg-muted">-</span>;
   if (typeof val === 'boolean') return val ? 'Yes' : 'No';
@@ -519,6 +546,9 @@ function formatLeafValue(
   const strVal = String(val);
   if (STATUS_LABELS[strVal]) return STATUS_LABELS[strVal];
   if (ROLE_LABELS[strVal]) return ROLE_LABELS[strVal];
+  if (isUUID(val) && (key === 'permission_id' || key === 'permissionId')) {
+    return permissionNames[strVal] ?? `${strVal.slice(0, 8)}...`;
+  }
   if (isUUID(val) && (key.endsWith('_id') || key === 'created_by' || key === 'approved_by' || key === 'locked_by')) {
     const actor = resolveActor(actorNames, strVal, asOf);
     if (actor) {
@@ -549,7 +579,14 @@ function formatLeafValue(
 
 const MAX_STRUCTURED_DEPTH = 10;
 
-function StructuredValueDisplay({ value, fieldKey = '', actorNames, asOf, depth = 0 }: StructuredValueProps): React.ReactNode {
+function StructuredValueDisplay({
+  value,
+  fieldKey = '',
+  actorNames,
+  permissionNames,
+  asOf,
+  depth = 0,
+}: StructuredValueProps): React.ReactNode {
   if (depth > MAX_STRUCTURED_DEPTH) {
     return <span className="text-app-fg-muted italic">(nested too deep)</span>;
   }
@@ -576,7 +613,7 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, asOf, depth 
   }
 
   if (typeof resolved === 'string') {
-    return formatLeafValue(fieldKey, resolved, actorNames, asOf);
+    return formatLeafValue(fieldKey, resolved, actorNames, asOf, permissionNames);
   }
 
   if (Array.isArray(resolved)) {
@@ -594,9 +631,16 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, asOf, depth 
                     </dt>
                     <dd className="text-app-fg">
                       {typeof v === 'object' && v !== null ? (
-                        <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} asOf={asOf} depth={depth + 1} />
+                        <StructuredValueDisplay
+                          value={v}
+                          fieldKey={k}
+                          actorNames={actorNames}
+                          permissionNames={permissionNames}
+                          asOf={asOf}
+                          depth={depth + 1}
+                        />
                       ) : (
-                        formatLeafValue(k, v, actorNames, asOf)
+                        formatLeafValue(k, v, actorNames, asOf, permissionNames)
                       )}
                     </dd>
                   </div>
@@ -605,9 +649,16 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, asOf, depth 
             ) : (
               <span className="text-app-fg-muted">
                 {typeof item === 'object' && item !== null ? (
-                  <StructuredValueDisplay value={item} fieldKey={String(i)} actorNames={actorNames} asOf={asOf} depth={depth + 1} />
+                  <StructuredValueDisplay
+                    value={item}
+                    fieldKey={String(i)}
+                    actorNames={actorNames}
+                    permissionNames={permissionNames}
+                    asOf={asOf}
+                    depth={depth + 1}
+                  />
                 ) : (
-                  formatLeafValue(String(i), item, actorNames, asOf)
+                  formatLeafValue(String(i), item, actorNames, asOf, permissionNames)
                 )}
               </span>
             )}
@@ -629,9 +680,16 @@ function StructuredValueDisplay({ value, fieldKey = '', actorNames, asOf, depth 
             </dt>
             <dd className="mt-0.5 pl-2 border-l-2 border-app-border">
               {typeof v === 'object' && v !== null ? (
-                <StructuredValueDisplay value={v} fieldKey={k} actorNames={actorNames} asOf={asOf} depth={depth + 1} />
+                <StructuredValueDisplay
+                  value={v}
+                  fieldKey={k}
+                  actorNames={actorNames}
+                  permissionNames={permissionNames}
+                  asOf={asOf}
+                  depth={depth + 1}
+                />
               ) : (
-                formatLeafValue(k, v, actorNames, asOf)
+                formatLeafValue(k, v, actorNames, asOf, permissionNames)
               )}
             </dd>
           </div>
@@ -675,6 +733,7 @@ function DetailModal({
   entry,
   actorNames,
   locationNames,
+  permissionNames,
   onClose,
   onUnknownActorClick,
   onPreviewImage,
@@ -682,6 +741,7 @@ function DetailModal({
   entry: AuditEntry;
   actorNames: ActorMap;
   locationNames: Record<string, string>;
+  permissionNames: PermissionNameMap;
   onClose: () => void;
   onUnknownActorClick?: (changedBy: string | null, displayName: string) => void;
   onPreviewImage?: (url: string) => void;
@@ -708,7 +768,7 @@ function DetailModal({
               Record Detail
             </h3>
             <p className="text-sm text-app-fg mt-1 max-w-xl leading-snug">
-              {generateAuditDescription(entry, actorNames, locationNames)}
+              {generateAuditDescription(entry, actorNames, locationNames, permissionNames)}
             </p>
             <p className="text-xs text-app-fg-muted mt-1">
               {formatAuditTableName(entry.tableName)} &middot; {entry.recordId.slice(0, 8)}...
@@ -793,10 +853,16 @@ function DetailModal({
                     ) : (typeof r.value === 'object' && r.value !== null) ||
                       (typeof r.value === 'string' && (r.value.startsWith('{') || r.value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
-                        <StructuredValueDisplay value={r.value} fieldKey={r.key} actorNames={actorNames} asOf={asOf} />
+                        <StructuredValueDisplay
+                          value={r.value}
+                          fieldKey={r.key}
+                          actorNames={actorNames}
+                          permissionNames={permissionNames}
+                          asOf={asOf}
+                        />
                       </div>
                     ) : (
-                      formatValue(r.key, r.value, actorNames, asOf)
+                      formatValue(r.key, r.value, actorNames, asOf, permissionNames)
                     )}
                   </div>
                 ),
@@ -870,9 +936,11 @@ function PollingStatusIndicator({
 
 function TimeTravelPanel({
   actorNames,
+  permissionNames,
   onPreviewImage,
 }: {
   actorNames: ActorMap;
+  permissionNames: PermissionNameMap;
   onPreviewImage?: (url: string) => void;
 }) {
   const fetcher = useFetcher();
@@ -969,10 +1037,16 @@ function TimeTravelPanel({
                     ) : (typeof r.value === 'object' && r.value !== null) ||
                       (typeof r.value === 'string' && (r.value.startsWith('{') || r.value.startsWith('['))) ? (
                       <div className="py-1.5 min-w-0">
-                        <StructuredValueDisplay value={r.value} fieldKey={r.key} actorNames={actorNames} asOf={ttAsOf} />
+                        <StructuredValueDisplay
+                          value={r.value}
+                          fieldKey={r.key}
+                          actorNames={actorNames}
+                          permissionNames={permissionNames}
+                          asOf={ttAsOf}
+                        />
                       </div>
                     ) : (
-                      formatValue(r.key, r.value, actorNames, ttAsOf)
+                      formatValue(r.key, r.value, actorNames, ttAsOf, permissionNames)
                     )}
                   </div>
                 ),
@@ -998,6 +1072,7 @@ export function AuditPage({
   actorIds,
   actorFilterOptions,
   locationNames,
+  permissionNames,
   error,
   canExport = false,
 }: AuditPageProps) {
@@ -1257,7 +1332,7 @@ export function AuditPage({
         rows={rows.map((entry) => ({
           timestamp: formatDate(entry.validFrom),
           table: formatAuditTableName(entry.tableName),
-          description: generateAuditDescription(entry, actorNames, locationNames),
+          description: generateAuditDescription(entry, actorNames, locationNames, permissionNames),
           actor: getActorDisplay(entry.changedBy, actorNames, entry.validFrom),
           recordId: entry.recordId,
           validTo: entry.validTo ? formatDate(entry.validTo) : 'Current',
@@ -1310,7 +1385,12 @@ export function AuditPage({
                       <span>Loading…</span>
                     </span>
                   ) : (
-                    <AuditDescription entry={entry} actorNames={actorNames} locationNames={locationNames} />
+                    <AuditDescription
+                      entry={entry}
+                      actorNames={actorNames}
+                      locationNames={locationNames}
+                      permissionNames={permissionNames}
+                    />
                   ),
               },
               {
@@ -1387,7 +1467,12 @@ export function AuditPage({
                       <span>Loading…</span>
                     </span>
                   ) : (
-                    <AuditDescription entry={entry} actorNames={actorNames} locationNames={locationNames} />
+                    <AuditDescription
+                      entry={entry}
+                      actorNames={actorNames}
+                      locationNames={locationNames}
+                      permissionNames={permissionNames}
+                    />
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1446,7 +1531,11 @@ export function AuditPage({
       />
 
       {/* Time Travel Panel — actor names loaded post-mount */}
-      <TimeTravelPanel actorNames={actorNames} onPreviewImage={(url) => setPreviewImageUrl(url)} />
+      <TimeTravelPanel
+        actorNames={actorNames}
+        permissionNames={permissionNames}
+        onPreviewImage={(url) => setPreviewImageUrl(url)}
+      />
 
       {/* Detail Modal — uses resolved actorNames */}
       {selectedEntry && (
@@ -1454,6 +1543,7 @@ export function AuditPage({
           entry={selectedEntry}
           actorNames={actorNames}
           locationNames={locationNames}
+          permissionNames={permissionNames}
           onClose={() => setSelectedEntry(null)}
           onUnknownActorClick={(changedBy, displayName) => {
             setSelectedEntry(null);

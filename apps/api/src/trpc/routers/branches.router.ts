@@ -860,6 +860,7 @@ export const branchesRouter = router({
       const actor = {
         id: ctx.user.id,
         role: ctx.user.role,
+        permissions: ctx.user.permissions ?? [],
         currentBranchId: ctx.user.currentBranchId ?? null,
         mirroredBy: ctx.user.mirroredBy ?? null,
       };

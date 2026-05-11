@@ -238,10 +238,13 @@ const HEAD_OF_LOGISTICS_MIRRORABLE = new Set<string>([
  *
  * Rules (per CEO directive):
  * - SuperAdmin / Admin can mirror anyone EXCEPT another admin-level user.
- * - HEAD_OF_CS can mirror any CS_CLOSER (org-wide head — not limited to a single branch).
+ * - HEAD_OF_CS can mirror any CS_CLOSER.
  * - HEAD_OF_MARKETING can mirror any MEDIA_BUYER.
- * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER org-wide.
- * - Branch team supervisors mirror via `BranchTeamsService.actorCanMirrorViaSupervision` (same branch).
+ * - HEAD_OF_LOGISTICS can mirror LOGISTICS_MANAGER / TPL_MANAGER / TPL_RIDER / STOCK_MANAGER.
+ * - Branch team supervisors mirror via `BranchTeamsService.actorCanMirrorViaSupervision`.
+ * - Department-head mirror powers are tied to the direct-report role matrix above,
+ *   not to `scopeOrgWideHead`. Head of Marketing no longer keeps org-wide branch
+ *   visibility by default, but should still retain the HoM -> Media Buyer mirror power.
  * - HR_MANAGER cannot mirror anyone (per directive — HR doesn't need it).
  * - Nobody can mirror themselves.
  *
@@ -321,25 +324,18 @@ export function canMirror(
   const perms = actor.permissions ?? [];
   if (perms.includes('mirror.any')) return true;
 
-  if (isOrgWideDepartmentHead(actor)) {
-    if ((actor.role === 'HEAD_OF_CS' || perms.includes('mirror.cs_team')) && target.role === 'CS_CLOSER')
-      return true;
-    if (
-      (actor.role === 'HEAD_OF_MARKETING' || perms.includes('mirror.marketing_team')) &&
-      target.role === 'MEDIA_BUYER'
-    )
-      return true;
-    if (
-      (actor.role === 'HEAD_OF_LOGISTICS' || perms.includes('mirror.logistics_chain')) &&
-      HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role)
-    )
-      return true;
-    return false;
-  }
-
-  const sameBranch =
-    !!actor.currentBranchId && target.primaryBranchId === actor.currentBranchId;
-  if (!sameBranch) return false;
+  if ((actor.role === 'HEAD_OF_CS' || perms.includes('mirror.cs_team')) && target.role === 'CS_CLOSER')
+    return true;
+  if (
+    (actor.role === 'HEAD_OF_MARKETING' || perms.includes('mirror.marketing_team')) &&
+    target.role === 'MEDIA_BUYER'
+  )
+    return true;
+  if (
+    (actor.role === 'HEAD_OF_LOGISTICS' || perms.includes('mirror.logistics_chain')) &&
+    HEAD_OF_LOGISTICS_MIRRORABLE.has(target.role)
+  )
+    return true;
 
   return false;
 }

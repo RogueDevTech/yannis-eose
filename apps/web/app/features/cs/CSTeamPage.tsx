@@ -14,6 +14,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Button } from '~/components/ui/button';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
+import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import {
@@ -57,6 +58,7 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
   return (
     <div className={embedded ? 'space-y-3' : 'card'}>
       <div className="flex items-start gap-3 mb-3">
+        <CompactUserAvatar name={member.name} />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-app-fg truncate">
             {member.name}
@@ -153,7 +155,10 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
         key: 'member',
         header: 'Member',
         render: (member) => (
-          <span className="font-medium text-app-fg truncate">{member.name}</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <CompactUserAvatar name={member.name} />
+            <span className="font-medium text-app-fg truncate">{member.name}</span>
+          </div>
         ),
       },
       {

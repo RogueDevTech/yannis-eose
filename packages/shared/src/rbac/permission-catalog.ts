@@ -147,6 +147,13 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   // bypass; every other gate runs through a code so admins can deputize via the
   // matrix without code changes.
   { code: 'orders.line_price.edit', resource: 'orders.line_price', action: 'edit', description: 'Edit line unit prices (and derived totals) on confirmed orders. Branch / supervisor scoping still applies.' },
+  {
+    code: 'orders.detail.manage',
+    resource: 'orders.detail',
+    action: 'manage',
+    description:
+      'Use mutable controls on the admin order-detail page (call, callback, assignment, status actions, and related requests). Order/service-level scope checks still apply.',
+  },
   { code: 'orders.confirm.bypass_call_gate', resource: 'orders.confirm', action: 'bypass_call_gate', description: 'Confirm an order without the 15-second call-duration evidence (off-platform 3PL workflows)' },
   { code: 'orders.delivery.confirm', resource: 'orders.delivery', action: 'confirm', description: 'Mark an order DELIVERED via the CS / Logistics rider-proxy path' },
   { code: 'orders.update.any_branch', resource: 'orders.update', action: 'any_branch', description: 'Update orders that have no branch context (org-wide heads)' },
@@ -216,6 +223,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'branches.teams.cs',
     'branches.teams.marketing',
     'orders.line_price.edit',
+    'orders.detail.manage',
     'orders.confirm.bypass_call_gate',
     'orders.delivery.confirm',
     'orders.assign',
@@ -304,6 +312,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'messaging.templates.create',
     'messaging.templates.update',
     'orders.line_price.edit',
+    'orders.detail.manage',
     'orders.confirm.bypass_call_gate',
     'orders.delivery.confirm',
     'orders.update.any_branch',
@@ -324,6 +333,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'orders.scheduledCallbacks',
     'orders.flaggedDuplicates',
     'orders.dismissDuplicate',
+    'orders.detail.manage',
     'cs.leaderboard',
     'cart.read',
     'orders.createOffline',
@@ -376,6 +386,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'logistics.deliveryConfirmation.submit',
     'logistics.deliveryConfirmation.review',
     'orders.line_price.edit',
+    'orders.detail.manage',
     'orders.delivery.confirm',
     'orders.update.any_branch',
     // HoLogistics approves logistics-side order-domain requests (per-order branch
@@ -430,6 +441,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   HR_MANAGER: [
     'hr.read',
     'hr.write',
+    'hr.approveAdjustment',
     'users.read',
     'users.create',
     'users.update',

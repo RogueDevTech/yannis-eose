@@ -64,4 +64,26 @@ describe.skipIf(SKIP_IF_NO_DB)('BranchTeamsService — supervision mirror helper
     );
     expect(ok).toBe(false);
   });
+
+  it('actorCanMirrorViaSupervision is true for a direct supervisee even without an active branch', async () => {
+    const branch = await createTestBranch(db as any);
+    const sup = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    const buyer = await createTestUser(db as any, { role: 'MEDIA_BUYER' });
+    await db.insert(schema.userBranches).values([
+      { userId: sup.id, branchId: branch.id, isPrimary: true },
+      { userId: buyer.id, branchId: branch.id, isPrimary: true },
+    ]);
+    const team = await insertTestBranchTeam(db as any, branch.id, 'MARKETING', 'Buyers');
+    await db.insert(schema.branchTeamMembers).values([
+      { teamId: team!.id, userId: sup.id, isSupervisor: true },
+      { teamId: team!.id, userId: buyer.id, isSupervisor: false },
+    ]);
+
+    const svc = new BranchTeamsService(db as any);
+    const ok = await svc.actorCanMirrorViaSupervision(
+      { id: sup.id, currentBranchId: null },
+      { id: buyer.id, role: 'MEDIA_BUYER' },
+    );
+    expect(ok).toBe(true);
+  });
 });

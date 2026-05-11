@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "cleanup-duplicate-permission-requests": "tsx scripts/cleanup-duplicate-permission-requests.ts",
     "run-permission-backfill": "tsx scripts/run-permission-snapshot-backfill.ts",
     "run-permission-backfill:standalone": "tsx scripts/backfill-permission-snapshot-standalone.ts"
   },

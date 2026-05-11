@@ -1796,11 +1796,11 @@ export function OrderDetailPage({
           {/* Right column — see left column note above. `contents` on mobile
               lets `order-N` reorder cards across columns without duplicating. */}
           <div className="contents lg:block lg:space-y-4">
-            {/* Order Actions — CS / Head of CS only, role-based.
+            {/* Order Actions — CS / Head of CS only, permission-gated by the route.
                 CS still owns Adjust/Call/Delete after CS_ENGAGED while goods are pre-delivery so
                 they can manage upsells, delivery-coordination calls, and cancellations.
-                Media Buyers use this page read-only (campaign performance); never show CS actions. */}
-            {canEditOrder && userRole !== 'MEDIA_BUYER' && isCSOrHoS && orderAllowsLineItemEdits && (
+                Read-only viewers keep this page for visibility only; they never see action controls. */}
+            {canEditOrder && isCSOrHoS && orderAllowsLineItemEdits && (
               <div className="card order-[-2] lg:order-none">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
@@ -2002,9 +2002,9 @@ export function OrderDetailPage({
               )}
 
             {/* Logistics Actions — share/allocate when CONFIRMED or ALLOCATED, confirm delivery when IN_TRANSIT.
-                Same read-only rule as Order Actions: Media Buyers must not allocate or run logistics ops here. */}
+                Same read-only rule as Order Actions: viewers without the detail-action capability do not see this card. */}
             {(() => {
-              if (!canEditOrder || userRole === 'MEDIA_BUYER') return null;
+              if (!canEditOrder) return null;
               const locationsWithGroup = logisticsLocations.filter((l) => !!l.whatsappGroupLink);
               const canShareToWhatsApp =
                 (order.status === 'CONFIRMED' || order.status === 'AGENT_ASSIGNED') &&

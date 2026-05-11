@@ -112,8 +112,9 @@ export function BranchDetailLoadingShell({
         </div>
       </div>
 
-      {/* Department cards skeleton — same shell as the loaded cards, with only
-          API-driven values pulsing. Static labels / actions stay readable. */}
+      {/* Department cards skeleton — department identity pulses too so route
+          transition shells don't reveal branch-specific sections before access
+          checks / loader data resolve. */}
       <div className="grid gap-4 sm:grid-cols-2">
         {visibleDepartments.map((dept) => (
           <article
@@ -121,21 +122,22 @@ export function BranchDetailLoadingShell({
             className="relative bg-app-elevated rounded-xl border border-app-border p-5 shadow-sm flex flex-col min-h-[180px]"
           >
             <div className="flex items-start justify-between gap-3 mb-2">
-              <h3 className="font-semibold text-app-fg text-base leading-snug min-w-0 flex-1">
-                {dept.title}
-              </h3>
-              <span className="shrink-0 inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-app-hover text-app-fg-muted">
-                {dept.code}
+              <div className="h-5 w-36 rounded bg-app-hover animate-pulse min-w-0 flex-1" aria-hidden />
+              <span className="shrink-0 inline-flex items-center rounded-md px-2 py-0.5 bg-app-hover">
+                <span className="h-3 w-10 rounded bg-app-border/80 animate-pulse" aria-hidden />
               </span>
             </div>
 
             <div className="text-sm text-app-fg-muted mb-4 flex-1">
-              <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-[11px] font-semibold text-app-fg-muted">
-                {dept.code}
+              <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5">
+                <span className="h-3 w-8 rounded bg-app-border/80 animate-pulse" aria-hidden />
               </span>
               <span className="mx-1.5">·</span>
               <span className="inline-block h-3 w-20 rounded bg-app-hover animate-pulse align-middle" aria-hidden />
-              <p className="mt-2 text-sm text-app-fg-muted">{dept.description}</p>
+              <div className="mt-2 space-y-2" aria-hidden>
+                <div className="h-3 w-32 rounded bg-app-hover animate-pulse" />
+                <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 mb-4">

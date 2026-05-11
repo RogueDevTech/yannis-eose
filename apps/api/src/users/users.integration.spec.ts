@@ -16,7 +16,7 @@
 
 import { randomUUID } from 'crypto';
 import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
 import { createTestUser, createTestBranch } from '../test/factories/order.factory';
 import { UsersService } from './users.service';
@@ -27,6 +27,7 @@ import type { PermissionsService } from '../permissions/permissions.service';
 import type { EventsService } from '../events/events.service';
 import type { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 import type { BranchTeamsService } from '../branches/branch-teams.service';
+import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -299,5 +300,127 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
         { id: admin.id, role: 'SUPER_ADMIN', name: 'Admin', currentBranchId: null } as any,
       ),
     ).resolves.toMatchObject({ role: 'HEAD_OF_CS' });
+  });
+});
+
+describe.skipIf(SKIP_IF_NO_DB)('UsersService — pending permission request dedupe', () => {
+  const pgClient = getPgClient();
+  const db = getDb();
+
+  const authStub = {} as unknown as AuthService;
+  const notificationsStub = {
+    enqueueCreateForRole: () => undefined,
+  } as unknown as NotificationsService;
+  const permissionsStub = {
+    isSensitiveRole: (role: string) => role === 'ADMIN' || role === 'BRANCH_ADMIN',
+  } as unknown as PermissionsService;
+  const eventsStub = { emitToUser: () => undefined } as unknown as EventsService;
+  const userBundleCacheStub = {
+    invalidate: async () => undefined,
+  } as unknown as UserBundleCacheService;
+
+  beforeEach(async () => {
+    await pgClient`BEGIN`;
+  });
+
+  afterEach(async () => {
+    await pgClient`ROLLBACK`;
+  });
+
+  afterAll(async () => {
+    await closeConnections();
+  });
+
+  it('blocks a second pending USER_CREATION request for the same email and phone', async () => {
+    const hr = await createTestUser(db as any, { role: 'HR_MANAGER' });
+    await setSessionActor(pgClient, hr.id, null);
+
+    const svc = new UsersService(
+      db as any,
+      authStub,
+      notificationsStub,
+      permissionsStub,
+      eventsStub,
+      userBundleCacheStub,
+      branchTeamsStub,
+    );
+
+    const input = {
+      name: 'Pending Admin',
+      email: `pending-admin-${randomUUID()}@yannis.test`,
+      role: 'ADMIN' as const,
+      status: 'PENDING' as const,
+      phone: '08035550123',
+    };
+
+    await expect(
+      svc.createStaff(
+        input,
+        { id: hr.id, role: 'HR_MANAGER', name: 'HR', currentBranchId: null } as any,
+      ),
+    ).resolves.toMatchObject({ requiresApproval: true });
+
+    await expect(
+      svc.createStaff(
+        input,
+        { id: hr.id, role: 'HR_MANAGER', name: 'HR', currentBranchId: null } as any,
+      ),
+    ).rejects.toThrow(/pending user-creation approval request already exists/i);
+
+    const [pendingCount] = await db
+      .select({ c: count() })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'USER_CREATION'),
+          eq(schema.permissionRequests.requesterId, hr.id),
+        ),
+      );
+
+    expect(Number(pendingCount?.c ?? 0)).toBe(1);
+  });
+
+  it('blocks a second pending ROLE_CHANGE request for the same target user', async () => {
+    const hr = await createTestUser(db as any, { role: 'HR_MANAGER' });
+    const target = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await setSessionActor(pgClient, hr.id, null);
+
+    const svc = new UsersService(
+      db as any,
+      authStub,
+      notificationsStub,
+      permissionsStub,
+      eventsStub,
+      userBundleCacheStub,
+      branchTeamsStub,
+    );
+
+    await expect(
+      svc.update(
+        { userId: target.id, role: 'BRANCH_ADMIN' as const },
+        { id: hr.id, role: 'HR_MANAGER', name: 'HR', currentBranchId: null } as any,
+      ),
+    ).resolves.toMatchObject({ requiresApproval: true });
+
+    await expect(
+      svc.update(
+        { userId: target.id, role: 'BRANCH_ADMIN' as const },
+        { id: hr.id, role: 'HR_MANAGER', name: 'HR', currentBranchId: null } as any,
+      ),
+    ).rejects.toThrow(/pending role-change approval request already exists/i);
+
+    const [pendingCount] = await db
+      .select({ c: count() })
+      .from(schema.permissionRequests)
+      .where(
+        and(
+          eq(schema.permissionRequests.status, 'PENDING'),
+          permissionRequestTypeTextEq(schema.permissionRequests.type, 'ROLE_CHANGE'),
+          eq(schema.permissionRequests.targetUserId, target.id),
+        ),
+      );
+
+    expect(Number(pendingCount?.c ?? 0)).toBe(1);
   });
 });
