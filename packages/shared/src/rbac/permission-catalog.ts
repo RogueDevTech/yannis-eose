@@ -108,7 +108,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   { code: 'settings.write', resource: 'settings', action: 'write', description: 'Update system settings' },
   { code: 'rider.dashboard', resource: 'rider', action: 'dashboard', description: 'Rider dashboard' },
   { code: 'cart.read', resource: 'cart', action: 'read', description: 'View cart abandonment data (CS dashboard)' },
-  { code: 'branches.manage', resource: 'branches', action: 'manage', description: 'Create, update, and assign users to branches (SuperAdmin only)' },
+  { code: 'branches.manage', resource: 'branches', action: 'manage', description: 'Create, update, and assign users to branches (SuperAdmin / Admin / HR Manager)' },
   { code: 'branches.view_all', resource: 'branches', action: 'view_all', description: 'View data across all branches (global visibility bypass) — grant sparingly' },
   { code: 'branches.teams.cs', resource: 'branches.teams', action: 'cs', description: 'Manage CS supervisor teams within a branch (Head of CS)' },
   { code: 'branches.teams.marketing', resource: 'branches.teams', action: 'marketing', description: 'Manage Marketing supervisor teams within a branch (Head of Marketing)' },
@@ -431,6 +431,14 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'users.read',
     'users.create',
     'users.update',
+    // HR manages the org's branch catalogue (CEO directive 2026-05-11) —
+    // creates new branches, edits names / codes / status, assigns users
+    // to branches. SuperAdmin / Admin still cover the same surface; HR
+    // joins them by default so day-to-day staff-org changes don't need a
+    // SuperAdmin handoff. `branches.manage_users` mirrors the same intent
+    // for branch-membership writes.
+    'branches.manage',
+    'branches.manage_users',
     'notifications.broadcast',
     'audit.read',
     'hr.onboarding.read',

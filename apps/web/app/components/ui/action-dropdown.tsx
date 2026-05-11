@@ -40,8 +40,16 @@ export interface ActionDropdownProps {
   items: ActionDropdownItem[];
   openMenuId: string | null;
   setOpenMenuId: (id: string | null) => void;
-  /** 'actions' = "Actions" text + caret (default); 'ellipsis' = circular icon button */
-  trigger?: 'actions' | 'ellipsis';
+  /**
+   * 'actions'   = "Actions" text + caret (default)
+   * 'ellipsis'  = circular icon button
+   * 'button'    = primary/secondary Button styling with `triggerLabel` + caret
+   */
+  trigger?: 'actions' | 'ellipsis' | 'button';
+  /** Label text shown when `trigger === 'button'`. */
+  triggerLabel?: string;
+  /** Button variant when `trigger === 'button'`. Maps to btn-* classes. */
+  triggerVariant?: 'primary' | 'secondary';
   /** Menu alignment relative to trigger: 'end' = right-align (default for actions), 'start' = left-align */
   align?: 'start' | 'end';
 }
@@ -52,6 +60,8 @@ export function ActionDropdown({
   openMenuId,
   setOpenMenuId,
   trigger = 'actions',
+  triggerLabel,
+  triggerVariant = 'secondary',
   align = 'end',
 }: ActionDropdownProps) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -143,14 +153,21 @@ export function ActionDropdown({
         type="button"
         onClick={() => setOpenMenuId(isOpen ? null : id)}
         className={
-          trigger === 'actions'
-            ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-app-fg-muted bg-app-hover hover:brightness-95 dark:hover:brightness-110 border border-app-border transition-colors'
-            : 'w-8 h-8 flex items-center justify-center rounded-full bg-app-hover text-app-fg-muted hover:bg-app-elevated border border-transparent hover:border-app-border hover:text-app-fg transition-colors'
+          trigger === 'button'
+            ? `${triggerVariant === 'primary' ? 'btn-primary' : 'btn-secondary'} btn-sm inline-flex items-center gap-1.5`
+            : trigger === 'actions'
+              ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-app-fg-muted bg-app-hover hover:brightness-95 dark:hover:brightness-110 border border-app-border transition-colors'
+              : 'w-8 h-8 flex items-center justify-center rounded-full bg-app-hover text-app-fg-muted hover:bg-app-elevated border border-transparent hover:border-app-border hover:text-app-fg transition-colors'
         }
         aria-expanded={isOpen}
         aria-haspopup="true"
       >
-        {trigger === 'actions' ? (
+        {trigger === 'button' ? (
+          <>
+            {triggerLabel}
+            <CaretDownIcon />
+          </>
+        ) : trigger === 'actions' ? (
           <>
             Actions
             <CaretDownIcon />

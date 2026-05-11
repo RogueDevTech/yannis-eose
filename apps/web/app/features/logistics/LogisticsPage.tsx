@@ -6,7 +6,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { Modal } from '~/components/ui/modal';
-import { Link, useFetcher } from '@remix-run/react';
+import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
@@ -22,6 +22,7 @@ import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
@@ -168,6 +169,9 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const friendlyError = fetcherSurface.friendlyError;
   const mutationModalOpen = showAddProvider || showAddLocation || !!editingProvider;
   const [dismissedError, setDismissedError] = useState(false);
+  /** Single open-menu id shared by the page-header "+ Logistics company" /
+   *  "+ Location" dropdowns so opening one closes the other. */
+  const [openHeaderMenuId, setOpenHeaderMenuId] = useState<string | null>(null);
   useFetcherToast(fetcher.data, {
     successMessage: 'Logistics action completed',
     skipErrorToast: mutationModalOpen,
@@ -414,29 +418,45 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         actions={
           <div className="flex flex-wrap gap-2">
             <PageRefreshButton />
-            <Link
-              to="/admin/inventory"
-              prefetch="intent"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-app-border bg-app-surface text-sm font-medium text-app-fg hover:bg-app-hover"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V7M3 7l3-4h12l3 4M3 7h18M9 11h6" />
-              </svg>
-              View stocks
-            </Link>
-            <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
-              + Logistics company
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                setAddLocationProviderId('');
-                setShowAddLocation(true);
-              }}
-            >
-              + Location
-            </Button>
+            <ActionDropdown
+              id="add-company"
+              trigger="button"
+              triggerLabel="+ Logistics company"
+              triggerVariant="secondary"
+              openMenuId={openHeaderMenuId}
+              setOpenMenuId={setOpenHeaderMenuId}
+              items={[
+                {
+                  label: 'Add manually',
+                  onClick: () => setShowAddProvider(true),
+                },
+                {
+                  label: 'Import from Excel',
+                  to: '/admin/logistics/partners/import-providers',
+                },
+              ]}
+            />
+            <ActionDropdown
+              id="add-location"
+              trigger="button"
+              triggerLabel="+ Location"
+              triggerVariant="primary"
+              openMenuId={openHeaderMenuId}
+              setOpenMenuId={setOpenHeaderMenuId}
+              items={[
+                {
+                  label: 'Add manually',
+                  onClick: () => {
+                    setAddLocationProviderId('');
+                    setShowAddLocation(true);
+                  },
+                },
+                {
+                  label: 'Import from Excel',
+                  to: '/admin/logistics/partners/import-locations',
+                },
+              ]}
+            />
           </div>
         }
       />
