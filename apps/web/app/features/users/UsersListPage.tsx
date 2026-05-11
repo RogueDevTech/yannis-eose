@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams, useFetcher } from '@remix-run/react';
+import { Link, useSearchParams, useFetcher, useNavigate } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
+import { ActionDropdown } from '~/components/ui/action-dropdown';
+import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -147,6 +149,21 @@ export function UsersListPage({
   // from a long table, so confirm before sending.
   const [resendConfirm, setResendConfirm] = useState<{ id: string; name: string; email: string } | null>(null);
   const isResending = resendFetcher.state !== 'idle';
+  /** Single open-menu id for the page-header split-button (Add user ▾). */
+  const [openHeaderMenuId, setOpenHeaderMenuId] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { requiresBranchSelection, ensureBranchForAction } = useBranchScopeActionGuard();
+  /** Mirrors `<BranchScopedLink>` behaviour from inside an ActionDropdown
+   *  item: pop the branch-picker modal first when the active user is an
+   *  org-wide head viewing "All branches", otherwise navigate immediately. */
+  const goToAddUser = useCallback(() => {
+    const target = `${usersBasePath}/new`;
+    if (requiresBranchSelection) {
+      ensureBranchForAction({ actionLabel: 'creating a user', nextHref: target });
+      return;
+    }
+    navigate(target);
+  }, [requiresBranchSelection, ensureBranchForAction, navigate, usersBasePath]);
 
   useEffect(() => {
     setDraftSearch(searchFromUrl);
@@ -399,28 +416,32 @@ export function UsersListPage({
             desktop={
               <>
                 <PageRefreshButton />
-                {!staffAccounts ? (
-                  <Link
-                    to="/hr/users/import"
-                    prefetch="intent"
-                    className="inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-surface px-3 py-1.5 text-sm font-medium text-app-fg hover:bg-app-hover"
+                {staffAccounts ? (
+                  // Staff-accounts variant has no Import flow — single button is fine.
+                  <BranchScopedLink
+                    to={`${usersBasePath}/new`}
+                    actionLabel="creating a user"
+                    className="btn-primary"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                     </svg>
-                    Import users
-                  </Link>
-                ) : null}
-                <BranchScopedLink
-                  to={`${usersBasePath}/new`}
-                  actionLabel="creating a user"
-                  className="btn-primary"
-                >
-                  <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  {staffAccounts ? 'Add staff' : 'Add User'}
-                </BranchScopedLink>
+                    Add staff
+                  </BranchScopedLink>
+                ) : (
+                  <ActionDropdown
+                    id="add-user"
+                    trigger="button"
+                    triggerLabel="+ Add User"
+                    triggerVariant="primary"
+                    openMenuId={openHeaderMenuId}
+                    setOpenMenuId={setOpenHeaderMenuId}
+                    items={[
+                      { label: 'Add manually', onClick: goToAddUser },
+                      { label: 'Import from Excel', to: '/hr/users/import' },
+                    ]}
+                  />
+                )}
               </>
             }
             sheet={({ closeSheet }) => (

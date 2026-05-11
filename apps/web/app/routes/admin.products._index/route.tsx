@@ -14,6 +14,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Button } from '~/components/ui/button';
+import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { MarketingOffersTab } from '~/features/campaigns/MarketingOffersTab';
 import { OfferGroupCreateModal } from '~/features/campaigns/OfferGroupCreateModal';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
@@ -414,6 +415,9 @@ function ProductsRouteInner(
 ) {
   const [uiTab, setUiTab] = React.useState<'product' | 'offers'>(data.initialTab);
   const [showCreateOffer, setShowCreateOffer] = React.useState(false);
+  /** Single open-menu id shared by the page-header split-button so opening
+   *  one closes any others. */
+  const [openHeaderMenuId, setOpenHeaderMenuId] = React.useState<string | null>(null);
 
   const offersFetcher = useFetcher<OffersSummaryApiResponse>();
   const offersFetchStartedRef = React.useRef(false);
@@ -507,18 +511,18 @@ function ProductsRouteInner(
               </Button>
             ) : null}
             {data.canCreateProduct ? (
-              <Link to="/admin/products/import" prefetch="intent">
-                <Button type="button" variant="secondary" size="sm">
-                  + Import product
-                </Button>
-              </Link>
-            ) : null}
-            {data.canCreateProduct ? (
-              <Link to="/admin/products/new" prefetch="intent">
-                <Button variant="primary" size="sm">
-                  + Add product
-                </Button>
-              </Link>
+              <ActionDropdown
+                id="add-product"
+                trigger="button"
+                triggerLabel="+ Add product"
+                triggerVariant="primary"
+                openMenuId={openHeaderMenuId}
+                setOpenMenuId={setOpenHeaderMenuId}
+                items={[
+                  { label: 'Add manually', to: '/admin/products/new' },
+                  { label: 'Import from Excel', to: '/admin/products/import' },
+                ]}
+              />
             ) : null}
           </div>
         }

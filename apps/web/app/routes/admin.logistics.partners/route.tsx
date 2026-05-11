@@ -154,6 +154,69 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'importProvider') {
+    // Per-row submit from /admin/logistics/partners/import-providers. Each
+    // row is one POST that calls `logistics.createProvider` so the same
+    // permission gate, RLS, and audit triggers apply per provider.
+    const rowIndexRaw = formData.get('rowIndex')?.toString() ?? '';
+    const rowIndex = Number.parseInt(rowIndexRaw, 10);
+    const name = formData.get('name')?.toString().trim() ?? '';
+    const contactInfo = formData.get('contactInfo')?.toString().trim() ?? '';
+    const coverageArea = formData.get('coverageArea')?.toString().trim() ?? '';
+    if (!name || !contactInfo || !coverageArea) {
+      return json(
+        { error: 'name, contact info, and coverage area are required.', rowIndex },
+        { status: 400 },
+      );
+    }
+    const res = await apiRequest<unknown>('/trpc/logistics.createProvider', {
+      method: 'POST',
+      cookie,
+      body: { name, contactInfo, coverageArea },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to create logistics company'), rowIndex },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, rowIndex });
+  }
+
+  if (intent === 'importLocation') {
+    // Per-row submit from /admin/logistics/partners/import-locations. The
+    // editor resolves the provider name → providerId before posting, so this
+    // handler only sees the resolved UUID.
+    const rowIndexRaw = formData.get('rowIndex')?.toString() ?? '';
+    const rowIndex = Number.parseInt(rowIndexRaw, 10);
+    const providerId = formData.get('providerId')?.toString().trim() ?? '';
+    const name = formData.get('name')?.toString().trim() ?? '';
+    const address = formData.get('address')?.toString().trim() ?? '';
+    const coordinates = formData.get('coordinates')?.toString().trim() ?? '';
+    const whatsappGroupLink = formData.get('whatsappGroupLink')?.toString().trim() ?? '';
+    if (!providerId || !name || !address) {
+      return json(
+        { error: 'provider, name, and address are required.', rowIndex },
+        { status: 400 },
+      );
+    }
+    const body: Record<string, unknown> = { providerId, name, address };
+    if (coordinates) body.coordinates = coordinates;
+    if (whatsappGroupLink) body.whatsappGroupLink = whatsappGroupLink;
+    const res = await apiRequest<unknown>('/trpc/logistics.createLocation', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to create location'), rowIndex },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, rowIndex });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
