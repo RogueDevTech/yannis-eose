@@ -35,6 +35,24 @@ export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
   'HEAD_OF_LOGISTICS',
 ]);
 
+/**
+ * Roles that do NOT participate in `user_branches`. Mirrors the branch-management
+ * rule in `branches.router.ts` / `admin.branches.$branchId`: only Marketing, CS,
+ * and Branch Admin belong in the branching system; everything else is org-wide
+ * (or location-scoped outside branches).
+ */
+const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'FINANCE_OFFICER',
+  'HEAD_OF_LOGISTICS',
+  'STOCK_MANAGER',
+  'TPL_MANAGER',
+  'TPL_RIDER',
+  'LOGISTICS_MANAGER',
+  'HR_MANAGER',
+]);
+
 export function isOrgWideDepartmentHead(user: {
   role: string;
   scopeOrgWideHead?: boolean;
@@ -45,13 +63,15 @@ export function isOrgWideDepartmentHead(user: {
 
 /**
  * Returns true if the user is allowed to see cross-branch data without a session branch.
- * Admin-class + org-wide department heads match multi-branch UX (CLAUDE.md); others need scope perms.
+ * Admin-class, org-wide department heads, and HR_MANAGER match multi-branch UX;
+ * others need scope perms.
  */
 export function canViewAllBranches(user: {
   role: string;
   permissions?: string[];
   scopeOrgWideHead?: boolean;
 }): boolean {
+  if (NON_BRANCH_ASSIGNED_ROLES.has(user.role)) return true;
   if (isAdminLevel(user)) return true;
   if (isOrgWideDepartmentHead(user)) return true;
   const permissionSet = new Set(user.permissions ?? []);

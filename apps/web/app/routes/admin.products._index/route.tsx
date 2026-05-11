@@ -1,9 +1,9 @@
 import { defer, json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import * as React from 'react';
-import { Await, Link, useFetcher, useLoaderData } from '@remix-run/react';
+import { Await, Link, useFetcher, useLoaderData, useRevalidator } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
-import { cachedClientLoader } from '~/lib/loader-cache';
+import { cachedClientLoader, invalidateCachedLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, safeStatus } from '~/lib/api.server';
 import { isSuperAdminOnly } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -17,6 +17,7 @@ import { Button } from '~/components/ui/button';
 import { MarketingOffersTab } from '~/features/campaigns/MarketingOffersTab';
 import { OfferGroupCreateModal } from '~/features/campaigns/OfferGroupCreateModal';
 import { ProductsListPage } from '~/features/products/ProductsListPage';
+import { ProductsImportModal } from '~/features/products/ProductsImportModal';
 import { ProductsHubLoadingShell } from '~/features/products/ProductsDeferredLoadingShells';
 import type { Product } from '~/features/products/types';
 import type { OfferGroupRow } from '~/features/campaigns/types';
@@ -279,6 +280,85 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'importProduct') {
+    // Per-row submit from <ProductsImportModal>. Each row is one POST that
+    // calls `products.create` so the same permission gate, RLS, and audit
+    // triggers run as the manual + Add product form. Failure surfaces with
+    // `{ error, rowIndex }` so the modal can mark the row failed and keep
+    // going on the rest of the batch.
+    await requirePermission(request, 'products.create');
+    const rowIndexRaw = formData.get('rowIndex')?.toString() ?? '';
+    const rowIndex = Number.parseInt(rowIndexRaw, 10);
+
+    const name = formData.get('name')?.toString().trim() ?? '';
+    const basePriceRaw = formData.get('basePrice')?.toString() ?? '';
+    const costPriceRaw = formData.get('costPrice')?.toString() ?? '';
+    const description = formData.get('description')?.toString().trim() ?? '';
+    const categoryName = formData.get('category')?.toString().trim() ?? '';
+    const categoryId = formData.get('categoryId')?.toString().trim() ?? '';
+    const galleryImageUrlsRaw = formData.get('galleryImageUrls')?.toString() ?? '';
+
+    if (!name || !basePriceRaw || !costPriceRaw) {
+      return json(
+        { error: 'name, base price, and cost price are required.', rowIndex },
+        { status: 400 },
+      );
+    }
+
+    const basePrice = Number(basePriceRaw);
+    const costPrice = Number(costPriceRaw);
+    if (!Number.isFinite(basePrice) || basePrice < 0) {
+      return json({ error: 'Base price must be a number ≥ 0.', rowIndex }, { status: 400 });
+    }
+    if (!Number.isFinite(costPrice) || costPrice < 0) {
+      return json({ error: 'Cost price must be a number ≥ 0.', rowIndex }, { status: 400 });
+    }
+
+    let galleryImageUrls: string[] = [];
+    try {
+      const parsedUrls = galleryImageUrlsRaw ? (JSON.parse(galleryImageUrlsRaw) as unknown) : [];
+      if (Array.isArray(parsedUrls)) {
+        galleryImageUrls = parsedUrls.filter((u): u is string => typeof u === 'string');
+      }
+    } catch {
+      // Ignore malformed payload; fall through to empty array.
+    }
+
+    const body: Record<string, unknown> = {
+      name,
+      baseSalePrice: basePrice,
+      costPrice,
+      galleryImageUrls,
+    };
+    if (description) body.description = description;
+    if (categoryId) body.categoryId = categoryId;
+    if (categoryName) body.category = categoryName;
+
+    const res = await apiRequest<unknown>('/trpc/products.create', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to create product'), rowIndex },
+        { status: safeStatus(res.status) },
+      );
+    }
+    // Drop the cached loader entry so the next products.list call hits fresh
+    // data — the modal calls `onComplete()` after the batch which refreshes
+    // the page from the same cache.
+    if (typeof globalThis !== 'undefined') {
+      try {
+        const url = new URL(request.url);
+        invalidateCachedLoader(url.pathname);
+      } catch {
+        // Non-fatal.
+      }
+    }
+    return json({ success: true, rowIndex });
+  }
+
   if (intent === 'archiveProduct') {
     const id = formData.get('id')?.toString() ?? '';
     const reason = formData.get('reason')?.toString().trim() ?? '';
@@ -335,6 +415,8 @@ function ProductsRouteInner(
 ) {
   const [uiTab, setUiTab] = React.useState<'product' | 'offers'>(data.initialTab);
   const [showCreateOffer, setShowCreateOffer] = React.useState(false);
+  const [showImportProducts, setShowImportProducts] = React.useState(false);
+  const revalidator = useRevalidator();
 
   const offersFetcher = useFetcher<OffersSummaryApiResponse>();
   const offersFetchStartedRef = React.useRef(false);
@@ -428,6 +510,16 @@ function ProductsRouteInner(
               </Button>
             ) : null}
             {data.canCreateProduct ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowImportProducts(true)}
+              >
+                + Import product
+              </Button>
+            ) : null}
+            {data.canCreateProduct ? (
               <Link to="/admin/products/new" prefetch="intent">
                 <Button variant="primary" size="sm">
                   + Add product
@@ -437,6 +529,17 @@ function ProductsRouteInner(
           </div>
         }
       />
+
+      {/* Bulk-import modal — lazy-loaded categories, per-row create via the
+          page action's `importProduct` intent. Revalidate on Done so the new
+          rows show up immediately. */}
+      {data.canCreateProduct ? (
+        <ProductsImportModal
+          open={showImportProducts}
+          onClose={() => setShowImportProducts(false)}
+          onComplete={() => revalidator.revalidate()}
+        />
+      ) : null}
 
       <OverviewStatStrip
         items={[

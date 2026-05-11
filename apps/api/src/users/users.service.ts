@@ -484,7 +484,7 @@ export class UsersService {
     // before the transaction even opened. Promise.all collapses to ~1 RTT total.
     //
     // CEO directive 2026-05-03: org-wide head roles (HEAD_OF_CS / HEAD_OF_MARKETING
-    // / HEAD_OF_LOGISTICS) and per-branch HR_MANAGER are NO LONGER singletons.
+    // / HEAD_OF_LOGISTICS) and company-wide HR_MANAGER are NO LONGER singletons.
     // Permissions gate capability; multiple holders are allowed (e.g. handover
     // periods, co-heads, regional heads). The DB unique indexes were dropped in
     // migration 0108. The frontend still surfaces a soft warning so admins can
@@ -1427,7 +1427,7 @@ export class UsersService {
       }
     }
 
-    // CEO directive 2026-05-03: org-wide head roles and per-branch HR_MANAGER
+    // CEO directive 2026-05-03: org-wide head roles and company-wide HR_MANAGER
     // are no longer singletons — multiple holders are allowed. The previous
     // CONFLICT throws on this update path are removed alongside the matching
     // create-path check + the DB indexes (migration 0108). The frontend

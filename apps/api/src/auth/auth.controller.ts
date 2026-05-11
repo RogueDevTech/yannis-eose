@@ -439,7 +439,8 @@ export class AuthController {
    * startMirror just baked in the target's branch.
    *
    * `branchId = null` clears branch context ("All Branches"); only allowed
-   * for users that can view all branches (admin / org-wide heads / Finance).
+   * for users that can view all branches (admin, org-wide heads, and other
+   * non-branch-assigned company-wide roles).
    */
   @Post('switch-branch')
   @HttpCode(HttpStatus.OK)

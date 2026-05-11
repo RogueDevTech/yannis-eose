@@ -22,7 +22,8 @@ import type {
 import { formatRole, ROLE_AVATAR_GRADIENTS } from './types';
 import { PermissionMatrix } from './PermissionMatrix';
 
-// HoCS / HoM / HoLogistics: one ACTIVE+PENDING holder org-wide. HR_MANAGER: one per branch.
+// HoCS / HoM / HoLogistics + HR_MANAGER: existing ACTIVE+PENDING holders shown
+// as a soft warning only. Multiple holders are allowed; HR is company-wide too.
 import { ORG_WIDE_DEPARTMENT_HEAD_ROLES } from '~/lib/rbac';
 import { isRoleProbationEligible } from '@yannis/shared';
 

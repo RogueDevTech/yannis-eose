@@ -1,4 +1,10 @@
 /**
+ * @deprecated Replaced 2026-05-11 by `UsersImportPage` mounted at
+ * `/hr/users/import`. The page version makes every row inline-editable so HR
+ * can fix bad rows without bouncing back to Excel. This file is no longer
+ * imported anywhere — kept for one release as a fallback. Safe to delete
+ * after the new page proves out.
+ *
  * UsersImportModal — bulk-import users from a XLSX/CSV sheet.
  *
  * Three-step wizard:
@@ -114,7 +120,17 @@ type RowStatus =
   | { state: 'invalid' };
 
 interface ColumnSpec {
+  /**
+   * Canonical lookup key — snake_case. `pickHeaderValue` normalises the
+   * spreadsheet header (lowercase, whitespace + dashes → underscore) before
+   * matching, so "Name", "Primary Branch", "PRIMARY-BRANCH", and
+   * "primary_branch" all resolve here.
+   */
   header: string;
+  /** Friendly display label shown in chips, the column guide, and the template. */
+  label: string;
+  /** Extra aliases shown in the column guide so operators see headers are case/spacing insensitive. */
+  alsoAccepts: string[];
   required: boolean;
   description: string;
   examples: string[];
@@ -125,18 +141,24 @@ interface ColumnSpec {
 const COLUMN_SPECS: ColumnSpec[] = [
   {
     header: 'name',
+    label: 'Name',
+    alsoAccepts: ['Name', 'NAME'],
     required: true,
     description: 'Full name. Minimum 2 characters.',
     examples: ['Jane Doe', 'Tunde Bello'],
   },
   {
     header: 'email',
+    label: 'Email',
+    alsoAccepts: ['Email', 'EMAIL'],
     required: true,
     description: 'Login email. Must be unique across the org.',
     examples: ['jane.doe@example.com'],
   },
   {
     header: 'role',
+    label: 'Role',
+    alsoAccepts: ['Role', 'ROLE'],
     required: true,
     description:
       'Use the enum (left column) or any accepted label (right column) in each row. Case-insensitive; spaces vs underscores both work for enums. SUPER_ADMIN cannot be imported. Creating users with admin-class roles (e.g. ADMIN, FINANCE_OFFICER) queues SuperAdmin approval row-by-row.',
@@ -145,30 +167,40 @@ const COLUMN_SPECS: ColumnSpec[] = [
   },
   {
     header: 'phone',
+    label: 'Phone',
+    alsoAccepts: ['Phone', 'PHONE'],
     required: true,
     description: 'Nigerian number, no spaces.',
     examples: ['08031234567', '+2348022223333'],
   },
   {
     header: 'primary_branch',
+    label: 'Primary Branch',
+    alsoAccepts: ['Primary Branch', 'PRIMARY BRANCH', 'primary branch', 'Primary-Branch'],
     required: true,
     description: 'The branch this user defaults to. Use the branch CODE first; the NAME also works.',
     examples: ['LAG', 'Lagos HQ'],
   },
   {
     header: 'additional_branches',
+    label: 'Additional Branches',
+    alsoAccepts: ['Additional Branches', 'additional branches', 'Additional-Branches'],
     required: false,
     description: 'Extra branches the user can switch into. Comma- or semicolon-separated codes/names. The primary is auto-included.',
     examples: ['ABJ, PHC', 'Abuja; Port Harcourt'],
   },
   {
     header: 'probation',
+    label: 'Probation',
+    alsoAccepts: ['Probation', 'PROBATION'],
     required: false,
     description: 'Mark the new user as probation. Empty / blank = no.',
     examples: ['true', 'yes', 'false'],
   },
   {
     header: 'probation_until',
+    label: 'Probation Until',
+    alsoAccepts: ['Probation Until', 'probation until', 'Probation-Until'],
     required: false,
     description: 'Probation review date when probation = true. ISO format. Defaults to 90 days from import.',
     examples: ['2026-08-08'],
@@ -315,17 +347,17 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
             key={c.header}
             className="flex items-center justify-between gap-1.5 rounded-md border border-app-border bg-app-hover/30 px-2 py-1.5"
           >
-            <code className="font-mono text-xs font-medium text-app-fg truncate" title={c.header}>
-              {c.header}
+            <span className="text-xs font-medium text-app-fg truncate" title={c.label}>
+              {c.label}
               {c.required ? (
                 <span className="ml-0.5 text-danger-500" aria-hidden="true">*</span>
               ) : null}
               {c.required ? <span className="sr-only"> (required)</span> : null}
-            </code>
+            </span>
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
-                aria-label={`Open column guide: ${c.header}`}
+                aria-label={`Open column guide: ${c.label}`}
                 aria-haspopup="dialog"
                 onClick={() => setDetailColumn(c)}
                 className="inline-flex items-center justify-center min-w-8 min-h-8 rounded-full border border-app-border text-app-fg-muted hover:bg-brand-50 hover:border-brand-200 hover:text-brand-700 dark:hover:bg-brand-900/25 dark:hover:border-brand-700 dark:hover:text-brand-300 transition-colors"
@@ -349,7 +381,7 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
             <div className="min-w-0 space-y-2">
               <h3 id={detailTitleId} className="text-base font-semibold text-app-fg leading-snug">
                 <span className="text-app-fg-muted font-normal">Spreadsheet column · </span>
-                <code className="font-mono text-[15px] font-semibold text-app-fg">{detailColumn.header}</code>
+                <span className="text-[15px] font-semibold text-app-fg">{detailColumn.label}</span>
               </h3>
               {detailColumn.required ? (
                 <span className="inline-flex text-[10px] uppercase tracking-wider rounded-md bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-2 py-0.5 font-semibold">
@@ -382,6 +414,24 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
             }
           >
             <p className="text-sm text-app-fg leading-relaxed">{detailColumn.description}</p>
+            <div className="rounded-md border border-app-border bg-app-hover/40 px-3 py-2 space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                Header names — case &amp; spacing don&apos;t matter
+              </p>
+              <p className="text-xs text-app-fg-muted">
+                The matcher lowercases the column header and treats spaces or dashes as underscores.
+                Any of these all work for this column:
+              </p>
+              <ul className="flex flex-wrap gap-1">
+                {[detailColumn.label, detailColumn.header, ...detailColumn.alsoAccepts].map((alias) => (
+                  <li key={alias}>
+                    <code className="font-mono text-[11px] rounded bg-app-elevated border border-app-border px-1.5 py-0.5 text-app-fg">
+                      {alias}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+            </div>
             {detailColumn.referenceGuide && detailColumn.referenceGuide.length > 0 ? (
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
@@ -484,6 +534,111 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
   const importFetcher = useFetcher<{ success?: boolean; error?: string; rowIndex?: number; requiresApproval?: boolean }>();
   // Suppress the global error toast — the modal renders per-row errors directly.
   useFetcherToast(importFetcher.data, { skipErrorToast: true, skipSuccessToast: true });
+
+  /**
+   * Build a starter `.xlsx` for the operator. Two sheets:
+   *   1. "Users" — friendly headers (matching the column-guide labels) + two
+   *      sample rows pre-filled with realistic values pulled from the live
+   *      branches list.
+   *   2. "Reference" — every role enum + its accepted labels, and every
+   *      branch (code + name). The open-source `xlsx` package only writes
+   *      data validations under SheetJS Pro — copying from the Reference
+   *      sheet is the practical fallback for an Excel-native dropdown.
+   */
+  function downloadTemplate() {
+    const headers = COLUMN_SPECS.map((c) => c.label);
+    const sampleBranchCode = branches[0]?.code ?? 'LAG';
+    const sampleSecondBranch = branches[1]?.code ?? branches[0]?.code ?? '';
+    const sampleA: Record<string, string | number> = {
+      Name: 'Jane Doe',
+      Email: 'jane.doe@example.com',
+      Role: 'CS Closer',
+      Phone: '08031234567',
+      'Primary Branch': sampleBranchCode,
+      'Additional Branches': sampleSecondBranch ? sampleSecondBranch : '',
+      Probation: 'false',
+      'Probation Until': '',
+    };
+    const sampleB: Record<string, string | number> = {
+      Name: 'Tunde Bello',
+      Email: 'tunde.bello@example.com',
+      Role: 'Media Buyer',
+      Phone: '+2348022223333',
+      'Primary Branch': sampleBranchCode,
+      'Additional Branches': '',
+      Probation: 'true',
+      'Probation Until': new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10),
+    };
+    const ws = XLSX.utils.json_to_sheet([sampleA, sampleB], { header: headers });
+
+    const headerComments: Record<string, string> = {
+      Name: 'Required. Min 2 characters.',
+      Email: 'Required. Must be unique.',
+      Role:
+        'Required. Pick a value from the Reference sheet — enum (CS_CLOSER) or label (CS Closer) both work.',
+      Phone: 'Required. Nigerian number.',
+      'Primary Branch':
+        'Required. Use the branch CODE first; NAME also works. See Reference sheet for the full list.',
+      'Additional Branches':
+        'Optional. Comma- or semicolon-separated branch codes/names.',
+      Probation: 'Optional. true / false / yes / no. Empty = no.',
+      'Probation Until': 'Optional. ISO date, e.g. 2026-08-08. Defaults to +90 days.',
+    };
+    headers.forEach((h, idx) => {
+      const addr = XLSX.utils.encode_cell({ r: 0, c: idx });
+      const comment = headerComments[h];
+      const cell = ws[addr];
+      if (cell && comment) {
+        (cell as { c?: Array<{ a: string; t: string }> }).c = [{ a: 'Yannis', t: comment }];
+      }
+    });
+
+    ws['!cols'] = [
+      { wch: 22 }, // Name
+      { wch: 28 }, // Email
+      { wch: 18 }, // Role
+      { wch: 16 }, // Phone
+      { wch: 18 }, // Primary Branch
+      { wch: 22 }, // Additional Branches
+      { wch: 12 }, // Probation
+      { wch: 16 }, // Probation Until
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Users');
+
+    // Reference sheet — single column-wise dump of every enum option. Each
+    // section is separated by a blank row so it scans well visually.
+    const referenceRows: Array<Record<string, string>> = [
+      { Column: 'Name', Rule: 'Free text. Min 2 characters.' },
+      { Column: 'Email', Rule: 'Unique login email.' },
+      { Column: 'Role', Rule: 'Pick from the list below (enum or label).' },
+      { Column: 'Phone', Rule: 'Nigerian: 08031234567 or +2348031234567.' },
+      { Column: 'Primary Branch', Rule: 'Branch CODE or NAME (case-insensitive).' },
+      { Column: 'Additional Branches', Rule: 'Comma- or semicolon-separated.' },
+      { Column: 'Probation', Rule: 'true / false / yes / no. Empty = no.' },
+      { Column: 'Probation Until', Rule: 'ISO date (YYYY-MM-DD).' },
+      { Column: '', Rule: '' },
+      { Column: 'Valid roles (enum)', Rule: 'Accepted labels' },
+      ...SPREADSHEET_IMPORT_ROLE_REFERENCE.map((r) => ({
+        Column: r.enum,
+        Rule: r.acceptedLabels,
+      })),
+      { Column: '', Rule: '' },
+      {
+        Column: 'Valid branches (code)',
+        Rule: branches.length > 0 ? 'Branch name' : 'No branches configured yet',
+      },
+      ...branches.map((b) => ({ Column: b.code, Rule: b.name })),
+    ];
+    const refWs = XLSX.utils.json_to_sheet(referenceRows, { header: ['Column', 'Rule'] });
+    refWs['!cols'] = [{ wch: 24 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, refWs, 'Reference');
+
+    XLSX.writeFile(wb, 'yannis-users-import-template.xlsx');
+  }
 
   // Sequential row-by-row submit. Each row is one POST to the page action's `importUser`
   // intent, which calls `users.create`. Cancel flips a ref the loop checks before each row.
@@ -613,6 +768,20 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
 
       {step === 'upload' && (
         <div className="px-5 py-5 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 -mb-2">
+            <p className="text-xs text-app-fg-muted">
+              New here? Grab the starter template — headers + sample rows + a Reference sheet of valid roles and branches.
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={downloadTemplate}
+              disabled={branchesLoading}
+            >
+              Download template
+            </Button>
+          </div>
           <div className="rounded-lg border-2 border-dashed border-app-border p-6 text-center">
             <p className="text-sm text-app-fg-muted mb-3">
               Drop an .xlsx, .xls, or .csv file, or click to choose. Max 500 rows per import.
