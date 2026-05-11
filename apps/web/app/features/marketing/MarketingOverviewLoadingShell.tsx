@@ -56,18 +56,22 @@ function SkeletonOrderCard() {
 function SkeletonMediaBuyerCard() {
   return (
     <div
-      className="shrink-0 w-64 rounded-xl border border-app-border bg-app-elevated p-4 space-y-3 animate-pulse"
+      className="shrink-0 w-48 rounded-xl border border-app-border bg-app-elevated p-2.5 space-y-2 animate-pulse"
       aria-hidden
     >
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-full bg-app-hover shrink-0" />
-        <div className="flex-1 space-y-2 min-w-0">
-          <div className="h-4 w-28 rounded bg-app-hover" />
-          <div className="h-3 w-36 rounded bg-app-hover" />
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 rounded-full bg-app-hover shrink-0" />
+        <div className="flex-1 space-y-1.5 min-w-0">
+          <div className="h-3 w-24 rounded bg-app-hover" />
+          <div className="h-2.5 w-28 rounded bg-app-hover" />
         </div>
       </div>
-      <div className="w-full h-2 rounded-full bg-app-hover" />
-      <div className="h-3 w-20 rounded bg-app-hover" />
+      <div className="flex gap-1.5">
+        <div className="h-5 flex-1 rounded bg-app-hover" />
+        <div className="h-5 w-16 rounded bg-app-hover" />
+      </div>
+      <div className="h-2.5 w-full rounded bg-app-hover" />
+      <div className="h-1.5 w-full rounded-full bg-app-hover" />
     </div>
   );
 }

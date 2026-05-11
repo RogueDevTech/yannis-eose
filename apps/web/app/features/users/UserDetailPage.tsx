@@ -756,7 +756,9 @@ export function UserDetailPage({
     [],
   );
 
-  const profileHeaderTone = 'bg-brand-500 dark:bg-brand-600';
+  const profileHeaderTone = 'bg-brand-600 dark:bg-brand-700';
+  const profileAvatarTone = 'bg-brand-600 dark:bg-brand-500';
+  const profileHeroLabel = isSelfView ? 'My profile' : 'Staff profile';
   const initials = user.name
     .split(' ')
     .map((w) => w.charAt(0).toUpperCase())
@@ -946,29 +948,44 @@ export function UserDetailPage({
       )}
 
       {/* ─── Profile Header Card ─────────────────────────── */}
-      <div className="card p-0">
-        {/* Profile banner — single flat tone */}
-        <div className={`h-28 sm:h-32 ${profileHeaderTone}`} />
+      <div className="card p-0 overflow-hidden">
+        {/* Profile banner — executive hero with a single identity headline. */}
+        <div className={`relative isolate overflow-hidden ${profileHeaderTone}`}>
+          <div className="relative px-4 sm:px-6 pt-5 sm:pt-7 pb-16 sm:pb-20">
+            <div className="max-w-3xl min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/75">
+                {profileHeroLabel}
+              </p>
+              <h1 className="mt-2 text-3xl sm:text-4xl font-bold text-white leading-tight break-words">
+                {user.name}
+              </h1>
+            </div>
+          </div>
+        </div>
 
         {/* Profile Info */}
-        <div className="px-4 sm:px-6 pb-5 -mt-12 sm:-mt-14 relative">
-          <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-            {/* Avatar */}
-            <div
-              className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl ${profileHeaderTone} ring-4 ring-white dark:ring-surface-900 flex items-center justify-center shadow-lg flex-shrink-0`}
-            >
-              <span className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-                {initials}
-              </span>
-            </div>
-
-            <div className="flex-1 min-w-0 pb-1">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-app-fg">{user.name}</h1>
-                  <p className="text-sm text-app-fg-muted mt-0.5">{user.email}</p>
+        <div className="px-4 sm:px-6 pb-5 -mt-10 sm:-mt-12 relative">
+          <div className="rounded-[1.25rem] border border-app-border/80 bg-app-elevated shadow-sm">
+            <div className="px-4 sm:px-5 py-4">
+              <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                {/* Avatar */}
+                <div
+                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl ${profileAvatarTone} ring-4 ring-white dark:ring-surface-900 flex items-center justify-center shadow-lg flex-shrink-0`}
+                >
+                  <span className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
+                    {initials}
+                  </span>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm text-app-fg break-all sm:break-normal">{user.email}</p>
+                      <p className="text-xs text-app-fg-muted mt-1">
+                        {ROLE_DESCRIPTIONS[user.role] ?? ''}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                   <PageRefreshButton />
                   {/* Staff onboarding lives on Overview; login nudge until HR approves. */}
                   {/* Mirror: `branches.canMirrorToUser` — not behind restrictHeadView. Disabled when preview-only (nested mirror). */}
@@ -1065,158 +1082,158 @@ export function UserDetailPage({
                       </BranchScopedLink>
                     )}
                   {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                      <>
-                            <Button
-                              type="button"
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => setShowResetPassword(true)}
-                              className="flex items-center gap-1.5"
-                            >
-                              <svg
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={2}
+                        <>
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setShowResetPassword(true)}
+                                className="flex items-center gap-1.5"
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
-                                />
-                              </svg>
-                              Reset Password
-                            </Button>
-                            {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
-                              isSuperAdmin && (
-                                <Button
-                                  type="button"
-                                  variant="danger"
-                                  size="sm"
-                                  onClick={() => setShowDeactivateConfirm(true)}
-                                  className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                                <svg
+                                  className="w-3.5 h-3.5"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                  strokeWidth={2}
                                 >
-                                  Deactivate
-                                </Button>
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
+                                  />
+                                </svg>
+                                Reset Password
+                              </Button>
+                              {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
+                                isSuperAdmin && (
+                                  <Button
+                                    type="button"
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => setShowDeactivateConfirm(true)}
+                                    className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                                  >
+                                    Deactivate
+                                  </Button>
+                                )}
+                              {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
+                                <Form method="post" data-branch-scoped-action="true">
+                                  <input type="hidden" name="intent" value="reactivate" />
+                                  <Button
+                                    type="submit"
+                                    variant="secondary"
+                                    size="sm"
+                                    loading={isReactivating}
+                                    loadingText="Reactivating..."
+                                    className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
+                                  >
+                                    Reactivate
+                                  </Button>
+                                </Form>
                               )}
-                            {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
-                              <Form method="post" data-branch-scoped-action="true">
-                                <input type="hidden" name="intent" value="reactivate" />
-                                <Button
-                                  type="submit"
-                                  variant="secondary"
-                                  size="sm"
-                                  loading={isReactivating}
-                                  loadingText="Reactivating..."
-                                  className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
-                                >
-                                  Reactivate
-                                </Button>
-                              </Form>
-                            )}
-                            {user.status === 'DEACTIVATED' && (
-                              <p className="text-xs text-app-fg-muted italic">
-                                Deactivated accounts cannot be reactivated. Re-invite the user to
-                                create a new account.
-                              </p>
-                            )}
-                      </>
-                    )}
+                              {user.status === 'DEACTIVATED' && (
+                                <p className="text-xs text-app-fg-muted italic">
+                                  Deactivated accounts cannot be reactivated. Re-invite the user to
+                                  create a new account.
+                                </p>
+                              )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-app-border/70">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <RoleBadge role={user.role} label={formatRole(user.role)} />
+                      {user.isTeamSupervisor && <SupervisorBadge />}
+                      {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} />}
+                      <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                        {tenure}
+                      </span>
+                      {(user.loginCount ?? 0) > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted"
+                          title={
+                            user.lastLoginAt
+                              ? `Last sign-in ${new Date(user.lastLoginAt).toLocaleString('en-NG')}`
+                              : 'Sign-in history'
+                          }
+                        >
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
+                            />
+                          </svg>
+                          {user.loginCount} sign-in{user.loginCount === 1 ? '' : 's'}
+                          {user.lastLoginAt && ` · ${getTimeSince(new Date(user.lastLoginAt))}`}
+                        </span>
+                      )}
+                      {user.phone && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
+                            />
+                          </svg>
+                          {user.phone}
+                        </span>
+                      )}
+                      {showCapacityReadonly && (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"
+                            />
+                          </svg>
+                          Capacity: {user.capacity}
+                        </span>
+                      )}
+                      <UserBranchBadges branches={user.branchMemberships} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-
-          {/* Quick info pills */}
-          <div className="flex flex-wrap items-center gap-2 mt-4">
-            <RoleBadge role={user.role} label={formatRole(user.role)} />
-            {user.isTeamSupervisor && <SupervisorBadge />}
-            {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} />}
-            <span className={USER_STATUS_COLORS[user.status] ?? 'badge'}>{user.status}</span>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
-              <svg
-                className="w-3 h-3"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              {tenure}
-            </span>
-            {(user.loginCount ?? 0) > 0 && (
-              <span
-                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted"
-                title={
-                  user.lastLoginAt
-                    ? `Last sign-in ${new Date(user.lastLoginAt).toLocaleString('en-NG')}`
-                    : 'Sign-in history'
-                }
-              >
-                <svg
-                  className="w-3 h-3"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
-                  />
-                </svg>
-                {user.loginCount} sign-in{user.loginCount === 1 ? '' : 's'}
-                {user.lastLoginAt && ` · ${getTimeSince(new Date(user.lastLoginAt))}`}
-              </span>
-            )}
-            {user.phone && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-app-hover text-app-fg-muted">
-                <svg
-                  className="w-3 h-3"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"
-                  />
-                </svg>
-                {user.phone}
-              </span>
-            )}
-            {showCapacityReadonly && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-                <svg
-                  className="w-3 h-3"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"
-                  />
-                </svg>
-                Capacity: {user.capacity}
-              </span>
-            )}
-            <UserBranchBadges branches={user.branchMemberships} />
-          </div>
-
-          {/* Role description */}
-          <p className="text-xs text-app-fg-muted mt-3">{ROLE_DESCRIPTIONS[user.role] ?? ''}</p>
         </div>
       </div>
 

@@ -5,7 +5,7 @@ import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
 import { MarketingTeamLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
-import type { FundingBalanceRow } from '~/features/marketing/types';
+import type { FundingBalanceRow, MarketingTeamOverviewStats } from '~/features/marketing/types';
 import { buildLeaderboardInput, resolveMarketingDateFilters } from '~/lib/marketing-pages.server';
 
 export const meta: MetaFunction = () => [
@@ -21,6 +21,34 @@ function toBalanceRows(users: Array<{ id: string; name: string; role: string }>)
     totalSpend: '0',
     balance: '0',
   }));
+}
+
+function computeMarketingTeamOverview(
+  teamMembers: FundingBalanceRow[],
+  leaderboard: Array<{
+    totalOrders: number;
+    confirmedOrders: number;
+    deliveredOrders: number;
+  }>,
+): MarketingTeamOverviewStats {
+  const totals = leaderboard.reduce(
+    (acc, entry) => {
+      acc.totalOrders += entry.totalOrders;
+      acc.confirmedOrders += entry.confirmedOrders;
+      acc.deliveredOrders += entry.deliveredOrders;
+      return acc;
+    },
+    { totalOrders: 0, confirmedOrders: 0, deliveredOrders: 0 },
+  );
+
+  return {
+    teamMembers: teamMembers.length,
+    totalOrders: totals.totalOrders,
+    averageConfirmationRate:
+      totals.totalOrders > 0 ? (totals.confirmedOrders / totals.totalOrders) * 100 : null,
+    averageDeliveryRate:
+      totals.totalOrders > 0 ? (totals.deliveredOrders / totals.totalOrders) * 100 : null,
+  };
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -74,6 +102,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   type LeaderboardEntry = {
     mediaBuyerId: string;
     totalOrders: number;
+    confirmedOrders: number;
+    deliveredOrders: number;
     confirmationRate: number;
     deliveryRate: number;
     cpa: number;
@@ -81,11 +111,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     profitabilityScore: number | null;
   };
   const leaderboard: LeaderboardEntry[] = bundle?.leaderboard ?? [];
+  const overviewStats = computeMarketingTeamOverview(teamMembers, leaderboard);
   const metricsByUser = new Map(
     leaderboard.map((e) => [
       e.mediaBuyerId,
       {
         totalOrders: e.totalOrders,
+        confirmedOrders: e.confirmedOrders,
+        deliveredOrders: e.deliveredOrders,
         confirmationRate: e.confirmationRate,
         deliveryRate: e.deliveryRate,
         cpa: e.cpa,
@@ -221,6 +254,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     sortDir,
     unfilteredCount,
     profitabilityConfig,
+    overviewStats,
   };
   })();
 
@@ -251,6 +285,7 @@ export default function MarketingTeamRoute() {
             sortDir={data.sortDir}
             unfilteredCount={data.unfilteredCount}
             profitabilityConfig={data.profitabilityConfig}
+            overviewStats={data.overviewStats}
           />
         )}
     </CachedAwait>

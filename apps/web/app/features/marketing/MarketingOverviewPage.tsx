@@ -13,12 +13,7 @@ import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
 import type { LeaderboardEntry, Metrics, FundingBalanceRow, MarketingOverviewRecentOrder } from './types';
 import type { LiveActivityItem } from '~/features/cs/types';
 
-function renderMediaBuyerLeaderboardCard(
-  buyer: LeaderboardEntry,
-  balancesList: FundingBalanceRow[],
-  className = '',
-  isNew = false,
-) {
+function renderMediaBuyerLeaderboardCard(buyer: LeaderboardEntry, className = '', isNew = false) {
   const isHighCpa = buyer.cpa > HIGH_CPA_THRESHOLD && buyer.totalOrders > 0;
   const roasBarWidth = Math.min((buyer.trueRoas / 4) * 100, 100); // cap at 4x ROAS = full bar
   const barColor = buyer.trueRoas >= 2
@@ -41,48 +36,79 @@ function renderMediaBuyerLeaderboardCard(
       key={buyer.mediaBuyerId}
       to={`/admin/marketing/orders?mediaBuyerId=${buyer.mediaBuyerId}`}
       prefetch="intent"
-      className={`card block transition-all duration-200 cursor-pointer ${isHighCpa ? 'ring-2 ring-warning-400 dark:ring-warning-500' : ''} ${newClass} ${className}`}
+      className={`
+        group relative block rounded-xl border transition-all duration-200 cursor-pointer
+        ${isHighCpa ? 'ring-2 ring-warning-400 dark:ring-warning-500' : ''}
+        ${isNew
+          ? 'row-new-highlight'
+          : 'bg-app-elevated border-app-border'
+        }
+        ${newClass}
+        ${className}
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500
+      `}
       title={`View ${buyer.name}'s orders`}
     >
-      {/* Avatar + name */}
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-9 h-9 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-          <span className="text-sm font-bold text-brand-600 dark:text-brand-400">{initials}</span>
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-app-fg truncate">{buyer.name}</p>
-          <p className="text-xs text-app-fg-muted">
-            {buyer.totalOrders} order{buyer.totalOrders !== 1 ? 's' : ''} · {buyer.deliveredOrders} delivered
-          </p>
-        </div>
-      </div>
-
-      {/* ROAS progress bar */}
-      <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${roasBarWidth}%` }}
-        />
-      </div>
-
-      {/* ROAS label + High CPA tag */}
-      <div className="flex items-center justify-between mt-2">
-        <span className="text-xs text-app-fg-muted">
-          ROAS <span className={`font-bold ${roasTextColor}`}>{buyer.trueRoas.toFixed(2)}x</span>
-        </span>
-        {isHighCpa && (
-          <span className="text-xs font-medium text-danger-600 dark:text-danger-400">HIGH CPA</span>
+      <span className="absolute top-2 right-2 flex h-2 w-2">
+        {isNew ? (
+          <>
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-success-500" />
+          </>
+        ) : (
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-app-border" />
         )}
-      </div>
+      </span>
 
-      {/* NEW ORDER flash */}
-      {isNew && (
-        <div className="mt-2 pt-2 border-t border-success-200 dark:border-success-800/50 flex items-center gap-1.5">
-          <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
-            NEW ORDER
+      <div className="px-2.5 py-2 pr-5">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+            <span className="text-[11px] font-bold text-brand-600 dark:text-brand-400">{initials}</span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-app-fg truncate">{buyer.name}</p>
+            <p className="text-[10px] text-app-fg-muted truncate">
+              {buyer.totalOrders} order{buyer.totalOrders !== 1 ? 's' : ''} · {buyer.deliveredOrders} delivered
+            </p>
+          </div>
+          <span className={`text-[11px] font-bold shrink-0 tabular-nums ${roasTextColor}`}>
+            {buyer.trueRoas.toFixed(2)}x
           </span>
         </div>
-      )}
+
+        <div className="flex items-center gap-1.5 mb-1 min-w-0">
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-hover text-app-fg-muted">
+            <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="truncate min-w-0">CPA {formatNaira(Math.round(buyer.cpa))}</span>
+          </span>
+          {isHighCpa ? (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400">
+              High CPA
+            </span>
+          ) : null}
+        </div>
+
+        <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-medium text-app-fg-muted">
+          <span>Conf {Math.round(buyer.confirmationRate)}%</span>
+          <span>Del {Math.round(buyer.deliveryRate)}%</span>
+        </div>
+        <div className="w-full h-1.5 bg-app-hover rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+            style={{ width: `${roasBarWidth}%` }}
+          />
+        </div>
+
+        {isNew && (
+          <div className="mt-1.5 flex items-center gap-1">
+            <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-[9px] font-bold bg-success-500 text-white">
+              JUST NOW
+            </span>
+          </div>
+        )}
+      </div>
     </Link>
   );
 }
@@ -820,9 +846,9 @@ export function MarketingOverviewPage({
               ref={mediaBuyerScrollRef}
               className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
             >
-              {sortedSource != null && sortedSource.map((buyer) => renderMediaBuyerLeaderboardCard(buyer, balancesList, 'shrink-0 w-64', newBuyerIds.has(buyer.mediaBuyerId)))}
+              {sortedSource != null && sortedSource.map((buyer) => renderMediaBuyerLeaderboardCard(buyer, 'shrink-0 w-48', newBuyerIds.has(buyer.mediaBuyerId)))}
               {balanceOnlySource != null && balanceOnlySource.map((row) => (
-                <MediaBuyerBalanceCard key={row.userId} row={row} className="shrink-0 w-64" />
+                <MediaBuyerBalanceCard key={row.userId} row={row} compact className="shrink-0 w-48" />
               ))}
             </div>
           );
