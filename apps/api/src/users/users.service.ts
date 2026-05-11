@@ -35,7 +35,7 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { EventsService } from '../events/events.service';
 import { resolveRoleTemplateBaselineCodes } from '../permissions/role-template-baseline';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { isAdminLevelRole } from '../common/authz';
+import { ADMIN_LEVEL_ROLES, isAdminLevelRole } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 
@@ -1381,6 +1381,64 @@ export class UsersService {
       // Fall through to the main update logic below; the field-level whitelist above means
       // downstream admin-only paths (role change, deactivation, email change, etc.) won't
       // trigger because their triggering fields are all undefined for team-lead callers.
+    }
+
+    // HR-edits-admin → SuperAdmin approval queue (CEO directive 2026-05-11).
+    // HR_MANAGER reaches the edit form for admin-class targets (see canEditUser),
+    // but any submitted change is intercepted here and queued as a ROLE_CHANGE
+    // permission_request so SuperAdmin signs off. We inject the target's current
+    // role into the payload so the approval handler's `if (!payload.role)` guard
+    // is satisfied even when HR didn't touch the role field.
+    if (actor.role === 'HR_MANAGER' && ADMIN_LEVEL_ROLES.has(beforeRow.role)) {
+      if (input.userId === actor.id) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Cannot edit your own account here.',
+        });
+      }
+      if (input.role === 'SUPER_ADMIN') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only the current SuperAdmin can transfer the SUPER_ADMIN role.',
+        });
+      }
+      if (input.phone) {
+        const phoneConflictRows = await this.selectStaffPhoneConflictRows(input.phone, input.userId);
+        this.throwIfStaffPhoneConflictRows(phoneConflictRows);
+      }
+      const queuedPayload: UpdateStaffInput = {
+        ...input,
+        role: input.role ?? (beforeRow.role as UpdateStaffInput['role']),
+      };
+      const [req] = await withActor(this.db, actor, async (tx) =>
+        tx
+          .insert(schema.permissionRequests)
+          .values({
+            type: 'ROLE_CHANGE',
+            status: 'PENDING',
+            requesterId: actor.id,
+            targetUserId: input.userId,
+            requestedRole: queuedPayload.role,
+            reason: `HR requested edit on admin-class account (${beforeRow.role}).`,
+            payload: queuedPayload as unknown as Record<string, unknown>,
+          })
+          .returning({ id: schema.permissionRequests.id }),
+      );
+
+      if (req?.id) {
+        this.notificationsService.enqueueCreateForRole('SUPER_ADMIN', {
+          type: 'approval:permission_request',
+          title: 'HR edit on admin pending',
+          body: `HR requested changes on ${beforeRow.name ?? 'an admin account'}.`,
+          data: { requestId: req.id, type: 'ROLE_CHANGE', targetUserId: input.userId },
+        });
+      }
+
+      return {
+        requiresApproval: true,
+        requestId: req?.id,
+        message: 'Edit submitted for SuperAdmin approval.',
+      };
     }
 
     // Sensitive-role approval flow on update — anyone other than SuperAdmin promoting someone to

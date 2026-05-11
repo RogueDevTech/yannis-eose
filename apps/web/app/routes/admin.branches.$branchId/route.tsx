@@ -17,6 +17,7 @@ import {
   safeStatus,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
+import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -25,7 +26,6 @@ import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { SearchInput } from '~/components/ui/search-input';
-import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills';
 import { RoleBadge } from '~/components/ui/role-badge';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Pagination } from '~/components/ui/pagination';
@@ -38,6 +38,7 @@ import { BranchDetailLoadingShell } from '~/features/branches/BranchesDeferredLo
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Collapsible } from '~/components/ui/collapsible';
 import { Tabs } from '~/components/ui/tabs';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader, invalidateCachedLoader } from '~/lib/loader-cache';
 
@@ -235,6 +236,13 @@ interface BranchOrgStructurePayload {
  *   - `removeBranchTeamMember` → REMOVE: drop the member row from the team.
  *   - `setBranchTeamMemberSupervisor` → SUPERVISOR_TOGGLE: patch isSupervisor
  *     on the existing member row.
+ *   - `createBranchTeam` → CREATE_TEAM: append a synthetic team row to the
+ *     matching dept block so the new team appears immediately (was previously
+ *     invisible until the loader revalidation completed — CEO 2026-05-11).
+ *   - `deleteBranchTeam` → DELETE_TEAM: drop the team row from its dept block
+ *     so it disappears immediately on confirm.
+ *   - `updateBranchTeam` (rename) → RENAME_TEAM: patch the team's `name` so
+ *     the renamed title shows up immediately.
  */
 type PendingTeamMutation =
   | {
@@ -253,6 +261,21 @@ type PendingTeamMutation =
       userId: string;
       teamId: string;
       isSupervisor: boolean;
+    }
+  | {
+      kind: 'createTeam';
+      department: 'CS' | 'MARKETING';
+      name: string;
+      optimisticTeamId: string;
+    }
+  | {
+      kind: 'deleteTeam';
+      teamId: string;
+    }
+  | {
+      kind: 'renameTeam';
+      teamId: string;
+      name: string;
     };
 
 function usePendingTeamMutation(
@@ -270,6 +293,24 @@ function usePendingTeamMutation(
     const fd = fetcher.formData;
     if (!fd) return null;
     const intent = fd.get('intent')?.toString() ?? '';
+
+    // createBranchTeam has no teamId (the row doesn't exist yet on the
+    // server) — handle it before the teamId guard so the synthetic row can
+    // appear in the dept's team list immediately.
+    if (intent === 'createBranchTeam') {
+      const department = fd.get('department')?.toString();
+      const name = fd.get('name')?.toString().trim();
+      if ((department !== 'CS' && department !== 'MARKETING') || !name) return null;
+      // Stable optimistic id keyed on the form payload so the same in-flight
+      // submission produces the same synthetic row across renders.
+      return {
+        kind: 'createTeam',
+        department,
+        name,
+        optimisticTeamId: optimisticId(`${department}:${name}`),
+      };
+    }
+
     const teamId = fd.get('teamId')?.toString();
     if (!teamId) return null;
     const isSupervisor = fd.get('isSupervisor') === 'true';
@@ -300,6 +341,13 @@ function usePendingTeamMutation(
       const userId = fd.get('userId')?.toString();
       if (!userId) return null;
       return { kind: 'setSupervisor', userId, teamId, isSupervisor };
+    }
+    if (intent === 'deleteBranchTeam') {
+      return { kind: 'deleteTeam', teamId };
+    }
+    if (intent === 'updateBranchTeam') {
+      const name = fd.get('name')?.toString().trim() ?? '';
+      return { kind: 'renameTeam', teamId, name };
     }
     return null;
   }, [fetcher.formData, fetcher.state, fetcher.data, revalidatorState]);
@@ -375,6 +423,62 @@ function applyPendingTeamMutation(
           const filtered = t.members.filter((m) => m.userId !== pending.userId);
           return filtered.length === t.members.length ? t : { ...t, members: filtered };
         });
+        return { ...d, teams: newTeams };
+      }),
+    };
+  }
+
+  // ── CREATE_TEAM ──────────────────────────────────────────────────
+  // Append a synthetic team row to the dept block matching the pending
+  // department lane. The id is from `optimisticId()`, so any code that needs
+  // to short-circuit actions on in-flight rows can detect it via
+  // `isOptimisticId(team.id)`.
+  if (pending.kind === 'createTeam') {
+    return {
+      departments: orgStructure.departments.map((d) => {
+        if (d.department.department !== pending.department) return d;
+        // Idempotency: don't double-append if this synthetic row is already
+        // there (revalidator + fetcher state can re-fire the memo).
+        if (d.teams.some((t) => t.id === pending.optimisticTeamId)) return d;
+        const synthetic: BranchTeamWithMembers = {
+          id: pending.optimisticTeamId,
+          branchId: d.department.branchId,
+          branchDepartmentId: d.department.id,
+          department: pending.department,
+          name: pending.name,
+          createdAt: new Date().toISOString(),
+          updatedAt: null,
+          members: [],
+        };
+        return { ...d, teams: [...d.teams, synthetic] };
+      }),
+    };
+  }
+
+  // ── DELETE_TEAM ──────────────────────────────────────────────────
+  // Drop the team from its dept block immediately so it disappears from the
+  // UI on confirm. The loader-revalidation that follows will land the same
+  // shape (team gone) so there's no flicker on swap-back.
+  if (pending.kind === 'deleteTeam') {
+    return {
+      departments: orgStructure.departments.map((d) => {
+        const next = d.teams.filter((t) => t.id !== pending.teamId);
+        return next.length === d.teams.length ? d : { ...d, teams: next };
+      }),
+    };
+  }
+
+  // ── RENAME_TEAM ──────────────────────────────────────────────────
+  if (pending.kind === 'renameTeam') {
+    return {
+      departments: orgStructure.departments.map((d) => {
+        const ownsTeam = d.teams.some((t) => t.id === pending.teamId);
+        if (!ownsTeam) return d;
+        const newTeams = d.teams.map((t) =>
+          t.id === pending.teamId
+            ? { ...t, name: pending.name.length > 0 ? pending.name : null }
+            : t,
+        );
         return { ...d, teams: newTeams };
       }),
     };
@@ -896,7 +1000,7 @@ function BranchMembersPanel({
   // or not. Pick a specific team from the Teams tab.
   const [teamFilter, setTeamFilter] = useState<'ALL' | 'ASSIGNED' | 'UNASSIGNED'>('ALL');
 
-  const teamPillOptions = useMemo((): FilterPillOption[] => {
+  const teamFilterOptions = useMemo(() => {
     let assigned = 0;
     let unassigned = 0;
     for (const m of members) {
@@ -904,9 +1008,9 @@ function BranchMembersPanel({
       else unassigned += 1;
     }
     return [
-      { value: 'ALL', label: 'All', count: members.length },
-      { value: 'ASSIGNED', label: 'Assigned to team', count: assigned },
-      { value: 'UNASSIGNED', label: 'Unassigned', count: unassigned },
+      { value: 'ALL', label: `All (${members.length})` },
+      { value: 'ASSIGNED', label: `Assigned to team (${assigned})` },
+      { value: 'UNASSIGNED', label: `Unassigned (${unassigned})` },
     ];
   }, [members, teamByUserId]);
 
@@ -966,22 +1070,12 @@ function BranchMembersPanel({
 
   return (
     <div className="space-y-3">
-      {/* Filters: team chips + name search. Role pills dropped — within a
-          dept, every member is the same role family (Media Buyer / CS Closer
-          / Head). Heads + supervisors are surfaced as inline tags on cards. */}
+      {/* Filters: compact dropdown + name search. Role pills dropped — within
+          a dept, every member is the same role family (Media Buyer / CS
+          Closer / Head). Heads + supervisors are surfaced as inline tags. */}
       <div className="space-y-2">
-        {teamPillOptions.length > 1 && (
-          <div className="min-w-0 overflow-x-auto pb-0.5 -mb-0.5">
-            <FilterPills
-              options={teamPillOptions}
-              value={teamFilter}
-              onChange={(v) => setTeamFilter(v as 'ALL' | 'ASSIGNED' | 'UNASSIGNED')}
-              size="sm"
-            />
-          </div>
-        )}
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-end">
-          <div className="w-full min-w-0 lg:max-w-xs shrink-0">
+        <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-start md:gap-3">
+          <div className="min-w-0 w-full md:flex-1">
             <SearchInput
               value={search}
               onChange={setSearch}
@@ -989,6 +1083,7 @@ function BranchMembersPanel({
               aria-label="Search members by name or email"
               controlSize="sm"
               debounceMs={200}
+              wrapperClassName="w-full"
             />
             {isSearching && isFetcherBusy ? (
               <p className="mt-1 text-[11px] text-app-fg-muted">Searching…</p>
@@ -996,6 +1091,20 @@ function BranchMembersPanel({
               <p className="mt-1 text-[11px] text-danger-600 dark:text-danger-400">{fetcherError}</p>
             ) : null}
           </div>
+          {teamFilterOptions.length > 1 ? (
+            <div className="min-w-0 w-full md:flex-1">
+              <FormSelect
+                aria-label="Filter members by team assignment"
+                value={teamFilter}
+                onChange={(e) =>
+                  setTeamFilter(e.target.value as 'ALL' | 'ASSIGNED' | 'UNASSIGNED')
+                }
+                options={teamFilterOptions}
+                controlSize="sm"
+                wrapperClassName="w-full"
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1719,10 +1828,70 @@ function BranchSupervisorTeamsPanel({
   // of waiting for the loader's network revalidation. The overlay drops
   // cleanly when the canonical orgStructure lands.
   const pendingTeamMutation = usePendingTeamMutation(squadFetcher);
-  const orgStructure = useMemo(
-    () => applyPendingTeamMutation(serverOrgStructure, pendingTeamMutation, branchMembers),
-    [serverOrgStructure, pendingTeamMutation, branchMembers],
-  );
+  // Sticky create-team rows — see the useEffect block below for capture +
+  // self-clear logic. Declared up here so the orgStructure memo can fold
+  // them into the rendered list alongside `applyPendingTeamMutation`.
+  const [stickyCreates, setStickyCreates] = useState<
+    Array<{
+      optimisticTeamId: string;
+      branchDepartmentId: string;
+      department: 'CS' | 'MARKETING';
+      name: string;
+      addedAt: number;
+    }>
+  >([]);
+  // Sticky delete-team ids — keep deleted teams hidden locally even after
+  // the optimistic overlay drops, until the canonical data also stops
+  // returning them. Without this the row briefly reappears between the
+  // pendingTeamMutation overlay dropping and the canonical refresh.
+  const [stickyDeletes, setStickyDeletes] = useState<
+    Array<{ teamId: string; addedAt: number }>
+  >([]);
+  const orgStructure = useMemo(() => {
+    const withPending = applyPendingTeamMutation(
+      serverOrgStructure,
+      pendingTeamMutation,
+      branchMembers,
+    );
+    const deletedIds = new Set(stickyDeletes.map((sd) => sd.teamId));
+    const baseDepartments = withPending.departments.map((d) => {
+      // First pass: hide any team that was just deleted (sticky filter).
+      if (deletedIds.size === 0) return d;
+      const filtered = d.teams.filter((t) => !deletedIds.has(t.id));
+      return filtered.length === d.teams.length ? d : { ...d, teams: filtered };
+    });
+    if (stickyCreates.length === 0) {
+      return deletedIds.size === 0 ? withPending : { departments: baseDepartments };
+    }
+    // Second pass: append each sticky create to its dept block, but only if
+    // the same dept doesn't already contain a real team with the same name
+    // (the canonical row landed) AND the pending overlay didn't already
+    // inject a synthetic with the same id.
+    return {
+      departments: baseDepartments.map((d) => {
+        const adds = stickyCreates.filter(
+          (sc) =>
+            sc.branchDepartmentId === d.department.id &&
+            !d.teams.some((t) => t.id === sc.optimisticTeamId) &&
+            !d.teams.some(
+              (t) => !isOptimisticId(t.id) && (t.name?.trim() ?? '') === sc.name,
+            ),
+        );
+        if (adds.length === 0) return d;
+        const synthetic: BranchTeamWithMembers[] = adds.map((sc) => ({
+          id: sc.optimisticTeamId,
+          branchId: d.department.branchId,
+          branchDepartmentId: d.department.id,
+          department: sc.department,
+          name: sc.name,
+          createdAt: new Date(sc.addedAt).toISOString(),
+          updatedAt: null,
+          members: [],
+        }));
+        return { ...d, teams: [...d.teams, ...synthetic] };
+      }),
+    };
+  }, [serverOrgStructure, pendingTeamMutation, branchMembers, stickyCreates, stickyDeletes]);
   const flatTeams = orgStructure.departments.flatMap((d) => d.teams);
   const canManageAny = canManageCSTeams || canManageMarketingTeams;
   const canManageForDept = (dept: 'CS' | 'MARKETING'): boolean =>
@@ -1763,12 +1932,166 @@ function BranchSupervisorTeamsPanel({
   );
 
   // Auto-close the create-team modal once the create finishes successfully.
+  // Brief delay (700 ms) so the success toast pops + the optimistic row
+  // appears in the list BEFORE the modal vanishes — gives the operator
+  // visible confirmation that their team was created.
+  const lastClosedSuccessRef = useRef<unknown>(null);
   useEffect(() => {
-    if (createTeamOpen && squadFetcher.state === 'idle' && squadFetcher.data?.success) {
-      setCreateTeamOpen(false);
+    if (!createTeamOpen) return;
+    if (squadFetcher.state !== 'idle') return;
+    if (!squadFetcher.data?.success) return;
+    if (lastClosedSuccessRef.current === squadFetcher.data) return;
+    lastClosedSuccessRef.current = squadFetcher.data;
+    const t = setTimeout(() => setCreateTeamOpen(false), 700);
+    return () => clearTimeout(t);
+  }, [createTeamOpen, squadFetcher.state, squadFetcher.data]);
+
+  // Belt-and-braces revalidation: Remix's auto-revalidation after a fetcher
+  // action SHOULD pick up the new team, but the canonical data was sometimes
+  // not landing in time for the optimistic overlay to drop cleanly (the team
+  // would "come and leave" instead of swapping to the real row). Firing an
+  // explicit revalidate() guarantees we see the fresh org structure.
+  const teamsRevalidator = useRevalidator();
+  const lastRevalidatedRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (
+      squadFetcher.state === 'idle' &&
+      squadFetcher.data?.success &&
+      // Only fire once per success transition — guard with a ref so a
+      // re-render with the same fetcher.data doesn't re-trigger.
+      lastRevalidatedRef.current !== squadFetcher.data
+    ) {
+      lastRevalidatedRef.current = squadFetcher.data;
+      if (typeof window !== 'undefined') {
+        invalidateCachedLoader(window.location.pathname);
+      }
+      teamsRevalidator.revalidate();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to fetcher transitions
-  }, [squadFetcher.state, squadFetcher.data]);
+  }, [squadFetcher.state, squadFetcher.data, teamsRevalidator]);
+
+  // ── Sticky create-team overlay ────────────────────────────────────────
+  // Belt-and-braces: even if the loader revalidation misses the new team
+  // (deferred-stream race, weird cache, action posted under a parent route,
+  // etc.), keep showing the synthetic row until the canonical orgStructure
+  // proves it landed. State is declared above (alongside the orgStructure
+  // memo); the effects below capture and self-clear entries.
+  const recordedFormRef = useRef<unknown>(null);
+
+  // Capture an entry whenever a createBranchTeam succeeds. We watch the
+  // 'loading' window (between submitting and idle) — at that point
+  // `fetcher.data.success` is set AND `fetcher.formData` is still present.
+  // Once state goes 'idle', Remix nulls formData, so capturing later isn't
+  // possible. Dedupe via the formData reference so a re-render with the same
+  // fetcher state doesn't re-record.
+  useEffect(() => {
+    if (squadFetcher.state === 'submitting') return;
+    if (!squadFetcher.data?.success) return;
+    const fd = squadFetcher.formData;
+    if (!fd) return;
+    if (recordedFormRef.current === fd) return;
+    recordedFormRef.current = fd;
+    const intent = fd.get('intent')?.toString();
+    if (intent !== 'createBranchTeam') return;
+    const department = fd.get('department')?.toString();
+    if (department !== 'CS' && department !== 'MARKETING') return;
+    const name = fd.get('name')?.toString().trim();
+    if (!name) return;
+    const dept = serverOrgStructure.departments.find(
+      (d) => d.department.department === department,
+    );
+    if (!dept) return;
+    setStickyCreates((prev) => [
+      ...prev,
+      {
+        optimisticTeamId: optimisticId(`${department}:${name}:${Date.now()}`),
+        branchDepartmentId: dept.department.id,
+        department,
+        name,
+        addedAt: Date.now(),
+      },
+    ]);
+  }, [squadFetcher.state, squadFetcher.data, squadFetcher.formData, serverOrgStructure]);
+
+  // Drop entries the moment the canonical data shows a matching real team —
+  // or 15 s after they were added (safety so a permanently failed
+  // revalidation doesn't leave a stale ghost row forever).
+  useEffect(() => {
+    if (stickyCreates.length === 0) return;
+    const now = Date.now();
+    const next = stickyCreates.filter((sc) => {
+      if (now - sc.addedAt > 15_000) return false;
+      const dept = serverOrgStructure.departments.find(
+        (d) => d.department.id === sc.branchDepartmentId,
+      );
+      if (!dept) return true; // dept missing — keep the sticky entry
+      const matched = dept.teams.some(
+        (t) => !isOptimisticId(t.id) && (t.name?.trim() ?? '') === sc.name,
+      );
+      return !matched;
+    });
+    if (next.length !== stickyCreates.length) {
+      setStickyCreates(next);
+    }
+  }, [serverOrgStructure, stickyCreates]);
+
+  // Schedule a re-evaluation at the 15 s mark so the safety-hatch drop fires
+  // even when nothing else triggers a render.
+  useEffect(() => {
+    if (stickyCreates.length === 0) return;
+    const oldest = stickyCreates.reduce((min, sc) => Math.min(min, sc.addedAt), Date.now());
+    const remaining = Math.max(0, 15_000 - (Date.now() - oldest));
+    const t = setTimeout(() => setStickyCreates((p) => [...p]), remaining + 50);
+    return () => clearTimeout(t);
+  }, [stickyCreates]);
+
+  // ── Sticky delete capture ─────────────────────────────────────────────
+  // Same lifecycle pattern as stickyCreates above, but inverted: hold onto
+  // the deleted teamId so the row stays hidden even after the optimistic
+  // overlay drops. Self-clears when the canonical data also stops returning
+  // the team, or after the 15 s safety hatch.
+  const recordedDeleteFormRef = useRef<unknown>(null);
+  useEffect(() => {
+    if (squadFetcher.state === 'submitting') return;
+    if (!squadFetcher.data?.success) return;
+    const fd = squadFetcher.formData;
+    if (!fd) return;
+    if (recordedDeleteFormRef.current === fd) return;
+    recordedDeleteFormRef.current = fd;
+    const intent = fd.get('intent')?.toString();
+    if (intent !== 'deleteBranchTeam') return;
+    const teamId = fd.get('teamId')?.toString();
+    if (!teamId) return;
+    setStickyDeletes((prev) =>
+      prev.some((sd) => sd.teamId === teamId) ? prev : [...prev, { teamId, addedAt: Date.now() }],
+    );
+  }, [squadFetcher.state, squadFetcher.data, squadFetcher.formData]);
+
+  // Drop sticky-delete entries once the canonical data confirms the team is
+  // really gone, or after 15 s safety hatch.
+  useEffect(() => {
+    if (stickyDeletes.length === 0) return;
+    const now = Date.now();
+    const liveIds = new Set(
+      serverOrgStructure.departments.flatMap((d) => d.teams.map((t) => t.id)),
+    );
+    const next = stickyDeletes.filter((sd) => {
+      if (now - sd.addedAt > 15_000) return false;
+      // Keep filtering as long as the canonical still has the row.
+      return liveIds.has(sd.teamId);
+    });
+    if (next.length !== stickyDeletes.length) {
+      setStickyDeletes(next);
+    }
+  }, [serverOrgStructure, stickyDeletes]);
+
+  // Safety-hatch timer for stickyDeletes — same trick as stickyCreates.
+  useEffect(() => {
+    if (stickyDeletes.length === 0) return;
+    const oldest = stickyDeletes.reduce((min, sd) => Math.min(min, sd.addedAt), Date.now());
+    const remaining = Math.max(0, 15_000 - (Date.now() - oldest));
+    const t = setTimeout(() => setStickyDeletes((p) => [...p]), remaining + 50);
+    return () => clearTimeout(t);
+  }, [stickyDeletes]);
 
   const rosterAddOptions = (deptBlock: BranchOrgDepartmentBlock) => {
     const lane = deptBlock.department.department;
@@ -2011,16 +2334,6 @@ function BranchSupervisorTeamsPanel({
     ? (visibleDepartments.find((d) => d.department.id === selectedDeptId) ?? null)
     : null;
 
-  // Members outside the formal dept structure (Logistics / Finance / HR /
-  // Other roles). Per CEO directive 2026-05-10 these should not be in branches
-  // at all — surface a warning card on the master view until the cleanup
-  // migration runs. Only Heads who can manage both depts (i.e. admin-class
-  // viewers) see the warning; HoM/HoCS shouldn't be diagnosing branch hygiene.
-  const canSeeBothDepts = canManageCSTeams && canManageMarketingTeams;
-  const nonDeptMembers = canSeeBothDepts
-    ? branchMembers.filter((m) => m.department !== 'CS' && m.department !== 'MARKETING')
-    : [];
-
   return (
     <div className="space-y-6">
       {selectedDept === null ? (
@@ -2061,7 +2374,7 @@ function BranchSupervisorTeamsPanel({
                       className="absolute inset-0 z-0 rounded-xl focus:outline-none"
                     />
 
-                    <div className="relative z-10 flex items-start justify-between gap-3 mb-3 pointer-events-none">
+                    <div className="relative z-10 flex items-start justify-between gap-3 mb-2 pointer-events-none">
                       <h3 className="font-semibold text-app-fg text-base leading-snug min-w-0 flex-1 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
                         {deptTitle}
                       </h3>
@@ -2076,36 +2389,51 @@ function BranchSupervisorTeamsPanel({
                       </span>
                     </div>
 
-                    <div className="relative z-10 grid grid-cols-3 gap-2 text-center mb-4 flex-1 pointer-events-none">
-                      <div>
-                        <p className="text-2xl font-semibold text-app-fg tabular-nums">
-                          {memberCount}
-                        </p>
-                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide mt-0.5">
+                    <div className="relative z-10 text-sm text-app-fg-muted mb-4 flex-1 pointer-events-none">
+                      <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-[11px] font-semibold text-app-fg-muted">
+                        {lane}
+                      </span>
+                      <span className="mx-1.5">·</span>
+                      <span>
+                        {memberCount} member{memberCount === 1 ? '' : 's'}
+                      </span>
+                      <p className="mt-2 text-sm text-app-fg-muted">
+                        {lane === 'CS'
+                          ? 'Manage customer support'
+                          : 'Manage marketing'}
+                      </p>
+                    </div>
+
+                    <div className="relative z-10 grid grid-cols-3 gap-2 mb-4 pointer-events-none">
+                      <div className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
                           Members
                         </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
+                          {memberCount}
+                        </p>
                       </div>
-                      <div>
-                        <p className="text-2xl font-semibold text-app-fg tabular-nums">
+                      <div className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                          Teams
+                        </p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums text-brand-600 dark:text-brand-400">
                           {deptBlock.teams.length}
                         </p>
-                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide mt-0.5">
-                          Team{deptBlock.teams.length === 1 ? '' : 's'}
-                        </p>
                       </div>
-                      <div>
-                        <p className="text-2xl font-semibold text-app-fg tabular-nums">
-                          {supervisorCount}
+                      <div className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                          Supervisors
                         </p>
-                        <p className="text-[10px] text-app-fg-muted uppercase tracking-wide mt-0.5">
-                          Supervisor{supervisorCount === 1 ? '' : 's'}
+                        <p className="mt-1 text-lg font-semibold tabular-nums text-success-600 dark:text-success-400">
+                          {supervisorCount}
                         </p>
                       </div>
                     </div>
 
-                    <div className="relative z-10 flex items-center justify-end pt-3 border-t border-app-border pointer-events-none">
-                      <span className="text-xs font-medium text-app-fg-muted group-hover:text-brand-600 dark:group-hover:text-brand-400 inline-flex items-center gap-1 transition-colors">
-                        Manage {deptTitle.toLowerCase()}
+                    <div className="relative z-10 flex items-center gap-2 pt-3 border-t border-app-border pointer-events-none">
+                      <span className="ml-auto text-xs font-medium text-app-fg-muted group-hover:text-brand-600 dark:group-hover:text-brand-400 inline-flex items-center gap-1 transition-colors">
+                        View details
                         <svg
                           className="w-3.5 h-3.5"
                           fill="none"
@@ -2123,23 +2451,6 @@ function BranchSupervisorTeamsPanel({
             </div>
           )}
 
-          {nonDeptMembers.length > 0 && (
-            <div className="rounded-lg border border-warning-300 dark:border-warning-700/50 bg-warning-50/50 dark:bg-warning-900/20 p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-warning-900 dark:text-warning-200">
-                  Non-branch members on this branch
-                </h3>
-                <span className="text-xs font-medium text-warning-800 dark:text-warning-300">
-                  {nonDeptMembers.length} member{nonDeptMembers.length === 1 ? '' : 's'}
-                </span>
-              </div>
-              <p className="text-xs text-warning-800 dark:text-warning-300">
-                These users have non-CS/Marketing roles (Logistics, Finance, HR, Admin, etc.). Per
-                CEO directive 2026-05-10 they shouldn't be assigned to a branch. Branch assignment
-                will be removed by the next cleanup migration.
-              </p>
-            </div>
-          )}
         </>
       ) : (
         // ── Detail view: one dept's members + roster + squads ──
@@ -2210,33 +2521,27 @@ function BranchSupervisorTeamsPanel({
               const unassignedCount = deptMembers.filter(
                 (m) => !inTeamUserIds.has(m.userId),
               ).length;
-              const overviewStats: Array<{ label: string; value: number; tone: string }> = [
-                { label: 'Members', value: deptMembers.length, tone: 'text-app-fg' },
-                {
-                  label: 'Teams',
-                  value: selectedDept.teams.length,
-                  tone: 'text-brand-600 dark:text-brand-400',
-                },
-                {
-                  label: 'Supervisors',
-                  value: supervisorCount,
-                  tone: 'text-success-600 dark:text-success-400',
-                },
-              ];
               return (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    {overviewStats.map((s) => (
-                      <div key={s.label} className="card p-3">
-                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
-                          {s.label}
-                        </p>
-                        <p className={`text-2xl font-bold tabular-nums mt-1 ${s.tone}`}>
-                          {s.value}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                  <OverviewStatStrip
+                    items={[
+                      {
+                        label: 'Members',
+                        value: deptMembers.length,
+                        valueClassName: 'text-app-fg',
+                      },
+                      {
+                        label: 'Teams',
+                        value: selectedDept.teams.length,
+                        valueClassName: 'text-brand-600 dark:text-brand-400',
+                      },
+                      {
+                        label: 'Supervisors',
+                        value: supervisorCount,
+                        valueClassName: 'text-success-600 dark:text-success-400',
+                      },
+                    ]}
+                  />
                   {unassignedCount > 0 && (
                     <div className="rounded-md border border-warning-300 dark:border-warning-700/50 bg-warning-50/50 dark:bg-warning-900/20 px-3 py-2 text-sm text-warning-800 dark:text-warning-300">
                       {unassignedCount} member{unassignedCount === 1 ? '' : 's'} not on a team yet —
@@ -2315,6 +2620,10 @@ function BranchSupervisorTeamsPanel({
                       const supervisorCount = team.members.filter((m) => m.isSupervisor).length;
                       const isOpen = openTeamId === team.id;
                       const canManageThisTeam = canManageForDept(team.department);
+                      // Synthetic row from `applyPendingTeamMutation`'s
+                      // createTeam overlay — dim it and disable per-row actions
+                      // until the loader revalidates with the canonical row.
+                      const isOptimistic = isOptimisticId(team.id);
                       const isRenameBusy =
                         isBusy &&
                         confirmIntent?.kind === 'renameTeam' &&
@@ -2329,7 +2638,11 @@ function BranchSupervisorTeamsPanel({
                         confirmIntent.teamTitle === title;
 
                       return (
-                        <div key={team.id} className="card p-0 overflow-hidden">
+                        <div
+                          key={team.id}
+                          className={`card p-0 overflow-hidden ${isOptimistic ? 'opacity-60' : ''}`}
+                          aria-busy={isOptimistic || undefined}
+                        >
                           <Collapsible
                             open={isOpen}
                             onOpenChange={(next) => setOpenTeamId(next ? team.id : null)}
@@ -2349,6 +2662,11 @@ function BranchSupervisorTeamsPanel({
                                 <div className="min-w-0">
                                   <p className="text-sm font-semibold text-app-fg truncate">
                                     {title}
+                                    {isOptimistic ? (
+                                      <span className="ml-2 text-[10px] uppercase tracking-wider rounded bg-app-hover text-app-fg-muted px-1.5 py-0.5 font-semibold align-middle">
+                                        Creating…
+                                      </span>
+                                    ) : null}
                                   </p>
                                   <p className="text-xs text-app-fg-muted">
                                     {team.members.length} member
@@ -2396,7 +2714,7 @@ function BranchSupervisorTeamsPanel({
                                       type="submit"
                                       variant="secondary"
                                       size="sm"
-                                      disabled={isBusy}
+                                      disabled={isBusy || isOptimistic}
                                       loading={isRenameBusy}
                                       loadingText="Saving…"
                                     >
@@ -2407,7 +2725,7 @@ function BranchSupervisorTeamsPanel({
                                     type="button"
                                     variant="danger"
                                     size="sm"
-                                    disabled={isBusy}
+                                    disabled={isBusy || isOptimistic}
                                     loading={isDeleteBusy}
                                     loadingText="Deleting…"
                                     onClick={() =>
@@ -2517,7 +2835,7 @@ function BranchSupervisorTeamsPanel({
                                         type="submit"
                                         variant="primary"
                                         size="sm"
-                                        disabled={isBusy || pick.length === 0}
+                                        disabled={isBusy || isOptimistic || pick.length === 0}
                                         loading={isAddMemberBusy}
                                         loadingText="Adding…"
                                       >
@@ -2610,14 +2928,15 @@ function BranchSupervisorTeamsPanel({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && createTeamName.trim() && !isBusy) {
                   e.preventDefault();
-                  squadFetcher.submit(
-                    {
-                      intent: 'createBranchTeam',
-                      department: selectedDept.department.department,
-                      name: createTeamName.trim(),
-                    },
-                    { method: 'post' },
-                  );
+                  // submitSquadMutation invalidates the cachedClientLoader
+                  // BEFORE the submit so the post-action revalidation reads
+                  // fresh data instead of the stale pre-mutation snapshot —
+                  // which is what kept the new team invisible until refresh.
+                  submitSquadMutation({
+                    intent: 'createBranchTeam',
+                    department: selectedDept.department.department,
+                    name: createTeamName.trim(),
+                  });
                 }
               }}
               placeholder="e.g. Team A"
@@ -2654,14 +2973,14 @@ function BranchSupervisorTeamsPanel({
               onClick={() => {
                 const trimmed = createTeamName.trim();
                 if (!trimmed) return;
-                squadFetcher.submit(
-                  {
-                    intent: 'createBranchTeam',
-                    department: selectedDept.department.department,
-                    name: trimmed,
-                  },
-                  { method: 'post' },
-                );
+                // Cache-invalidating wrapper — see Enter-key handler above
+                // for why a bare squadFetcher.submit() leaks stale data into
+                // the post-action revalidation.
+                submitSquadMutation({
+                  intent: 'createBranchTeam',
+                  department: selectedDept.department.department,
+                  name: trimmed,
+                });
               }}
             >
               Create team

@@ -84,16 +84,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const user = userPayload?.result?.data;
     if (!user) return { kind: 'notFound' };
 
-    // Admin-level accounts can't be edited from this page (mirrors `intent === 'update'` gate
-    // on the detail-route action).
-    if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') {
-      return {
-        kind: 'forbidden',
-        message: 'SuperAdmin/Admin accounts cannot be updated from this page.',
-      };
-    }
-
-    // Per-target edit-access gate — mirrors the service-layer guard in users.service.ts.
+    // Per-target edit-access gate — canEditUser is the single source of truth
+    // for who can reach this form on which target. SuperAdmin can edit anyone
+    // directly; HR_MANAGER can edit anyone but admin-class updates queue as a
+    // permission_request (CEO directive 2026-05-11). Mirrors the service-layer
+    // guard in users.service.ts.
     const accessLevel = canEditUser(viewer, {
       id: user.id,
       role: user.role,
@@ -287,12 +282,10 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!target) {
     return json({ error: 'User not found' }, { status: 404 });
   }
-  if (target.role === 'SUPER_ADMIN' || target.role === 'ADMIN') {
-    return json(
-      { error: 'SuperAdmin/Admin accounts cannot be updated from this page. Use Settings to edit your own profile.' },
-      { status: 403 },
-    );
-  }
+  // Admin-class targets: the service layer decides. SuperAdmin applies the
+  // update directly; HR_MANAGER's changes queue as a permission_request for
+  // SuperAdmin approval. Everyone else is rejected by canEditUser before
+  // reaching here. Don't gate at the action level — let the service speak.
 
   const body: Record<string, unknown> = { userId };
   const prevAssignedKey = [...(target.assignedProductIds ?? [])].sort().join('\0');
@@ -422,6 +415,19 @@ export async function action({ request, params }: ActionFunctionArgs) {
       { error: extractApiErrorMessage(res.data, 'Failed to update user') },
       { status: safeStatus(res.status) },
     );
+  }
+
+  // HR edits on admin-class targets queue as a SuperAdmin approval request —
+  // the service returns `{ requiresApproval: true, message }`. Surface it as
+  // an info toast instead of silently redirecting back to the detail page.
+  const updatePayload = (res.data as {
+    result?: { data?: { requiresApproval?: boolean; message?: string } };
+  })?.result?.data;
+  if (updatePayload?.requiresApproval) {
+    return json({
+      success: true,
+      message: updatePayload.message ?? 'Edit submitted for SuperAdmin approval.',
+    });
   }
 
   return redirect(`/hr/users/${userId}`);
