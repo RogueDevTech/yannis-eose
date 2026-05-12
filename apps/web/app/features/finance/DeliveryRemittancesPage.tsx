@@ -491,7 +491,7 @@ export function DeliveryRemittancesPage({
       <PageHeader
         title="Cash Remittances"
         mobileInlineActions
-        description="Review remittance batches and record new cash remittances."
+        description="Review and record cash remittances."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Cash remittances tools"

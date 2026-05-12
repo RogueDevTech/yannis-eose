@@ -553,7 +553,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         onClose={() => setConfirmInTransit(false)}
         error={fetcherSurface.errorMatchingIntent('shipmentMarkInTransit')}
         title="Mark this shipment as in transit?"
-        description="Use this once the supplier has dispatched the goods so ops can see them in the incoming pipeline."
+        description="Use this after the supplier dispatches the goods."
         confirmLabel="Mark in transit"
         variant="warning"
         loading={isPending('shipmentMarkInTransit')}
@@ -565,7 +565,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         onClose={() => setConfirmArrived(false)}
         error={fetcherSurface.errorMatchingIntent('shipmentMarkArrived')}
         title="Mark this shipment as arrived?"
-        description="Confirms the goods are physically at the destination warehouse and ready to verify."
+        description="Use this when the goods reach the destination and are ready to verify."
         confirmLabel="Mark arrived"
         variant="warning"
         loading={isPending('shipmentMarkArrived')}

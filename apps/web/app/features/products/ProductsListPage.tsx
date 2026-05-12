@@ -364,9 +364,9 @@ export function ProductsListPage({
         }
         emptyDescription={
           productsLoadError
-            ? 'Use Reload data above. An empty table here does not mean your catalog is empty.'
+            ? 'Use Reload data above and try again.'
             : products.length === 0
-              ? 'Add your first product with Add Product above.'
+              ? 'Add your first product above.'
               : 'Try adjusting your search or filters.'
         }
         pagination={{

@@ -31,7 +31,7 @@ export function ProductsListDeferredFallback() {
         loadingVariant="overlay"
         withCard
         emptyTitle="Loading products…"
-        emptyDescription="Catalog data is streaming in."
+        emptyDescription="Loading catalog data."
         pagination={{
           page: 1,
           totalPages: 1,

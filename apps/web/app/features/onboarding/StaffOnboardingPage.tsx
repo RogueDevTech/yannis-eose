@@ -386,7 +386,7 @@ export function StaffOnboardingPage({
         description={
           mode === 'self'
             ? 'Help HR keep accurate records. You can save and come back anytime — submit when you\'re ready.'
-            : 'Review the packet below (documents open in a new tab). Staff edit from Your onboarding; approve here once verification is complete.'
+            : 'Review the documents below and approve when ready.'
         }
         actions={
           <div className="flex items-center gap-2">
@@ -589,7 +589,7 @@ export function StaffOnboardingPage({
           <Card>
             <CardHeader
               title="Payout bank details"
-              description="Where Finance sends your monthly payroll. Required before you can submit for review."
+              description="Where Finance sends your payroll. Required before review."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField label="Bank name" hint="e.g. GTBank, Access Bank, OPay">
@@ -654,7 +654,7 @@ export function StaffOnboardingPage({
         open={confirmSubmit}
         onClose={() => setConfirmSubmit(false)}
         title="Submit your onboarding?"
-        description="Once submitted, the form locks until HR reviews it. You can ask HR to make changes if anything needs editing afterwards."
+        description="After submission, the form stays locked until HR reviews it."
         confirmLabel="Submit for review"
         variant="warning"
         loading={isSubmitting}
@@ -669,7 +669,7 @@ export function StaffOnboardingPage({
         open={confirmApprove}
         onClose={() => setConfirmApprove(false)}
         title="Approve this onboarding?"
-        description="The staff member will be notified. Their onboarding will stay approved and locked for edits unless you coordinate a correction with them."
+        description="The staff member will be notified. The record stays locked unless you coordinate a correction."
         confirmLabel="Approve"
         variant="warning"
         loading={isApproving}

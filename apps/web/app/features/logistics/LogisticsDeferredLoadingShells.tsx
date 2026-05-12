@@ -239,7 +239,7 @@ export function LogisticsOrdersLoadingShell({
       <PageHeader
         title="Logistics orders"
         mobileInlineActions
-        description="Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery."
+        description="Track confirmed and in-flight orders."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Logistics orders tools"

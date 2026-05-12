@@ -197,6 +197,20 @@ If a pattern appears in 2+ places, it must be a shared component in `apps/web/ap
 - `danger`: destructive (Remove, Delete, Cancel, Reject).
 - Never use `<Button size="sm">` in tables — inflates row height.
 
+### Admin Mobile Optimization Standard
+- Default to **mobile-first** cleanup for admin surfaces: shorten copy, reduce chrome, and keep dense views readable on small screens.
+- Prefer concise page descriptions with no filler punctuation or multi-clause explanations. One short sentence is the default.
+- Use `<PageHeader />` with `mobileInlineActions` and collapse mobile actions with `<PageHeaderMobileTools />` instead of hand-rolling mobile button rows.
+- Prefer `<PageRefreshButton iconOnly />` on mobile and keep full refresh buttons for desktop only when needed.
+- Group date filters, search helpers, and secondary actions inside the same header-tools pattern so the top of the page stays compact.
+- Remove redundant inner section headings above tables or lists when the page header, tabs, or overview stats already provide the context.
+- On mobile, give primary identifiers more space: names, titles, and key statuses should win over badges, pills, or secondary metrics.
+- Reduce mobile padding on leaderboard cards, action rows, and summary blocks when it improves scanability, but do not sacrifice tap targets.
+- If horizontal scrolling is necessary for strips or dense controls, make the whole card area scrollable rather than only the inner content.
+- Keep collapsible leaderboard/card behavior mobile-only when desktop has room to show the full content by default.
+- Mirror visible header and copy changes in loading shells, deferred fallbacks, and skeletons.
+- Reuse shared UI primitives already standardized here: `<PageHeader />`, `<PageHeaderMobileTools />`, `<ToolbarFiltersCollapsible />`, `<OverviewStatStrip />`, `<CompactTable />`, `<EmptyState />`, `<NumberInput />`, and other shared inputs before introducing custom mobile variants.
+
 ---
 
 ## Modal + Optimistic UI Pattern (Non-Negotiable)

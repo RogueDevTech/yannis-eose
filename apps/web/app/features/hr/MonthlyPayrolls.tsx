@@ -568,7 +568,7 @@ function BatchDetailModal({
         {payouts.length === 0 ? (
           <EmptyState
             title="No payouts in this batch"
-            description="Generation produced no payouts — usually means no commission plan covers these staff yet."
+            description="No payouts were generated. Check commission plan coverage."
           />
         ) : (
           <div className="overflow-x-auto">
