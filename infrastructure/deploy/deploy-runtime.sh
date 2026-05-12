@@ -7,13 +7,13 @@
 #   IMAGE_TAG
 #
 # Optional env:
-#   COMPOSE_FILES   space-separated compose files
+#   COMPOSE_FILES   space-separated compose files (default: docker-compose.runtime.yml)
 # ==============================================================================
 set -euo pipefail
 
 IMAGE_REGISTRY="${IMAGE_REGISTRY:-}"
 IMAGE_TAG="${IMAGE_TAG:-dev-latest}"
-COMPOSE_FILES="${COMPOSE_FILES:-docker-compose.runtime.yml docker-compose.runtime.tunnel.yml}"
+COMPOSE_FILES="${COMPOSE_FILES:-docker-compose.runtime.yml}"
 
 if [ -z "$IMAGE_REGISTRY" ]; then
   echo "IMAGE_REGISTRY is required."
@@ -36,11 +36,6 @@ if ! grep -q '^REDIS_URL=' .env 2>/dev/null; then
   echo "REDIS_URL missing from .env"
   exit 1
 fi
-if ! grep -q '^CLOUDFLARE_TUNNEL_TOKEN=' .env 2>/dev/null; then
-  echo "CLOUDFLARE_TUNNEL_TOKEN missing from .env"
-  exit 1
-fi
-
 echo "→ Freeing disk space..."
 df -h /
 docker system prune -af 2>/dev/null || true
@@ -71,8 +66,10 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
     IMAGE_REGISTRY="$IMAGE_REGISTRY" IMAGE_TAG="$IMAGE_TAG" docker compose "${compose_args[@]}" logs --tail=60 api
     echo "→ Web logs (last 60 lines):"
     IMAGE_REGISTRY="$IMAGE_REGISTRY" IMAGE_TAG="$IMAGE_TAG" docker compose "${compose_args[@]}" logs --tail=60 web
-    echo "→ Tunnel logs (last 60 lines):"
-    IMAGE_REGISTRY="$IMAGE_REGISTRY" IMAGE_TAG="$IMAGE_TAG" docker compose "${compose_args[@]}" logs --tail=60 cloudflared
+    if IMAGE_REGISTRY="$IMAGE_REGISTRY" IMAGE_TAG="$IMAGE_TAG" docker compose "${compose_args[@]}" ps cloudflared >/dev/null 2>&1; then
+      echo "→ Tunnel logs (last 60 lines):"
+      IMAGE_REGISTRY="$IMAGE_REGISTRY" IMAGE_TAG="$IMAGE_TAG" docker compose "${compose_args[@]}" logs --tail=60 cloudflared || true
+    fi
     exit 1
   fi
   sleep 5

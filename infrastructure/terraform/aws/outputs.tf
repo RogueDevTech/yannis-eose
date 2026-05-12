@@ -61,7 +61,6 @@ output "suggested_runtime_env" {
   value = {
     ASSET_ENV_PREFIX               = var.environment
     AWS_REGION                     = var.aws_region
-    CLOUDFLARE_TUNNEL_TOKEN        = "<cloudflare tunnel token>"
     CORS_ORIGIN                    = "https://${var.public_web_hostname}"
     DEPLOY_PLATFORM                = "aws"
     EDGE_WORKER_URL                = "https://<your-edge-worker-domain>"

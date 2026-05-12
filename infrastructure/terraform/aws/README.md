@@ -51,10 +51,9 @@ OBJECT_STORAGE_PROVIDER=s3
 OBJECT_STORAGE_BUCKET=<terraform object_storage_bucket output>
 OBJECT_STORAGE_PUBLIC_BASE_URL=https://<terraform object_storage_bucket output>.s3.<region>.amazonaws.com
 ASSET_ENV_PREFIX=dev
-CLOUDFLARE_TUNNEL_TOKEN=<cloudflare tunnel token>
 ```
 
 ## Notes
 
-- This adapter assumes the same normalized runtime shape as GCP: single VM, external Redis, Cloudflare Tunnel, no VM-local nginx, no VM-local Redis.
+- This adapter assumes the same normalized runtime shape as GCP: single VM, external Redis, ingress handled separately, no VM-local nginx, no VM-local Redis.
 - The runtime compose still uses the shared files in `infrastructure/deploy/`.

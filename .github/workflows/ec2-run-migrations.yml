@@ -53,7 +53,6 @@ jobs:
         run: |
           gcloud compute scp \
             infrastructure/deploy/docker-compose.runtime.yml \
-            infrastructure/deploy/docker-compose.runtime.tunnel.yml \
             infrastructure/deploy/refresh-env.sh \
             infrastructure/deploy/refresh-env-gcp.sh \
             infrastructure/deploy/run-migrations.sh \
@@ -73,7 +72,7 @@ jobs:
           gcloud compute ssh "$GCP_VM_NAME" \
             --zone "$GCP_ZONE" \
             --project "$GCP_PROJECT_ID" \
-            --command "cd /opt/yannis-eose && chmod +x ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' RUNTIME_ENV_SECRET_NAME='$GCP_RUNTIME_ENV_SECRET_NAME' ./refresh-env.sh && gcloud auth configure-docker '${GCP_REGION}-docker.pkg.dev' --quiet && COMPOSE_FILES='docker-compose.runtime.yml docker-compose.runtime.tunnel.yml' IMAGE_REGISTRY='${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY_ID}' IMAGE_TAG='dev-latest' ./run-migrations.sh"
+            --command "cd /opt/yannis-eose && chmod +x ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' RUNTIME_ENV_SECRET_NAME='$GCP_RUNTIME_ENV_SECRET_NAME' ./refresh-env.sh && gcloud auth configure-docker '${GCP_REGION}-docker.pkg.dev' --quiet && COMPOSE_FILES='docker-compose.runtime.yml' IMAGE_REGISTRY='${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY_ID}' IMAGE_TAG='dev-latest' ./run-migrations.sh"
 
   migrate-aws:
     name: Pull API image + run migrations on EC2
@@ -105,7 +104,6 @@ jobs:
           scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i ~/.ssh/deploy_key \
             infrastructure/deploy/docker-compose.runtime.yml \
-            infrastructure/deploy/docker-compose.runtime.tunnel.yml \
             infrastructure/deploy/refresh-env.sh \
             infrastructure/deploy/refresh-env-aws.sh \
             infrastructure/deploy/run-migrations.sh \
@@ -123,4 +121,4 @@ jobs:
             chmod +x ./refresh-env.sh ./refresh-env-aws.sh ./run-migrations.sh
             DEPLOY_PLATFORM='aws' SECRET_NAME='${{ env.AWS_RUNTIME_SECRET_NAME }}' AWS_REGION='${{ env.AWS_REGION }}' ./refresh-env.sh
             aws ecr get-login-password --region '${{ env.AWS_REGION }}' | docker login --username AWS --password-stdin '${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com'
-            COMPOSE_FILES='docker-compose.runtime.yml docker-compose.runtime.tunnel.yml' IMAGE_REGISTRY='${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com' IMAGE_TAG='dev-latest' ./run-migrations.sh
+            COMPOSE_FILES='docker-compose.runtime.yml' IMAGE_REGISTRY='${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com' IMAGE_TAG='dev-latest' ./run-migrations.sh

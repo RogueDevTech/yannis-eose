@@ -27,7 +27,7 @@ Requires `DATABASE_URL` in the environment (or root `.env` if you load it yourse
 ```bash
 cd /opt/yannis-eose
 chmod +x run-migrations.sh
-export COMPOSE_FILES="docker-compose.runtime.yml docker-compose.runtime.tunnel.yml"
+export COMPOSE_FILES="docker-compose.runtime.yml"
 ./run-migrations.sh
 ```
 
