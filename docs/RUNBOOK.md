@@ -50,9 +50,8 @@ The API logs a production warning when `SESSION_COOKIE_DOMAIN` is unset (`apps/a
 - Local laptop development:
   - `apps/api/.env` should point to local Redis (for example `redis://127.0.0.1:6379`).
 - Deployed dev on VM:
-  - Redis runs as a Docker service in `docker-compose.prod.yml`.
-  - API connects to internal compose Redis via `REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379`.
-  - `/opt/yannis-eose/.env` is refreshed from AWS Secrets Manager by `refresh-env.sh` and should include `REDIS_PASSWORD`.
+  - Redis stays external via `REDIS_URL`; it does **not** run inside the VM.
+  - `/opt/yannis-eose/.env` is refreshed via `refresh-env.sh`, which dispatches to the active provider adapter.
 
 ### Redis Sanity Check (Local)
 
@@ -65,10 +64,9 @@ redis-cli -u "$REDIS_URL" ping
 
 ```bash
 cd /opt/yannis-eose
-grep '^REDIS_PASSWORD=' .env
-docker compose -f docker-compose.prod.yml ps redis
-docker compose -f docker-compose.prod.yml logs --tail=80 redis
-docker compose -f docker-compose.prod.yml logs --tail=80 api | grep -i redis
+grep '^REDIS_URL=' .env
+docker compose -f docker-compose.runtime.yml -f docker-compose.runtime.tunnel.yml logs --tail=80 api | grep -i redis
+docker compose -f docker-compose.runtime.yml -f docker-compose.runtime.tunnel.yml ps api web cloudflared
 ```
 
 If the API logs show repeated Redis DNS/connection errors, Socket.io auth may fail and real-time notifications will lag.

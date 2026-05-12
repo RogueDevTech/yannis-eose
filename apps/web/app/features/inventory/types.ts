@@ -80,6 +80,7 @@ export interface LocationOption {
   id: string;
   name: string;
   providerName: string | null;
+  providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null;
 }
 
 export interface ShipmentFilterOption {

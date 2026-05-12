@@ -10,7 +10,7 @@ import { FormField } from '~/components/ui/form-field';
 import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upload';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Spinner } from '~/components/ui/spinner';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { fetchCampaignOrderTotalForBatch } from '~/lib/trpc-browser';
 import type { Campaign, Product, AdPlatform } from './types';
 import { AD_EXPENSE_PLATFORM_OPTIONS } from './ad-expense-options';
@@ -736,7 +736,7 @@ function FormSectionCard({
                     </td>
                     <td className="px-1.5 py-1">
                       <FileUpload
-                        folder={S3_FOLDERS.SCREENSHOTS}
+                        folder={ASSET_FOLDERS.SCREENSHOTS}
                         onUpload={(url) => onLineChange(line.uid, { screenshotUrl: url })}
                         onUploadStateChange={(s) => onLineChange(line.uid, { uploadState: s })}
                         variant="minimal"

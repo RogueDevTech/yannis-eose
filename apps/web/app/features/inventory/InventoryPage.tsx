@@ -165,6 +165,10 @@ export function InventoryPage(props: InventoryStreamData) {
   const isLoadingLevels = useLoaderRefetchBusy().busy;
 
   const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
+  const locationTagClasses = (providerKind: LocationOption['providerKind']) =>
+    providerKind === 'WAREHOUSE'
+      ? 'border-brand-600 bg-brand-600 text-white shadow-sm dark:border-brand-500 dark:bg-brand-500 dark:text-slate-950'
+      : 'border-app-border bg-app-hover text-app-fg-muted';
   const locationName = (id: string | null) => {
     if (!id) return '—';
     const loc = displayLocations.find((l) => l.id === id) ?? locations.find((l) => l.id === id);
@@ -172,11 +176,14 @@ export function InventoryPage(props: InventoryStreamData) {
     return loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name;
   };
 
-  const locationLabelParts = (id: string | null): { name: string; tag?: string } => {
-    if (!id) return { name: '—' };
+  const locationLabelParts = (
+    id: string | null,
+  ): { name: string; tag?: string; providerKind: LocationOption['providerKind'] } => {
+    if (!id) return { name: '—', providerKind: null };
     const loc = displayLocations.find((l) => l.id === id) ?? locations.find((l) => l.id === id);
-    if (!loc) return { name: 'Unknown location' };
-    return { name: loc.name, ...(loc.providerName ? { tag: loc.providerName } : {}) };
+    if (!loc) return { name: 'Unknown location', providerKind: null };
+    const tag = loc.providerName ?? (loc.providerKind === 'WAREHOUSE' ? 'Our warehouse' : undefined);
+    return { name: loc.name, providerKind: loc.providerKind, ...(tag ? { tag } : {}) };
   };
 
   // displayedLevels is computed below — after the optimisticLevels hook fires
@@ -286,7 +293,9 @@ export function InventoryPage(props: InventoryStreamData) {
           <span className="inline-flex items-center gap-2 min-w-0">
             <span className="text-app-fg-muted truncate">{parts.name}</span>
             {parts.tag ? (
-              <span className="inline-flex items-center rounded-full border border-app-border bg-app-hover px-2 py-0.5 text-[10px] font-medium text-app-fg-muted whitespace-nowrap">
+              <span
+                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(parts.providerKind)}`}
+              >
                 {parts.tag}
               </span>
             ) : null}
@@ -841,11 +850,13 @@ export function InventoryPage(props: InventoryStreamData) {
                 ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
                   value: l.id,
                   label: l.name,
-                  ...(l.providerName
+                  ...((l.providerName ?? (l.providerKind === 'WAREHOUSE' ? 'Our warehouse' : null))
                     ? {
                         leading: (
-                          <span className="inline-flex items-center rounded-full border border-app-border bg-app-hover px-2 py-0.5 text-[10px] font-medium text-app-fg-muted whitespace-nowrap">
-                            {l.providerName}
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
+                          >
+                            {l.providerName ?? 'Our warehouse'}
                           </span>
                         ),
                       }

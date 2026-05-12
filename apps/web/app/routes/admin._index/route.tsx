@@ -13,7 +13,7 @@ import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/feat
 
 const defaultQuickOverview: QuickOverviewData = {
   marketing: { today: { newOrders: 0, confirmed: 0, delivered: 0, cancelled: 0 } },
-  cs: { closerCount: 0, totalPending: 0, idleCount: 0, unassigned: 0 },
+  cs: { unassigned: 0, engaged: 0, confirmed: 0, delivered: 0 },
   pendingApprovals: 0,
 };
 

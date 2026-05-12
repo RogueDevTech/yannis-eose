@@ -6,6 +6,7 @@
 - **pnpm** 9+ (`npm install -g pnpm`)
 - **PostgreSQL 18** connection string (Aiven, Neon, or any managed Postgres)
 - **Redis** connection string (Upstash, Redis Cloud, or any managed Redis)
+- **Google Cloud credentials** with access to the configured GCS bucket if you want direct uploads / image rehosting to work locally
 - **Git** 2.30+
 
 ## Quick Start (< 10 minutes)
@@ -42,6 +43,16 @@ cp apps/edge-worker/.env.example apps/edge-worker/.env
 | `PORT` | API port | `4444` |
 | `CORS_ORIGIN` | Frontend URL | `http://localhost:4003` |
 | `SESSION_TTL_SECONDS` | Session lifetime | `86400` |
+| `SESSION_COOKIE_DOMAIN` | Parent cookie domain for split web/API hosts | `.roguedevtech.com` |
+| `OBJECT_STORAGE_PROVIDER` | Object storage adapter to use | `gcs` |
+| `OBJECT_STORAGE_BUCKET` | Bucket used for uploads + product image rehosting | `dev-yannis-eose-assets` |
+| `OBJECT_STORAGE_PUBLIC_BASE_URL` | Public base URL for durable file URLs | `https://storage.googleapis.com/dev-yannis-eose-assets` |
+| `ASSET_ENV_PREFIX` | Environment-specific object prefix | `dev` |
+| `GCP_PROJECT_ID` | Required when using the `gcs` adapter | `my-gcp-project` |
+| `AWS_REGION` | Required when using the `s3` adapter without a custom endpoint | `eu-north-1` |
+| `S3_ENDPOINT` | Optional S3-compatible endpoint override | `https://s3.eu-north-1.amazonaws.com` |
+| `S3_ACCESS_KEY_ID` | Optional static S3 credentials for local dev | `AKIA...` |
+| `S3_SECRET_ACCESS_KEY` | Optional static S3 credentials for local dev | `secret` |
 
 **Required env vars for `apps/web/.env`:**
 
@@ -49,14 +60,24 @@ cp apps/edge-worker/.env.example apps/edge-worker/.env
 |----------|-------------|---------|
 | `API_URL` | Backend API URL | `http://localhost:4444` |
 | `VITE_API_URL` | Client-side API URL | `http://localhost:4444` |
+| `OBJECT_STORAGE_PROVIDER` | Object storage adapter to use | `gcs` |
+| `OBJECT_STORAGE_BUCKET` | Bucket used by `/api/upload-url` | `dev-yannis-eose-assets` |
+| `OBJECT_STORAGE_PUBLIC_BASE_URL` | Public base URL for uploaded assets | `https://storage.googleapis.com/dev-yannis-eose-assets` |
+| `ASSET_ENV_PREFIX` | Environment-specific object prefix | `dev` |
+| `GCP_PROJECT_ID` | Required when using the `gcs` adapter | `my-gcp-project` |
+| `AWS_REGION` | Required when using the `s3` adapter without a custom endpoint | `eu-north-1` |
+| `S3_ENDPOINT` | Optional S3-compatible endpoint override | `https://s3.eu-north-1.amazonaws.com` |
+| `S3_ACCESS_KEY_ID` | Optional static S3 credentials for local dev | `AKIA...` |
+| `S3_SECRET_ACCESS_KEY` | Optional static S3 credentials for local dev | `secret` |
 
 ### Redis Environment Split (Local vs Deployed Dev)
 
 - Local laptop runtime uses `apps/api/.env`:
   - `REDIS_URL=redis://127.0.0.1:6379` (or your SSH tunnel endpoint)
-- Deployed dev on VM uses Redis from Docker Compose (`redis` service in `infrastructure/deploy/docker-compose.prod.yml`).
-- API container is pinned to compose-internal Redis URL (`redis://:${REDIS_PASSWORD}@redis:6379`) at deploy time.
-- Provide `REDIS_PASSWORD` in VM runtime `.env` (from `refresh-env.sh` / Secrets Manager). If absent, deploy uses a dev fallback password.
+- Deployed dev uses the same external `REDIS_URL` pattern — Redis is **not** VM-local on either provider adapter.
+- The shared runtime compose files are `infrastructure/deploy/docker-compose.runtime.yml` and `infrastructure/deploy/docker-compose.runtime.tunnel.yml`.
+- `DEPLOY_PLATFORM=aws|gcp` selects the provider wrapper in CI and on the VM.
+- VM runtime `.env` is refreshed via `infrastructure/deploy/refresh-env.sh`, which dispatches to the selected provider adapter.
 
 ### 3. Run Database Migrations
 
@@ -141,7 +162,7 @@ yannis-eose/
 │   │   │   ├── components/     # Layout + UI components (32+)
 │   │   │   ├── features/       # Feature page components (29 modules)
 │   │   │   ├── hooks/          # React hooks (socket, VOIP, PWA, mobile, online)
-│   │   │   ├── lib/            # API client, S3 upload, CSV export, PDF, offline sync
+│   │   │   ├── lib/            # API client, object storage upload, CSV export, PDF, offline sync
 │   │   │   └── routes/         # Remix file-based routing (admin, auth, hr, rider, tpl, payment)
 │   │   ├── e2e/                # Playwright E2E tests (7 specs)
 │   │   └── public/             # SW, manifest, static assets

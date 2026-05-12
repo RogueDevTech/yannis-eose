@@ -2,7 +2,7 @@ export interface ProductOffer {
   label: string;
   qty: number;
   price: string;
-  /** Gallery URLs for this offer tier (S3 or other HTTPS). */
+  /** Gallery URLs for this offer tier (GCS/public object storage or other HTTPS). */
   imageUrls?: string[];
 }
 

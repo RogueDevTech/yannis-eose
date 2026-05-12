@@ -1,28 +1,19 @@
 import type { ActionFunctionArgs } from '@remix-run/node';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import {
+  ASSET_FOLDERS,
+  type AssetFolder,
+} from '@yannis/shared';
 import { getCurrentUser } from '~/lib/api.server';
+import { createSignedAssetUpload } from '~/lib/object-storage.server';
 
-const ALLOWED_FOLDERS = new Set([
-  'screenshots',
-  'receipts',
-  'delivery-proof',
-  'invoices',
-  'product-images',
-  // Phase 22 — staff onboarding profile uploads
-  'onboarding-docs',
-]);
+const ALLOWED_FOLDERS = new Set<AssetFolder>(Object.values(ASSET_FOLDERS));
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 interface UploadUrlRequest {
-  folder?: string;
+  folder?: AssetFolder;
   fileName?: string;
   fileType?: string;
   fileSize?: number;
-}
-
-function sanitizeFilename(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_{2,}/g, '_').toLowerCase();
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -41,7 +32,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!user) {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
-  // Mirror Mode is strictly view-only — S3 uploads bypass the tRPC mutation block, so we
+  // Mirror Mode is strictly view-only — direct asset uploads bypass the tRPC mutation block, so we
   // must reject them here too. Otherwise an admin mirroring a staff member could write
   // files into their folder. See CLAUDE.md → "Mirror Mode".
   if (user.mirroredBy) {
@@ -52,12 +43,12 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   const body = (await request.json().catch(() => ({}))) as UploadUrlRequest;
-  const folder = body.folder ?? '';
+  const folder = body.folder;
   const fileName = body.fileName ?? '';
   const fileType = body.fileType ?? 'application/octet-stream';
   const fileSize = Number(body.fileSize ?? 0);
 
-  if (!ALLOWED_FOLDERS.has(folder)) {
+  if (!folder || !ALLOWED_FOLDERS.has(folder)) {
     return jsonResponse({ error: 'Invalid upload folder' }, 400);
   }
   if (!fileName || fileName.length > 255) {
@@ -67,43 +58,14 @@ export async function action({ request }: ActionFunctionArgs) {
     return jsonResponse({ error: 'Invalid file size' }, 400);
   }
 
-  const bucket = process.env['S3_BUCKET'] ?? '';
-  const region = process.env['S3_REGION'] ?? 'us-east-1';
-  const endpoint = process.env['S3_ENDPOINT'] ?? '';
-  const accessKeyId = process.env['S3_ACCESS_KEY_ID'] ?? '';
-  const secretAccessKey = process.env['S3_SECRET_ACCESS_KEY'] ?? '';
-
-  if (!bucket || !accessKeyId || !secretAccessKey) {
+  const signedUpload = await createSignedAssetUpload({
+    folder,
+    fileName,
+    fileType,
+  });
+  if (!signedUpload) {
     return jsonResponse({ error: 'Upload service not configured' }, 503);
   }
 
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).slice(2, 8);
-  const key = `${folder}/${timestamp}-${random}-${sanitizeFilename(fileName)}`;
-
-  const client = new S3Client({
-    region,
-    credentials: { accessKeyId, secretAccessKey },
-    ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
-  });
-
-  const command = new PutObjectCommand({
-    Bucket: bucket,
-    Key: key,
-    ContentType: fileType,
-  });
-
-  // @smithy/types is pulled in at two minor versions in node_modules, so S3Client
-  // and PutObjectCommand resolve to different (structurally identical) symbols
-  // than getSignedUrl's parameter slots. Runtime is fine; cast to keep typecheck quiet.
-  const uploadUrl = await getSignedUrl(
-    client as unknown as Parameters<typeof getSignedUrl>[0],
-    command as unknown as Parameters<typeof getSignedUrl>[1],
-    { expiresIn: 120 },
-  );
-  const fileUrl = endpoint
-    ? `${endpoint}/${bucket}/${key}`
-    : `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
-
-  return jsonResponse({ uploadUrl, fileUrl, key });
+  return jsonResponse(signedUpload);
 }

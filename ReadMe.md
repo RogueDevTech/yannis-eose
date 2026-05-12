@@ -22,6 +22,12 @@ brew services stop redis
 brew services start redis
 brew services list | grep redis   # should now show "started"
 
+
+
+GCP TERRAFORM
+terraform plan project-26c432ec-b4f1-4e21-a6a
+terraform apply project-26c432ec-b4f1-4e21-a6a
+
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env    # Configure database + Redis
@@ -96,13 +102,15 @@ cd apps/web && npm run dev
 | Edge | Cloudflare Workers |
 | VOIP | Twilio Voice API + WebRTC |
 | PWA | Service Workers + Web Push |
-| File Storage | AWS S3 / Cloudflare R2 |
+| File Storage | Provider-selectable object storage (GCS / S3) |
 | Testing | Playwright (7 E2E specs) |
 | CI/CD | GitHub Actions |
 
 ## Documentation
 
 - [Developer Onboarding Guide](docs/DEVELOPER_GUIDE.md) — Setup, architecture, conventions
+- [Multi-Cloud Deploy](docs/MULTI_CLOUD_DEPLOY.md) — Shared runtime contract, provider selector, and adapter model
+- [GCP Dev Deploy](docs/GCP_DEV_DEPLOY.md) — Terraform, VM runtime, Cloudflare Tunnel, and runtime secret layout
 - [Operational Runbook](docs/RUNBOOK.md) — Common operations and troubleshooting
 - [Architecture Decision Records](docs/ADR.md) — 9 ADRs covering key technical choices
 - [CLAUDE.md](CLAUDE.md) — Full system specification and agent directives

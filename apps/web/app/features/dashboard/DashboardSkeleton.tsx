@@ -70,7 +70,7 @@ export function AdminQuickDashboardLoadingShell({
 
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Customer support today</h2>
+          <h2 className="text-lg font-semibold text-app-fg">CS activity today</h2>
           <Link
             to="/admin/cs/queue"
             prefetch="intent"
@@ -83,10 +83,10 @@ export function AdminQuickDashboardLoadingShell({
           embedded
           showScrollControls={false}
           items={[
-            { label: 'Closers', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Pending', value: <StatValuePulse className="min-w-[2.25rem]" /> },
-            { label: 'Idle', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Unassigned', value: <StatValuePulse className="min-w-[2.25rem]" /> },
+            { label: 'Engaged', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
           ]}
         />
       </div>

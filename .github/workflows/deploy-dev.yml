@@ -1,4 +1,4 @@
-name: Deploy to Dev (EC2)
+name: Deploy to Dev
 
 on:
   push:
@@ -10,8 +10,6 @@ concurrency:
 
 env:
   NODE_VERSION: "20"
-  # ECR and EC2 deploy use this region. Set secret AWS_ACCOUNT_ID (e.g. 194722404149) for EC2 pull.
-  AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}
 
 jobs:
   build:
@@ -32,11 +30,89 @@ jobs:
       - name: Build all packages
         run: pnpm turbo build
 
-  deploy:
-    name: Deploy to EC2
+  deploy-gcp:
+    name: Deploy to Dev (GCP)
     runs-on: ubuntu-latest
     needs: build
+    if: ${{ vars.DEPLOY_PLATFORM == 'gcp' }}
     environment: dev
+    env:
+      GCP_REGION: ${{ secrets.GCP_REGION || 'europe-west2' }}
+      GCP_ZONE: ${{ secrets.GCP_ZONE || 'europe-west2-a' }}
+      GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.GCP_ARTIFACT_REPOSITORY_ID || 'dev-yannis-eose' }}
+      GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.GCP_RUNTIME_ENV_SECRET_NAME || 'dev-yannis-runtime-env' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Artifact Registry auth
+        run: |
+          gcloud auth configure-docker "${{ env.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - name: Build & push API image
+        env:
+          IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
+          IMAGE_TAG: dev-${{ github.sha }}
+        run: |
+          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-api:dev-latest
+
+      - name: Build & push Web image
+        env:
+          IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
+          IMAGE_TAG: dev-${{ github.sha }}
+        run: |
+          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-web:dev-latest
+
+      - name: Prepare VM deploy directory
+        run: |
+          gcloud compute ssh "${{ secrets.GCP_VM_NAME }}" \
+            --zone "${{ env.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --command "sudo mkdir -p /opt/yannis-eose && sudo chown \$USER:\$USER /opt/yannis-eose"
+
+      - name: Copy deploy assets to VM
+        run: |
+          gcloud compute scp \
+            infrastructure/deploy/docker-compose.runtime.yml \
+            infrastructure/deploy/docker-compose.runtime.tunnel.yml \
+            infrastructure/deploy/deploy-dev.sh \
+            infrastructure/deploy/deploy-runtime.sh \
+            infrastructure/deploy/deploy-gcp-dev.sh \
+            infrastructure/deploy/refresh-env.sh \
+            infrastructure/deploy/refresh-env-gcp.sh \
+            infrastructure/deploy/run-migrations.sh \
+            "${{ secrets.GCP_VM_NAME }}:/opt/yannis-eose/" \
+            --zone "${{ env.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Deploy on GCE VM
+        run: |
+          gcloud compute ssh "${{ secrets.GCP_VM_NAME }}" \
+            --zone "${{ env.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --command "cd /opt/yannis-eose && chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-gcp-dev.sh ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' GCP_REGION='${{ env.GCP_REGION }}' GCP_PROJECT_ID='${{ secrets.GCP_PROJECT_ID }}' ARTIFACT_REPOSITORY_ID='${{ env.GCP_ARTIFACT_REPOSITORY_ID }}' RUNTIME_ENV_SECRET_NAME='${{ env.GCP_RUNTIME_ENV_SECRET_NAME }}' IMAGE_TAG='dev-latest' ./deploy-dev.sh"
+
+  deploy-aws:
+    name: Deploy to Dev (AWS)
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ vars.DEPLOY_PLATFORM == 'aws' || vars.DEPLOY_PLATFORM == '' }}
+    environment: dev
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}
+      AWS_RUNTIME_SECRET_NAME: ${{ secrets.AWS_RUNTIME_SECRET_NAME || 'dev-yannis-runtime-env' }}
+      AWS_VM_SSH_USER: ${{ secrets.EC2_SSH_USER || 'ubuntu' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,132 +123,66 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
       - name: Ensure ECR repositories exist
         run: |
           for repo in yannis-eose-api yannis-eose-web; do
-            aws ecr describe-repositories --repository-names "$repo" --region ${{ env.AWS_REGION }} 2>/dev/null || \
-            aws ecr create-repository --repository-name "$repo" --region ${{ env.AWS_REGION }}
+            aws ecr describe-repositories --repository-names "$repo" --region "${{ env.AWS_REGION }}" 2>/dev/null || \
+            aws ecr create-repository --repository-name "$repo" --region "${{ env.AWS_REGION }}"
           done
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region "${{ env.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
 
       - name: Build & push API image
         env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
           IMAGE_TAG: dev-${{ github.sha }}
         run: |
-          docker build -f apps/api/Dockerfile -t $ECR_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $ECR_REGISTRY/yannis-eose-api:dev-latest .
-          docker push $ECR_REGISTRY/yannis-eose-api:$IMAGE_TAG
-          docker push $ECR_REGISTRY/yannis-eose-api:dev-latest
+          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-api:dev-latest
 
       - name: Build & push Web image
         env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
           IMAGE_TAG: dev-${{ github.sha }}
         run: |
-          docker build -f apps/web/Dockerfile -t $ECR_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $ECR_REGISTRY/yannis-eose-web:dev-latest .
-          docker push $ECR_REGISTRY/yannis-eose-web:$IMAGE_TAG
-          docker push $ECR_REGISTRY/yannis-eose-web:dev-latest
+          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-web:dev-latest
 
-      - name: Copy compose and nginx to EC2
+      - name: Copy deploy assets to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          if [ -z "$EC2_HOST" ]; then echo "::error::Secret EC2_HOST is not set. Add it in repo Settings → Secrets and variables → Actions (or in the dev environment)."; exit 1; fi
+          if [ -z "$EC2_HOST" ]; then echo "::error::Secret EC2_HOST is not set."; exit 1; fi
           if [ -z "$EC2_SSH_KEY" ]; then echo "::error::Secret EC2_SSH_KEY is not set."; exit 1; fi
           mkdir -p ~/.ssh
           echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key ubuntu@${EC2_HOST} "sudo mkdir -p /opt/yannis-eose && sudo chown ubuntu:ubuntu /opt/yannis-eose"
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key "${{ env.AWS_VM_SSH_USER }}"@"$EC2_HOST" "sudo mkdir -p /opt/yannis-eose && sudo chown ${{ env.AWS_VM_SSH_USER }}:${{ env.AWS_VM_SSH_USER }} /opt/yannis-eose"
           scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i ~/.ssh/deploy_key \
-            infrastructure/deploy/docker-compose.prod.yml \
-            infrastructure/nginx/nginx.conf \
+            infrastructure/deploy/docker-compose.runtime.yml \
+            infrastructure/deploy/docker-compose.runtime.tunnel.yml \
+            infrastructure/deploy/deploy-dev.sh \
+            infrastructure/deploy/deploy-runtime.sh \
+            infrastructure/deploy/deploy-aws-dev.sh \
             infrastructure/deploy/refresh-env.sh \
+            infrastructure/deploy/refresh-env-aws.sh \
             infrastructure/deploy/run-migrations.sh \
-            ubuntu@${EC2_HOST}:/opt/yannis-eose/
+            "${{ env.AWS_VM_SSH_USER }}"@"$EC2_HOST":/opt/yannis-eose/
 
-      - name: Deploy on EC2 via SSH
+      - name: Deploy on EC2
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
+          username: ${{ env.AWS_VM_SSH_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 15m
-          debug: false
+          command_timeout: 20m
           script: |
-            set -ex
             cd /opt/yannis-eose
-            {
-              set -e
-              echo "→ Ensuring .env exists..."
-              touch .env
-              export SECRET_NAME="yanis-eose"
-              export AWS_REGION=${{ env.AWS_REGION }}
-              chmod +x ./refresh-env.sh 2>/dev/null || true
-              if [ -x ./refresh-env.sh ]; then ./refresh-env.sh || true; fi
-              echo "→ Validating VM runtime env..."
-              if ! grep -q '^REDIS_PASSWORD=' .env; then
-                echo "REDIS_PASSWORD not found in /opt/yannis-eose/.env. Falling back to compose default password for dev."
-              fi
-              if ! grep -q '^DATABASE_URL=' .env; then
-                echo "Missing DATABASE_URL in /opt/yannis-eose/.env (Secrets Manager / refresh-env)."
-                exit 1
-              fi
-              echo "→ Logging into ECR..."
-              aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-              export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-              export IMAGE_TAG=dev-latest
-              echo "→ Freeing disk space (prune unused Docker images/containers)..."
-              df -h /
-              docker system prune -af 2>/dev/null || true
-              echo "→ Freeing port 80 (stop host nginx + tear down existing stack)..."
-              sudo systemctl stop nginx 2>/dev/null || true
-              docker compose -f docker-compose.prod.yml down 2>/dev/null || true
-              echo "→ Pulling images..."
-              docker compose -f docker-compose.prod.yml pull
-              chmod +x ./run-migrations.sh 2>/dev/null || true
-              echo "→ Running DB migrations (before bringing up app)..."
-              if [ -x ./run-migrations.sh ]; then
-                ./run-migrations.sh
-              else
-                echo "WARNING: run-migrations.sh missing or not executable — relying on API boot-time migrate only."
-              fi
-              echo "→ Starting containers..."
-              docker compose -f docker-compose.prod.yml up -d
-              echo "→ Waiting 20s for containers to start..."
-              sleep 20
-              echo "→ Health checks (retry every 5s, up to 90s)..."
-              for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
-                if curl -sf http://localhost:4444/health >/dev/null && curl -sf http://localhost:3000 >/dev/null; then
-                  echo "→ Health checks passed."
-                  break
-                fi
-                if [ "$i" -eq 18 ]; then
-                  echo "→ Health check timeout. Container status:"
-                  docker compose -f docker-compose.prod.yml ps -a
-                  echo "→ API logs (last 40 lines):"
-                  docker compose -f docker-compose.prod.yml logs --tail=40 api
-                  echo "→ Web logs (last 40 lines):"
-                  docker compose -f docker-compose.prod.yml logs --tail=40 web
-                  curl -sf http://localhost:4444/health || echo "API not ready"
-                  curl -sf http://localhost:3000 || echo "Web not ready"
-                  exit 1
-                fi
-                sleep 5
-              done
-              curl -sf http://localhost:4444/health || (echo "API health check failed" && exit 1)
-              curl -sf http://localhost:3000 || (echo "Web health check failed" && exit 1)
-              echo "→ Checking nginx is up..."
-              docker compose -f docker-compose.prod.yml ps nginx
-              curl -sf -o /dev/null http://localhost:80 || (echo "Nginx not responding on :80" && docker compose -f docker-compose.prod.yml logs --tail=20 nginx && exit 1)
-              docker image prune -f
-              echo "→ Deploy done."
-            } 2>&1 | tee /tmp/deploy.log
-            EXIT=${PIPESTATUS[0]}
-            echo "========== FULL DEPLOY LOG =========="
-            cat /tmp/deploy.log
-            exit $EXIT
+            chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-aws-dev.sh ./refresh-env.sh ./refresh-env-aws.sh ./run-migrations.sh
+            DEPLOY_PLATFORM='aws' AWS_REGION='${{ env.AWS_REGION }}' AWS_ACCOUNT_ID='${{ secrets.AWS_ACCOUNT_ID }}' SECRET_NAME='${{ env.AWS_RUNTIME_SECRET_NAME }}' IMAGE_TAG='dev-latest' ./deploy-dev.sh

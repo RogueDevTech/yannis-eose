@@ -5,7 +5,7 @@ import { Checkbox } from '~/components/ui/checkbox';
 import { FileUpload } from '~/components/ui/file-upload';
 import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { createRemittanceSchema, createDeliveryRemittanceSchema } from '@yannis/shared/validators';
 import { SearchableSelect } from '~/components/ui/searchable-select';
@@ -363,7 +363,7 @@ export function RemitPage({
               Payment receipt(s) (required)
             </label>
             <FileUpload
-              folder={S3_FOLDERS.RECEIPTS}
+              folder={ASSET_FOLDERS.RECEIPTS}
               label="Upload receipt"
               required={deliveryReceiptUrls.length === 0}
               onUpload={addDeliveryReceipt}
@@ -474,7 +474,7 @@ export function RemitPage({
             disabled={isSubmitting}
           />
           <FileUpload
-            folder={S3_FOLDERS.RECEIPTS}
+            folder={ASSET_FOLDERS.RECEIPTS}
             name="receiptUrl"
             label="Receipt (required)"
             required

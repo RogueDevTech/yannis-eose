@@ -1,0 +1,12 @@
+project_id          = "your-gcp-project-id"
+region              = "europe-west2"
+zone                = "europe-west2-a"
+environment         = "dev"
+machine_type        = "e2-small"
+vm_admin_user       = "deployer"
+ssh_public_key      = "ssh-ed25519 AAAA..."
+public_web_hostname = "dev-yannis.roguedevtech.com"
+public_api_hostname = "api-dev-yannis.roguedevtech.com"
+bucket_cors_origins = [
+  "https://dev-yannis.roguedevtech.com",
+]

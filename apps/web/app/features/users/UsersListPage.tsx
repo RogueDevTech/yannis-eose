@@ -138,6 +138,8 @@ export function UsersListPage({
   const totalPages: number = roster?.totalPages ?? 0;
   const staffAccounts = variant === 'staffAccounts';
   const [searchParams, setSearchParams] = useSearchParams();
+  const currentStatusParam = searchParams.has('status') ? (searchParams.get('status') || 'ALL') : 'ALL';
+  const currentRoleParam = searchParams.has('role') ? (searchParams.get('role') || 'ALL') : 'ALL';
   const searchFromUrl = searchParams.get('search') ?? '';
   const [draftSearch, setDraftSearch] = useState(searchFromUrl);
   const isFilterLoading = useLoaderRefetchBusy().busy;
@@ -221,37 +223,52 @@ export function UsersListPage({
   );
 
   const handleStatusChange = (value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value === 'ALL') next.delete('status');
-    else next.set('status', value);
-    next.set('page', '1');
-    setSearchParams(next, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === 'ALL') next.delete('status');
+        else next.set('status', value);
+        next.set('page', '1');
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   const handleRoleChange = (value: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value === 'ALL') next.delete('role');
-    else next.set('role', value);
-    next.set('page', '1');
-    setSearchParams(next, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === 'ALL') next.delete('role');
+        else next.set('role', value);
+        next.set('page', '1');
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   const goToPage = (nextPage: number) => {
     const clamped = Math.min(Math.max(1, nextPage), safeTotalPages);
-    const next = new URLSearchParams(searchParams);
-    next.set('page', String(clamped));
-    setSearchParams(next, { replace: true });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('page', String(clamped));
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   const filtersToolbarBadge = useMemo(() => {
     let n = 0;
-    if (statusParam !== 'ALL') n += 1;
-    if (roleParam !== 'ALL') n += 1;
+    if (currentStatusParam !== 'ALL') n += 1;
+    if (currentRoleParam !== 'ALL') n += 1;
     if ((searchParams.get('search') ?? '').trim().length > 0) n += 1;
     if (searchParams.get('probationOnly') === '1') n += 1;
     if (searchParams.get('supervisorOnly') === '1') n += 1;
     return n;
-  }, [statusParam, roleParam, searchParams]);
+  }, [currentStatusParam, currentRoleParam, searchParams]);
 
   const probationOnly = searchParams.get('probationOnly') === '1';
   const handleProbationOnlyToggle = (next: boolean) => {
@@ -563,7 +580,7 @@ export function UsersListPage({
             desktopInlineFilters={
               <>
                 <FormSelect
-                  value={statusParam}
+                  value={currentStatusParam}
                   onChange={(e) => handleStatusChange(e.target.value)}
                   options={[
                     { value: 'ALL', label: 'All Status' },
@@ -576,7 +593,7 @@ export function UsersListPage({
                   wrapperClassName="w-full min-w-0 sm:w-40"
                 />
                 <FormSelect
-                  value={roleParam}
+                  value={currentRoleParam}
                   onChange={(e) => handleRoleChange(e.target.value)}
                   options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                   wrapperClassName="w-full min-w-0 sm:w-48"
@@ -588,7 +605,7 @@ export function UsersListPage({
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Status</span>
                   <FormSelect
-                    value={statusParam}
+                    value={currentStatusParam}
                     onChange={(e) => handleStatusChange(e.target.value)}
                     options={[
                       { value: 'ALL', label: 'All Status' },
@@ -604,7 +621,7 @@ export function UsersListPage({
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Role</span>
                   <FormSelect
-                    value={roleParam}
+                    value={currentRoleParam}
                     onChange={(e) => handleRoleChange(e.target.value)}
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                     wrapperClassName="w-full"
@@ -676,7 +693,7 @@ export function UsersListPage({
               desktopInlineFilters={
                 <>
                   <FormSelect
-                    value={statusParam}
+                    value={currentStatusParam}
                     onChange={(e) => handleStatusChange(e.target.value)}
                     options={[
                       { value: 'ALL', label: 'All Status' },
@@ -689,7 +706,7 @@ export function UsersListPage({
                     wrapperClassName="w-full min-w-0 sm:w-40"
                   />
                   <FormSelect
-                    value={roleParam}
+                    value={currentRoleParam}
                     onChange={(e) => handleRoleChange(e.target.value)}
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                     wrapperClassName="w-full min-w-0 sm:w-48"
@@ -723,7 +740,7 @@ export function UsersListPage({
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Status</span>
                     <FormSelect
-                      value={statusParam}
+                      value={currentStatusParam}
                       onChange={(e) => handleStatusChange(e.target.value)}
                       options={[
                         { value: 'ALL', label: 'All Status' },
@@ -739,7 +756,7 @@ export function UsersListPage({
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Role</span>
                     <FormSelect
-                      value={roleParam}
+                      value={currentRoleParam}
                       onChange={(e) => handleRoleChange(e.target.value)}
                       options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                       wrapperClassName="w-full"

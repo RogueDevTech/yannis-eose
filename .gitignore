@@ -44,3 +44,8 @@ coverage/
 # Cloudflare
 .wrangler/
 .dev.vars
+
+# Terraform local state and plugin cache
+**/.terraform/
+*.tfstate
+*.tfstate.*

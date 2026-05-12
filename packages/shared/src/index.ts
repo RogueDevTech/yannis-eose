@@ -11,6 +11,8 @@ export * from './rbac/permission-catalog';
 export * from './rbac/permission-bitmask';
 export * from './rbac/permission-snapshot-merge';
 export * from './messaging/template-catalog';
+export * from './storage/asset-storage';
+export * from './storage/object-storage';
 export { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from './marketing/default-form-accent';
 export * as db from './db/index';
 // `runSqlMigrations` is server-only (uses node:fs / node:path). Re-exporting it

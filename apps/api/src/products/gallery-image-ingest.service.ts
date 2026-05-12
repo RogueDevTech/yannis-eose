@@ -1,9 +1,17 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { eq } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import { db as schema } from '@yannis/shared';
+import {
+  buildProductGalleryRehostKey,
+  db as schema,
+} from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
+import {
+  buildObjectStoragePublicUrl,
+  getObjectStoragePublicOrigin,
+  putBufferToObjectStorage,
+  resolveObjectStorageRuntimeConfig,
+} from '../common/storage/object-storage';
 
 /**
  * GalleryImageIngestService — rehosts product gallery images on our object
@@ -17,14 +25,14 @@ import { DRIZZLE } from '../database/database.module';
  *      (fire-and-forget). The HTTP response returns; this method finishes in
  *      the background on the Node event loop.
  *   3. Each external URL is fetched (15s timeout, 10 MB cap), MIME-validated
- *      against an `image/*` allowlist, and uploaded to S3/R2 under
- *      `product-images/<productId>/<timestamp>-<idx>.<ext>`.
+ *      against an `image/*` allowlist, and uploaded to the configured object store under an
+ *      environment-prefixed product-gallery key.
  *   4. After all URLs are processed, the product's `gallery_image_urls`
  *      column is updated to the new array. Failed entries keep their
  *      original URL — graceful degradation.
  *
  * Skips when:
- *   - S3 env config is missing (logs once, no throw)
+ *   - object storage env config is missing (logs once, no throw)
  *   - URL already starts with our bucket's public origin (idempotent re-runs)
  *   - URL doesn't look like a valid http(s) URL
  */
@@ -79,7 +87,7 @@ export class GalleryImageIngestService {
     if (urls.length === 0) return;
     if (!this.isConfigured()) {
       this.logger.warn(
-        `gallery ingest skipped — S3 env not configured (product=${productId}, urls=${urls.length})`,
+        `gallery ingest skipped — object storage env not configured (product=${productId}, urls=${urls.length})`,
       );
       return;
     }
@@ -87,7 +95,6 @@ export class GalleryImageIngestService {
     // Map every URL to either a rehosted URL (download succeeded) or its
     // original (already on our bucket OR download failed — keep the original
     // so the storefront still has something to render).
-    const client = this.buildClient();
     const finalUrls: string[] = [];
     let rehostedCount = 0;
     for (let i = 0; i < urls.length; i += 1) {
@@ -96,7 +103,7 @@ export class GalleryImageIngestService {
         finalUrls.push(src);
         continue;
       }
-      const rehosted = await this.rehostSingle(client, productId, src, i);
+      const rehosted = await this.rehostSingle(productId, src, i);
       if (rehosted) {
         finalUrls.push(rehosted);
         rehostedCount += 1;
@@ -122,12 +129,11 @@ export class GalleryImageIngestService {
   }
 
   /**
-   * Fetch one URL and upload to S3. Returns the new public URL on success,
+   * Fetch one URL and upload to the configured object store. Returns the new public URL on success,
    * or null on any failure (size cap, MIME mismatch, network error). Caller
    * keeps the original URL on null.
    */
   private async rehostSingle(
-    client: S3Client,
     productId: string,
     sourceUrl: string,
     index: number,
@@ -166,17 +172,18 @@ export class GalleryImageIngestService {
       }
 
       const ext = this.extensionFor(contentType, sourceUrl);
-      const safeProductId = productId.replace(/[^a-zA-Z0-9-]/g, '');
-      const key = `product-images/${safeProductId}/${Date.now()}-${index}${ext}`;
+      const key = buildProductGalleryRehostKey({
+        productId,
+        extension: ext,
+        envPrefix: this.getAssetEnvPrefix(),
+        randomSuffix: `img-${index}`,
+      });
 
-      await client.send(
-        new PutObjectCommand({
-          Bucket: this.getBucket(),
-          Key: key,
-          Body: buffer,
-          ContentType: contentType,
-        }),
-      );
+      await putBufferToObjectStorage({
+        key,
+        body: buffer,
+        contentType,
+      });
 
       return this.publicUrlFor(key);
     } catch (err) {
@@ -190,45 +197,21 @@ export class GalleryImageIngestService {
   }
 
   private isConfigured(): boolean {
-    return Boolean(
-      this.getBucket() && process.env['S3_ACCESS_KEY_ID'] && process.env['S3_SECRET_ACCESS_KEY'],
-    );
+    return Boolean(resolveObjectStorageRuntimeConfig()?.bucket);
   }
 
-  private getBucket(): string {
-    return process.env['S3_BUCKET'] ?? '';
-  }
-
-  private getEndpoint(): string {
-    return process.env['S3_ENDPOINT'] ?? '';
-  }
-
-  private getRegion(): string {
-    return process.env['S3_REGION'] ?? 'us-east-1';
+  private getAssetEnvPrefix(): string {
+    return resolveObjectStorageRuntimeConfig()?.assetEnvPrefix ?? 'dev';
   }
 
   /** Stable origin under which our uploaded objects are served — used to
    *  detect "already mine" URLs so re-runs are no-ops. */
   private getOwnPublicOrigin(): string {
-    const endpoint = this.getEndpoint();
-    if (endpoint) return `${endpoint.replace(/\/$/, '')}/${this.getBucket()}/`;
-    return `https://${this.getBucket()}.s3.${this.getRegion()}.amazonaws.com/`;
+    return getObjectStoragePublicOrigin();
   }
 
   private publicUrlFor(key: string): string {
-    return `${this.getOwnPublicOrigin()}${key}`;
-  }
-
-  private buildClient(): S3Client {
-    const region = this.getRegion();
-    const endpoint = this.getEndpoint();
-    const accessKeyId = process.env['S3_ACCESS_KEY_ID'] ?? '';
-    const secretAccessKey = process.env['S3_SECRET_ACCESS_KEY'] ?? '';
-    return new S3Client({
-      region,
-      credentials: { accessKeyId, secretAccessKey },
-      ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
-    });
+    return buildObjectStoragePublicUrl(key) ?? '';
   }
 
   /** Pick a sensible file extension from MIME first, then the URL pathname. */

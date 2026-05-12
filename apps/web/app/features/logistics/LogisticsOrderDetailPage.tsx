@@ -17,7 +17,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { STATUS_DOT_CLASS, STATUS_LABELS } from '~/features/shared/order-status';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { buildOrderSummaryClipboardText } from '~/features/orders/build-order-summary-clipboard';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
@@ -1192,7 +1192,7 @@ export function LogisticsOrderDetailPage({
                       />
                       <div>
                         <label className="block text-xs font-medium text-app-fg-muted mb-1">Proof Screenshot</label>
-                        <FileUpload folder={S3_FOLDERS.DELIVERY_PROOF} onUpload={setDeliveryProofUrl} accept="image/*" label={deliveryProofUrl ? 'Uploaded' : 'Upload proof'} />
+                        <FileUpload folder={ASSET_FOLDERS.DELIVERY_PROOF} onUpload={setDeliveryProofUrl} accept="image/*" label={deliveryProofUrl ? 'Uploaded' : 'Upload proof'} />
                       </div>
                     </div>
 
@@ -1265,7 +1265,7 @@ export function LogisticsOrderDetailPage({
                       />
                       <div>
                         <label className="block text-xs font-medium text-app-fg-muted mb-1">Proof</label>
-                        <FileUpload folder={S3_FOLDERS.DELIVERY_PROOF} onUpload={setPartialDeliveryProofUrl} accept="image/*" label={partialDeliveryProofUrl ? 'Uploaded' : 'Upload'} />
+                        <FileUpload folder={ASSET_FOLDERS.DELIVERY_PROOF} onUpload={setPartialDeliveryProofUrl} accept="image/*" label={partialDeliveryProofUrl ? 'Uploaded' : 'Upload'} />
                       </div>
                     </div>
 

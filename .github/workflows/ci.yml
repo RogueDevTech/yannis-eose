@@ -12,7 +12,6 @@ concurrency:
 
 env:
   NODE_VERSION: "20"
-  AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
 
 jobs:
   # ── Build ──────────────────────────────────────────────────────
@@ -50,72 +49,20 @@ jobs:
 
   # ── Deploy to Staging (auto on push to main) ───────────────────
   deploy-staging:
-    name: Deploy to Staging
+    name: Staging Deploy Disabled
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: staging
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build & push API image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: staging-${{ github.sha }}
+      - name: AWS staging deploy intentionally disabled
         run: |
-          docker build -f apps/api/Dockerfile -t $ECR_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $ECR_REGISTRY/yannis-eose-api:staging-latest .
-          docker push $ECR_REGISTRY/yannis-eose-api:$IMAGE_TAG
-          docker push $ECR_REGISTRY/yannis-eose-api:staging-latest
-
-      - name: Build & push Web image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: staging-${{ github.sha }}
-        run: |
-          docker build -f apps/web/Dockerfile -t $ECR_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $ECR_REGISTRY/yannis-eose-web:staging-latest .
-          docker push $ECR_REGISTRY/yannis-eose-web:$IMAGE_TAG
-          docker push $ECR_REGISTRY/yannis-eose-web:staging-latest
-
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST_STAGING }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /opt/yannis-eose
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-            export IMAGE_TAG=staging-${{ github.sha }}
-            export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
-            for i in $(seq 1 18); do
-              if curl -sf http://localhost:4444/health >/dev/null && curl -sf http://localhost:3000 >/dev/null; then
-                echo "Health checks passed."; break
-              fi
-              if [ "$i" -eq 18 ]; then
-                docker compose -f docker-compose.prod.yml logs --tail=40 api
-                docker compose -f docker-compose.prod.yml logs --tail=40 web
-                exit 1
-              fi
-              sleep 5
-            done
-            docker image prune -f
+          echo "Staging deploy is intentionally disabled."
+          echo "The project is migrating away from AWS/EC2; implement the GCP staging/prod rollout before re-enabling auto-deploy from main."
 
   # ── Deploy to Production (manual approval) ─────────────────────
   deploy-production:
-    name: Deploy to Production
+    name: Production Deploy Disabled
     runs-on: ubuntu-latest
     needs: deploy-staging
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -123,62 +70,10 @@ jobs:
       name: production
       url: https://yannis.roguedevtech.com
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build & push API image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: production-${{ github.sha }}
+      - name: AWS production deploy intentionally disabled
         run: |
-          docker build -f apps/api/Dockerfile -t $ECR_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $ECR_REGISTRY/yannis-eose-api:production-latest .
-          docker push $ECR_REGISTRY/yannis-eose-api:$IMAGE_TAG
-          docker push $ECR_REGISTRY/yannis-eose-api:production-latest
-
-      - name: Build & push Web image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: production-${{ github.sha }}
-        run: |
-          docker build -f apps/web/Dockerfile -t $ECR_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $ECR_REGISTRY/yannis-eose-web:production-latest .
-          docker push $ECR_REGISTRY/yannis-eose-web:$IMAGE_TAG
-          docker push $ECR_REGISTRY/yannis-eose-web:production-latest
-
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST_PRODUCTION }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /opt/yannis-eose
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-            export IMAGE_TAG=production-${{ github.sha }}
-            export ECR_REGISTRY=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
-            for i in $(seq 1 18); do
-              if curl -sf http://localhost:4444/health >/dev/null && curl -sf http://localhost:3000 >/dev/null; then
-                echo "Health checks passed."; break
-              fi
-              if [ "$i" -eq 18 ]; then
-                docker compose -f docker-compose.prod.yml logs --tail=40 api
-                docker compose -f docker-compose.prod.yml logs --tail=40 web
-                exit 1
-              fi
-              sleep 5
-            done
-            docker image prune -f
+          echo "Production deploy is intentionally disabled."
+          echo "The project is migrating away from AWS/EC2; implement the GCP production rollout before re-enabling main-branch deploys."
 
   # ── Deploy Edge Worker (on changes to edge-worker) ─────────────
   deploy-edge-worker:
