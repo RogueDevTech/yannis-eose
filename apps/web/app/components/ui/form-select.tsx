@@ -445,11 +445,12 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
                           ) : null}
                           {group.options.map((option, optionIndexInGroup) => {
                             optionIndex += 1;
-                            const flatOption = flatOptions[optionIndex];
+                            const currentOptionIndex = optionIndex;
+                            const flatOption = flatOptions[currentOptionIndex];
                             return (
                               <button
                                 key={flatOption?.key ?? `${groupIndex}-${option.value}-${optionIndexInGroup}`}
-                                id={`${inputId || 'form-select'}-opt-${optionIndex}`}
+                                id={`${inputId || 'form-select'}-opt-${currentOptionIndex}`}
                                 type="button"
                                 role="option"
                                 aria-selected={flatOption?.value === currentValue}
@@ -457,11 +458,11 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
                                 disabled={option.disabled}
                                 className={[
                                   'w-full rounded-md px-2 py-1.5 text-left transition-colors',
-                                  optionIndex === activeIndex ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-app-hover',
+                                  currentOptionIndex === activeIndex ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-app-hover',
                                   option.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
                                 ].join(' ')}
-                                onMouseEnter={() => !option.disabled && setActiveIndex(optionIndex)}
-                                onClick={() => selectAt(optionIndex)}
+                                onMouseEnter={() => !option.disabled && setActiveIndex(currentOptionIndex)}
+                                onClick={() => selectAt(currentOptionIndex)}
                               >
                                 <span className="block truncate text-sm text-app-fg">{option.label}</span>
                               </button>
