@@ -319,6 +319,12 @@
     @apply px-3 py-1.5 text-xs;
   }
 
+  @media (max-width: 767px) {
+    .card .btn-sm {
+      @apply min-h-10 px-4 py-2 text-sm;
+    }
+  }
+
   .btn-lg {
     @apply px-6 py-3 text-base;
   }

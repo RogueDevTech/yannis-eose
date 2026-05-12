@@ -406,7 +406,8 @@ export function InventoryPage(props: InventoryStreamData) {
       {/* Page header */}
       <PageHeader
         title="Inventory"
-        description="Track on-hand stock, reservations, and reconciliation. Manage inbound supplier receipts from the separate Shipments page."
+        mobileInlineActions
+        description="Track stock and reservations."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Inventory tools"

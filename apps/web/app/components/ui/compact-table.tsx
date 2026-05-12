@@ -262,7 +262,7 @@ export function CompactTableActionButton({
   className = '',
 }: CompactTableActionButtonProps) {
   const toneClass = TONE_CLASSES[tone];
-  const sharedClass = `${toneClass} font-medium h-auto py-0 ${className}`;
+  const sharedClass = `${toneClass} font-medium min-h-10 px-4 py-2 text-sm md:h-auto md:min-h-0 md:px-0 md:py-0 md:text-xs ${className}`;
 
   if (to && !disabled) {
     return (
@@ -449,13 +449,14 @@ export function CompactTable<T>({
                   const title = col.cellTitle?.(row);
                   const valueUsesTabularNums = (col.align ?? 'left') === 'right' && !col.tight;
                   const align = col.align ?? 'left';
+                  const mobileAlign = col.key === 'amount' ? 'left' : align;
                   const valueShellClass = [
-                    'min-w-0 w-full',
-                    align === 'right'
+                    'min-w-0 w-full overflow-hidden whitespace-nowrap text-ellipsis',
+                    mobileAlign === 'right'
                       ? col.tight
                         ? 'flex flex-nowrap justify-end gap-x-2 overflow-x-auto'
                         : 'text-right'
-                      : align === 'center'
+                      : mobileAlign === 'center'
                         ? 'text-center'
                         : 'text-left',
                     valueUsesTabularNums ? 'tabular-nums' : '',
@@ -496,17 +497,17 @@ export function CompactTable<T>({
                     <div
                       key={col.key}
                       className={[
-                        'grid grid-cols-[9rem_minmax(0,1fr)] items-start gap-x-3 py-2.5 first:pt-0 last:pb-0 sm:grid-cols-[9.5rem_minmax(0,1fr)]',
+                        'grid grid-cols-[45%_calc(55%-0.75rem)] items-start gap-x-3 py-2.5 first:pt-0 last:pb-0',
                         col.className ?? '',
                       ]
                         .filter(Boolean)
                         .join(' ')}
                     >
-                      <dt className="m-0 min-w-0 pt-0.5 text-left text-[11px] font-semibold uppercase leading-snug tracking-wide text-app-fg-muted [&_svg]:inline [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:shrink-0">
+                      <dt className="m-0 min-w-0 overflow-hidden pt-0.5 text-left text-[11px] font-semibold uppercase leading-snug tracking-wide text-app-fg-muted whitespace-nowrap text-ellipsis [&_svg]:inline [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:shrink-0">
                         {labelForMobile}
                       </dt>
                       <dd
-                        className="m-0 min-w-0 max-w-full text-sm break-words text-app-fg"
+                        className="m-0 min-w-0 max-w-full overflow-hidden text-sm text-app-fg"
                         title={title}
                       >
                         <div className={[cellExtra, valueShellClass].filter(Boolean).join(' ')}>

@@ -259,10 +259,8 @@ export function RemitPage({
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-app-fg">Remit</h1>
-        <p className="text-sm text-app-fg-muted mt-0.5">
-          Stock transfer to warehouse, or delivery remittance (batch delivered orders + payment receipts for Finance).
-        </p>
+        <h1 className="text-xl font-bold text-app-fg">Remittances</h1>
+        <p className="text-sm text-app-fg-muted mt-0.5">Create stock and delivery remittances.</p>
       </div>
 
       {/* Delivery remittance: select orders + payment receipts → Finance marks received */}

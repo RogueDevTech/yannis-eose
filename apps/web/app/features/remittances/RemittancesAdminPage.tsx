@@ -8,6 +8,7 @@ import { Modal } from '~/components/ui/modal';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -338,18 +339,36 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     <div className="space-y-6">
       <PageHeader
         title="Stock Transfer Confirmations"
-        description="Confirm in-transit stock transfers when goods arrive at the destination. No receipt upload required."
+        mobileInlineActions
+        description="Confirm incoming stock transfers."
         actions={
-          <div className="flex items-center gap-2">
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-              <DateFilterBar
-                startDate={filters.startDate}
-                endDate={filters.endDate}
-                periodAllTime={filters.periodAllTime}
-              />
-            </div>
-            <PageRefreshButton />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Transfer confirmation tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Transfer confirmation toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                  />
+                </div>
+                <PageRefreshButton />
+              </div>
+            }
+            sheet={
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            }
+          />
         }
       />
 

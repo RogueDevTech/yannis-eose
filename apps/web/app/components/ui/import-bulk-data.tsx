@@ -24,6 +24,7 @@ import * as XLSX from 'xlsx';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useToast } from '~/components/ui/toast';
 
@@ -323,11 +324,25 @@ export function ImportBulkData<
     <div className="space-y-4">
       <PageHeader
         title={title}
+        mobileInlineActions
         description={description}
         actions={
-          <Link to={backHref} prefetch="intent" className="btn-secondary btn-sm">
-            {backLabel}
-          </Link>
+          <PageHeaderMobileTools
+            sheetTitle="Import tools"
+            sheetSubtitle={<span>Navigation</span>}
+            triggerAriaLabel="Import toolbar"
+            showMobileRefresh={false}
+            desktop={
+              <Link to={backHref} prefetch="intent" className="btn-secondary btn-sm">
+                {backLabel}
+              </Link>
+            }
+            sheet={
+              <Link to={backHref} prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
+                {backLabel}
+              </Link>
+            }
+          />
         }
       />
 

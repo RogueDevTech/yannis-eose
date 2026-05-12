@@ -882,8 +882,8 @@ export const ordersRouter = router({
    */
   inactiveAgents: permissionProcedure('orders.inactiveAgents')
     .input(z.object({ thresholdMinutes: z.number().min(1).default(10) }).optional())
-    .query(async ({ input }) => {
-      return getOrdersService().getInactiveAgents(input?.thresholdMinutes ?? 10);
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().getInactiveAgents(input?.thresholdMinutes ?? 10, ctx.currentBranchId);
     }),
 
   /**
@@ -899,11 +899,12 @@ export const ordersRouter = router({
         endDate: z.string().date().optional(),
       }),
     )
-    .query(async ({ input }) =>
+    .query(async ({ input, ctx }) =>
       getOrdersService().getCSCloserLeaderboard(
         input.period ?? 'this_month',
         input.startDate,
         input.endDate,
+        ctx.currentBranchId,
       ),
     ),
 
@@ -1070,14 +1071,15 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const branchId = ctx.currentBranchId;
       const [team, workloads, leaderboard, inactiveAgents] = await Promise.all([
-        getUsersService().listCSTeam(),
+        getUsersService().listCSTeam(branchId),
         getOrdersService().getCSCloserWorkloads(branchId),
         getOrdersService().getCSCloserLeaderboard(
           input.period,
           input.startDate,
           input.endDate,
+          branchId,
         ),
-        getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes),
+        getOrdersService().getInactiveAgents(input.inactiveThresholdMinutes, branchId),
       ]);
       return { team, workloads, leaderboard, inactiveAgents };
     }),
@@ -1370,8 +1372,8 @@ export const ordersRouter = router({
   /**
    * Get all scheduled callbacks (including future).
    */
-  scheduledCallbacks: permissionProcedure('orders.scheduledCallbacks').query(async () => {
-    return getOrdersService().getScheduledCallbacks();
+  scheduledCallbacks: permissionProcedure('orders.scheduledCallbacks').query(async ({ ctx }) => {
+    return getOrdersService().getScheduledCallbacks(ctx.currentBranchId);
   }),
 
   // ── Duplicate Order Management ────────────────────────────
@@ -1379,8 +1381,8 @@ export const ordersRouter = router({
   /**
    * Get flagged duplicate orders for review.
    */
-  flaggedDuplicates: permissionProcedure('orders.flaggedDuplicates').query(async () => {
-    return getOrdersService().getFlaggedDuplicates();
+  flaggedDuplicates: permissionProcedure('orders.flaggedDuplicates').query(async ({ ctx }) => {
+    return getOrdersService().getFlaggedDuplicates(ctx.currentBranchId);
   }),
 
   /**
@@ -1517,8 +1519,8 @@ export const ordersRouter = router({
    * Only relevant when CS_DISPATCH_STRATEGY = 'claim'.
    */
   claimQueue: permissionProcedure('orders.read')
-    .query(async () => {
-      return getOrdersService().getClaimQueue();
+    .query(async ({ ctx }) => {
+      return getOrdersService().getClaimQueue(ctx.currentBranchId);
     }),
 
   /**

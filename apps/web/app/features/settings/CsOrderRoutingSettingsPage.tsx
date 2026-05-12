@@ -261,8 +261,8 @@ export function CsOrderRoutingSettingsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CS routing — which branch?"
-        description="Decides which CS branch handles each new marketing order. Once a branch is picked here, the CS dispatch strategy (Settings → System) chooses which closer in that branch actually takes the order."
+        title="CS Routing"
+        description="Choose which CS branch handles new marketing orders."
       />
 
       <Card>

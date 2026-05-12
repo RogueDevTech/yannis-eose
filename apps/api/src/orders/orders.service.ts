@@ -4209,22 +4209,43 @@ export class OrdersService {
    *      CS statuses, restricted to the same agent set via `IN (...)`.
    * Constant 2 RTTs regardless of agent count.
    */
-  async getInactiveAgents(thresholdMinutes = 10) {
+  async getInactiveAgents(thresholdMinutes = 10, branchId?: string | null) {
     const threshold = new Date(Date.now() - thresholdMinutes * 60 * 1000);
 
-    const agents = await this.db
-      .select({
-        id: schema.users.id,
-        name: schema.users.name,
-        lastActionAt: schema.users.lastActionAt,
-      })
-      .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.role, 'CS_CLOSER'),
-          eq(schema.users.status, 'ACTIVE'),
-        ),
-      );
+    const agents = await (branchId
+      ? this.db
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            lastActionAt: schema.users.lastActionAt,
+          })
+          .from(schema.users)
+          .innerJoin(
+            schema.userBranches,
+            and(
+              eq(schema.userBranches.userId, schema.users.id),
+              eq(schema.userBranches.branchId, branchId),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.users.role, 'CS_CLOSER'),
+              eq(schema.users.status, 'ACTIVE'),
+            ),
+          )
+      : this.db
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            lastActionAt: schema.users.lastActionAt,
+          })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.role, 'CS_CLOSER'),
+              eq(schema.users.status, 'ACTIVE'),
+            ),
+          ));
 
     if (agents.length === 0) return [];
 
@@ -4240,6 +4261,7 @@ export class OrdersService {
           isNull(schema.orders.deletedAt),
           inArray(schema.orders.assignedCsId, agentIds),
           inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
+          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
         ),
       )
       .groupBy(schema.orders.assignedCsId);
@@ -4290,7 +4312,12 @@ export class OrdersService {
    * Total round-trips: 3 (in parallel) regardless of how many agents exist.
    * Output shape, sort, and counted-status semantics are unchanged.
    */
-  async getCSCloserLeaderboard(period: 'this_month' | 'all_time' = 'this_month', startDate?: string, endDate?: string) {
+  async getCSCloserLeaderboard(
+    period: 'this_month' | 'all_time' = 'this_month',
+    startDate?: string,
+    endDate?: string,
+    branchId?: string | null,
+  ) {
     const useCustomRange = startDate && endDate;
     const periodStart = useCustomRange
       ? new Date(startDate)
@@ -4300,15 +4327,32 @@ export class OrdersService {
     let periodEnd: Date | null = useCustomRange ? new Date(endDate) : null;
     if (periodEnd) periodEnd.setHours(23, 59, 59, 999);
 
-    const agents = await this.db
-      .select({ id: schema.users.id, name: schema.users.name })
-      .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.role, 'CS_CLOSER'),
-          eq(schema.users.status, 'ACTIVE'),
-        ),
-      );
+    const agents = await (branchId
+      ? this.db
+          .select({ id: schema.users.id, name: schema.users.name })
+          .from(schema.users)
+          .innerJoin(
+            schema.userBranches,
+            and(
+              eq(schema.userBranches.userId, schema.users.id),
+              eq(schema.userBranches.branchId, branchId),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.users.role, 'CS_CLOSER'),
+              eq(schema.users.status, 'ACTIVE'),
+            ),
+          )
+      : this.db
+          .select({ id: schema.users.id, name: schema.users.name })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.role, 'CS_CLOSER'),
+              eq(schema.users.status, 'ACTIVE'),
+            ),
+          ));
 
     if (agents.length === 0) return [];
     const agentIds = agents.map((a) => a.id);
@@ -4339,16 +4383,14 @@ export class OrdersService {
 
     const orderWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
+      ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
     );
     const deliveredWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
       deliveredOrRemitted,
+      ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
       ...(deliveredDateFilter ? [deliveredDateFilter] : []),
-    );
-    const callsWhere = and(
-      inArray(schema.callLogs.agentId, agentIds),
-      ...(callLogsDateFilter ? [callLogsDateFilter] : []),
     );
 
     const [orderRows, deliveredRows, callRows] = await Promise.all([
@@ -4370,16 +4412,39 @@ export class OrdersService {
         .from(schema.orders)
         .where(deliveredWhere)
         .groupBy(schema.orders.assignedCsId),
-      this.db
-        .select({
-          agentId: schema.callLogs.agentId,
-          callsMade: sql<number>`COUNT(*)::int`,
-          // AVG over only COMPLETED calls (matches the prior callLogsAvgWhere semantics).
-          avgDuration: sql<number>`COALESCE(AVG(${schema.callLogs.durationSeconds}) FILTER (WHERE ${callCompleted}), 0)::numeric`,
-        })
-        .from(schema.callLogs)
-        .where(callsWhere)
-        .groupBy(schema.callLogs.agentId),
+      branchId
+        ? this.db
+            .select({
+              agentId: schema.callLogs.agentId,
+              callsMade: sql<number>`COUNT(*)::int`,
+              // AVG over only COMPLETED calls (matches the prior callLogsAvgWhere semantics).
+              avgDuration: sql<number>`COALESCE(AVG(${schema.callLogs.durationSeconds}) FILTER (WHERE ${callCompleted}), 0)::numeric`,
+            })
+            .from(schema.callLogs)
+            .innerJoin(schema.orders, eq(schema.callLogs.orderId, schema.orders.id))
+            .where(
+              and(
+                inArray(schema.callLogs.agentId, agentIds),
+                eq(schema.orders.branchId, branchId),
+                ...(callLogsDateFilter ? [callLogsDateFilter] : []),
+              ),
+            )
+            .groupBy(schema.callLogs.agentId)
+        : this.db
+            .select({
+              agentId: schema.callLogs.agentId,
+              callsMade: sql<number>`COUNT(*)::int`,
+              // AVG over only COMPLETED calls (matches the prior callLogsAvgWhere semantics).
+              avgDuration: sql<number>`COALESCE(AVG(${schema.callLogs.durationSeconds}) FILTER (WHERE ${callCompleted}), 0)::numeric`,
+            })
+            .from(schema.callLogs)
+            .where(
+              and(
+                inArray(schema.callLogs.agentId, agentIds),
+                ...(callLogsDateFilter ? [callLogsDateFilter] : []),
+              ),
+            )
+            .groupBy(schema.callLogs.agentId),
     ]);
 
     type OrderAgg = { engaged: number; confirmed: number; cancelled: number };
@@ -4769,7 +4834,7 @@ export class OrdersService {
    * Get all UNPROCESSED orders available for claiming (claim mode only).
    * Sorted oldest-first so longer-waiting orders are visible first.
    */
-  async getClaimQueue(): Promise<Array<{
+  async getClaimQueue(branchId?: string | null): Promise<Array<{
     id: string;
     customerName: string;
     createdAt: Date;
@@ -4790,6 +4855,7 @@ export class OrdersService {
         and(
           eq(schema.orders.status, 'UNPROCESSED'),
           sql`(${schema.orders.lockedUntil} IS NULL OR ${schema.orders.lockedUntil} < NOW())`,
+          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
         ),
       )
       .orderBy(asc(schema.orders.createdAt))
@@ -5562,7 +5628,7 @@ export class OrdersService {
   /**
    * Get all orders with scheduled callbacks (including future ones).
    */
-  async getScheduledCallbacks() {
+  async getScheduledCallbacks(branchId?: string | null) {
     const orders = await this.db
       .select()
       .from(schema.orders)
@@ -5575,6 +5641,7 @@ export class OrdersService {
             eq(schema.orders.status, 'CS_ASSIGNED'),
             eq(schema.orders.status, 'CS_ENGAGED'),
           ),
+          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
         ),
       )
       .orderBy(asc(schema.orders.callbackScheduledAt));
@@ -5649,11 +5716,16 @@ export class OrdersService {
    * pull them in a single `WHERE id IN (...)` query, then merge in memory. Saves
    * (N − 1) round-trips on the remote DB.
    */
-  async getFlaggedDuplicates() {
+  async getFlaggedDuplicates(branchId?: string | null) {
     const flagged = await this.db
       .select()
       .from(schema.orders)
-      .where(inArray(schema.orders.isDuplicate, ['FLAGGED', 'POSSIBLY_DUPLICATE']))
+      .where(
+        and(
+          inArray(schema.orders.isDuplicate, ['FLAGGED', 'POSSIBLY_DUPLICATE']),
+          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+        ),
+      )
       .orderBy(desc(schema.orders.createdAt));
 
     if (flagged.length === 0) return [];
@@ -5664,7 +5736,12 @@ export class OrdersService {
       const originalRows = await this.db
         .select()
         .from(schema.orders)
-        .where(inArray(schema.orders.id, originalIds));
+        .where(
+          and(
+            inArray(schema.orders.id, originalIds),
+            ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+          ),
+        );
       for (const row of originalRows) originalById.set(row.id, row);
     }
 

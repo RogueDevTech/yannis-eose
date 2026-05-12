@@ -5,6 +5,7 @@ import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fe
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Card, CardBody } from '~/components/ui/card';
 import { Tabs } from '~/components/ui/tabs';
@@ -257,15 +258,37 @@ export function RoleTemplatesPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Role templates"
-        description="Permission-first presets. SYSTEM templates map to legacy enum roles; CUSTOM templates can combine any permissions."
+        title="Role Templates"
+        mobileInlineActions
+        description="Create and manage permission presets for staff roles."
         actions={
-          <>
-            <PageRefreshButton />
-            <Button type="button" variant="primary" onClick={openCreate} disabled={busy}>
-              New template
-            </Button>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Role template tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Role template toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button type="button" variant="primary" onClick={openCreate} disabled={busy}>
+                  New template
+                </Button>
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <Button
+                type="button"
+                variant="primary"
+                className="w-full justify-center"
+                onClick={() => {
+                  closeSheet();
+                  openCreate();
+                }}
+                disabled={busy}
+              >
+                New template
+              </Button>
+            )}
+          />
         }
       />
 

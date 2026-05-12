@@ -26,14 +26,7 @@ export function CSDashboardDuplicatesTabPanel({
         <div className="card">
           <StripToolbar
             title="Potential duplicates"
-            description={
-              <>
-                <span className="font-semibold text-danger-700 dark:text-danger-400">Duplicate</span> = same buyer
-                phone in the last 24 hours.{' '}
-                <span className="font-semibold text-warning-700 dark:text-warning-400">Possibly dup</span> = same
-                phone older than 24 hours but within 30 days. Merge into the original or dismiss.
-              </>
-            }
+            description="Same phone in 24h = duplicate. Older within 30 days = possible duplicate. Merge or dismiss."
             onScrollLeft={pairs.length > 0 ? () => scrollBy(-280) : undefined}
             onScrollRight={pairs.length > 0 ? () => scrollBy(280) : undefined}
             scrollAriaSubject="duplicates"

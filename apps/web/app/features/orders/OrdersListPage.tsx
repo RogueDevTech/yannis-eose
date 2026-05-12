@@ -1,11 +1,11 @@
 import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
-import { Await, Link, useFetcher, useSearchParams, useNavigate } from '@remix-run/react';
+import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { SmartPick } from '~/components/ui/smart-pick';
 import { Modal } from '~/components/ui/modal';
 import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { formatOrderTimestamp, formatOrderTimestampShort } from '~/lib/format-date';
+import { formatOrderTimestamp } from '~/lib/format-date';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -40,9 +40,8 @@ import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
-import { CompactTable, type CompactTableColumn, type CompactTableMobileCardHelpers } from '~/components/ui/compact-table';
+import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
-import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
@@ -231,7 +230,6 @@ function OrdersListPageImpl({
   const [scheduleCalendarModalOpen, setScheduleCalendarModalOpen] = useState(false);
 
   const liveState = useLiveIndicator(liveEvents ?? []);
-  const navigate = useNavigate();
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
@@ -780,6 +778,7 @@ function OrdersListPageImpl({
       {/* Page header — Live tag sits directly in front of the refresh button per CS request. */}
       <PageHeader
         title={isCSCloser ? 'My Orders' : 'CS Orders'}
+        mobileInlineActions
         description={isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
           <>
@@ -1510,62 +1509,6 @@ function OrdersListPageImpl({
             }
             emptyTitle={orders.length === 0 ? 'No orders yet' : 'No orders found'}
             emptyDescription={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}
-            renderMobileCard={(order, _i, helpers: CompactTableMobileCardHelpers<Order>) => (
-              <div className={`relative ${highlightedIds.has(order.id) ? 'row-new-highlight' : ''}`}>
-                {canBulkAction && helpers.rowSelection ? (
-                  <div className="absolute left-0 top-0 z-10">{helpers.rowSelection}</div>
-                ) : null}
-                <div
-                  className={['p-1', canBulkAction ? 'pl-10' : '', selectedIds.has(order.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '']
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  <Link to={`/admin/orders/${order.id}`} className="block rounded-md p-3 transition-opacity hover:opacity-90">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="font-medium text-app-fg">{order.customerName}</span>
-                        {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
-                      </div>
-                      <OrderStatusBadge status={order.status} />
-                    </div>
-                    {showCSCloserColumn && (order.assignedCsName || order.assignedCsId) ? (
-                      <div className="mb-0.5 text-sm text-app-fg-muted">
-                        {order.assignedCsId ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              navigate(`/hr/users/${order.assignedCsId}`);
-                            }}
-                          >
-                            {order.assignedCsName ?? 'View user'}
-                          </Button>
-                        ) : (
-                          <span>{order.assignedCsName ?? '—'}</span>
-                        )}
-                      </div>
-                    ) : null}
-                    <div className="flex items-center justify-between text-sm text-app-fg-muted">
-                      <span className="font-mono">{order.customerPhoneDisplay}</span>
-                      <span className="font-medium text-app-fg">
-                        <NairaPrice amount={order.totalAmount ? Number(order.totalAmount) : null} />
-                      </span>
-                    </div>
-                    <div className="mt-1 text-xs text-app-fg-muted whitespace-nowrap">
-                      {formatOrderTimestampShort(order.createdAt)}
-                    </div>
-                  </Link>
-                  <div className="flex flex-wrap items-center gap-3 border-t border-app-border px-3 pb-3 pt-2">
-                    <TableActionButton to={`/admin/orders/${order.id}`} variant="primary">
-                      View
-                    </TableActionButton>
-                  </div>
-                </div>
-              </div>
-            )}
           />
         </div>
       </TableLoadingOverlay>

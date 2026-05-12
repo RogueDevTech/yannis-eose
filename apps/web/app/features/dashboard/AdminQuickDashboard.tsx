@@ -2,7 +2,6 @@ import { Link } from '@remix-run/react';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { isSuperAdminOnly } from '~/lib/rbac';
 
 /**
  * Data shape for the lightweight admin landing. Populated by
@@ -61,11 +60,8 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
     <div className="space-y-6">
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
-        description={
-          isSuperAdminOnly({ role })
-            ? 'Quick snapshot — open the Executive Overview for the full picture.'
-            : 'Quick snapshot of today.'
-        }
+        mobileInlineActions
+        description="Quick snapshot of today's performance."
         actions={
           // Match the Inventory-page mobile pattern (CEO directive 2026-05-10):
           // below `md` the action collapses to an icon so the greeting +

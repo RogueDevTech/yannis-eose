@@ -143,8 +143,14 @@ export function StaffOnboardingDocumentsPage({
     <div className="space-y-4">
       <PageHeader
         title="Staff onboarding documents"
-        description="Status of staff HR documents — open a row to review or edit in the full onboarding flow."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Review staff onboarding documents."
+        actions={
+          <>
+            <PageRefreshButton className="hidden md:inline-flex" />
+            <PageRefreshButton iconOnly className="md:hidden" />
+          </>
+        }
       />
 
       {counts ? (

@@ -12,6 +12,7 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
+import { Button } from '~/components/ui/button';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast } from '~/components/ui/toast';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -139,7 +140,6 @@ export function UsersListPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const searchFromUrl = searchParams.get('search') ?? '';
   const [draftSearch, setDraftSearch] = useState(searchFromUrl);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFilterLoading = useLoaderRefetchBusy().busy;
   const safeTotalPages = Math.max(1, totalPages);
   const resendFetcher = useFetcher<{ success?: boolean; error?: string; intent?: string }>();
@@ -169,13 +169,7 @@ export function UsersListPage({
     setDraftSearch(searchFromUrl);
   }, [searchFromUrl]);
 
-  useEffect(() => {
-    return () => {
-      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    };
-  }, []);
-
-  const commitSearchToUrl = useCallback(
+  const submitSearchToUrl = useCallback(
     (raw: string) => {
       const trimmed = raw.trim().slice(0, 120);
       setSearchParams(
@@ -191,14 +185,39 @@ export function UsersListPage({
     },
     [setSearchParams],
   );
-
-  const handleSearchChange = useCallback(
-    (val: string) => {
-      setDraftSearch(val);
-      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-      searchDebounceRef.current = setTimeout(() => commitSearchToUrl(val), 300);
+  const hasDraftSearch = draftSearch.trim().length > 0;
+  const hasAppliedSearch = searchFromUrl.trim().length > 0;
+  const searchActionVisible = hasDraftSearch || hasAppliedSearch;
+  const searchActionLabel = hasDraftSearch ? 'Search' : 'Cancel';
+  const handleSearchDraftChange = useCallback(
+    (value: string) => {
+      setDraftSearch(value);
+      if (value === '' && hasAppliedSearch) {
+        submitSearchToUrl('');
+      }
     },
-    [commitSearchToUrl],
+    [hasAppliedSearch, submitSearchToUrl],
+  );
+  const searchRow = (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        submitSearchToUrl(draftSearch);
+      }}
+      className="flex items-center gap-2"
+    >
+      <SearchInput
+        value={draftSearch}
+        onChange={handleSearchDraftChange}
+        placeholder="Search by name, email, or phone…"
+        wrapperClassName="min-w-0 flex-1 md:min-w-0"
+      />
+      {searchActionVisible ? (
+        <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+          {searchActionLabel}
+        </Button>
+      ) : null}
+    </form>
   );
 
   const handleStatusChange = (value: string) => {
@@ -402,11 +421,12 @@ export function UsersListPage({
   return (
     <div className="space-y-4">
       <PageHeader
-        title={staffAccounts ? 'Staff accounts' : 'Users'}
+        title={staffAccounts ? 'Staff Accounts' : 'Users'}
+        mobileInlineActions
         description={
           staffAccounts
-            ? 'Staff names and payout bank details (account name, number, bank code) for disbursement.'
-            : 'Manage team members and their roles'
+            ? 'Review staff payout details.'
+            : 'Manage team members and roles.'
         }
         actions={
           <PageHeaderMobileTools
@@ -539,14 +559,7 @@ export function UsersListPage({
             sheetSubtitle={
               <span>Search runs on the full roster server-side. Status and role reload the list.</span>
             }
-            searchRow={
-              <SearchInput
-                value={draftSearch}
-                onChange={handleSearchChange}
-                placeholder="Search by name, email, or phone…"
-                wrapperClassName="min-w-0 flex-1 md:min-w-0"
-              />
-            }
+            searchRow={searchRow}
             desktopInlineFilters={
               <>
                 <FormSelect
@@ -659,14 +672,7 @@ export function UsersListPage({
               sheetSubtitle={
                 <span>Search runs on the full roster server-side. Status and role reload the list.</span>
               }
-              searchRow={
-                <SearchInput
-                  value={draftSearch}
-                  onChange={handleSearchChange}
-                  placeholder="Search by name, email, or phone…"
-                  wrapperClassName="min-w-0 flex-1 md:min-w-0"
-                />
-              }
+              searchRow={searchRow}
               desktopInlineFilters={
                 <>
                   <FormSelect

@@ -480,8 +480,14 @@ export function SettingsPage({
     <div className="space-y-4">
       <PageHeader
         title="Settings"
-        description="Manage your account and system preferences"
-        actions={<PageRefreshButton />}
+        description="Manage account and system settings."
+        mobileInlineActions
+        actions={
+          <>
+            <PageRefreshButton className="hidden md:inline-flex" />
+            <PageRefreshButton iconOnly className="md:hidden" />
+          </>
+        }
       />
 
       <Tabs

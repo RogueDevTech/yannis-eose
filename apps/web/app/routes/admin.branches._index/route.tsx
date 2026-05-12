@@ -15,6 +15,8 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { TextInput } from '~/components/ui/text-input';
@@ -137,11 +139,35 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
     <div className="space-y-6">
       <PageHeader
         title="Branch Management"
-        description="Manage company branches and tenant separation. Each branch has its own data scope."
+        mobileInlineActions
+        description="Manage company branches."
         actions={
-          <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
-            + New Branch
-          </Button>
+          <PageHeaderMobileTools
+            sheetTitle="Branch tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Branch toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
+                  + New Branch
+                </Button>
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <Button
+                variant="primary"
+                size="sm"
+                className="w-full justify-center"
+                onClick={() => {
+                  closeSheet();
+                  setCreateOpen(true);
+                }}
+              >
+                + New Branch
+              </Button>
+            )}
+          />
         }
       />
 

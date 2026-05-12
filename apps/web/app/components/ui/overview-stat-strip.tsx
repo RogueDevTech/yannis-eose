@@ -14,7 +14,7 @@ export type OverviewStatStripItem = {
 const SCROLL_DELTA = 280;
 
 const labelClass = 'text-xs font-medium text-app-fg-muted uppercase tracking-wider';
-const valueClass = 'text-xl font-bold mt-0.5';
+const valueClass = 'text-lg font-bold leading-tight md:mt-0.5 md:text-xl';
 
 export function OverviewStatStripSkeleton({
   count,
@@ -33,21 +33,30 @@ export function OverviewStatStripSkeleton({
   const tiles = Array.from({ length: count });
   const hasLabels = !!labels && labels.length > 0;
   return (
-    <div className="card !p-4">
-      <div className="flex flex-nowrap gap-2 overflow-x-auto scrollbar-hide pb-0.5">
-        {tiles.map((_, i) => (
-          <div
-            key={i}
-            className={`shrink-0 min-w-[5rem] text-center px-2 py-1.5 rounded-lg bg-app-hover/50 ${tileClassName}`}
-          >
-            {hasLabels ? (
-              <div className={labelClass}>{labels[i] ?? ''}</div>
-            ) : (
-              <div className="h-3 w-14 mx-auto rounded bg-app-hover animate-pulse" />
-            )}
-            <div className="h-6 w-8 mx-auto rounded bg-app-hover mt-1.5 animate-pulse" />
-          </div>
-        ))}
+    <div className="card !p-0 overflow-hidden">
+      <div className="overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem]">
+        <div className="flex w-max min-w-full flex-nowrap gap-2 pb-0.5">
+          {tiles.map((_, i) => (
+            <div
+              key={i}
+              className={`shrink-0 min-w-[10rem] rounded-lg bg-app-hover/50 px-2 py-1.5 text-center md:min-w-[5rem] ${tileClassName}`}
+            >
+              {hasLabels ? (
+                <div>
+                  <div className={`truncate ${labelClass}`}>
+                    {labels[i] ?? ''}
+                  </div>
+                  <div className="mt-1.5 h-6 rounded bg-app-hover animate-pulse md:mx-auto md:w-8" />
+                </div>
+              ) : (
+                <>
+                  <div className="mx-auto h-3 w-14 rounded bg-app-hover animate-pulse" />
+                  <div className="mt-1.5 h-6 rounded bg-app-hover animate-pulse md:mx-auto md:w-8" />
+                </>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -93,7 +102,17 @@ export function OverviewStatStrip({
 
   const hasHorizontalOverflow = useHasHorizontalOverflow(scrollRef, overflowContentKey);
 
-  const tileBase = ['shrink-0', 'text-center', 'px-2', 'py-1.5', 'rounded-lg', 'bg-app-hover', tileClassName || 'min-w-[5rem]']
+  const tileBase = [
+    'shrink-0',
+    'rounded-lg',
+    'bg-app-hover',
+    'px-2',
+    'py-1.5',
+    'min-w-[10rem]',
+    'md:min-w-[5rem]',
+    'text-center',
+    tileClassName,
+  ]
     .join(' ');
 
   const scrollButtons = showScrollControls && hasHorizontalOverflow ? (
@@ -131,28 +150,47 @@ export function OverviewStatStrip({
     </div>
   ) : null;
 
-  const stripRow = (
-    <div className="flex items-center gap-1.5 min-w-0">
-      <div ref={scrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-2 overflow-x-auto scrollbar-hide pb-0.5">
+  const stripContent = (
+    <div ref={scrollRef} className="flex-1 min-w-0 overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem]">
+      <div className="flex w-max min-w-full flex-nowrap gap-2 pb-0.5">
         {items.map((item, i) => (
           <div key={i} className={tileBase} title={item.title}>
-            <p className={labelClass}>{item.label}</p>
-            {item.plainValue ? (
-              <div className="mt-0.5 flex justify-center">{item.value}</div>
-            ) : (
-              <p className={`${valueClass} ${item.valueClassName ?? 'text-app-fg'}`}>{item.value}</p>
-            )}
+            <div>
+              <p className={`truncate ${labelClass}`}>{item.label}</p>
+              {item.plainValue ? (
+                <div className="mt-0.5 flex justify-center">{item.value}</div>
+              ) : (
+                <p
+                  className={`mt-0.5 ${valueClass} ${item.valueClassName ?? 'text-app-fg'}`}
+                >
+                  {item.value}
+                </p>
+              )}
+            </div>
           </div>
         ))}
       </div>
-      {scrollButtons}
     </div>
   );
 
   if (embedded) {
-    return <div className={className}>{stripRow}</div>;
+    return (
+      <div className={className}>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {stripContent}
+          {scrollButtons}
+        </div>
+      </div>
+    );
   }
 
-  const outer = ['card', '!p-4', className].filter(Boolean).join(' ');
-  return <div className={outer}>{stripRow}</div>;
+  const outer = ['card', '!p-0', 'overflow-hidden', className].filter(Boolean).join(' ');
+  return (
+    <div className={outer}>
+      <div className="flex items-center gap-1.5 min-w-0">
+        {stripContent}
+        {scrollButtons ? <div className="hidden md:flex shrink-0 pr-[0.9rem]">{scrollButtons}</div> : null}
+      </div>
+    </div>
+  );
 }

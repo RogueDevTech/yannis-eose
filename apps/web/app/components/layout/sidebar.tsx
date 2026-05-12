@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink } from '@remix-run/react';
+import { getAppLogoSrc } from '~/lib/theme';
 
 export interface SidebarGroup {
   group: string | null;
@@ -17,7 +18,7 @@ interface SidebarProps {
   activePathname?: string;
   /** Unread notification count to show on the Notifications nav item */
   notificationCount?: number;
-  /** Dark named theme only — picks logo asset tuned for dark backgrounds. */
+  /** Whether the active app theme uses dark surfaces for theme-aware logo selection. */
   isDarkTheme?: boolean;
 }
 
@@ -115,14 +116,14 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
           ${mobileOpen ? 'w-[var(--sidebar-width)] translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        {/* Logo strip + asset — CSS vars per data-app-theme; PNG swap only for Dark theme */}
+        {/* Logo strip + asset — CSS vars per data-app-theme; logo variant tracks the active theme. */}
         <div
           className={`flex items-center h-[var(--header-height)] flex-shrink-0 rounded-b-lg border-b border-app-logo-strip-border bg-app-logo-strip-bg
             ${isExpanded ? 'justify-center px-2' : 'pl-6 pr-4'}
           `}
         >
           <img
-            src={isDarkTheme ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+            src={getAppLogoSrc(isDarkTheme)}
             alt="Yannis"
             className="h-8 w-auto max-w-full object-contain flex-shrink-0"
           />

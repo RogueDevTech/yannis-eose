@@ -18,7 +18,7 @@ import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { formatNaira } from '~/lib/format-amount';
 import { MediaBuyerBalanceCard } from './MediaBuyerBalanceCard';
-import type { FundingBalanceRow } from './types';
+import type { FundingBalanceRow, MarketingTeamOverviewStats } from './types';
 import {
   confirmationRateColorClass,
   deliveryRateColorClass,
@@ -38,6 +38,7 @@ export interface MarketingTeamPageProps {
   sortDir?: 'asc' | 'desc';
   /** Org-wide profitability thresholds — colors the Profitability column. */
   profitabilityConfig?: { targetRoas: number; greenThreshold: number };
+  overviewStats: MarketingTeamOverviewStats;
 }
 
 /** Green if trueRoas ≥ green threshold, red below. Neutral when no spend/data. */
@@ -154,6 +155,7 @@ export function MarketingTeamPage({
   sortBy: sortByFromLoader = 'name',
   sortDir: sortDirFromLoader = 'asc',
   profitabilityConfig = { targetRoas: 3, greenThreshold: 2.5 },
+  overviewStats,
 }: MarketingTeamPageProps) {
   const greenThreshold = profitabilityConfig.greenThreshold;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -319,7 +321,8 @@ export function MarketingTeamPage({
     <div className="space-y-6">
       <PageHeader
         title="Team Analysis"
-        description={`Media buyer funding, CPA, and profitability (True ROAS vs ${profitabilityConfig.targetRoas}x target — green ≥ ${greenThreshold}x).`}
+        mobileInlineActions
+        description="View media buyer performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Team analysis tools"
@@ -384,6 +387,32 @@ export function MarketingTeamPage({
       <OverviewStatStrip
         showScrollControls={false}
         items={[
+          {
+            label: 'Team members',
+            value: overviewStats.teamMembers.toLocaleString(),
+            valueClassName: 'text-app-fg',
+          },
+          {
+            label: 'Total orders',
+            value: overviewStats.totalOrders.toLocaleString(),
+            valueClassName: 'text-app-fg',
+          },
+          {
+            label: 'Avg confirmation %',
+            value:
+              overviewStats.averageConfirmationRate != null
+                ? `${Math.round(overviewStats.averageConfirmationRate)}%`
+                : '\u2014',
+            valueClassName: confirmationRateColorClass(overviewStats.averageConfirmationRate),
+          },
+          {
+            label: 'Avg delivery %',
+            value:
+              overviewStats.averageDeliveryRate != null
+                ? `${Math.round(overviewStats.averageDeliveryRate)}%`
+                : '\u2014',
+            valueClassName: deliveryRateColorClass(overviewStats.averageDeliveryRate),
+          },
           {
             label: 'Total Sent',
             value: <NairaPrice amount={parseFloat(fundingSummary.totalSent)} />,

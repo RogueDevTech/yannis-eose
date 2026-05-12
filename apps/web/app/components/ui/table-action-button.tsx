@@ -33,7 +33,7 @@ import type { LinkProps } from '@remix-run/react';
 export type TableActionVariant = 'primary' | 'neutral' | 'danger';
 
 const SHARED_BASE =
-  'inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium leading-none transition-colors focus:outline-none focus-visible:ring-1 disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex min-h-10 items-center justify-center px-3 py-2 rounded-lg border text-sm font-medium leading-none transition-colors focus:outline-none focus-visible:ring-1 disabled:opacity-50 disabled:cursor-not-allowed md:min-h-0 md:px-2 md:py-0.5 md:rounded md:text-xs';
 
 const VARIANT_CLASSES: Record<TableActionVariant, string> = {
   // Brand blue — primary affordance. Hovers slightly deeper, dark-mode

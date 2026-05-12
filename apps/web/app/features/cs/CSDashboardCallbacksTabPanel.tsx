@@ -24,7 +24,7 @@ export function CSDashboardCallbacksTabPanel({
         <div>
           <StripToolbar
             title="Callbacks"
-            description={'Orders awaiting callback retry after “No Answer” — View for details, Call Now to retry.'}
+            description="Retry no-answer orders. Open details or call now."
             onScrollLeft={() => scrollBy(-280)}
             onScrollRight={() => scrollBy(280)}
             scrollAriaSubject="callbacks"

@@ -95,7 +95,8 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
     <div className="space-y-4">
       <PageHeader
         title="Cross-funnel attempts"
-        description="Customers who tried to order through your funnel but already submitted via another Media Buyer's funnel within the dedup window. These are NOT orders — they don't count in your CPA, ROAS, or any pipeline. Use this as a signal that your funnel is generating real interest."
+        mobileInlineActions
+        description="Review duplicate funnel attempts."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Cross-funnel tools"

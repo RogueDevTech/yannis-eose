@@ -14,6 +14,7 @@ import { Button } from '~/components/ui/button';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Modal } from '~/components/ui/modal';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
@@ -101,20 +102,43 @@ export function HRPage({
     <div className="space-y-4">
       <PageHeader
         title="HR & Payroll"
-        description="Monthly payroll batches and staff earnings adjustments. Commission plans and per-staff payouts live on their own pages."
+        mobileInlineActions
+        description="Run monthly payroll and manage staff adjustments."
         actions={
-          <div className="flex items-center gap-2 flex-wrap">
-            <PageRefreshButton />
-            {isHrOrFinance && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => setShowAddAdjustment(true)}
-              >
-                + Add-on
-              </Button>
-            )}
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="HR tools"
+            sheetSubtitle={<span>Refresh and actions</span>}
+            triggerAriaLabel="HR toolbar"
+            desktop={
+              <div className="flex items-center gap-2 flex-wrap">
+                <PageRefreshButton />
+                {isHrOrFinance ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => setShowAddAdjustment(true)}
+                  >
+                    + Add-on
+                  </Button>
+                ) : null}
+              </div>
+            }
+            sheet={({ closeSheet }) =>
+              isHrOrFinance ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowAddAdjustment(true);
+                  }}
+                >
+                  + Add-on
+                </Button>
+              ) : null
+            }
+          />
         }
       />
 

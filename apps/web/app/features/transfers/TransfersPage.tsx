@@ -464,11 +464,11 @@ export function TransfersPage({
   };
 
   const pageTitle =
-    transfersPageVariant === 'logistics' ? 'Partner stock transfers' : 'Stock transfers';
+    transfersPageVariant === 'logistics' ? 'Partner Transfers' : 'Stock Transfers';
   const pageDescription =
     transfersPageVariant === 'logistics'
-      ? 'Request stock moves from one logistics location to another (including between 3PL partners). Sent transfers stay In transit until the receiving location confirms receipt under Logistics → Stock Transfer Confirmations.'
-      : 'Send stock between locations. Transfers stay on this list as In transit until the destination confirms receipt (Logistics → Stock Transfer Confirmations).';
+      ? 'Request stock moves between logistics locations.'
+      : 'Move stock between locations and track receipt.';
 
   const initiateTransferCta =
     transfersPageVariant === 'logistics' ? '+ Request transfer' : '+ Record transfer';
@@ -481,6 +481,7 @@ export function TransfersPage({
     <div className="space-y-4">
       <PageHeader
         title={pageTitle}
+        mobileInlineActions
         description={pageDescription}
         actions={
           <PageHeaderMobileTools

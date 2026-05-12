@@ -9,6 +9,7 @@ import {
   requirePermission,
 } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
@@ -205,16 +206,29 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
     <div className="space-y-4">
       <PageHeader
         title="Warehouse shipments"
-        description="All inbound shipments received (or planned) for this warehouse."
+        mobileInlineActions
+        description="View warehouse shipments."
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <Link to="/admin/inventory/warehouses">
-              <Button variant="secondary" size="sm">
+          <PageHeaderMobileTools
+            sheetTitle="Warehouse shipment tools"
+            sheetSubtitle={<span>Refresh and navigation</span>}
+            triggerAriaLabel="Warehouse shipment toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <Link to="/admin/inventory/warehouses">
+                  <Button variant="secondary" size="sm">
+                    Back to warehouses
+                  </Button>
+                </Link>
+              </div>
+            }
+            sheet={
+              <Link to="/admin/inventory/warehouses" className="btn-secondary btn-sm w-full justify-center">
                 Back to warehouses
-              </Button>
-            </Link>
-          </div>
+              </Link>
+            }
+          />
         }
       />
 

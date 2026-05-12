@@ -2,6 +2,7 @@ import { useFetcher } from '@remix-run/react';
 import { useState, useId, useRef, useEffect, useCallback } from 'react';
 import { Button } from '~/components/ui/button';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { InlineNotification } from '~/components/ui/inline-notification';
@@ -310,8 +311,7 @@ function UserPicker({ value, onChange }: UserPickerProps) {
     onChange(null);
   }
 
-  function handleQueryChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const q = e.target.value;
+  function handleQueryChange(q: string) {
     setQuery(q);
     fetchFirstPage(q);
   }
@@ -373,28 +373,14 @@ function UserPicker({ value, onChange }: UserPickerProps) {
       ) : (
         // Search input shown inside dropdown
         <div className="relative">
-          <svg
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-app-fg-muted"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={1.8}
-            stroke="currentColor"
-            aria-hidden
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z"
-            />
-          </svg>
-          <input
+          <SearchInput
             ref={inputRef}
-            type="text"
             value={query}
             onChange={handleQueryChange}
             onKeyDown={handleKeyDown}
             placeholder="Search by name or email…"
-            className="input pl-9 pr-9"
+            className="pr-9"
+            clearable={false}
             autoComplete="off"
             aria-autocomplete="list"
             aria-expanded

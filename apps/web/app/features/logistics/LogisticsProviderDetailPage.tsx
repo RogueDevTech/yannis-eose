@@ -7,6 +7,7 @@ import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-t
 import { DescriptionList } from '~/components/ui/description-list';
 import { EmptyState } from '~/components/ui/empty-state';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -146,17 +147,30 @@ export function LogisticsProviderDetailPage({
 
       <PageHeader
         title={provider.name}
-        description="Logistics company profile and delivery performance for the selected period."
+        mobileInlineActions
+        description="View logistics company details and performance."
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              to={backHref}
-              className="btn-secondary btn-sm inline-flex items-center justify-center"
-            >
-              ← Back to team analysis
-            </Link>
-            <PageRefreshButton />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Provider tools"
+            sheetSubtitle={<span>Refresh and navigation</span>}
+            triggerAriaLabel="Provider toolbar"
+            desktop={
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  to={backHref}
+                  className="btn-secondary btn-sm inline-flex items-center justify-center"
+                >
+                  ← Back to team analysis
+                </Link>
+                <PageRefreshButton />
+              </div>
+            }
+            sheet={
+              <Link to={backHref} className="btn-secondary btn-sm w-full justify-center">
+                Back to team analysis
+              </Link>
+            }
+          />
         }
       />
 

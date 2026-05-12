@@ -252,7 +252,7 @@ export function MarketingOrdersPage({
         align: 'right',
         render: showSkeletonRows
           ? () => (
-              <span className="inline-flex w-full justify-end">
+              <span className="inline-flex w-full justify-start md:justify-end">
                 <TableCellTextPulse className="w-[4.5rem]" />
               </span>
             )
@@ -284,9 +284,9 @@ export function MarketingOrdersPage({
       {
         key: 'actions',
         header: '',
-        mobileLabel: 'Actions',
         align: 'center',
         tight: true,
+        mobileShowLabel: false,
         render: showSkeletonRows
           ? () => <CompactTableActionButton disabled>View</CompactTableActionButton>
           : (order) => (
@@ -301,10 +301,11 @@ export function MarketingOrdersPage({
     <div className="space-y-4">
       <PageHeader
         title={isMediaBuyer ? 'My Orders' : 'Marketing Orders'}
+        mobileInlineActions
         description={
           isMediaBuyer
-            ? 'Track your campaign orders and conversion funnel'
-            : 'View orders across all media buyers'
+            ? 'Track your campaign orders.'
+            : 'View orders by media buyer.'
         }
         actions={
           <PageHeaderMobileTools
@@ -764,27 +765,6 @@ export function MarketingOrdersPage({
       ) : (
       <>
       <div className="card scroll-mt-4 overflow-hidden p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h2 className="text-lg font-semibold text-app-fg inline-flex flex-wrap items-center gap-x-1">
-            <span>Orders</span>
-            {/* Show pulse for the count ONLY on the initial Suspense fallback,
-                not on in-page refetches. During pagination/filter refetch the
-                old `total` is still meaningful and unmounting the count would
-                trigger layout flicker. */}
-            {deferredLoading ? (
-              <span className="inline-flex items-center gap-0.5 text-base font-semibold text-app-fg">
-                <span aria-hidden>(</span>
-                <span
-                  className="inline-block h-5 w-9 rounded-md bg-app-border/80 dark:bg-app-border/65 animate-pulse align-middle"
-                  aria-hidden
-                />
-                <span aria-hidden>)</span>
-              </span>
-            ) : (
-              <span>({total})</span>
-            )}
-          </h2>
-        </div>
         <CompactTable<Order>
           withCard={false}
           columns={marketingOrderColumns}

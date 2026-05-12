@@ -10,6 +10,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -493,38 +494,79 @@ function ProductsRouteInner(
     <div className="space-y-4">
       <PageHeader
         title="Products"
-        description="Manage products and reusable offer packages."
+        mobileInlineActions
+        description="Manage products and offers."
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            {data.canManageOffers ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  startOffersSummaryFetch();
-                  setShowCreateOffer(true);
-                }}
-              >
-                + Create offer
-              </Button>
-            ) : null}
-            {data.canCreateProduct ? (
-              <ActionDropdown
-                id="add-product"
-                trigger="button"
-                triggerLabel="+ Add product"
-                triggerVariant="primary"
-                openMenuId={openHeaderMenuId}
-                setOpenMenuId={setOpenHeaderMenuId}
-                items={[
-                  { label: 'Add manually', to: '/admin/products/new' },
-                  { label: 'Import from Excel', to: '/admin/products/import' },
-                ]}
-              />
-            ) : null}
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Product tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Product toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                {data.canManageOffers ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      startOffersSummaryFetch();
+                      setShowCreateOffer(true);
+                    }}
+                  >
+                    + Create offer
+                  </Button>
+                ) : null}
+                {data.canCreateProduct ? (
+                  <ActionDropdown
+                    id="add-product"
+                    trigger="button"
+                    triggerLabel="+ Add product"
+                    triggerVariant="primary"
+                    openMenuId={openHeaderMenuId}
+                    setOpenMenuId={setOpenHeaderMenuId}
+                    items={[
+                      { label: 'Add manually', to: '/admin/products/new' },
+                      { label: 'Import from Excel', to: '/admin/products/import' },
+                    ]}
+                  />
+                ) : null}
+              </div>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                {data.canManageOffers ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      startOffersSummaryFetch();
+                      setShowCreateOffer(true);
+                    }}
+                  >
+                    + Create offer
+                  </Button>
+                ) : null}
+                {data.canCreateProduct ? (
+                  <ActionDropdown
+                    id="add-product-mobile"
+                    trigger="button"
+                    triggerLabel="+ Add product"
+                    triggerVariant="primary"
+                    openMenuId={openHeaderMenuId}
+                    setOpenMenuId={setOpenHeaderMenuId}
+                    items={[
+                      { label: 'Add manually', to: '/admin/products/new' },
+                      { label: 'Import from Excel', to: '/admin/products/import' },
+                    ]}
+                  />
+                ) : null}
+              </>
+            )}
+          />
         }
       />
 

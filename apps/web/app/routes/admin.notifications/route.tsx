@@ -11,6 +11,7 @@ import {
 } from '@remix-run/react';
 import { Suspense, useEffect } from 'react';
 import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
 import type { Notification } from '~/features/notifications/types';
 import { NotificationsBroadcastPanel } from '~/features/notifications/panels/NotificationsBroadcastPanel';
@@ -411,11 +412,12 @@ export default function AdminNotificationsRoute() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-app-fg">Notifications</h1>
-        <p className="mt-0.5 text-sm text-app-fg-muted">
-          In-app feed, broadcast push, automations, and delivery log — one place.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-app-fg">Notifications</h1>
+          <p className="mt-0.5 text-sm text-app-fg-muted">Manage alerts and delivery logs.</p>
+        </div>
+        <PageRefreshButton iconOnly />
       </div>
 
       <div className="sticky top-0 z-10 -mx-4 lg:-mx-6 border-b border-app-border bg-app-canvas/95 backdrop-blur supports-[backdrop-filter]:bg-app-canvas/80">

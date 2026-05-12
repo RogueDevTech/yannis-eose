@@ -12,6 +12,7 @@
 
 import { Link, useSearchParams } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
+import { FormSelect } from '~/components/ui/form-select';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 
 interface PaginationProps {
@@ -282,19 +283,16 @@ export function Pagination({
           <label htmlFor="pagination-per-page" className="whitespace-nowrap">
             Per page
           </label>
-          <select
+          <FormSelect
             id="pagination-per-page"
-            value={pageSize}
+            value={String(pageSize)}
             onChange={(e) => commitPageSize(Number.parseInt(e.target.value, 10))}
-            className="rounded-md border border-app-border bg-app-canvas px-2 py-1 text-xs font-medium text-app-fg hover:bg-app-hover focus:outline-none focus:ring-2 focus:ring-brand-500"
+            options={resolvedPageSizeOptions.map((size) => ({ value: String(size), label: String(size) }))}
+            controlSize="sm"
+            wrapperClassName="min-w-[4.5rem]"
+            className="font-medium"
             aria-label="Rows per page"
-          >
-            {resolvedPageSizeOptions.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       ) : null}
     </nav>

@@ -11,6 +11,7 @@ import {
   type ImportColumn,
   importCellInputClass,
 } from '~/components/ui/import-bulk-data';
+import { FormSelect } from '~/components/ui/form-select';
 import {
   type CategoryInfo,
   type ParsedRow,
@@ -24,6 +25,15 @@ import { downloadProductsImportTemplate } from './products-import-template';
 
 interface ProductsImportPageProps {
   categories: CategoryInfo[];
+}
+
+function importSelectClass(errored: boolean): string {
+  return [
+    '!h-7 !rounded-md !bg-app-elevated !px-2 !pr-6 !text-xs',
+    errored
+      ? '!border-danger-400 focus:!border-danger-500 focus:!ring-danger-500'
+      : '!border-app-border focus:!border-brand-500 focus:!ring-brand-500',
+  ].join(' ');
 }
 
 export function ProductsImportPage({ categories }: ProductsImportPageProps) {
@@ -94,7 +104,7 @@ export function ProductsImportPage({ categories }: ProductsImportPageProps) {
         errorLabel: 'Category',
         getDisplayValue: (row) => row.categoryInput,
         renderCell: ({ row, disabled, errored, patch }) => (
-          <select
+          <FormSelect
             value={row.categoryId ?? ''}
             onChange={(e) => {
               const id = e.target.value;
@@ -102,15 +112,12 @@ export function ProductsImportPage({ categories }: ProductsImportPageProps) {
               patch({ categoryInput: cat?.name ?? '' } as Partial<ResolvedRow>);
             }}
             disabled={disabled || categories.length === 0}
-            className={importCellInputClass(errored)}
-          >
-            <option value="">— None —</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            controlSize="sm"
+            wrapperClassName="w-full"
+            className={importSelectClass(errored)}
+            placeholder="— None —"
+            options={categories.map((c) => ({ value: c.id, label: c.name }))}
+          />
         ),
       },
       {
@@ -159,7 +166,7 @@ export function ProductsImportPage({ categories }: ProductsImportPageProps) {
   return (
     <ImportBulkData<ParsedRow, ResolvedRow>
       title="Import products"
-      description="Upload a spreadsheet, fix any rows the editor flags, then import. Each row is created one at a time so a single bad row doesn't block the rest."
+      description="Upload a spreadsheet and import products."
       backHref="/admin/products"
       backLabel="← Back to products"
       resourceLabel="product"

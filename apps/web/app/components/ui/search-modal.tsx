@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
+import { SearchInput } from '~/components/ui/search-input';
 import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 
 interface SearchResult {
@@ -170,17 +171,15 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
     <Modal open onClose={onClose} maxWidth="max-w-lg" backdropBlur contentClassName="p-0 max-h-[85dvh] flex flex-col overflow-hidden border border-app-border bg-app-elevated">
       {/* Search input */}
           <div className="flex items-center gap-3 px-4 border-b border-app-border shrink-0">
-            <svg className="w-5 h-5 text-app-fg-muted flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-            </svg>
-            <input
+            <SearchInput
               ref={inputRef}
-              type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={setQuery}
               onKeyDown={handleKeyDown}
               placeholder="Search orders, products, users..."
-              className="flex-1 py-3.5 bg-transparent border-0 text-sm text-app-fg placeholder:text-app-fg-muted focus:outline-none focus:ring-0"
+              wrapperClassName="flex-1"
+              clearable={false}
+              className="!h-auto !rounded-none !border-0 !bg-transparent !py-3.5 !pr-0 focus:!border-0 focus:!ring-0"
             />
             {loading && (
               <div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />

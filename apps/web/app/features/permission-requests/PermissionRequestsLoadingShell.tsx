@@ -48,8 +48,14 @@ export function PermissionRequestsLoadingShell({ activeStatus }: { activeStatus:
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Permission Requests"
-        description="Sensitive changes (including admin-level staff and product archive) may require Super Admin approval. Approved and rejected requests are preserved for audit."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Review sensitive approval requests."
+        actions={
+          <>
+            <PageRefreshButton className="hidden md:inline-flex" />
+            <PageRefreshButton iconOnly className="md:hidden" />
+          </>
+        }
       />
       <Tabs value={safe} onChange={() => {}} tabs={[...STATUS_TABS]} />
       <div className="card p-0 flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] overflow-hidden min-h-[12rem]">

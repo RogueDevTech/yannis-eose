@@ -37,6 +37,13 @@ export interface FundingBalanceRow {
   profitabilityScore?: number | null;
 }
 
+export interface MarketingTeamOverviewStats {
+  teamMembers: number;
+  totalOrders: number;
+  averageConfirmationRate: number | null;
+  averageDeliveryRate: number | null;
+}
+
 export interface FundingRequestRecord {
   id: string;
   requesterId: string;

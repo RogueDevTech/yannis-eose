@@ -6,6 +6,8 @@ import { Modal } from '~/components/ui/modal';
 import { Textarea } from '~/components/ui/textarea';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { LiveIndicator } from '~/components/ui/live-indicator';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
@@ -14,7 +16,6 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { DeferredError, DeferredSection } from '~/components/ui/deferred-section';
 import {
-  CSCartOverviewStatTileSkeleton,
   CSTabCountBadgeSkeleton,
   CSClaimQueueTabDeferredFallback,
   CSCallbacksTabDeferredFallback,
@@ -31,6 +32,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
 import { NairaPrice } from '~/components/ui/naira-price';
+import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import {
   LiveActivityCard,
@@ -49,7 +51,6 @@ const CSDashboardCallbacksTabPanel = lazy(() =>
 const CSDashboardHotSwapTabPanel = lazy(() =>
   import('./CSDashboardHotSwapTabPanel').then((m) => ({ default: m.CSDashboardHotSwapTabPanel })),
 );
-import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -581,31 +582,56 @@ function CSQueueStaticHeader({
 }) {
   const liveState = useLiveIndicator(liveEvents ?? []);
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <h1 className="text-2xl font-bold text-app-fg">Live activities</h1>
-
-        <p className="text-xs text-app-fg-muted mt-1 flex items-center gap-1.5">
-          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          Showing today&apos;s data —{' '}
-          {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          {' '}· Resets at midnight
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <PageRefreshButton />
-        {canCreateOffline && (
-          <Button variant="primary" size="sm" onClick={onCreateOffline}>
-            Create offline order
-          </Button>
-        )}
-        {liveEvents != null && liveEvents.length > 0 && (
-          <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-        )}
-      </div>
-    </div>
+    <PageHeader
+      title="Live Activities"
+      mobileInlineActions
+      description="Today's queue and closer activity."
+      actions={
+        <PageHeaderMobileTools
+          sheetTitle="CS queue tools"
+          sheetSubtitle={<span>Create offline orders and refresh the queue</span>}
+          triggerAriaLabel="CS queue tools"
+          mobileLeading={
+            liveEvents != null && liveEvents.length > 0 ? (
+              <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+            ) : null
+          }
+          desktop={
+            <>
+              {liveEvents != null && liveEvents.length > 0 && (
+                <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+              )}
+              {canCreateOffline && (
+                <Button variant="primary" size="sm" onClick={onCreateOffline}>
+                  Create offline order
+                </Button>
+              )}
+              <PageRefreshButton />
+            </>
+          }
+          sheet={({ closeSheet }) => (
+            <>
+              {canCreateOffline ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    onCreateOffline();
+                  }}
+                >
+                  Create offline order
+                </Button>
+              ) : (
+                <p className="text-sm text-app-fg-muted">Use the refresh icon to reload the queue.</p>
+              )}
+            </>
+          )}
+        />
+      }
+    />
   );
 }
 
@@ -1044,16 +1070,12 @@ function CSDashboardPageLoaded({
       action: '/admin/cs/queue/carts',
     });
   }, [revealCartPhoneFetcher]);
-  const overviewScrollRef = useRef<HTMLDivElement>(null);
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
   const unassignedQueueScrollRef = useRef<HTMLDivElement>(null);
   const abandonedScrollRef = useRef<HTMLDivElement>(null);
   const [viewAllActivityOpen, setViewAllActivityOpen] = useState(false);
   const [viewAllActivityPage, setViewAllActivityPage] = useState(1);
-  const scrollOverviewStrip = useCallback((delta: number) => {
-    overviewScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
-  }, []);
   const scrollAgentStrip = useCallback((delta: number) => {
     agentScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
@@ -1066,27 +1088,6 @@ function CSDashboardPageLoaded({
   const scrollAbandonedStrip = useCallback((delta: number) => {
     abandonedScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
-
-  const overviewStripOverflowKey = useMemo(() => {
-    const tp = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
-    const cap = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
-    const sc = statusCounts as Record<string, number>;
-    const tc = workloads.reduce((s: number, w: AgentWorkload) => s + (w.todayClosesCount ?? 0), 0);
-    return [
-      workloads.length,
-      tp,
-      unassignedTotal,
-      sc['CONFIRMED'] ?? 0,
-      sc['DELIVERED'] ?? 0,
-      cap,
-      tc,
-      sc['CS_ENGAGED'] ?? 0,
-      sc['CANCELLED'] ?? 0,
-      cartStats ? '1' : '0',
-    ].join('|');
-  }, [workloads, unassignedTotal, statusCounts, cartStats]);
-
-  const overviewHasOverflow = useHasHorizontalOverflow(overviewScrollRef, overviewStripOverflowKey);
 
   useEffect(() => {
     if (viewAllAgentsOpen) setViewAllPage(1);
@@ -1348,6 +1349,103 @@ function CSDashboardPageLoaded({
     ((statusCounts as Record<string, number>)['DISPATCHED'] ?? 0) +
     ((statusCounts as Record<string, number>)['IN_TRANSIT'] ?? 0);
   const cancelledCount = (statusCounts as Record<string, number>)['CANCELLED'] ?? 0;
+  const overviewStatItems: OverviewStatStripItem[] = [
+    { label: 'Active closers', value: workloads.length, valueClassName: 'text-app-fg' },
+    {
+      label: 'Pending confirmation',
+      value: totalPending,
+      valueClassName: 'text-warning-600 dark:text-warning-400',
+    },
+    {
+      label: 'Unassigned',
+      value: unassignedTotal,
+      valueClassName: 'text-danger-600 dark:text-danger-400',
+    },
+    {
+      label: 'Assigned',
+      value: (statusCounts as Record<string, number>)['CS_ASSIGNED'] ?? 0,
+      valueClassName: 'text-info-600 dark:text-info-400',
+    },
+    {
+      label: 'Unconfirmed',
+      value: (statusCounts as Record<string, number>)['CS_ENGAGED'] ?? 0,
+      valueClassName: 'text-cyan-600 dark:text-cyan-400',
+    },
+    {
+      label: 'Confirmed',
+      value: confirmedCount,
+      valueClassName: 'text-brand-600 dark:text-brand-400',
+    },
+    {
+      label: 'Delivered',
+      value: (statusCounts as Record<string, number>)['DELIVERED'] ?? 0,
+      valueClassName: 'text-success-600 dark:text-success-400',
+    },
+    {
+      label: 'Cash Remitted',
+      value: (statusCounts as Record<string, number>)['REMITTED'] ?? 0,
+      valueClassName: 'text-green-600 dark:text-green-400',
+    },
+    {
+      label: 'Backlog / cap',
+      value: (
+        <>
+          {totalPending}
+          <span className="text-sm font-normal text-app-fg-muted">/{totalCapacity}</span>
+        </>
+      ),
+      valueClassName: 'text-app-fg',
+    },
+    {
+      label: 'Duty today · Lagos',
+      value: (
+        <>
+          {totalClosesToday}
+          <span className="text-sm font-normal text-app-fg-muted">/{totalCapacity}</span>
+        </>
+      ),
+      valueClassName: 'text-brand-600 dark:text-brand-400',
+    },
+    { label: 'Cancelled', value: cancelledCount, valueClassName: 'text-app-fg' },
+    ...(cartStats
+      ? ([
+          {
+            label: 'Cart Pending',
+            value: (
+              <DeferredSection
+                resolve={cartStats}
+                fallback={
+                  <span
+                    className="inline-block h-5 w-9 rounded-md bg-app-border/80 align-middle animate-pulse dark:bg-app-border/65"
+                    aria-hidden
+                  />
+                }
+              >
+                {(stats: { pending: number; abandonedOpen: number }) => stats.pending}
+              </DeferredSection>
+            ),
+            valueClassName: 'text-warning-600 dark:text-warning-400',
+          },
+          {
+            label: 'Abandoned',
+            value: (
+              <DeferredSection
+                resolve={cartStats}
+                fallback={
+                  <span
+                    className="inline-block h-5 w-9 rounded-md bg-app-border/80 align-middle animate-pulse dark:bg-app-border/65"
+                    aria-hidden
+                  />
+                }
+              >
+                {(stats: { pending: number; abandonedOpen: number }) => stats.abandonedOpen}
+              </DeferredSection>
+            ),
+            valueClassName: 'text-app-fg',
+          },
+        ] satisfies OverviewStatStripItem[])
+      : []),
+  ];
   const assignableCloserOptions = useMemo(
     () =>
       workloads
@@ -1451,159 +1549,7 @@ function CSDashboardPageLoaded({
         />
       )}
 
-      {/* Overview + Order Pipeline (compact, single horizontal row) */}
-      <div className="card">
-        <div className="flex items-center gap-2 min-w-0">
-          <div ref={overviewScrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Active closers
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {workloads.length}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Pending confirmation
-            </p>
-            <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">
-              {totalPending}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Unassigned
-            </p>
-            <p className="text-xl font-bold text-danger-600 dark:text-danger-400 mt-1">
-              {unassignedTotal}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Assigned
-            </p>
-            <p className="text-xl font-bold text-info-600 dark:text-info-400 mt-1">
-              {(statusCounts as Record<string, number>)['CS_ASSIGNED'] ?? 0}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Unconfirmed
-            </p>
-            <p className="text-xl font-bold text-cyan-600 dark:text-cyan-400 mt-1">
-              {(statusCounts as Record<string, number>)['CS_ENGAGED'] ?? 0}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Confirmed
-            </p>
-            <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">
-              {confirmedCount}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Delivered
-            </p>
-            <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">
-              {(statusCounts as Record<string, number>)['DELIVERED'] ?? 0}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Cash Remitted
-            </p>
-            <p className="text-xl font-bold text-green-600 dark:text-green-400 mt-1">
-              {(statusCounts as Record<string, number>)['REMITTED'] ?? 0}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Backlog / cap
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {totalPending}
-              <span className="text-sm font-normal text-app-fg-muted">
-                /{totalCapacity}
-              </span>
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[7rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider whitespace-nowrap">
-              Duty today · Lagos
-            </p>
-            <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">
-              {totalClosesToday}
-              <span className="text-sm font-normal text-app-fg-muted">
-                /{totalCapacity}
-              </span>
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Cancelled
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {(statusCounts as Record<string, number>)['CANCELLED'] ?? 0}
-            </p>
-          </div>
-          {cartStats && (
-            <>
-              <DeferredSection resolve={cartStats} fallback={<CSCartOverviewStatTileSkeleton />}>
-                {(stats: { pending: number; abandonedOpen: number }) => (
-                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-                      Cart Pending
-                    </p>
-                    <p className="text-xl font-bold text-warning-600 dark:text-warning-400 mt-1">
-                      {stats.pending}
-                    </p>
-                  </div>
-                )}
-              </DeferredSection>
-              <DeferredSection resolve={cartStats} fallback={<CSCartOverviewStatTileSkeleton />}>
-                {(stats: { pending: number; abandonedOpen: number }) => (
-                  <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-                    <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-                      Abandoned
-                    </p>
-                    <p className="text-xl font-bold text-app-fg mt-1">
-                      {stats.abandonedOpen}
-                    </p>
-                  </div>
-                )}
-              </DeferredSection>
-            </>
-          )}
-          </div>
-          {overviewHasOverflow && (
-          <div className="hidden md:flex shrink-0 items-center gap-0.5 sm:gap-1.5 self-center">
-            <button
-              type="button"
-              onClick={() => scrollOverviewStrip(-280)}
-              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-              aria-label="Scroll overview left"
-            >
-              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollOverviewStrip(280)}
-              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-              aria-label="Scroll overview right"
-            >
-              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-          )}
-        </div>
-      </div>
+      <OverviewStatStrip items={overviewStatItems} />
 
       {/* ── Live Activity Feed ──────────────────────────────── */}
       <div>
@@ -1653,9 +1599,7 @@ function CSDashboardPageLoaded({
                         </span>
                       )}
                     </h2>
-                    <p className="text-xs text-app-fg-muted mt-0.5">
-                      Order activity — today · Click a card for details
-                    </p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">Today's orders and carts. Tap a card.</p>
                   </div>
                   <div className="flex items-center gap-1 sm:gap-2">
                     <div className="hidden md:flex items-center gap-1 sm:gap-2">
@@ -1710,8 +1654,8 @@ function CSDashboardPageLoaded({
                         <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
                     </div>
-                    <p className="text-sm font-medium text-app-fg-muted">No order activity today</p>
-                    <p className="text-xs text-app-fg-muted">Cards appear here as orders and carts come in</p>
+                    <p className="text-sm font-medium text-app-fg-muted">No activity yet today</p>
+                    <p className="text-xs text-app-fg-muted">Orders and carts will show here.</p>
                   </div>
                 )}
 
@@ -1828,8 +1772,8 @@ function CSDashboardPageLoaded({
           <div>
             <h2 className="text-sm font-semibold text-app-fg">Closer workloads</h2>
             <p className="text-xs text-app-fg-muted mt-0.5">
-              {workloads.length} active closer{workloads.length !== 1 ? 's' : ''} · backlog {totalPending}/{totalCapacity}{' '}
-              (concurrent) · duty {totalClosesToday}/{totalCapacity} today (Lagos)
+              {workloads.length} active closer{workloads.length !== 1 ? 's' : ''} · {totalPending}/{totalCapacity}{' '}
+              backlog · {totalClosesToday} closed today (Lagos)
             </p>
           </div>
           {workloads.length > 0 && (
@@ -1978,7 +1922,8 @@ function CSDashboardPageLoaded({
               batch of unassigned orders to a closer in one go. */}
           {displayedUnassignedOrders.length > 0 && (
             <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="-mx-1 overflow-x-auto scrollbar-hide">
+                <div className="flex min-w-max items-center gap-2 px-1">
                 <SmartPick
                   total={displayedUnassignedOrders.length}
                   selectedCount={selectedQueueIds.size}
@@ -1989,8 +1934,10 @@ function CSDashboardPageLoaded({
                   }
                   onClear={clearQueueSelection}
                   itemNoun="orders"
+                  compactMobile
+                  className="shrink-0"
                 />
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <div className="flex shrink-0 items-center gap-2">
                   <Button
                     type="button"
                     variant="primary"
@@ -2003,6 +1950,7 @@ function CSDashboardPageLoaded({
                   >
                     Assign{selectedQueueIds.size > 0 ? ` (${selectedQueueIds.size})` : ''}
                   </Button>
+                </div>
                 </div>
               </div>
 
@@ -2020,7 +1968,7 @@ function CSDashboardPageLoaded({
             <div>
               <StripToolbar
                 title="Unassigned queue"
-                description="Fresh orders that have not been assigned to a closer yet — pick or bulk-assign."
+                description="New orders waiting for assignment. Pick one or bulk-assign."
                 onScrollLeft={() => scrollUnassignedQueueStrip(-280)}
                 onScrollRight={() => scrollUnassignedQueueStrip(280)}
                 scrollAriaSubject="unassigned queue"
@@ -2542,7 +2490,7 @@ function CSDashboardPageLoaded({
             <div>
               <StripToolbar
                 title="Cart abandonment"
-                description={`Dropped-off sessions — they stay until cleared. Use Clear when handled. Total backlog: ${abandonedPagination.total}.`}
+                description={`Dropped sessions stay here until cleared. Backlog: ${abandonedPagination.total}.`}
                 onScrollLeft={() => scrollAbandonedStrip(-280)}
                 onScrollRight={() => scrollAbandonedStrip(280)}
                 scrollAriaSubject="abandoned carts"

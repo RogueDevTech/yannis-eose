@@ -92,7 +92,7 @@ export function ProductEditPage({
 
       <PageHeader
         title="Edit Product"
-        description="Catalog SKU: name, category, gallery, list price, and cost. Offer packages are managed on Marketing → Forms when you attach this product."
+        description="Update product details."
         actions={<StatusBadge status={product.status} />}
       />
 

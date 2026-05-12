@@ -3,6 +3,7 @@ import { Link, useFetcher } from '@remix-run/react';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
@@ -228,12 +229,26 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
   return (
     <div className="space-y-6 max-w-3xl">
       <PageHeader
-        title="Generate Monthly Payroll Batch"
-        description="Auto-derives payouts from delivered orders and commission plans for the selected scope and month. Existing batches for that month are skipped; use Re-generate inside a draft batch to refresh a single slot."
+        title="Generate Payroll Batch"
+        mobileInlineActions
+        description="Generate payroll for a selected month and scope."
         actions={
-          <Link to="/hr/payroll" className="btn-ghost btn-sm shrink-0">
-            ← Back to payroll
-          </Link>
+          <PageHeaderMobileTools
+            sheetTitle="Payroll tools"
+            sheetSubtitle={<span>Navigation</span>}
+            triggerAriaLabel="Payroll generator toolbar"
+            showMobileRefresh={false}
+            desktop={
+              <Link to="/hr/payroll" className="btn-ghost btn-sm shrink-0">
+                ← Back to payroll
+              </Link>
+            }
+            sheet={
+              <Link to="/hr/payroll" className="btn-secondary btn-sm w-full justify-center">
+                Back to payroll
+              </Link>
+            }
+          />
         }
       />
 

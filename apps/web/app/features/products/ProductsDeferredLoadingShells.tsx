@@ -6,6 +6,7 @@ import {
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 
@@ -84,13 +85,27 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Products"
-        description="Manage products and reusable offer packages."
+        mobileInlineActions
+        description="Manage products and offers."
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <span className="h-8 w-28 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-            <span className="h-8 w-28 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Product tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Product toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <span className="h-8 w-28 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+                <span className="h-8 w-28 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </div>
+            }
+            sheet={
+              <>
+                <span className="h-9 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+                <span className="h-9 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </>
+            }
+          />
         }
       />
       <OverviewStatStrip

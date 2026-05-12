@@ -20,6 +20,7 @@ import {
   type ImportColumn,
   importCellInputClass,
 } from '~/components/ui/import-bulk-data';
+import { FormSelect } from '~/components/ui/form-select';
 import {
   BRANCH_ELIGIBLE_IMPORT_ROLES,
   type BranchInfo,
@@ -36,6 +37,15 @@ import { downloadUsersImportTemplate } from './users-import-template';
 
 interface UsersImportPageProps {
   branches: BranchInfo[];
+}
+
+function importSelectClass(errored: boolean): string {
+  return [
+    '!h-7 !rounded-md !bg-app-elevated !px-2 !pr-6 !text-xs',
+    errored
+      ? '!border-danger-400 focus:!border-danger-500 focus:!ring-danger-500'
+      : '!border-app-border focus:!border-brand-500 focus:!ring-brand-500',
+  ].join(' ');
 }
 
 export function UsersImportPage({ branches }: UsersImportPageProps) {
@@ -100,22 +110,19 @@ export function UsersImportPage({ branches }: UsersImportPageProps) {
         errorLabel: 'Role',
         getDisplayValue: (row) => row.role,
         renderCell: ({ row, disabled, errored, patch }) => (
-          <select
+          <FormSelect
             value={row.resolvedRole ?? ''}
             onChange={(e) => patch({ role: e.target.value } as Partial<ResolvedRow>)}
             disabled={disabled}
-            className={importCellInputClass(errored)}
-          >
-            <option value="">—</option>
-            {SPREADSHEET_IMPORT_ROLE_REFERENCE.map((r) => {
-              const primaryLabel = r.acceptedLabels.split(',').at(0)?.trim() || r.enum;
-              return (
-                <option key={r.enum} value={r.enum}>
-                  {primaryLabel}
-                </option>
-              );
-            })}
-          </select>
+            controlSize="sm"
+            wrapperClassName="w-full"
+            className={importSelectClass(errored)}
+            placeholder="—"
+            options={SPREADSHEET_IMPORT_ROLE_REFERENCE.map((r) => ({
+              value: r.enum,
+              label: r.acceptedLabels.split(',').at(0)?.trim() || r.enum,
+            }))}
+          />
         ),
       },
       {
@@ -191,7 +198,7 @@ export function UsersImportPage({ branches }: UsersImportPageProps) {
   return (
     <ImportBulkData<ParsedRow, ResolvedRow>
       title="Import users"
-      description="Upload a spreadsheet, fix any rows the editor flags, then import. Each row is created one at a time so a single bad row doesn't block the rest."
+      description="Upload a spreadsheet and import users."
       backHref="/hr/users"
       backLabel="← Back to users"
       resourceLabel="user"

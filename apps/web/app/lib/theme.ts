@@ -86,6 +86,14 @@ export const THEME_STORAGE_KEY = 'yannis_theme';
 
 export const THEME_CHANGE_EVENT = 'yannis-theme-change';
 
+export const APP_LOGO_LIGHT_SURFACE_SRC = '/assets/yannis-logo-white-bg.png';
+export const APP_LOGO_DARK_SURFACE_SRC = '/assets/yannis-logo1.png';
+
+/** Pick the logo variant that best fits the current theme surface. */
+export function getAppLogoSrc(isDarkTheme: boolean): string {
+  return isDarkTheme ? APP_LOGO_DARK_SURFACE_SRC : APP_LOGO_LIGHT_SURFACE_SRC;
+}
+
 const THEME_IDS = APP_THEMES.map((t) => t.id) as AppThemeId[];
 
 export function isAppThemeId(value: string): value is AppThemeId {

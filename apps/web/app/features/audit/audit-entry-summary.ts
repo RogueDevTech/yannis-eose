@@ -66,7 +66,7 @@ export const AUDIT_TABLE_LABELS: Record<string, string> = {
   cart_abandonments: 'Cart Abandonments',
   permissions: 'Permissions',
   user_permissions: 'User Permissions',
-  mirror_sessions: 'Mirror sessions',
+  mirror_sessions: 'Mirror Mode',
 };
 
 export function formatAuditTableName(name: string): string {
@@ -377,7 +377,7 @@ export function getAuditSummaryParts(
     const targetLabel = targetInfo?.name ?? (targetId ? `${targetId.slice(0, 8)}…` : 'another user');
     const isActive = entry.action === 'INSERT';
     if (isActive) {
-      return { prefix: `${actor} opened a read-only session as `, entityLabel: targetLabel, suffix: '.' };
+      return { prefix: `${actor} entered mirror mode as `, entityLabel: targetLabel, suffix: '.' };
     }
     const startedRaw = pickStr(data, 'started_at', 'startedAt');
     const endedRaw = pickStr(data, 'ended_at', 'endedAt');
@@ -386,11 +386,11 @@ export function getAuditSummaryParts(
       const ms = new Date(endedRaw).getTime() - new Date(startedRaw).getTime();
       const mins = Math.floor(ms / 60000);
       const secs = Math.floor((ms % 60000) / 1000);
-      durationLabel = mins > 0 ? ` (session lasted ${mins}m ${secs}s).` : ` (session lasted ${secs}s).`;
+      durationLabel = mins > 0 ? ` (lasted ${mins}m ${secs}s).` : ` (lasted ${secs}s).`;
     } else {
       durationLabel = '.';
     }
-    return { prefix: `${actor} ended a read-only session as `, entityLabel: targetLabel, suffix: durationLabel };
+    return { prefix: `${actor} ended mirror mode as `, entityLabel: targetLabel, suffix: durationLabel };
   }
 
   if (table === 'users') {
