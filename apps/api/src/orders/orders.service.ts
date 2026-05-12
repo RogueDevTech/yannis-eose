@@ -3498,12 +3498,10 @@ export class OrdersService {
     let redistributed = 0;
     for (const order of csAssignedOrders) {
       const currentAssignedId = order.assignedCsId ?? null;
-      const available = workloads
-        .map((w) => {
-          const state = workloadMap.get(w.agentId)!;
-          return { agentId: w.agentId, ...state };
-        })
-        .filter((s) => s.pendingCount < s.capacity);
+      const available = workloads.map((w) => {
+        const state = workloadMap.get(w.agentId)!;
+        return { agentId: w.agentId, ...state };
+      });
 
       sortAvailable(available);
       const target = available[0];
@@ -3597,12 +3595,10 @@ export class OrdersService {
     const ordersByTarget = new Map<string, string[]>();
 
     for (const order of orders) {
-      const available = targetWorkloads
-        .map((w) => {
-          const state = workloadMap.get(w.agentId)!;
-          return { agentId: w.agentId, ...state };
-        })
-        .filter((s) => s.pendingCount < s.capacity);
+      const available = targetWorkloads.map((w) => {
+        const state = workloadMap.get(w.agentId)!;
+        return { agentId: w.agentId, ...state };
+      });
 
       sortAvailable(available);
       const target = available[0];
@@ -4544,7 +4540,7 @@ export class OrdersService {
   /**
    * Assign a single UNPROCESSED order to the best available CS closer using the configured
    * dispatch strategy. Used by auto-dispatch on creation and by distributeUnassignedOrders.
-   * Returns true if the order was assigned, false if no capacity.
+   * Returns true if the order was assigned, false if no eligible closer was found.
    */
   private async assignOrderToBestAvailableAgent(orderId: string): Promise<boolean> {
     const [orderRow] = await this.db
@@ -4583,7 +4579,7 @@ export class OrdersService {
     const workloads = await this.getCSCloserWorkloads(servicingBranchId ?? undefined, {
       pendingCountsAcrossAllBranches: routing?.crossBranchServicing === true,
     });
-    let available = workloads.filter((w) => w.pendingCount < w.capacity);
+    let available = [...workloads];
     if (available.length === 0) return false;
 
     const restrict = routing?.restrictToCloserIds;
@@ -4715,49 +4711,10 @@ export class OrdersService {
 
   /**
    * Claim an order from the claim queue. Atomic lock prevents double-claiming.
-   * Agent must have capacity (pending orders < claim_cap) to claim.
    */
   async claimOrder(orderId: string, actor: SessionUser): Promise<{ success: boolean; message?: string }> {
     if (actor.role !== 'CS_CLOSER') {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS closers can claim orders' });
-    }
-
-    const [orderMeta] = await this.db
-      .select({ branchId: schema.orders.branchId })
-      .from(schema.orders)
-      .where(eq(schema.orders.id, orderId))
-      .limit(1);
-    const [firstLine] = await this.db
-      .select({ productId: schema.orderItems.productId })
-      .from(schema.orderItems)
-      .where(eq(schema.orderItems.orderId, orderId))
-      .orderBy(asc(schema.orderItems.createdAt))
-      .limit(1);
-    const routing =
-      orderMeta?.branchId != null
-        ? await this.csOrderRouting.resolveRoutingForDispatch(
-            orderMeta.branchId,
-            firstLine?.productId ?? null,
-            orderId,
-          )
-        : null;
-
-    // Claim-cap (per CS squad when configured) and pending count — parallel where possible.
-    const [{ claimCap }, pendingCounts] = await Promise.all([
-      this.getEffectiveCsDispatchStrategy(routing?.dispatchSettingsTeamId ?? null),
-      this.db
-        .select({ count: count() })
-        .from(schema.orders)
-        .where(
-          and(
-            eq(schema.orders.assignedCsId, actor.id),
-            inArray(schema.orders.status, ['CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED']),
-          ),
-        ),
-    ]);
-    const currentPending = pendingCounts[0]?.count ?? 0;
-    if (currentPending >= claimCap) {
-      return { success: false, message: `Claim cap reached (${claimCap} active orders). Confirm or cancel existing orders first.` };
     }
 
     // Atomic claim using Postgres row lock (FOR UPDATE SKIP LOCKED)
@@ -4906,14 +4863,6 @@ export class OrdersService {
   ) {
     switch (newStatus) {
       case 'CS_ENGAGED': {
-        const workloads = await this.getCSCloserWorkloads(order.branchId ?? undefined);
-        const agentWorkload = workloads.find((w) => w.agentId === actor.id);
-        if (agentWorkload && agentWorkload.pendingCount >= agentWorkload.capacity) {
-          throw new TRPCError({
-            code: 'BAD_REQUEST',
-            message: 'Agent has reached maximum capacity',
-          });
-        }
         // Check if order is locked by another agent
         if (
           order.lockedBy &&

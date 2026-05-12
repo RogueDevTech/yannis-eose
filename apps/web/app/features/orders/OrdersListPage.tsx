@@ -932,7 +932,7 @@ function OrdersListPageImpl({
                         <span className="text-xs font-medium text-success-600 dark:text-success-400">Target met</span>
                       )}
                       {myWorkload.pendingCount >= myWorkload.capacity && (
-                        <span className="text-xs font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
+                        <span className="text-xs font-medium text-warning-600 dark:text-warning-400">At quota</span>
                       )}
                     </div>
                   </div>

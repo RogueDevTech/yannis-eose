@@ -134,7 +134,7 @@ function AgentWorkloadCard({
             <span className="text-[10px] font-medium text-success-600 dark:text-success-400">Target met</span>
           )}
           {agent.pendingCount >= agent.capacity && (
-            <span className="text-[10px] font-medium text-danger-600 dark:text-danger-400">Pipeline limit</span>
+            <span className="text-[10px] font-medium text-warning-600 dark:text-warning-400">At quota</span>
           )}
           {isNew && (
             <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">

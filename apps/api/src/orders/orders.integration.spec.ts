@@ -28,6 +28,34 @@ const stubCsOrderRouting = {
   resolveRoutingForDispatch: async () => null,
 };
 
+const noopEvents = {
+  emitToUser: () => undefined,
+  emitToRoom: () => undefined,
+};
+
+const noopNotifications = {
+  create: async () => undefined,
+  enqueueCreate: () => undefined,
+  enqueueCreateForRole: () => undefined,
+  enqueueCreateForLocation: () => undefined,
+};
+
+function createOrdersServiceForTest(dbRef: any, overrides?: { settingsService?: any }) {
+  return new OrdersService(
+    dbRef as any,
+    {} as any,
+    noopEvents as any,
+    noopNotifications as any,
+    (overrides?.settingsService ?? {}) as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    new BranchTeamsService(dbRef as any),
+    {} as any,
+    stubCsOrderRouting as any,
+  );
+}
+
 // Skip all if no DB URL configured (unit-only environments)
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -155,6 +183,104 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
 
     expect(updated!.status).toBe('CS_ASSIGNED');
     expect(updated!.assignedCsId).toBe(csCloser.id);
+  });
+
+  it('allows CS_ASSIGNED → CS_ENGAGED even when the closer backlog exceeds their quota', async () => {
+    const closer = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await setSessionActor(pgClient, closer.id);
+    await db.update(schema.users).set({ capacity: 1 }).where(eq(schema.users.id, closer.id));
+
+    await createTestOrder(db as any, { status: 'CS_ASSIGNED', assignedCsId: closer.id });
+    const { orderId } = await createTestOrder(db as any, {
+      status: 'CS_ASSIGNED',
+      assignedCsId: closer.id,
+    });
+
+    const ordersService = createOrdersServiceForTest(db);
+    const actor = {
+      id: closer.id,
+      email: closer.email,
+      name: 'Closer',
+      role: 'CS_CLOSER',
+      logisticsLocationId: null,
+      currentBranchId: null,
+      permissions: ['orders.read'],
+    };
+
+    const updated = await ordersService.transition(
+      { orderId, newStatus: 'CS_ENGAGED' },
+      actor as any,
+    );
+
+    expect(updated.status).toBe('CS_ENGAGED');
+  });
+
+  it('claimOrder succeeds even when the closer is already at the configured claim quota', async () => {
+    const closer = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await setSessionActor(pgClient, closer.id);
+
+    await createTestOrder(db as any, { status: 'CS_ASSIGNED', assignedCsId: closer.id });
+    await createTestOrder(db as any, { status: 'CONFIRMED', assignedCsId: closer.id });
+    const { orderId } = await createTestOrder(db as any, { status: 'UNPROCESSED' });
+
+    const ordersService = createOrdersServiceForTest(db);
+    const actor = {
+      id: closer.id,
+      email: closer.email,
+      name: 'Closer',
+      role: 'CS_CLOSER',
+      logisticsLocationId: null,
+      currentBranchId: null,
+    };
+
+    const result = await ordersService.claimOrder(orderId, actor as any);
+    expect(result.success).toBe(true);
+
+    const [claimed] = await db
+      .select({ assignedCsId: schema.orders.assignedCsId, status: schema.orders.status })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId));
+
+    expect(claimed!.assignedCsId).toBe(closer.id);
+    expect(claimed!.status).toBe('CS_ASSIGNED');
+  });
+
+  it('auto-dispatch still assigns an order to a closer who is already at quota', async () => {
+    const branch = await createTestBranch(db as any);
+    const closer = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await db.insert(schema.userBranches).values([{ userId: closer.id, branchId: branch.id, isPrimary: true }]);
+    await db.update(schema.users).set({ capacity: 1 }).where(eq(schema.users.id, closer.id));
+
+    await createTestOrder(db as any, {
+      status: 'CS_ASSIGNED',
+      assignedCsId: closer.id,
+      branchId: branch.id,
+    });
+    const { orderId } = await createTestOrder(db as any, {
+      status: 'UNPROCESSED',
+      branchId: branch.id,
+    });
+
+    const ordersService = createOrdersServiceForTest(db, {
+      settingsService: {
+        get: async (key: string) => {
+          if (key === 'CS_DISPATCH_STRATEGY') return { strategy: 'load_balanced' };
+          if (key === 'CS_CLAIM_CAP') return { cap: 2 };
+          return null;
+        },
+      },
+    });
+
+    const assigned = await (ordersService as any).assignOrderToBestAvailableAgent(orderId);
+    expect(assigned).toBe(true);
+
+    const [updated] = await db
+      .select({ assignedCsId: schema.orders.assignedCsId, status: schema.orders.status })
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId));
+
+    expect(updated!.assignedCsId).toBe(closer.id);
+    expect(updated!.status).toBe('CS_ASSIGNED');
   });
 
   // ---------------------------------------------------------------------------

@@ -47,6 +47,9 @@ function parseCSTeamList(res: { ok: boolean; status: number; data: unknown }): A
   return Array.isArray(data) ? data : [];
 }
 
+const CS_ACTIVITY_FILTERS = new Set(['ALL', 'ACTIVE', 'IDLE']);
+const CS_BACKLOG_FILTERS = new Set(['ALL', 'HAS_PENDING', 'NO_PENDING']);
+
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermissionOrRoles(request, {
     roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
@@ -104,27 +107,66 @@ export async function loader({ request }: LoaderFunctionArgs) {
       isIdle: inactiveAgentIds.has(m.id),
     }));
 
-    const totalPending = workloads.reduce((sum, w) => sum + w.pendingCount, 0);
-    const idleCount = inactiveAgents.length;
+    const q = (url.searchParams.get('q') ?? '').trim();
+    const qLower = q.toLowerCase();
+    const activityRaw = url.searchParams.get('activity') ?? 'ALL';
+    const backlogRaw = url.searchParams.get('backlog') ?? 'ALL';
+    const activityFilter = CS_ACTIVITY_FILTERS.has(activityRaw) ? activityRaw : 'ALL';
+    const backlogFilter = CS_BACKLOG_FILTERS.has(backlogRaw) ? backlogRaw : 'ALL';
+
+    let filteredMembers = teamMembers;
+    if (qLower.length > 0) {
+      filteredMembers = filteredMembers.filter((member) => {
+        const branchText = (member.branchMemberships ?? [])
+          .flatMap((branch) => [branch.branchName, branch.branchCode])
+          .join(' ')
+          .toLowerCase();
+        const roleText = member.role.toLowerCase().replaceAll('_', ' ');
+        return (
+          member.name.toLowerCase().includes(qLower) ||
+          member.role.toLowerCase().includes(qLower) ||
+          roleText.includes(qLower) ||
+          branchText.includes(qLower)
+        );
+      });
+    }
+    if (activityFilter === 'ACTIVE') {
+      filteredMembers = filteredMembers.filter((member) => !member.isIdle);
+    } else if (activityFilter === 'IDLE') {
+      filteredMembers = filteredMembers.filter((member) => member.isIdle);
+    }
+    if (backlogFilter === 'HAS_PENDING') {
+      filteredMembers = filteredMembers.filter((member) => (member.workload?.pendingCount ?? 0) > 0);
+    } else if (backlogFilter === 'NO_PENDING') {
+      filteredMembers = filteredMembers.filter((member) => (member.workload?.pendingCount ?? 0) === 0);
+    }
+
+    const totalPending = filteredMembers.reduce((sum, member) => sum + (member.workload?.pendingCount ?? 0), 0);
+    const idleCount = filteredMembers.filter((member) => member.isIdle).length;
 
     const PAGE_SIZE = 20;
     const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
-    const totalCount = teamMembers.length;
+    const unfilteredCount = teamMembers.length;
+    const totalCount = filteredMembers.length;
     const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
     const page = Math.min(Math.max(1, Number.isFinite(pageRaw) ? pageRaw : 1), totalPages);
     const start = (page - 1) * PAGE_SIZE;
-    const pagedMembers = teamMembers.slice(start, start + PAGE_SIZE);
+    const pagedMembers = filteredMembers.slice(start, start + PAGE_SIZE);
 
     return {
       teamMembers: pagedMembers,
       summary: {
-        agentCount: list.length,
+        agentCount: totalCount,
         totalPending,
         idleCount,
       },
       page,
       totalPages,
       totalCount,
+      unfilteredCount,
+      q,
+      activityFilter,
+      backlogFilter,
       dateFilters: filters,
     };
   })();
@@ -148,6 +190,11 @@ export default function CSTeamRoute() {
             summary={data.summary}
             page={data.page}
             totalPages={data.totalPages}
+            totalCount={data.totalCount}
+            unfilteredCount={data.unfilteredCount}
+            q={data.q}
+            activityFilter={data.activityFilter}
+            backlogFilter={data.backlogFilter}
             dateFilters={data.dateFilters}
           />
         )}

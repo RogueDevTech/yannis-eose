@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link } from '@remix-run/react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -11,10 +11,13 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Button } from '~/components/ui/button';
 import { ExportModal } from '~/components/ui/export-modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
+import { SearchInput } from '~/components/ui/search-input';
+import { FormSelect } from '~/components/ui/form-select';
 import type { CSTeamMemberOverview } from './types';
 import { UserBranchBadges } from '~/components/ui/user-branch-badges';
 import {
@@ -28,9 +31,26 @@ export interface CSTeamPageProps {
   summary: { agentCount: number; totalPending: number; idleCount: number };
   page?: number;
   totalPages?: number;
+  totalCount?: number;
+  unfilteredCount?: number;
+  q?: string;
+  activityFilter?: string;
+  backlogFilter?: string;
   /** Date filter from URL — controls the leaderboard window for order counts. */
   dateFilters?: { startDate: string; endDate: string; periodAllTime: boolean };
 }
+
+const CS_ACTIVITY_OPTIONS = [
+  { value: 'ALL', label: 'All activity' },
+  { value: 'ACTIVE', label: 'Active only' },
+  { value: 'IDLE', label: 'Idle only' },
+];
+
+const CS_BACKLOG_OPTIONS = [
+  { value: 'ALL', label: 'All backlog' },
+  { value: 'HAS_PENDING', label: 'Has pending' },
+  { value: 'NO_PENDING', label: 'No pending' },
+];
 
 function formatLastActive(lastActionAt: string | null): string {
   if (!lastActionAt) return '—';
@@ -177,8 +197,72 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
   );
 }
 
-export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dateFilters }: CSTeamPageProps) {
+export function CSTeamPage({
+  teamMembers,
+  summary,
+  page = 1,
+  totalPages = 1,
+  totalCount = 0,
+  unfilteredCount = 0,
+  q = '',
+  activityFilter = 'ALL',
+  backlogFilter = 'ALL',
+  dateFilters,
+}: CSTeamPageProps) {
   const [showExportModal, setShowExportModal] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(q);
+
+  useEffect(() => {
+    setSearchQuery(q);
+  }, [q]);
+
+  const mergeListParams = (overrides: {
+    q?: string;
+    activity?: string;
+    backlog?: string;
+    page?: number;
+  }) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (overrides.q !== undefined) {
+          const trimmed = overrides.q.trim();
+          if (trimmed) params.set('q', trimmed);
+          else params.delete('q');
+        }
+        if (overrides.activity !== undefined) {
+          if (overrides.activity === 'ALL') params.delete('activity');
+          else params.set('activity', overrides.activity);
+        }
+        if (overrides.backlog !== undefined) {
+          if (overrides.backlog === 'ALL') params.delete('backlog');
+          else params.set('backlog', overrides.backlog);
+        }
+        if (overrides.page !== undefined) {
+          if (overrides.page <= 1) params.delete('page');
+          else params.set('page', String(overrides.page));
+        }
+        return params;
+      },
+      { replace: true },
+    );
+  };
+
+  const handleSearchSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    mergeListParams({ q: searchQuery, page: 1 });
+  };
+
+  const filtersBadgeCount = useMemo(() => {
+    let count = 0;
+    if (activityFilter !== 'ALL') count += 1;
+    if (backlogFilter !== 'ALL') count += 1;
+    return count;
+  }, [activityFilter, backlogFilter]);
+
+  const showFilteredEmpty = unfilteredCount > 0 && totalCount === 0;
+  const hasActiveFilters = q.length > 0 || activityFilter !== 'ALL' || backlogFilter !== 'ALL';
 
   const teamColumns = useMemo<CompactTableColumn<CSTeamMemberOverview>[]>(
     () => [
@@ -384,7 +468,7 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
         }
       />
 
-      {summary.agentCount > 0 && (
+      {unfilteredCount > 0 && (
         <OverviewStatStrip
           items={[
             {
@@ -409,19 +493,95 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
         />
       )}
 
-      {teamMembers.length === 0 ? (
+      <div>
+        <ToolbarFiltersCollapsible
+          className="mb-4 !border-0 px-0 py-0"
+          badgeCount={filtersBadgeCount}
+          sheetSubtitle={<span>Filter closers by live activity and backlog</span>}
+          searchRow={
+            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+              <SearchInput
+                value={searchQuery}
+                onChange={(value) => {
+                  setSearchQuery(value);
+                  if (value === '' && q.length > 0) mergeListParams({ q: '', page: 1 });
+                }}
+                placeholder="Search by closer, role, or branch…"
+                wrapperClassName="min-w-0 flex-1"
+                name="q"
+                autoComplete="off"
+              />
+              <Button type="submit" variant="secondary" size="sm">
+                Search
+              </Button>
+            </form>
+          }
+          desktopInlineFilters={
+            <>
+              <FormSelect
+                value={activityFilter}
+                onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
+                options={CS_ACTIVITY_OPTIONS}
+                wrapperClassName="w-full min-w-0 sm:w-44"
+              />
+              <FormSelect
+                value={backlogFilter}
+                onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
+                options={CS_BACKLOG_OPTIONS}
+                wrapperClassName="w-full min-w-0 sm:w-44"
+              />
+            </>
+          }
+          sheetFilterBody={
+            <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Activity</span>
+                <FormSelect
+                  value={activityFilter}
+                  onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
+                  options={CS_ACTIVITY_OPTIONS}
+                  wrapperClassName="w-full"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">Backlog</span>
+                <FormSelect
+                  value={backlogFilter}
+                  onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
+                  options={CS_BACKLOG_OPTIONS}
+                  wrapperClassName="w-full"
+                />
+              </div>
+            </>
+          }
+        />
+
+        {hasActiveFilters && (
+          <p className="mb-3 text-xs text-app-fg-muted" aria-live="polite">
+            {totalCount} closer{totalCount === 1 ? '' : 's'}
+            {q ? ` matching "${q}"` : ''}
+            {activityFilter !== 'ALL' ? ` · ${CS_ACTIVITY_OPTIONS.find((option) => option.value === activityFilter)?.label}` : ''}
+            {backlogFilter !== 'ALL' ? ` · ${CS_BACKLOG_OPTIONS.find((option) => option.value === backlogFilter)?.label}` : ''}
+          </p>
+        )}
+      </div>
+
+      {unfilteredCount === 0 ? (
         <div className="card">
           <EmptyState
             title="No team members yet"
             description="Manage staff from HR → Users."
           />
         </div>
+      ) : showFilteredEmpty ? (
+        <div className="card">
+          <EmptyState
+            title="No matching closers"
+            description="Try a different search, activity filter, or backlog filter."
+          />
+        </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          
-          </div>
-
           <div className="card p-0">
             <CompactTable
               withCard={false}
