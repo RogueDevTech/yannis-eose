@@ -3,7 +3,7 @@ import { MAX_PRODUCT_OFFER_IMAGES } from '@yannis/shared';
 import { FileUpload } from '~/components/ui/file-upload';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import { FormField } from '~/components/ui/form-field';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 
 interface OfferImagesEditorProps {
   imageUrls: string[];
@@ -78,7 +78,7 @@ export function OfferImagesEditor({
             {!atMax && !disabled && (
               <FileUpload
                 key={`offer-upload-${uploadNonce}`}
-                folder={S3_FOLDERS.PRODUCT_IMAGES}
+                folder={ASSET_FOLDERS.PRODUCT_IMAGES}
                 accept="image/*"
                 maxSizeMB={10}
                 size="sm"
@@ -129,7 +129,7 @@ export function OfferImagesEditor({
         {!atMax && !disabled && (
           <FileUpload
             key={`offer-upload-${uploadNonce}`}
-            folder={S3_FOLDERS.PRODUCT_IMAGES}
+            folder={ASSET_FOLDERS.PRODUCT_IMAGES}
             accept="image/*"
             maxSizeMB={10}
             label={imageUrls.length === 0 ? 'Upload images' : 'Add another image'}

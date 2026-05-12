@@ -39,7 +39,7 @@ Every mutation logged at the **database level** via PostgreSQL 18 System-Version
 | Edge/CDN | Cloudflare Workers |
 | Queue | Upstash QStash / CF Durable Objects |
 | VOIP | Twilio / MessageBird (WebRTC) |
-| Storage | Cloudflare R2 / AWS S3 |
+| Storage | Provider-selectable object storage (GCS / S3) |
 
 ---
 
@@ -57,7 +57,20 @@ yannis-eose/
 └── packages/config/   # ESLint, TS, Tailwind configs
 ```
 
-Rider dashboard lives in `apps/web` at `/rider/` (not a separate app). No Docker — Postgres 18 + Redis via remote connection strings in `.env`.
+Rider dashboard lives in `apps/web` at `/rider/` (not a separate app). Local development does not require Docker — Postgres 18 + Redis can be reached via remote connection strings in `.env`.
+
+### Deployment Standard (Locked)
+
+- **Dev deploy is provider-selectable via adapters.** The active adapter is chosen by deploy config such as `DEPLOY_PLATFORM=aws|gcp`.
+- **Shared runtime contract is the source of truth.** Both providers must satisfy the same single-VM Dockerized `web` + `api` shape, health checks, migration flow, and runtime env contract.
+- **Redis stays external** for dev deploys. Do **not** reintroduce VM-local Redis unless explicitly approved.
+- **Ingress is Cloudflare DNS + Cloudflare Tunnel.** Do **not** add nginx back onto the VM for the normalized dev baseline.
+- **Edge worker remains on Cloudflare.**
+- **Object storage is provider-selectable via adapters** (`gcs` / `s3`). New asset keys must stay **environment-prefixed** and **resource-scoped** (for example `dev/marketing/screenshots/...`, `dev/finance/receipts/...`, `dev/logistics/delivery-proof/...`, `dev/hr/onboarding-docs/...`, `dev/products/...`).
+- **New dev infrastructure uses `dev-*` naming** inside the selected provider so the same Terraform shape can be mirrored later for prod.
+- **Provider adapters must not drift from the shared contract.** Keep provider differences isolated to infra, deploy scripts, and object-storage adapters.
+
+Local dev still does **not** require Docker — Postgres 18 + Redis can be reached via remote connection strings in `.env`.
 
 ---
 

@@ -16,7 +16,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { Spinner } from '~/components/ui/spinner';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -65,6 +65,10 @@ type SecondaryErr = {
   error: string;
 } & Omit<SecondaryOk, 'ok'>;
 type SecondaryResponse = SecondaryOk | SecondaryErr;
+
+type AdSpendDetailRecord = AdSpendRecord & {
+  mediaBuyerName?: string | null;
+};
 
 const AD_SPEND_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'ALL', label: 'All entries' },
@@ -215,7 +219,7 @@ export function MarketingAdSpendPage({
     params.delete('eligiblePage');
     setSearchParams(params);
   };
-  const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendRecord | null>(null);
+  const [adSpendDetailModal, setAdSpendDetailModal] = useState<AdSpendDetailRecord | null>(null);
   const [rejectStep, setRejectStep] = useState(false);
   const [editTarget, setEditTarget] = useState<AdSpendRecord | null>(null);
   const [editFormCampaignId, setEditFormCampaignId] = useState('');
@@ -746,6 +750,7 @@ export function MarketingAdSpendPage({
     setAdSpendDetailModal({
       id: line.id,
       mediaBuyerId: line.mediaBuyerId,
+      mediaBuyerName: line.mediaBuyerName,
       productId: line.productId,
       campaignId: line.campaignId,
       spendAmount: line.spendAmount,
@@ -960,7 +965,7 @@ export function MarketingAdSpendPage({
             )}
             <div className="sm:col-span-2">
               <FileUpload
-                folder={S3_FOLDERS.SCREENSHOTS}
+                folder={ASSET_FOLDERS.SCREENSHOTS}
                 name="screenshotUrl"
                 label="Ads Manager Screenshot"
                 required
@@ -1120,7 +1125,7 @@ export function MarketingAdSpendPage({
               </div>
               <div className="sm:col-span-2">
                 <FileUpload
-                  folder={S3_FOLDERS.SCREENSHOTS}
+                  folder={ASSET_FOLDERS.SCREENSHOTS}
                   label="Ads Manager Screenshot"
                   required
                   onUpload={(url) => setEditScreenshotUrl(url)}
@@ -1536,7 +1541,7 @@ export function MarketingAdSpendPage({
                   <InlineLoadingText />
                 ) : (
                   <>
-                    {getUserName(adSpendDetailModal.mediaBuyerId, users)}
+                    {adSpendDetailModal.mediaBuyerName ?? getUserName(adSpendDetailModal.mediaBuyerId, users)}
                     {adSpendDetailModal.status === 'APPROVED' && adSpendDetailModal.approvedBy && (
                       <>
                         {' · '}

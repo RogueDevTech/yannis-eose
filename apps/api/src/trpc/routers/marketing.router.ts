@@ -522,7 +522,15 @@ export const marketingRouter = router({
     .input(updateAdSpendSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
       const { branchId, ...adSpendInput } = input;
-      return getMarketingService().updateAdSpend(adSpendInput, { id: ctx.user.id, role: ctx.user.role }, branchId ?? ctx.currentBranchId);
+      return getMarketingService().updateAdSpend(
+        adSpendInput,
+        {
+          id: ctx.user.id,
+          role: ctx.user.role,
+          permissions: ctx.user.permissions ?? [],
+        },
+        branchId ?? ctx.currentBranchId,
+      );
     }),
 
   // ── Performance Metrics ──────────────────────────

@@ -354,7 +354,7 @@ export const dashboardRouter = router({
    *
    * Returns two stat-card-shaped sections:
    *   - `marketing.today.{newOrders,confirmed,delivered,cancelled}` — today's order pulse
-   *   - `cs.{closerCount,totalPending,idleCount,unassigned}` — current CS-floor snapshot
+   *   - `cs.{unassigned,engaged,confirmed,delivered}` — today's CS activity snapshot
    * Plus `pendingApprovals` for finance.
    */
   quickOverview: permissionProcedure('ceo.overview').query(async ({ ctx }) => {
@@ -368,22 +368,12 @@ export const dashboardRouter = router({
     const startIso = todayStart.toISOString();
     const endIso = todayEnd.toISOString();
 
-    const [todayCounts, allTimeCounts, pendingApprovals, csWorkloads, inactiveAgents] = await Promise.all([
+    const [todayCounts, pendingApprovals] = await Promise.all([
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
-      ordersService.getStatusCounts(undefined, undefined, undefined, undefined, undefined, ctx.currentBranchId).catch(() => ({})),
       financeService.countPendingApprovalRequests().catch(() => 0),
-      ordersService.getCSCloserWorkloads(ctx.currentBranchId).catch(() => [] as Array<{ pendingCount: number }>),
-      ordersService.getInactiveAgents(10).catch(() => [] as unknown[]),
     ]);
 
     const today = (todayCounts ?? {}) as Record<string, number>;
-    const all = (allTimeCounts ?? {}) as Record<string, number>;
-
-    // CS snapshot — closerCount = how many agents have any workload row,
-    // totalPending = sum of pending across all agents.
-    const closerCount = csWorkloads.length;
-    const totalPending = csWorkloads.reduce((sum, w) => sum + (w.pendingCount ?? 0), 0);
-    const idleCount = inactiveAgents.length;
 
     return {
       marketing: {
@@ -395,10 +385,10 @@ export const dashboardRouter = router({
         },
       },
       cs: {
-        closerCount,
-        totalPending,
-        idleCount,
-        unassigned: all['UNPROCESSED'] ?? 0,
+        unassigned: today['UNPROCESSED'] ?? 0,
+        engaged: today['CS_ENGAGED'] ?? 0,
+        confirmed: today['CONFIRMED'] ?? 0,
+        delivered: today['DELIVERED'] ?? 0,
       },
       pendingApprovals,
     };

@@ -18,7 +18,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ExportModal } from '~/components/ui/export-modal';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { formatRole } from '~/features/users/types';
 import { PageHeader } from '~/components/ui/page-header';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -335,7 +335,7 @@ function CreateDisbursementModal({
 
           <div>
             <FileUpload
-              folder={S3_FOLDERS.RECEIPTS}
+              folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Payment receipt"
               required
@@ -1424,7 +1424,7 @@ export function DisbursementsPage({
               />
             </div>
             <FileUpload
-              folder={S3_FOLDERS.RECEIPTS}
+              folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Receipt image"
               required

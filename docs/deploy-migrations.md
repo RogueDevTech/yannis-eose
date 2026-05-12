@@ -4,7 +4,7 @@ Yannis applies hand-written SQL from `packages/shared/drizzle/*.sql` in order, t
 
 ## Two layers (both are OK)
 
-1. **Pre-start (recommended for EC2):** `infrastructure/deploy/run-migrations.sh` runs the same `runSqlMigrations` logic **before** `docker compose up`, using the freshly pulled API image. This is wired into `.github/workflows/deploy-dev.yml` after `docker compose pull`.
+1. **Pre-start (recommended for the selected dev VM):** `infrastructure/deploy/run-migrations.sh` runs the same `runSqlMigrations` logic **before** `docker compose up`, using the freshly pulled API image. This is wired into `.github/workflows/deploy-dev.yml` after `docker compose pull`.
 
 2. **API bootstrap:** `MigrationRunnerService` still runs the same `runSqlMigrations` on app startup (unless `MIGRATIONS_AUTORUN=false`).
 
@@ -22,20 +22,21 @@ pnpm db:migrate:app
 
 Requires `DATABASE_URL` in the environment (or root `.env` if you load it yourself).
 
-## Manual on EC2
+## Manual on the selected dev VM
 
 ```bash
 cd /opt/yannis-eose
 chmod +x run-migrations.sh
+export COMPOSE_FILES="docker-compose.runtime.yml docker-compose.runtime.tunnel.yml"
 ./run-migrations.sh
 ```
 
 ## GitHub Actions (manual migration-only)
 
-Workflow: **EC2 — run database migrations** (`.github/workflows/ec2-run-migrations.yml`).
+Workflow: **Dev — run database migrations** (`.github/workflows/ec2-run-migrations.yml`).
 
-- **Actions → EC2 — run database migrations → Run workflow**
-- Chooses the GitHub **environment** (e.g. `dev`) so it uses the same `EC2_HOST` / `EC2_SSH_KEY` / `AWS_ACCOUNT_ID` secrets as deploy.
-- SSHs to EC2, `docker compose pull api`, then `./run-migrations.sh` so files match the latest pushed API image.
+- **Actions → Dev — run database migrations → Run workflow**
+- Chooses the GitHub **environment** (e.g. `dev`) so it uses the same provider secrets as deploy.
+- Selects the provider path from `DEPLOY_PLATFORM`, pulls the latest API image, then runs `./run-migrations.sh` with the shared runtime compose files.
 
-Full deploys on branch `dev` still run migrations automatically in **Deploy to Dev (EC2)** before `docker compose up`.
+Full deploys on branch `dev` still run migrations automatically in **Deploy to Dev** before `docker compose up`.

@@ -1,0 +1,12 @@
+aws_region          = "eu-north-1"
+environment         = "dev"
+instance_type       = "t3.small"
+vm_admin_user       = "ec2-user"
+vpc_id              = "vpc-1234567890"
+subnet_id           = "subnet-1234567890"
+key_name            = "your-dev-keypair"
+public_web_hostname = "dev-yannis.roguedevtech.com"
+public_api_hostname = "api-dev-yannis.roguedevtech.com"
+bucket_cors_origins = [
+  "https://dev-yannis.roguedevtech.com",
+]

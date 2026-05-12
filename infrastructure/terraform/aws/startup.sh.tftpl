@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+dnf update -y
+dnf install -y docker jq awscli
+
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -SL "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+systemctl enable docker
+systemctl start docker
+
+usermod -aG docker "${vm_admin_user}"
+
+mkdir -p /opt/yannis-eose
+chown "${vm_admin_user}:${vm_admin_user}" /opt/yannis-eose

@@ -44,7 +44,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const locationsData = locationsRes.ok
     ? ((locationsRes.data as {
-        result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> };
+        result?: {
+          data?: Array<{
+            id: string;
+            name: string;
+            providerName?: string | null;
+            providerKind?: 'WAREHOUSE' | 'THIRD_PARTY' | null;
+          }>;
+        };
       })?.result?.data ?? null)
     : null;
 
@@ -53,6 +60,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     id: l.id,
     name: l.name,
     providerName: l.providerName ?? null,
+    providerKind: l.providerKind ?? null,
   }));
 
   const canIntake =

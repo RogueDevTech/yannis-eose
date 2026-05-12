@@ -67,6 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         dispatchLocked?: boolean;
         status: string;
         providerName?: string | null;
+        providerKind?: 'WAREHOUSE' | 'THIRD_PARTY' | null;
       }>;
       transfers: Transfer[];
       returnedOrders: ReturnedOrder[];
@@ -93,6 +94,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       id: l.id,
       name: l.name,
       providerName: l.providerName ?? null,
+      providerKind: l.providerKind ?? null,
     }));
     const locationsWithLock: LocationWithLock[] = locationRows.map((l) => ({
       id: l.id,

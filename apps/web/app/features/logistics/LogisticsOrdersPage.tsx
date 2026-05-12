@@ -13,7 +13,7 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -1203,7 +1203,7 @@ function EditDeliveryDateModal({
               Receipt <span className="text-danger-600 dark:text-danger-400">*</span>
             </label>
             <FileUpload
-              folder={S3_FOLDERS.RECEIPTS}
+              folder={ASSET_FOLDERS.RECEIPTS}
               onUpload={setReceiptUrl}
               accept="image/*,.pdf"
               label="Upload receipt"

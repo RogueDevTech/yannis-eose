@@ -14,7 +14,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 
@@ -70,7 +70,7 @@ export interface StaffOnboardingPageProps {
   /**
    * Set when the actor is browsing the app via Mirror Mode. Forces every form field
    * + every action button into read-only state so the admin can't write into the
-   * mirrored user's onboarding (S3 uploads, draft saves, submit, approve all blocked).
+   * mirrored user's onboarding (asset uploads, draft saves, submit, approve all blocked).
    * The server still gates these via `blockMutationsWhileMirroring` + the `/api/upload-url`
    * mirror check — this prop is the UX layer that disables the affordance up-front.
    */
@@ -512,7 +512,7 @@ export function StaffOnboardingPage({
               </FormField>
               <FormField label="Proof of address" hint="Utility bill or bank statement (PDF / image, ≤10MB)" className="sm:col-span-2">
                 <FileUpload
-                  folder={S3_FOLDERS.ONBOARDING_DOCS}
+                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
                   maxSizeMB={10}
                   onUpload={setProofUrl}
@@ -770,7 +770,7 @@ function AddSupportingDocument({
           <p className="rounded-md border border-app-border bg-app-elevated px-2 py-1.5 text-xs text-app-fg-muted break-all">{url}</p>
         ) : (
           <FileUpload
-            folder={S3_FOLDERS.ONBOARDING_DOCS}
+            folder={ASSET_FOLDERS.ONBOARDING_DOCS}
             accept="application/pdf,image/*"
             maxSizeMB={10}
             onUpload={setUrl}
@@ -861,7 +861,7 @@ function GuarantorCard({
             )
           ) : (
             <FileUpload
-              folder={S3_FOLDERS.ONBOARDING_DOCS}
+              folder={ASSET_FOLDERS.ONBOARDING_DOCS}
               accept="application/pdf,image/*"
               maxSizeMB={10}
               onUpload={onLetterUpload}

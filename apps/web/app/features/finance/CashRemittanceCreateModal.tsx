@@ -6,7 +6,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { FileUpload, type FileUploadUploadState } from '~/components/ui/file-upload';
 import { Checkbox } from '~/components/ui/checkbox';
 import { NairaPrice } from '~/components/ui/naira-price';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -189,7 +189,7 @@ export function CashRemittanceCreateModal({
 
         <div className="space-y-2">
           <FileUpload
-            folder={S3_FOLDERS.RECEIPTS}
+            folder={ASSET_FOLDERS.RECEIPTS}
             onUpload={(url) => setReceiptUrls((prev) => [...prev, url])}
             onUploadStateChange={(s) => setUploadState(s)}
             label="Upload receipt(s)"

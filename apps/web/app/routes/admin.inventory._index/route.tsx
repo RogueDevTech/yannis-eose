@@ -130,8 +130,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
     movements: { movements: StockMovement[]; pagination: { total: number } };
     products: Array<{ id: string; name: string }>;
-    warehouseLocations: Array<{ id: string; name: string; providerName?: string | null }>;
-    displayLocations: Array<{ id: string; name: string; providerName?: string | null }>;
+    warehouseLocations: Array<{
+      id: string;
+      name: string;
+      providerName?: string | null;
+      providerKind?: 'WAREHOUSE' | 'THIRD_PARTY' | null;
+    }>;
+    displayLocations: Array<{
+      id: string;
+      name: string;
+      providerName?: string | null;
+      providerKind?: 'WAREHOUSE' | 'THIRD_PARTY' | null;
+    }>;
     systemSettings: Array<{ key: string; value: unknown }>;
     lowStockAlerts: LowStockAlertsResult;
     shipments: { rows: ShipmentRow[]; pagination: { total: number } } | null;
@@ -201,12 +211,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     id: l.id,
     name: l.name,
     providerName: l.providerName ?? null,
+    providerKind: l.providerKind ?? null,
   }));
   const displayLocations: LocationOption[] = (bundle?.displayLocations ?? []).map(
     (l) => ({
       id: l.id,
       name: l.name,
       providerName: l.providerName ?? null,
+      providerKind: l.providerKind ?? null,
     }),
   );
 

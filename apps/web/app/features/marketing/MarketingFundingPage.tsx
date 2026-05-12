@@ -22,7 +22,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -957,7 +957,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               <AmountInput name="amount" required placeholder="e.g. 50,000.00" className="input w-full" />
             </div>
             <FileUpload
-              folder={S3_FOLDERS.RECEIPTS}
+              folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Receipt Upload"
               required
@@ -1153,7 +1153,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               />
             </div>
             <FileUpload
-              folder={S3_FOLDERS.RECEIPTS}
+              folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Receipt image"
               required

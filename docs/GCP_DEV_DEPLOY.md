@@ -1,0 +1,72 @@
+# GCP Dev Adapter
+
+This is the `gcp` adapter for the shared multi-cloud dev deploy contract:
+
+- single `e2-small` GCE VM
+- Dockerized `web` + `api`
+- Cloudflare Tunnel for ingress
+- external Redis
+- existing Cloud SQL URL
+- GCS bucket for uploaded assets
+
+## Hostnames
+
+- Web: `dev-yannis.roguedevtech.com`
+- API: `api-dev-yannis.roguedevtech.com`
+
+Cloudflare handles DNS and TLS. The VM does **not** run nginx.
+
+## Runtime stack on the VM
+
+The GCP adapter uses the shared runtime files:
+
+- `infrastructure/deploy/docker-compose.runtime.yml`
+- `infrastructure/deploy/docker-compose.runtime.tunnel.yml`
+- `infrastructure/deploy/deploy-runtime.sh`
+
+Redis is intentionally not part of the compose stack.
+
+## Runtime env secret
+
+The VM expects a Secret Manager secret whose payload is a raw `.env` file. The deploy
+workflow refreshes `/opt/yannis-eose/.env` from that secret before pulling images or
+running migrations.
+
+Minimum keys:
+
+```dotenv
+DEPLOY_PLATFORM=gcp
+DATABASE_URL=postgres://...
+REDIS_URL=redis://...
+SESSION_SECRET=replace-me
+SESSION_BUNDLE_SECRET=replace-me
+SESSION_COOKIE_DOMAIN=.roguedevtech.com
+CORS_ORIGIN=https://dev-yannis.roguedevtech.com
+PUBLIC_API_URL=https://api-dev-yannis.roguedevtech.com
+EDGE_WORKER_URL=https://<your-edge-worker-domain>
+GCP_PROJECT_ID=<your-gcp-project-id>
+OBJECT_STORAGE_PROVIDER=gcs
+OBJECT_STORAGE_BUCKET=<terraform object_storage_bucket output>
+OBJECT_STORAGE_PUBLIC_BASE_URL=https://storage.googleapis.com/<terraform object_storage_bucket output>
+ASSET_ENV_PREFIX=dev
+CLOUDFLARE_TUNNEL_TOKEN=<cloudflare tunnel token>
+```
+
+## Asset layout
+
+Direct uploads and product image rehosting are now environment-prefixed and resource-scoped:
+
+- `dev/marketing/screenshots/...`
+- `dev/finance/receipts/...`
+- `dev/finance/invoices/...`
+- `dev/logistics/delivery-proof/...`
+- `dev/hr/onboarding-docs/...`
+- `dev/products/images/uploads/...`
+- `dev/products/gallery/<product-id>/...`
+
+## Deploy flow
+
+1. Terraform creates the VM, Artifact Registry, GCS bucket, service account, and runtime secret container.
+2. A secret version is added for the runtime `.env`.
+3. `deploy-dev.yml` chooses the GCP adapter when `DEPLOY_PLATFORM=gcp`, pushes both images to Artifact Registry, copies the shared runtime assets plus GCP wrapper scripts to the VM, refreshes `.env`, runs migrations, and starts the stack.
+4. The manual migration workflow chooses the same GCP adapter and reuses the same runtime compose + migration contract.

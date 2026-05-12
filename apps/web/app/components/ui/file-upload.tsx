@@ -1,10 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { uploadToS3, type S3Folder } from '~/lib/s3-upload';
+import { uploadAsset, type AssetFolder } from '~/lib/object-storage';
 
 export type FileUploadUploadState = 'idle' | 'uploading' | 'done' | 'error';
 
 interface FileUploadProps {
-  folder: S3Folder;
+  folder: AssetFolder;
   onUpload: (url: string) => void;
   accept?: string;
   maxSizeMB?: number;
@@ -102,7 +102,7 @@ export function FileUpload({
       }
 
       try {
-        const url = await uploadToS3(file, folder, setProgress);
+        const url = await uploadAsset(file, folder, setProgress);
         setUploadedUrl(url);
         setState('done');
         onUpload(url);

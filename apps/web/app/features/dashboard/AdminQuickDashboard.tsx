@@ -21,14 +21,14 @@ export interface QuickOverviewData {
     };
   };
   cs: {
-    /** CS closers with any workload row in the current branch. */
-    closerCount: number;
-    /** Sum of pending orders across all CS closers. */
-    totalPending: number;
-    /** CS closers flagged as idle (no action > threshold). */
-    idleCount: number;
-    /** Orders sitting in UNPROCESSED waiting for CS assignment. */
+    /** Orders created today that are still sitting in UNPROCESSED waiting for CS assignment. */
     unassigned: number;
+    /** Orders created today that are currently in CS_ENGAGED. */
+    engaged: number;
+    /** Orders created today that are currently CONFIRMED. */
+    confirmed: number;
+    /** Orders created today that are currently DELIVERED. */
+    delivered: number;
   };
   /** Finance approval requests in PENDING state. */
   pendingApprovals: number;
@@ -119,10 +119,10 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
         />
       </div>
 
-      {/* CS — current floor snapshot. */}
+      {/* CS — today's company-wide activity snapshot. */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">Customer support today</h2>
+          <h2 className="text-lg font-semibold text-app-fg">CS activity today</h2>
           <Link
             to="/admin/cs/queue"
             prefetch="intent"
@@ -136,30 +136,31 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
           showScrollControls={false}
           items={[
             {
-              label: 'Closers',
-              value: data.cs.closerCount.toString(),
-              valueClassName: 'text-app-fg',
-              title: 'CS closers with any workload row in the current branch',
-            },
-            {
-              label: 'Pending',
-              value: data.cs.totalPending.toString(),
-              valueClassName: 'text-app-fg',
-              title: 'Total in-flight orders assigned across all closers',
-            },
-            {
-              label: 'Idle',
-              value: data.cs.idleCount.toString(),
-              valueClassName:
-                data.cs.idleCount > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-              title: 'Closers with no action for >10 min',
-            },
-            {
               label: 'Unassigned',
               value: data.cs.unassigned.toString(),
               valueClassName:
                 data.cs.unassigned > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg',
-              title: 'Orders waiting in UNPROCESSED — assign from the CS queue',
+              title: 'Orders created today that are still in UNPROCESSED',
+            },
+            {
+              label: 'Engaged',
+              value: data.cs.engaged.toString(),
+              valueClassName: 'text-info-600 dark:text-info-400',
+              title: 'Orders created today that are currently in CS_ENGAGED',
+            },
+            {
+              label: 'Confirmed',
+              value: data.cs.confirmed.toString(),
+              valueClassName:
+                data.cs.confirmed > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              title: 'Orders created today that are currently CONFIRMED',
+            },
+            {
+              label: 'Delivered',
+              value: data.cs.delivered.toString(),
+              valueClassName:
+                data.cs.delivered > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              title: 'Orders created today that are currently DELIVERED',
             },
           ]}
         />

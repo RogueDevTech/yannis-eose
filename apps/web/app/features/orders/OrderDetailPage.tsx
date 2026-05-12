@@ -32,7 +32,7 @@ import { NumberInput } from '~/components/ui/number-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
-import { S3_FOLDERS } from '~/lib/s3-upload';
+import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { shareOrderToLogistics } from '~/lib/trpc-browser';
 import { isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
@@ -2686,7 +2686,7 @@ export function OrderDetailPage({
               Screenshot (optional)
             </label>
             <FileUpload
-              folder={S3_FOLDERS.DELIVERY_PROOF}
+              folder={ASSET_FOLDERS.DELIVERY_PROOF}
               onUpload={(url) => setDeliverProofUrl(url)}
               accept="image/*"
               maxSizeMB={10}

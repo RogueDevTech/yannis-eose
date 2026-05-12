@@ -29,6 +29,11 @@ import { FailoverIoAdapter } from './events/failover-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // The GCP dev VM sits behind Cloudflare Tunnel, so trust proxy headers for
+  // accurate client IPs in rate limits / auth logging.
+  const httpAdapter = app.getHttpAdapter();
+  const expressApp = httpAdapter.getInstance() as { set: (key: string, value: unknown) => void };
+  expressApp.set('trust proxy', true);
   const redisHealth = app.get(RedisHealthService);
   app.useWebSocketAdapter(new FailoverIoAdapter(app, redisHealth));
 

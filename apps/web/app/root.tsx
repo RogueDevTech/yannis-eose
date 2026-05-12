@@ -36,9 +36,10 @@ declare global {
     __ENV: {
       API_URL: string;
       EDGE_WORKER_URL: string;
-      S3_BUCKET: string;
-      S3_REGION: string;
-      S3_ENDPOINT?: string;
+      OBJECT_STORAGE_PROVIDER?: string;
+      OBJECT_STORAGE_BUCKET: string;
+      OBJECT_STORAGE_PUBLIC_BASE_URL?: string;
+      ASSET_ENV_PREFIX: string;
       VAPID_PUBLIC_KEY?: string;
     };
   }
@@ -51,9 +52,12 @@ export async function loader() {
       // Empty string: client uses `getBrowserApiBaseUrl()` → same-origin (Vite /trpc + /socket.io proxy in dev).
       API_URL: process.env.PUBLIC_API_URL ?? process.env.API_URL ?? '',
       EDGE_WORKER_URL: process.env.EDGE_WORKER_URL ?? '',
-      S3_BUCKET: process.env.S3_BUCKET ?? '',
-      S3_REGION: process.env.S3_REGION ?? 'us-east-1',
-      S3_ENDPOINT: process.env.S3_ENDPOINT ?? '',
+      OBJECT_STORAGE_PROVIDER: process.env.OBJECT_STORAGE_PROVIDER ?? '',
+      OBJECT_STORAGE_BUCKET:
+        process.env.OBJECT_STORAGE_BUCKET ?? process.env.GCS_BUCKET ?? process.env.S3_BUCKET ?? '',
+      OBJECT_STORAGE_PUBLIC_BASE_URL:
+        process.env.OBJECT_STORAGE_PUBLIC_BASE_URL ?? process.env.GCS_PUBLIC_BASE_URL ?? '',
+      ASSET_ENV_PREFIX: process.env.ASSET_ENV_PREFIX ?? 'dev',
       VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? '',
     },
   });
