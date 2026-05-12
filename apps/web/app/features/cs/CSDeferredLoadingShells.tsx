@@ -413,6 +413,13 @@ export function CSTeamLoadingShell({
           { label: 'Idle', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
+      <div className="rounded-xl border border-app-border bg-app-surface p-4" aria-hidden>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="h-10 flex-1 rounded-lg bg-app-hover animate-pulse" />
+          <div className="h-10 w-full rounded-lg bg-app-hover animate-pulse md:w-44" />
+          <div className="h-10 w-full rounded-lg bg-app-hover animate-pulse md:w-44" />
+        </div>
+      </div>
       <CompactTable<{ id: string }>
         rows={teamRows}
         rowKey={(r) => r.id}
