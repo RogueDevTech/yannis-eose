@@ -65,8 +65,8 @@ redis-cli -u "$REDIS_URL" ping
 ```bash
 cd /opt/yannis-eose
 grep '^REDIS_URL=' .env
-docker compose -f docker-compose.runtime.yml -f docker-compose.runtime.tunnel.yml logs --tail=80 api | grep -i redis
-docker compose -f docker-compose.runtime.yml -f docker-compose.runtime.tunnel.yml ps api web cloudflared
+docker compose -f docker-compose.runtime.yml logs --tail=80 api | grep -i redis
+docker compose -f docker-compose.runtime.yml ps api web
 ```
 
 If the API logs show repeated Redis DNS/connection errors, Socket.io auth may fail and real-time notifications will lag.

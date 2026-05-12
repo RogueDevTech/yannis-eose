@@ -4,7 +4,7 @@ This is the `gcp` adapter for the shared multi-cloud dev deploy contract:
 
 - single `e2-small` GCE VM
 - Dockerized `web` + `api`
-- Cloudflare Tunnel for ingress
+- ingress handled outside the app deploy flow
 - external Redis
 - existing Cloud SQL URL
 - GCS bucket for uploaded assets
@@ -14,15 +14,18 @@ This is the `gcp` adapter for the shared multi-cloud dev deploy contract:
 - Web: `dev-yannis.roguedevtech.com`
 - API: `api-dev-yannis.roguedevtech.com`
 
-Cloudflare handles DNS and TLS. The VM does **not** run nginx.
+Cloudflare can still handle DNS and TLS, but the app deploy itself only starts `web` and `api`. The VM does **not** run nginx.
 
 ## Runtime stack on the VM
 
 The GCP adapter uses the shared runtime files:
 
 - `infrastructure/deploy/docker-compose.runtime.yml`
-- `infrastructure/deploy/docker-compose.runtime.tunnel.yml`
 - `infrastructure/deploy/deploy-runtime.sh`
+
+If you want a VM-local tunnel sidecar, the optional overlay remains available at:
+
+- `infrastructure/deploy/docker-compose.runtime.tunnel.yml`
 
 Redis is intentionally not part of the compose stack.
 
@@ -49,7 +52,6 @@ OBJECT_STORAGE_PROVIDER=gcs
 OBJECT_STORAGE_BUCKET=<terraform object_storage_bucket output>
 OBJECT_STORAGE_PUBLIC_BASE_URL=https://storage.googleapis.com/<terraform object_storage_bucket output>
 ASSET_ENV_PREFIX=dev
-CLOUDFLARE_TUNNEL_TOKEN=<cloudflare tunnel token>
 ```
 
 ## Asset layout

@@ -75,7 +75,8 @@ cp apps/edge-worker/.env.example apps/edge-worker/.env
 - Local laptop runtime uses `apps/api/.env`:
   - `REDIS_URL=redis://127.0.0.1:6379` (or your SSH tunnel endpoint)
 - Deployed dev uses the same external `REDIS_URL` pattern — Redis is **not** VM-local on either provider adapter.
-- The shared runtime compose files are `infrastructure/deploy/docker-compose.runtime.yml` and `infrastructure/deploy/docker-compose.runtime.tunnel.yml`.
+- The shared app runtime compose file is `infrastructure/deploy/docker-compose.runtime.yml`.
+- `infrastructure/deploy/docker-compose.runtime.tunnel.yml` is optional if you want a VM-local Cloudflare Tunnel sidecar.
 - `DEPLOY_PLATFORM=aws|gcp` selects the provider wrapper in CI and on the VM.
 - VM runtime `.env` is refreshed via `infrastructure/deploy/refresh-env.sh`, which dispatches to the selected provider adapter.
 

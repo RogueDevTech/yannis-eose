@@ -18,9 +18,7 @@ It is the `gcp` adapter for the shared Terraform contract documented in
 - `dev-yannis-runtime-env` Secret Manager secret
 - `dev-*` public asset bucket
 
-Cloudflare DNS/Tunnel resources are intentionally **not** created here. The VM expects a
-Cloudflare tunnel token to be supplied in the runtime `.env` secret and the hostname
-routing to be created in Cloudflare.
+Cloudflare DNS/Tunnel resources are intentionally **not** created here. Hostname routing and any optional tunnel setup are managed outside this Terraform stack.
 
 ## Apply
 
@@ -58,10 +56,9 @@ OBJECT_STORAGE_PROVIDER=gcs
 OBJECT_STORAGE_BUCKET=<terraform object_storage_bucket output>
 OBJECT_STORAGE_PUBLIC_BASE_URL=https://storage.googleapis.com/<terraform object_storage_bucket output>
 ASSET_ENV_PREFIX=dev
-CLOUDFLARE_TUNNEL_TOKEN=<cloudflare tunnel token>
 ```
 
-3. In Cloudflare, route:
+3. In Cloudflare or your preferred ingress layer, route:
    - `dev-yannis.roguedevtech.com` -> `http://web:3000`
    - `api-dev-yannis.roguedevtech.com` -> `http://api:4444`
 
@@ -72,4 +69,4 @@ from Secret Manager, logs into Artifact Registry, runs migrations, and starts th
 
 - The bucket is public-read by default because the current app stores durable asset URLs.
 - Redis is external by design for this dev setup.
-- nginx is intentionally excluded; Cloudflare Tunnel handles ingress/TLS.
+- nginx is intentionally excluded from the VM runtime.

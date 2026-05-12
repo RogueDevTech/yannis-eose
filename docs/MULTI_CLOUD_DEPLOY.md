@@ -16,7 +16,7 @@ Supported values:
 - `gcp`
 - `aws`
 
-If unset, the dev workflow defaults to `gcp`.
+If unset, the dev workflow defaults to `aws`.
 
 ## Shared Runtime Contract
 
@@ -25,7 +25,7 @@ Both providers must satisfy the same runtime shape:
 - single VM
 - Dockerized `web` + `api`
 - external Redis
-- Cloudflare Tunnel sidecar
+- ingress handled separately from the app deploy
 - no VM-local nginx
 - no VM-local Redis
 - pre-start migrations before traffic cutover
@@ -33,9 +33,12 @@ Both providers must satisfy the same runtime shape:
 Shared runtime files:
 
 - `infrastructure/deploy/docker-compose.runtime.yml`
-- `infrastructure/deploy/docker-compose.runtime.tunnel.yml`
 - `infrastructure/deploy/deploy-runtime.sh`
 - `infrastructure/deploy/run-migrations.sh`
+
+Optional ingress overlay:
+
+- `infrastructure/deploy/docker-compose.runtime.tunnel.yml`
 
 Provider wrappers:
 
@@ -66,7 +69,6 @@ OBJECT_STORAGE_PROVIDER=gcs
 OBJECT_STORAGE_BUCKET=<bucket-name>
 OBJECT_STORAGE_PUBLIC_BASE_URL=https://<public-object-base-url>
 ASSET_ENV_PREFIX=dev
-CLOUDFLARE_TUNNEL_TOKEN=<cloudflare tunnel token>
 ```
 
 Provider-specific additions:

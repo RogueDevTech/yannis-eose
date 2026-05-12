@@ -38,7 +38,7 @@ fi
 echo "→ Authenticating Docker to Artifact Registry..."
 gcloud auth configure-docker "$ARTIFACT_REGISTRY_HOST" --quiet
 
-COMPOSE_FILES="${COMPOSE_FILES:-docker-compose.runtime.yml docker-compose.runtime.tunnel.yml}" \
+COMPOSE_FILES="${COMPOSE_FILES:-docker-compose.runtime.yml}" \
 IMAGE_REGISTRY="$IMAGE_REGISTRY" \
 IMAGE_TAG="$IMAGE_TAG" \
 ./deploy-runtime.sh

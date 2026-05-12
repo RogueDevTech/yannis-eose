@@ -33,7 +33,7 @@ ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 echo "→ Authenticating Docker to ECR..."
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-COMPOSE_FILES="${COMPOSE_FILES:-docker-compose.runtime.yml docker-compose.runtime.tunnel.yml}" \
+COMPOSE_FILES="${COMPOSE_FILES:-docker-compose.runtime.yml}" \
 IMAGE_REGISTRY="$ECR_REGISTRY" \
 IMAGE_TAG="$IMAGE_TAG" \
 ./deploy-runtime.sh

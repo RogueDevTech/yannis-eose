@@ -101,7 +101,6 @@ output "suggested_runtime_env" {
     RUNTIME_ENV_SECRET             = google_secret_manager_secret.runtime_env.secret_id
     SESSION_COOKIE_DOMAIN          = ".roguedevtech.com"
     DEPLOY_PLATFORM                = "gcp"
-    CLOUDFLARE_TUNNEL_TOKEN        = "<cloudflare tunnel token>"
   }
   description = "Suggested runtime env keys to store in the Secret Manager .env secret."
 }
