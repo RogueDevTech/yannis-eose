@@ -202,9 +202,15 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Profit by shipment"
-        description="Pick an inbound shipment to see what it cost to bring in vs what we've earned selling it. Cost layers are exact (factory + landing); revenue is an estimate based on the average delivered price for each product."
-        actions={<PageRefreshButton />}
+        title="Profit by Shipment"
+        mobileInlineActions
+        description="Review shipment cost and estimated revenue."
+        actions={
+          <>
+            <PageRefreshButton className="hidden md:inline-flex" />
+            <PageRefreshButton iconOnly className="md:hidden" />
+          </>
+        }
       />
 
       <div className="card !p-3">

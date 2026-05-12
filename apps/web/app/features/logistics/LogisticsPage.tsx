@@ -21,6 +21,7 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { Tabs } from '~/components/ui/tabs';
@@ -414,50 +415,101 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     <div className="space-y-4">
       <PageHeader
         title="Logistics"
-        description="Manage 3PL logistics companies, locations, and delivery operations"
+        mobileInlineActions
+        description="Manage logistics companies and locations."
         actions={
-          <div className="flex flex-wrap gap-2">
-            <PageRefreshButton />
-            <ActionDropdown
-              id="add-company"
-              trigger="button"
-              triggerLabel="+ Logistics company"
-              triggerVariant="secondary"
-              openMenuId={openHeaderMenuId}
-              setOpenMenuId={setOpenHeaderMenuId}
-              items={[
-                {
-                  label: 'Add manually',
-                  onClick: () => setShowAddProvider(true),
-                },
-                {
-                  label: 'Import from Excel',
-                  to: '/admin/logistics/partners/import-providers',
-                },
-              ]}
-            />
-            <ActionDropdown
-              id="add-location"
-              trigger="button"
-              triggerLabel="+ Location"
-              triggerVariant="primary"
-              openMenuId={openHeaderMenuId}
-              setOpenMenuId={setOpenHeaderMenuId}
-              items={[
-                {
-                  label: 'Add manually',
-                  onClick: () => {
-                    setAddLocationProviderId('');
-                    setShowAddLocation(true);
-                  },
-                },
-                {
-                  label: 'Import from Excel',
-                  to: '/admin/logistics/partners/import-locations',
-                },
-              ]}
-            />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Logistics tools"
+            sheetSubtitle={<span>Refresh and add records</span>}
+            triggerAriaLabel="Logistics toolbar"
+            desktop={
+              <div className="flex flex-wrap gap-2">
+                <PageRefreshButton />
+                <ActionDropdown
+                  id="add-company"
+                  trigger="button"
+                  triggerLabel="+ Logistics company"
+                  triggerVariant="secondary"
+                  openMenuId={openHeaderMenuId}
+                  setOpenMenuId={setOpenHeaderMenuId}
+                  items={[
+                    {
+                      label: 'Add manually',
+                      onClick: () => setShowAddProvider(true),
+                    },
+                    {
+                      label: 'Import from Excel',
+                      to: '/admin/logistics/partners/import-providers',
+                    },
+                  ]}
+                />
+                <ActionDropdown
+                  id="add-location"
+                  trigger="button"
+                  triggerLabel="+ Location"
+                  triggerVariant="primary"
+                  openMenuId={openHeaderMenuId}
+                  setOpenMenuId={setOpenHeaderMenuId}
+                  items={[
+                    {
+                      label: 'Add manually',
+                      onClick: () => {
+                        setAddLocationProviderId('');
+                        setShowAddLocation(true);
+                      },
+                    },
+                    {
+                      label: 'Import from Excel',
+                      to: '/admin/logistics/partners/import-locations',
+                    },
+                  ]}
+                />
+              </div>
+            }
+            sheet={
+              <>
+                <ActionDropdown
+                  id="add-company-mobile"
+                  trigger="button"
+                  triggerLabel="+ Logistics company"
+                  triggerVariant="secondary"
+                  openMenuId={openHeaderMenuId}
+                  setOpenMenuId={setOpenHeaderMenuId}
+                  items={[
+                    {
+                      label: 'Add manually',
+                      onClick: () => setShowAddProvider(true),
+                    },
+                    {
+                      label: 'Import from Excel',
+                      to: '/admin/logistics/partners/import-providers',
+                    },
+                  ]}
+                />
+                <ActionDropdown
+                  id="add-location-mobile"
+                  trigger="button"
+                  triggerLabel="+ Location"
+                  triggerVariant="primary"
+                  openMenuId={openHeaderMenuId}
+                  setOpenMenuId={setOpenHeaderMenuId}
+                  items={[
+                    {
+                      label: 'Add manually',
+                      onClick: () => {
+                        setAddLocationProviderId('');
+                        setShowAddLocation(true);
+                      },
+                    },
+                    {
+                      label: 'Import from Excel',
+                      to: '/admin/logistics/partners/import-locations',
+                    },
+                  ]}
+                />
+              </>
+            }
+          />
         }
       />
 

@@ -3,6 +3,7 @@ import { Link, useFetcher, useLocation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -162,6 +163,7 @@ export function DeliveryRemittanceDetailPage({
 
       <PageHeader
         title={detail.status === 'SENT' ? 'Review cash remittance' : 'Cash remittance'}
+        mobileInlineActions
         description={
           <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
             <span>{locationLine}</span>
@@ -172,12 +174,24 @@ export function DeliveryRemittanceDetailPage({
           </span>
         }
         actions={
-          <>
-            <PageRefreshButton />
-            <Link to={listBackHref} className="btn-secondary btn-sm inline-flex">
-              Back to list
-            </Link>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Cash remittance tools"
+            sheetSubtitle={<span>Refresh and navigation</span>}
+            triggerAriaLabel="Cash remittance toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Link to={listBackHref} className="btn-secondary btn-sm inline-flex">
+                  Back to list
+                </Link>
+              </>
+            }
+            sheet={
+              <Link to={listBackHref} className="btn-secondary btn-sm w-full justify-center">
+                Back to list
+              </Link>
+            }
+          />
         }
       />
 

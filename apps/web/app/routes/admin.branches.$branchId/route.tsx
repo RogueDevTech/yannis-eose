@@ -21,6 +21,7 @@ import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -3140,14 +3141,30 @@ function BranchOverviewPage({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={branch.status} />
-            {canManageBranchPage ? (
-              <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}>
-                Edit
-              </Button>
-            ) : null}
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Branch tools"
+            sheetSubtitle={<span>Status and actions</span>}
+            triggerAriaLabel="Branch toolbar"
+            showMobileRefresh={false}
+            mobileLeading={<StatusBadge status={branch.status} />}
+            desktop={
+              <div className="flex items-center gap-2 flex-wrap">
+                <StatusBadge status={branch.status} />
+                {canManageBranchPage ? (
+                  <Button variant="primary" size="sm" onClick={() => setEditOpen(true)}>
+                    Edit
+                  </Button>
+                ) : null}
+              </div>
+            }
+            sheet={
+              canManageBranchPage ? (
+                <Button variant="primary" size="sm" className="w-full justify-center" onClick={() => setEditOpen(true)}>
+                  Edit
+                </Button>
+              ) : null
+            }
+          />
         </div>
       </div>
 

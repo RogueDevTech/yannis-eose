@@ -34,11 +34,11 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
       {/* Header */}
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-app-fg">
+          <h1 className="text-xl font-bold text-app-fg">
             {getGreeting()}, {firstName}
           </h1>
           <p className="text-sm text-app-fg-muted font-medium mt-1">
-            Your 3PL location stock and deliveries.
+            Your location's stock and deliveries.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

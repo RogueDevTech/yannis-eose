@@ -321,7 +321,8 @@ export function MarketingTeamPage({
     <div className="space-y-6">
       <PageHeader
         title="Team Analysis"
-        description={`Media buyer funding, CPA, and profitability (True ROAS vs ${profitabilityConfig.targetRoas}x target — green ≥ ${greenThreshold}x).`}
+        mobileInlineActions
+        description="View media buyer performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Team analysis tools"

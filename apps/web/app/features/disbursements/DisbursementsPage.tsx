@@ -10,6 +10,7 @@ import { Button } from '~/components/ui/button';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -899,24 +900,70 @@ export function DisbursementsPage({
       {/* Header */}
       <PageHeader
         title="Disbursements"
-        description="Send funds to Head of Marketing. HoM distributes to Media Buyers from Marketing → Funding."
+        mobileInlineActions
+        description="Send and track marketing disbursements."
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <PageRefreshButton />
-            <DateFilterBar
-              startDate={filters.startDate}
-              endDate={filters.endDate}
-              periodAllTime={filters.periodAllTime}
-            />
-            <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-              Generate report
-            </Button>
-            {canCreate && (
-              <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
-                + New disbursement
-              </Button>
+          <PageHeaderMobileTools
+            sheetTitle="Disbursement tools"
+            sheetSubtitle={<span>Date range and actions</span>}
+            triggerAriaLabel="Disbursement toolbar"
+            desktop={
+              <div className="flex flex-wrap items-center gap-2">
+                <PageRefreshButton />
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                  />
+                </div>
+                <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                  Generate report
+                </Button>
+                {canCreate && (
+                  <Button variant="primary" size="sm" onClick={() => setShowForm(true)}>
+                    + New disbursement
+                  </Button>
+                )}
+              </div>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Generate report
+                </Button>
+                {canCreate ? (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowForm(true);
+                    }}
+                  >
+                    + New disbursement
+                  </Button>
+                ) : null}
+              </>
             )}
-          </div>
+          />
         }
       />
 

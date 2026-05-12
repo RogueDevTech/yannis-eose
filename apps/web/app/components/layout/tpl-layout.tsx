@@ -7,7 +7,7 @@ import { BottomNav, type BottomNavItem } from './bottom-nav';
 import { SidebarIcons } from './sidebar';
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { useSocket, useForceLogoutOnRevoke } from '~/hooks/useSocket';
-import { APP_THEMES } from '~/lib/theme';
+import { APP_THEMES, getAppLogoSrc } from '~/lib/theme';
 
 const TPL_NAV = [
   { label: 'Dashboard', href: '/tpl', icon: SidebarIcons.dashboard },
@@ -155,7 +155,7 @@ export function TplLayout({
                 aria-label="3PL home"
               >
                 <img
-                  src={isDarkTheme ? '/assets/yannis-logo1.png' : '/assets/yannis-logo-white-bg.png'}
+                  src={getAppLogoSrc(isDarkTheme)}
                   alt="Yannis"
                   className="h-[1.575rem] w-auto max-w-[108px] md:h-8 md:max-w-none object-contain"
                 />

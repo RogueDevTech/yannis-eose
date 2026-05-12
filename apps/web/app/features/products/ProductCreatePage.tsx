@@ -56,7 +56,7 @@ export function ProductCreatePage({ actionData, categoriesPromise = [] }: Produc
 
       <PageHeader
         title="Add Product"
-        description="Create a catalog SKU, then add sellable tiers (offer templates) after save — or assign tiers when building marketing forms."
+        description="Create a catalog product."
       />
 
       {actionData?.error && !dismissedError && (

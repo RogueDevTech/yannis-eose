@@ -238,6 +238,7 @@ export function LogisticsOrdersLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Logistics orders"
+        mobileInlineActions
         description="Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery."
         actions={
           <PageHeaderMobileTools
@@ -297,13 +298,27 @@ export function LogisticsPartnersLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Logistics"
-        description="Manage 3PL logistics companies, locations, and delivery operations"
+        mobileInlineActions
+        description="Manage logistics companies and locations."
         actions={
-          <div className="flex gap-2">
-            <PageRefreshButton />
-            <span className="h-8 w-36 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-            <span className="h-8 w-24 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Logistics tools"
+            sheetSubtitle={<span>Refresh and add records</span>}
+            triggerAriaLabel="Logistics toolbar"
+            desktop={
+              <div className="flex gap-2">
+                <PageRefreshButton />
+                <span className="h-8 w-36 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+                <span className="h-8 w-24 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </div>
+            }
+            sheet={
+              <>
+                <span className="h-9 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+                <span className="h-9 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </>
+            }
+          />
         }
       />
       <Tabs
@@ -337,10 +352,23 @@ export function LogisticsRemittancesLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Stock transfer confirmations"
-        description="Partner receipt workflow and disputes."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Confirm incoming stock transfers."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Transfer confirmation tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Transfer confirmation toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-40 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+                <PageRefreshButton />
+              </div>
+            }
+            sheet={<div className="h-10 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />}
+          />
+        }
       />
-      <div className="h-10 w-full max-w-lg rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
       <CompactTable<{ id: string }>
         columns={LOGISTICS_REMITTANCES_SHELL_COLS}
         rows={rows}
@@ -363,6 +391,7 @@ export function LogisticsTeamLoadingShell({
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Logistics team analysis"
+        mobileInlineActions
         description="Provider performance for the selected period."
         actions={
           <>
@@ -448,6 +477,7 @@ function TransfersWorkspaceLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title={pageTitle}
+        mobileInlineActions
         description={pageDescription}
         actions={
           <PageHeaderMobileTools

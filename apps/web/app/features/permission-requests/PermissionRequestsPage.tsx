@@ -270,8 +270,14 @@ export function PermissionRequestsPage({
     <div className="space-y-4">
       <PageHeader
         title="Permission Requests"
-        description="Sensitive changes (including admin-level staff and product archive) may require Super Admin approval. Approved and rejected requests are preserved for audit."
-        actions={<PageRefreshButton />}
+        description="Review sensitive approval requests."
+        mobileInlineActions
+        actions={
+          <>
+            <PageRefreshButton className="hidden md:inline-flex" />
+            <PageRefreshButton iconOnly className="md:hidden" />
+          </>
+        }
       />
 
       {fetcherError && !dismissedError && modal == null && (

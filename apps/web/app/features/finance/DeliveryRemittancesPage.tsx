@@ -490,7 +490,8 @@ export function DeliveryRemittancesPage({
     <div className="space-y-4">
       <PageHeader
         title="Cash Remittances"
-        description="Use Remittances for batches you already recorded, or Awaiting remittance to pick delivered orders and record cash against one logistics location."
+        mobileInlineActions
+        description="Review remittance batches and record new cash remittances."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Cash remittances tools"

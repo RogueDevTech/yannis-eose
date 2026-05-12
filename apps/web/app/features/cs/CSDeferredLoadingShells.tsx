@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import {
   CompactTable,
@@ -184,6 +185,96 @@ function csTeamShellTableColumns(): CompactTableColumn<{ id: string }>[] {
   ];
 }
 
+function renderCSTeamMobileCardShell() {
+  const tileClass =
+    'rounded-lg border border-app-border bg-app-hover/40 px-2.5 py-2';
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-3">
+        <span className="inline-block h-10 w-10 shrink-0 animate-pulse rounded-full bg-app-border/70 dark:bg-app-border/55" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <TableCellTextPulse className="w-[8rem] max-w-[min(12rem,100%)]" />
+              <div className="mt-1">
+                <TableCellTextPulse className="w-[4rem]" />
+              </div>
+            </div>
+            <span className="inline-block h-5 w-10 shrink-0 animate-pulse rounded-full bg-app-border/70 dark:bg-app-border/55" />
+          </div>
+          <div className="mt-1.5 flex gap-1.5">
+            <span className="inline-block h-5 w-16 animate-pulse rounded-full bg-app-border/70 dark:bg-app-border/55" />
+            <span className="inline-block h-5 w-14 animate-pulse rounded-full bg-app-border/70 dark:bg-app-border/55" />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <div className={tileClass}>
+          <TableCellTextPulse className="w-[2.5rem]" />
+          <div className="mt-1">
+            <TableCellTextPulse className="w-[2.25rem]" />
+          </div>
+        </div>
+        <div className={tileClass}>
+          <TableCellTextPulse className="w-[2rem]" />
+          <div className="mt-1">
+            <TableCellTextPulse className="w-[3rem]" />
+          </div>
+        </div>
+        <div className={tileClass}>
+          <TableCellTextPulse className="w-[3rem]" />
+          <div className="mt-1">
+            <TableCellTextPulse className="w-[2.5rem]" />
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center justify-between">
+          <TableCellTextPulse className="w-[4rem]" />
+          <TableCellTextPulse className="w-[2rem]" />
+        </div>
+        <div className="h-1.5 w-full animate-pulse rounded-full bg-app-border/70 dark:bg-app-border/55" />
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className={tileClass}>
+            <TableCellTextPulse className="w-[2rem]" />
+            <div className="mt-1">
+              <TableCellTextPulse className="w-[3rem]" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {Array.from({ length: 2 }, (_, i) => (
+          <div key={i} className={tileClass}>
+            <TableCellTextPulse className="w-[3rem]" />
+            <div className="mt-1">
+              <TableCellTextPulse className="w-[4rem]" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-app-border pt-3">
+        <div className="grid grid-cols-2 gap-2">
+          <CompactTableActionButton disabled className="w-full justify-center">
+            View orders
+          </CompactTableActionButton>
+          <CompactTableActionButton disabled className="w-full justify-center">
+            View profile
+          </CompactTableActionButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** CS orders list — mirrors OrdersListPage chrome (date strip, live dot, stat labels, chart shell, table pulses). */
 export function CSOrdersLoadingShell({
   filters,
@@ -202,6 +293,7 @@ export function CSOrdersLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title={isCSCloser ? 'My Orders' : 'CS Orders'}
+        mobileInlineActions
         description={
           isCSCloser ? 'Your assigned orders and pipeline' : 'All customer orders for the CS team'
         }
@@ -282,7 +374,8 @@ export function CSTeamLoadingShell({
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Team Analysis"
-        description="Closer workload and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
+        mobileInlineActions
+        description="View closer workload and performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="CS team tools"
@@ -324,6 +417,7 @@ export function CSTeamLoadingShell({
         rows={teamRows}
         rowKey={(r) => r.id}
         columns={csTeamShellTableColumns()}
+        renderMobileCard={() => renderCSTeamMobileCardShell()}
         emptyTitle="Loading…"
         emptyDescription=""
       />
@@ -349,9 +443,9 @@ export function CSLeaderboardLoadingShell({
     <div className="space-y-6 px-3 sm:px-0" aria-busy="true" aria-live="polite">
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-app-fg">CS Leaderboard</h1>
+          <h1 className="text-xl font-bold text-app-fg">CS Leaderboard</h1>
           <p className="text-sm text-app-fg-muted mt-1">
-            Closer performance ranked by delivery rate ({periodLabel}).
+            Rank closer performance by delivery rate.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -364,35 +458,43 @@ export function CSLeaderboardLoadingShell({
       </div>
 
       <div className="card p-0">
-        <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
-          <h2 className="text-base font-semibold text-app-fg sm:text-lg">Closer performance</h2>
-          <p className="text-xs text-app-fg-muted mt-0.5">Ranked by delivery rate ({periodLabel})</p>
-        </div>
-        <div className="space-y-4 px-4 py-4">
+        <div className="space-y-3 px-3 py-3 md:space-y-4 md:px-4 md:py-4">
           {[1, 2, 3, 4, 5].map((rank) => {
             const isTopThree = rank <= 3;
             return (
               <div
                 key={rank}
-                className={`rounded-lg border border-app-border bg-app-elevated p-4 ${isTopThree ? 'bg-app-hover' : ''}`}
+                className={`rounded-lg border border-app-border bg-app-elevated p-3 md:p-4 ${isTopThree ? 'bg-app-hover' : ''}`}
               >
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-                  <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
+                <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="flex min-w-0 items-center gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
                       #{rank}
                     </span>
                     {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
-                    <p className="min-w-0 flex-1 sm:flex-none">
-                      <TableCellTextPulse className="w-[8rem] max-w-[12rem]" />
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <TableCellTextPulse className="w-[8rem] max-w-[min(14rem,100%)]" />
+                    </div>
                   </div>
-                  <div className="flex shrink-0 justify-end sm:order-last">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-app-hover px-3 py-1.5 text-sm font-bold text-app-fg">
+                  <div className="flex items-center justify-between gap-2 pl-10 md:block md:pl-0">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-app-hover px-2.5 py-1 text-xs font-bold text-app-fg md:px-3 md:py-1.5 md:text-sm">
                       <TableCellTextPulse className="w-[2.5rem]" />
                       <span>% del.</span>
                     </span>
+                    <svg
+                      className="h-4 w-4 shrink-0 text-app-fg-muted md:hidden"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
                   </div>
-                  <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
+                  <div className="mt-2.5 hidden border-t border-app-border pt-2.5 text-sm md:flex md:flex-wrap md:items-center md:gap-x-4 md:gap-y-1">
                     <span className="text-app-fg-muted">
                       Engaged <TableCellTextPulse className="w-[1.5rem] align-middle" />
                     </span>
@@ -452,8 +554,36 @@ export function CSMessageTemplatesLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Message Templates"
-        description="SMS and WhatsApp templates for customer communication."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Manage SMS and WhatsApp templates."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Message template tools"
+            sheetSubtitle={<span>Preview and create</span>}
+            triggerAriaLabel="Message template toolbar"
+            desktop={
+              <>
+                <Button type="button" variant="secondary" size="sm" disabled>
+                  Preview all
+                </Button>
+                <Button type="button" variant="primary" size="sm" disabled>
+                  + New Template
+                </Button>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={
+              <>
+                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                  Preview all
+                </Button>
+                <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+                  + New Template
+                </Button>
+              </>
+            }
+          />
+        }
       />
       <Tabs
         value="SMS"

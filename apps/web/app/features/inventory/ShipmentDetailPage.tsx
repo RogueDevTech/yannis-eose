@@ -15,6 +15,7 @@ import { DescriptionList } from '~/components/ui/description-list';
 import { Modal } from '~/components/ui/modal';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
@@ -335,73 +336,99 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
 
       <PageHeader
         title={shipment.referenceLabel}
+        mobileInlineActions
         description={shipment.label ?? undefined}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge
-              status={status}
-              label={formatShipmentStatus(status)}
-              variant={SHIPMENT_STATUS_VARIANT[status]}
-            />
-            <PageRefreshButton />
-            {/* View shipment stock — links to the inventory list filtered to this shipment so the
-                user can see where each unit went (current location distribution + intake events).
-                Only meaningful once the shipment is verified (units actually entered stock). */}
-            {(status === 'VERIFIED' || status === 'CLOSED') ? (
-              <Link
-                to={`/admin/inventory?shipmentId=${shipment.id}`}
-                prefetch="intent"
-                className="inline-flex items-center px-3 py-1.5 rounded-md border border-transparent bg-brand-500 text-sm font-medium text-white shadow-sm hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-              >
-                View shipment stock
-              </Link>
-            ) : null}
-            {allow('MARK_IN_TRANSIT') ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={optimisticBusy}
-                onClick={() => setConfirmInTransit(true)}
-              >
-                Mark in transit
-              </Button>
-            ) : null}
-            {allow('MARK_ARRIVED') ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={optimisticBusy}
-                onClick={() => setConfirmArrived(true)}
-              >
-                Mark arrived
-              </Button>
-            ) : null}
-            {allow('VERIFY') ? (
-              <Button variant="primary" size="sm" disabled={optimisticBusy} onClick={() => setVerifyOpen(true)}>
-                Verify and receive
-              </Button>
-            ) : null}
-            {allow('CLOSE') ? (
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={optimisticBusy}
-                onClick={() => setConfirmClose(true)}
-              >
-                Close shipment
-              </Button>
-            ) : null}
-            {allow('CANCEL') ? (
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={optimisticBusy}
-                onClick={() => setCancelOpen(true)}
-              >
-                Cancel
-              </Button>
-            ) : null}
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Shipment tools"
+            sheetSubtitle={<span>Status and actions</span>}
+            triggerAriaLabel="Shipment toolbar"
+            mobileLeading={
+              <StatusBadge
+                status={status}
+                label={formatShipmentStatus(status)}
+                variant={SHIPMENT_STATUS_VARIANT[status]}
+              />
+            }
+            desktop={
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  status={status}
+                  label={formatShipmentStatus(status)}
+                  variant={SHIPMENT_STATUS_VARIANT[status]}
+                />
+                <PageRefreshButton />
+                {(status === 'VERIFIED' || status === 'CLOSED') ? (
+                  <Link
+                    to={`/admin/inventory?shipmentId=${shipment.id}`}
+                    prefetch="intent"
+                    className="inline-flex items-center px-3 py-1.5 rounded-md border border-transparent bg-brand-500 text-sm font-medium text-white shadow-sm hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  >
+                    View shipment stock
+                  </Link>
+                ) : null}
+                {allow('MARK_IN_TRANSIT') ? (
+                  <Button variant="secondary" size="sm" disabled={optimisticBusy} onClick={() => setConfirmInTransit(true)}>
+                    Mark in transit
+                  </Button>
+                ) : null}
+                {allow('MARK_ARRIVED') ? (
+                  <Button variant="secondary" size="sm" disabled={optimisticBusy} onClick={() => setConfirmArrived(true)}>
+                    Mark arrived
+                  </Button>
+                ) : null}
+                {allow('VERIFY') ? (
+                  <Button variant="primary" size="sm" disabled={optimisticBusy} onClick={() => setVerifyOpen(true)}>
+                    Verify and receive
+                  </Button>
+                ) : null}
+                {allow('CLOSE') ? (
+                  <Button variant="primary" size="sm" disabled={optimisticBusy} onClick={() => setConfirmClose(true)}>
+                    Close shipment
+                  </Button>
+                ) : null}
+                {allow('CANCEL') ? (
+                  <Button variant="danger" size="sm" disabled={optimisticBusy} onClick={() => setCancelOpen(true)}>
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
+            }
+            sheet={
+              <>
+                {(status === 'VERIFIED' || status === 'CLOSED') ? (
+                  <Link to={`/admin/inventory?shipmentId=${shipment.id}`} prefetch="intent" className="btn-primary btn-sm w-full justify-center">
+                    View shipment stock
+                  </Link>
+                ) : null}
+                {allow('MARK_IN_TRANSIT') ? (
+                  <Button variant="secondary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setConfirmInTransit(true)}>
+                    Mark in transit
+                  </Button>
+                ) : null}
+                {allow('MARK_ARRIVED') ? (
+                  <Button variant="secondary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setConfirmArrived(true)}>
+                    Mark arrived
+                  </Button>
+                ) : null}
+                {allow('VERIFY') ? (
+                  <Button variant="primary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setVerifyOpen(true)}>
+                    Verify and receive
+                  </Button>
+                ) : null}
+                {allow('CLOSE') ? (
+                  <Button variant="primary" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setConfirmClose(true)}>
+                    Close shipment
+                  </Button>
+                ) : null}
+                {allow('CANCEL') ? (
+                  <Button variant="danger" size="sm" className="w-full justify-center" disabled={optimisticBusy} onClick={() => setCancelOpen(true)}>
+                    Cancel
+                  </Button>
+                ) : null}
+              </>
+            }
+          />
         }
       />
 

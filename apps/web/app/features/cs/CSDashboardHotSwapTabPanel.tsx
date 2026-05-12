@@ -59,7 +59,7 @@ export function CSDashboardHotSwapTabPanel({
         <div className="card">
           <StripToolbar
             title="Hot Swap"
-            description="Move orders from one closer to another in bulk — pick a source closer, select orders, choose a target closer, then reassign."
+            description="Move orders between closers in bulk. Pick a source, target, and orders."
             onScrollLeft={hotSwapFrom && hotSwapSourceOrders.length > 0 ? () => scrollOrdersBy(-280) : undefined}
             onScrollRight={hotSwapFrom && hotSwapSourceOrders.length > 0 ? () => scrollOrdersBy(280) : undefined}
             scrollAriaSubject="hot swap orders"

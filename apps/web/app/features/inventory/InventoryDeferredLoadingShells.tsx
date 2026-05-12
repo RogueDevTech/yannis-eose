@@ -12,6 +12,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { Button } from '~/components/ui/button';
 import { Tabs } from '~/components/ui/tabs';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
@@ -213,6 +214,7 @@ export function InventoryOverviewLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Inventory"
+        mobileInlineActions
         description="Track on-hand stock, reservations, and reconciliation. Manage inbound supplier receipts from the separate Shipments page."
         actions={
           <PageHeaderMobileTools
@@ -307,8 +309,14 @@ export function WarehousesListLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Our warehouses"
-        description="Company-owned warehouse sites and inbound shipment targets."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Track stock and reservations."
+        actions={
+          <>
+            <PageRefreshButton className="hidden md:inline-flex" />
+            <PageRefreshButton iconOnly className="md:hidden" />
+          </>
+        }
       />
       <OverviewStatStrip
         items={[
@@ -336,12 +344,21 @@ export function WarehouseShipmentsLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Warehouse shipments"
-        description="All inbound shipments received (or planned) for this warehouse."
+        mobileInlineActions
+        description="View warehouse shipments."
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <span className="h-8 w-32 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Warehouse shipment tools"
+            sheetSubtitle={<span>Refresh and navigation</span>}
+            triggerAriaLabel="Warehouse shipment toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <span className="h-8 w-32 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </div>
+            }
+            sheet={<span className="h-9 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />}
+          />
         }
       />
       <div className="card p-0 overflow-x-auto">
@@ -366,12 +383,21 @@ export function ShipmentsListLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Inbound Shipments"
-        description="Receive supplier deliveries into your warehouses. Verify to post into inventory and create FIFO batches."
+        mobileInlineActions
+        description="Receive and verify supplier shipments."
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <span className="h-8 w-28 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Shipment tools"
+            sheetSubtitle={<span>Refresh and view inventory</span>}
+            triggerAriaLabel="Shipment toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <span className="h-8 w-28 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+              </div>
+            }
+            sheet={<span className="h-9 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />}
+          />
         }
       />
       <CompactTable<{ id: string }>
@@ -496,28 +522,49 @@ export function ShipmentDetailLoadingShell() {
             <span className="inline-block h-6 w-44 rounded-md bg-app-border/75 dark:bg-app-border/55 animate-pulse align-middle" />
           ) as unknown as string
         }
+        mobileInlineActions
         description={
           (
             <span className="inline-block h-3.5 w-56 rounded bg-app-border/55 dark:bg-app-border/45 animate-pulse" />
           ) as unknown as string
         }
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className="inline-block h-6 w-20 rounded-full bg-app-border/65 dark:bg-app-border/55 animate-pulse"
-              aria-hidden
-              aria-label="Status badge"
-            />
-            <PageRefreshButton />
-            <span
-              className="inline-block h-8 w-28 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
-              aria-hidden
-            />
-            <span
-              className="inline-block h-8 w-32 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
-              aria-hidden
-            />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Shipment tools"
+            sheetSubtitle={<span>Status and actions</span>}
+            triggerAriaLabel="Shipment toolbar"
+            mobileLeading={
+              <span
+                className="inline-block h-6 w-20 rounded-full bg-app-border/65 dark:bg-app-border/55 animate-pulse"
+                aria-hidden
+                aria-label="Status badge"
+              />
+            }
+            desktop={
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-block h-6 w-20 rounded-full bg-app-border/65 dark:bg-app-border/55 animate-pulse"
+                  aria-hidden
+                  aria-label="Status badge"
+                />
+                <PageRefreshButton />
+                <span
+                  className="inline-block h-8 w-28 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+                  aria-hidden
+                />
+                <span
+                  className="inline-block h-8 w-32 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+                  aria-hidden
+                />
+              </div>
+            }
+            sheet={
+              <>
+                <span className="inline-block h-9 w-full animate-pulse rounded-md bg-app-border/55 dark:bg-app-border/45" aria-hidden />
+                <span className="inline-block h-9 w-full animate-pulse rounded-md bg-app-border/55 dark:bg-app-border/45" aria-hidden />
+              </>
+            }
+          />
         }
       />
 
@@ -596,7 +643,27 @@ export function CategoriesLoadingShell() {
   const rows = shellPulsePlaceholderRows('categories', 8);
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
-      <PageHeader title="Categories" description="Organize products." actions={<PageRefreshButton />} />
+      <PageHeader
+        title="Categories"
+        mobileInlineActions
+        description="Manage product categories."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Category tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Category toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button type="button" variant="primary" disabled>
+                  New Category
+                </Button>
+              </>
+            }
+            sheet={<Button type="button" variant="primary" className="w-full justify-center" disabled>New Category</Button>}
+          />
+        }
+      />
       <CompactTable<{ id: string }>
         columns={CATEGORIES_SHELL_COLS}
         rows={rows}

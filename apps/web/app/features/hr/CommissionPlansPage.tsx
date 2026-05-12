@@ -3,6 +3,7 @@ import { useFetcher } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
@@ -267,20 +268,43 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
     <div className="space-y-4">
       <PageHeader
         title="Commission Plans"
+        mobileInlineActions
         description={
           canCreate
-            ? 'Define base pay, per-order rules, tiered rates, and accelerators. Role is optional — leave it blank for templates you attach to individual staff profiles.'
+            ? 'Set base pay and commission rules for roles or staff.'
             : 'You do not have permission to create or edit commission plans.'
         }
         actions={
-          <>
-            <PageRefreshButton />
-            {canCreate && (
-              <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                + New Commission Plan
-              </Button>
-            )}
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Commission plan tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Commission plan toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                {canCreate ? (
+                  <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+                    + New Commission Plan
+                  </Button>
+                ) : null}
+              </>
+            }
+            sheet={({ closeSheet }) =>
+              canCreate ? (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowCreate(true);
+                  }}
+                >
+                  + New Commission Plan
+                </Button>
+              ) : null
+            }
+          />
         }
       />
 

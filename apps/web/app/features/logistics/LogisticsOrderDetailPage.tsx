@@ -633,6 +633,7 @@ export function LogisticsOrderDetailPage({
     <div className="space-y-4 overflow-x-hidden min-w-0">
       <PageHeader
         title={order.customerName}
+        mobileInlineActions
         description={
           <span className="inline-flex items-center gap-1.5">
             <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" />
@@ -652,13 +653,24 @@ export function LogisticsOrderDetailPage({
         }
         actions={
           <>
-            <PageRefreshButton />
-            {isOverdue && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                <ClockIcon /> OVERDUE
-              </span>
-            )}
-            <OrderStatusBadge status={order.status} expanded />
+            <div className="hidden md:flex md:flex-wrap md:items-center md:gap-2">
+              <PageRefreshButton />
+              {isOverdue && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                  <ClockIcon /> OVERDUE
+                </span>
+              )}
+              <OrderStatusBadge status={order.status} expanded />
+            </div>
+            <div className="flex items-center gap-2 md:hidden">
+              {isOverdue && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                  <ClockIcon /> OVERDUE
+                </span>
+              )}
+              <OrderStatusBadge status={order.status} expanded />
+              <PageRefreshButton iconOnly />
+            </div>
           </>
         }
       />

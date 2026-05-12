@@ -3,10 +3,13 @@ import { Link, useFetcher } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MediaBuyerBalanceCard } from '~/features/marketing/MediaBuyerBalanceCard';
 import { LiveIndicator } from '~/components/ui/live-indicator';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { LiveActivityCard, LiveActivityDetailModal } from '~/components/ui/live-activity-card';
+import { OverviewStatStrip, type OverviewStatStripItem } from '~/components/ui/overview-stat-strip';
 import { useLiveIndicator, useSocketEvent } from '~/hooks/useSocket';
 import { formatNaira } from '~/lib/format-amount';
 import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
@@ -189,7 +192,6 @@ export function MarketingOverviewPage({
     }
   }, [leaderboard]);
 
-  const statsScrollRef = useRef<HTMLDivElement>(null);
   const mediaBuyerScrollRef = useRef<HTMLDivElement>(null);
   const liveOrdersScrollRef = useRef<HTMLDivElement>(null);
 
@@ -271,9 +273,6 @@ export function MarketingOverviewPage({
   useEffect(() => {
     if (viewAllActivityOpen) setViewAllActivityPage(1);
   }, [viewAllActivityOpen]);
-  const scrollStatsStrip = useCallback((delta: number) => {
-    statsScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
-  }, []);
   const scrollMediaBuyerStrip = useCallback((delta: number) => {
     mediaBuyerScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   }, []);
@@ -305,132 +304,106 @@ export function MarketingOverviewPage({
   const avgCpa = leaderboard.length > 0
     ? leaderboard.reduce((sum, b) => sum + b.cpa, 0) / leaderboard.length
     : 0;
+  const statItems: OverviewStatStripItem[] = [
+    {
+      label: 'Total Spend',
+      value: formatNaira(Math.round(metrics.totalSpend)),
+      valueClassName: 'text-app-fg',
+    },
+    {
+      label: 'Total Orders',
+      value: metrics.totalOrders.toString(),
+      valueClassName: 'text-brand-600 dark:text-brand-400',
+    },
+    {
+      label: 'Delivered',
+      value: metrics.deliveredOrders.toString(),
+      valueClassName: 'text-success-600 dark:text-success-400',
+    },
+    {
+      label: 'Confirmed',
+      value: metrics.confirmedOrders.toString(),
+      valueClassName: 'text-success-600 dark:text-success-400',
+    },
+    {
+      label: 'Avg CPA',
+      value: formatNaira(Math.round(avgCpa)),
+      valueClassName: 'text-app-fg',
+    },
+    {
+      label: 'Delivery Rate',
+      value: `${metrics.deliveryRate.toFixed(1)}%`,
+      valueClassName:
+        metrics.deliveryRate >= 70
+          ? 'text-success-600 dark:text-success-400'
+          : 'text-warning-600 dark:text-warning-400',
+    },
+    {
+      label: 'Confirmation Rate',
+      value: `${metrics.confirmationRate.toFixed(1)}%`,
+      valueClassName:
+        metrics.confirmationRate >= 70
+          ? 'text-success-600 dark:text-success-400'
+          : 'text-warning-600 dark:text-warning-400',
+    },
+    {
+      label: 'True ROAS',
+      value: `${metrics.trueRoas.toFixed(2)}x`,
+      valueClassName: 'text-app-fg',
+    },
+    {
+      label: 'Del. Revenue',
+      value: formatNaira(Math.round(metrics.deliveredRevenue)),
+      valueClassName: 'text-app-fg',
+    },
+  ];
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-app-fg">Live Activities</h1>
-          <p className="text-sm text-app-fg-muted mt-0.5">
-            Manage media buyers, monitor team performance, and track funding
-          </p>
-          <p className="text-xs text-app-fg-muted mt-1 flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            Showing today's data —{' '}
-            {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-            {' '}· Resets at midnight
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <PageRefreshButton />
-          {liveEvents != null && liveEvents.length > 0 && (
-            <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-          )}
-          <DateFilterBar
-            startDate={filters?.startDate ?? ''}
-            endDate={filters?.endDate ?? ''}
-            periodAllTime={filters?.periodAllTime ?? false}
+      <PageHeader
+        title="Live Activities"
+        mobileInlineActions
+        description="Track marketing activity and funding."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Marketing overview tools"
+            sheetSubtitle={<span>Date range and refresh</span>}
+            triggerAriaLabel="Marketing overview tools"
+            mobileLeading={
+              liveEvents != null && liveEvents.length > 0 ? (
+                <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+              ) : null
+            }
+            desktop={
+              <>
+                {liveEvents != null && liveEvents.length > 0 && (
+                  <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+                )}
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false}
+                  />
+                </div>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters?.startDate ?? ''}
+                  endDate={filters?.endDate ?? ''}
+                  periodAllTime={filters?.periodAllTime ?? false}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            }
           />
-        </div>
-      </div>
+        }
+      />
 
-      {/* Stats strip — arrows sit in-line on the right (matches the CS queue layout). */}
-      <div className="card">
-        <div className="flex items-center gap-2 min-w-0">
-          <div ref={statsScrollRef} className="flex flex-1 min-w-0 flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1">
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Total Spend
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {formatNaira(Math.round(metrics.totalSpend))}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Total Orders
-            </p>
-            <p className="text-xl font-bold text-brand-600 dark:text-brand-400 mt-1">{metrics.totalOrders}</p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Delivered
-            </p>
-            <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">{metrics.deliveredOrders}</p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Confirmed
-            </p>
-            <p className="text-xl font-bold text-success-600 dark:text-success-400 mt-1">{metrics.confirmedOrders}</p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Avg CPA
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {formatNaira(Math.round(avgCpa))}
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Delivery Rate
-            </p>
-            <p className={`text-xl font-bold mt-1 ${metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}`}>
-              {metrics.deliveryRate.toFixed(1)}%
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Confirmation Rate
-            </p>
-            <p className={`text-xl font-bold mt-1 ${metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400'}`}>
-              {metrics.confirmationRate.toFixed(1)}%
-            </p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              True ROAS
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">{metrics.trueRoas.toFixed(2)}x</p>
-          </div>
-          <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">
-              Del. Revenue
-            </p>
-            <p className="text-xl font-bold text-app-fg mt-1">
-              {formatNaira(Math.round(metrics.deliveredRevenue))}
-            </p>
-          </div>
-          </div>
-          {/* Scroll arrows — placed in-line on the right next to the strip (CS queue layout). */}
-          <div className="hidden md:flex shrink-0 items-center gap-0.5 sm:gap-1.5 self-center">
-            <button
-              type="button"
-              onClick={() => scrollStatsStrip(-280)}
-              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-              aria-label="Scroll stats left"
-            >
-              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollStatsStrip(280)}
-              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-              aria-label="Scroll stats right"
-            >
-              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      <OverviewStatStrip items={statItems} />
 
       {/* ── Live Activity strip (browsing / abandoned / order-placed cards) ── */}
       <div>

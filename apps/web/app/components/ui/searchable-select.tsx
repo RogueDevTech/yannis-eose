@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { SearchInput } from './search-input';
 import { Spinner } from './spinner';
 
 type SearchableSelectSize = 'sm' | 'md' | 'lg';
@@ -194,6 +195,12 @@ export function SearchableSelect({
     }
   };
 
+  const updateQuery = (nextQuery: string) => {
+    setQuery(nextQuery);
+    const nextFiltered = options.filter((opt) => effectiveFilter(opt, nextQuery));
+    setActiveIndex(nextFiltered.findIndex((o) => !o.disabled));
+  };
+
   const selectAt = (idx: number) => {
     const option = filtered[idx];
     if (!option || option.disabled) return;
@@ -274,16 +281,14 @@ export function SearchableSelect({
           className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated shadow-lg p-2"
           style={{ top: pos.top, left: pos.left, minWidth: pos.minWidth, maxWidth: pos.maxWidth, width: 'auto' }}
         >
-          <input
+          <SearchInput
             ref={searchRef}
-            type="text"
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setActiveIndex(filtered.findIndex((o) => !o.disabled));
-            }}
+            onChange={updateQuery}
             placeholder={searchPlaceholder}
-            className="mb-2 h-8 w-full shrink-0 rounded-md border border-app-border bg-app-canvas px-2 text-sm text-app-fg placeholder:text-app-fg-muted focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+            controlSize="sm"
+            wrapperClassName="mb-2"
+            className="!rounded-md !text-sm !placeholder:text-sm"
             onWheel={forwardWheelToListbox}
             onKeyDown={(e) => {
               if (e.key === 'ArrowDown') {

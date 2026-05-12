@@ -12,6 +12,7 @@ import {
   type ImportColumn,
   importCellInputClass,
 } from '~/components/ui/import-bulk-data';
+import { FormSelect } from '~/components/ui/form-select';
 import {
   type ParsedRow,
   type ProviderInfo,
@@ -27,6 +28,15 @@ interface LocationsImportPageProps {
   providers: ProviderInfo[];
 }
 
+function importSelectClass(errored: boolean): string {
+  return [
+    '!h-7 !rounded-md !bg-app-elevated !px-2 !pr-6 !text-xs',
+    errored
+      ? '!border-danger-400 focus:!border-danger-500 focus:!ring-danger-500'
+      : '!border-app-border focus:!border-brand-500 focus:!ring-brand-500',
+  ].join(' ');
+}
+
 export function LocationsImportPage({ providers }: LocationsImportPageProps) {
   const columns: ImportColumn<ResolvedRow>[] = useMemo(
     () => [
@@ -37,7 +47,7 @@ export function LocationsImportPage({ providers }: LocationsImportPageProps) {
         errorLabel: 'Provider',
         getDisplayValue: (row) => row.providerInput,
         renderCell: ({ row, disabled, errored, patch }) => (
-          <select
+          <FormSelect
             value={row.providerId ?? ''}
             onChange={(e) => {
               const id = e.target.value;
@@ -45,15 +55,12 @@ export function LocationsImportPage({ providers }: LocationsImportPageProps) {
               patch({ providerInput: provider?.name ?? '' } as Partial<ResolvedRow>);
             }}
             disabled={disabled || providers.length === 0}
-            className={importCellInputClass(errored)}
-          >
-            <option value="">— Pick provider —</option>
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            controlSize="sm"
+            wrapperClassName="w-full"
+            className={importSelectClass(errored)}
+            placeholder="— Pick provider —"
+            options={providers.map((p) => ({ value: p.id, label: p.name }))}
+          />
         ),
       },
       {
@@ -133,7 +140,7 @@ export function LocationsImportPage({ providers }: LocationsImportPageProps) {
   return (
     <ImportBulkData<ParsedRow, ResolvedRow>
       title="Import logistics locations"
-      description="Upload a spreadsheet of pickup / dispatch locations, fix any rows the editor flags, then import. Each location must reference an existing 3PL company."
+      description="Upload a spreadsheet and import logistics locations."
       backHref="/admin/logistics/partners"
       backLabel="← Back to partners"
       resourceLabel="location"

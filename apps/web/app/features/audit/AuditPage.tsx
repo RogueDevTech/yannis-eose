@@ -1217,6 +1217,7 @@ export function AuditPage({
       {/* Header */}
       <PageHeader
         title="Audit Trail"
+        mobileInlineActions
         description="Complete history of all data changes. Every mutation is permanently recorded."
         actions={
           <PageHeaderMobileTools

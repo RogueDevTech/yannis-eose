@@ -2,6 +2,9 @@ import { useRef } from 'react';
 import { Link } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LiveIndicator } from '~/components/ui/live-indicator';
+import { OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { useLiveIndicator } from '~/hooks/useSocket';
@@ -10,15 +13,6 @@ export interface MarketingOverviewLoadingShellProps {
   leaderboardPeriod: 'this_month' | 'all_time';
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
   liveEvents?: string[];
-}
-
-function StatTilePulse({ label }: { label: string }) {
-  return (
-    <div className="shrink-0 min-w-[5rem] text-center p-3 rounded-lg bg-app-hover">
-      <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">{label}</p>
-      <div className="h-7 w-20 mx-auto mt-1 rounded bg-app-border/80 animate-pulse" aria-hidden />
-    </div>
-  );
 }
 
 function SkeletonLiveActivityCard() {
@@ -87,12 +81,7 @@ export function MarketingOverviewLoadingShell({
 }: MarketingOverviewLoadingShellProps) {
   const periodHint = leaderboardPeriod === 'all_time' ? 'all time' : 'selected period';
   const liveState = useLiveIndicator(liveEvents ?? []);
-  const statsScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
-
-  const scrollStatsStrip = (delta: number) => {
-    statsScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
-  };
   const scrollActivityStrip = (delta: number) => {
     activityScrollRef.current?.scrollBy({ left: delta, behavior: 'smooth' });
   };
@@ -111,68 +100,50 @@ export function MarketingOverviewLoadingShell({
 
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-app-fg">Live Activities</h1>
-          <p className="text-sm text-app-fg-muted mt-0.5">
-            Manage media buyers, monitor team performance, and track funding
-          </p>
-          <p className="text-xs text-app-fg-muted mt-1 flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            Showing today&apos;s data —{' '}
-            {new Date().toLocaleDateString('en-NG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-            {' '}· Resets at midnight
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <PageRefreshButton />
-          {liveEvents != null && liveEvents.length > 0 && (
-            <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
-          )}
-          <DateFilterBar
-            startDate={filters?.startDate ?? ''}
-            endDate={filters?.endDate ?? ''}
-            periodAllTime={filters?.periodAllTime ?? false}
+      <PageHeader
+        title="Live Activities"
+        mobileInlineActions
+        description="Track marketing activity and funding."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Marketing overview tools"
+            sheetSubtitle={<span>Date range and refresh</span>}
+            triggerAriaLabel="Marketing overview tools"
+            mobileLeading={
+              liveEvents != null && liveEvents.length > 0 ? (
+                <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+              ) : null
+            }
+            desktop={
+              <>
+                {liveEvents != null && liveEvents.length > 0 && (
+                  <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
+                )}
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false}
+                  />
+                </div>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters?.startDate ?? ''}
+                  endDate={filters?.endDate ?? ''}
+                  periodAllTime={filters?.periodAllTime ?? false}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            }
           />
-        </div>
-      </div>
+        }
+      />
 
-      <div className="card">
-        <div className="flex items-center gap-2 min-w-0">
-          <div
-            ref={statsScrollRef}
-            className="flex flex-1 min-w-0 flex-nowrap gap-3 overflow-x-auto scrollbar-hide pb-1"
-          >
-            {statLabels.map((label) => (
-              <StatTilePulse key={label} label={label} />
-            ))}
-          </div>
-          <div className="hidden md:flex shrink-0 items-center gap-0.5 sm:gap-1.5 self-center">
-            <button
-              type="button"
-              onClick={() => scrollStatsStrip(-280)}
-              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-              aria-label="Scroll stats left"
-            >
-              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollStatsStrip(280)}
-              className="p-1 sm:p-1.5 rounded-md sm:rounded-lg border border-app-border bg-app-elevated text-app-fg-muted hover:bg-app-hover transition-colors flex items-center justify-center"
-              aria-label="Scroll stats right"
-            >
-              <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5 stroke-1 sm:stroke-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      <OverviewStatStripSkeleton count={statLabels.length} labels={statLabels} />
 
       <div>
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">

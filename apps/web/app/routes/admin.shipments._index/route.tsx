@@ -14,6 +14,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { isAdminLevel } from '~/lib/rbac';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -280,14 +281,27 @@ function ShipmentsIndexContent(data: {
     <div className="space-y-4">
       <PageHeader
         title="Inbound Shipments"
-        description="Receive supplier deliveries into your warehouses. Verify to post into inventory and create FIFO batches."
+        mobileInlineActions
+        description="Receive and verify supplier shipments."
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm">
-              View inventory
-            </Link>
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Shipment tools"
+            sheetSubtitle={<span>Refresh and view inventory</span>}
+            triggerAriaLabel="Shipment toolbar"
+            desktop={
+              <div className="flex items-center gap-2">
+                <PageRefreshButton />
+                <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm">
+                  View inventory
+                </Link>
+              </div>
+            }
+            sheet={
+              <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
+                View inventory
+              </Link>
+            }
+          />
         }
       />
 

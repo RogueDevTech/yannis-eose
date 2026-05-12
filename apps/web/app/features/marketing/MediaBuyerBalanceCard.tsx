@@ -130,22 +130,23 @@ export function MediaBuyerBalanceCard({
             </div>
           </div>
 
-          <div className="mt-1.5 flex items-center gap-2 text-[10px] font-medium">
-            <Link
-              to={ordersHref}
-              prefetch="intent"
-              className="text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
-            >
-              Orders
-            </Link>
-            <span className="text-app-fg-muted">/</span>
-            <Link
-              to={`/hr/users/${row.userId}`}
-              prefetch="intent"
-              className="text-app-fg-muted hover:text-brand-600 dark:hover:text-brand-400"
-            >
-              Profile
-            </Link>
+          <div className="mt-2.5 border-t border-app-border pt-2.5">
+            <div className="flex items-center justify-start gap-2">
+              <Link
+                to={ordersHref}
+                prefetch="intent"
+                className="btn-primary btn-sm inline-flex flex-1 items-center justify-center"
+              >
+                View orders
+              </Link>
+              <Link
+                to={`/hr/users/${row.userId}`}
+                prefetch="intent"
+                className="btn-secondary btn-sm inline-flex flex-1 items-center justify-center"
+              >
+                View profile
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -227,21 +228,23 @@ export function MediaBuyerBalanceCard({
           </div>
         )}
       </div>
-      <div className="mt-3 flex flex-nowrap items-center gap-2">
-        <Link
-          to={ordersHref}
-          prefetch="intent"
-          className="btn-primary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-        >
-          View orders
-        </Link>
-        <Link
-          to={`/hr/users/${row.userId}`}
-          prefetch="intent"
-          className="btn-secondary btn-sm text-xs inline-flex items-center justify-center shrink-0"
-        >
-          View profile
-        </Link>
+      <div className="mt-3 border-t border-app-border pt-3">
+        <div className="flex items-center justify-start gap-2">
+          <Link
+            to={ordersHref}
+            prefetch="intent"
+            className="btn-primary btn-sm inline-flex flex-1 items-center justify-center"
+          >
+            View orders
+          </Link>
+          <Link
+            to={`/hr/users/${row.userId}`}
+            prefetch="intent"
+            className="btn-secondary btn-sm inline-flex flex-1 items-center justify-center"
+          >
+            View profile
+          </Link>
+        </div>
       </div>
     </div>
   );

@@ -87,6 +87,57 @@ function InlineLoadingText({ label = 'Loading…' }: { label?: string }) {
   );
 }
 
+function ExpenseViewToggle({
+  value,
+  onChange,
+  fullWidth = false,
+}: {
+  value: 'daily' | 'detailed';
+  onChange: (next: 'daily' | 'detailed') => void;
+  fullWidth?: boolean;
+}) {
+  const shellClass = fullWidth
+    ? 'flex w-full overflow-hidden rounded-md border border-app-border'
+    : 'inline-flex overflow-hidden rounded-md border border-app-border';
+  const buttonBase = 'px-3 py-1 text-xs font-medium transition-colors';
+
+  return (
+    <div role="tablist" aria-label="Expense view mode" className={shellClass}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'daily'}
+        onClick={() => onChange('daily')}
+        className={[
+          buttonBase,
+          fullWidth ? 'flex-1 text-center' : '',
+          value === 'daily'
+            ? 'bg-brand-500 text-white'
+            : 'bg-app-canvas text-app-fg-muted hover:bg-app-hover hover:text-app-fg',
+        ].join(' ')}
+      >
+        Daily
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={value === 'detailed'}
+        onClick={() => onChange('detailed')}
+        className={[
+          buttonBase,
+          'border-l border-app-border',
+          fullWidth ? 'flex-1 text-center' : '',
+          value === 'detailed'
+            ? 'bg-brand-500 text-white'
+            : 'bg-app-canvas text-app-fg-muted hover:bg-app-hover hover:text-app-fg',
+        ].join(' ')}
+      >
+        Detailed
+      </button>
+    </div>
+  );
+}
+
 function hasPositiveSpendAmountInput(raw: string): boolean {
   const t = raw.replace(/,/g, '').trim();
   if (t === '') return false;
@@ -716,17 +767,8 @@ export function MarketingAdSpendPage({
     <div className="space-y-4">
       <PageHeader
         title="Ads Expense"
-        description={
-          <>
-            Log daily spend with Ads Manager screenshots.{' '}
-            <Link
-              to="/admin/marketing/funding"
-              className="text-brand-600 dark:text-brand-400 font-medium hover:underline"
-            >
-              Funding &amp; performance
-            </Link>
-          </>
-        }
+        mobileInlineActions
+        description="Log daily ad spend."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Ads Expense tools"
@@ -1115,42 +1157,7 @@ export function MarketingAdSpendPage({
       {/* Phase 17: Daily groups accordion (default) + per-line table —
           chosen via the segmented view-mode control. Same filters apply. */}
       <div className="card p-0">
-        <div className="px-4 py-3 border-b border-app-border flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-app-fg">
-            {expenseListView === 'daily' ? 'Daily expenses' : 'Detailed expenses (per ad)'}
-          </h2>
-          <div role="tablist" aria-label="Expense view mode" className="inline-flex rounded-md border border-app-border overflow-hidden">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={expenseListView === 'daily'}
-              onClick={() => setExpenseListView('daily')}
-              className={[
-                'px-3 py-1 text-xs font-medium transition-colors',
-                expenseListView === 'daily'
-                  ? 'bg-brand-500 text-white'
-                  : 'bg-app-canvas text-app-fg-muted hover:bg-app-hover hover:text-app-fg',
-              ].join(' ')}
-            >
-              Daily
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={expenseListView === 'detailed'}
-              onClick={() => setExpenseListView('detailed')}
-              className={[
-                'px-3 py-1 text-xs font-medium transition-colors border-l border-app-border',
-                expenseListView === 'detailed'
-                  ? 'bg-brand-500 text-white'
-                  : 'bg-app-canvas text-app-fg-muted hover:bg-app-hover hover:text-app-fg',
-              ].join(' ')}
-            >
-              Detailed
-            </button>
-          </div>
-        </div>
-        <div className="px-4 py-3 border-b border-app-border flex items-center justify-between gap-3">
+        <div className="border-b border-app-border px-4 py-3">
           <Tabs
             value={selectedStatus}
             onChange={handleAdSpendStatusChange}
@@ -1181,7 +1188,6 @@ export function MarketingAdSpendPage({
                 value={searchQuery}
                 onChange={(val) => setSearchQuery(val)}
                 placeholder="Search ads…"
-                controlSize="sm"
                 wrapperClassName="min-w-0 flex-1"
               />
               <Button type="submit" variant="secondary" size="sm">
@@ -1242,10 +1248,15 @@ export function MarketingAdSpendPage({
                   />
                 )
               ) : null}
+              <ExpenseViewToggle value={expenseListView} onChange={setExpenseListView} />
             </>
           }
           sheetFilterBody={
             <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">View</span>
+                <ExpenseViewToggle value={expenseListView} onChange={setExpenseListView} fullWidth />
+              </div>
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-app-fg-muted">Product</span>
                 <SearchableSelect

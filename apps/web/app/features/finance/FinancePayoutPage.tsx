@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { Tabs } from '~/components/ui/tabs';
@@ -192,16 +193,39 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
     <div className="space-y-4">
       <PageHeader
         title="Payout"
-        description="Finance review queue for payroll disbursement and payout document exports."
+        mobileInlineActions
+        description="Review payroll payout batches."
         actions={
-          <>
-            <PageRefreshButton />
-            {selectedBatch && (
-              <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
-                Export payout document
-              </Button>
-            )}
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Payout tools"
+            sheetSubtitle={<span>Refresh and export</span>}
+            triggerAriaLabel="Payout toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                {selectedBatch ? (
+                  <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                    Export payout document
+                  </Button>
+                ) : null}
+              </>
+            }
+            sheet={({ closeSheet }) =>
+              selectedBatch ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setShowExportModal(true);
+                  }}
+                >
+                  Export payout document
+                </Button>
+              ) : null
+            }
+          />
         }
       />
 

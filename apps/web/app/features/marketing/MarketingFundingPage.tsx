@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
+import { useFetcher, useNavigation, useSearchParams, useLocation } from '@remix-run/react';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -382,15 +382,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
   // ── Role-aware copy ─────────────────────────────────────
   const receivedTitle = isMediaBuyer ? 'Incoming Funding' : "Funds I've Received";
-  const receivedDescription = isMediaBuyer
-    ? 'Funding sent to you by Head of Marketing. Mark each as Received once you confirm the transfer.'
-    : currentUserRole === 'HEAD_OF_MARKETING'
-      ? 'Funding sent to you by Finance, plus your outbound requests for more funds.'
-      : 'Funding sent to your account, plus your outbound requests.';
-  const distributingDescription =
-    currentUserRole === 'HEAD_OF_MARKETING'
-      ? 'Funding you have disbursed to Media Buyers and pending requests from your team.'
-      : 'Funding disbursed downstream and pending requests awaiting your approval.';
 
   // ── Disputed totals + search local state ────────────────
   const totalDisputed = directionSummary.disputedAsReceiver + directionSummary.disputedAsSender;
@@ -619,7 +610,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     fundingRequestPatches,
     searchParams,
   ]);
-  const sectionDescriptionDisplay = displaySection === 'received' ? receivedDescription : distributingDescription;
   const transferEmptyMessage =
     activeSection === 'received'
       ? isMediaBuyer
@@ -688,14 +678,8 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
     <div className="space-y-4">
       <PageHeader
         title="Funding"
-        description={
-          <>
-            {isMediaBuyer ? 'Funding sent to you.' : 'Track funds received and distributed.'}{' '}
-            <Link to="/admin/marketing/ad-spend" className="text-brand-600 dark:text-brand-400 font-medium hover:underline">
-              Ad spend logging
-            </Link>
-          </>
-        }
+        mobileInlineActions
+        description="Track funds received and sent."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Funding tools"
@@ -795,19 +779,11 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 px-4 py-4 border-b border-app-border">
-          <div className="min-w-0">
-            {!canDistribute && <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2>}
-            <p className={`text-xs text-app-fg-muted leading-relaxed ${!canDistribute ? 'mt-0.5' : ''}`}>
-              {sectionDescriptionDisplay}
-            </p>
+        {!canDistribute ? (
+          <div className="border-b border-app-border px-4 py-3">
+            <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2>
           </div>
-          {/* Both `+ Request Funds` and `+ Send Funding` live in the page header
-              (see PageHeader actions above). The previous in-section copies were
-              duplicates — removed so each action surfaces exactly once. The
-              empty-state CTA further down still offers `+ Request Funds`
-              contextually when the table itself is empty. */}
-        </div>
+        ) : null}
 
         {displaySection === 'distributing' && unifiedDistributingSlice ? (
           <>

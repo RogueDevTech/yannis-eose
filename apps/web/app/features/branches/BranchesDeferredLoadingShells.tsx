@@ -1,5 +1,7 @@
 import { PageHeader } from '~/components/ui/page-header';
 import { Button } from '~/components/ui/button';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 
 /** `/admin/branches` — list shell. */
 export function BranchesListLoadingShell() {
@@ -7,11 +9,23 @@ export function BranchesListLoadingShell() {
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Branch Management"
-        description="Manage company branches and tenant separation. Each branch has its own data scope."
+        mobileInlineActions
+        description="Manage company branches."
         actions={
-          <Button variant="primary" size="sm" disabled className="opacity-60">
-            + New Branch
-          </Button>
+          <PageHeaderMobileTools
+            sheetTitle="Branch tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Branch toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button variant="primary" size="sm" disabled className="opacity-60">
+                  + New Branch
+                </Button>
+              </>
+            }
+            sheet={<Button variant="primary" size="sm" className="w-full justify-center" disabled>+ New Branch</Button>}
+          />
         }
       />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

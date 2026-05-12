@@ -372,7 +372,8 @@ export function LogisticsTeamPage({
     <div className="space-y-6">
       <PageHeader
         title="Logistics Team Analysis"
-        description="Logistics provider delivery rates, delinquency, and order-status breakdown for the selected period."
+        mobileInlineActions
+        description="View provider delivery performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Logistics team tools"

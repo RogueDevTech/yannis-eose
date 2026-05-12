@@ -6,6 +6,7 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
@@ -224,24 +225,43 @@ export function FormsPage({
         title={
           showMyFormsOnly ? 'My Forms' : 'Forms'
         }
+        mobileInlineActions
         description={
           showMyFormsOnly
-              ? 'Create and manage your order forms'
-              : 'Create and manage order forms for your products'
+              ? 'Manage your campaign forms.'
+              : 'Manage campaign forms.'
         }
         actions={
-          <>
-            <PageRefreshButton />
-            <BranchScopedLink
-              to="/admin/marketing/forms/new"
-              actionLabel="creating a form"
-              prefetch="intent"
-            >
-              <Button variant="primary" size="sm">
-                + New Form
-              </Button>
-            </BranchScopedLink>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Forms"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Forms toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <BranchScopedLink
+                  to="/admin/marketing/forms/new"
+                  actionLabel="creating a form"
+                  prefetch="intent"
+                >
+                  <Button variant="primary" size="sm">
+                    + New Form
+                  </Button>
+                </BranchScopedLink>
+              </>
+            }
+            sheet={
+              <BranchScopedLink
+                to="/admin/marketing/forms/new"
+                actionLabel="creating a form"
+                prefetch="intent"
+              >
+                <Button variant="primary" size="sm" className="w-full justify-center">
+                  + New Form
+                </Button>
+              </BranchScopedLink>
+            }
+          />
         }
       />
 

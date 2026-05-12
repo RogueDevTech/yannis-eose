@@ -421,11 +421,12 @@ export function UsersListPage({
   return (
     <div className="space-y-4">
       <PageHeader
-        title={staffAccounts ? 'Staff accounts' : 'Users'}
+        title={staffAccounts ? 'Staff Accounts' : 'Users'}
+        mobileInlineActions
         description={
           staffAccounts
-            ? 'Staff names and payout bank details (account name, number, bank code) for disbursement.'
-            : 'Manage team members and their roles'
+            ? 'Review staff payout details.'
+            : 'Manage team members and roles.'
         }
         actions={
           <PageHeaderMobileTools

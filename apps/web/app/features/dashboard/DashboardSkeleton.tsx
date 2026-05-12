@@ -35,8 +35,14 @@ export function AdminQuickDashboardLoadingShell({
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title={`${greeting}, ${firstName}`}
+        mobileInlineActions
         description={description}
-        actions={<PageRefreshButton />}
+        actions={
+          <>
+            <span className="hidden md:inline-flex"><PageRefreshButton /></span>
+            <span className="md:hidden"><PageRefreshButton iconOnly /></span>
+          </>
+        }
       />
 
       <div className="card">

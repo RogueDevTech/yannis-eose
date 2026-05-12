@@ -14,6 +14,7 @@ import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { PageNotification } from '~/components/ui/page-notification';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -985,161 +986,263 @@ export function UserDetailPage({
                         {ROLE_DESCRIPTIONS[user.role] ?? ''}
                       </p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-                  <PageRefreshButton />
-                  {/* Staff onboarding lives on Overview; login nudge until HR approves. */}
-                  {/* Mirror: `branches.canMirrorToUser` — not behind restrictHeadView. Disabled when preview-only (nested mirror). */}
-                  {!isSelfView &&
-                    viewerShowsMirror &&
-                    (mirrorSubmitDisabled ? (
-                      <span title="Exit mirror mode to start a new mirror session as this user.">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled
-                          className="opacity-70 cursor-not-allowed"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            <svg
-                              className="w-3.5 h-3.5"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={2}
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                              />
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                              />
-                            </svg>
-                            Mirror user
-                          </span>
-                        </Button>
-                      </span>
-                    ) : (
-                      <Form method="post" data-branch-scoped-action="true">
-                        <input type="hidden" name="intent" value="mirror" />
-                        <Button
-                          type="submit"
-                          variant="secondary"
-                          size="sm"
-                          className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
-                          loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
-                          loadingText="Entering..."
-                        >
-                          <svg
-                            className="w-3.5 h-3.5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-                            />
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                            />
-                          </svg>
-                          Mirror user
-                        </Button>
-                      </Form>
-                    ))}
-                  {!isSelfView &&
-                    !isSuperAdminProfile &&
-                    (canOpenSettingsTab || canEditLimited) && (
-                      <BranchScopedLink
-                        to={`/hr/users/${user.id}/edit`}
-                        actionLabel="editing this user"
-                        prefetch="intent"
-                        className="btn-primary btn-sm flex items-center gap-1.5"
-                      >
-                        <svg
-                          className="w-3.5 h-3.5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
-                          />
-                        </svg>
-                        Edit user
-                      </BranchScopedLink>
-                    )}
-                  {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
-                        <>
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => setShowResetPassword(true)}
-                                className="flex items-center gap-1.5"
-                              >
-                                <svg
-                                  className="w-3.5 h-3.5"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={2}
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
-                                  />
-                                </svg>
-                                Reset Password
-                              </Button>
-                              {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
-                                isSuperAdmin && (
+                    <div className="flex-shrink-0">
+                      <PageHeaderMobileTools
+                        sheetTitle="Profile tools"
+                        sheetSubtitle={<span>Refresh and account actions</span>}
+                        triggerAriaLabel="Profile toolbar"
+                        desktop={
+                          <div className="flex flex-wrap items-center gap-2">
+                            <PageRefreshButton />
+                            {!isSelfView &&
+                              viewerShowsMirror &&
+                              (mirrorSubmitDisabled ? (
+                                <span title="Exit mirror mode to start a new mirror session as this user.">
                                   <Button
                                     type="button"
-                                    variant="danger"
+                                    variant="secondary"
                                     size="sm"
-                                    onClick={() => setShowDeactivateConfirm(true)}
-                                    className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                                    disabled
+                                    className="opacity-70 cursor-not-allowed"
                                   >
-                                    Deactivate
+                                    <span className="flex items-center gap-1.5">
+                                      <svg
+                                        className="w-3.5 h-3.5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                        strokeWidth={2}
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                                        />
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                        />
+                                      </svg>
+                                      Mirror user
+                                    </span>
                                   </Button>
-                                )}
-                              {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
+                                </span>
+                              ) : (
                                 <Form method="post" data-branch-scoped-action="true">
-                                  <input type="hidden" name="intent" value="reactivate" />
+                                  <input type="hidden" name="intent" value="mirror" />
                                   <Button
                                     type="submit"
                                     variant="secondary"
                                     size="sm"
-                                    loading={isReactivating}
-                                    loadingText="Reactivating..."
-                                    className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
+                                    className="flex items-center gap-1.5 border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                                    loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                                    loadingText="Entering..."
                                   >
-                                    Reactivate
+                                    <svg
+                                      className="w-3.5 h-3.5"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      strokeWidth={2}
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                                      />
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                      />
+                                    </svg>
+                                    Mirror user
                                   </Button>
                                 </Form>
+                              ))}
+                            {!isSelfView &&
+                              !isSuperAdminProfile &&
+                              (canOpenSettingsTab || canEditLimited) && (
+                                <BranchScopedLink
+                                  to={`/hr/users/${user.id}/edit`}
+                                  actionLabel="editing this user"
+                                  prefetch="intent"
+                                  className="btn-primary btn-sm flex items-center gap-1.5"
+                                >
+                                  <svg
+                                    className="w-3.5 h-3.5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"
+                                    />
+                                  </svg>
+                                  Edit user
+                                </BranchScopedLink>
                               )}
-                              {user.status === 'DEACTIVATED' && (
-                                <p className="text-xs text-app-fg-muted italic">
-                                  Deactivated accounts cannot be reactivated. Re-invite the user to
-                                  create a new account.
-                                </p>
+                            {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => setShowResetPassword(true)}
+                                  className="flex items-center gap-1.5"
+                                >
+                                  <svg
+                                    className="w-3.5 h-3.5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
+                                    />
+                                  </svg>
+                                  Reset Password
+                                </Button>
+                                {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
+                                  isSuperAdmin && (
+                                    <Button
+                                      type="button"
+                                      variant="danger"
+                                      size="sm"
+                                      onClick={() => setShowDeactivateConfirm(true)}
+                                      className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                                    >
+                                      Deactivate
+                                    </Button>
+                                  )}
+                                {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
+                                  <Form method="post" data-branch-scoped-action="true">
+                                    <input type="hidden" name="intent" value="reactivate" />
+                                    <Button
+                                      type="submit"
+                                      variant="secondary"
+                                      size="sm"
+                                      loading={isReactivating}
+                                      loadingText="Reactivating..."
+                                      className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
+                                    >
+                                      Reactivate
+                                    </Button>
+                                  </Form>
+                                )}
+                                {user.status === 'DEACTIVATED' && (
+                                  <p className="text-xs text-app-fg-muted italic">
+                                    Deactivated accounts cannot be reactivated. Re-invite the user to
+                                    create a new account.
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        }
+                        sheet={({ closeSheet }) => (
+                          <>
+                            {!isSelfView &&
+                              viewerShowsMirror &&
+                              (mirrorSubmitDisabled ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  disabled
+                                  className="w-full justify-center opacity-70 cursor-not-allowed"
+                                >
+                                  Mirror user
+                                </Button>
+                              ) : (
+                                <Form method="post" data-branch-scoped-action="true" className="w-full">
+                                  <input type="hidden" name="intent" value="mirror" />
+                                  <Button
+                                    type="submit"
+                                    variant="secondary"
+                                    size="sm"
+                                    className="w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600"
+                                    loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'}
+                                    loadingText="Entering..."
+                                  >
+                                    Mirror user
+                                  </Button>
+                                </Form>
+                              ))}
+                            {!isSelfView &&
+                              !isSuperAdminProfile &&
+                              (canOpenSettingsTab || canEditLimited) && (
+                                <BranchScopedLink
+                                  to={`/hr/users/${user.id}/edit`}
+                                  actionLabel="editing this user"
+                                  prefetch="intent"
+                                  className="btn-primary btn-sm w-full justify-center"
+                                  onClick={() => closeSheet()}
+                                >
+                                  Edit user
+                                </BranchScopedLink>
                               )}
-                        </>
-                      )}
+                            {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  className="w-full justify-center"
+                                  onClick={() => {
+                                    closeSheet();
+                                    setShowResetPassword(true);
+                                  }}
+                                >
+                                  Reset Password
+                                </Button>
+                                {(user.status === 'ACTIVE' || user.status === 'PENDING') &&
+                                  isSuperAdmin && (
+                                    <Button
+                                      type="button"
+                                      variant="danger"
+                                      size="sm"
+                                      className="w-full justify-center bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700"
+                                      onClick={() => {
+                                        closeSheet();
+                                        setShowDeactivateConfirm(true);
+                                      }}
+                                    >
+                                      Deactivate
+                                    </Button>
+                                  )}
+                                {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
+                                  <Form method="post" data-branch-scoped-action="true" className="w-full">
+                                    <input type="hidden" name="intent" value="reactivate" />
+                                    <Button
+                                      type="submit"
+                                      variant="secondary"
+                                      size="sm"
+                                      loading={isReactivating}
+                                      loadingText="Reactivating..."
+                                      className="w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
+                                    >
+                                      Reactivate
+                                    </Button>
+                                  </Form>
+                                )}
+                                {user.status === 'DEACTIVATED' && (
+                                  <p className="text-xs text-app-fg-muted italic">
+                                    Deactivated accounts cannot be reactivated.
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </>
+                        )}
+                      />
                     </div>
                   </div>
 

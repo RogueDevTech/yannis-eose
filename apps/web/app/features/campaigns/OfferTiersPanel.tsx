@@ -5,6 +5,7 @@ import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { TextInput } from '~/components/ui/text-input';
 import { FormField } from '~/components/ui/form-field';
+import { FormSelect } from '~/components/ui/form-select';
 import { AmountInput } from '~/components/ui/amount-input';
 import { CompactTable } from '~/components/ui/compact-table';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -372,16 +373,16 @@ export function OfferTiersPanel({
 
           {editingId ? (
             <FormField label="Status" htmlFor="templateStatusDraft">
-              <select
+              <FormSelect
                 id="templateStatusDraft"
                 value={statusDraft}
                 onChange={(e) => setStatusDraft(e.target.value as typeof statusDraft)}
-                className="input w-full"
-              >
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-                <option value="ARCHIVED">Archived</option>
-              </select>
+                options={[
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                  { value: 'ARCHIVED', label: 'Archived' },
+                ]}
+              />
             </FormField>
           ) : null}
 

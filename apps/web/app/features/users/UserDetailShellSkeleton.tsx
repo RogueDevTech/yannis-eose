@@ -34,8 +34,14 @@ export function UserDetailShellSkeleton() {
                   >
                     <span className="w-3.5 h-3.5 rounded-full bg-app-hover animate-pulse" />
                   </span>
-                  <span className="h-9 min-w-[5.5rem] px-2 rounded-md border border-app-border bg-app-hover/40 inline-flex items-center justify-center text-xs text-app-fg-muted">
-                    Loading…
+                  <span
+                    className="h-9 w-9 rounded-md border border-app-border bg-app-hover/40 inline-flex items-center justify-center shrink-0"
+                    aria-hidden
+                  >
+                    <span className="w-3.5 h-3.5 rounded-full bg-app-hover animate-pulse" />
+                  </span>
+                  <span className="hidden md:inline-flex h-9 min-w-[5.5rem] px-2 rounded-md border border-app-border bg-app-hover/40 items-center justify-center text-xs text-app-fg-muted">
+                    Tools
                   </span>
                 </div>
               </div>

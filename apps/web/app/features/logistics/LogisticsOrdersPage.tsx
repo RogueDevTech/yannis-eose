@@ -651,6 +651,7 @@ function LogisticsOrdersPageImpl({
       <div className="space-y-4">
         <PageHeader
           title={pageTitle}
+          mobileInlineActions
           description={pageDescription}
           actions={
             <>

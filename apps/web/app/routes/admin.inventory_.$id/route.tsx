@@ -4,6 +4,8 @@ import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Await, Link, useLoaderData, useSearchParams } from '@remix-run/react';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { FilterPills } from '~/components/ui/filter-pills';
@@ -320,6 +322,7 @@ function InventoryLevelDetailRouteInner({
           </Link>
         }
         title={productLabel}
+        mobileInlineActions
         description={
           <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="inline-flex items-center gap-1.5 shrink-0 text-app-fg-muted">
@@ -333,9 +336,28 @@ function InventoryLevelDetailRouteInner({
           </span>
         }
         actions={
-          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-            <DateFilterBar startDate={startDate ?? undefined} endDate={endDate ?? undefined} />
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Inventory level tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Inventory level toolbar"
+            desktop={
+              <>
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+                  <DateFilterBar startDate={startDate ?? undefined} endDate={endDate ?? undefined} />
+                </div>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={startDate ?? undefined}
+                  endDate={endDate ?? undefined}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            }
+          />
         }
       />
 

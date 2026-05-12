@@ -1,5 +1,7 @@
 import { Link } from '@remix-run/react';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
@@ -24,35 +26,45 @@ export function ProductViewPage({ product, canEditProduct }: ProductViewPageProp
       </div>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-app-fg">{product.name}</h1>
-          <p className="text-sm text-app-fg-muted mt-1">
-            Catalog SKU — pricing packages for Edge forms are configured on{' '}
-            <Link to="/admin/marketing/forms" className="text-brand-600 dark:text-brand-400 hover:underline">
-              Marketing → Forms
-            </Link>{' '}
-            when this product is attached to a form.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <PageRefreshButton />
-          <span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>
-            {product.status}
-          </span>
-          {canEditProduct && (
-            <Link
-              to={`/admin/products/${product.id}?mode=edit`}
-              className="btn-primary inline-flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
-              </svg>
-              Edit
-            </Link>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title={product.name}
+        mobileInlineActions
+        description="View product details."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Product tools"
+            sheetSubtitle={<span>Status and actions</span>}
+            triggerAriaLabel="Product toolbar"
+            mobileLeading={<span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>{product.status}</span>}
+            desktop={
+              <>
+                <PageRefreshButton />
+                <span className={PRODUCT_STATUS_COLORS[product.status] ?? 'badge'}>
+                  {product.status}
+                </span>
+                {canEditProduct ? (
+                  <Link
+                    to={`/admin/products/${product.id}?mode=edit`}
+                    className="btn-primary inline-flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                    </svg>
+                    Edit
+                  </Link>
+                ) : null}
+              </>
+            }
+            sheet={
+              canEditProduct ? (
+                <Link to={`/admin/products/${product.id}?mode=edit`} className="btn-primary btn-sm w-full justify-center">
+                  Edit
+                </Link>
+              ) : null
+            }
+          />
+        }
+      />
 
       {/* Product Details */}
       <div className="card space-y-4">

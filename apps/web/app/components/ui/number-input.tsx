@@ -7,8 +7,8 @@ type Coerce = 'integer' | 'decimal';
 
 interface NumberInputProps
   extends Omit<TextInputProps, 'value' | 'onChange' | 'defaultValue' | 'type' | 'inputMode'> {
-  /** Current numeric value. */
-  value: number;
+  /** Current numeric value. `null` renders as an empty field. */
+  value: number | null;
   /**
    * Fired with the final clamped numeric value once the user has finished editing
    * (on blur, on Enter, or after a programmatic clamp). Never fires mid-typing
@@ -16,6 +16,8 @@ interface NumberInputProps
    * the parent state to snap back.
    */
   onValueChange: (value: number) => void;
+  /** Fired when the field commits to an empty value and `allowEmpty` is enabled. */
+  onValueCleared?: () => void;
   /** Minimum accepted value. Clamped on blur. */
   min?: number;
   /** Maximum accepted value. Clamped on blur. */
@@ -25,6 +27,8 @@ interface NumberInputProps
    * Defaults to `min` (or `0` when no min is set).
    */
   fallbackValue?: number;
+  /** When true, an empty commit stays empty instead of snapping to a fallback value. */
+  allowEmpty?: boolean;
   /** Integer (default) or decimal. Decimal allows `.` while typing. */
   coerce?: Coerce;
   /**
@@ -58,9 +62,11 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     {
       value,
       onValueChange,
+      onValueCleared,
       min,
       max,
       fallbackValue,
+      allowEmpty = false,
       coerce = 'integer',
       maxFractionDigits = 4,
       onBlur,
@@ -69,7 +75,8 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     },
     ref,
   ) => {
-    const formatNumber = (n: number): string => {
+    const formatNumber = (n: number | null): string => {
+      if (n === null) return '';
       if (!Number.isFinite(n)) return '';
       if (coerce === 'integer') return String(Math.trunc(n));
       // Avoid scientific notation + trailing zeros the user didn't type.
@@ -84,7 +91,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     // the new value — preserves trailing decimals and leading zeros while typing.
     useEffect(() => {
       const parsed = parseFinite(text, coerce);
-      if (parsed === null || parsed !== value) {
+      if ((parsed === null && value !== null) || (parsed !== null && parsed !== value)) {
         setText(formatNumber(value));
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps -- formatNumber + parseFinite are stable
@@ -92,6 +99,11 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
 
     const commit = (raw: string) => {
       const parsed = parseFinite(raw, coerce);
+      if (parsed === null && allowEmpty) {
+        setText('');
+        if (value !== null) onValueCleared?.();
+        return;
+      }
       const fb = fallbackValue ?? min ?? 0;
       let next = parsed === null ? fb : parsed;
       if (typeof min === 'number' && next < min) next = min;

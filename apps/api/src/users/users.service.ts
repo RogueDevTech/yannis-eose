@@ -1156,7 +1156,7 @@ export class UsersService {
    * List CS team members (HEAD_OF_CS + CS_CLOSER) for Team page.
    * Gated by cs.teamOverview; does not require users.read.
    */
-  async listCSTeam(): Promise<Array<{
+  async listCSTeam(branchId?: string | null): Promise<Array<{
     id: string;
     name: string;
     role: string;
@@ -1168,30 +1168,62 @@ export class UsersService {
       roleInBranch: string | null;
     }>;
   }>> {
-    const rows = await this.db
-      .select({
-        id: schema.users.id,
-        name: schema.users.name,
-        role: schema.users.role,
-      })
-      .from(schema.users)
-      .where(
-        and(
-          eq(schema.users.status, 'ACTIVE'),
-          or(
-            eq(schema.users.role, 'CS_CLOSER'),
-            eq(schema.users.role, 'HEAD_OF_CS'),
-            sql<boolean>`EXISTS (
-              SELECT 1
-              FROM branch_team_members btm
-              INNER JOIN branch_teams bt ON bt.id = btm.team_id
-              WHERE btm.user_id = ${schema.users.id}
-                AND bt.department = 'CS'
-            )`,
-          ),
-        ),
-      )
-      .orderBy(asc(schema.users.name));
+    const rows = await (branchId
+      ? this.db
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            role: schema.users.role,
+          })
+          .from(schema.users)
+          .innerJoin(
+            schema.userBranches,
+            and(
+              eq(schema.userBranches.userId, schema.users.id),
+              eq(schema.userBranches.branchId, branchId),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.users.status, 'ACTIVE'),
+              or(
+                eq(schema.users.role, 'CS_CLOSER'),
+                eq(schema.users.role, 'HEAD_OF_CS'),
+                sql<boolean>`EXISTS (
+                  SELECT 1
+                  FROM branch_team_members btm
+                  INNER JOIN branch_teams bt ON bt.id = btm.team_id
+                  WHERE btm.user_id = ${schema.users.id}
+                    AND bt.department = 'CS'
+                )`,
+              ),
+            ),
+          )
+          .orderBy(asc(schema.users.name))
+      : this.db
+          .select({
+            id: schema.users.id,
+            name: schema.users.name,
+            role: schema.users.role,
+          })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.status, 'ACTIVE'),
+              or(
+                eq(schema.users.role, 'CS_CLOSER'),
+                eq(schema.users.role, 'HEAD_OF_CS'),
+                sql<boolean>`EXISTS (
+                  SELECT 1
+                  FROM branch_team_members btm
+                  INNER JOIN branch_teams bt ON bt.id = btm.team_id
+                  WHERE btm.user_id = ${schema.users.id}
+                    AND bt.department = 'CS'
+                )`,
+              ),
+            ),
+          )
+          .orderBy(asc(schema.users.name)));
 
     const membershipsByUser = await this.getUserBranchMemberships(rows.map((r) => r.id));
     return rows.map((r) => ({

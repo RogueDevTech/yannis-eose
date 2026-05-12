@@ -214,10 +214,10 @@ export class ReportsService {
         : 'this_month';
 
     const [team, workloads, leaderboard, inactive] = await Promise.all([
-      this.usersService.listCSTeam(),
+      this.usersService.listCSTeam(currentBranchId),
       this.ordersService.getCSCloserWorkloads(currentBranchId),
-      this.ordersService.getCSCloserLeaderboard(period, startDate, endDate),
-      this.ordersService.getInactiveAgents(10),
+      this.ordersService.getCSCloserLeaderboard(period, startDate, endDate, currentBranchId),
+      this.ordersService.getInactiveAgents(10, currentBranchId),
     ]);
 
     const workloadById = new Map(workloads.map((w) => [w.agentId, w]));

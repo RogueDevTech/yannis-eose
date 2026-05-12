@@ -84,7 +84,8 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
     <div className="space-y-4">
       <PageHeader
         title="Finance"
-        description="True profit + cost layers for the selected slice. Use the filters to narrow by branch, media buyer, or time window — then jump into a deep dive below."
+        mobileInlineActions
+        description="See revenue, profit, and costs for the selected period."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Finance tools"

@@ -53,6 +53,7 @@ export function DashboardPage({
     <div className="space-y-6">
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
+        mobileInlineActions
         description={getRoleDescription(role)}
         actions={
           // Match the Inventory-page mobile pattern (CEO directive 2026-05-10):

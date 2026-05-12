@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, useSearchParams } from '@remix-run/react';
+import { useSearchParams } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
@@ -29,6 +29,40 @@ const AD_SPEND_STATUS_TAB_OPTIONS = [
   { value: 'APPROVED', label: 'Approved' },
   { value: 'REJECTED', label: 'Rejected' },
 ];
+
+function AdSpendViewToggleShell({ fullWidth = false }: { fullWidth?: boolean }) {
+  const shellClass = fullWidth
+    ? 'flex w-full overflow-hidden rounded-md border border-app-border'
+    : 'inline-flex overflow-hidden rounded-md border border-app-border';
+  const buttonBase = 'px-3 py-1 text-xs font-medium transition-colors';
+
+  return (
+    <div role="tablist" aria-label="Expense view mode" className={shellClass}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected="true"
+        disabled
+        className={[buttonBase, fullWidth ? 'flex-1 text-center' : '', 'bg-brand-500 text-white opacity-85'].join(' ')}
+      >
+        Daily
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected="false"
+        disabled
+        className={[
+          buttonBase,
+          'border-l border-app-border bg-app-canvas text-app-fg-muted opacity-70',
+          fullWidth ? 'flex-1 text-center' : '',
+        ].join(' ')}
+      >
+        Detailed
+      </button>
+    </div>
+  );
+}
 
 const TEAM_SORT_BY_OPTIONS_SHELL = [
   { value: 'name', label: 'Name' },
@@ -264,25 +298,12 @@ export function MarketingFundingLoadingShell({
   const statItems = useMemo(() => fundingMetricsShellStatItems(canDistribute), [canDistribute]);
   const ledgerColumns = useMemo(() => fundingLedgerShellTableColumns(), []);
 
-  const distributingDescription =
-    'Outgoing transfers and funding requests you manage for your media buyers.';
-  const receivedDescription = isMediaBuyer
-    ? 'Funding sent to you from Head of Marketing and transfers you mark as received.'
-    : 'Incoming transfers and requests across your branch.';
-  const sectionDescription = activeSection === 'distributing' ? distributingDescription : receivedDescription;
-
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Funding"
-        description={
-          <>
-            {isMediaBuyer ? 'Funding sent to you.' : 'Track funds received and distributed.'}{' '}
-            <Link to="/admin/marketing/ad-spend" className="text-brand-600 dark:text-brand-400 font-medium hover:underline">
-              Ad spend logging
-            </Link>
-          </>
-        }
+        mobileInlineActions
+        description="Track funds received and sent."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Funding tools"
@@ -356,14 +377,11 @@ export function MarketingFundingLoadingShell({
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-3 border-b border-app-border px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            {!canDistribute ? <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2> : null}
-            <p className={`text-xs leading-relaxed text-app-fg-muted ${!canDistribute ? 'mt-0.5' : ''}`}>
-              {sectionDescription}
-            </p>
+        {!canDistribute ? (
+          <div className="border-b border-app-border px-4 py-3">
+            <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2>
           </div>
-        </div>
+        ) : null}
 
         <ToolbarFiltersCollapsible
           badgeCount={badgeCount}
@@ -569,17 +587,8 @@ export function MarketingAdSpendLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Ads Expense"
-        description={
-          <>
-            Log daily spend with Ads Manager screenshots.{' '}
-            <Link
-              to="/admin/marketing/funding"
-              className="text-brand-600 dark:text-brand-400 font-medium hover:underline"
-            >
-              Funding &amp; performance
-            </Link>
-          </>
-        }
+        mobileInlineActions
+        description="Log daily ad spend."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Ads Expense tools"
@@ -650,12 +659,6 @@ export function MarketingAdSpendLoadingShell({
       />
 
       <div className="card scroll-mt-4 overflow-hidden p-0">
-        <div className="flex items-center justify-between gap-3 border-b border-app-border px-4 py-3">
-          <h2 className="text-lg font-semibold text-app-fg">Daily expenses</h2>
-          <Button type="button" variant="ghost" size="sm" disabled className="opacity-70">
-            Detailed view
-          </Button>
-        </div>
         <div className="border-b border-app-border px-4 py-3">
           <Tabs value={selectedStatus} onChange={handleStatusChange} tabs={AD_SPEND_STATUS_TAB_OPTIONS} />
         </div>
@@ -709,10 +712,15 @@ export function MarketingAdSpendLoadingShell({
                   searchPlaceholder="Search buyers…"
                 />
               ) : null}
+              <AdSpendViewToggleShell />
             </>
           }
           sheetFilterBody={
             <>
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-app-fg-muted">View</span>
+                <AdSpendViewToggleShell fullWidth />
+              </div>
               <div className="space-y-1.5">
                 <span className="text-xs font-medium text-app-fg-muted">Product</span>
                 <SearchableSelect
@@ -851,7 +859,8 @@ export function MarketingTeamLoadingShell({
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Team Analysis"
-        description={`Media buyer funding, CPA, and profitability (True ROAS vs ${profitabilityConfig.targetRoas}x target — green ≥ ${profitabilityConfig.greenThreshold}x).`}
+        mobileInlineActions
+        description="View media buyer performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Team analysis tools"
@@ -1038,12 +1047,12 @@ export function MarketingLeaderboardLoadingShell({
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   leaderboardPeriod: 'this_month' | 'all_time';
 }) {
-  const periodLabel = leaderboardPeriod === 'all_time' ? 'all time' : 'this month';
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Marketing Leaderboard"
-        description={`Media buyer performance ranked by True ROAS (${periodLabel}).`}
+        mobileInlineActions
+        description="Compare media buyer performance."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Leaderboard tools"
@@ -1077,67 +1086,54 @@ export function MarketingLeaderboardLoadingShell({
         }
       />
       <div className="card p-0">
-        <div className="border-b border-app-border px-4 py-3 sm:px-4 sm:py-3">
-          <h2 className="text-base font-semibold text-app-fg sm:text-lg">Media Buyer Performance</h2>
-          <p className="mt-0.5 text-xs text-app-fg-muted">
-            Ranked by True ROAS ({periodLabel})
-          </p>
-        </div>
-        <div className="space-y-4 px-4 py-4">
+        <div className="space-y-3 px-3 py-3 md:space-y-4 md:px-4 md:py-4">
           {[1, 2, 3, 4, 5].map((rank) => {
             const isTopThree = rank <= 3;
             return (
               <div
                 key={rank}
-                className={`rounded-lg border border-app-border p-4 ${
+                className={`rounded-lg border border-app-border p-3 md:p-4 ${
                   isTopThree ? 'bg-app-hover' : 'bg-app-elevated'
                 }`}
               >
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-                  <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
+                <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="flex min-w-0 items-center gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
                       #{rank}
                     </span>
                     {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
-                    <div className="min-w-0 flex-1 sm:flex-none">
+                    <div className="min-w-0 flex-1">
                       <TableCellTextPulse className="w-[10rem] max-w-[min(16rem,100%)]" />
-                      <div className="mt-1">
-                        <TableCellTextPulse className="w-[14rem] max-w-full" />
-                      </div>
                     </div>
                   </div>
-                  <div className="flex shrink-0 justify-end sm:order-last">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-app-hover px-3 py-1.5 text-sm font-bold text-app-fg">
+                  <div className="flex items-center justify-between gap-2 pl-10 md:block md:pl-0">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-app-hover px-2.5 py-1 text-xs font-bold text-app-fg md:px-3 md:py-1.5 md:text-sm">
                       <TableCellTextPulse className="w-[2.25rem]" />
                       <span>x ROAS</span>
                     </span>
+                    <svg
+                      className="h-4 w-4 shrink-0 text-app-fg-muted md:hidden"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
                   </div>
-                  <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
-                    <span className="text-app-fg-muted font-medium">
-                      {'₦'}<TableCellTextPulse className="w-[3rem] align-middle" /> spend
-                    </span>
-                    <span className="text-app-fg-muted">
-                      Orders <TableCellTextPulse className="w-[1.5rem] align-middle" />
-                    </span>
-                    <span className="text-success-600 dark:text-success-400">
-                      Delivered <TableCellTextPulse className="w-[1.5rem] align-middle" />
-                    </span>
-                    <span className="text-success-600 dark:text-success-400">
-                      Confirmed <TableCellTextPulse className="w-[1.5rem] align-middle" />
-                    </span>
-                    <span className="text-app-fg-muted font-medium">
-                      {'₦'}<TableCellTextPulse className="w-[3rem] align-middle" /> revenue
-                    </span>
-                    <span className="text-app-fg-muted">
-                      CPA {'₦'}<TableCellTextPulse className="w-[2.5rem] align-middle" />
-                    </span>
-                    <span className="text-app-fg-muted">
-                      Del. rate <TableCellTextPulse className="w-[2.5rem] align-middle" />
-                    </span>
-                    <span className="text-app-fg-muted">
-                      Conf. rate <TableCellTextPulse className="w-[2.5rem] align-middle" />
-                    </span>
-                  </div>
+                </div>
+                <div className="mt-2.5 hidden border-t border-app-border pt-2.5 text-sm md:flex md:flex-wrap md:items-center md:gap-x-4 md:gap-y-1">
+                  <TableCellTextPulse className="w-[6rem]" />
+                  <TableCellTextPulse className="w-[5rem]" />
+                  <TableCellTextPulse className="w-[5rem]" />
+                  <TableCellTextPulse className="w-[5rem]" />
+                  <TableCellTextPulse className="w-[6rem]" />
+                  <TableCellTextPulse className="w-[5rem]" />
+                  <TableCellTextPulse className="w-[5rem]" />
+                  <TableCellTextPulse className="w-[5rem]" />
                 </div>
               </div>
             );
@@ -1195,7 +1191,8 @@ export function MarketingCrossFunnelLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Cross-funnel attempts"
-        description="Customers who tried to order through your funnel but already submitted via another Media Buyer's funnel within the dedup window."
+        mobileInlineActions
+        description="Review duplicate funnel attempts."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Cross-funnel tools"
@@ -1341,7 +1338,8 @@ export function MarketingFormsLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Forms"
-        description={isMediaBuyer ? 'Your campaign forms and hosted URLs.' : 'Manage campaign forms across media buyers.'}
+        mobileInlineActions
+        description={isMediaBuyer ? 'Manage your campaign forms.' : 'Manage campaign forms.'}
         actions={
           <PageHeaderMobileTools
             sheetTitle="Forms"
@@ -1489,10 +1487,11 @@ export function MarketingOrdersLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title={isMediaBuyer ? 'My Orders' : 'Marketing Orders'}
+        mobileInlineActions
         description={
           isMediaBuyer
-            ? 'Track your campaign orders and conversion funnel'
-            : 'View orders across all media buyers'
+            ? 'Track your campaign orders.'
+            : 'View orders by media buyer.'
         }
         actions={
           <PageHeaderMobileTools

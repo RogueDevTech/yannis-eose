@@ -11,6 +11,8 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { useFetcherToast } from '~/components/ui/toast';
 import { FormSelect } from '~/components/ui/form-select';
@@ -442,23 +444,69 @@ function MessageTemplatesPage({
     <div className="space-y-4">
       <PageHeader
         title="Message Templates"
-        description="Pre-configured SMS and WhatsApp templates for closers. Type plain variable tokens like @customer_name."
+        mobileInlineActions
+        description="Manage SMS and WhatsApp templates."
         actions={
-          <>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setPreviewAllOpen(true)}
-              disabled={filtered.length === 0}
-              title={filtered.length === 0 ? 'No templates to preview' : 'See every template with sample data'}
-            >
-              Preview all
-            </Button>
-            <Button variant="primary" size="sm" onClick={() => { setCreateBody(''); setCreateOpen(true); }}>
-              + New Template
-            </Button>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Message template tools"
+            sheetSubtitle={<span>Preview and create</span>}
+            triggerAriaLabel="Message template toolbar"
+            desktop={
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setPreviewAllOpen(true)}
+                  disabled={filtered.length === 0}
+                  title={filtered.length === 0 ? 'No templates to preview' : 'See every template with sample data'}
+                >
+                  Preview all
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    setCreateBody('');
+                    setCreateOpen(true);
+                  }}
+                >
+                  + New Template
+                </Button>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setPreviewAllOpen(true);
+                  }}
+                  disabled={filtered.length === 0}
+                  title={filtered.length === 0 ? 'No templates to preview' : 'See every template with sample data'}
+                >
+                  Preview all
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    setCreateBody('');
+                    setCreateOpen(true);
+                  }}
+                >
+                  + New Template
+                </Button>
+              </>
+            )}
+          />
         }
       />
 

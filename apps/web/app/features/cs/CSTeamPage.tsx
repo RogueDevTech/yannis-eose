@@ -49,98 +49,129 @@ function csRoleLabel(role: string): string {
   return role === 'CS_CLOSER' ? 'Closer' : role.replace(/_/g, ' ');
 }
 
+function CSTeamCompactStat({
+  label,
+  value,
+  valueClassName = 'text-app-fg',
+}: {
+  label: string;
+  value: React.ReactNode;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-app-border bg-app-hover/40 px-2.5 py-2">
+      <span className={['block text-sm font-semibold leading-none', valueClassName].filter(Boolean).join(' ')}>
+        {value}
+      </span>
+      <span className="mt-1 block text-[10px] font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; embedded?: boolean }) {
   const isAgent = member.role === 'CS_CLOSER';
   const workload = member.workload;
   const leaderboard = member.leaderboardEntry;
   const roleLabel = csRoleLabel(member.role);
+  const dailyPct =
+    workload && workload.capacity > 0 ? ((workload.todayClosesCount ?? 0) / workload.capacity) * 100 : 0;
+  const progressPct = Math.min(dailyPct, 100);
+  const dutyToneClass =
+    dailyPct >= 100
+      ? 'text-success-600 dark:text-success-400'
+      : dailyPct >= 70
+        ? 'text-warning-600 dark:text-warning-400'
+        : 'text-brand-600 dark:text-brand-400';
+  const progressBarClass =
+    dailyPct >= 100 ? 'bg-success-500' : dailyPct >= 70 ? 'bg-warning-500' : 'bg-brand-500';
+  const activityValue = member.isIdle ? 'Idle' : workload ? formatLastActive(workload.lastActionAt) : '—';
+  const activityToneClass = member.isIdle ? 'text-warning-600 dark:text-warning-400' : 'text-app-fg';
 
   return (
-    <div className={embedded ? 'space-y-3' : 'card'}>
-      <div className="flex items-start gap-3 mb-3">
+    <div className={embedded ? 'space-y-3' : 'card space-y-3'}>
+      <div className="flex items-start gap-3">
         <CompactUserAvatar name={member.name} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-app-fg truncate">
-            {member.name}
-          </p>
-          <p className="text-xs text-app-fg-muted truncate">
-            {roleLabel}
-          </p>
-          <div className="mt-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-app-fg">{member.name}</p>
+              <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+                {roleLabel}
+              </p>
+            </div>
+            {isAgent && member.isIdle && (
+              <span className="shrink-0 rounded-full bg-warning-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-700 dark:text-warning-300">
+                Idle
+              </span>
+            )}
+          </div>
+          <div className="mt-1.5">
             <UserBranchBadges branches={member.branchMemberships} compact />
           </div>
         </div>
-        {isAgent && member.isIdle && (
-          <span className="shrink-0 text-xs font-medium text-warning-600 dark:text-warning-400">Idle</span>
-        )}
       </div>
 
       {isAgent && workload && (
-        <>
-          <div className="mb-3">
-            <p className="text-xs text-app-fg-muted mb-1">
-              Today&apos;s duty: {(workload.todayClosesCount ?? 0)} / {workload.capacity}
-              <span className="text-app-fg-muted/80"> (Lagos)</span>
-              {!member.isIdle && (
-                <span className="ml-1">· {formatLastActive(workload.lastActionAt)}</span>
-              )}
-            </p>
-            <p className="text-[11px] text-app-fg-muted mb-1">Backlog: {workload.pendingCount}</p>
-            <div className="w-full h-2 bg-app-hover rounded-full overflow-hidden">
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-3 gap-2">
+            <CSTeamCompactStat
+              label="Duty"
+              value={`${workload.todayClosesCount ?? 0}/${workload.capacity}`}
+              valueClassName={dutyToneClass}
+            />
+            <CSTeamCompactStat label="Backlog" value={workload.pendingCount} />
+            <CSTeamCompactStat label={member.isIdle ? 'Status' : 'Active'} value={activityValue} valueClassName={activityToneClass} />
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-medium text-app-fg-muted">
+              <span>Lagos duty</span>
+              <span className={dutyToneClass}>{Math.round(progressPct)}%</span>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-app-hover">
               <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  (() => {
-                    const d =
-                      workload.capacity > 0 ? ((workload.todayClosesCount ?? 0) / workload.capacity) * 100 : 0;
-                    return d >= 100 ? 'bg-success-500' : d >= 70 ? 'bg-warning-500' : 'bg-brand-500';
-                  })()
-                }`}
-                style={{
-                  width: `${Math.min(workload.capacity > 0 ? ((workload.todayClosesCount ?? 0) / workload.capacity) * 100 : 0, 100)}%`,
-                }}
+                className={`h-full rounded-full transition-all duration-300 ${progressBarClass}`}
+                style={{ width: `${progressPct}%` }}
               />
             </div>
           </div>
           {leaderboard && (
-            <div className="grid grid-cols-3 gap-2 mb-2 text-xs text-app-fg-muted">
-              <div>
-                <span className="font-medium text-app-fg">{leaderboard.ordersEngaged}</span>
-                <span className="block text-app-fg-muted">Assigned</span>
-              </div>
-              <div>
-                <span className="font-medium text-app-fg">{leaderboard.ordersDelivered}</span>
-                <span className="block text-app-fg-muted">Delivered</span>
-              </div>
-              <div>
-                <span className="font-medium text-app-fg">{leaderboard.ordersConfirmed}</span>
-                <span className="block text-app-fg-muted">Confirmed</span>
-              </div>
+            <div className="grid grid-cols-3 gap-2">
+              <CSTeamCompactStat label="Assigned" value={leaderboard.ordersEngaged} />
+              <CSTeamCompactStat label="Delivered" value={leaderboard.ordersDelivered} />
+              <CSTeamCompactStat label="Confirmed" value={leaderboard.ordersConfirmed} />
             </div>
           )}
           {leaderboard && (
-            <div className="grid grid-cols-2 gap-2 mb-3 text-xs text-app-fg-muted">
-              <div>
-                <span className={`font-medium ${confirmationRateColorClass(leaderboard.confirmationRate)}`}>
-                  {formatRate(leaderboard.confirmationRate)}
-                </span>
-                <span className="block text-app-fg-muted">Conf. rate</span>
-              </div>
-              <div>
-                <span className={`font-medium ${deliveryRateColorClass(leaderboard.deliveryRate)}`}>
-                  {formatRate(leaderboard.deliveryRate)}
-                </span>
-                <span className="block text-app-fg-muted">Delivery rate</span>
-              </div>
+            <div className="grid grid-cols-2 gap-2">
+              <CSTeamCompactStat
+                label="Conf. rate"
+                value={formatRate(leaderboard.confirmationRate)}
+                valueClassName={confirmationRateColorClass(leaderboard.confirmationRate)}
+              />
+              <CSTeamCompactStat
+                label="Delivery rate"
+                value={formatRate(leaderboard.deliveryRate)}
+                valueClassName={deliveryRateColorClass(leaderboard.deliveryRate)}
+              />
             </div>
           )}
-        </>
+        </div>
       )}
 
-      <div className="inline-flex flex-nowrap items-center gap-1.5">
-        <CompactTableActionButton to={`/admin/cs/orders?csCloserId=${member.id}&period=all_time`}>
-          View orders
-        </CompactTableActionButton>
-        <CompactTableActionButton to={`/hr/users/${member.id}`}>View profile</CompactTableActionButton>
+      <div className="border-t border-app-border pt-3">
+        <div className="grid grid-cols-2 gap-2">
+          <CompactTableActionButton
+            to={`/admin/cs/orders?csCloserId=${member.id}&period=all_time`}
+            className="w-full justify-center"
+          >
+            View orders
+          </CompactTableActionButton>
+          <CompactTableActionButton to={`/hr/users/${member.id}`} className="w-full justify-center">
+            View profile
+          </CompactTableActionButton>
+        </div>
       </div>
     </div>
   );
@@ -279,7 +310,8 @@ export function CSTeamPage({ teamMembers, summary, page = 1, totalPages = 1, dat
     <div className="space-y-6">
       <PageHeader
         title="Team Analysis"
-        description="Closer workload and assigned / delivered / confirmed counts for the selected period. View orders or profile per member."
+        mobileInlineActions
+        description="View closer workload and performance."
         actions={
           dateFilters ? (
             <PageHeaderMobileTools

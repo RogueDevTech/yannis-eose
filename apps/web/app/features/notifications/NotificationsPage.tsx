@@ -107,8 +107,8 @@ export function NotificationsPage({
         </div>
       ) : (
         <PageHeader
-          title="All Notifications"
-          description={`${displayUnreadCount(unreadCount) > 0 ? `${displayUnreadCount(unreadCount)} unread` : 'All caught up'} · Page ${pagination.page} of ${pagination.totalPages || 1}`}
+          title="Notifications"
+          description="Review unread and read system notifications."
           actions={
             <div className="flex items-center gap-2">
               <Link

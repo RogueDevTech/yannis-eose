@@ -8,6 +8,7 @@ import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Button } from '~/components/ui/button';
 import { Tabs } from '~/components/ui/tabs';
@@ -127,14 +128,23 @@ export function MonthlyPayrollsLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="HR & Payroll"
-        description="Monthly payroll batches and staff earnings adjustments. Commission plans and per-staff payouts live on their own pages."
+        mobileInlineActions
+        description="Run monthly payroll and manage staff adjustments."
         actions={
-          <div className="flex items-center gap-2 flex-wrap">
-            <PageRefreshButton />
-            <Button variant="primary" size="sm" disabled className="opacity-60">
-              + Add-on
-            </Button>
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="HR tools"
+            sheetSubtitle={<span>Refresh and actions</span>}
+            triggerAriaLabel="HR toolbar"
+            desktop={
+              <div className="flex items-center gap-2 flex-wrap">
+                <PageRefreshButton />
+                <Button variant="primary" size="sm" disabled className="opacity-60">
+                  + Add-on
+                </Button>
+              </div>
+            }
+            sheet={<Button variant="primary" size="sm" className="w-full justify-center" disabled>+ Add-on</Button>}
+          />
         }
       />
       <Tabs
@@ -161,12 +171,27 @@ export function GeneratePayrollLoadingShell() {
   return (
     <div className="space-y-6 max-w-3xl" aria-busy="true" aria-live="polite">
       <PageHeader
-        title="Generate Monthly Payroll Batch"
-        description="Auto-derives payouts from delivered orders and commission plans for the selected scope and month. Existing batches for that month are skipped; use Re-generate inside a draft batch to refresh a single slot."
+        title="Generate Payroll Batch"
+        mobileInlineActions
+        description="Generate payroll for a selected month and scope."
         actions={
-          <Link to="/hr/payroll" className="btn-ghost btn-sm shrink-0 opacity-60 pointer-events-none">
-            ← Back to payroll
-          </Link>
+          <PageHeaderMobileTools
+            sheetTitle="Payroll tools"
+            sheetSubtitle={<span>Navigation</span>}
+            triggerAriaLabel="Payroll generator toolbar"
+            showMobileRefresh={false}
+            desktop={
+              <Link to="/hr/payroll" className="btn-ghost btn-sm shrink-0 opacity-60 pointer-events-none">
+                ← Back to payroll
+              </Link>
+            }
+            sheet={
+              <span
+                className="inline-block h-9 w-full rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+                aria-hidden
+              />
+            }
+          />
         }
       />
       <div className="card p-4 space-y-4">
@@ -188,14 +213,23 @@ export function CommissionPlansLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Commission Plans"
-        description="Define base pay, per-order rules, tiered rates, and accelerators. Role is optional — leave it blank for templates you attach to individual staff profiles."
+        mobileInlineActions
+        description="Set base pay and commission rules for roles or staff."
         actions={
-          <>
-            <PageRefreshButton />
-            <Button variant="primary" size="sm" disabled className="opacity-60">
-              + New Commission Plan
-            </Button>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Commission plan tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Commission plan toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button variant="primary" size="sm" disabled className="opacity-60">
+                  + New Commission Plan
+                </Button>
+              </>
+            }
+            sheet={<Button variant="primary" size="sm" className="w-full justify-center" disabled>+ New Commission Plan</Button>}
+          />
         }
       />
       <CompactTable<{ id: string }>
@@ -215,11 +249,11 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title={staffAccounts ? 'Staff accounts' : 'Users'}
+        title={staffAccounts ? 'Staff Accounts' : 'Users'}
         description={
           staffAccounts
-            ? 'Staff names and payout bank details (account name, number, bank code) for disbursement.'
-            : 'Manage team members and their roles'
+            ? 'Review staff payout details.'
+            : 'Manage team members and roles.'
         }
         actions={
           <div className="flex items-center gap-2">
@@ -500,8 +534,14 @@ export function StaffOnboardingDocsLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Staff onboarding documents"
-        description="Status of staff HR documents — open a row to review or edit in the full onboarding flow."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Review staff onboarding documents."
+        actions={
+          <>
+            <PageRefreshButton className="hidden md:inline-flex" />
+            <PageRefreshButton iconOnly className="md:hidden" />
+          </>
+        }
       />
       <OverviewStatStrip
         items={[

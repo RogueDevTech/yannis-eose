@@ -9,6 +9,7 @@ import { Modal } from '~/components/ui/modal';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -385,17 +386,37 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
     <div className="space-y-4">
       <PageHeader
         title="Product Categories"
-        description="Manage brand categories for products. Brand info appears on invoices and SMS."
+        mobileInlineActions
+        description="Manage product categories."
         actions={
-          <>
-            <PageRefreshButton />
-            <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-              </svg>
-              New Category
-            </Button>
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Category tools"
+            sheetSubtitle={<span>Refresh and create</span>}
+            triggerAriaLabel="Category toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button variant="primary" className="flex items-center gap-2" onClick={() => setModalCategory(null)}>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  New Category
+                </Button>
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <Button
+                variant="primary"
+                className="w-full justify-center"
+                onClick={() => {
+                  closeSheet();
+                  setModalCategory(null);
+                }}
+              >
+                New Category
+              </Button>
+            )}
+          />
         }
       />
 

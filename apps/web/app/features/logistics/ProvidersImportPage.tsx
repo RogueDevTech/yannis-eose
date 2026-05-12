@@ -86,7 +86,7 @@ export function ProvidersImportPage() {
   return (
     <ImportBulkData<ParsedRow, ResolvedRow>
       title="Import logistics companies"
-      description="Upload a spreadsheet of 3PL companies, fix any rows the editor flags, then import. Each row is created one at a time so a single bad row doesn't block the rest."
+      description="Upload a spreadsheet and import logistics companies."
       backHref="/admin/logistics/partners"
       backLabel="← Back to partners"
       resourceLabel="company"

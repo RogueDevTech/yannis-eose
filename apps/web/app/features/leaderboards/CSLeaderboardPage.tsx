@@ -1,4 +1,5 @@
 import { DeferredSection } from '~/components/ui/deferred-section';
+import { Collapsible } from '~/components/ui/collapsible';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { Pagination } from '~/components/ui/pagination';
@@ -38,9 +39,9 @@ export function CSLeaderboardPage({
     <div className="space-y-6 px-3 sm:px-0">
       <div className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-app-fg">CS Leaderboard</h1>
+          <h1 className="text-xl font-bold text-app-fg">CS Leaderboard</h1>
           <p className="text-sm text-app-fg-muted mt-1">
-            Closer performance ranked by delivery rate ({periodLabel}).
+            Rank closer performance by delivery rate.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -71,68 +72,81 @@ export function CSLeaderboardPage({
           return (
             <TableLoadingOverlay show={isFilterLoading}>
             <div className="card p-0">
-              <div className="px-4 py-3 sm:px-4 sm:py-3 border-b border-app-border">
-                <h2 className="text-base font-semibold text-app-fg sm:text-lg">Closer performance</h2>
-                <p className="text-xs text-app-fg-muted mt-0.5">
-                  Ranked by delivery rate ({periodLabel}) · {lb.length} closer{lb.length === 1 ? '' : 's'}
-                </p>
-              </div>
-              <div className="space-y-4 px-4 py-4">
+              <div className="space-y-3 px-3 py-3 md:space-y-4 md:px-4 md:py-4">
                 {pagedLb.map((e, idx) => {
                   const rank = startIdx + idx + 1;
                   const isTopThree = rank <= 3;
-                  return (
-                    <div
-                      key={e.agentId}
-                      className={`rounded-lg border border-app-border bg-app-elevated p-4 ${isTopThree ? 'bg-app-hover' : ''}`}
-                    >
-                      {/* Mobile: stacked layout. Desktop: single row */}
-                      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
-                        {/* Rank + trophy + name — full width on mobile, then primary pill */}
-                        <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
-                            #{rank}
-                          </span>
-                          {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
-                          <p className={`min-w-0 flex-1 truncate text-sm font-medium text-app-fg sm:flex-none ${isTopThree ? 'font-semibold' : ''}`}>
+                  const deliveryPillClass =
+                    e.deliveryRate >= 70
+                      ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400'
+                      : e.deliveryRate >= 50
+                        ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400'
+                        : 'bg-app-hover text-app-fg';
+                  const trigger = (
+                    <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-medium text-app-fg-muted">
+                          #{rank}
+                        </span>
+                        {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={`text-sm font-medium leading-snug text-app-fg whitespace-normal md:truncate ${
+                              isTopThree ? 'font-semibold' : ''
+                            }`}
+                          >
                             {e.agentName}
                           </p>
                         </div>
-                        {/* Primary metric pill — right-aligned on mobile */}
-                        <div className="flex shrink-0 justify-end sm:order-last">
-                          <span
-                            className={`inline-block rounded-full px-3 py-1.5 text-sm font-bold ${
-                              e.deliveryRate >= 70
-                                ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400'
-                                : e.deliveryRate >= 50
-                                  ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400'
-                                  : 'bg-app-hover text-app-fg'
-                            }`}
-                          >
-                            {e.deliveryRate.toFixed(1)}% del.
-                          </span>
-                        </div>
-                        {/* Metrics: 2-col grid on mobile, inline on desktop */}
-                        <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
-                          <span className="text-app-fg-muted">
-                            Engaged <strong className="text-app-fg">{e.ordersEngaged}</strong>
-                          </span>
-                          <span className="text-success-600 dark:text-success-400">
-                            Confirmed <strong>{e.ordersConfirmed}</strong>
-                          </span>
-                          <span className="text-brand-600 dark:text-brand-400 font-medium">
-                            Delivered <strong>{e.ordersDelivered}</strong>
-                          </span>
-                          <span className="text-app-fg-muted">
-                            Calls <strong className="text-app-fg">{e.callsMade}</strong>
-                          </span>
-                          <span className="text-app-fg-muted">
-                            Conf. <strong className="text-app-fg">{e.confirmationRate.toFixed(1)}%</strong>
-                          </span>
-                          <span className="text-app-fg-muted">
-                            Avg call <strong className="text-app-fg">{formatAvgCall(e.avgCallDurationSeconds)}</strong>
-                          </span>
-                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pl-10 md:block md:pl-0">
+                        <span
+                          className={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-bold md:px-3 md:py-1.5 md:text-sm ${deliveryPillClass}`}
+                        >
+                          {e.deliveryRate.toFixed(1)}% del.
+                        </span>
+                      </div>
+                    </div>
+                  );
+                  const details = (
+                    <div className="grid w-full grid-cols-2 gap-x-3 gap-y-2 border-t border-app-border pt-2.5 text-sm sm:flex sm:flex-1 sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1">
+                      <span className="text-app-fg-muted">
+                        Engaged <strong className="text-app-fg">{e.ordersEngaged}</strong>
+                      </span>
+                      <span className="text-success-600 dark:text-success-400">
+                        Confirmed <strong>{e.ordersConfirmed}</strong>
+                      </span>
+                      <span className="text-brand-600 dark:text-brand-400 font-medium">
+                        Delivered <strong>{e.ordersDelivered}</strong>
+                      </span>
+                      <span className="text-app-fg-muted">
+                        Calls <strong className="text-app-fg">{e.callsMade}</strong>
+                      </span>
+                      <span className="text-app-fg-muted">
+                        Conf. <strong className="text-app-fg">{e.confirmationRate.toFixed(1)}%</strong>
+                      </span>
+                      <span className="text-app-fg-muted">
+                        Avg call <strong className="text-app-fg">{formatAvgCall(e.avgCallDurationSeconds)}</strong>
+                      </span>
+                    </div>
+                  );
+                  return (
+                    <div
+                      key={e.agentId}
+                      className={`rounded-lg border border-app-border bg-app-elevated p-3 md:p-4 ${isTopThree ? 'bg-app-hover' : ''}`}
+                    >
+                      <div className="md:hidden">
+                        <Collapsible
+                          trigger={trigger}
+                          triggerClassName="items-start sm:items-center hover:opacity-100"
+                          contentClassName="pt-2.5"
+                        >
+                          {details}
+                        </Collapsible>
+                      </div>
+                      <div className="hidden md:block">
+                        {trigger}
+                        {details}
                       </div>
                     </div>
                   );

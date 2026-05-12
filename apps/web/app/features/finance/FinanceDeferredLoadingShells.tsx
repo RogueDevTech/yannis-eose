@@ -94,7 +94,8 @@ export function FinanceOverviewLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Finance"
-        description="True profit for the selected period, product contribution, and a live cash-and-close queue. Use the sidebar for deep workflows."
+        mobileInlineActions
+        description="See revenue, profit, and costs for the selected period."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Finance tools"
@@ -164,11 +165,12 @@ export function FinanceDisbursementsLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Disbursements"
-        description="Send funding to the Head of Marketing and approve funding requests from the marketing team."
+        mobileInlineActions
+        description="Send and track marketing disbursements."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Disbursements tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetSubtitle={<span>Date range and actions</span>}
             triggerAriaLabel="Disbursements toolbar"
             desktop={
               <>
@@ -180,17 +182,31 @@ export function FinanceDisbursementsLoadingShell({
                     periodAllTime={filters.periodAllTime}
                   />
                 </div>
+                <Button type="button" variant="secondary" size="sm" disabled>
+                  Generate report
+                </Button>
+                <Button type="button" variant="primary" size="sm" disabled>
+                  + New disbursement
+                </Button>
               </>
             }
             sheet={() => (
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                  Generate report
+                </Button>
+                <Button type="button" variant="primary" size="sm" className="w-full justify-center" disabled>
+                  + New disbursement
+                </Button>
+              </>
             )}
           />
         }
@@ -250,8 +266,22 @@ export function DeliveryRemittancesLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Cash Remittances"
-        description="Use Remittances for batches you already recorded, or Awaiting remittance to pick delivered orders and record cash against one logistics location."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Review remittance batches and record new cash remittances."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Cash remittances tools"
+            sheetSubtitle={<span>Date range, export, and pick orders</span>}
+            triggerAriaLabel="Cash remittances toolbar and date range"
+            desktop={<PageRefreshButton />}
+            sheet={
+              <>
+                <div className="h-9 w-full rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse" aria-hidden />
+                <div className="h-9 w-full rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse" aria-hidden />
+              </>
+            }
+          />
+        }
       />
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
@@ -367,6 +397,7 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
 
       <PageHeader
         title="Cash remittance"
+        mobileInlineActions
         description={
           (
             <span className="inline-flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-sm text-app-fg-muted">
@@ -379,13 +410,26 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
           ) as unknown as string
         }
         actions={
-          <>
-            <PageRefreshButton />
-            <span
-              className="inline-block h-8 w-28 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
-              aria-hidden
-            />
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Cash remittance tools"
+            sheetSubtitle={<span>Refresh and navigation</span>}
+            triggerAriaLabel="Cash remittance toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <span
+                  className="inline-block h-8 w-28 rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+                  aria-hidden
+                />
+              </>
+            }
+            sheet={
+              <span
+                className="inline-block h-9 w-full rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse"
+                aria-hidden
+              />
+            }
+          />
         }
       />
 
@@ -469,8 +513,24 @@ export function FinancePayoutLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Payout"
-        description="Review monthly payroll batches pending finance disbursement and export payout documents."
-        actions={<PageRefreshButton />}
+        mobileInlineActions
+        description="Review payroll payout batches."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Payout tools"
+            sheetSubtitle={<span>Refresh and export</span>}
+            triggerAriaLabel="Payout toolbar"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button type="button" variant="secondary" size="sm" disabled>
+                  Export payout document
+                </Button>
+              </>
+            }
+            sheet={<Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>Export payout document</Button>}
+          />
+        }
       />
       <OverviewStatStrip
         items={[
