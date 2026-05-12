@@ -510,7 +510,7 @@ export function UserOnboardingLoadingShell() {
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Onboarding"
-        description="Review the packet below (documents open in a new tab). Staff edit from Your onboarding; approve here once verification is complete."
+        description="Review the documents below and approve when ready."
         actions={
           <div className="flex gap-2 items-center">
             <div className="h-6 w-20 rounded-full bg-app-hover animate-pulse" aria-hidden />

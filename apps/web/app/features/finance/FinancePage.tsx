@@ -243,7 +243,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
             to="/admin/finance/profit-by-shipment"
             icon="📦"
             title="Profit by shipment"
-            description="Pick an inbound shipment and see the full unit economics — factory cost + landing + sold qty + estimated revenue."
+            description="Review shipment cost and estimated revenue."
           />
           <DeepDiveCard
             to={
@@ -253,19 +253,19 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
             }
             icon="📊"
             title="Ad spend slice"
-            description="Drill into Facebook / TikTok / Google spend per buyer per branch with the same date filter applied."
+            description="View ad spend by buyer and branch."
           />
           <DeepDiveCard
             to="/admin/finance/delivery-remittances"
             icon="💸"
             title="Cash remittances"
-            description="Find a delivery remittance by date, partner, or status — pending, received, or disputed."
+            description="Find remittances by date, partner, or status."
           />
           <DeepDiveCard
             to="/admin/finance/payout"
             icon="📑"
             title="Payout queue"
-            description="Payroll batches awaiting Finance review and disbursement, with bank-detail export."
+            description="Review payroll batches for disbursement."
           />
         </div>
       </div>

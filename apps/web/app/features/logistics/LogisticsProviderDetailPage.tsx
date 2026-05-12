@@ -252,7 +252,7 @@ export function LogisticsProviderDetailPage({
             <Card>
               <CardHeader
                 title="Performance"
-                description="Orders with an agent-assigned timestamp in this period (same rules as team analysis)."
+                description="Orders assigned in this period."
               />
               <CardBody className="pt-0">
                 {performance ? (
@@ -281,8 +281,7 @@ export function LogisticsProviderDetailPage({
                   />
                 ) : (
                   <p className="text-sm text-app-fg-muted">
-                    No rolled-up metrics for this window (or data is still loading). Try another date range from team
-                    analysis.
+                    No metrics for this date range yet.
                   </p>
                 )}
               </CardBody>
@@ -320,13 +319,13 @@ export function LogisticsProviderDetailPage({
         <Card>
           <CardHeader
             title="Activity"
-            description="Audit history for this logistics company (name, status, contact, coverage, rate card). Edits to individual warehouses are tracked on each location’s record."
+            description="Audit history for this company."
           />
           <CardBody className="pt-0">
             {providerActivity.length === 0 ? (
               <EmptyState
                 title="No activity yet"
-                description="Changes to this company from the Partners flow will appear here once saved."
+                description="Changes from Partners appear here after save."
               />
             ) : (
               <ul className="divide-y divide-app-border border border-app-border rounded-lg overflow-hidden">

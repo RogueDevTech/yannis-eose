@@ -56,7 +56,7 @@ export function FinanceProfitWaterfall({ profit }: { profit: ProfitReport }) {
     <Card>
       <CardHeader
         title="True profit bridge"
-        description="Delivered orders in range — bar width is share of revenue. Same formula as True Profit KPI."
+        description="Delivered orders in range, sized by revenue share."
       />
       <CardBody className="-mt-2 space-y-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

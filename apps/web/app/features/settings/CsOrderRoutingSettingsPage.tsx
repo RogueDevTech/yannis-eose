@@ -335,7 +335,7 @@ export function CsOrderRoutingSettingsPage({
                 Assign products
               </span>
             }
-            description="Tick products, choose a servicing branch, then click Assign. Re-assigning a product overwrites its previous route. Remove a row to revert that product to same-branch."
+            description="Select products, choose a servicing branch, then assign."
           />
           <CardBody className="space-y-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
@@ -405,7 +405,7 @@ export function CsOrderRoutingSettingsPage({
             </div>
 
             {products.length === 0 ? (
-              <EmptyState title="No products" description="Add active products in the catalogue first." />
+              <EmptyState title="No products" description="Add active products to the catalog first." />
             ) : (
               <div className="max-h-[min(28rem,60vh)] overflow-y-auto rounded-lg border border-app-border divide-y divide-app-border">
                 {filteredProductsForBulk.map((p) => {
@@ -484,7 +484,7 @@ export function CsOrderRoutingSettingsPage({
             )}
 
             {filteredProductsForBulk.length === 0 && products.length > 0 ? (
-              <p className="text-xs text-app-fg-muted">No products match your search.</p>
+              <p className="text-xs text-app-fg-muted">No matching products.</p>
             ) : null}
           </CardBody>
         </Card>
@@ -494,7 +494,7 @@ export function CsOrderRoutingSettingsPage({
         open={!!deleteProductId}
         onClose={() => setDeleteProductId(null)}
         title="Remove product route?"
-        description="This product will become unassigned. New orders for it will fall through to the order's marketing branch as a safety net until you assign a CS branch."
+        description="This product will be unassigned until you assign a CS branch again."
         confirmLabel="Remove"
         variant="danger"
         onConfirm={confirmDelete}
@@ -511,7 +511,7 @@ export function CsOrderRoutingSettingsPage({
           const branchLabel =
             branchNameById.get(bulkServicingBranchId) ?? 'the chosen servicing branch';
           const verbing = selectedProductIds.size === 1 ? 'this product' : 'these products';
-          return `New orders for ${verbing} will be routed to CS at ${branchLabel}. Any existing route on a re-assigned product will be overwritten.`;
+          return `New orders for ${verbing} will route to CS at ${branchLabel}. Existing routes will be replaced.`;
         })()}
         confirmLabel="Assign"
         variant="warning"
@@ -533,12 +533,12 @@ export function CsOrderRoutingSettingsPage({
         })()}
         description={(() => {
           if (draftMode === 'SPLIT_ALL_BRANCHES') {
-            return 'New marketing orders will be distributed across CS in every branch — whichever closer has the lowest pending workload wins. Marketing branch is kept on the order for attribution but no longer constrains who handles it.';
+            return 'New marketing orders will be shared across CS in every branch. The marketing branch stays for attribution only.';
           }
           if (draftMode === 'PRODUCT_ALLOCATION') {
-            return 'New marketing orders will start routing per-product as soon as you save. Products without an explicit assignment will fall back to CS in the order’s marketing branch as a safety net.';
+            return 'New marketing orders will start routing by product after save. Unassigned products fall back to the order marketing branch.';
           }
-          return 'Every new marketing order will be handled by CS in the same branch as the marketing funnel that created it. Existing product routes are kept in the database and will reactivate if you switch back.';
+          return 'New marketing orders will stay in the same branch as the marketing funnel. Saved product routes remain and will reactivate if you switch back.';
         })()}
         confirmLabel="Save"
         variant="warning"

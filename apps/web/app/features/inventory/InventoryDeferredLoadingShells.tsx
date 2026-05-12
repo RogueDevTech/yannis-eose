@@ -215,7 +215,7 @@ export function InventoryOverviewLoadingShell() {
       <PageHeader
         title="Inventory"
         mobileInlineActions
-        description="Track on-hand stock, reservations, and reconciliation. Manage inbound supplier receipts from the separate Shipments page."
+        description="Track stock and reservations."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Inventory tools"

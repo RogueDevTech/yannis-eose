@@ -111,17 +111,33 @@ export function ActionDropdown({
       ref={menuRef}
       className="fixed z-[9999] w-48 min-w-[160px] bg-app-elevated border border-app-border rounded-lg shadow-lg py-1 animate-fade-in"
       style={menuStyle}
+      onMouseDown={(event) => {
+        // Keep inside-clicks from bubbling to the document-level outside-click
+        // listener before the menu item itself can handle navigation/action.
+        event.stopPropagation();
+      }}
     >
       {items.map((item) => {
         const variantClass = VARIANT_CLASSES[item.variant ?? 'default'];
         const baseClass = `w-full text-left px-3 py-2 text-sm whitespace-nowrap flex items-center gap-2 transition-colors ${variantClass}`;
-        if (item.to != null) {
+        const target = item.to;
+        if (target != null) {
           return (
             <Link
               key={item.label}
-              to={item.to}
+              to={target}
               className={baseClass}
-              onClick={() => setOpenMenuId(null)}
+              onClick={(event) => {
+                const isPrimaryClick = event.button === 0;
+                const hasModifier = event.metaKey || event.altKey || event.ctrlKey || event.shiftKey;
+                // For regular same-tab navigation, let the browser/Remix own the
+                // transition; the page swap will unmount the menu naturally.
+                // Only close immediately for modified clicks that keep the
+                // current page alive (cmd/ctrl-click, middle-click, etc.).
+                if (!isPrimaryClick || hasModifier || event.defaultPrevented) {
+                  setOpenMenuId(null);
+                }
+              }}
             >
               {item.icon}
               {item.label}

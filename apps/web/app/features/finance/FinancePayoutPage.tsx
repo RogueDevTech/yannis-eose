@@ -300,7 +300,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
                 <EmptyState
                   variant="inline"
                   title="No batch selected"
-                  description="Choose Review on a payroll batch to load bank details and amounts for disbursement."
+                  description="Select Review on a batch to load payout details."
                 />
               </div>
             ) : selectedBatch.payouts.length === 0 ? (

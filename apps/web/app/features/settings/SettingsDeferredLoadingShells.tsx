@@ -30,7 +30,7 @@ export function RoleTemplatesLoadingShell() {
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Role templates"
-        description="Permission-first presets. SYSTEM templates map to legacy enum roles; CUSTOM templates can combine any permissions."
+        description="Create and manage permission presets for staff roles."
         actions={
           <>
             <PageRefreshButton />

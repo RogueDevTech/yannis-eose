@@ -229,7 +229,7 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
       {!shipmentId ? (
         <EmptyState
           title="Pick a shipment to see the P&L"
-          description="Cost in (factory × received qty + allocated landing cost) is exact. Revenue is approximated from average delivered price × units sold from the shipment's batch — best read as a planning number."
+          description="Pick a shipment to compare exact cost with estimated revenue."
         />
       ) : !profit ? (
         <EmptyState
