@@ -1,5 +1,9 @@
 import { z } from 'zod';
 import { MAX_OFFER_TIER_IMAGES } from './products';
+import {
+  FIXED_FIELD_ORDER_TOKENS,
+  ORDERABLE_STANDARD_FIELD_KEYS,
+} from '../marketing/form-field-order';
 
 // ============================================
 // Marketing Funding Validators
@@ -467,8 +471,32 @@ export const STANDARD_FIELD_KEYS = [
 ] as const;
 export const standardFormFieldSchema = z.object({
   key: z.enum(STANDARD_FIELD_KEYS),
+  label: z.string().trim().min(1).max(120).optional(),
   required: z.boolean().default(false),
 });
+
+const fieldOrderStandardTokenSchema = z
+  .string()
+  .refine(
+    (value) =>
+      value.startsWith('standard.') &&
+      ORDERABLE_STANDARD_FIELD_KEYS.includes(value.slice('standard.'.length) as (typeof ORDERABLE_STANDARD_FIELD_KEYS)[number]),
+    'Invalid standard field order token',
+  );
+
+const fieldOrderCustomTokenSchema = z
+  .string()
+  .refine((value) => value.startsWith('custom.'), 'Invalid custom field order token')
+  .refine((value) => {
+    const customId = value.slice('custom.'.length);
+    return z.string().uuid().safeParse(customId).success;
+  }, 'Custom field order token must end with a valid field id');
+
+export const campaignFieldOrderTokenSchema = z.union([
+  z.enum(FIXED_FIELD_ORDER_TOKENS),
+  fieldOrderStandardTokenSchema,
+  fieldOrderCustomTokenSchema,
+]);
 
 /**
  * When a field is `required`, the submitted answer must be non-empty in the type-specific sense.
@@ -550,6 +578,7 @@ export const formConfigSchema = z.object({
   preferredDeliveryDateOptions: z.array(z.string().max(100)).max(20).optional(),
   genderOptions: z.array(z.string().max(100)).max(20).optional(),
   standardFields: z.array(standardFormFieldSchema).max(STANDARD_FIELD_KEYS.length).optional(),
+  fieldOrder: z.array(campaignFieldOrderTokenSchema).max(59).optional(),
   // Legacy: pre-builder advanced field array. Kept for backward compatibility — the new
   // builder writes to `customFields` instead.
   fields: z.array(z.object({

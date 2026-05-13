@@ -154,6 +154,47 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'updateLocation') {
+    const locationId = formData.get('locationId')?.toString()?.trim() ?? '';
+    const name = formData.get('name')?.toString()?.trim() ?? '';
+    const address = formData.get('address')?.toString()?.trim() ?? '';
+    const coordinatesRaw = formData.get('coordinates')?.toString()?.trim() ?? '';
+    const whatsappRaw = formData.get('whatsappGroupLink')?.toString()?.trim() ?? '';
+    const statusRaw = formData.get('status')?.toString();
+    if (!locationId) {
+      return json({ error: 'Location is required.' }, { status: 400 });
+    }
+    if (!name || !address) {
+      return json({ error: 'Name and address are required.' }, { status: 400 });
+    }
+    const body: Record<string, unknown> = {
+      locationId,
+      name,
+      address,
+      coordinates: coordinatesRaw,
+    };
+    if (statusRaw === 'ACTIVE' || statusRaw === 'INACTIVE') {
+      body.status = statusRaw;
+    }
+    if (whatsappRaw) {
+      body.whatsappGroupLink = whatsappRaw;
+    } else {
+      body.whatsappGroupLink = null;
+    }
+    const res = await apiRequest<unknown>('/trpc/logistics.updateLocation', {
+      method: 'POST',
+      cookie,
+      body,
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update location') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   if (intent === 'importProvider') {
     // Per-row submit from /admin/logistics/partners/import-providers. Each
     // row is one POST that calls `logistics.createProvider` so the same

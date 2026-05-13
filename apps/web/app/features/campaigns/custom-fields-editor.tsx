@@ -69,17 +69,6 @@ export function CustomFieldsEditor({ fields, onFieldsChange, footnote }: CustomF
     if (editingFieldId === id) setEditingFieldId(null);
   }
 
-  function handleReorder(fromId: string, toIndex: number) {
-    const fromIndex = fields.findIndex((f) => f.id === fromId);
-    if (fromIndex === -1 || fromIndex === toIndex) return;
-    const next = [...fields];
-    const [moved] = next.splice(fromIndex, 1);
-    if (!moved) return;
-    const insertAt = fromIndex < toIndex ? toIndex - 1 : toIndex;
-    next.splice(insertAt, 0, moved);
-    onFieldsChange(next.map((f, i) => ({ ...f, order: i })));
-  }
-
   return (
     <>
       <div className="space-y-3">
@@ -105,10 +94,8 @@ export function CustomFieldsEditor({ fields, onFieldsChange, footnote }: CustomF
                 <FieldRow
                   key={field.id}
                   field={field}
-                  index={index}
                   onEdit={() => setEditingFieldId(field.id)}
                   onDelete={() => handleDeleteField(field.id)}
-                  onReorder={handleReorder}
                   onUpdateRequired={(id, required) => handleUpdateField(id, { required })}
                 />
               ))}
@@ -171,54 +158,22 @@ export function CustomFieldsEditor({ fields, onFieldsChange, footnote }: CustomF
 
 function FieldRow({
   field,
-  index,
   onEdit,
   onDelete,
-  onReorder,
   onUpdateRequired,
 }: {
   field: CustomFormField;
-  index: number;
   onEdit: () => void;
   onDelete: () => void;
-  onReorder: (fromId: string, toIndex: number) => void;
   onUpdateRequired: (id: string, required: boolean) => void;
 }) {
-  const [isDragOver, setIsDragOver] = useState(false);
-
   return (
     <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('text/yannis-field-id', field.id);
-        e.dataTransfer.effectAllowed = 'move';
-      }}
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('text/yannis-field-id')) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          setIsDragOver(true);
-        }
-      }}
-      onDragLeave={() => setIsDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragOver(false);
-        const draggedId = e.dataTransfer.getData('text/yannis-field-id');
-        if (draggedId && draggedId !== field.id) {
-          onReorder(draggedId, index);
-        }
-      }}
       className={[
         'group flex items-center gap-2 rounded-lg border bg-app-elevated p-3 transition-colors',
-        isDragOver
-          ? 'border-brand-500 ring-2 ring-brand-200 dark:ring-brand-800'
-          : 'border-app-border hover:border-app-border-strong',
+        'border-app-border hover:border-app-border-strong',
       ].join(' ')}
     >
-      <span className="cursor-grab active:cursor-grabbing text-app-fg-muted shrink-0" title="Drag to reorder" aria-hidden>
-        ⋮⋮
-      </span>
       <span className="w-7 h-7 inline-flex items-center justify-center rounded bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 text-sm font-mono shrink-0">
         {FIELD_TYPE_META[field.type].icon}
       </span>

@@ -1,3 +1,5 @@
+import { useCallback, useMemo } from 'react';
+import { useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -6,14 +8,16 @@ import {
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
+import { FilterPills } from '~/components/ui/filter-pills';
+import { FormSelect } from '~/components/ui/form-select';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { SearchInput } from '~/components/ui/search-input';
 import { Tabs } from '~/components/ui/tabs';
+import { TextInput } from '~/components/ui/text-input';
 import type { TransfersShellDateFilters } from '~/lib/transfers-shell-filters';
-
-const LOGISTICS_ORDER_SHELL_ROWS = 8;
 
 export function logisticsOrdersShellColumns(): CompactTableColumn<{ id: string }>[] {
   return [
@@ -227,71 +231,6 @@ function TransfersStockFilterControlShell({
   );
 }
 
-/** Logistics orders list — date strip + stat/table pulse. */
-export function LogisticsOrdersLoadingShell({
-  filters,
-}: {
-  filters: { startDate: string; endDate: string; periodAllTime: boolean };
-}) {
-  const rows = shellPulsePlaceholderRows('log_orders', LOGISTICS_ORDER_SHELL_ROWS);
-  return (
-    <div className="space-y-4" aria-busy="true" aria-live="polite">
-      <PageHeader
-        title="Logistics orders"
-        mobileInlineActions
-        description="Track confirmed and in-flight orders."
-        actions={
-          <PageHeaderMobileTools
-            sheetTitle="Logistics orders tools"
-            sheetSubtitle={<span>Date range</span>}
-            triggerAriaLabel="Logistics orders toolbar"
-            desktop={
-              <>
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
-                <PageRefreshButton />
-              </>
-            }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
-          />
-        }
-      />
-      <OverviewStatStrip
-        items={[
-          { label: 'Total Orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Awaiting logistics assignment', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'Agent assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'Dispatched', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
-        ]}
-      />
-      <div className="h-10 w-full max-w-md rounded-lg border border-app-border bg-app-hover animate-pulse" aria-hidden />
-      <CompactTable<{ id: string }>
-        columns={logisticsOrdersShellColumns()}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
-    </div>
-  );
-}
-
 /** Logistics companies + locations hub. */
 export function LogisticsPartnersLoadingShell() {
   return (
@@ -345,13 +284,72 @@ export function LogisticsPartnersLoadingShell() {
   );
 }
 
-/** Stock transfer confirmations / remittances. */
+/** Stock transfer confirmations — URL-driven date + status pills + filter row; table pulse. */
 export function LogisticsRemittancesLoadingShell() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const rows = shellPulsePlaceholderRows('log_remit', 6);
+
+  const periodAllTime = searchParams.get('period') === 'all_time';
+  const startDate = searchParams.get('startDate') ?? '';
+  const endDate = searchParams.get('endDate') ?? '';
+  const rawStatus = searchParams.get('status') ?? '';
+  const statusValue = ['IN_TRANSIT', 'RECEIVED', 'DISPUTED'].includes(rawStatus) ? rawStatus : '';
+  const locationId = searchParams.get('locationId') ?? '';
+  const search = searchParams.get('search') ?? '';
+  const sender = searchParams.get('sender') ?? '';
+  const minQty = searchParams.get('minQty') ?? '';
+  const maxQty = searchParams.get('maxQty') ?? '';
+
+  const setFilterParam = useCallback(
+    (key: string, value: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (value.trim().length === 0) next.delete(key);
+      else next.set(key, value);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
+
+  const clearAllFilters = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('status');
+    next.delete('locationId');
+    next.delete('search');
+    next.delete('sender');
+    next.delete('minQty');
+    next.delete('maxQty');
+    next.delete('startDate');
+    next.delete('endDate');
+    next.delete('period');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const statusPillOptions = useMemo(
+    () => [
+      { value: '', label: 'All' },
+      { value: 'IN_TRANSIT', label: 'Pending', dotColor: 'bg-warning-500' },
+      { value: 'RECEIVED', label: 'Received', dotColor: 'bg-success-500' },
+      { value: 'DISPUTED', label: 'Disputed', dotColor: 'bg-danger-500' },
+    ],
+    [],
+  );
+
+  const locationOptions = useMemo(() => {
+    const base = [{ value: '', label: 'All locations' }];
+    if (locationId) base.push({ value: locationId, label: 'Selected location' });
+    return base;
+  }, [locationId]);
+
+  const senderOptions = useMemo(() => {
+    const base = [{ value: '', label: 'All senders' }];
+    if (sender) base.push({ value: sender, label: sender });
+    return base;
+  }, [sender]);
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title="Stock transfer confirmations"
+        title="Stock Transfer Confirmations"
         mobileInlineActions
         description="Confirm incoming stock transfers."
         actions={
@@ -361,14 +359,92 @@ export function LogisticsRemittancesLoadingShell() {
             triggerAriaLabel="Transfer confirmation toolbar"
             desktop={
               <div className="flex items-center gap-2">
-                <div className="h-8 w-40 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+                <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} />
+                </div>
                 <PageRefreshButton />
               </div>
             }
-            sheet={<div className="h-10 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />}
+            sheet={
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={startDate}
+                  endDate={endDate}
+                  periodAllTime={periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            }
           />
         }
       />
+      <OverviewStatStrip
+        items={[
+          { label: 'Total transfers', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Pending', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Received', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Disputed', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Qty sent', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Qty received', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+        ]}
+      />
+
+      <div className="card space-y-3 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterPills
+            options={statusPillOptions}
+            value={statusValue}
+            onChange={(v) => setFilterParam('status', v)}
+            size="sm"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchInput
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-64"
+            placeholder="Search by ID or product"
+            value={search}
+            onChange={(value) => setFilterParam('search', value)}
+            debounceMs={250}
+          />
+          <FormSelect
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-52"
+            value={locationId}
+            onChange={(e) => setFilterParam('locationId', e.target.value)}
+            options={locationOptions}
+          />
+          <FormSelect
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-48"
+            value={sender}
+            onChange={(e) => setFilterParam('sender', e.target.value)}
+            options={senderOptions}
+          />
+          <TextInput
+            type="number"
+            min={0}
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-28"
+            placeholder="Min qty"
+            value={minQty}
+            onChange={(e) => setFilterParam('minQty', e.target.value)}
+          />
+          <TextInput
+            type="number"
+            min={0}
+            controlSize="sm"
+            wrapperClassName="w-full sm:w-28"
+            placeholder="Max qty"
+            value={maxQty}
+            onChange={(e) => setFilterParam('maxQty', e.target.value)}
+          />
+          <Button type="button" variant="secondary" size="sm" onClick={clearAllFilters}>
+            Clear all filters
+          </Button>
+        </div>
+      </div>
+
       <CompactTable<{ id: string }>
         columns={LOGISTICS_REMITTANCES_SHELL_COLS}
         rows={rows}

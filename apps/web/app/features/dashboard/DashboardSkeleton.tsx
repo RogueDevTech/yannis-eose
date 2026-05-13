@@ -165,7 +165,7 @@ export function DashboardSkeleton() {
         <div className="h-9 w-44 rounded-lg bg-app-hover animate-pulse shrink-0" />
       </div>
 
-      <OverviewStatStripSkeleton count={4} />
+      <OverviewStatStripSkeleton count={7} />
 
       {/* Content cards placeholder */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

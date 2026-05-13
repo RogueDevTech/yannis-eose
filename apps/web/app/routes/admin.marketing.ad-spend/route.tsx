@@ -5,6 +5,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
+import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
 import { MarketingAdSpendPage } from '~/features/marketing/MarketingAdSpendPage';
 import { MarketingAdSpendLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { AdSpendStatusCounts, AdSpendStatusFilter, Campaign, MarketingAdSpendLoaderData } from '~/features/marketing/types';
@@ -112,21 +113,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canApproveAdSpend,
   };
 
-  const pageData = (async (): Promise<MarketingAdSpendLoaderData> => {
-  const adSpendRes = await apiRequest<unknown>(
-    `/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`,
-    { method: 'GET', cookie },
-  );
-
-  const adSpendData = parseAdSpend(adSpendRes);
-  const totalRows = adSpendData?.pagination?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalRows / AD_SPEND_PER_PAGE));
-
-  const adSpendPicklists = (async (): Promise<{
-    statusCounts: AdSpendStatusCounts;
-    campaigns: Campaign[];
-    mediaBuyersForFilter: Array<{ id: string; name: string }>;
-  }> => {
+  const picklistsPromise = (async (): Promise<AdSpendPicklists> => {
     try {
       // One request collapses the previous 3 (statusCounts + listCampaigns +
       // users.list[MEDIA_BUYER]) — same fan-out runs server-side in parallel.
@@ -135,11 +122,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { method: 'GET', cookie },
       );
       if (!bundleRes.ok) {
-        return {
-          statusCounts: { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
-          campaigns: [],
-          mediaBuyersForFilter: [],
-        };
+        return AD_SPEND_PICKLISTS_FALLBACK;
       }
       const data = (
         bundleRes.data as {
@@ -153,18 +136,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }
       )?.result?.data;
       return {
-        statusCounts: data?.adSpendStatusCounts ?? { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
+        statusCounts: data?.adSpendStatusCounts ?? AD_SPEND_PICKLISTS_FALLBACK.statusCounts,
         campaigns: data?.campaigns ?? [],
         mediaBuyersForFilter: data?.mediaBuyersForFilter ?? [],
       };
     } catch {
-      return {
-        statusCounts: { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 },
-        campaigns: [],
-        mediaBuyersForFilter: [],
-      };
+      return AD_SPEND_PICKLISTS_FALLBACK;
     }
   })();
+
+  const pageData = (async (): Promise<MarketingAdSpendLoaderData> => {
+  const adSpendRes = await apiRequest<unknown>(
+    `/trpc/marketing.listAdSpend?input=${encodeURIComponent(adSpendInput)}`,
+    { method: 'GET', cookie },
+  );
+
+  const adSpendData = parseAdSpend(adSpendRes);
+  const totalRows = adSpendData?.pagination?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalRows / AD_SPEND_PER_PAGE));
 
   const data: MarketingAdSpendLoaderData = {
     viewMode: isMediaBuyer ? 'media_buyer' : 'admin',
@@ -190,7 +179,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     groupsTotal: 0,
     groupsPage: groupsPage,
     groupsTotalPages: 1,
-    adSpendPicklists,
   };
 
   return data;
@@ -199,6 +187,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({
     adSpendShell,
     pageData,
+    picklistsPromise,
   } as unknown as Record<string, unknown>);
 }
 
@@ -228,6 +217,10 @@ type AdSpendPicklists = Pick<
   'statusCounts' | 'campaigns' | 'mediaBuyersForFilter'
 >;
 
+function isResolvedPicklists(v: AdSpendPicklists | Promise<AdSpendPicklists>): v is AdSpendPicklists {
+  return typeof v === 'object' && v != null && !('then' in (v as object));
+}
+
 /**
  * Bridges the picklists promise into local state instead of resolving it via
  * a Suspense boundary. The previous Suspense+Await pattern rendered
@@ -245,11 +238,17 @@ function AdSpendWithPicklists({
   sync,
   picklistsPromise,
 }: {
-  sync: Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
-  picklistsPromise: Promise<AdSpendPicklists>;
+  sync: MarketingAdSpendLoaderData;
+  picklistsPromise: Promise<AdSpendPicklists> | AdSpendPicklists;
 }) {
-  const [picklists, setPicklists] = useState<AdSpendPicklists | null>(null);
+  const [picklists, setPicklists] = useState<AdSpendPicklists | null>(
+    isResolvedPicklists(picklistsPromise) ? picklistsPromise : null,
+  );
   useEffect(() => {
+    if (isResolvedPicklists(picklistsPromise)) {
+      setPicklists(picklistsPromise);
+      return;
+    }
     let cancelled = false;
     Promise.resolve(picklistsPromise)
       .then((p) => {
@@ -270,28 +269,26 @@ function AdSpendWithPicklists({
 }
 
 export default function AdminMarketingAdSpendRoute() {
-  const { adSpendShell, pageData } = useLoaderData<typeof loader>() as unknown as {
+  const { adSpendShell, pageData, picklistsPromise } = useLoaderData<typeof loader>() as unknown as {
     adSpendShell: {
       filters: MarketingAdSpendLoaderData['filters'];
       viewMode: MarketingAdSpendLoaderData['viewMode'];
       canApproveAdSpend: boolean;
     };
     pageData: Promise<MarketingAdSpendLoaderData>;
+    picklistsPromise: Promise<AdSpendPicklists> | AdSpendPicklists;
   };
+  useMultiDeferredCacheSync({
+    shell: { adSpendShell },
+    deferred: { pageData, picklistsPromise },
+  });
   return (
     <CachedAwait
       resolve={pageData}
       fallback={<MarketingAdSpendLoadingShell {...adSpendShell} />}
-      loaderShell={{ adSpendShell }}
-      deferredKey="pageData"
     >
       {(data) => {
-        if (data.adSpendPicklists) {
-          const { adSpendPicklists, ...rest } = data;
-          const sync = rest as Omit<MarketingAdSpendLoaderData, 'adSpendPicklists'>;
-          return <AdSpendWithPicklists sync={sync} picklistsPromise={adSpendPicklists} />;
-        }
-        return <MarketingAdSpendPage {...data} />;
+        return <AdSpendWithPicklists sync={data} picklistsPromise={picklistsPromise} />;
       }}
     </CachedAwait>
   );

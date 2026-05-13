@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -17,6 +19,11 @@ import { Tabs } from '~/components/ui/tabs';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { DescriptionList } from '~/components/ui/description-list';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
+import { SearchableSelect } from '~/components/ui/searchable-select';
+import { SortMenu } from '~/components/ui/sort-menu';
+import { TextInput } from '~/components/ui/text-input';
 
 const SHELL_PAGINATION_FOOTER = (
   <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -207,9 +214,126 @@ const CATEGORIES_SHELL_COLS: CompactTableColumn<{ id: string }>[] = [
   },
 ];
 
-/** Main inventory hub — stock levels plus summary stats and compact table pulse. */
+/** Main inventory hub — URL-driven stock-level filters; stats + table pulse. */
 export function InventoryOverviewLoadingShell() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const levelRows = shellPulsePlaceholderRows('inv_levels', 8);
+
+  const rawProduct = searchParams.get('productId') ?? '';
+  const rawLocation = searchParams.get('locationId') ?? '';
+  const rawShipment = searchParams.get('shipmentId') ?? '';
+  const serverSearch = (searchParams.get('search') ?? '').trim();
+  const legacySort = searchParams.get('sort') ?? '';
+  const rawSortBy = searchParams.get('sortBy') ?? '';
+  const rawSortDir = searchParams.get('sortDir') ?? '';
+
+  const serverSortBy: 'available' | 'updatedAt' = useMemo(() => {
+    if (rawSortBy === 'available' || rawSortBy === 'updatedAt') return rawSortBy;
+    if (legacySort === 'lowestAvailable' || legacySort === 'highestAvailable') return 'available';
+    return 'updatedAt';
+  }, [rawSortBy, legacySort]);
+
+  const serverSortDir: 'asc' | 'desc' = useMemo(() => {
+    if (rawSortDir === 'asc' || rawSortDir === 'desc') return rawSortDir;
+    if (legacySort === 'lowestAvailable') return 'asc';
+    if (legacySort === 'highestAvailable') return 'desc';
+    return 'desc';
+  }, [rawSortDir, legacySort]);
+
+  const currentProduct = rawProduct || 'ALL';
+  const currentLocation = rawLocation || 'ALL';
+  const currentShipment = rawShipment || 'ALL';
+
+  const [searchInput, setSearchInput] = useState(serverSearch);
+  useEffect(() => {
+    setSearchInput(serverSearch);
+  }, [serverSearch]);
+
+  const updateLevelsParam = useCallback(
+    (key: 'productId' | 'locationId' | 'shipmentId' | 'sort' | 'search', value: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (!value || value === 'ALL' || value === 'default') next.delete(key);
+        else next.set(key, value);
+        next.delete('page');
+        return next;
+      }, { preventScrollReset: true });
+    },
+    [setSearchParams],
+  );
+
+  const updateLevelsSort = useCallback(
+    (sortBy: 'available' | 'updatedAt', sortDir: 'asc' | 'desc') => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        const isDefault = sortBy === 'updatedAt' && sortDir === 'desc';
+        if (isDefault) {
+          next.delete('sortBy');
+          next.delete('sortDir');
+          next.delete('sort');
+        } else {
+          next.set('sortBy', sortBy);
+          next.set('sortDir', sortDir);
+          next.delete('sort');
+        }
+        next.delete('page');
+        return next;
+      }, { preventScrollReset: true });
+    },
+    [setSearchParams],
+  );
+
+  const resetLevelsFilters = useCallback(() => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('productId');
+      next.delete('locationId');
+      next.delete('shipmentId');
+      next.delete('sort');
+      next.delete('sortBy');
+      next.delete('sortDir');
+      next.delete('search');
+      next.delete('page');
+      return next;
+    }, { preventScrollReset: true });
+  }, [setSearchParams]);
+
+  const submitSearch = useCallback(
+    (next: string) => {
+      const trimmed = next.trim();
+      if (trimmed === serverSearch) return;
+      updateLevelsParam('search', trimmed);
+    },
+    [serverSearch, updateLevelsParam],
+  );
+
+  const productOptions = useMemo(() => {
+    const base = [{ value: 'ALL', label: 'All products' }];
+    if (currentProduct !== 'ALL') base.push({ value: currentProduct, label: 'Selected product' });
+    return base;
+  }, [currentProduct]);
+
+  const locationOptions = useMemo(() => {
+    const base = [{ value: 'ALL', label: 'All locations' }];
+    if (currentLocation !== 'ALL') base.push({ value: currentLocation, label: 'Selected location' });
+    return base;
+  }, [currentLocation]);
+
+  const shipmentOptions = useMemo(() => {
+    const base = [{ value: 'ALL', label: 'All shipments' }];
+    if (currentShipment !== 'ALL') base.push({ value: currentShipment, label: 'Selected shipment' });
+    return base;
+  }, [currentShipment]);
+
+  const hasActiveFilters =
+    currentProduct !== 'ALL' ||
+    currentLocation !== 'ALL' ||
+    currentShipment !== 'ALL' ||
+    legacySort !== '' ||
+    serverSortBy !== 'updatedAt' ||
+    serverSortDir !== 'desc' ||
+    serverSearch.length > 0;
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -251,6 +375,88 @@ export function InventoryOverviewLoadingShell() {
           { label: 'Movements', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <SearchableSelect
+          id="levels-product-filter-shell"
+          value={currentProduct}
+          onChange={(v) => updateLevelsParam('productId', v)}
+          wrapperClassName="w-full sm:w-48"
+          placeholder="All products"
+          searchPlaceholder="Search products…"
+          options={productOptions}
+        />
+        <SearchableSelect
+          id="levels-location-filter-shell"
+          value={currentLocation}
+          onChange={(v) => updateLevelsParam('locationId', v)}
+          wrapperClassName="w-full min-w-0 sm:w-48"
+          placeholder="All locations"
+          searchPlaceholder="Search locations…"
+          options={locationOptions}
+        />
+        <SearchableSelect
+          id="levels-shipment-filter-shell"
+          value={currentShipment}
+          onChange={(v) => updateLevelsParam('shipmentId', v)}
+          wrapperClassName="w-full min-w-0 sm:w-52"
+          placeholder="All shipments"
+          searchPlaceholder="Search SHIP ref…"
+          options={shipmentOptions}
+        />
+        <form
+          method="get"
+          className="flex-1 min-w-0"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitSearch(searchInput);
+          }}
+        >
+          <SearchInput
+            name="search"
+            placeholder="Search by product name…"
+            value={searchInput}
+            onChange={(val) => {
+              setSearchInput(val);
+              if (val === '') submitSearch('');
+            }}
+            wrapperClassName="w-full"
+          />
+        </form>
+        <SortMenu
+          value={{ sortBy: serverSortBy, sortDir: serverSortDir }}
+          onChange={(next) => updateLevelsSort(next.sortBy as 'available' | 'updatedAt', next.sortDir)}
+          defaultValue={{ sortBy: 'updatedAt', sortDir: 'desc' }}
+          options={[
+            {
+              value: 'updatedAt',
+              label: 'Last updated',
+              description: 'Most recently changed inventory rows.',
+              ascLabel: 'Oldest first',
+              descLabel: 'Newest first',
+              defaultDir: 'desc',
+            },
+            {
+              value: 'available',
+              label: 'Available units',
+              description: 'Stock count minus units reserved on open orders.',
+              ascLabel: 'Lowest first',
+              descLabel: 'Highest first',
+              defaultDir: 'desc',
+            },
+          ]}
+        />
+        {hasActiveFilters ? (
+          <button
+            type="button"
+            onClick={resetLevelsFilters}
+            className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
+          >
+            Reset
+          </button>
+        ) : null}
+      </div>
+
       <div className="card p-0 overflow-hidden">
         <CompactTable<{ id: string }>
           withCard={false}
@@ -376,9 +582,36 @@ export function WarehouseShipmentsLoadingShell() {
   );
 }
 
-/** Global standalone shipments list. */
+const SHIPMENT_STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'All statuses' },
+  { value: 'CREATED', label: 'Created' },
+  { value: 'IN_TRANSIT', label: 'In transit' },
+  { value: 'ARRIVED', label: 'Arrived' },
+  { value: 'VERIFIED', label: 'Verified' },
+  { value: 'CLOSED', label: 'Closed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+];
+
+/** Global standalone shipments list — GET filter form from URL; stats pulse; table pulse. */
 export function ShipmentsListLoadingShell() {
+  const [searchParams] = useSearchParams();
   const rows = shellPulsePlaceholderRows('ship_list', 8);
+
+  const rawStatus = (searchParams.get('status') ?? '').trim();
+  const status = SHIPMENT_STATUS_FILTER_OPTIONS.some((o) => o.value === rawStatus) ? rawStatus : '';
+  const search = (searchParams.get('search') ?? '').trim();
+  const destinationLocationId = (searchParams.get('destinationLocationId') ?? '').trim();
+  const fromDate = (searchParams.get('fromDate') ?? '').trim();
+  const toDate = (searchParams.get('toDate') ?? '').trim();
+
+  const hasActiveFilters =
+    status !== '' || search !== '' || destinationLocationId !== '' || fromDate !== '' || toDate !== '';
+
+  const warehouseOptions = [{ value: '', label: 'All warehouses' }];
+  if (destinationLocationId) {
+    warehouseOptions.push({ value: destinationLocationId, label: 'Selected warehouse' });
+  }
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -393,13 +626,77 @@ export function ShipmentsListLoadingShell() {
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
-                <span className="h-8 w-28 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
+                <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm">
+                  View inventory
+                </Link>
               </div>
             }
-            sheet={<span className="h-9 w-full animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />}
+            sheet={
+              <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
+                View inventory
+              </Link>
+            }
           />
         }
       />
+
+      <OverviewStatStrip
+        items={[
+          { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Created', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Arrived', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Verified', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Closed', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Cancelled', value: <StatValuePulse className="min-w-[2rem]" /> },
+        ]}
+      />
+
+      <div className="card p-4 space-y-3">
+        <form method="get" className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <FormSelect
+              label="Status"
+              name="status"
+              defaultValue={status}
+              wrapperClassName="w-full sm:w-48"
+              options={SHIPMENT_STATUS_FILTER_OPTIONS}
+            />
+            <FormSelect
+              label="Warehouse"
+              name="destinationLocationId"
+              defaultValue={destinationLocationId}
+              wrapperClassName="w-full sm:w-56"
+              options={warehouseOptions}
+            />
+            <div className="w-full sm:w-40">
+              <TextInput label="From" type="date" name="fromDate" defaultValue={fromDate} />
+            </div>
+            <div className="w-full sm:w-40">
+              <TextInput label="To" type="date" name="toDate" defaultValue={toDate} />
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <SearchInput
+              name="search"
+              defaultValue={search}
+              placeholder="Search label, supplier, or supplier ref…"
+              wrapperClassName="w-full"
+            />
+            <div className="flex shrink-0 items-center gap-2">
+              <button type="submit" className="btn-primary btn-sm">
+                Apply filters
+              </button>
+              {hasActiveFilters ? (
+                <Link to="/admin/shipments" prefetch="intent" className="btn-ghost btn-sm">
+                  Reset
+                </Link>
+              ) : null}
+            </div>
+          </div>
+        </form>
+      </div>
+
       <CompactTable<{ id: string }>
         columns={SHIPMENTS_SHELL_COLS}
         rows={rows}
@@ -638,9 +935,26 @@ export function ShipmentDetailLoadingShell() {
   );
 }
 
-/** Product categories. */
+/** Product categories — URL search + stats pulse; table pulse. */
 export function CategoriesLoadingShell() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const rows = shellPulsePlaceholderRows('categories', 8);
+  const search = searchParams.get('search') ?? '';
+  const [draft, setDraft] = useState(search);
+
+  useEffect(() => {
+    setDraft(search);
+  }, [search]);
+
+  const applySearch = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (draft.trim()) next.set('search', draft.trim());
+      else next.delete('search');
+      return next;
+    }, { replace: true });
+  };
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -664,6 +978,29 @@ export function CategoriesLoadingShell() {
           />
         }
       />
+
+      <OverviewStatStrip
+        showScrollControls={false}
+        items={[
+          { label: 'Total Categories', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Active', value: <StatValuePulse className="min-w-[2rem]" /> },
+        ]}
+      />
+
+      <div className="card">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <SearchInput
+            value={draft}
+            onChange={setDraft}
+            placeholder="Search categories or brand names…"
+            wrapperClassName="min-w-0 flex-1"
+          />
+          <Button type="button" variant="secondary" size="sm" className="shrink-0" onClick={() => applySearch()}>
+            Search
+          </Button>
+        </div>
+      </div>
+
       <CompactTable<{ id: string }>
         columns={CATEGORIES_SHELL_COLS}
         rows={rows}

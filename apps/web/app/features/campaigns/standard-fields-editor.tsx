@@ -1,11 +1,16 @@
+import { useMemo, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Textarea } from '~/components/ui/textarea';
 import { ChipInput } from '~/components/ui/chip-input';
+import { Modal } from '~/components/ui/modal';
+import { TextInput } from '~/components/ui/text-input';
 import type { StandardFieldConfig, StandardFieldKey } from './types';
 import {
   ADDITIONAL_FIELD_OPTION_KEYS,
   type AdditionalFieldSelectOptionsState,
+  getDefaultStandardFieldLabel,
+  getStandardFieldLabel,
   joinOptionLines,
   parseOptionLines,
   STANDARD_FIELD_LABELS,
@@ -25,74 +30,26 @@ export function StandardFieldsEditor({
   selectOptions,
   onSelectOptionsChange,
 }: StandardFieldsEditorProps) {
+  const [editingFieldKey, setEditingFieldKey] = useState<StandardFieldKey | null>(null);
   const selected = new Set(fields.map((f) => f.key));
   const remaining = STANDARD_FIELD_ORDER.filter((key) => !selected.has(key));
+  const editingField = editingFieldKey ? fields.find((field) => field.key === editingFieldKey) ?? null : null;
 
   function addField(key: StandardFieldKey) {
-    onFieldsChange([...fields, { key, required: false }]);
+    onFieldsChange([...fields, { key, label: getDefaultStandardFieldLabel(key), required: false }]);
   }
 
   function removeField(key: StandardFieldKey) {
     onFieldsChange(fields.filter((f) => f.key !== key));
+    if (editingFieldKey === key) setEditingFieldKey(null);
   }
 
-  function updateRequired(key: StandardFieldKey, required: boolean) {
-    onFieldsChange(fields.map((f) => (f.key === key ? { ...f, required } : f)));
+  function updateField(key: StandardFieldKey, patch: Partial<StandardFieldConfig>) {
+    onFieldsChange(fields.map((f) => (f.key === key ? { ...f, ...patch } : f)));
   }
 
   function patchSelectOptions(patch: Partial<AdditionalFieldSelectOptionsState>) {
     onSelectOptionsChange({ ...selectOptions, ...patch });
-  }
-
-  function optionBlock(key: StandardFieldKey) {
-    if (!(ADDITIONAL_FIELD_OPTION_KEYS as readonly StandardFieldKey[]).includes(key)) return null;
-
-    if (key === 'deliveryState') {
-      return (
-        <div className="mt-2 pt-2 border-t border-app-border">
-          <label className="block text-xs font-medium text-app-fg-muted mb-1">Delivery state options</label>
-          <Textarea
-            rows={5}
-            value={joinOptionLines(selectOptions.deliveryStateOptions)}
-            onChange={(e) => patchSelectOptions({ deliveryStateOptions: parseOptionLines(e.target.value) })}
-            className="textarea textarea-bordered text-sm font-mono"
-            placeholder="One option per line"
-          />
-          <p className="text-[11px] text-app-fg-muted mt-1">
-            One per line. Starts from the default Nigerian states list; clear all and save to use that default on the live
-            form.
-          </p>
-        </div>
-      );
-    }
-    if (key === 'preferredDeliveryDate') {
-      return (
-        <div className="mt-2 pt-2 border-t border-app-border">
-          <ChipInput
-            label="Preferred delivery date options"
-            value={selectOptions.preferredDeliveryDateOptions}
-            onChange={(next) => patchSelectOptions({ preferredDeliveryDateOptions: next })}
-            placeholder="Type an option and press Enter…"
-            hint="Press Enter to add. Backspace on empty input removes the last chip. Clear all and save to use the default timing choices on the live form."
-          />
-        </div>
-      );
-    }
-    return (
-      <div className="mt-2 pt-2 border-t border-app-border">
-        <label className="block text-xs font-medium text-app-fg-muted mb-1">Gender options</label>
-        <Textarea
-          rows={3}
-          value={joinOptionLines(selectOptions.genderOptions)}
-          onChange={(e) => patchSelectOptions({ genderOptions: parseOptionLines(e.target.value) })}
-          className="textarea textarea-bordered text-sm font-mono"
-          placeholder="One option per line"
-        />
-        <p className="text-[11px] text-app-fg-muted mt-1">
-          One per line. Clear all and save to use Male / Female on the live form.
-        </p>
-      </div>
-    );
   }
 
   return (
@@ -128,32 +85,46 @@ export function StandardFieldsEditor({
                 key={field.key}
                 className="group rounded-lg border bg-app-elevated p-3 border-app-border hover:border-app-border-strong transition-colors"
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-start gap-2">
                   <span className="w-7 h-7 inline-flex items-center justify-center rounded bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 text-sm font-mono shrink-0">
                     •
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-app-fg truncate">
-                      {STANDARD_FIELD_LABELS[field.key]}
-                      {field.required && <span className="text-danger-500 ml-1">*</span>}
+                      {getStandardFieldLabel(field)}
                     </p>
-                    <p className="text-xs text-app-fg-muted">Additional field</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-app-fg-muted">
+                      <span>{STANDARD_FIELD_LABELS[field.key]}</span>
+                      {field.required ? (
+                        <span className="rounded-full bg-danger-50 px-2 py-0.5 text-danger-700 dark:bg-danger-900/20 dark:text-danger-300">
+                          Required
+                        </span>
+                      ) : null}
+                      {getStandardFieldLabel(field) !== getDefaultStandardFieldLabel(field.key) ? (
+                        <span className="rounded-full bg-brand-50 px-2 py-0.5 text-brand-700 dark:bg-brand-900/20 dark:text-brand-300">
+                          Label edited
+                        </span>
+                      ) : null}
+                      {(ADDITIONAL_FIELD_OPTION_KEYS as readonly StandardFieldKey[]).includes(field.key) ? (
+                        <span className="rounded-full bg-app-canvas px-2 py-0.5">Options editable</span>
+                      ) : null}
+                    </div>
                   </div>
-                  <label className="flex items-center gap-1.5 shrink-0 text-app-fg-muted" title="Require this field on the public form">
-                    <Checkbox checked={field.required} onChange={(e) => updateRequired(field.key, e.target.checked)} />
-                    <span className="text-xs">Required</span>
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs text-danger-600 hover:text-danger-700"
-                    onClick={() => removeField(field.key)}
-                  >
-                    Remove
-                  </Button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button type="button" variant="secondary" size="sm" className="text-xs" onClick={() => setEditingFieldKey(field.key)}>
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-danger-600 hover:text-danger-700"
+                      onClick={() => removeField(field.key)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
                 </div>
-                {optionBlock(field.key)}
               </div>
             ))}
 
@@ -172,6 +143,135 @@ export function StandardFieldsEditor({
           </div>
         )}
       </div>
+
+      {editingField ? (
+        <StandardFieldEditorModal
+          field={editingField}
+          selectOptions={selectOptions}
+          onClose={() => setEditingFieldKey(null)}
+          onSave={({ fieldPatch, selectOptionsPatch }) => {
+            updateField(editingField.key, fieldPatch);
+            if (selectOptionsPatch) patchSelectOptions(selectOptionsPatch);
+            setEditingFieldKey(null);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function StandardFieldEditorModal({
+  field,
+  selectOptions,
+  onClose,
+  onSave,
+}: {
+  field: StandardFieldConfig;
+  selectOptions: AdditionalFieldSelectOptionsState;
+  onClose: () => void;
+  onSave: (payload: {
+    fieldPatch: Pick<StandardFieldConfig, 'label' | 'required'>;
+    selectOptionsPatch?: Partial<AdditionalFieldSelectOptionsState>;
+  }) => void;
+}) {
+  const [label, setLabel] = useState(getStandardFieldLabel(field));
+  const [required, setRequired] = useState(field.required);
+  const [deliveryStateOptions, setDeliveryStateOptions] = useState(joinOptionLines(selectOptions.deliveryStateOptions));
+  const [preferredDeliveryDateOptions, setPreferredDeliveryDateOptions] = useState(selectOptions.preferredDeliveryDateOptions);
+  const [genderOptions, setGenderOptions] = useState(joinOptionLines(selectOptions.genderOptions));
+
+  const supportsOptions = (ADDITIONAL_FIELD_OPTION_KEYS as readonly StandardFieldKey[]).includes(field.key);
+  const trimmedLabel = label.trim();
+  const labelError = trimmedLabel.length === 0 ? 'Label is required' : undefined;
+
+  const selectOptionsPatch = useMemo<Partial<AdditionalFieldSelectOptionsState> | undefined>(() => {
+    if (!supportsOptions) return undefined;
+    if (field.key === 'deliveryState') {
+      return { deliveryStateOptions: parseOptionLines(deliveryStateOptions) };
+    }
+    if (field.key === 'preferredDeliveryDate') {
+      return { preferredDeliveryDateOptions };
+    }
+    return { genderOptions: parseOptionLines(genderOptions) };
+  }, [deliveryStateOptions, field.key, genderOptions, preferredDeliveryDateOptions, supportsOptions]);
+
+  return (
+    <Modal open onClose={onClose} maxWidth="max-w-lg" contentClassName="p-6 space-y-4 bg-app-elevated">
+      <div>
+        <h3 className="text-lg font-semibold text-app-fg">Edit additional field</h3>
+        <p className="text-xs text-app-fg-muted mt-0.5">Update the label, requirement, and options for this built-in field.</p>
+      </div>
+
+      <TextInput
+        label="Field label"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        maxLength={120}
+        required
+        error={labelError}
+        placeholder={getDefaultStandardFieldLabel(field.key)}
+      />
+
+      <div className="rounded-lg border border-app-border bg-app-canvas px-3 py-2 text-xs text-app-fg-muted">
+        Built-in field: <span className="font-medium text-app-fg">{STANDARD_FIELD_LABELS[field.key]}</span>
+      </div>
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <Checkbox checked={required} onChange={(e) => setRequired(e.target.checked)} />
+        <span className="text-sm text-app-fg">Required on the public form</span>
+      </label>
+
+      {supportsOptions ? (
+        field.key === 'deliveryState' ? (
+          <Textarea
+            label="Delivery state options"
+            rows={5}
+            value={deliveryStateOptions}
+            onChange={(e) => setDeliveryStateOptions(e.target.value)}
+            className="font-mono"
+            placeholder="One option per line"
+            hint="One per line. Clear all and save to use the default Nigerian states list."
+          />
+        ) : field.key === 'preferredDeliveryDate' ? (
+          <ChipInput
+            label="Preferred delivery date options"
+            value={preferredDeliveryDateOptions}
+            onChange={setPreferredDeliveryDateOptions}
+            placeholder="Type an option and press Enter…"
+            hint="Press Enter to add. Clear all and save to use the default timing choices."
+          />
+        ) : (
+          <Textarea
+            label="Gender options"
+            rows={3}
+            value={genderOptions}
+            onChange={(e) => setGenderOptions(e.target.value)}
+            className="font-mono"
+            placeholder="One option per line"
+            hint="One per line. Clear all and save to use Male / Female."
+          />
+        )
+      ) : null}
+
+      <div className="flex items-center justify-end gap-2 pt-2 border-t border-app-border">
+        <Button variant="secondary" size="sm" type="button" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          onClick={() =>
+            onSave({
+              fieldPatch: { label: trimmedLabel, required },
+              ...(selectOptionsPatch ? { selectOptionsPatch } : {}),
+            })
+          }
+          disabled={!!labelError}
+        >
+          Save changes
+        </Button>
+      </div>
+    </Modal>
   );
 }

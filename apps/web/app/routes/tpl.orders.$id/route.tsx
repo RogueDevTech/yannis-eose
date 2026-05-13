@@ -29,6 +29,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     address: string | null;
     whatsappGroupLink?: string | null;
     providerName: string | null;
+    providerKind?: string | null;
     eligible: boolean;
     reason: string | null;
     availabilityByProduct: Array<{

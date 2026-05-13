@@ -858,6 +858,25 @@ export class UsersService {
   }
 
   /**
+   * Same actor gate as Remix `requireStaffAccountsAccess` — company-wide staff roster (`/hr/users`).
+   * Used to honor `companyWideUserList` without widening `users.list` for arbitrary `users.read` callers.
+   */
+  private actorMayListCompanyWideUserRoster(
+    actor: { id: string; role: string; permissions?: string[] } | null,
+  ): boolean {
+    if (!actor) return false;
+    if (actor.role === 'SUPER_ADMIN' || isAdminLevelRole(actor.role)) return true;
+    if (actor.role === 'HR_MANAGER' || actor.role === 'FINANCE_OFFICER') return true;
+    const perms = new Set((actor.permissions ?? []).map((p) => canonicalPermissionCode(p)));
+    return (
+      perms.has(canonicalPermissionCode('users.staff.view')) ||
+      perms.has(canonicalPermissionCode('users.staff.create')) ||
+      perms.has(canonicalPermissionCode('users.staff.update')) ||
+      perms.has(canonicalPermissionCode('users.staff.deactivate'))
+    );
+  }
+
+  /**
    * Shared WHERE fragments for `list` vs HR roster KPI aggregates (`rosterSummary`).
    * `rosterBreakdown` ignores the list's status equality filter so tiles stay meaningful when
    * the table is filtered to one status; DEACTIVATED handling matches product rules in the plan.
@@ -871,6 +890,7 @@ export class UsersService {
       | 'branchId'
       | 'userIds'
       | 'allBranches'
+      | 'companyWideUserList'
       | 'probationOnly'
       | 'supervisorOnly'
     >,
@@ -924,7 +944,8 @@ export class UsersService {
       );
     const skipBranchScope =
       (input.userIds && input.userIds.length > 0) ||
-      (input.allBranches === true && canViewAllBranches);
+      (input.allBranches === true && canViewAllBranches) ||
+      (input.companyWideUserList === true && this.actorMayListCompanyWideUserRoster(actor));
     const branchFilter = skipBranchScope
       ? input.branchId
       : (input.branchId ?? currentBranchId ?? undefined);
@@ -1071,8 +1092,9 @@ export class UsersService {
   }
 
   /**
-   * Full-roster aggregates for the HR Users KPI strip — same branch/search/role/probation
-   * scope as `list`, but status breakdown ignores the list status filter (except DEACTIVATED).
+   * Full-roster aggregates for the HR Users KPI strip — same search/role/probation
+   * scope as `list` (including `companyWideUserList` for `/hr/users`), but status
+   * breakdown ignores the list status filter (except DEACTIVATED).
    */
   async rosterSummary(
     input: ListUsersRosterSummaryInput,

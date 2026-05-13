@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { ListOrdersScheduleKind } from '@yannis/shared';
 import {
   BranchDetailLoadingShell,
   BranchesListLoadingShell,
@@ -38,7 +39,6 @@ import {
   WarehousesListLoadingShell,
 } from '~/features/inventory/InventoryDeferredLoadingShells';
 import {
-  LogisticsOrdersLoadingShell,
   LogisticsPartnersLoadingShell,
   LogisticsProviderDetailLoadingShell,
   LogisticsRemittancesLoadingShell,
@@ -46,6 +46,7 @@ import {
   LogisticsTransfersLoadingShell,
   TransfersLoadingShell,
 } from '~/features/logistics/LogisticsDeferredLoadingShells';
+import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
 import {
   MarketingAdSpendLoadingShell,
   MarketingCrossFunnelLoadingShell,
@@ -85,6 +86,159 @@ function parseDateFilters(sp: URLSearchParams): {
     startDate: sp.get('startDate') ?? '',
     endDate: sp.get('endDate') ?? '',
     periodAllTime: false,
+  };
+}
+
+function pad2Shell(n: number) {
+  return String(n).padStart(2, '0');
+}
+
+/** Client-side default month — mirrors CS orders loader when no date params. */
+function defaultThisMonthRangeClient(): { startDate: string; endDate: string } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const iso = (d: Date) => `${d.getFullYear()}-${pad2Shell(d.getMonth() + 1)}-${pad2Shell(d.getDate())}`;
+  return { startDate: iso(start), endDate: iso(end) };
+}
+
+/** Mirrors `defaultTodayRange()` in `api.server.ts` — marketing overview default. */
+function defaultTodayRangeClient(): { startDate: string; endDate: string } {
+  const now = new Date();
+  const iso = (d: Date) => `${d.getFullYear()}-${pad2Shell(d.getMonth() + 1)}-${pad2Shell(d.getDate())}`;
+  return { startDate: iso(now), endDate: iso(now) };
+}
+
+/** Finance list pages that default to this month when no explicit range (disbursements, cash remittances). */
+function parseFinanceDefaultMonthDateFilters(sp: URLSearchParams): {
+  startDate: string;
+  endDate: string;
+  periodAllTime: boolean;
+} {
+  const periodAllTime = sp.get('period') === 'all_time';
+  let startDate = sp.get('startDate') ?? '';
+  let endDate = sp.get('endDate') ?? '';
+  if (!periodAllTime && !startDate && !endDate) {
+    const d = defaultThisMonthRangeClient();
+    startDate = d.startDate;
+    endDate = d.endDate;
+  }
+  if (periodAllTime) {
+    startDate = '';
+    endDate = '';
+  }
+  return { startDate, endDate, periodAllTime };
+}
+
+/** URL-driven props for `CSOrdersLoadingShell` during dashboard route transitions. */
+function parseCsOrdersLoadingShellFromSearchParams(sp: URLSearchParams): {
+  filters: {
+    startDate: string;
+    endDate: string;
+    startTime: string;
+    endTime: string;
+    periodAllTime: boolean;
+  };
+  statusFilter?: string;
+  searchFilter?: string;
+  scheduleFilters: {
+    calendarMonth: string;
+    scheduleKind: ListOrdersScheduleKind | null;
+    scheduleDate: string | null;
+  };
+} {
+  const periodAllTime = sp.get('period') === 'all_time';
+  let startDate = sp.get('startDate') ?? '';
+  let endDate = sp.get('endDate') ?? '';
+  let startTime = sp.get('startTime') ?? '';
+  let endTime = sp.get('endTime') ?? '';
+  if (!periodAllTime && !startDate && !endDate) {
+    const d = defaultThisMonthRangeClient();
+    startDate = d.startDate;
+    endDate = d.endDate;
+  }
+  if (periodAllTime) {
+    startDate = '';
+    endDate = '';
+    startTime = '';
+    endTime = '';
+  }
+  if (!startDate) startTime = '';
+  if (!endDate) endTime = '';
+
+  const scheduleKindRaw = sp.get('scheduleKind');
+  let scheduleKind: ListOrdersScheduleKind | null = null;
+  if (
+    scheduleKindRaw === 'callback_due' ||
+    scheduleKindRaw === 'callback_on_day' ||
+    scheduleKindRaw === 'delivery_on_day' ||
+    scheduleKindRaw === 'delivery_overdue'
+  ) {
+    scheduleKind = scheduleKindRaw as ListOrdersScheduleKind;
+  }
+  const scheduleDateRaw = sp.get('scheduleDate');
+  const scheduleDate =
+    scheduleDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(scheduleDateRaw) ? scheduleDateRaw : null;
+  const calendarMonthRaw = sp.get('calendarMonth');
+  const now = new Date();
+  const defaultCalendarMonth = `${now.getFullYear()}-${pad2Shell(now.getMonth() + 1)}`;
+  let calendarMonth =
+    calendarMonthRaw && /^\d{4}-\d{2}$/.test(calendarMonthRaw) ? calendarMonthRaw : defaultCalendarMonth;
+  if (scheduleDate && !calendarMonthRaw) {
+    calendarMonth = scheduleDate.slice(0, 7);
+  }
+
+  const statusRaw = sp.get('status') ?? undefined;
+  const search = sp.get('search') ?? undefined;
+
+  return {
+    filters: { startDate, endDate, startTime, endTime, periodAllTime },
+    statusFilter: statusRaw || undefined,
+    searchFilter: search || undefined,
+    scheduleFilters: {
+      calendarMonth,
+      scheduleKind,
+      scheduleDate: scheduleKind === 'delivery_overdue' ? null : scheduleDate,
+    },
+  };
+}
+
+/** Dashboard transition → `/admin/logistics/orders` (URL-only; mirrors loader defaults). */
+function parseLogisticsOrdersTransitionPage(sp: URLSearchParams) {
+  const periodAllTime = sp.get('period') === 'all_time';
+  let startDate = sp.get('startDate') ?? '';
+  let endDate = sp.get('endDate') ?? '';
+  if (!periodAllTime && !startDate && !endDate) {
+    const d = defaultThisMonthRangeClient();
+    startDate = d.startDate;
+    endDate = d.endDate;
+  }
+  if (periodAllTime) {
+    startDate = '';
+    endDate = '';
+  }
+  const page = Math.max(1, parseInt(sp.get('page') || '1', 10));
+  const rawPer = parseInt(sp.get('perPage') || '40', 10);
+  const limit = [20, 40, 50, 100].includes(rawPer) ? rawPer : 40;
+  return {
+    deferredLoading: true,
+    orders: [],
+    total: 0,
+    totalPages: 1,
+    page,
+    limit,
+    statusFilter: sp.get('status') || 'ALL',
+    searchFilter: sp.get('search') ?? '',
+    statusCounts: {} as Record<string, number>,
+    locations: [],
+    riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>,
+    filters: { startDate, endDate, periodAllTime },
+    isTplManagerScoped: false,
+    canEditDeliveryDate: false,
+    allocationOnDetailOnly: true,
+    orderDetailBasePath: '/admin/orders',
+    pageDescription:
+      'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
   };
 }
 
@@ -139,7 +293,7 @@ const entries: ShellEntry[] = [
   {
     match: /^\/admin\/finance\/delivery-remittances$/,
     render: (_m, sp) => {
-      const dates = parseDateFilters(sp);
+      const dates = parseFinanceDefaultMonthDateFilters(sp);
       return (
         <DeliveryRemittancesLoadingShell
           filters={{
@@ -147,7 +301,7 @@ const entries: ShellEntry[] = [
             status: sp.get('status') ?? '',
             location: sp.get('location') ?? '',
             sentBy: sp.get('sentBy') ?? '',
-            eligibleQ: sp.get('eligibleQ') ?? '',
+            eligibleQ: sp.get('q') ?? '',
           }}
         />
       );
@@ -156,7 +310,7 @@ const entries: ShellEntry[] = [
   {
     match: /^\/admin\/finance\/disbursements$/,
     render: (_m, sp) => {
-      const dates = parseDateFilters(sp);
+      const dates = parseFinanceDefaultMonthDateFilters(sp);
       return (
         <FinanceDisbursementsLoadingShell
           filters={{
@@ -225,7 +379,7 @@ const entries: ShellEntry[] = [
   },
   {
     match: /^\/admin\/logistics\/orders$/,
-    render: (_m, sp) => <LogisticsOrdersLoadingShell filters={parseDateFilters(sp)} />,
+    render: (_m, sp) => <LogisticsOrdersPage {...parseLogisticsOrdersTransitionPage(sp)} />,
   },
   { match: /^\/admin\/logistics\/partners$/, render: () => <LogisticsPartnersLoadingShell /> },
   {
@@ -249,13 +403,23 @@ const entries: ShellEntry[] = [
   {
     match: /^\/admin\/marketing\/overview$/,
     render: (_m, sp) => {
-      const rawPeriod = sp.get('leaderboardPeriod');
-      const leaderboardPeriod: 'this_month' | 'all_time' =
-        rawPeriod === 'all_time' ? 'all_time' : 'this_month';
+      const periodAllTime = sp.get('period') === 'all_time';
+      let startDate = sp.get('startDate') ?? '';
+      let endDate = sp.get('endDate') ?? '';
+      if (!periodAllTime && !startDate && !endDate) {
+        const d = defaultTodayRangeClient();
+        startDate = d.startDate;
+        endDate = d.endDate;
+      }
+      if (periodAllTime) {
+        startDate = '';
+        endDate = '';
+      }
+      const leaderboardPeriod: 'this_month' | 'all_time' = periodAllTime ? 'all_time' : 'this_month';
       return (
         <MarketingOverviewLoadingShell
           leaderboardPeriod={leaderboardPeriod}
-          filters={parseDateFilters(sp)}
+          filters={{ startDate, endDate, periodAllTime }}
         />
       );
     },
@@ -293,12 +457,22 @@ const entries: ShellEntry[] = [
   {
     match: /^\/admin\/marketing\/leaderboard$/,
     render: (_m, sp) => {
-      const rawPeriod = sp.get('leaderboardPeriod');
-      const leaderboardPeriod: 'this_month' | 'all_time' =
-        rawPeriod === 'all_time' ? 'all_time' : 'this_month';
+      const periodAllTime = sp.get('period') === 'all_time';
+      let startDate = sp.get('startDate') ?? '';
+      let endDate = sp.get('endDate') ?? '';
+      if (!periodAllTime && !startDate && !endDate) {
+        const d = defaultThisMonthRangeClient();
+        startDate = d.startDate;
+        endDate = d.endDate;
+      }
+      if (periodAllTime) {
+        startDate = '';
+        endDate = '';
+      }
+      const leaderboardPeriod: 'this_month' | 'all_time' = periodAllTime ? 'all_time' : 'this_month';
       return (
         <MarketingLeaderboardLoadingShell
-          filters={parseDateFilters(sp)}
+          filters={{ startDate, endDate, periodAllTime }}
           leaderboardPeriod={leaderboardPeriod}
         />
       );
@@ -314,36 +488,76 @@ const entries: ShellEntry[] = [
   },
   {
     match: /^\/admin\/marketing\/orders$/,
-    render: (_m, sp) => (
-      <MarketingOrdersLoadingShell
-        filters={parseDateFilters(sp)}
-        isMediaBuyer={false}
-        showMediaBuyerColumn={false}
-      />
-    ),
+    render: (_m, sp) => {
+      const periodAllTime = sp.get('period') === 'all_time';
+      let startDate = sp.get('startDate') ?? '';
+      let endDate = sp.get('endDate') ?? '';
+      if (!periodAllTime && !startDate && !endDate) {
+        const d = defaultThisMonthRangeClient();
+        startDate = d.startDate;
+        endDate = d.endDate;
+      }
+      if (periodAllTime) {
+        startDate = '';
+        endDate = '';
+      }
+      return (
+        <MarketingOrdersLoadingShell
+          filters={{ startDate, endDate, periodAllTime }}
+          isMediaBuyer={false}
+          showMediaBuyerColumn={false}
+        />
+      );
+    },
   },
 
   // ── Admin / CS ──────────────────────────────────────────────────────────────
   { match: /^\/admin\/cs\/queue$/, render: () => <CSOverviewSkeleton /> },
   {
     match: /^\/admin\/cs\/team$/,
-    render: (_m, sp) => <CSTeamLoadingShell dateFilters={parseDateFilters(sp)} />,
+    render: (_m, sp) => {
+      const dateFilters = parseDateFilters(sp);
+      const q = (sp.get('q') ?? '').trim();
+      const activityRaw = sp.get('activity') ?? 'ALL';
+      const backlogRaw = sp.get('backlog') ?? 'ALL';
+      const activityFilter = ['ALL', 'ACTIVE', 'IDLE'].includes(activityRaw) ? activityRaw : 'ALL';
+      const backlogFilter = ['ALL', 'HAS_PENDING', 'NO_PENDING'].includes(backlogRaw) ? backlogRaw : 'ALL';
+      return (
+        <CSTeamLoadingShell
+          dateFilters={dateFilters}
+          q={q}
+          activityFilter={activityFilter}
+          backlogFilter={backlogFilter}
+        />
+      );
+    },
   },
   {
     match: /^\/admin\/cs\/orders$/,
-    render: (_m, sp) => (
-      <CSOrdersLoadingShell filters={parseDateFilters(sp)} isCSCloser={false} />
-    ),
+    render: (_m, sp) => {
+      const p = parseCsOrdersLoadingShellFromSearchParams(sp);
+      return <CSOrdersLoadingShell {...p} isCSCloser={false} showCSCloserColumn={false} />;
+    },
   },
   {
     match: /^\/admin\/cs\/leaderboard$/,
     render: (_m, sp) => {
-      const rawPeriod = sp.get('leaderboardPeriod');
-      const leaderboardPeriod: 'this_month' | 'all_time' =
-        rawPeriod === 'all_time' ? 'all_time' : 'this_month';
+      const periodAllTime = sp.get('period') === 'all_time';
+      let startDate = sp.get('startDate') ?? '';
+      let endDate = sp.get('endDate') ?? '';
+      if (!periodAllTime && !startDate && !endDate) {
+        const d = defaultThisMonthRangeClient();
+        startDate = d.startDate;
+        endDate = d.endDate;
+      }
+      if (periodAllTime) {
+        startDate = '';
+        endDate = '';
+      }
+      const leaderboardPeriod: 'this_month' | 'all_time' = periodAllTime ? 'all_time' : 'this_month';
       return (
         <CSLeaderboardLoadingShell
-          filters={parseDateFilters(sp)}
+          filters={{ startDate, endDate, periodAllTime }}
           leaderboardPeriod={leaderboardPeriod}
         />
       );

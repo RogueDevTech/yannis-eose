@@ -10,6 +10,7 @@ import type {
   CrossFunnelAttemptRow,
   CrossFunnelStats,
 } from '~/features/marketing/MarketingCrossFunnelPage';
+import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
 
 export const meta: MetaFunction = () => [
   { title: 'Cross-funnel — Yannis EOSE' },
@@ -78,13 +79,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     productId: productId ?? '',
   };
 
-  const pageData = (async () => {
-  const listRes = await apiRequest<unknown>(
-    `/trpc/marketing.listMyCrossFunnelAttempts?input=${encodeURIComponent(JSON.stringify(listInput))}`,
-    { method: 'GET', cookie },
-  );
+  const crossFunnelShell = { filters };
 
-  const secondaryPromise = (async (): Promise<CrossFunnelStats> => {
+  const listData = (async () => {
+    const listRes = await apiRequest<unknown>(
+      `/trpc/marketing.listMyCrossFunnelAttempts?input=${encodeURIComponent(JSON.stringify(listInput))}`,
+      { method: 'GET', cookie },
+    );
+    return { list: parseList(listRes) };
+  })();
+
+  const statsPromise = (async (): Promise<CrossFunnelStats> => {
     try {
       const statsRes = await apiRequest<unknown>(
         `/trpc/marketing.crossFunnelStats?input=${encodeURIComponent(JSON.stringify(statsInput))}`,
@@ -96,16 +101,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
   })();
 
-  return {
-    list: parseList(listRes),
-    secondary: secondaryPromise,
-    filters,
-  };
-  })();
-
   return defer({
-    crossFunnelShell: { filters },
-    pageData,
+    crossFunnelShell,
+    listData,
+    statsPromise,
   });
 }
 
@@ -113,13 +112,16 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export default function CrossFunnelRoute() {
-  const { crossFunnelShell, pageData } = useLoaderData<typeof loader>();
+  const { crossFunnelShell, listData, statsPromise } = useLoaderData<typeof loader>();
+  useMultiDeferredCacheSync({
+    shell: { crossFunnelShell },
+    deferred: { listData, statsPromise },
+  });
   return (
-    <CachedAwait resolve={pageData} fallback={<MarketingCrossFunnelLoadingShell {...crossFunnelShell} />}
-      loaderShell={{ crossFunnelShell }}
-      deferredKey="pageData"
-    >
-      {(p) => <MarketingCrossFunnelPage list={p.list} secondary={p.secondary} filters={p.filters} />}
+    <CachedAwait resolve={listData} fallback={<MarketingCrossFunnelLoadingShell {...crossFunnelShell} />}>
+      {(d) => (
+        <MarketingCrossFunnelPage list={d.list} secondary={statsPromise} filters={crossFunnelShell.filters} />
+      )}
     </CachedAwait>
   );
 }

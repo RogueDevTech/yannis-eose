@@ -580,6 +580,9 @@ export default function CSOrdersRoute() {
       fallback={
         <CSOrdersLoadingShell
           filters={csOrdersShell.filters!}
+          scheduleFilters={csOrdersShell.scheduleFilters!}
+          statusFilter={csOrdersShell.statusFilter}
+          searchFilter={csOrdersShell.searchFilter}
           isCSCloser={csOrdersShell.isCSCloser}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
           showCSCloserColumn={csOrdersShell.showCSCloserColumn}

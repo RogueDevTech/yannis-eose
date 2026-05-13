@@ -11,9 +11,10 @@ import { canViewAllBranches } from '~/lib/rbac';
  * `cart.read` / `marketing.read` (see apps/api/src/trpc/routers/cart.router.ts).
  *
  * Scoping rules (loader-side — also enforced server-side via the tRPC input):
- *   - MEDIA_BUYER → `mediaBuyerId = viewer.id`
- *   - admin-class / explicit global-scope holders → no scope (org-wide)
- *   - everyone else → `branchId = viewer.currentBranchId` (when set)
+ *   - Active branch wins when selected → `branchId = viewer.currentBranchId`
+ *   - MEDIA_BUYER also keeps `mediaBuyerId = viewer.id`
+ *   - admin-class / explicit global-scope holders with no selected branch → org-wide
+ *   - everyone else with no active branch falls back to the current server-side rules
  */
 type ActivityItem = {
   id: string;
@@ -38,17 +39,22 @@ function buildScopeInput(user: {
   currentBranchId?: string | null;
 }): ScopeInput {
   const limit = 60;
-  // Media Buyers see their own funnel only — same MB filter the API runs internally.
+  // Active branch selection is the source of truth for this page. Media Buyers
+  // still keep their own-funnel restriction on top of that branch scope.
   if (user.role === 'MEDIA_BUYER') {
-    return { limit, mediaBuyerId: user.id };
+    return {
+      limit,
+      mediaBuyerId: user.id,
+      ...(user.currentBranchId ? { branchId: user.currentBranchId } : {}),
+    };
   }
-  // Admin-class or explicit global-scope holder — org-wide visibility, no filter.
-  if (canViewAllBranches(user)) {
-    return { limit };
-  }
-  // Otherwise scope to the viewer's active branch when set.
+  // Selected branch should scope the live feed even for admin/global viewers.
   if (user.currentBranchId) {
     return { limit, branchId: user.currentBranchId };
+  }
+  // No selected branch: admin/global viewers keep org-wide visibility.
+  if (canViewAllBranches(user)) {
+    return { limit };
   }
   return { limit };
 }

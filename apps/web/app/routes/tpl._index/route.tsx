@@ -1,8 +1,9 @@
 import { defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { Suspense } from 'react';
-import { Await, useLoaderData, useRouteLoaderData } from '@remix-run/react';
+import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import { apiRequest, getSessionCookie, getCurrentUser, defaultThisMonthRange } from '~/lib/api.server';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { TplDashboardPage } from '~/features/tpl-dashboard/TplDashboardPage';
 import type { TplDashboardData } from '~/features/tpl-dashboard/types';
@@ -83,6 +84,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ tplDashboardShell, pageData });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function TplDashboard() {
   const { tplDashboardShell, pageData } = useLoaderData<typeof loader>();
   const parentData = useRouteLoaderData('routes/tpl') as { user: { name: string; role: string; email: string } } | undefined;
@@ -90,10 +94,13 @@ export default function TplDashboard() {
   usePageRefreshOnEvent(['order:status_changed', 'transfer:created', 'stock:updated']);
 
   return (
-    <Suspense fallback={<TplDashboardLoadingShell filters={tplDashboardShell.filters} />}>
-      <Await resolve={pageData}>
-        {(data) => <TplDashboardPage data={data} userName={userName} />}
-      </Await>
-    </Suspense>
+    <CachedAwait
+      resolve={pageData}
+      fallback={<TplDashboardLoadingShell filters={tplDashboardShell.filters} />}
+      loaderShell={{ tplDashboardShell }}
+      deferredKey="pageData"
+    >
+      {(data) => <TplDashboardPage data={data} userName={userName} />}
+    </CachedAwait>
   );
 }

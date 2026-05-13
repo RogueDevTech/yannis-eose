@@ -20,6 +20,8 @@ export const STANDARD_FIELD_ORDER: StandardFieldKey[] = [
   'paymentMethod',
 ];
 
+const MAX_STANDARD_FIELD_LABEL_LENGTH = 120;
+
 /** Additional fields whose dropdown choices can be edited (defaults match the Edge Worker). */
 export const ADDITIONAL_FIELD_OPTION_KEYS: readonly StandardFieldKey[] = ['gender', 'deliveryState', 'preferredDeliveryDate'];
 
@@ -115,6 +117,31 @@ export function parseOptionLines(text: string): string[] {
 
 export function joinOptionLines(opts: string[]): string {
   return opts.join('\n');
+}
+
+export function getDefaultStandardFieldLabel(key: StandardFieldKey): string {
+  return STANDARD_FIELD_LABELS[key];
+}
+
+export function getStandardFieldLabel(field: Pick<StandardFieldConfig, 'key' | 'label'>): string {
+  const trimmed = field.label?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : getDefaultStandardFieldLabel(field.key);
+}
+
+function normalizeStandardFieldConfig(input: {
+  key: StandardFieldKey;
+  required?: boolean;
+  label?: string | null | undefined;
+}): StandardFieldConfig {
+  const rawLabel = typeof input.label === 'string' ? input.label.trim() : '';
+  return {
+    key: input.key,
+    label:
+      rawLabel.length > 0
+        ? rawLabel.slice(0, MAX_STANDARD_FIELD_LABEL_LENGTH)
+        : getDefaultStandardFieldLabel(input.key),
+    required: input.required === true,
+  };
 }
 
 const MAX_OPT_LEN = 100;
@@ -223,16 +250,21 @@ export function normalizeStandardFields(config: CampaignFormConfig | null | unde
     const dedup = new Map<StandardFieldKey, StandardFieldConfig>();
     for (const item of raw) {
       if (!item || !isStandardFieldKey((item as { key?: unknown }).key)) continue;
-      dedup.set(item.key, {
-        key: item.key,
-        required: item.required === true,
-      });
+      dedup.set(
+        item.key,
+        normalizeStandardFieldConfig({
+          key: item.key,
+          label: (item as { label?: unknown }).label as string | undefined,
+          required: item.required === true,
+        }),
+      );
     }
     return STANDARD_FIELD_ORDER.filter((key) => dedup.has(key)).map((key) => dedup.get(key) as StandardFieldConfig);
   }
 
   return STANDARD_FIELD_ORDER.filter((key) => readLegacyEnabled(config, key)).map((key) => ({
     key,
+    label: getDefaultStandardFieldLabel(key),
     required: readLegacyRequired(config, key),
   }));
 }
@@ -292,11 +324,24 @@ export function parseStandardFieldsPayload(
 
   const dedup = new Map<StandardFieldKey, StandardFieldConfig>();
   for (let i = 0; i < parsed.length; i++) {
-    const row = parsed[i] as { key?: unknown; required?: unknown } | null;
+    const row = parsed[i] as { key?: unknown; label?: unknown; required?: unknown } | null;
     if (!row || !isStandardFieldKey(row.key)) {
       return { ok: false, error: `Additional field ${i + 1} has an invalid key` };
     }
-    dedup.set(row.key, { key: row.key, required: row.required === true });
+    if (row.label !== undefined && (typeof row.label !== 'string' || row.label.trim().length === 0)) {
+      return { ok: false, error: `Additional field ${i + 1} has an invalid label` };
+    }
+    if (typeof row.label === 'string' && row.label.trim().length > MAX_STANDARD_FIELD_LABEL_LENGTH) {
+      return { ok: false, error: `Additional field ${i + 1} label is too long` };
+    }
+    dedup.set(
+      row.key,
+      normalizeStandardFieldConfig({
+        key: row.key,
+        label: typeof row.label === 'string' ? row.label : undefined,
+        required: row.required === true,
+      }),
+    );
   }
 
   return {

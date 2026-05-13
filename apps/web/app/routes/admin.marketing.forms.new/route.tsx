@@ -12,6 +12,7 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
 import { MarketingFormCreatePage } from '~/features/campaigns/MarketingFormCreatePage';
+import { normalizeBuilderFieldOrder, parseFieldOrderPayload } from '~/features/campaigns/form-field-order';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
 import {
   parseAdditionalFieldSelectOptionsPayload,
@@ -120,6 +121,14 @@ export async function action({ request }: ActionFunctionArgs) {
   const customFields = parsedFields.fields;
   const hasCustomFields = customFields.length > 0;
 
+  const parsedFieldOrder = parseFieldOrderPayload(formData.get('fieldOrder')?.toString());
+  if (!parsedFieldOrder.ok) {
+    return json({ error: parsedFieldOrder.error }, { status: 400 });
+  }
+  const fieldOrder = normalizeBuilderFieldOrder(parsedFieldOrder.fieldOrder, standardFields, customFields);
+  const hasNonDefaultFieldOrder =
+    JSON.stringify(fieldOrder) !== JSON.stringify(normalizeBuilderFieldOrder(undefined, standardFields, customFields));
+
   const formConfig =
     heading ||
     subtitle ||
@@ -128,7 +137,8 @@ export async function action({ request }: ActionFunctionArgs) {
     successCallbackUrl ||
     showProductImages === false ||
     hasStandardFields ||
-    hasCustomFields
+    hasCustomFields ||
+    hasNonDefaultFieldOrder
       ? {
           ...(heading ? { heading } : {}),
           ...(subtitle ? { subtitle } : {}),
@@ -137,6 +147,7 @@ export async function action({ request }: ActionFunctionArgs) {
           ...(successCallbackUrl ? { successCallbackUrl } : {}),
           ...(showProductImages === false ? { showProductImages: false } : {}),
           standardFields,
+          fieldOrder,
           ...legacyStandardFlags,
           deliveryStateOptions: parsedSelectOpts.options.deliveryStateOptions,
           preferredDeliveryDateOptions: parsedSelectOpts.options.preferredDeliveryDateOptions,

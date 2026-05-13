@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { defer, json } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
 import { UsersListPage } from '~/features/users/UsersListPage';
@@ -131,7 +132,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const pageParam = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
   const { perPage, pageSizeOptions } = parsePerPage(url.searchParams);
-  const input: Record<string, unknown> = { page, limit: perPage, sortBy: 'createdAt', sortOrder: 'desc' };
+  const input: Record<string, unknown> = {
+    page,
+    limit: perPage,
+    sortBy: 'createdAt',
+    sortOrder: 'desc',
+    companyWideUserList: true,
+  };
   if (statusParam && statusParam !== 'ALL') input.status = statusParam;
   if (roleParam && roleParam !== 'ALL') input.role = roleParam;
   if (searchParam.length > 0) input.search = searchParam;
@@ -140,7 +147,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const inputEnc = encodeURIComponent(JSON.stringify(input));
 
-  const summaryPayload: Record<string, unknown> = {};
+  const summaryPayload: Record<string, unknown> = { companyWideUserList: true };
   if (statusParam && statusParam !== 'ALL') summaryPayload.status = statusParam;
   if (roleParam && roleParam !== 'ALL') summaryPayload.role = roleParam;
   if (searchParam.length > 0) summaryPayload.search = searchParam;
@@ -216,11 +223,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   })();
 
   return defer({
-    statusParam: statusParam ?? 'ALL',
-    roleParam: roleParam ?? 'ALL',
-    searchParam,
-    perPage,
-    pageSizeOptions,
+    usersShell: {
+      statusParam: statusParam ?? 'ALL',
+      roleParam: roleParam ?? 'ALL',
+      searchParam,
+      perPage,
+      pageSizeOptions,
+    },
     usersPromise,
   });
 }
@@ -229,19 +238,33 @@ export const clientLoader = cachedClientLoader;
 clientLoader.hydrate = false;
 
 export default function UsersRoute() {
-  const { statusParam, roleParam, searchParam, usersPromise, perPage, pageSizeOptions } =
-    useLoaderData<typeof loader>();
-  // App Shell — page chrome (header, action button, filter pills, search,
-  // pagination shell) renders synchronously below; only the table rows show
-  // skeleton state until `usersPromise` resolves.
+  const { usersShell, usersPromise } = useLoaderData<typeof loader>();
   return (
-    <UsersListPage
-      statusParam={statusParam}
-      roleParam={roleParam}
-      searchParam={searchParam}
-      usersPromise={usersPromise}
-      pageSize={perPage}
-      pageSizeOptions={pageSizeOptions}
-    />
+    <CachedAwait
+      resolve={usersPromise}
+      fallback={
+        <UsersListPage
+          usersPromise={usersPromise}
+          statusParam={usersShell.statusParam}
+          roleParam={usersShell.roleParam}
+          searchParam={usersShell.searchParam}
+          pageSize={usersShell.perPage}
+          pageSizeOptions={usersShell.pageSizeOptions}
+        />
+      }
+      loaderShell={{ usersShell }}
+      deferredKey="usersPromise"
+    >
+      {(roster) => (
+        <UsersListPage
+          statusParam={usersShell.statusParam}
+          roleParam={usersShell.roleParam}
+          searchParam={usersShell.searchParam}
+          usersPromise={roster}
+          pageSize={usersShell.perPage}
+          pageSizeOptions={usersShell.pageSizeOptions}
+        />
+      )}
+    </CachedAwait>
   );
 }

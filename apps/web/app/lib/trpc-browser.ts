@@ -136,9 +136,22 @@ export async function shareOrderToLogistics(input: {
   } catch {
     throw new Error('Share to logistics company failed');
   }
-  const json = (await res.json()) as TrpcEnvelope<ShareToLogisticsResult> & {
-    error?: { message?: string };
-  };
+  const rawText = await res.text();
+  let json: (TrpcEnvelope<ShareToLogisticsResult> & { error?: { message?: string } }) | null = null;
+  try {
+    json = JSON.parse(rawText) as TrpcEnvelope<ShareToLogisticsResult> & { error?: { message?: string } };
+  } catch {
+    const trimmed = rawText.trimStart();
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+      throw new Error(
+        'Share failed: the app received a web page instead of the API (HTML, not JSON). ' +
+          'Usually the browser is posting to the web origin but /trpc is not proxied to Nest — ' +
+          'set PUBLIC_API_URL / API_URL to the API host in deploy, or ensure your reverse proxy forwards /trpc. ' +
+          `Request was ${base}/trpc/messaging.shareToLogistics`,
+      );
+    }
+    throw new Error('Share to logistics company failed: response was not valid JSON');
+  }
   if (!res.ok) {
     throw new Error(json.error?.message ?? 'Share to logistics company failed');
   }
@@ -217,4 +230,35 @@ export async function fetchCampaignOrderTotalForBatch(
   } catch {
     return null;
   }
+}
+
+export type OrderClipboardSummaryPayload = { text: string };
+
+/**
+ * GET `orders.clipboardSummary` — full plain-text handoff including stored customer phone
+ * when the order row has it (same visibility as order detail).
+ */
+export async function fetchOrderClipboardSummary(orderId: string): Promise<OrderClipboardSummaryPayload> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) throw new Error('Copy order summary failed: API URL not configured');
+  const url = `${base}/trpc/orders.clipboardSummary?input=${encodeURIComponent(JSON.stringify({ orderId }))}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { credentials: 'include' });
+  } catch {
+    throw new Error('Copy order summary failed: network error');
+  }
+  const rawText = await res.text();
+  let json: (TrpcEnvelope<OrderClipboardSummaryPayload> & { error?: { message?: string } }) | null = null;
+  try {
+    json = JSON.parse(rawText) as TrpcEnvelope<OrderClipboardSummaryPayload> & { error?: { message?: string } };
+  } catch {
+    throw new Error('Copy order summary failed: invalid response');
+  }
+  if (!res.ok) {
+    throw new Error(json.error?.message ?? 'Copy order summary failed');
+  }
+  const data = json.result?.data;
+  if (!data?.text) throw new Error('Copy order summary failed: empty payload');
+  return data;
 }

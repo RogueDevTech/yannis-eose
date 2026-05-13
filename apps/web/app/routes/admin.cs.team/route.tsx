@@ -62,7 +62,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { startDate, endDate, periodAllTime, filters } = resolveMarketingDateFilters(url);
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
 
-  const teamShell = { dateFilters: filters };
+  const qSync = (url.searchParams.get('q') ?? '').trim();
+  const activityRaw = url.searchParams.get('activity') ?? 'ALL';
+  const backlogRaw = url.searchParams.get('backlog') ?? 'ALL';
+  const activityFilterSync = CS_ACTIVITY_FILTERS.has(activityRaw) ? activityRaw : 'ALL';
+  const backlogFilterSync = CS_BACKLOG_FILTERS.has(backlogRaw) ? backlogRaw : 'ALL';
+
+  const teamShell = {
+    dateFilters: filters,
+    q: qSync,
+    activityFilter: activityFilterSync,
+    backlogFilter: backlogFilterSync,
+  };
 
   const pageData = (async () => {
     // One bundle endpoint replaces the previous 4 parallel calls (listCSTeam +
@@ -180,7 +191,7 @@ clientLoader.hydrate = false;
 export default function CSTeamRoute() {
   const { teamShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<CSTeamLoadingShell dateFilters={teamShell.dateFilters} />}
+    <CachedAwait resolve={pageData} fallback={<CSTeamLoadingShell {...teamShell} />}
       loaderShell={{ teamShell }}
       deferredKey="pageData"
     >

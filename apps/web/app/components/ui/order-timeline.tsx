@@ -74,6 +74,7 @@ const EVENT_BORDER: Record<string, string> = {
   LINE_PRICE_CHANGE_REQUESTED: 'border-amber-500',
   LINE_PRICE_CHANGE_APPROVED: 'border-success-500',
   LINE_PRICE_CHANGE_REJECTED: 'border-danger-500',
+  CS_ORDER_COMMENT: 'border-brand-400',
 };
 
 const RIDER_METADATA_EVENT_TYPES = new Set([
@@ -88,6 +89,7 @@ const RIDER_METADATA_EVENT_TYPES = new Set([
 
 function formatEventType(type: string): string {
   if (type === 'ORDER_ALLOCATED') return 'Agent assigned';
+  if (type === 'CS_ORDER_COMMENT') return 'Comment';
   return type
     .toLowerCase()
     .replace(/_/g, ' ')
@@ -208,6 +210,16 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
   return event.description;
 }
 
+function csOrderCommentBody(event: TimelineEvent): string {
+  const fromMeta = strMeta(event.metadata, 'commentBody');
+  if (fromMeta) return fromMeta;
+  const { description } = event;
+  if (description.startsWith('Comment: ')) {
+    return description.slice('Comment: '.length);
+  }
+  return description;
+}
+
 interface OrderTimelineProps {
   events: TimelineEvent[];
 }
@@ -227,8 +239,53 @@ export function OrderTimeline({ events }: OrderTimelineProps) {
         const borderClass =
           EVENT_BORDER[event.eventType] ?? 'border-app-border dark:border-neutral-600';
         const actorLabel = timelineActorLabel(event);
-        const description = renderTimelineDescription(event);
         const actorLinkable = isLinkableUserId(event.actorId);
+
+        if (event.eventType === 'CS_ORDER_COMMENT') {
+          const body = csOrderCommentBody(event);
+          return (
+            <li
+              key={event.id}
+              className={`border-l-4 pl-3 pr-2 py-3 bg-brand-50/90 dark:bg-brand-950/30 ${borderClass}`}
+              title="Comment on this order"
+            >
+              <p className="text-2xs font-semibold uppercase tracking-wider text-app-fg-muted">Comment</p>
+              <div className="mt-2 rounded-lg bg-app-hover/90 dark:bg-app-hover/40 px-3 py-2.5">
+                <p className="text-sm font-medium text-app-fg leading-relaxed whitespace-pre-wrap break-words">
+                  {body}
+                </p>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-app-fg-muted">
+                {actorLabel ? (
+                  <span>
+                    <span className="text-app-fg-muted/90">Added by </span>
+                    {actorLinkable ? (
+                      <TimelineLink to={`/hr/users/${event.actorId}`}>{actorLabel}</TimelineLink>
+                    ) : (
+                      <span className="font-medium text-app-fg">{actorLabel}</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-app-fg-muted/90">Staff comment</span>
+                )}
+                <span className="text-app-border" aria-hidden>
+                  ·
+                </span>
+                <time dateTime={event.createdAt}>
+                  {new Date(event.createdAt).toLocaleString('en-NG', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </time>
+              </div>
+            </li>
+          );
+        }
+
+        const description = renderTimelineDescription(event);
         // Description already names the actor, or actor equals assignee/claimer.
         const showActorLine =
           actorLabel &&

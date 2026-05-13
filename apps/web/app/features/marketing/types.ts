@@ -407,12 +407,6 @@ export interface MarketingAdSpendLoaderData {
   mediaBuyersForFilter?: Array<{ id: string; name: string }>;
   statusCounts?: AdSpendStatusCounts;
   campaigns?: Campaign[];
-  /** Streamed after `marketing.listAdSpend` — tab counts + campaign / buyer picklists. */
-  adSpendPicklists?: Promise<{
-    statusCounts: AdSpendStatusCounts;
-    campaigns: Campaign[];
-    mediaBuyersForFilter: Array<{ id: string; name: string }>;
-  }>;
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */
   metrics: Metrics | null;
   /** Loaded post-mount from `/api/marketing-ad-spend-secondary`. */

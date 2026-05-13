@@ -6,7 +6,7 @@ function minimalOrder(over: Partial<OrderDetail> = {}): OrderDetail {
   return {
     id: '025f2465-177c-4745-bd14-18bbd068b4d1',
     customerName: 'Ada O.',
-    customerPhoneDisplay: '0803****1234',
+    customerPhoneDisplay: '0803****4567',
     customerAddress: '12 Allen Ave',
     deliveryAddress: '45 Admiralty Way, Lekki',
     deliveryNotes: null,
@@ -38,7 +38,8 @@ describe('buildOrderSummaryClipboardText', () => {
   it('includes order id, masked phone, and line item', () => {
     const text = buildOrderSummaryClipboardText(minimalOrder());
     expect(text).toContain('025f2465-177c-4745-bd14-18bbd068b4d1');
-    expect(text).toContain('0803****1234');
+    expect(text).toContain('Phone:');
+    expect(text).toContain('0803****4567');
     expect(text).toContain('Widget Pro');
     expect(text).toContain('CONFIRMED');
     expect(text).toContain('SwiftDeliver Lekki Hub');

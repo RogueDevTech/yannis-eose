@@ -1,3 +1,5 @@
+import type { CampaignFieldOrderToken } from '@yannis/shared';
+
 /** Field types supported by the campaign form editor. Mirrors `FORM_FIELD_TYPES` in the shared
  *  validators; kept duplicated here to avoid pulling validator types into the UI bundle. */
 export type CustomFormFieldType =
@@ -40,6 +42,7 @@ export type StandardFieldKey =
 
 export interface StandardFieldConfig {
   key: StandardFieldKey;
+  label: string;
   required: boolean;
 }
 
@@ -69,6 +72,7 @@ export interface CampaignFormConfig {
   /** Dropdown choices for the Gender additional field (defaults: Male, Female). */
   genderOptions?: string[];
   standardFields?: StandardFieldConfig[];
+  fieldOrder?: CampaignFieldOrderToken[];
   /** Custom fields the Media Buyer adds to their public form (create / edit). */
   customFields?: CustomFormField[];
   /** Post-submit redirect for the buyer (funnel thank-you page). */
