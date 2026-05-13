@@ -161,6 +161,22 @@ function csCloserSelfQueueListOpts(
   return undefined;
 }
 
+/** CS / ops list: self-queue pin + optional customer_phone substring search (orders.read holders). */
+export function buildOrdersListOpts(
+  user: SessionUser,
+  input: Partial<Pick<ListOrdersInput, 'assignedCsId'>> = {},
+): { assignedCloserViewerId?: string; searchIncludeCustomerPhone?: boolean } | undefined {
+  const closer = csCloserSelfQueueListOpts(user, input);
+  const perms = user.permissions ?? [];
+  // Session stamps canonical codes (`orders.view`); legacy snapshots may still hold `orders.read`.
+  const searchIncludeCustomerPhone =
+    perms.some((p) => canonicalPermissionCode(p) === 'orders.view') || isAdminLevel(user);
+  const out: { assignedCloserViewerId?: string; searchIncludeCustomerPhone?: boolean } = {};
+  if (closer) Object.assign(out, closer);
+  if (searchIncludeCustomerPhone) out.searchIncludeCustomerPhone = true;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function orderListBranchId(_user: { role: string }, sessionBranchId: string | null): string | null {
   return sessionBranchId;
 }
@@ -392,6 +408,16 @@ export const ordersRouter = router({
     }),
 
   /**
+   * Full-field plain-text order summary for clipboard (includes stored customer phone when present).
+   * Same visibility as `orders.getById` — does not bypass Lead Fortress for hash-only intakes.
+   */
+  clipboardSummary: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => ({
+      text: await getOrdersService().getClipboardSummaryText(input.orderId, ctx.user),
+    })),
+
+  /**
    * Single round-trip for inventory DELIVERY rows: customer names only.
    * Gated like `/admin/inventory`; per-order visibility matches `orders.getById`.
    */
@@ -422,7 +448,7 @@ export const ordersRouter = router({
     .query(async ({ input, ctx }) => {
       const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
       if (ctx.user.role === 'SUPER_ADMIN') {
-        return getOrdersService().list(input, branchId, csCloserSelfQueueListOpts(ctx.user, input));
+        return getOrdersService().list(input, branchId, buildOrdersListOpts(ctx.user, input));
       }
       const perms = ctx.user.permissions ?? [];
       const hasOrdersRead = perms.includes('orders.read');
@@ -448,7 +474,7 @@ export const ordersRouter = router({
         });
       }
       if (hasOrgWideScope) {
-        return getOrdersService().list(input, branchId, csCloserSelfQueueListOpts(ctx.user, input));
+        return getOrdersService().list(input, branchId, buildOrdersListOpts(ctx.user, input));
       }
       let effectiveInput = input;
       if (ctx.user.role === 'MEDIA_BUYER') {
@@ -461,7 +487,7 @@ export const ordersRouter = router({
       // orders assigned to their CS team agents OR created by their MB team
       // members. Their own work is always included.
       effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
-      return getOrdersService().list(effectiveInput, branchId, csCloserSelfQueueListOpts(ctx.user, effectiveInput));
+      return getOrdersService().list(effectiveInput, branchId, buildOrdersListOpts(ctx.user, effectiveInput));
     }),
 
   /**
@@ -1021,7 +1047,7 @@ export const ordersRouter = router({
           ? getOrdersService().getCSCloserWorkloads(branchId)
           : Promise.resolve([]),
         input.showCSCloserColumn
-          ? getLogisticsService().listLocationOptions({ status: 'ACTIVE' })
+          ? getLogisticsService().listLocationOptions({ status: 'ACTIVE', providerKind: 'THIRD_PARTY' })
           : Promise.resolve([]),
         input.canCreateOffline
           ? getProductsService().list(
@@ -1119,7 +1145,7 @@ export const ordersRouter = router({
 
       const [ordersResult, statusCounts, transfers, returnedOrders] =
         await Promise.all([
-          getOrdersService().list(listInput, branchId),
+          getOrdersService().list(listInput, branchId, buildOrdersListOpts(ctx.user, listInput)),
           getOrdersService().getStatusCounts(
             undefined,
             input.startDate,
@@ -1248,7 +1274,7 @@ export const ordersRouter = router({
 
       const [ordersResult, statusCounts, locationsResult, ridersResult] =
         await Promise.all([
-          getOrdersService().list(listInput, branchId),
+          getOrdersService().list(listInput, branchId, buildOrdersListOpts(ctx.user, listInput)),
           getOrdersService().getStatusCounts(
             undefined,
             input.startDate,
@@ -1510,6 +1536,27 @@ export const ordersRouter = router({
     .input(z.object({ orderId: z.string().uuid() }))
     .query(async ({ input, ctx }) => {
       return getOrdersService().getOrderTimeline(input.orderId, ctx.user);
+    }),
+
+  /**
+   * Append a manual CS note to the order timeline (no status change).
+   */
+  addCsOrderComment: authedProcedure
+    .meta({ branchScopedMutation: true })
+    .input(
+      z.object({
+        orderId: z.string().uuid(),
+        comment: z.string().min(1).max(2000),
+        branchId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { branchId: _branchId, ...rest } = input;
+      const res = await getOrdersService().addCsOrderComment(rest.orderId, ctx.user, {
+        comment: rest.comment,
+      });
+      await invalidateOrderDetailCache(input.orderId);
+      return res;
     }),
 
   // ── Claim Mode ────────────────────────────────────────

@@ -301,10 +301,8 @@ function CSDashboard({
   const showsTeamManagementCard = role === 'HEAD_OF_CS' || isCsTeamSupervisor;
   const counts = data.orderCounts as Record<string, number>;
   // `pendingQueue` rolls UNPROCESSED + CS_ASSIGNED into one waiting-on-engagement
-  // bucket for the top stat strip. The legacy per-status pipeline (Agent assigned /
-  // In Transit / Delivered / Cancelled) was retired 2026-05-03 — those counts
-  // still exist on `/admin/cs/orders` via the status filter, but Head of CS
-  // doesn't need them on the landing.
+  // bucket for the top stat strip. Deeper per-status breakdown lives on
+  // `/admin/cs/orders` via the status filter.
   const unprocessed = counts['UNPROCESSED'] ?? 0;
   const csAssigned = counts['CS_ASSIGNED'] ?? 0;
   const engaged = counts['CS_ENGAGED'] ?? 0;
@@ -321,7 +319,7 @@ function CSDashboard({
   if (role === 'CS_CLOSER' && !isCsTeamSupervisor) {
     return (
       <>
-        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
+        <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={6} />}>
           {(metrics) => (
             <OverviewStatStrip
               tileClassName="min-w-[6rem]"
@@ -334,6 +332,12 @@ function CSDashboard({
                 },
                 { label: 'Currently Engaged', value: engaged.toString(), valueClassName: 'text-app-fg' },
                 { label: 'Confirmed', value: metrics.confirmedOrders.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
+                {
+                  label: 'Delivered',
+                  value: metrics.deliveredOrders.toString(),
+                  valueClassName:
+                    metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+                },
                 {
                   label: 'Confirmation Rate',
                   value: `${metrics.confirmationRate.toFixed(1)}%`,
@@ -371,12 +375,13 @@ function CSDashboard({
     );
   }
 
-  // Head of CS keeps the operational view: stats + full Order Pipeline + team controls + recent feed.
+  // Head of CS: KPI strip + team controls + quick links (no full pipeline strip).
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={4} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
         {(metrics) => (
           <OverviewStatStrip
+            tileClassName="min-w-[6rem]"
             items={[
               {
                 label: 'Pending Queue',
@@ -387,6 +392,12 @@ function CSDashboard({
               { label: 'Currently Engaged', value: engaged.toString(), valueClassName: 'text-app-fg' },
               { label: 'Confirmed', value: confirmed.toString(), valueClassName: 'text-success-600 dark:text-success-400' },
               {
+                label: 'Delivered',
+                value: metrics.deliveredOrders.toString(),
+                valueClassName:
+                  metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              },
+              {
                 label: 'Delivery Rate',
                 value: `${metrics.deliveryRate.toFixed(1)}%`,
                 valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
@@ -396,11 +407,11 @@ function CSDashboard({
         )}
       </DashboardMetricsSection>
 
-      {/* Order Pipeline strip retired 2026-05-03 — the 4-tile summary above
-          (Pending Queue / Currently Engaged / Confirmed / Delivery Rate) is the
-          only KPI row Head of CS needs at-a-glance. Per-status counts are still
-          available on `/admin/cs/orders` via the status filter pills, so deep
-          dives don't lose anything. */}
+      {/* Order Pipeline strip retired 2026-05-03 — the KPI row above (queue health +
+          period Delivered + Delivery Rate) is the at-a-glance row for Head of CS.
+          Live-bucket `Confirmed` is current CONFIRMED count; `Delivered` / rate use
+          the selected date range from `marketing.metrics`. Per-status counts remain
+          on `/admin/cs/orders` via the status filter pills. */}
 
       {showsTeamManagementCard && (
         <div className="card">
@@ -472,12 +483,18 @@ function MarketingDashboard({
   const showsTeamManagementCard = role === 'HEAD_OF_MARKETING' || isMarketingTeamSupervisor;
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
         {(metrics) => (
           <OverviewStatStrip
             tileClassName="min-w-[6rem]"
             items={[
               { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
+              {
+                label: 'Delivered',
+                value: metrics.deliveredOrders.toString(),
+                valueClassName:
+                  metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+              },
               { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg' },
               {
                 label: 'True ROAS',

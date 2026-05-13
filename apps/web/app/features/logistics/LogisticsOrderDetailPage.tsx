@@ -18,7 +18,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { STATUS_DOT_CLASS, STATUS_LABELS } from '~/features/shared/order-status';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
-import { buildOrderSummaryClipboardText } from '~/features/orders/build-order-summary-clipboard';
+import { fetchOrderClipboardSummary } from '~/lib/trpc-browser';
 import type { OrderDetail, HistoryEntry } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
 
@@ -543,18 +543,21 @@ export function LogisticsOrderDetailPage({
   useFetcherToast(fetcher.data, { successMessage: 'Order updated' });
 
   const handleCopyOrderSummary = useCallback(async () => {
-    const text = buildOrderSummaryClipboardText(order);
     try {
       if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
         toast.error('Copy failed', 'Clipboard is not available in this browser.');
         return;
       }
+      const { text } = await fetchOrderClipboardSummary(order.id);
       await navigator.clipboard.writeText(text);
       toast.success('Copied', 'Order summary ready to paste into WhatsApp or your 3PL group.');
-    } catch {
-      toast.error('Copy failed', 'Could not write to the clipboard.');
+    } catch (e) {
+      toast.error(
+        'Copy failed',
+        e instanceof Error ? e.message : 'Could not load or write the order summary.',
+      );
     }
-  }, [order, toast]);
+  }, [order.id, toast]);
 
   const [activeTab, setActiveTab] = useState('overview');
   const [allocateLocationId, setAllocateLocationId] = useState('');

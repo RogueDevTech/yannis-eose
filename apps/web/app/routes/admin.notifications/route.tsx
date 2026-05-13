@@ -7,10 +7,11 @@ import {
   Link,
   useNavigate,
   useNavigation,
-  Await,
 } from '@remix-run/react';
-import { Suspense, useEffect } from 'react';
+import { useEffect } from 'react';
+import { CachedAwait } from '~/components/ui/cached-await';
 import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
 import type { Notification } from '~/features/notifications/types';
@@ -165,6 +166,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })(),
   });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -463,43 +467,46 @@ export default function AdminNotificationsRoute() {
         </nav>
       </div>
 
-      <Suspense fallback={<NotificationsTabPanelSkeleton />}>
-        <Await resolve={pageData}>
-          {({ feed, rules, logBundle }) => (
-            <div>
-              {displayTab === 'feed' && (
-                <div className="space-y-4">
-                  <NotificationsPage
-                    notifications={feed.notifications as Notification[]}
-                    unreadCount={feed.unreadCount}
-                    pagination={feed.pagination}
-                    unreadOnlyFilter={unreadOnly}
-                    listRouteSearch={{ tab: 'feed' }}
-                    embeddedInTabs
-                  />
-                </div>
-              )}
-
-              {displayTab === 'broadcast' && canPushAdmin && notificationsShell.user && (
-                <NotificationsBroadcastPanel actorRole={notificationsShell.user.role ?? ''} />
-              )}
-
-              {displayTab === 'automations' && canPushAdmin && (
-                <NotificationsAutomationsPanel rules={rules} />
-              )}
-
-              {displayTab === 'log' && (
-                <NotificationsDeliveryLogPanel
-                  logs={logBundle.logs}
-                  pagination={logBundle.logPagination}
-                  searchParams={searchParams}
-                  setSearchParams={setSearchParams}
+      <CachedAwait
+        resolve={pageData}
+        fallback={<NotificationsTabPanelSkeleton />}
+        loaderShell={{ notificationsShell }}
+        deferredKey="pageData"
+      >
+        {({ feed, rules, logBundle }) => (
+          <div>
+            {displayTab === 'feed' && (
+              <div className="space-y-4">
+                <NotificationsPage
+                  notifications={feed.notifications as Notification[]}
+                  unreadCount={feed.unreadCount}
+                  pagination={feed.pagination}
+                  unreadOnlyFilter={unreadOnly}
+                  listRouteSearch={{ tab: 'feed' }}
+                  embeddedInTabs
                 />
-              )}
-            </div>
-          )}
-        </Await>
-      </Suspense>
+              </div>
+            )}
+
+            {displayTab === 'broadcast' && canPushAdmin && notificationsShell.user && (
+              <NotificationsBroadcastPanel actorRole={notificationsShell.user.role ?? ''} />
+            )}
+
+            {displayTab === 'automations' && canPushAdmin && (
+              <NotificationsAutomationsPanel rules={rules} />
+            )}
+
+            {displayTab === 'log' && (
+              <NotificationsDeliveryLogPanel
+                logs={logBundle.logs}
+                pagination={logBundle.logPagination}
+                searchParams={searchParams}
+                setSearchParams={setSearchParams}
+              />
+            )}
+          </div>
+        )}
+      </CachedAwait>
     </div>
   );
 }

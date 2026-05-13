@@ -15,7 +15,6 @@ import {
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage } from '~/features/logistics/LogisticsOrdersPage';
-import { LogisticsOrdersLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { Order } from '~/features/orders/types';
 import type { Location } from '~/features/logistics/types';
 
@@ -113,6 +112,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       endDate: endDate ?? '',
       periodAllTime,
     },
+    page,
+    limit: ORDERS_PER_PAGE,
+    statusFilter: status,
+    searchFilter: search ?? '',
+    isTplManagerScoped: !!effectiveLogisticsLocationId,
+    canEditDeliveryDate: false,
+    allocationOnDetailOnly: true,
+    orderDetailBasePath: '/admin/orders',
+    pageDescription:
+      'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
   };
 
   const pageData = (async () => {
@@ -163,25 +172,21 @@ export async function loader({ request }: LoaderFunctionArgs) {
       orders: placeholderOrders,
       total,
       totalPages,
-      page,
-      limit: ORDERS_PER_PAGE,
-      statusFilter: status,
-      searchFilter: search ?? '',
+      page: logisticsOrdersShell.page,
+      limit: logisticsOrdersShell.limit,
+      statusFilter: logisticsOrdersShell.statusFilter,
+      searchFilter: logisticsOrdersShell.searchFilter,
       listErrorMessage,
       statusCounts,
       locations,
       riders: [] as Array<{ id: string; name: string; logisticsLocationId: string | null }>,
       dailyCounts: undefined,
-      filters: {
-        startDate: startDate ?? '',
-        endDate: endDate ?? '',
-        periodAllTime,
-      },
-      isTplManagerScoped: !!effectiveLogisticsLocationId,
-      canEditDeliveryDate: false,
-      allocationOnDetailOnly: true,
-      orderDetailBasePath: '/admin/orders',
-      pageDescription: 'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
+      filters: logisticsOrdersShell.filters,
+      isTplManagerScoped: logisticsOrdersShell.isTplManagerScoped,
+      canEditDeliveryDate: logisticsOrdersShell.canEditDeliveryDate,
+      allocationOnDetailOnly: logisticsOrdersShell.allocationOnDetailOnly,
+      orderDetailBasePath: logisticsOrdersShell.orderDetailBasePath,
+      pageDescription: logisticsOrdersShell.pageDescription,
     };
   })();
 
@@ -366,7 +371,30 @@ export default function LogisticsOrdersRoute() {
   const { logisticsOrdersShell, pageData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
   return (
-    <CachedAwait resolve={pageData} fallback={<LogisticsOrdersLoadingShell filters={logisticsOrdersShell.filters} />}
+    <CachedAwait
+      resolve={pageData}
+      fallback={
+        <LogisticsOrdersPage
+          deferredLoading
+          orders={[]}
+          total={0}
+          totalPages={1}
+          listErrorMessage={undefined}
+          statusCounts={{}}
+          locations={[]}
+          riders={[]}
+          page={logisticsOrdersShell.page}
+          limit={logisticsOrdersShell.limit}
+          statusFilter={logisticsOrdersShell.statusFilter}
+          searchFilter={logisticsOrdersShell.searchFilter}
+          filters={logisticsOrdersShell.filters}
+          isTplManagerScoped={logisticsOrdersShell.isTplManagerScoped}
+          canEditDeliveryDate={logisticsOrdersShell.canEditDeliveryDate}
+          allocationOnDetailOnly={logisticsOrdersShell.allocationOnDetailOnly}
+          orderDetailBasePath={logisticsOrdersShell.orderDetailBasePath}
+          pageDescription={logisticsOrdersShell.pageDescription}
+        />
+      }
       loaderShell={{ logisticsOrdersShell }}
       deferredKey="pageData"
     >

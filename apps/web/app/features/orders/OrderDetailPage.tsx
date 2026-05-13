@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { Link, useFetcher, useRevalidator } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
@@ -33,12 +33,24 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
-import { shareOrderToLogistics } from '~/lib/trpc-browser';
-import { isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
+import { shareOrderToLogistics, fetchOrderClipboardSummary } from '~/lib/trpc-browser';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
+import { hasFinanceAccess, isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
-import { buildOrderSummaryClipboardText } from './build-order-summary-clipboard';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
+
+/** Matches `orders.scheduleCallback` / Remix action validation (minutes). */
+const CALLBACK_DELAY_MIN_MINUTES = 5;
+const CALLBACK_DELAY_MAX_MINUTES = 10080;
+
+type CallbackCustomDelayUnit = 'minutes' | 'hours' | 'days';
+
+function callbackCustomUnitMultiplier(unit: CallbackCustomDelayUnit): number {
+  if (unit === 'minutes') return 1;
+  if (unit === 'hours') return 60;
+  return 1440;
+}
 
 function InvoiceCardSkeleton() {
   return (
@@ -163,21 +175,17 @@ const STATUS_FLOW_LOGISTICS = [
 ] as const;
 
 /**
- * "Order Progress" stepper for everyone else (Admin, SuperAdmin, HoM, HoCS,
- * Finance, HR, Branch Admin) — CEO directive 2026-05-10. Drops the
- * `AGENT_ASSIGNED` step that only logistics ops cares about, while keeping
- * `REMITTED` so Finance still sees the cash-reconciliation milestone.
+ * "Order Progress" stepper when the viewer should see the finance milestone: drops
+ * `AGENT_ASSIGNED`, keeps `REMITTED` (cash remittance / COD close-out).
  */
 const STATUS_FLOW_STANDARD = [
   'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED', 'REMITTED',
 ] as const;
 
 /**
- * "Order Progress" stepper visible to CS closers — CEO directive 2026-05-10.
- * The CEO's six top-level buckets minus `REMITTED` (finance reconciliation —
- * "does not concern them"). `AGENT_ASSIGNED` / `DISPATCHED` / `IN_TRANSIT`
- * are also dropped — once an order leaves CS, the with-logistics phase is
- * outside CS's working surface.
+ * Default stepper for order detail — ends at **Delivered** (no `REMITTED`, no
+ * `AGENT_ASSIGNED`). Used for CS, marketing, branch ops, HR, etc. unless the viewer
+ * is logistics-side or has finance / cash-remittance capabilities.
  */
 const STATUS_FLOW_CS = [
   'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CONFIRMED', 'DELIVERED',
@@ -191,6 +199,14 @@ const LOGISTICS_VIEWER_ROLES = new Set([
   'TPL_MANAGER',
   'TPL_RIDER',
 ]);
+
+/** CS / HoCS assign to external 3PL; internal warehouse hubs stay on logistics surfaces. */
+function filterAllocatableLocationsForOrderHandoff<
+  T extends { providerKind?: string | null },
+>(rows: T[], mayIncludeInternalWarehouses: boolean): T[] {
+  if (mayIncludeInternalWarehouses) return rows;
+  return rows.filter((l) => (l.providerKind ?? 'THIRD_PARTY') !== 'WAREHOUSE');
+}
 
 // Everything between ALLOCATED and DELIVERED happens offline (rider with the
 // parcel). DISPATCHED + IN_TRANSIT therefore collapse — for the full flow
@@ -778,6 +794,7 @@ export function OrderDetailPage({
   const ensureInvoiceFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const invoiceFetcher = useFetcher<{ ok: boolean; invoice: OrderInvoice | null; error?: string }>();
   const timelineFetcher = useFetcher<{ ok: boolean; timeline: TimelineEvent[]; error?: string }>();
+  const csCommentFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const revalidator = useRevalidator();
 
   // Optimistic order: overlay in-flight transition / assignment / callback patches on top of
@@ -814,9 +831,42 @@ export function OrderDetailPage({
   const [dismissedError, setDismissedError] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [scheduleCallbackModalOpen, setScheduleCallbackModalOpen] = useState(false);
+  const [addCommentModalOpen, setAddCommentModalOpen] = useState(false);
+  const [csCommentDraft, setCsCommentDraft] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
-  const [scheduleDelayMinutes, setScheduleDelayMinutes] = useState(120);
+  const [scheduleDelaySelect, setScheduleDelaySelect] = useState<string>('120');
+  const [scheduleCustomAmount, setScheduleCustomAmount] = useState<number | null>(2);
+  const [scheduleCustomUnit, setScheduleCustomUnit] = useState<CallbackCustomDelayUnit>('hours');
   const [scheduleNotes, setScheduleNotes] = useState('');
+
+  const effectiveScheduleDelayMinutes = useMemo(() => {
+    if (scheduleDelaySelect !== 'custom') {
+      const n = parseInt(scheduleDelaySelect, 10);
+      return Number.isFinite(n) ? n : Number.NaN;
+    }
+    if (scheduleCustomAmount == null || !Number.isFinite(scheduleCustomAmount) || scheduleCustomAmount <= 0) {
+      return Number.NaN;
+    }
+    return Math.round(scheduleCustomAmount * callbackCustomUnitMultiplier(scheduleCustomUnit));
+  }, [scheduleDelaySelect, scheduleCustomAmount, scheduleCustomUnit]);
+
+  const scheduleDelayInvalid =
+    !Number.isFinite(effectiveScheduleDelayMinutes) ||
+    effectiveScheduleDelayMinutes < CALLBACK_DELAY_MIN_MINUTES ||
+    effectiveScheduleDelayMinutes > CALLBACK_DELAY_MAX_MINUTES;
+
+  const scheduleCallbackHiddenDelayMinutes =
+    !scheduleDelayInvalid && Number.isFinite(effectiveScheduleDelayMinutes)
+      ? effectiveScheduleDelayMinutes
+      : 120;
+
+  const scheduleCustomAmountMin = Math.max(
+    1,
+    Math.ceil(CALLBACK_DELAY_MIN_MINUTES / callbackCustomUnitMultiplier(scheduleCustomUnit)),
+  );
+  const scheduleCustomAmountMax = Math.floor(
+    CALLBACK_DELAY_MAX_MINUTES / callbackCustomUnitMultiplier(scheduleCustomUnit),
+  );
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
   const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
   const [priceApprovalReason, setPriceApprovalReason] = useState('');
@@ -865,13 +915,42 @@ export function OrderDetailPage({
     };
   }, [allocatableLocations, allocatableLocationsDeferred]);
 
-  const selectedAllocatableLocation = resolvedAllocatableLocations.find((l) => l.id === allocateLocationId);
-  const eligibleAllocatableCount = resolvedAllocatableLocations.filter((l) => l.eligible).length;
+  const mayIncludeInternalWarehousesForHandoff =
+    LOGISTICS_VIEWER_ROLES.has(userRole) || isAdminLevel({ role: userRole });
+
+  const handoffAllocatableLocations = useMemo(
+    () =>
+      filterAllocatableLocationsForOrderHandoff(
+        resolvedAllocatableLocations,
+        mayIncludeInternalWarehousesForHandoff,
+      ),
+    [resolvedAllocatableLocations, mayIncludeInternalWarehousesForHandoff],
+  );
+
+  const syncHandoffAllocatableLocations = useMemo(
+    () =>
+      filterAllocatableLocationsForOrderHandoff(
+        allocatableLocations,
+        mayIncludeInternalWarehousesForHandoff,
+      ),
+    [allocatableLocations, mayIncludeInternalWarehousesForHandoff],
+  );
+
+  const selectedAllocatableLocation = handoffAllocatableLocations.find((l) => l.id === allocateLocationId);
+  const eligibleAllocatableCount = handoffAllocatableLocations.filter((l) => l.eligible).length;
+
+  useEffect(() => {
+    if (!allocateModalOpen || !allocateLocationId) return;
+    if (!handoffAllocatableLocations.some((l) => l.id === allocateLocationId)) {
+      setAllocateLocationId('');
+    }
+  }, [allocateModalOpen, allocateLocationId, handoffAllocatableLocations]);
 
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const scheduleSurface = useFetcherActionSurface(scheduleFetcher);
   const adjustItemsSurface = useFetcherActionSurface(adjustItemsFetcher);
   const priceRequestSurface = useFetcherActionSurface(priceRequestFetcher);
+  const csCommentSurface = useFetcherActionSurface(csCommentFetcher);
 
   /** Disambiguates `intent: transition` (confirm / allocate / cancel / deliver share one intent). */
   type FetchSubmissionKey = {
@@ -916,21 +995,24 @@ export function OrderDetailPage({
     deliverModalOpen ||
     callCustomerModalOpen;
 
-  // Stepper shape (CEO directive 2026-05-10):
-  //   - CS closers: 5 steps (no AGENT_ASSIGNED, no REMITTED — neither
-  //     concerns them).
-  //   - Logistics-side viewers: 7 steps including AGENT_ASSIGNED — that's
-  //     their actionable handoff.
-  //   - Everyone else (Admin / HoM / HoCS / Finance / HR / Branch Admin):
-  //     6 steps without AGENT_ASSIGNED but with REMITTED.
-  // Actions, gates, and backend transitions are unchanged — only the
-  // stepper shape flips per role.
+  // Stepper shape — Cash Remitted (`REMITTED`) only for viewers who actually operate
+  // finance remittance or logistics COD tracking. Everyone else ends at Delivered so
+  // CS / marketing / branch campaign views are not polluted with step 6.
   const isLogisticsViewer = LOGISTICS_VIEWER_ROLES.has(userRole);
-  const orderStatusFlow = isCSCloser
-    ? (STATUS_FLOW_CS as readonly string[])
-    : isLogisticsViewer
-      ? (STATUS_FLOW_LOGISTICS as readonly string[])
-      : (STATUS_FLOW_STANDARD as readonly string[]);
+  const viewerSeesCashRemittanceStep = useMemo(() => {
+    if (isLogisticsViewer) return true;
+    if (hasFinanceAccess({ role: userRole, permissions })) return true;
+    const permSet = new Set((permissions ?? []).map((p) => canonicalPermissionCode(p)));
+    const cashCreate = canonicalPermissionCode('finance.cashRemittance.create');
+    const cashReceived = canonicalPermissionCode('finance.cashRemittance.markReceived');
+    return permSet.has(cashCreate) || permSet.has(cashReceived);
+  }, [userRole, permissions, isLogisticsViewer]);
+  const orderProgressStripHidesCashRemitted = !viewerSeesCashRemittanceStep;
+  const orderStatusFlow = isLogisticsViewer
+    ? (STATUS_FLOW_LOGISTICS as readonly string[])
+    : viewerSeesCashRemittanceStep
+      ? (STATUS_FLOW_STANDARD as readonly string[])
+      : (STATUS_FLOW_CS as readonly string[]);
   const currentStatusIndex = getProgressIndex(order.status, orderStatusFlow);
   const actionError = (fetcher.data as { error?: string })?.error;
   const callInitiated = (fetcher.data as { callInitiated?: boolean })?.callInitiated;
@@ -980,6 +1062,10 @@ export function OrderDetailPage({
     skipErrorToast: adjustItemsModalOpen,
   });
   useFetcherToast(ensureInvoiceFetcher.data, { successMessage: 'Invoice generated' });
+  useFetcherToast(csCommentFetcher.data, {
+    successMessage: 'Comment added',
+    skipErrorToast: addCommentModalOpen,
+  });
   const canGenerateInvoice =
     isAdminLevel({ role: userRole }) || (permissions ?? []).includes('finance.read');
   const showCopyOrderSummary = canCopyOrderSummaryForChat(userRole, currentBranchId ?? null, order);
@@ -997,18 +1083,21 @@ export function OrderDetailPage({
     showLogisticsOrderSummaryCopy && !!logisticsLocationWithGroupLink;
 
   const handleCopyOrderSummary = useCallback(async () => {
-    const text = buildOrderSummaryClipboardText(order);
     try {
       if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
         toast.error('Copy failed', 'Clipboard is not available in this browser.');
         return;
       }
+      const { text } = await fetchOrderClipboardSummary(order.id);
       await navigator.clipboard.writeText(text);
       toast.success('Copied', 'Order summary ready to paste into WhatsApp or your logistics company group.');
-    } catch {
-      toast.error('Copy failed', 'Could not write to the clipboard.');
+    } catch (e) {
+      toast.error(
+        'Copy failed',
+        e instanceof Error ? e.message : 'Could not load or write the order summary.',
+      );
     }
-  }, [order, toast]);
+  }, [order.id, toast]);
 
   // When user submits again, clear dismissed so the next response error will show
   useEffect(() => {
@@ -1254,7 +1343,9 @@ export function OrderDetailPage({
     (data: { success: true } & Record<string, unknown>) => {
       if (!(data as { scheduled?: boolean }).scheduled) return;
       setScheduleCallbackModalOpen(false);
-      setScheduleDelayMinutes(120);
+      setScheduleDelaySelect('120');
+      setScheduleCustomAmount(2);
+      setScheduleCustomUnit('hours');
       setScheduleNotes('');
     },
     [],
@@ -1267,6 +1358,16 @@ export function OrderDetailPage({
   }, []);
   useCloseOnFetcherSuccess(adjustItemsFetcher, handleAdjustItemsSuccess);
   useCloseOnFetcherSuccess(priceRequestFetcher, handleAdjustItemsSuccess);
+
+  const handleCsCommentSuccess = useCallback(
+    (_data: { success: true } & Record<string, unknown>) => {
+      setAddCommentModalOpen(false);
+      setCsCommentDraft('');
+      void timelineFetcher.load(`/api/order-timeline/${order.id}`);
+    },
+    [order.id, timelineFetcher],
+  );
+  useCloseOnFetcherSuccess(csCommentFetcher, handleCsCommentSuccess, { intent: 'addCsOrderComment' });
 
   // Escape to close adjust items modal
   useEffect(() => {
@@ -1339,9 +1440,8 @@ export function OrderDetailPage({
       {/* Phase 18 — surface the cash-remittance association so anyone reading
           the order knows why a DELIVERED order isn't yet REMITTED, or where
           the cash receipt that closed it out lives.
-          Hidden from CS closers (CEO directive 2026-05-10) — cash remittance
-          is a Finance reconciliation concern, not CS's. */}
-      {order.remittanceId && !isCSCloser && (
+          Hidden from CS and marketing (Delivered is the end of their scope). */}
+      {order.remittanceId && !orderProgressStripHidesCashRemitted && (
         <Link
           to={`/admin/finance/delivery-remittances/${order.remittanceId}`}
           prefetch="intent"
@@ -1426,18 +1526,24 @@ export function OrderDetailPage({
                 {orderStatusFlow.map((status, idx) => {
                   const isPast = idx < currentStatusIndex;
                   const isCurrent = idx === currentStatusIndex;
+                  // Brand "current" ring reads as in-progress; Delivered / Remitted match
+                  // OrderStatusBadge (emerald / green) and prior completed steps (success).
+                  const isSuccessMilestone =
+                    status === 'DELIVERED' || status === 'REMITTED';
+                  const renderedComplete = isPast || (isCurrent && isSuccessMilestone);
+                  const showInProgressCurrent = isCurrent && !isSuccessMilestone;
 
                   return (
                     <div key={status} className="flex items-center flex-shrink-0 lg:justify-center">
                       <div className="flex flex-col items-center lg:w-full">
                         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                          isCurrent
+                          showInProgressCurrent
                             ? 'bg-brand-500 text-white ring-4 ring-brand-100 dark:ring-brand-900'
-                            : isPast
-                            ? 'bg-success-500 text-white'
-                            : 'bg-app-hover text-app-fg-muted'
+                            : renderedComplete
+                              ? 'bg-success-500 text-white'
+                              : 'bg-app-hover text-app-fg-muted'
                         }`}>
-                          {isPast ? (
+                          {renderedComplete ? (
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                             </svg>
@@ -1446,7 +1552,11 @@ export function OrderDetailPage({
                           )}
                         </div>
                         <span className={`text-2xs mt-1 whitespace-nowrap lg:whitespace-normal lg:text-center lg:leading-tight ${
-                          isCurrent ? 'text-brand-600 dark:text-brand-400 font-semibold' : isPast ? 'text-success-600 dark:text-success-500' : 'text-app-fg-muted'
+                          showInProgressCurrent
+                            ? 'text-brand-600 dark:text-brand-400 font-semibold'
+                            : renderedComplete
+                              ? 'text-success-600 dark:text-success-500 font-semibold'
+                              : 'text-app-fg-muted'
                         }`}>
                           {STATUS_LABELS[status] ?? formatStatus(status)}
                         </span>
@@ -1799,8 +1909,10 @@ export function OrderDetailPage({
             {/* Order Actions — CS / Head of CS only, permission-gated by the route.
                 CS still owns Adjust/Call/Delete after CS_ENGAGED while goods are pre-delivery so
                 they can manage upsells, delivery-coordination calls, and cancellations.
+                Manual timeline comments stay available while the actor can act on the order,
+                including after line-item edits are closed (e.g. DELIVERED).
                 Read-only viewers keep this page for visibility only; they never see action controls. */}
-            {canEditOrder && isCSOrHoS && orderAllowsLineItemEdits && (
+            {canEditOrder && isCSOrHoS && (orderAllowsLineItemEdits || canPerformCSActionsOnOrder) && (
               <div className="card order-[-2] lg:order-none">
                 <h2 className="text-lg font-semibold text-app-fg mb-3">Order Actions</h2>
                 {/* When the order is UNPROCESSED and no closer has been assigned, ALL actions
@@ -1829,7 +1941,7 @@ export function OrderDetailPage({
                   {/* All actions other than the Assign closer dropdown are suppressed while
                       the order is UNPROCESSED with no closer assigned — see the info banner
                       above for rationale. */}
-                  {!(order.status === 'UNPROCESSED' && !order.assignedCsId) && (
+                  {!(order.status === 'UNPROCESSED' && !order.assignedCsId) && orderAllowsLineItemEdits && (
                   <>
                   {/* Adjust order items — always first */}
                   <Button
@@ -1919,6 +2031,18 @@ export function OrderDetailPage({
                   </Button>
 
                   </>
+                  )}
+
+                  {canPerformCSActionsOnOrder && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => setAddCommentModalOpen(true)}
+                      disabled={csCommentFetcher.state === 'submitting'}
+                    >
+                      Add comment
+                    </Button>
                   )}
 
                   {/* Assign to closer — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED.
@@ -2325,7 +2449,9 @@ export function OrderDetailPage({
           open
           onClose={() => {
             setScheduleCallbackModalOpen(false);
-            setScheduleDelayMinutes(120);
+            setScheduleDelaySelect('120');
+            setScheduleCustomAmount(2);
+            setScheduleCustomUnit('hours');
             setScheduleNotes('');
           }}
           maxWidth="max-w-md"
@@ -2339,13 +2465,13 @@ export function OrderDetailPage({
           <scheduleFetcher.Form method="post" className="block space-y-4">
             <input type="hidden" name="intent" value="scheduleCallback" />
             {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-            <input type="hidden" name="delayMinutes" value={scheduleDelayMinutes} />
+            <input type="hidden" name="delayMinutes" value={scheduleCallbackHiddenDelayMinutes} />
             <input type="hidden" name="notes" value={scheduleNotes} />
             <FormSelect
               id="schedule-callback-delay"
               label="Delay"
-              value={String(scheduleDelayMinutes)}
-              onChange={(e) => setScheduleDelayMinutes(parseInt(e.target.value, 10))}
+              value={scheduleDelaySelect}
+              onChange={(e) => setScheduleDelaySelect(e.target.value)}
               aria-label="Callback delay"
               options={[
                 { value: '30', label: '30 minutes' },
@@ -2354,8 +2480,49 @@ export function OrderDetailPage({
                 { value: '240', label: '4 hours' },
                 { value: '480', label: '8 hours' },
                 { value: '1440', label: '24 hours' },
+                { value: 'custom', label: 'Custom…' },
               ]}
             />
+            {scheduleDelaySelect === 'custom' ? (
+              <div className="space-y-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+                  <NumberInput
+                    label="Amount"
+                    wrapperClassName="flex-1 min-w-0"
+                    value={scheduleCustomAmount}
+                    onValueChange={setScheduleCustomAmount}
+                    min={scheduleCustomAmountMin}
+                    max={scheduleCustomAmountMax}
+                    coerce="integer"
+                    allowEmpty
+                    onValueCleared={() => setScheduleCustomAmount(null)}
+                    aria-label="Custom callback delay amount"
+                  />
+                  <FormSelect
+                    label="Unit"
+                    value={scheduleCustomUnit}
+                    onChange={(e) =>
+                      setScheduleCustomUnit(e.target.value as CallbackCustomDelayUnit)
+                    }
+                    options={[
+                      { value: 'minutes', label: 'Minutes' },
+                      { value: 'hours', label: 'Hours' },
+                      { value: 'days', label: 'Days' },
+                    ]}
+                    wrapperClassName="sm:w-40 shrink-0"
+                    aria-label="Custom delay unit"
+                  />
+                </div>
+                <p className="text-xs text-app-fg-muted">
+                  Total delay must be between 5 minutes and 7 days.
+                  {scheduleDelayInvalid ? (
+                    <span className="block text-danger-600 dark:text-danger-400 mt-1">
+                      Adjust the amount so the total falls in that range.
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+            ) : null}
             <Textarea
               label="Notes (optional)"
               value={scheduleNotes}
@@ -2370,7 +2537,9 @@ export function OrderDetailPage({
                 className="w-full sm:w-auto"
                 onClick={() => {
                   setScheduleCallbackModalOpen(false);
-                  setScheduleDelayMinutes(120);
+                  setScheduleDelaySelect('120');
+                  setScheduleCustomAmount(2);
+                  setScheduleCustomUnit('hours');
                   setScheduleNotes('');
                 }}
               >
@@ -2380,7 +2549,7 @@ export function OrderDetailPage({
                 type="submit"
                 variant="primary"
                 className="w-full sm:w-auto"
-                disabled={scheduleFetcher.state === 'submitting'}
+                disabled={scheduleFetcher.state === 'submitting' || scheduleDelayInvalid}
                 loading={scheduleFetcher.state === 'submitting'}
                 loadingText="Scheduling..."
               >
@@ -2388,6 +2557,60 @@ export function OrderDetailPage({
               </Button>
             </div>
           </scheduleFetcher.Form>
+        </Modal>
+      )}
+
+      {/* Add timeline comment (does not change order status) */}
+      {addCommentModalOpen && (
+        <Modal
+          open
+          onClose={() => {
+            setAddCommentModalOpen(false);
+            setCsCommentDraft('');
+          }}
+          maxWidth="max-w-md"
+          contentClassName="p-6 max-h-[90dvh] overflow-y-auto pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Add comment</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            This note appears on Order Activity. It does not change order status.
+          </p>
+          <ModalFetcherInlineError message={csCommentSurface.errorMatchingIntent('addCsOrderComment')} />
+          <csCommentFetcher.Form method="post" className="block space-y-4">
+            <input type="hidden" name="intent" value="addCsOrderComment" />
+            {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+            <input type="hidden" name="comment" value={csCommentDraft} />
+            <Textarea
+              label="Comment"
+              value={csCommentDraft}
+              onChange={(e) => setCsCommentDraft(e.target.value)}
+              placeholder="e.g. Customer prefers evening delivery"
+              rows={4}
+            />
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full sm:w-auto"
+                onClick={() => {
+                  setAddCommentModalOpen(false);
+                  setCsCommentDraft('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                className="w-full sm:w-auto"
+                disabled={csCommentFetcher.state === 'submitting' || !csCommentDraft.trim()}
+                loading={csCommentFetcher.state === 'submitting'}
+                loadingText="Saving…"
+              >
+                Save comment
+              </Button>
+            </div>
+          </csCommentFetcher.Form>
         </Modal>
       )}
 
@@ -2474,7 +2697,7 @@ export function OrderDetailPage({
               : 'Select the logistics company location that will fulfil this order. Stock must be available at that location.'}
           </p>
           <ModalFetcherInlineError message={fetcherErrorForTransition('AGENT_ASSIGNED')} />
-          {allocatableLocations.length > 0 ? (
+          {syncHandoffAllocatableLocations.length > 0 ? (
             <>
               {eligibleAllocatableCount === 0 ? (
                 <InlineNotification
@@ -2490,7 +2713,7 @@ export function OrderDetailPage({
                 onChange={setAllocateLocationId}
                 placeholder="Select a location..."
                 searchPlaceholder="Search locations..."
-                options={allocatableLocations.map((loc) => ({
+                options={syncHandoffAllocatableLocations.map((loc) => ({
                   value: loc.id,
                   label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                   description: describeAllocatableLocation(loc),
@@ -2532,17 +2755,35 @@ export function OrderDetailPage({
           ) : allocatableLocationsDeferred ? (
             <DeferredSection resolve={allocatableLocationsDeferred} skeleton="card">
               {(rows) => {
-                const list = Array.isArray(rows) ? rows : [];
+                const rawList = Array.isArray(rows) ? rows : [];
+                const list = filterAllocatableLocationsForOrderHandoff(
+                  rawList,
+                  mayIncludeInternalWarehousesForHandoff,
+                );
                 const eligibleCount = list.filter((l) => l.eligible).length;
                 const selected = allocateLocationId ? list.find((l) => l.id === allocateLocationId) : undefined;
 
-                return list.length === 0 ? (
-                  <EmptyState
-                    title="No locations with enough stock"
-                    description="No logistics hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Receive stock (intake or verified transfer) and try again."
-                    variant="card"
-                  />
-                ) : (
+                if (rawList.length === 0) {
+                  return (
+                    <EmptyState
+                      title="No locations with enough stock"
+                      description="No logistics hub currently has enough free shelf stock for every line on this order (or dispatch is locked). Receive stock (intake or verified transfer) and try again."
+                      variant="card"
+                    />
+                  );
+                }
+
+                if (list.length === 0) {
+                  return (
+                    <EmptyState
+                      title="No external logistics partners available"
+                      description="Company-owned warehouse hubs are not listed in this hand-off. Pick a third-party logistics location, or ask a logistics team member to assign internal fulfillment."
+                      variant="card"
+                    />
+                  );
+                }
+
+                return (
                   <>
                     {eligibleCount === 0 ? (
                       <InlineNotification

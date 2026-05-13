@@ -202,6 +202,8 @@ export interface OrderDetailPageExtraProps {
     address: string | null;
     whatsappGroupLink?: string | null;
     providerName: string | null;
+    /** From logistics provider row — `WAREHOUSE` is internal inventory, not a 3PL hand-off. */
+    providerKind?: string | null;
     eligible: boolean;
     reason: string | null;
     /**
@@ -227,6 +229,7 @@ export interface OrderDetailPageExtraProps {
       address: string | null;
       whatsappGroupLink?: string | null;
       providerName: string | null;
+      providerKind?: string | null;
       eligible: boolean;
       reason: string | null;
       availabilityByProduct: Array<{

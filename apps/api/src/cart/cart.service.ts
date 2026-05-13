@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { eq, and, lt, desc, count, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
-import { SYSTEM_ACTOR_ID } from '@yannis/shared';
+import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { withActor } from '../common/db/with-actor';
@@ -12,32 +12,12 @@ type CartDbOrTx =
   | PostgresJsDatabase<typeof schema>
   | Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
 
-function maskPhone(phoneHash: string): string {
-  if (phoneHash.length <= 8) return '****';
-  return `${phoneHash.slice(0, 4)}****${phoneHash.slice(-4)}`;
-}
-
 /**
- * Mask a real customer phone for display in CS lists.
- * Pillar 2 — full number is never sent to the browser; only `0803****1234`
- * (first 4 + last 4 digits, asterisks in the middle) so a rep can confirm
- * they're calling the right person while the raw value stays server-side.
- */
-function maskRealPhone(phone: string): string {
-  const digits = phone.replace(/\D+/g, '');
-  if (digits.length <= 8) return '****';
-  return `${digits.slice(0, 4)}****${digits.slice(-4)}`;
-}
-
-/**
- * Best-effort masked display from whatever the cart row holds. Prefers the
- * raw phone (newly captured carts) and falls back to the phone-hash mask for
- * legacy rows that have no raw phone yet.
+ * Best-effort display from cart row: digit mask when raw phone is present,
+ * otherwise "Hidden" / "—" when only a hash or nothing (never hash fragments as a "phone").
  */
 function maskCartPhone(rawPhone: string | null, phoneHash: string): string {
-  const trimmed = rawPhone?.trim();
-  if (trimmed) return maskRealPhone(trimmed);
-  return maskPhone(phoneHash);
+  return formatOrderCustomerPhoneDisplay(rawPhone, phoneHash);
 }
 
 @Injectable()
@@ -500,7 +480,7 @@ export class CartService {
     return rows.map((r) => ({
       id: r.id,
       customerName: r.customerName,
-      customerPhoneDisplay: maskPhone(r.customerPhoneHash),
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(null, r.customerPhoneHash),
       productName: r.productName ?? null,
       offerLabel: r.offerLabel ?? null,
       cartStatus: r.cartStatus,

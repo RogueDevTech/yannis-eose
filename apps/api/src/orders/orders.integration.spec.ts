@@ -10,8 +10,8 @@
 
 import { describe, it, expect, afterAll, beforeEach, afterEach } from 'vitest';
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
-import { db as schema } from '@yannis/shared';
+import { eq, and } from 'drizzle-orm';
+import { db as schema, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections, setSessionActor } from '../test/setup-integration';
 import {
   createTestUser,
@@ -485,13 +485,10 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
     // Raw phone is stored in DB but must NEVER appear in API response
     expect(order!.customerPhone).toBe(rawPhone);
 
-    // maskPhone logic: first4 + **** + last4 of hash
-    const hash = order!.customerPhoneHash ?? '';
-    const masked = hash.length <= 8 ? '****' : `${hash.slice(0, 4)}****${hash.slice(-4)}`;
-    // Masked value must NOT equal the raw phone
-    expect(masked).not.toBe(rawPhone);
-    // Masked value must contain ****
-    expect(masked).toContain('****');
+    const display = formatOrderCustomerPhoneDisplay(order!.customerPhone, order!.customerPhoneHash);
+    expect(display).toBe('0803****4567');
+    expect(display).not.toBe(rawPhone);
+    expect(display).not.toContain('testh');
   });
 
   // ---------------------------------------------------------------------------
@@ -537,6 +534,83 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       .where(eq(schema.orderTimelineEvents.id, eventId));
 
     expect(eventAfterNameChange!.actorName).toBe(snapshotName); // unchanged
+  });
+
+  it('addCsOrderComment writes CS_ORDER_COMMENT for assigned closer on DELIVERED order', async () => {
+    const branch = await createTestBranch(db as any);
+    const closer = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await db.insert(schema.userBranches).values({ userId: closer.id, branchId: branch.id, isPrimary: true });
+    await setSessionActor(pgClient, closer.id, branch.id);
+    const { orderId } = await createTestOrder(db as any, {
+      status: 'DELIVERED',
+      branchId: branch.id,
+      assignedCsId: closer.id,
+    });
+
+    const ordersService = createOrdersServiceForTest(db as any);
+    const actor = {
+      id: closer.id,
+      email: closer.email,
+      name: 'Test closer',
+      role: 'CS_CLOSER' as const,
+      logisticsLocationId: null,
+      currentBranchId: branch.id,
+      permissions: [] as string[],
+    };
+
+    const res = await ordersService.addCsOrderComment(orderId, actor as any, {
+      comment: 'Customer asked to call back Thursday.',
+    });
+    expect(res.success).toBe(true);
+
+    const rows = await db
+      .select()
+      .from(schema.orderTimelineEvents)
+      .where(and(eq(schema.orderTimelineEvents.orderId, orderId), eq(schema.orderTimelineEvents.eventType, 'CS_ORDER_COMMENT')));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.description).toContain('Customer asked');
+    expect((rows[0]!.metadata as { commentBody?: string })?.commentBody).toBe(
+      'Customer asked to call back Thursday.',
+    );
+    expect(rows[0]!.actorId).toBe(closer.id);
+  });
+
+  it('addCsOrderComment rejects CS closer not assigned to the order', async () => {
+    const branch = await createTestBranch(db as any);
+    const assignee = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    const stranger = await createTestUser(db as any, { role: 'CS_CLOSER' });
+    await db.insert(schema.userBranches).values([
+      { userId: assignee.id, branchId: branch.id, isPrimary: true },
+      { userId: stranger.id, branchId: branch.id, isPrimary: true },
+    ]);
+    await setSessionActor(pgClient, stranger.id, branch.id);
+    const { orderId } = await createTestOrder(db as any, {
+      status: 'DELIVERED',
+      branchId: branch.id,
+      assignedCsId: assignee.id,
+    });
+
+    const ordersService = createOrdersServiceForTest(db as any);
+    const actor = {
+      id: stranger.id,
+      email: stranger.email,
+      name: 'Stranger closer',
+      role: 'CS_CLOSER' as const,
+      logisticsLocationId: null,
+      currentBranchId: branch.id,
+      permissions: [] as string[],
+    };
+
+    await expect(ordersService.addCsOrderComment(orderId, actor as any, { comment: 'Nope' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+
+    const commentRows = await db
+      .select({ id: schema.orderTimelineEvents.id })
+      .from(schema.orderTimelineEvents)
+      .where(and(eq(schema.orderTimelineEvents.orderId, orderId), eq(schema.orderTimelineEvents.eventType, 'CS_ORDER_COMMENT')));
+    expect(commentRows).toHaveLength(0);
   });
 
   it('assignToCS allows CS team supervisor for UNPROCESSED order on same branch', async () => {

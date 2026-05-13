@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useSearchParams } from '@remix-run/react';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import {
   CompactTable,
@@ -12,6 +14,11 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
+import { Button } from '~/components/ui/button';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
+import { SearchableSelect } from '~/components/ui/searchable-select';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 
 const FINANCE_OVERVIEW_STRIP = [
   { label: 'Revenue', value: <StatValuePulse className="min-w-[3.5rem]" /> },
@@ -144,7 +151,23 @@ export function FinanceOverviewLoadingShell({
   );
 }
 
-/** Finance → Disbursements — header, date, tab strip, table pulse. */
+type DisbMainTab = 'disbursements' | 'requests' | 'balances';
+
+function disbMainTabFromSp(sp: URLSearchParams): DisbMainTab {
+  const t = sp.get('tab');
+  if (t === 'requests' || t === 'balances') return t;
+  return 'disbursements';
+}
+
+const DISB_STATUS_OPTIONS = ['ALL', 'SENT', 'COMPLETED', 'DISPUTED'] as const;
+const DISB_STATUS_LABELS: Record<string, string> = {
+  ALL: 'All',
+  SENT: 'Pending',
+  COMPLETED: 'Received',
+  DISPUTED: 'Disputed',
+};
+
+/** Finance → Disbursements — URL-driven tabs + filter row; stats + table pulse. */
 export function FinanceDisbursementsLoadingShell({
   filters,
 }: {
@@ -160,6 +183,113 @@ export function FinanceDisbursementsLoadingShell({
     balancesStatus: string;
   };
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mainTab = useMemo(() => disbMainTabFromSp(searchParams), [searchParams]);
+  const [searchQuery, setSearchQuery] = useState(() => filters.search);
+  const [balancesSearchQuery, setBalancesSearchQuery] = useState(() => filters.balancesSearch);
+
+  useEffect(() => {
+    setSearchQuery(filters.search);
+  }, [filters.search]);
+  useEffect(() => {
+    setBalancesSearchQuery(filters.balancesSearch);
+  }, [filters.balancesSearch]);
+
+  const selectedStatus =
+    filters.status && DISB_STATUS_OPTIONS.includes(filters.status as (typeof DISB_STATUS_OPTIONS)[number])
+      ? filters.status
+      : 'ALL';
+  const selectedReceiver = filters.receiver || 'ALL';
+  const receiverOptions = useMemo(() => {
+    const base = [{ value: 'ALL', label: 'All recipients' }];
+    if (selectedReceiver !== 'ALL') {
+      base.push({ value: selectedReceiver, label: 'Selected recipient' });
+    }
+    return base;
+  }, [selectedReceiver]);
+
+  const balancesRoleFilter = filters.balancesRole || 'ALL';
+  const balancesStatusFilter = filters.balancesStatus || 'ALL';
+
+  const setMainTab = useCallback(
+    (tab: DisbMainTab) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (tab === 'disbursements') next.delete('tab');
+          else next.set('tab', tab);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const handleStatusChange = (v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', '1');
+      if (!v || v === 'ALL') next.delete('status');
+      else next.set('status', v);
+      return next;
+    });
+  };
+
+  const handleReceiverChange = (v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', '1');
+      if (!v || v === 'ALL') next.delete('receiver');
+      else next.set('receiver', v);
+      return next;
+    });
+  };
+
+  const handleSearchSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('page', '1');
+      const q = searchQuery.trim();
+      if (q) next.set('search', q);
+      else next.delete('search');
+      return next;
+    });
+  };
+
+  const handleBalancesSearchSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('balancesPage', '1');
+      const q = balancesSearchQuery.trim();
+      if (q) next.set('balancesSearch', q);
+      else next.delete('balancesSearch');
+      return next;
+    });
+  };
+
+  const handleBalancesRoleChange = (v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('balancesPage', '1');
+      if (!v || v === 'ALL') next.delete('balancesRole');
+      else next.set('balancesRole', v);
+      return next;
+    });
+  };
+
+  const handleBalancesStatusChange = (v: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('balancesPage', '1');
+      if (!v || v === 'ALL') next.delete('balancesStatus');
+      else next.set('balancesStatus', v);
+      return next;
+    });
+  };
+
   const rows = shellPulsePlaceholderRows('fin_disb', DISBURSEMENTS_SHELL_ROWS);
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
@@ -220,21 +350,112 @@ export function FinanceDisbursementsLoadingShell({
           { label: 'Disputed', value: <StatValuePulse className="min-w-[3rem]" /> },
         ]}
       />
-      <Tabs
-        variant="underline"
-        value="disbursements"
-        onChange={() => {}}
-        tabs={[
-          { value: 'disbursements', label: 'Disbursements' },
-          { value: 'requests', label: 'Funding requests' },
-          { value: 'balances', label: 'Recipient balances' },
-        ]}
-      />
-      <div className="card p-0 overflow-hidden">
-        <div className="p-4 border-b border-app-border flex gap-2 flex-wrap">
-          <div className="h-9 flex-1 min-w-[8rem] max-w-xs rounded-lg bg-app-hover animate-pulse" aria-hidden />
-          <div className="h-9 w-36 rounded-lg bg-app-hover animate-pulse" aria-hidden />
+      <div className="card p-0">
+        <div className="px-4 pt-2">
+          <Tabs
+            variant="underline"
+            value={mainTab}
+            onChange={(v) => setMainTab(v as DisbMainTab)}
+            tabs={[
+              { value: 'disbursements', label: 'Disbursements' },
+              { value: 'requests', label: 'Funding requests' },
+              { value: 'balances', label: 'Recipient balances' },
+            ]}
+          />
         </div>
+      </div>
+
+      {mainTab === 'disbursements' ? (
+        <div className="card">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
+              <SearchInput
+                type="search"
+                value={searchQuery}
+                onChange={(v) => setSearchQuery(v)}
+                placeholder="Search by sender, receiver, or ID…"
+                controlSize="sm"
+                clearable
+                wrapperClassName="min-w-0 flex-1"
+                aria-label="Search disbursements"
+              />
+              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+                Search
+              </Button>
+            </form>
+            <FormSelect
+              id="disbursement-status-filter-shell"
+              value={selectedStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              options={DISB_STATUS_OPTIONS.map((s) => ({ value: s, label: DISB_STATUS_LABELS[s] ?? s }))}
+              controlSize="sm"
+              wrapperClassName="w-full sm:w-44"
+              aria-label="Filter by status"
+            />
+            <SearchableSelect
+              id="disbursement-recipient-filter-shell"
+              value={selectedReceiver}
+              onChange={handleReceiverChange}
+              options={receiverOptions}
+              controlSize="sm"
+              wrapperClassName="w-full min-w-0 sm:w-52"
+              searchPlaceholder="Search recipients…"
+              placeholder="All recipients"
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {mainTab === 'balances' ? (
+        <div className="card">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <form onSubmit={handleBalancesSearchSubmit} className="flex min-w-0 flex-1 gap-2">
+              <SearchInput
+                type="search"
+                value={balancesSearchQuery}
+                onChange={(v) => setBalancesSearchQuery(v)}
+                placeholder="Search recipient name…"
+                controlSize="sm"
+                clearable
+                wrapperClassName="min-w-0 flex-1"
+                aria-label="Search recipient balances"
+              />
+              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
+                Search
+              </Button>
+            </form>
+            <FormSelect
+              id="balances-role-filter-shell"
+              value={balancesRoleFilter}
+              onChange={(e) => handleBalancesRoleChange(e.target.value)}
+              options={[
+                { value: 'ALL', label: 'All roles' },
+                { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
+                { value: 'MEDIA_BUYER', label: 'Media Buyer' },
+              ]}
+              controlSize="sm"
+              wrapperClassName="w-full sm:w-52"
+              aria-label="Filter balances by role"
+            />
+            <FormSelect
+              id="balances-status-filter-shell"
+              value={balancesStatusFilter}
+              onChange={(e) => handleBalancesStatusChange(e.target.value)}
+              options={[
+                { value: 'ALL', label: 'All balances' },
+                { value: 'POSITIVE', label: 'Positive' },
+                { value: 'ZERO', label: 'Zero' },
+                { value: 'NEGATIVE', label: 'Negative' },
+              ]}
+              controlSize="sm"
+              wrapperClassName="w-full sm:w-48"
+              aria-label="Filter by balance status"
+            />
+          </div>
+        </div>
+      ) : null}
+
+      <div className="card p-0 overflow-hidden">
         <CompactTable<{ id: string }>
           withCard={false}
           columns={disbursementsShellColumns()}
@@ -248,7 +469,7 @@ export function FinanceDisbursementsLoadingShell({
   );
 }
 
-/** Cash remittances list — filters + dual panels pulse. */
+/** Cash remittances list — URL tabs + filters; stats + panels pulse. */
 export function DeliveryRemittancesLoadingShell({
   filters,
 }: {
@@ -262,6 +483,86 @@ export function DeliveryRemittancesLoadingShell({
     eligibleQ: string;
   };
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewTab = searchParams.get('tab') === 'remittances' ? 'remittances' : 'eligible';
+  const [eligibleDraft, setEligibleDraft] = useState(() => filters.eligibleQ);
+
+  useEffect(() => {
+    setEligibleDraft(filters.eligibleQ);
+  }, [filters.eligibleQ]);
+
+  const setViewTab = useCallback(
+    (tab: 'remittances' | 'eligible') => {
+      setSearchParams(
+        (p) => {
+          const next = new URLSearchParams(p);
+          next.set('page', '1');
+          if (tab === 'remittances') next.set('tab', 'remittances');
+          else next.delete('tab');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const handleLocationChange = useCallback(
+    (locationId: string) => {
+      setSearchParams((p) => {
+        const next = new URLSearchParams(p);
+        next.set('page', '1');
+        next.set('eligiblePage', '1');
+        if (!locationId) next.delete('location');
+        else next.set('location', locationId);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const handleSentByChange = useCallback(
+    (userId: string) => {
+      setSearchParams((p) => {
+        const next = new URLSearchParams(p);
+        next.set('page', '1');
+        if (!userId) next.delete('sentBy');
+        else next.set('sentBy', userId);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const commitEligibleQ = useCallback(() => {
+    const trimmed = eligibleDraft.trim();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('eligiblePage', '1');
+      if (!trimmed) next.delete('q');
+      else next.set('q', trimmed);
+      return next;
+    });
+  }, [eligibleDraft, setSearchParams]);
+
+  const locationPickOptions = useMemo(() => {
+    const base = [{ value: '', label: 'All locations' }];
+    if (filters.location) {
+      base.push({ value: filters.location, label: 'Selected location' });
+    }
+    return base;
+  }, [filters.location]);
+
+  const sentByPickOptions = useMemo(() => {
+    const base = [{ value: '', label: 'Sent by anyone' }];
+    if (filters.sentBy) {
+      base.push({ value: filters.sentBy, label: 'Selected accountant' });
+    }
+    return base;
+  }, [filters.sentBy]);
+
+  const remittanceToolbarBadge = (filters.location ? 1 : 0) + (filters.sentBy ? 1 : 0);
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -273,27 +574,40 @@ export function DeliveryRemittancesLoadingShell({
             sheetTitle="Cash remittances tools"
             sheetSubtitle={<span>Date range, export, and pick orders</span>}
             triggerAriaLabel="Cash remittances toolbar and date range"
-            desktop={<PageRefreshButton />}
-            sheet={
+            desktop={
               <>
-                <div className="h-9 w-full rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse" aria-hidden />
-                <div className="h-9 w-full rounded-md bg-app-border/55 dark:bg-app-border/45 animate-pulse" aria-hidden />
+                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                  />
+                </div>
+                <PageRefreshButton />
+                <Button type="button" variant="secondary" size="sm" disabled className="opacity-70">
+                  Generate report
+                </Button>
               </>
             }
+            sheet={() => (
+              <>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                  Generate report
+                </Button>
+              </>
+            )}
           />
         }
       />
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-          <DateFilterBar
-            startDate={filters.startDate}
-            endDate={filters.endDate}
-            periodAllTime={filters.periodAllTime}
-          />
-        </div>
-        <div className="h-9 w-32 rounded-lg bg-app-hover animate-pulse" aria-hidden />
-        <div className="h-9 w-40 rounded-lg bg-app-hover animate-pulse" aria-hidden />
-      </div>
+
       <OverviewStatStrip
         items={[
           { label: 'Expected (awaiting)', value: <StatValuePulse className="min-w-[3.5rem]" /> },
@@ -303,16 +617,106 @@ export function DeliveryRemittancesLoadingShell({
           { label: 'Disputed', value: <StatValuePulse className="min-w-[3rem]" /> },
         ]}
       />
+
       <Tabs
-        value="ALL"
-        onChange={() => {}}
+        variant="underline"
+        value={viewTab}
+        onChange={(v) => setViewTab(v as 'remittances' | 'eligible')}
         tabs={[
-          { value: 'ALL', label: 'All' },
-          { value: 'SENT', label: 'Pending' },
-          { value: 'RECEIVED', label: 'Received' },
-          { value: 'DISPUTED', label: 'Disputed' },
+          { value: 'eligible', label: 'Awaiting remittance' },
+          { value: 'remittances', label: 'Confirmed remittances' },
         ]}
       />
+
+      {viewTab === 'remittances' ? (
+        <div className="card p-0 overflow-hidden">
+          <ToolbarFiltersCollapsible
+            className="!border-0"
+            badgeCount={remittanceToolbarBadge}
+            sheetSubtitle={<span>Location and sent-by apply immediately</span>}
+            desktopInlineFilters={
+              <>
+                <SearchableSelect
+                  id="delivery-remittance-location-filter-shell"
+                  value={filters.location}
+                  onChange={handleLocationChange}
+                  wrapperClassName="w-full min-w-0 sm:w-52"
+                  placeholder="All locations"
+                  searchPlaceholder="Search locations…"
+                  options={locationPickOptions}
+                />
+                <SearchableSelect
+                  id="delivery-remittance-sent-by-filter-shell"
+                  value={filters.sentBy}
+                  onChange={handleSentByChange}
+                  wrapperClassName="w-full min-w-0 sm:w-56"
+                  placeholder="Sent by anyone"
+                  searchPlaceholder="Search accountants…"
+                  options={sentByPickOptions}
+                />
+              </>
+            }
+            sheetFilterBody={
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Location</span>
+                  <SearchableSelect
+                    id="delivery-remittance-location-filter-sheet-shell"
+                    value={filters.location}
+                    onChange={handleLocationChange}
+                    wrapperClassName="w-full"
+                    placeholder="All locations"
+                    searchPlaceholder="Search locations…"
+                    options={locationPickOptions}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
+                  <SearchableSelect
+                    id="delivery-remittance-sent-by-filter-sheet-shell"
+                    value={filters.sentBy}
+                    onChange={handleSentByChange}
+                    wrapperClassName="w-full"
+                    placeholder="Sent by anyone"
+                    searchPlaceholder="Search accountants…"
+                    options={sentByPickOptions}
+                  />
+                </div>
+              </>
+            }
+          />
+        </div>
+      ) : null}
+
+      {viewTab === 'eligible' ? (
+        <div className="card p-4 space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex min-w-0 gap-2">
+              <SearchInput
+                value={eligibleDraft}
+                onChange={(v) => setEligibleDraft(v)}
+                placeholder="Search customer, order ID, invoice ref, or bill-to name"
+                controlSize="md"
+                wrapperClassName="min-w-0 flex-1"
+              />
+              <Button type="button" variant="secondary" size="sm" className="shrink-0 self-end" onClick={() => commitEligibleQ()}>
+                Search
+              </Button>
+            </div>
+            <FormSelect
+              id="eligible-remittance-location-shell"
+              aria-label="Filter by logistics location"
+              value={filters.location}
+              onChange={(e) => handleLocationChange(e.target.value)}
+              placeholder="All locations"
+              options={locationPickOptions}
+              controlSize="md"
+              wrapperClassName="w-full"
+            />
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card p-4 space-y-2 min-h-[240px] animate-pulse">
           <div className="h-5 w-40 rounded bg-app-hover" aria-hidden />
@@ -503,12 +907,37 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
   );
 }
 
-/** Finance payout — filter pills + batch list pulse. */
+/** Finance payout — URL-driven status pills; stats + batch cards pulse. */
 export function FinancePayoutLoadingShell({
-  status,
+  status: _statusShell,
 }: {
   status: '' | 'PENDING_FINANCE' | 'PAID';
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const raw = searchParams.get('status');
+  const active: '' | 'PAID' | 'PENDING_FINANCE' =
+    raw === 'PAID' || raw === 'PENDING_FINANCE' ? raw : '';
+
+  const setFilter = (next: '' | 'PAID' | 'PENDING_FINANCE') => {
+    setSearchParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (!next) n.delete('status');
+        else n.set('status', next);
+        return n;
+      },
+      { replace: true },
+    );
+  };
+
+  const pillClass = (v: '' | 'PAID' | 'PENDING_FINANCE') =>
+    [
+      'rounded-full px-4 py-2 text-sm font-medium border transition-colors',
+      active === v
+        ? 'border-brand-500 bg-brand-500 text-white shadow-sm'
+        : 'border-app-border bg-app-elevated text-app-fg hover:bg-app-hover',
+    ].join(' ');
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -539,19 +968,16 @@ export function FinancePayoutLoadingShell({
           { label: 'Batches', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
-      <div className="flex flex-wrap gap-2">
-        <div
-          className={`h-9 w-24 rounded-full animate-pulse ${status === '' ? 'bg-brand-500/30' : 'bg-app-hover'}`}
-          aria-hidden
-        />
-        <div
-          className={`h-9 w-40 rounded-full animate-pulse ${status === 'PENDING_FINANCE' ? 'bg-brand-500/30' : 'bg-app-hover'}`}
-          aria-hidden
-        />
-        <div
-          className={`h-9 w-20 rounded-full animate-pulse ${status === 'PAID' ? 'bg-brand-500/30' : 'bg-app-hover'}`}
-          aria-hidden
-        />
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by payout status">
+        <button type="button" className={pillClass('')} onClick={() => setFilter('')}>
+          All
+        </button>
+        <button type="button" className={pillClass('PENDING_FINANCE')} onClick={() => setFilter('PENDING_FINANCE')}>
+          Pending finance
+        </button>
+        <button type="button" className={pillClass('PAID')} onClick={() => setFilter('PAID')}>
+          Paid
+        </button>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         {[1, 2, 3, 4].map((i) => (

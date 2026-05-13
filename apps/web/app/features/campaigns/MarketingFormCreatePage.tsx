@@ -14,7 +14,14 @@ import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
 import type { CustomFormField, OfferGroupRow, StandardFieldConfig } from './types';
+import { AccentColorInput } from './accent-color-input';
 import { CustomFieldsEditor } from './custom-fields-editor';
+import {
+  getOrderedCustomFields,
+  getOrderedStandardFields,
+  normalizeBuilderFieldOrder,
+  type CampaignFieldOrderToken,
+} from './form-field-order';
 import { FormFullPreview, type FormFullPreviewPreviewProduct } from './form-full-preview';
 import { cloneDefaultAdditionalFieldSelectOptions } from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
@@ -80,6 +87,9 @@ export function MarketingFormCreatePage({
   const [accentColor, setAccentColor] = useState<string>(DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
   const [fields, setFields] = useState<CustomFormField[]>([]);
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>([]);
+  const [fieldOrder, setFieldOrder] = useState<CampaignFieldOrderToken[]>(() =>
+    normalizeBuilderFieldOrder(undefined, [], []),
+  );
   const [dismissedOffersError, setDismissedOffersError] = useState(false);
   const [dismissedActionError, setDismissedActionError] = useState(false);
   const [formHeading, setFormHeading] = useState('');
@@ -90,8 +100,22 @@ export function MarketingFormCreatePage({
   const [additionalSelectOptions, setAdditionalSelectOptions] = useState(cloneDefaultAdditionalFieldSelectOptions);
   const [selectedOfferGroupId, setSelectedOfferGroupId] = useState('');
 
-  const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
-  const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
+  useEffect(() => {
+    setFieldOrder((current) => normalizeBuilderFieldOrder(current, standardFields, fields));
+  }, [standardFields, fields]);
+
+  const orderedStandardFields = useMemo(
+    () => getOrderedStandardFields(standardFields, fieldOrder),
+    [standardFields, fieldOrder],
+  );
+  const orderedCustomFields = useMemo(
+    () => getOrderedCustomFields(fields, fieldOrder),
+    [fields, fieldOrder],
+  );
+
+  const customFieldsJson = useMemo(() => JSON.stringify(orderedCustomFields), [orderedCustomFields]);
+  const standardFieldsJson = useMemo(() => JSON.stringify(orderedStandardFields), [orderedStandardFields]);
+  const fieldOrderJson = useMemo(() => JSON.stringify(fieldOrder), [fieldOrder]);
   const additionalFieldSelectOptionsJson = useMemo(
     () => JSON.stringify(additionalSelectOptions),
     [additionalSelectOptions],
@@ -218,6 +242,7 @@ export function MarketingFormCreatePage({
             <input type="hidden" name="intent" value="createForm" />
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
+            <input type="hidden" name="fieldOrder" value={fieldOrderJson} readOnly />
             <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="offerGroupId" value={selectedOfferGroupId} readOnly />
@@ -280,16 +305,7 @@ export function MarketingFormCreatePage({
                     value={formButtonText}
                     onChange={(e) => setFormButtonText(e.target.value)}
                   />
-                  <div className="flex items-center gap-2 sm:col-span-1">
-                    <input
-                      type="color"
-                      aria-label="Accent color"
-                      value={accentColor}
-                      onChange={(e) => setAccentColor(e.target.value)}
-                      className="w-10 h-9 rounded border border-app-border cursor-pointer shrink-0"
-                    />
-                    <span className="text-sm text-app-fg-muted">Accent (preview on the right)</span>
-                  </div>
+                  <AccentColorInput value={accentColor} onChange={setAccentColor} hint="Preview updates on the right." />
                   <TextInput
                     name="successCallbackUrl"
                     type="url"
@@ -311,7 +327,7 @@ export function MarketingFormCreatePage({
             <div>
               <h2 className="text-sm font-semibold text-app-fg mb-2">Additional fields</h2>
               <StandardFieldsEditor
-                fields={standardFields}
+                fields={orderedStandardFields}
                 onFieldsChange={setStandardFields}
                 selectOptions={additionalSelectOptions}
                 onSelectOptionsChange={setAdditionalSelectOptions}
@@ -321,7 +337,7 @@ export function MarketingFormCreatePage({
             <div>
               <h2 className="text-sm font-semibold text-app-fg mb-2">Custom fields</h2>
               <CustomFieldsEditor
-                fields={fields}
+                fields={orderedCustomFields}
                 onFieldsChange={setFields}
                 footnote={
                   <span>
@@ -351,9 +367,11 @@ export function MarketingFormCreatePage({
             buttonText={formButtonText}
             accentColor={accentColor}
             multiProduct={previewMultiProduct}
-            standardFields={standardFields}
+            standardFields={orderedStandardFields}
+            fieldOrder={fieldOrder}
+            onFieldOrderChange={setFieldOrder}
             successCallbackUrl={successCallbackUrl}
-            customFields={fields}
+            customFields={orderedCustomFields}
             previewOffers={previewOffers}
             previewProducts={previewProducts}
             additionalSelectOptions={additionalSelectOptions}

@@ -148,6 +148,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       address: string | null;
       whatsappGroupLink?: string | null;
       providerName: string | null;
+      providerKind?: string | null;
       eligible: boolean;
       reason: string | null;
       availabilityByProduct: Array<{
@@ -174,6 +175,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             address: string | null;
             whatsappGroupLink?: string | null;
             providerName?: string | null;
+            providerKind?: string | null;
             eligible: boolean;
             reason: string | null;
             availabilityByProduct: Array<{
@@ -188,6 +190,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return (data?.result?.data ?? []).map((loc) => ({
         ...loc,
         providerName: loc.providerName ?? null,
+        providerKind: loc.providerKind ?? null,
       }));
     })
     .catch((err) => {
@@ -246,6 +249,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     address: string | null;
     whatsappGroupLink?: string | null;
     providerName: string | null;
+    providerKind: string | null;
     eligible: boolean;
     reason: string | null;
     availabilityByProduct: Array<{
@@ -697,6 +701,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
       return json({ error: err }, { status: safeStatus(res.status) });
     }
     return json({ success: true, scheduled: true });
+  }
+
+  if (intent === 'addCsOrderComment') {
+    const comment = formData.get('comment')?.toString() ?? '';
+    const trimmed = comment.trim();
+    if (!trimmed) {
+      return json({ error: 'Comment is required' }, { status: 400 });
+    }
+    if (trimmed.length > 2000) {
+      return json({ error: 'Comment must be at most 2000 characters' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.addCsOrderComment', {
+      method: 'POST',
+      cookie,
+      body: { orderId, comment: trimmed, ...branchIdFromForm(formData) },
+    });
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Could not save comment');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
   }
 
   if (intent === 'transition') {

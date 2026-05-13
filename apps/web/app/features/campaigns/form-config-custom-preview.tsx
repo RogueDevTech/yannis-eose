@@ -66,7 +66,7 @@ export function FormConfigCustomFieldsPreview({
   return inner;
 }
 
-function FormConfigCustomFieldBlock({
+export function FormConfigCustomFieldBlock({
   field,
   accentColor,
   controlClassName,

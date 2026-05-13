@@ -13,6 +13,7 @@ import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
 import { userCanManageOfferTemplates } from '~/lib/marketing-offer-tier.server';
 import { MarketingFormEditPage } from '~/features/campaigns/MarketingFormEditPage';
+import { normalizeBuilderFieldOrder, parseFieldOrderPayload } from '~/features/campaigns/form-field-order';
 import { parseCustomFieldsPayload } from '~/features/campaigns/parse-custom-fields.server';
 import {
   parseAdditionalFieldSelectOptionsPayload,
@@ -265,6 +266,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     return json({ error: parsedCustom.error }, { status: 400 });
   }
 
+  const parsedFieldOrder = parseFieldOrderPayload(formData.get('fieldOrder')?.toString());
+  if (!parsedFieldOrder.ok) {
+    return json({ error: parsedFieldOrder.error }, { status: 400 });
+  }
+
   const existingRes = await apiRequest<{ result?: { data?: Campaign } }>(
     `/trpc/marketing.getCampaign?input=${encodeURIComponent(JSON.stringify({ id }))}`,
     { method: 'GET', cookie },
@@ -280,6 +286,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
     ...(successCallbackUrl ? { successCallbackUrl } : {}),
     showProductImages,
     standardFields: parsedStandard.fields,
+    fieldOrder: normalizeBuilderFieldOrder(
+      parsedFieldOrder.fieldOrder,
+      parsedStandard.fields,
+      parsedCustom.fields,
+    ),
     ...toLegacyStandardFieldFlags(parsedStandard.fields),
     customFields: parsedCustom.fields,
     deliveryStateOptions: parsedSelectOpts.options.deliveryStateOptions,

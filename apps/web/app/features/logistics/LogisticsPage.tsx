@@ -162,13 +162,14 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [viewingProvider, setViewingProvider] = useState<Provider | null>(null);
   const [viewingLocation, setViewingLocation] = useState<Location | null>(null);
 
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const actionError = fetcherSurface.rawError;
   const friendlyError = fetcherSurface.friendlyError;
-  const mutationModalOpen = showAddProvider || showAddLocation || !!editingProvider;
+  const mutationModalOpen = showAddProvider || showAddLocation || !!editingProvider || !!editingLocation;
   const [dismissedError, setDismissedError] = useState(false);
   /** Single open-menu id shared by the page-header "+ Logistics company" /
    *  "+ Location" dropdowns so opening one closes the other. */
@@ -273,6 +274,27 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   }, []);
   const providerPatches = useOptimisticListPatches<Provider>(fetcher, buildProviderPatches);
 
+  const buildLocationPatches = useCallback<
+    (fd: FormData, intent: string) => { id: string; patch: Partial<Location> }[] | null
+  >((fd, intent) => {
+    if (intent !== 'updateLocation') return null;
+    const id = fd.get('locationId')?.toString();
+    if (!id) return null;
+    const patch: Partial<Location> = {};
+    const name = fd.get('name')?.toString().trim();
+    const address = fd.get('address')?.toString().trim();
+    if (name) patch.name = name;
+    if (address) patch.address = address;
+    const coordinates = fd.get('coordinates')?.toString().trim();
+    if (coordinates !== undefined) patch.coordinates = coordinates || null;
+    const whatsapp = fd.get('whatsappGroupLink')?.toString().trim();
+    if (whatsapp !== undefined) patch.whatsappGroupLink = whatsapp || null;
+    const status = fd.get('status')?.toString();
+    if (status) patch.status = status;
+    return [{ id, patch }];
+  }, []);
+  const locationPatches = useOptimisticListPatches<Location>(fetcher, buildLocationPatches);
+
   /** Server data + any in-flight optimistic rows (adds + edits). Loader
    * revalidation replaces these synthetic rows with canonical data once it
    * lands. */
@@ -281,8 +303,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     [providers, optimisticProviders, providerPatches],
   );
   const displayLocations = useMemo(
-    () => [...optimisticLocations, ...locations],
-    [locations, optimisticLocations],
+    () => [...optimisticLocations, ...applyOptimisticPatches(locations, locationPatches)],
+    [locations, optimisticLocations, locationPatches],
   );
   const displayTotalProviders = totalProviders + optimisticProviders.length;
   const displayTotalLocations = totalLocations + optimisticLocations.length;
@@ -383,16 +405,25 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         align: 'right',
         tight: true,
         render: (l) => {
-          const isOptimistic = isOptimisticId(l.id);
+          const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
           return (
-            <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingLocation(l)}>
-              View
-            </CompactTableActionButton>
+            <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+              <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingLocation(l)}>
+                View
+              </CompactTableActionButton>
+              <CompactTableActionButton
+                className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
+                disabled={isOptimistic}
+                onClick={() => setEditingLocation(l)}
+              >
+                Edit
+              </CompactTableActionButton>
+            </div>
           );
         },
       },
     ],
-    [displayProviders],
+    [displayProviders, locationPatches],
   );
 
   useEffect(() => {
@@ -408,6 +439,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     setShowAddProvider(false);
     setShowAddLocation(false);
     setEditingProvider(null);
+    setEditingLocation(null);
   }, []);
   useCloseOnFetcherSuccess(fetcher, handleFetcherSuccess);
 
@@ -747,7 +779,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               <div>
                 <dt className="text-xs font-medium text-app-fg-muted">Logistics company</dt>
                 <dd className="mt-0.5 text-sm text-app-fg">
-                  {providers.find((p) => p.id === viewingLocation.providerId)?.name ?? 'Unknown logistics company'}
+                  {displayProviders.find((p) => p.id === viewingLocation.providerId)?.name ?? 'Unknown logistics company'}
                 </dd>
               </div>
               <div>
@@ -805,11 +837,121 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               </div>
             </dl>
           </div>
-          <div className="flex gap-2 px-6 py-4 border-t border-app-border">
+          <div className="flex flex-wrap gap-2 px-6 py-4 border-t border-app-border">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setEditingLocation(viewingLocation);
+                setViewingLocation(null);
+              }}
+            >
+              Edit
+            </Button>
             <Button type="button" variant="secondary" size="sm" onClick={() => setViewingLocation(null)}>
               Close
             </Button>
           </div>
+        </Modal>
+      )}
+
+      {/* Edit location modal */}
+      {editingLocation && (
+        <Modal
+          key={editingLocation.id}
+          open
+          onClose={() => setEditingLocation(null)}
+          maxWidth="max-w-2xl"
+          backdropBlur
+          contentClassName="p-0"
+        >
+          <div className="flex items-center justify-between px-6 py-4 border-b border-app-border">
+            <h3 className="text-lg font-semibold text-app-fg">Edit location</h3>
+            <button
+              type="button"
+              onClick={() => setEditingLocation(null)}
+              className="text-app-fg-muted hover:text-app-fg transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <fetcher.Form method="post" className="px-6 py-4 space-y-4">
+            <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('updateLocation')} />
+            <input type="hidden" name="intent" value="updateLocation" />
+            <input type="hidden" name="locationId" value={editingLocation.id} />
+            <div>
+              <p className="text-xs font-medium text-app-fg-muted">Logistics company</p>
+              <p className="mt-0.5 text-sm text-app-fg">
+                {displayProviders.find((p) => p.id === editingLocation.providerId)?.name ?? 'Unknown logistics company'}
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-4">
+              <TextInput
+                id="edit-location-name"
+                name="name"
+                type="text"
+                label="Location name"
+                required
+                defaultValue={editingLocation.name}
+                placeholder="e.g. Ikeja hub"
+              />
+              <TextInput
+                id="edit-location-address"
+                name="address"
+                type="text"
+                label="Address"
+                required
+                defaultValue={editingLocation.address}
+                placeholder="Street, city, state"
+              />
+              <TextInput
+                id="edit-location-coordinates"
+                name="coordinates"
+                type="text"
+                label="GPS coordinates"
+                defaultValue={editingLocation.coordinates ?? ''}
+                placeholder="Lat, long"
+                hint="Optional map pin for dispatch."
+              />
+              <TextInput
+                id="edit-location-whatsapp"
+                name="whatsappGroupLink"
+                type="url"
+                label="WhatsApp group link"
+                defaultValue={editingLocation.whatsappGroupLink ?? ''}
+                placeholder="https://chat.whatsapp.com/…"
+                hint="Leave empty to remove. Used by the CS Share to logistics company flow."
+                wrapperClassName="sm:col-span-2"
+              />
+              <FormSelect
+                name="status"
+                label="Status"
+                defaultValue={editingLocation.status}
+                options={[
+                  { value: 'ACTIVE', label: 'Active' },
+                  { value: 'INACTIVE', label: 'Inactive' },
+                ]}
+                wrapperClassName="sm:col-span-2"
+              />
+            </div>
+            {editingLocation.dispatchLocked === true && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                Dispatch is locked on this location (reconciliation). You can still update contact details and status.
+              </p>
+            )}
+            <div className="flex gap-2 pt-2">
+              <Button type="submit" variant="primary" size="sm" loading={fetcher.state === 'submitting'} loadingText="Saving...">
+                Save changes
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditingLocation(null)}>
+                Cancel
+              </Button>
+            </div>
+          </fetcher.Form>
         </Modal>
       )}
 
@@ -857,22 +999,42 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             </dl>
             <div>
               <h4 className="text-sm font-medium text-app-fg mb-2">Locations</h4>
-              {locations.filter((l) => l.providerId === viewingProvider.id).length === 0 ? (
+              {displayLocations.filter((l) => l.providerId === viewingProvider.id).length === 0 ? (
                 <p className="text-sm text-app-fg-muted">No locations.</p>
               ) : (
                 <ul className="space-y-2">
-                  {locations
+                  {displayLocations
                     .filter((l) => l.providerId === viewingProvider.id)
-                    .map((l) => (
-                      <li key={l.id} className="rounded-lg border border-app-border p-3 text-sm">
-                        <p className="font-medium text-app-fg">{l.name}</p>
-                        <p className="text-app-fg-muted mt-0.5">{l.address}</p>
-                        {l.coordinates && (
-                          <p className="text-app-fg-muted mt-0.5 text-xs">{l.coordinates}</p>
-                        )}
-                        <div className="mt-1"><StatusBadge status={l.status} /></div>
-                      </li>
-                    ))}
+                    .map((l) => {
+                      const locBusy = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
+                      return (
+                        <li
+                          key={l.id}
+                          className="flex flex-col gap-2 rounded-lg border border-app-border p-3 text-sm sm:flex-row sm:items-start sm:justify-between"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-app-fg">{l.name}</p>
+                            <p className="text-app-fg-muted mt-0.5">{l.address}</p>
+                            {l.coordinates ? (
+                              <p className="text-app-fg-muted mt-0.5 text-xs">{l.coordinates}</p>
+                            ) : null}
+                            <div className="mt-1">
+                              <StatusBadge status={l.status} />
+                            </div>
+                          </div>
+                          <CompactTableActionButton
+                            className="shrink-0 self-end sm:self-start"
+                            disabled={locBusy}
+                            onClick={() => {
+                              setEditingLocation(l);
+                              setViewingProvider(null);
+                            }}
+                          >
+                            Edit
+                          </CompactTableActionButton>
+                        </li>
+                      );
+                    })}
                 </ul>
               )}
             </div>
@@ -923,7 +1085,9 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           columns={locationTableColumns}
           rows={displayLocations}
           rowKey={(l) => l.id}
-          rowClassName={(l) => (isOptimisticId(l.id) ? 'opacity-60' : '')}
+          rowClassName={(l) =>
+            isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id) ? 'opacity-60' : ''
+          }
           emptyTitle="No locations yet"
           emptyDescription="Add a logistics company first, then add locations."
         />

@@ -1,8 +1,9 @@
-import { Suspense } from 'react';
-import { Await, useLoaderData } from '@remix-run/react';
+import { useLoaderData } from '@remix-run/react';
 import { defer, type LoaderFunctionArgs, type MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermissionOrRoles, defaultTodayRange } from '~/lib/api.server';
 import { usePageRefreshOnEvent, usePollingFallback } from '~/hooks/useSocket';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { MarketingOverviewPage } from '~/features/marketing/MarketingOverviewPage';
 import { MarketingOverviewLoadingShell } from '~/features/marketing/MarketingOverviewLoadingShell';
 import type {
@@ -117,7 +118,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   });
 
-  return defer({
+  const overviewShell = {
     leaderboardPeriod,
     liveEvents: [...MARKETING_OVERVIEW_LIVE_EVENTS],
     filters: {
@@ -125,39 +126,43 @@ export async function loader({ request }: LoaderFunctionArgs) {
       endDate: endDate ?? '',
       periodAllTime,
     },
+  };
+
+  return defer({
+    overviewShell,
     overviewData,
   });
 }
 
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
+
 export default function MarketingOverviewRoute() {
-  const data = useLoaderData<typeof loader>();
+  const { overviewShell, overviewData } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_OVERVIEW_LIVE_EVENTS]);
   usePollingFallback(30_000); // fallback: poll every 30s when socket is disconnected
-  const leaderboardPeriod = data.leaderboardPeriod as 'this_month' | 'all_time';
+  const leaderboardPeriod = overviewShell.leaderboardPeriod as 'this_month' | 'all_time';
   return (
-    <Suspense
+    <CachedAwait
+      resolve={overviewData}
       fallback={
         <MarketingOverviewLoadingShell
           leaderboardPeriod={leaderboardPeriod}
-          filters={data.filters}
-          liveEvents={data.liveEvents}
+          filters={overviewShell.filters}
+          liveEvents={overviewShell.liveEvents}
         />
       }
+      loaderShell={{ overviewShell }}
+      deferredKey="overviewData"
     >
-      <Await resolve={data.overviewData}>
-        {(payload) => (
-          <MarketingOverviewPage
-            metrics={payload.metrics}
-            leaderboard={payload.leaderboard}
-            balancesList={payload.balancesList}
-            recentOrders={payload.recentOrders}
-            liveActivity={payload.liveActivity}
-            leaderboardPeriod={leaderboardPeriod}
-            filters={data.filters}
-            liveEvents={data.liveEvents}
-          />
-        )}
-      </Await>
-    </Suspense>
+      {(payload) => (
+        <MarketingOverviewPage
+          {...payload}
+          leaderboardPeriod={leaderboardPeriod}
+          filters={overviewShell.filters}
+          liveEvents={overviewShell.liveEvents}
+        />
+      )}
+    </CachedAwait>
   );
 }

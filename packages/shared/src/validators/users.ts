@@ -210,6 +210,12 @@ export const listUsersSchema = z.object({
    */
   allBranches: z.boolean().optional(),
   /**
+   * HR / staff-accounts roster: list everyone with `users.read`, ignoring `ctx.currentBranchId`.
+   * Only honored when the actor matches staff-accounts access (admin-level, HR_MANAGER,
+   * FINANCE_OFFICER, or `users.staff.*` grants) — same gate as `/hr/users`.
+   */
+  companyWideUserList: z.boolean().optional(),
+  /**
    * When `false`, skip the per-row branch-memberships join. Defaults to `true` for
    * backward compatibility (the User Admin page reads memberships per row).
    * Filter-dropdown callers (Marketing orders' Media-buyer picker, ad-spend buyer
@@ -236,6 +242,7 @@ export const usersRosterSummarySchema = listUsersSchema.pick({
   branchId: true,
   userIds: true,
   allBranches: true,
+  companyWideUserList: true,
   probationOnly: true,
   supervisorOnly: true,
 });

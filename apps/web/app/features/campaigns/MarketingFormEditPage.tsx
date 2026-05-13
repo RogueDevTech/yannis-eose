@@ -10,6 +10,13 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useFetcherToast } from '~/components/ui/toast';
+import { AccentColorInput } from './accent-color-input';
+import {
+  getOrderedCustomFields,
+  getOrderedStandardFields,
+  normalizeBuilderFieldOrder,
+  type CampaignFieldOrderToken,
+} from './form-field-order';
 import { templatesToPreviewOffers, type MinimalOfferTemplateForPreview } from './offer-template-preview';
 import type { Campaign, CustomFormField, OfferGroupRow, Product, StandardFieldConfig } from './types';
 import { CustomFieldsEditor } from './custom-fields-editor';
@@ -151,6 +158,9 @@ export function MarketingFormEditPage({
   const [successCallbackUrl, setSuccessCallbackUrl] = useState(() => cfg?.successCallbackUrl ?? '');
   const [showProductImages, setShowProductImages] = useState(() => cfg?.showProductImages !== false);
   const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() => normalizeStandardFields(campaign.formConfig));
+  const [fieldOrder, setFieldOrder] = useState<CampaignFieldOrderToken[]>(() =>
+    normalizeBuilderFieldOrder(cfg?.fieldOrder, normalizeStandardFields(campaign.formConfig), sortAndReindexCustomFields((cfg?.customFields ?? []) as CustomFormField[])),
+  );
   const [additionalSelectOptions, setAdditionalSelectOptions] = useState(() =>
     additionalFieldSelectOptionsFromConfig(campaign.formConfig),
   );
@@ -165,14 +175,35 @@ export function MarketingFormEditPage({
     setSuccessCallbackUrl(c?.successCallbackUrl ?? '');
     setShowProductImages(c?.showProductImages !== false);
     setStandardFields(normalizeStandardFields(c));
+    setFieldOrder(
+      normalizeBuilderFieldOrder(
+        c?.fieldOrder,
+        normalizeStandardFields(c),
+        sortAndReindexCustomFields((c?.customFields ?? []) as CustomFormField[]),
+      ),
+    );
     setAdditionalSelectOptions(additionalFieldSelectOptionsFromConfig(c));
     setSelectedOfferTemplateIds(Array.isArray(c?.selectedOfferTemplateIds) ? c.selectedOfferTemplateIds : []);
     setSelectedOfferGroupId(campaign.offerGroupId ?? '');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only reset when switching form
   }, [campaign.id]);
 
-  const customFieldsJson = useMemo(() => JSON.stringify(fields), [fields]);
-  const standardFieldsJson = useMemo(() => JSON.stringify(standardFields), [standardFields]);
+  useEffect(() => {
+    setFieldOrder((current) => normalizeBuilderFieldOrder(current, standardFields, fields));
+  }, [standardFields, fields]);
+
+  const orderedStandardFields = useMemo(
+    () => getOrderedStandardFields(standardFields, fieldOrder),
+    [standardFields, fieldOrder],
+  );
+  const orderedCustomFields = useMemo(
+    () => getOrderedCustomFields(fields, fieldOrder),
+    [fields, fieldOrder],
+  );
+
+  const customFieldsJson = useMemo(() => JSON.stringify(orderedCustomFields), [orderedCustomFields]);
+  const standardFieldsJson = useMemo(() => JSON.stringify(orderedStandardFields), [orderedStandardFields]);
+  const fieldOrderJson = useMemo(() => JSON.stringify(fieldOrder), [fieldOrder]);
   const additionalFieldSelectOptionsJson = useMemo(
     () => JSON.stringify(additionalSelectOptions),
     [additionalSelectOptions],
@@ -351,6 +382,7 @@ export function MarketingFormEditPage({
             <input type="hidden" name="id" value={campaign.id} />
             <input type="hidden" name="customFields" value={customFieldsJson} readOnly />
             <input type="hidden" name="standardFields" value={standardFieldsJson} readOnly />
+            <input type="hidden" name="fieldOrder" value={fieldOrderJson} readOnly />
             <input type="hidden" name="additionalFieldSelectOptions" value={additionalFieldSelectOptionsJson} readOnly />
             <input type="hidden" name="formAccentColor" value={accentColor} readOnly />
             <input type="hidden" name="showProductImages" value={showProductImages ? 'true' : 'false'} readOnly />
@@ -417,16 +449,7 @@ export function MarketingFormEditPage({
                     value={formButtonText}
                     onChange={(e) => setFormButtonText(e.target.value)}
                   />
-                  <div className="flex items-center gap-2 sm:col-span-1">
-                    <input
-                      type="color"
-                      aria-label="Accent color"
-                      value={accentColor}
-                      onChange={(e) => setAccentColor(e.target.value)}
-                      className="w-10 h-9 rounded border border-app-border cursor-pointer shrink-0"
-                    />
-                    <span className="text-sm text-app-fg-muted">Accent color (preview updates on the right)</span>
-                  </div>
+                  <AccentColorInput value={accentColor} onChange={setAccentColor} hint="Preview updates on the right." />
                   <TextInput
                     name="successCallbackUrl"
                     type="url"
@@ -448,7 +471,7 @@ export function MarketingFormEditPage({
             <div>
               <h2 className="text-sm font-semibold text-app-fg mb-2">Additional fields</h2>
               <StandardFieldsEditor
-                fields={standardFields}
+                fields={orderedStandardFields}
                 onFieldsChange={setStandardFields}
                 selectOptions={additionalSelectOptions}
                 onSelectOptionsChange={setAdditionalSelectOptions}
@@ -458,7 +481,7 @@ export function MarketingFormEditPage({
             <div>
               <h2 className="text-sm font-semibold text-app-fg mb-2">Custom fields</h2>
               <CustomFieldsEditor
-                fields={fields}
+                fields={orderedCustomFields}
                 onFieldsChange={setFields}
                 footnote={
                   <span>
@@ -488,9 +511,11 @@ export function MarketingFormEditPage({
             buttonText={formButtonText}
             accentColor={accentColor}
             multiProduct={false}
-            standardFields={standardFields}
+            standardFields={orderedStandardFields}
+            fieldOrder={fieldOrder}
+            onFieldOrderChange={setFieldOrder}
             successCallbackUrl={successCallbackUrl}
-            customFields={fields}
+            customFields={orderedCustomFields}
             previewOffers={previewOffers}
             additionalSelectOptions={additionalSelectOptions}
             showProductImages={showProductImages}

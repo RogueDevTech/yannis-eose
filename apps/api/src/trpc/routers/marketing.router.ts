@@ -41,6 +41,7 @@ import { MarketingService } from '../../marketing/marketing.service';
 import { getBranchTeamsService, listBranchesForUser } from './branches.router';
 import {
   applySupervisorScope,
+  buildOrdersListOpts,
   getOrdersService,
   narrowOrdersAggregateFiltersForViewer,
 } from './orders.router';
@@ -750,7 +751,7 @@ export const marketingRouter = router({
           restrictMbIds,
         ),
         getMarketingService().listFundingBalances(ctx.user, branchId),
-        getOrdersService().list(recentOrdersInput, branchId),
+        getOrdersService().list(recentOrdersInput, branchId, buildOrdersListOpts(ctx.user)),
         fetchLiveActivity(),
       ]);
 

@@ -1110,7 +1110,7 @@ function OrdersListPageImpl({
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
               <form
                 method="get"
-                className="min-w-0 w-full md:flex-1"
+                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1"
                 onSubmit={(e) => {
                   e.preventDefault();
                   setSearchParams((p) => {
@@ -1124,11 +1124,14 @@ function OrdersListPageImpl({
               >
                 <SearchInput
                   name="search"
-                  placeholder="Search by customer name..."
+                  placeholder="Search by customer name or phone number…"
                   value={searchQuery}
                   onChange={(val) => setSearchQuery(val)}
-                  wrapperClassName="w-full"
+                  wrapperClassName="min-w-0 w-full flex-1"
                 />
+                <Button type="submit" variant="secondary" size="sm" className="w-full shrink-0 sm:w-auto">
+                  Search
+                </Button>
               </form>
               <div className="hidden shrink-0 items-center gap-3 md:flex">
                 <FormSelect

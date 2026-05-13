@@ -12,7 +12,9 @@ import {
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
+import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { CSDashboardPage } from '~/features/cs/CSDashboardPage';
 import { CSOverviewSkeleton } from '~/features/cs/CSOverviewSkeleton';
 import {
@@ -58,6 +60,9 @@ const CS_QUEUE_LIVE_EVENTS = [
 export const meta: MetaFunction = () => [
   { title: 'Live Activities — Yannis EOSE' },
 ];
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'cs.teamOverview');
@@ -435,6 +440,10 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Order ID required' }, { status: 400 });
     }
 
+    if (Number.isNaN(delayMinutes) || delayMinutes < 5 || delayMinutes > 10080) {
+      return json({ error: 'Invalid delay (5 min to 7 days)' }, { status: 400 });
+    }
+
     const branchId = branchIdFromForm(formData);
 
     const res = await apiRequest<unknown>('/trpc/orders.scheduleCallback', {
@@ -605,6 +614,24 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function CSQueueRoute() {
   const data = useLoaderData<typeof loader>() as unknown as CSQueueDeferredLoaderData;
+  useMultiDeferredCacheSync({
+    shell: {
+      leaderboardPeriod: data.leaderboardPeriod,
+      canCreateOffline: data.canCreateOffline,
+      canDeleteCart: data.canDeleteCart,
+    },
+    deferred: {
+      shell: data.shell,
+      criticalData: data.criticalData,
+      inactiveAgents: data.inactiveAgents,
+      callbackOrders: data.callbackOrders,
+      flaggedDuplicates: data.flaggedDuplicates,
+      leaderboard: data.leaderboard,
+      cartStats: data.cartStats,
+      claimQueue: data.claimQueue,
+      productsForOfflineOrder: data.productsForOfflineOrder,
+    },
+  });
   usePageRefreshOnEvent([...CS_QUEUE_LIVE_EVENTS]);
   return (
     <Suspense fallback={<CSOverviewSkeleton />}>

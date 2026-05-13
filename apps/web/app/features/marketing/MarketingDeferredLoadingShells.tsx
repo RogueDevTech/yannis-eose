@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { Button } from '~/components/ui/button';
@@ -1468,6 +1468,11 @@ function marketingOrdersShellTableColumns(
   return cols;
 }
 
+const MARKETING_ORDERS_SHELL_STATUS_OPTIONS = STATUS_OPTIONS.map((status) => ({
+  value: status,
+  label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+}));
+
 /**
  * Marketing orders list — PageHeader + stat strip + table pulse. Mirrors `MarketingOrdersPage`
  * chrome so the cross-route transition shell shows real labels (Total / Unprocessed / Confirmed /
@@ -1483,6 +1488,61 @@ export function MarketingOrdersLoadingShell({
   isMediaBuyer: boolean;
   showMediaBuyerColumn?: boolean;
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') ?? '');
+  const [selectedStatus, setSelectedStatus] = useState(() => searchParams.get('status') || 'ALL');
+
+  useEffect(() => {
+    setSearchQuery(searchParams.get('search') ?? '');
+    setSelectedStatus(searchParams.get('status') || 'ALL');
+  }, [searchParams]);
+
+  const applyListParams = useCallback(
+    (overrides: { page?: number; status?: string; search?: string }) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (overrides.page !== undefined) {
+            if (overrides.page <= 1) next.delete('page');
+            else next.set('page', String(overrides.page));
+          }
+          if (overrides.status !== undefined) {
+            if (overrides.status === 'ALL' || !overrides.status) next.delete('status');
+            else next.set('status', overrides.status);
+          }
+          if (overrides.search !== undefined) {
+            const t = overrides.search.trim();
+            if (t) next.set('search', t);
+            else next.delete('search');
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const ordersToolbarFilterBadge = useMemo(() => {
+    let n = 0;
+    if (selectedStatus !== 'ALL') n += 1;
+    const mb = searchParams.get('mediaBuyerId') || 'ALL';
+    if (showMediaBuyerColumn && mb !== 'ALL') n += 1;
+    if ((searchParams.get('productId') || '').length > 0) n += 1;
+    if ((searchParams.get('campaignId') || '').length > 0) n += 1;
+    return n;
+  }, [selectedStatus, showMediaBuyerColumn, searchParams]);
+
+  const handleSearchSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    applyListParams({ search: searchQuery, page: 1 });
+  };
+
+  const handleStatusChange = (v: string) => {
+    setSelectedStatus(v);
+    applyListParams({ status: v, page: 1 });
+  };
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -1538,10 +1598,58 @@ export function MarketingOrdersLoadingShell({
         ]}
       />
 
-      <div
-        className="h-10 w-full max-w-md rounded-lg border border-app-border bg-app-hover animate-pulse"
-        aria-hidden
-      />
+      <div className="card p-0 overflow-hidden">
+        <ToolbarFiltersCollapsible
+          className="!border-0"
+          badgeCount={ordersToolbarFilterBadge}
+          sheetSubtitle={<span>Status and search apply immediately</span>}
+          searchRow={
+            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+              <SearchInput
+                placeholder="Search by customer or order ID..."
+                value={searchQuery}
+                onChange={(val) => {
+                  setSearchQuery(val);
+                  if (val === '' && (searchParams.get('search') ?? '').length > 0) {
+                    applyListParams({ search: '', page: 1 });
+                  }
+                }}
+                wrapperClassName="min-w-0 flex-1"
+              />
+              <Button type="submit" variant="secondary" size="sm">
+                Search
+              </Button>
+            </form>
+          }
+          desktopInlineFilters={
+            <>
+              <FormSelect
+                value={selectedStatus}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                options={MARKETING_ORDERS_SHELL_STATUS_OPTIONS}
+                wrapperClassName="w-auto min-w-[11rem]"
+              />
+              {showMediaBuyerColumn ? (
+                <div
+                  className="h-9 w-full min-w-0 rounded-md border border-app-border bg-app-hover/90 animate-pulse sm:w-56"
+                  aria-hidden
+                />
+              ) : null}
+            </>
+          }
+          sheetFilterBody={
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-app-fg-muted">Status</span>
+              <FormSelect
+                value={selectedStatus}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                options={MARKETING_ORDERS_SHELL_STATUS_OPTIONS}
+                wrapperClassName="w-full"
+              />
+            </div>
+          }
+        />
+      </div>
 
       <CompactTable<{ id: string }>
         rows={MARKETING_ORDERS_SHELL_ROW_DATA}

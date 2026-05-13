@@ -16,7 +16,7 @@ import {
  * Verifies that raw phone numbers (Nigerian patterns 0XXXXXXXXXX or +234XXXXXXXXXX)
  * are NEVER exposed in the UI or network responses for any role.
  *
- * Masked format 0803****1234 is allowed.
+ * Masked format 0803****4567 (digits only) is allowed; hash-derived pseudo-phones are not.
  */
 
 const PHONE_SENSITIVE_PAGES = [

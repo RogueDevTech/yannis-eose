@@ -1,4 +1,4 @@
-import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from '@yannis/shared';
+import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX, normalizeCampaignFieldOrder } from '@yannis/shared';
 
 /**
  * Yannis EOSE — Edge Worker
@@ -169,8 +169,10 @@ interface CampaignConfig {
         | 'preferredDeliveryDate'
         | 'customerEmail'
         | 'paymentMethod';
+      label?: string;
       required: boolean;
     }>;
+    fieldOrder?: string[];
     deliveryStateOptions?: string[];
     preferredDeliveryDateOptions?: string[];
     genderOptions?: string[];
@@ -1236,7 +1238,28 @@ function getFormInnerHTML(config: CampaignConfig): string {
     ? `<p class="subtitle">${escapeHtml(subtitleTrimmed)}</p>`
     : '';
   const buttonText = fc.buttonText ?? 'Submit Order';
-  const standard = new Map((fc.standardFields ?? []).map((f) => [f.key, { required: !!f.required }]));
+  const defaultStandardLabels = {
+    deliveryAddress: 'Delivery Address',
+    deliveryNotes: 'Delivery Notes',
+    deliveryState: 'Delivery State',
+    gender: 'Gender',
+    preferredDeliveryDate: 'Preferred Delivery Date',
+    customerEmail: 'Email',
+    paymentMethod: 'Payment Method',
+  } as const;
+  const getStandardLabel = (
+    key: keyof typeof defaultStandardLabels,
+    labelOverride?: string,
+  ) => {
+    const trimmed = typeof labelOverride === 'string' ? labelOverride.trim() : '';
+    return trimmed.length > 0 ? trimmed : defaultStandardLabels[key];
+  };
+  const standard = new Map(
+    (fc.standardFields ?? []).map((f) => [
+      f.key,
+      { required: !!f.required, label: getStandardLabel(f.key, f.label) },
+    ]),
+  );
   const hasStandard = standard.size > 0;
   type StdFieldKey =
     | 'deliveryAddress'
@@ -1266,9 +1289,28 @@ function getFormInnerHTML(config: CampaignConfig): string {
     if (key === 'customerEmail') return fc.requireCustomerEmail === true;
     return fc.requirePaymentMethod === true;
   };
+  const standardLabel = (key: StdFieldKey) => standard.get(key)?.label ?? defaultStandardLabels[key];
   const showPaymentMethod = showField('paymentMethod');
   const showStandaloneEmail = showField('customerEmail');
   const showProductImages = fc.showProductImages !== false;
+  const standardFieldEntries = (
+    [
+      'gender',
+      'deliveryState',
+      'deliveryAddress',
+      'deliveryNotes',
+      'preferredDeliveryDate',
+      'customerEmail',
+      'paymentMethod',
+    ] as const
+  )
+    .filter((key) => showField(key))
+    .map((key) => ({ key, label: standardLabel(key), required: requiredField(key) }));
+  const customFields = Array.isArray(fc.customFields)
+    ? [...fc.customFields].sort((a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER))
+    : [];
+  const customFieldMap = new Map(customFields.map((field) => [field.id, field]));
+  const resolvedFieldOrder = normalizeCampaignFieldOrder(fc.fieldOrder, standardFieldEntries, customFields);
 
   const hasSingleProduct = config.products.length === 1;
 
@@ -1314,6 +1356,33 @@ function getFormInnerHTML(config: CampaignConfig): string {
   // If single product, auto-set selectedProduct via hidden data attribute
   const firstProduct = config.products[0];
   const singleProductAttr = hasSingleProduct && firstProduct ? ` data-single-product="${firstProduct.id}"` : '';
+  const orderedFormInfoHtml = resolvedFieldOrder
+    .map((token) => {
+      if (token === 'fixed.fullName') {
+        return `<label for="customerName">Full Name</label>
+      <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">`;
+      }
+      if (token === 'fixed.phoneNumber') {
+        return `<label for="customerPhone">Phone Number</label>
+      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">`;
+      }
+      if (token.startsWith('standard.')) {
+        return renderStandardField(
+          standardFieldEntries.find((field) => field.key === token.slice('standard.'.length)),
+          requiredField,
+          fc,
+          showStandaloneEmail,
+          standardLabel('customerEmail'),
+        );
+      }
+      if (token.startsWith('custom.')) {
+        const field = customFieldMap.get(token.slice('custom.'.length));
+        return field ? renderCustomField(field) : '';
+      }
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n');
 
   return `
     <h2>${escapeHtml(heading)}</h2>
@@ -1332,52 +1401,7 @@ function getFormInnerHTML(config: CampaignConfig): string {
       <div class="product-selector">${productOptionsHtml}</div>` : ''}
       <label>Select Offer</label>
       ${offerGroupsHtml}
-      <label for="customerName">Full Name</label>
-      <input id="customerName" name="customerName" type="text" required minlength="2" placeholder="Your full name">
-      <label for="customerPhone">Phone Number</label>
-      <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">
-      ${showField('gender') ? `<label for="customerGender">Gender${requiredField('gender') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="customerGender" name="customerGender"${requiredField('gender') ? ' required' : ''}>
-        <option value="">Select gender...</option>
-        ${(
-          fc.genderOptions && fc.genderOptions.length > 0
-            ? fc.genderOptions
-            : ['Male', 'Female']
-        ).map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join('\n')}
-      </select>` : ''}
-      ${showField('deliveryState') ? `<label for="deliveryState">Delivery State${requiredField('deliveryState') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="deliveryState" name="deliveryState"${requiredField('deliveryState') ? ' required' : ''}>
-        <option value="">Select state...</option>
-        ${(fc.deliveryStateOptions && fc.deliveryStateOptions.length > 0
-          ? fc.deliveryStateOptions
-          : ['Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun', 'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo', 'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue', 'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe', 'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi']
-        ).map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('\n')}
-      </select>` : ''}
-      ${showField('deliveryAddress') ? `<label for="deliveryAddress">Delivery Address${requiredField('deliveryAddress') ? ' <span class="required">*</span>' : ''}</label>
-      <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"${requiredField('deliveryAddress') ? ' required' : ''}></textarea>` : ''}
-      ${showField('deliveryNotes') ? `<label for="deliveryNotes">Delivery Notes${requiredField('deliveryNotes') ? ' <span class="required">*</span>' : ' (optional)'}</label>
-      <input id="deliveryNotes" name="deliveryNotes" type="text" placeholder="Any special instructions"${requiredField('deliveryNotes') ? ' required' : ''}>` : ''}
-      ${showField('preferredDeliveryDate') ? `<label for="preferredDeliveryDate">When do you want to receive your order?${requiredField('preferredDeliveryDate') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="preferredDeliveryDate" name="preferredDeliveryDate"${requiredField('preferredDeliveryDate') ? ' required' : ''}>
-        <option value="">Select...</option>
-        ${(fc.preferredDeliveryDateOptions && fc.preferredDeliveryDateOptions.length > 0
-          ? fc.preferredDeliveryDateOptions
-          : ['As soon as possible', 'Within 1-2 days', 'Within 3-5 days', 'Next week', 'Specific date (mention in notes)']
-        ).map(o => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('\n')}
-      </select>` : ''}
-      ${showStandaloneEmail ? `<label for="customerEmail">Email${requiredField('customerEmail') ? ' <span class="required">*</span>' : ''}</label>
-      <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com"${requiredField('customerEmail') ? ' required' : ''}>` : ''}
-      ${showPaymentMethod ? `<label for="paymentMethod">Payment method${requiredField('paymentMethod') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="paymentMethod" name="paymentMethod"${requiredField('paymentMethod') ? ' required' : ''}>
-        <option value="">Select payment method...</option>
-        <option value="PAY_ON_DELIVERY">Pay on delivery</option>
-        <option value="PAY_ONLINE">Pay online (card / bank)</option>
-      </select>
-      ${showStandaloneEmail ? '' : `<div id="customerEmailWrap" class="hidden">
-        <label for="customerEmail">Email (for payment receipt) <span class="required">*</span></label>
-        <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com">
-      </div>`}` : ''}
-      ${renderCustomFields(fc.customFields)}
+      ${orderedFormInfoHtml}
       <button type="submit" class="btn" id="yannisSubmitBtn">${escapeHtml(buttonText)}</button>
     </form>
   `;
@@ -1390,105 +1414,166 @@ function getFormInnerHTML(config: CampaignConfig): string {
  * attributes. The form-submit JS reads these via `[data-yannis-cf]` and folds them into
  * the `customFields` payload sent to the API.
  */
-function renderCustomFields(
-  fields: NonNullable<CampaignConfig['formConfig']>['customFields'] | undefined,
+function renderStandardField(
+  field:
+    | {
+        key:
+          | 'deliveryAddress'
+          | 'deliveryNotes'
+          | 'deliveryState'
+          | 'gender'
+          | 'preferredDeliveryDate'
+          | 'customerEmail'
+          | 'paymentMethod';
+        label: string;
+        required: boolean;
+      }
+    | undefined,
+  requiredField: (key: 'deliveryAddress' | 'deliveryNotes' | 'deliveryState' | 'gender' | 'preferredDeliveryDate' | 'customerEmail' | 'paymentMethod') => boolean,
+  fc: NonNullable<CampaignConfig['formConfig']>,
+  showStandaloneEmail: boolean,
+  emailLabel: string,
 ): string {
-  if (!fields || fields.length === 0) return '';
-  // Always render in `order` ascending so reordering on the builder is reflected on the form.
-  const sorted = [...fields].sort((a, b) => a.order - b.order);
-  return sorted.map((field) => {
-    const id = `yannis-cf-${field.id}`;
-    const required = field.required ? 'required' : '';
-    const placeholder = field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '';
-    const helpHtml = field.helpText
-      ? `<p class="help-text">${escapeHtml(field.helpText)}</p>`
-      : '';
-    const labelHtml = `<label for="${id}">${escapeHtml(field.label)}${field.required ? ' <span class="required">*</span>' : ''}</label>`;
+  if (!field) return '';
+  switch (field.key) {
+    case 'gender':
+      return `<label for="customerGender">${escapeHtml(field.label)}${requiredField('gender') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="customerGender" name="customerGender"${requiredField('gender') ? ' required' : ''}>
+        <option value="">Select gender...</option>
+        ${(
+          fc.genderOptions && fc.genderOptions.length > 0 ? fc.genderOptions : ['Male', 'Female']
+        ).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('\n')}
+      </select>`;
+    case 'deliveryState':
+      return `<label for="deliveryState">${escapeHtml(field.label)}${requiredField('deliveryState') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="deliveryState" name="deliveryState"${requiredField('deliveryState') ? ' required' : ''}>
+        <option value="">Select state...</option>
+        ${(fc.deliveryStateOptions && fc.deliveryStateOptions.length > 0
+          ? fc.deliveryStateOptions
+          : ['Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun', 'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo', 'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue', 'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe', 'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi']
+        ).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('\n')}
+      </select>`;
+    case 'deliveryAddress':
+      return `<label for="deliveryAddress">${escapeHtml(field.label)}${requiredField('deliveryAddress') ? ' <span class="required">*</span>' : ''}</label>
+      <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"${requiredField('deliveryAddress') ? ' required' : ''}></textarea>`;
+    case 'deliveryNotes':
+      return `<label for="deliveryNotes">${escapeHtml(field.label)}${requiredField('deliveryNotes') ? ' <span class="required">*</span>' : ' (optional)'}</label>
+      <input id="deliveryNotes" name="deliveryNotes" type="text" placeholder="Any special instructions"${requiredField('deliveryNotes') ? ' required' : ''}>`;
+    case 'preferredDeliveryDate':
+      return `<label for="preferredDeliveryDate">${escapeHtml(field.label)}${requiredField('preferredDeliveryDate') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="preferredDeliveryDate" name="preferredDeliveryDate"${requiredField('preferredDeliveryDate') ? ' required' : ''}>
+        <option value="">Select...</option>
+        ${(fc.preferredDeliveryDateOptions && fc.preferredDeliveryDateOptions.length > 0
+          ? fc.preferredDeliveryDateOptions
+          : ['As soon as possible', 'Within 1-2 days', 'Within 3-5 days', 'Next week', 'Specific date (mention in notes)']
+        ).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('\n')}
+      </select>`;
+    case 'customerEmail':
+      return `<label for="customerEmail">${escapeHtml(field.label)}${requiredField('customerEmail') ? ' <span class="required">*</span>' : ''}</label>
+      <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com"${requiredField('customerEmail') ? ' required' : ''}>`;
+    case 'paymentMethod':
+      return `<label for="paymentMethod">${escapeHtml(field.label)}${requiredField('paymentMethod') ? ' <span class="required">*</span>' : ''}</label>
+      <select id="paymentMethod" name="paymentMethod"${requiredField('paymentMethod') ? ' required' : ''}>
+        <option value="">Select payment method...</option>
+        <option value="PAY_ON_DELIVERY">Pay on delivery</option>
+        <option value="PAY_ONLINE">Pay online (card / bank)</option>
+      </select>
+      ${showStandaloneEmail ? '' : `<div id="customerEmailWrap" class="hidden">
+        <label for="customerEmail">${escapeHtml(emailLabel)} (for payment receipt) <span class="required">*</span></label>
+        <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com">
+      </div>`}`;
+  }
+}
 
-    switch (field.type) {
-      case 'text':
-        return `${labelHtml}
-          <input id="${id}" name="${id}" type="text" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="text" ${required} ${placeholder}
-            ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
-            ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}>
-          ${helpHtml}`;
-      case 'textarea':
-        return `${labelHtml}
-          <textarea id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="textarea" ${required} ${placeholder}
-            ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
-            ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}></textarea>
-          ${helpHtml}`;
-      case 'email':
-        return `${labelHtml}
-          <input id="${id}" name="${id}" type="email" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="email" ${required} ${placeholder}>
-          ${helpHtml}`;
-      case 'phone':
-        // Digit-only phone input (CEO directive 2026-05-08): browsers must
-        // surface the numeric keypad on mobile (`type="tel" inputmode="numeric"`),
-        // reject letters at the keystroke level (`oninput` strip), and pattern-match
-        // on submit. Allow `+`, spaces, dashes, and parentheses for formatting; the
-        // server-side validator strips them again before stashing the value.
-        return `${labelHtml}
-          <input id="${id}" name="${id}" type="tel" inputmode="numeric"
-            autocomplete="tel"
-            data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}
-            ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
-            ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}
-            pattern="[0-9+\\-\\s()]*"
-            title="Numbers only"
-            oninput="this.value = this.value.replace(/[^0-9+\\-\\s()]/g, '')">
-          ${helpHtml}`;
-      case 'number':
-        return `${labelHtml}
-          <input id="${id}" name="${id}" type="number" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="number" ${required} ${placeholder}
-            ${field.min != null ? `min="${Number(field.min)}"` : ''}
-            ${field.max != null ? `max="${Number(field.max)}"` : ''}>
-          ${helpHtml}`;
-      case 'date':
-        return `${labelHtml}
-          <input id="${id}" name="${id}" type="date" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="date" ${required}
-            ${field.min ? `min="${escapeHtml(String(field.min))}"` : ''}
-            ${field.max ? `max="${escapeHtml(String(field.max))}"` : ''}>
-          ${helpHtml}`;
-      case 'dropdown': {
-        const options = (field.options ?? []).map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join('\n');
-        return `${labelHtml}
-          <select id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="dropdown" ${required}>
-            <option value="">Select...</option>
-            ${options}
-          </select>
-          ${helpHtml}`;
-      }
-      case 'radio': {
-        const options = (field.options ?? []).map((o, i) => `
-          <label class="radio-option">
-            <input type="radio" name="${id}" value="${escapeHtml(o)}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="radio" ${i === 0 && field.required ? 'required' : ''}>
-            <span>${escapeHtml(o)}</span>
-          </label>`).join('\n');
-        return `${labelHtml}
-          <div class="radio-group" role="radiogroup" data-cf-group="${escapeHtml(field.id)}">${options}</div>
-          ${helpHtml}`;
-      }
-      case 'checkbox_group': {
-        const options = (field.options ?? []).map((o) => `
-          <label class="checkbox-option">
-            <input type="checkbox" name="${id}" value="${escapeHtml(o)}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="checkbox_group">
-            <span>${escapeHtml(o)}</span>
-          </label>`).join('\n');
-        return `${labelHtml}
-          <div class="checkbox-group" data-cf-group="${escapeHtml(field.id)}" ${field.required ? 'data-cf-required="1"' : ''}>${options}</div>
-          ${helpHtml}`;
-      }
-      case 'toggle':
-        return `<label class="toggle-row">
-            <input type="checkbox" id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="toggle" ${field.required ? 'required' : ''}>
-            <span>${escapeHtml(field.label)}${field.required ? ' <span class="required">*</span>' : ''}</span>
-          </label>
-          ${helpHtml}`;
-      default:
-        return '';
+type CampaignCustomField = NonNullable<NonNullable<CampaignConfig['formConfig']>['customFields']>[number];
+
+function renderCustomField(field: CampaignCustomField): string {
+  const id = `yannis-cf-${field.id}`;
+  const required = field.required ? 'required' : '';
+  const placeholder = field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : '';
+  const helpHtml = field.helpText ? `<p class="help-text">${escapeHtml(field.helpText)}</p>` : '';
+  const labelHtml = `<label for="${id}">${escapeHtml(field.label)}${field.required ? ' <span class="required">*</span>' : ''}</label>`;
+
+  switch (field.type) {
+    case 'text':
+      return `${labelHtml}
+        <input id="${id}" name="${id}" type="text" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="text" ${required} ${placeholder}
+          ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
+          ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}>
+        ${helpHtml}`;
+    case 'textarea':
+      return `${labelHtml}
+        <textarea id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="textarea" ${required} ${placeholder}
+          ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
+          ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}></textarea>
+        ${helpHtml}`;
+    case 'email':
+      return `${labelHtml}
+        <input id="${id}" name="${id}" type="email" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="email" ${required} ${placeholder}>
+        ${helpHtml}`;
+    case 'phone':
+      return `${labelHtml}
+        <input id="${id}" name="${id}" type="tel" inputmode="numeric"
+          autocomplete="tel"
+          data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}
+          ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
+          ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}
+          pattern="[0-9+\\-\\s()]*"
+          title="Numbers only"
+          oninput="this.value = this.value.replace(/[^0-9+\\-\\s()]/g, '')">
+        ${helpHtml}`;
+    case 'number':
+      return `${labelHtml}
+        <input id="${id}" name="${id}" type="number" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="number" ${required} ${placeholder}
+          ${field.min != null ? `min="${Number(field.min)}"` : ''}
+          ${field.max != null ? `max="${Number(field.max)}"` : ''}>
+        ${helpHtml}`;
+    case 'date':
+      return `${labelHtml}
+        <input id="${id}" name="${id}" type="date" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="date" ${required}
+          ${field.min ? `min="${escapeHtml(String(field.min))}"` : ''}
+          ${field.max ? `max="${escapeHtml(String(field.max))}"` : ''}>
+        ${helpHtml}`;
+    case 'dropdown': {
+      const options = (field.options ?? [])
+        .map((option: string) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`)
+        .join('\n');
+      return `${labelHtml}
+        <select id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="dropdown" ${required}>
+          <option value="">Select...</option>
+          ${options}
+        </select>
+        ${helpHtml}`;
     }
-  }).join('\n');
+    case 'radio': {
+      const options = (field.options ?? []).map((option: string, index: number) => `
+        <label class="radio-option">
+          <input type="radio" name="${id}" value="${escapeHtml(option)}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="radio" ${index === 0 && field.required ? 'required' : ''}>
+          <span>${escapeHtml(option)}</span>
+        </label>`).join('\n');
+      return `${labelHtml}
+        <div class="radio-group" role="radiogroup" data-cf-group="${escapeHtml(field.id)}">${options}</div>
+        ${helpHtml}`;
+    }
+    case 'checkbox_group': {
+      const options = (field.options ?? []).map((option: string) => `
+        <label class="checkbox-option">
+          <input type="checkbox" name="${id}" value="${escapeHtml(option)}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="checkbox_group">
+          <span>${escapeHtml(option)}</span>
+        </label>`).join('\n');
+      return `${labelHtml}
+        <div class="checkbox-group" data-cf-group="${escapeHtml(field.id)}" ${field.required ? 'data-cf-required="1"' : ''}>${options}</div>
+        ${helpHtml}`;
+    }
+    case 'toggle':
+      return `<label class="toggle-row">
+          <input type="checkbox" id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="toggle" ${field.required ? 'required' : ''}>
+          <span>${escapeHtml(field.label)}${field.required ? ' <span class="required">*</span>' : ''}</span>
+        </label>
+        ${helpHtml}`;
+    default:
+      return '';
+  }
 }
 
 function escapeHtml(str: string): string {

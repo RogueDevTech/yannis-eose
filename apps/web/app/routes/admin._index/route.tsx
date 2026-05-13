@@ -1,15 +1,16 @@
-import { Suspense } from 'react';
-import { useLoaderData, useRouteLoaderData, Await } from '@remix-run/react';
+import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultThisMonthRange } from '~/lib/api.server';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
+import { CachedAwait } from '~/components/ui/cached-await';
+import { cachedClientLoader } from '~/lib/loader-cache';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
 import { AdminQuickDashboardLoadingShell, DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
 import { AdminQuickDashboard, type QuickOverviewData } from '~/features/dashboard/AdminQuickDashboard';
-import type { DashboardData, DashboardLoaderData, OrdersAndCounts } from '~/features/dashboard/types';
+import type { DashboardData, OrdersAndCounts } from '~/features/dashboard/types';
 
 const defaultQuickOverview: QuickOverviewData = {
   marketing: { today: { newOrders: 0, confirmed: 0, delivered: 0, cancelled: 0 } },
@@ -48,14 +49,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // /admin hits ONE tRPC call (dashboard.quickOverview) and renders in <200ms.
   if (role && isAdminLevel({ role })) {
     const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
-    const quickPromise = apiRequest<{ result?: { data?: QuickOverviewData } }>(
+    const pageData = apiRequest<{ result?: { data?: QuickOverviewData } }>(
       '/trpc/dashboard.quickOverview',
       deferredOpt,
     ).then((res) =>
       res.ok && res.data?.result?.data ? res.data.result.data : defaultQuickOverview
     ).catch(() => defaultQuickOverview);
 
-    return defer({ variant: 'admin_quick' as const, data: quickPromise, filters });
+    return defer({ variant: 'admin_quick' as const, filters, pageData });
   }
 
   // All other roles: role-specific dashboard — all deferred for navigate-first
@@ -66,7 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const ordersP = apiRequest<unknown>('/trpc/orders.list?input=' + encodeURIComponent(JSON.stringify(ordersListInput)), deferredOpt);
   const countsP = apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(ordersCountsInput)}`, deferredOpt);
 
-  const ordersAndCountsPromise = Promise.all([ordersP, countsP]).then(([ordersRes, countsRes]): OrdersAndCounts => {
+  const pageData = Promise.all([ordersP, countsP]).then(([ordersRes, countsRes]): OrdersAndCounts => {
     const ordersData = ordersRes.ok
       ? (ordersRes.data as { result?: { data?: { orders: DashboardData['recentOrders']; pagination: { total: number } } } })?.result?.data
       : null;
@@ -83,11 +84,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({
     variant: 'dashboard' as const,
     filters,
-    data: {
-      ordersAndCounts: ordersAndCountsPromise,
-    } satisfies DashboardLoaderData,
+    pageData,
   });
 }
+
+export const clientLoader = cachedClientLoader;
+clientLoader.hydrate = false;
 
 export default function AdminDashboard() {
   const loaderData = useLoaderData<typeof loader>();
@@ -115,29 +117,32 @@ export default function AdminDashboard() {
     parentData?.user?.isCsTeamSupervisorOnActiveBranch === true;
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
-  if (loaderData.variant === 'admin_quick') {
-    const adminRole = role ?? 'ADMIN';
-    return (
-      <Suspense fallback={<AdminQuickDashboardLoadingShell userName={userName} role={adminRole} />}>
-        <Await resolve={loaderData.data} errorElement={<DeferredError />}>
-          {(data) => (
-            <AdminQuickDashboard
-              data={data}
-              userName={userName}
-              role={adminRole}
-            />
-          )}
-        </Await>
-      </Suspense>
-    );
-  }
-  const { ordersAndCounts: _ordersPromise } = loaderData.data;
+  const adminRole = role ?? 'ADMIN';
+
   return (
-    <Suspense fallback={<DashboardSkeleton />}>
-      <Await resolve={_ordersPromise} errorElement={<DeferredError />}>
-        {(ordersAndCounts) => (
+    <CachedAwait<QuickOverviewData | OrdersAndCounts>
+      resolve={loaderData.pageData as Promise<QuickOverviewData | OrdersAndCounts>}
+      fallback={
+        loaderData.variant === 'admin_quick' ? (
+          <AdminQuickDashboardLoadingShell userName={userName} role={adminRole} />
+        ) : (
+          <DashboardSkeleton />
+        )
+      }
+      loaderShell={{ variant: loaderData.variant, filters: loaderData.filters }}
+      deferredKey="pageData"
+      errorElement={() => <DeferredError />}
+    >
+      {(data) =>
+        loaderData.variant === 'admin_quick' ? (
+          <AdminQuickDashboard
+            data={data as QuickOverviewData}
+            userName={userName}
+            role={adminRole}
+          />
+        ) : (
           <DashboardPage
-            data={ordersAndCounts}
+            data={data as OrdersAndCounts}
             role={role}
             userName={userName}
             filters={loaderData.filters}
@@ -145,7 +150,6 @@ export default function AdminDashboard() {
             isCsTeamSupervisor={isCsTeamSupervisor}
           />
         )}
-      </Await>
-    </Suspense>
+    </CachedAwait>
   );
 }

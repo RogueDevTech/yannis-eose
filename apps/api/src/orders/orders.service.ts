@@ -20,7 +20,7 @@ import {
   getMissingRequiredCustomFormLabels,
   z,
 } from '@yannis/shared';
-import { EDGE_FORM_ACTOR_ID, canonicalPermissionCode } from '@yannis/shared';
+import { EDGE_FORM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
@@ -40,6 +40,27 @@ import { BranchTeamsService } from '../branches/branch-teams.service';
 import { CsOrderRoutingService } from './cs-order-routing.service';
 import { CacheService } from '../common/cache/cache.service';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
+
+/**
+ * OR-substrings for `customer_phone` ILIKE — DB often stores `0803…` while users search `+234803…`.
+ * (Edge/API still persist plaintext `customer_phone` when provided; hash-only rows stay name-only.)
+ */
+export function expandCustomerPhoneSearchDigitRuns(digitRun: string): string[] {
+  if (digitRun.length < 7 || digitRun.length > 24) return [];
+  const runs = new Set<string>([digitRun]);
+  if (digitRun.startsWith('234') && digitRun.length >= 12 && digitRun.length <= 13) {
+    const rest = digitRun.slice(3);
+    if (rest.length === 10) runs.add(`0${rest}`);
+  }
+  if (digitRun.startsWith('0') && digitRun.length === 11) {
+    runs.add(`234${digitRun.slice(1)}`);
+  }
+  if (digitRun.length === 10 && /^[789]\d{9}$/.test(digitRun)) {
+    runs.add(`0${digitRun}`);
+    runs.add(`234${digitRun}`);
+  }
+  return [...runs];
+}
 
 const PENDING_PAYMENT_PREFIX = 'pending_payment:';
 const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
@@ -1631,7 +1652,7 @@ export class OrdersService {
     const { customerPhone: _rawPhone, ...orderSafe } = order;
     return {
       ...orderSafe,
-      customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(order.customerPhone, order.customerPhoneHash),
       orderItems: items,
       callLogs: calls,
       allowedTransitions,
@@ -1660,21 +1681,23 @@ export class OrdersService {
   ): void {
     if (actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN') return;
     const perms = actor.permissions ?? [];
-    const hasOrdersRead = perms.includes('orders.read');
-    const hasMarketingOrders = perms.includes('marketing.orders');
-    if (!hasOrdersRead) {
-      if (!hasMarketingOrders) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Not authorized to view this order',
-        });
-      }
-      if (actor.role !== 'HEAD_OF_MARKETING' && order.mediaBuyerId !== actor.id) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Not authorized to view this order',
-        });
-      }
+    const hasOrdersView = perms.some((p) => canonicalPermissionCode(p) === 'orders.view');
+    if (hasOrdersView) return;
+
+    const hasMarketingOrdersView = perms.some(
+      (p) => canonicalPermissionCode(p) === 'marketing.orders.view',
+    );
+    if (!hasMarketingOrdersView) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Not authorized to view this order',
+      });
+    }
+    if (actor.role !== 'HEAD_OF_MARKETING' && order.mediaBuyerId !== actor.id) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Not authorized to view this order',
+      });
     }
   }
 
@@ -1719,6 +1742,8 @@ export class OrdersService {
     address: string | null;
     whatsappGroupLink: string | null;
     providerName: string | null;
+    /** `WAREHOUSE` = internal hub; `THIRD_PARTY` = external 3PL. */
+    providerKind: string | null;
     eligible: boolean;
     reason: string | null;
     availabilityByProduct: Array<{
@@ -1767,6 +1792,7 @@ export class OrdersService {
         address: schema.logisticsLocations.address,
         whatsappGroupLink: schema.logisticsLocations.whatsappGroupLink,
         providerName: schema.logisticsProviders.name,
+        providerKind: schema.logisticsProviders.kind,
         dispatchLocked: schema.logisticsLocations.dispatchLocked,
       })
       .from(schema.logisticsLocations)
@@ -1789,6 +1815,7 @@ export class OrdersService {
       address: string | null;
       whatsappGroupLink: string | null;
       providerName: string | null;
+      providerKind: string | null;
       eligible: boolean;
       reason: string | null;
       availabilityByProduct: Array<{
@@ -1838,6 +1865,7 @@ export class OrdersService {
           address: location.address,
           whatsappGroupLink: location.whatsappGroupLink,
           providerName: location.providerName ?? null,
+          providerKind: location.providerKind ?? null,
           eligible: false,
           reason: 'Dispatch locked at this location. Resolve stock reconciliations first.',
           availabilityByProduct: null,
@@ -1880,6 +1908,7 @@ export class OrdersService {
         address: location.address,
         whatsappGroupLink: location.whatsappGroupLink,
         providerName: location.providerName ?? null,
+        providerKind: location.providerKind ?? null,
         eligible: detailedReason == null,
         reason: hideStockCounts ? genericReason : detailedReason,
         availabilityByProduct: hideStockCounts ? null : availabilityByProduct,
@@ -1978,12 +2007,62 @@ export class OrdersService {
   }
 
   /**
+   * Plain-text order summary for WhatsApp / logistics. Same read gate as `getById`.
+   * Phone line uses the stored `customer_phone` when present; otherwise scans delivery
+   * notes, address, and custom field strings for a Nigerian mobile so paste is the
+   * full number (not a mask). Nigerian GSM is normalized to compact `+234…` for
+   * tap-to-call in WhatsApp/dialers. If nothing is found, paste explains VOIP fallback.
+   */
+  async getClipboardSummaryText(orderId: string, actor: SessionUser): Promise<string> {
+    const detail = await this.getById(orderId);
+    this.assertActorMayViewOrderForRead(actor, detail);
+
+    const [phoneRow] = await this.db
+      .select({
+        customerPhone: schema.orders.customerPhone,
+        customerPhoneHash: schema.orders.customerPhoneHash,
+      })
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+
+    const resolved = resolveOrderClipboardPhone({
+      customerPhone: phoneRow?.customerPhone,
+      deliveryNotes: detail.deliveryNotes,
+      customerAddress: detail.customerAddress,
+      customFields: detail.customFields as Record<string, unknown> | null | undefined,
+    });
+
+    const phoneForPaste =
+      resolved != null
+        ? formatNigerianPhoneForClipboardPaste(resolved.trim())
+        : 'Not available — full phone was not found on this order. Use VOIP from the order screen to contact the customer.';
+
+    return buildOrderClipboardSummaryText({
+      id: detail.id,
+      status: detail.status,
+      customerName: detail.customerName,
+      customerPhoneForPaste: phoneForPaste,
+      deliveryAddress: detail.deliveryAddress ?? null,
+      customerAddress: detail.customerAddress ?? null,
+      orderItems: detail.orderItems,
+      totalAmount: detail.totalAmount ?? null,
+      preferredDeliveryDate: detail.preferredDeliveryDate ?? null,
+      logisticsLocationName: detail.logisticsLocationName ?? null,
+      paymentStatus: detail.paymentStatus ?? null,
+      deliveryNotes: detail.deliveryNotes ?? null,
+      campaignCustomFieldDefs: detail.campaignCustomFieldDefs,
+      customFields: detail.customFields as Record<string, unknown> | null | undefined,
+    });
+  }
+
+  /**
    * List orders with filtering, search, and pagination.
    */
   async list(
     input: ListOrdersInput,
     branchId?: string | null,
-    listOpts?: { assignedCloserViewerId?: string },
+    listOpts?: { assignedCloserViewerId?: string; searchIncludeCustomerPhone?: boolean },
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
 
@@ -2048,8 +2127,21 @@ export class OrdersService {
         // Fast-path: exact ID match can use the PK index (ILIKE would force a scan).
         conditions.push(eq(schema.orders.id, trimmed));
       } else if (trimmed.length > 0) {
-        // Customer name substring search (optimize further with pg_trgm index).
-        conditions.push(ilike(schema.orders.customerName, `%${trimmed}%`));
+        const nameMatch = ilike(schema.orders.customerName, `%${trimmed}%`);
+        const digitRun = trimmed.replace(/\D/g, '');
+        const canMatchStoredPhone =
+          listOpts?.searchIncludeCustomerPhone === true &&
+          digitRun.length >= 7 &&
+          digitRun.length <= 24;
+        if (canMatchStoredPhone) {
+          const runs = expandCustomerPhoneSearchDigitRuns(digitRun);
+          const phoneParts = runs.map((r) => ilike(schema.orders.customerPhone, `%${r}%`));
+          const phoneOr = phoneParts.length > 1 ? or(...phoneParts) : phoneParts[0];
+          const combined = phoneOr ? or(nameMatch, phoneOr) : nameMatch;
+          if (combined) conditions.push(combined);
+        } else {
+          conditions.push(nameMatch);
+        }
       }
     }
     if (input.startDate) {
@@ -2134,6 +2226,7 @@ export class OrdersService {
       status: schema.orders.status,
       customerName: schema.orders.customerName,
       customerPhoneHash: schema.orders.customerPhoneHash,
+      customerPhone: schema.orders.customerPhone,
       totalAmount: schema.orders.totalAmount,
       createdAt: schema.orders.createdAt,
       updatedAt: schema.orders.updatedAt,
@@ -2237,10 +2330,11 @@ export class OrdersService {
 
     return {
       orders: orders.map((order) => {
+        const { customerPhone, ...orderRest } = order;
         const primary = primaryItemByOrder.get(order.id);
         return {
-          ...order,
-          customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
+          ...orderRest,
+          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
           mediaBuyerName: order.mediaBuyerId ? userNamesById.get(order.mediaBuyerId) ?? null : null,
           assignedCsName: order.assignedCsId ? userNamesById.get(order.assignedCsId) ?? null : null,
           primaryProductId: primary?.productId ?? null,
@@ -2824,9 +2918,10 @@ export class OrdersService {
       });
     }
 
+    const { customerPhone: transitionPhone, ...updatedSafe } = updated;
     return {
-      ...updated,
-      customerPhoneDisplay: this.maskPhone(updated.customerPhoneHash),
+      ...updatedSafe,
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(transitionPhone, updated.customerPhoneHash),
       allowedTransitions: getAllowedNextStatuses(newStatus),
     };
   }
@@ -3024,9 +3119,10 @@ export class OrdersService {
       });
     }
 
+    const { customerPhone: updatedPhone, ...updatedForResponse } = updated;
     return {
-      ...updated,
-      customerPhoneDisplay: this.maskPhone(updated.customerPhoneHash),
+      ...updatedForResponse,
+      customerPhoneDisplay: formatOrderCustomerPhoneDisplay(updatedPhone, updated.customerPhoneHash),
     };
   }
 
@@ -5549,6 +5645,52 @@ export class OrdersService {
   }
 
   /**
+   * Append a manual CS note to the order timeline (does not change order status).
+   */
+  async addCsOrderComment(orderId: string, actor: SessionUser, body: { comment: string }) {
+    const trimmed = body.comment.trim();
+    if (trimmed.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Comment cannot be empty' });
+    }
+    if (trimmed.length > 2000) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Comment must be at most 2000 characters' });
+    }
+
+    const rows = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+
+    const order = rows[0];
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+
+    await this.assertActorMayUpdateOrder(actor, {
+      branchId: order.branchId ?? null,
+      assignedCsId: order.assignedCsId ?? null,
+      status: order.status,
+    });
+
+    const description = `Comment: ${trimmed}`;
+
+    await withActor(this.db, actor, async (tx) => {
+      await tx.insert(schema.orderTimelineEvents).values({
+        orderId,
+        eventType: 'CS_ORDER_COMMENT',
+        actorId: actor.id,
+        actorName: actor.name ?? null,
+        description,
+        metadata: { source: 'cs_manual', commentBody: trimmed },
+        branchId: order.branchId ?? null,
+      });
+    });
+
+    return { success: true as const };
+  }
+
+  /**
    * Get orders due for callback (callbackScheduledAt <= now).
    */
   async getCallbackQueue() {
@@ -5568,10 +5710,13 @@ export class OrdersService {
       )
       .orderBy(asc(schema.orders.callbackScheduledAt));
 
-    return orders.map((order) => ({
-      ...order,
-      customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
-    }));
+    return orders.map((order) => {
+      const { customerPhone, ...rest } = order;
+      return {
+        ...rest,
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+      };
+    });
   }
 
   /**
@@ -5595,10 +5740,13 @@ export class OrdersService {
       )
       .orderBy(asc(schema.orders.callbackScheduledAt));
 
-    return orders.map((order) => ({
-      ...order,
-      customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
-    }));
+    return orders.map((order) => {
+      const { customerPhone, ...rest } = order;
+      return {
+        ...rest,
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+      };
+    });
   }
 
   /**
@@ -5696,11 +5844,20 @@ export class OrdersService {
 
     return flagged.map((dup) => {
       const origRow = dup.duplicateOfId ? originalById.get(dup.duplicateOfId) ?? null : null;
-      const original = origRow
-        ? { ...origRow, customerPhoneDisplay: this.maskPhone(origRow.customerPhoneHash) }
-        : null;
+      const original = (() => {
+        if (!origRow) return null;
+        const { customerPhone, ...o } = origRow;
+        return {
+          ...o,
+          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, origRow.customerPhoneHash),
+        };
+      })();
+      const { customerPhone: dupPhone, ...dupRest } = dup;
       return {
-        duplicate: { ...dup, customerPhoneDisplay: this.maskPhone(dup.customerPhoneHash) },
+        duplicate: {
+          ...dupRest,
+          customerPhoneDisplay: formatOrderCustomerPhoneDisplay(dupPhone, dup.customerPhoneHash),
+        },
         original,
         flagKind: (dup.isDuplicate === 'POSSIBLY_DUPLICATE' ? 'POSSIBLY_DUPLICATE' : 'FLAGGED') as
           | 'FLAGGED'
@@ -5834,10 +5991,13 @@ export class OrdersService {
       .orderBy(desc(schema.orders.createdAt))
       .limit(5);
 
-    return potential.map((order) => ({
-      ...order,
-      customerPhoneDisplay: this.maskPhone(order.customerPhoneHash),
-    }));
+    return potential.map((order) => {
+      const { customerPhone, ...rest } = order;
+      return {
+        ...rest,
+        customerPhoneDisplay: formatOrderCustomerPhoneDisplay(customerPhone, order.customerPhoneHash),
+      };
+    });
   }
 
   private async findRecentPhoneOrder(phoneHash: string) {
@@ -5954,14 +6114,6 @@ export class OrdersService {
   }
 
   /**
-   * Mask phone hash for display: show first 4 + **** + last 4.
-   */
-  private maskPhone(phoneHash: string): string {
-    if (phoneHash.length <= 8) return '****';
-    return `${phoneHash.slice(0, 4)}****${phoneHash.slice(-4)}`;
-  }
-
-  /**
    * Build a meaningful notification body for "order assigned to you" pings — replaces
    * the legacy "An order has been assigned to you. Please attend to it." stub. Includes
    * customer name + amount so the CS rep can prioritise without opening the order.
@@ -5993,7 +6145,8 @@ export class OrdersService {
    * CS roles see: ORDER_RECEIVED, ORDER_AUTO_ASSIGNED, ORDER_MANUALLY_ASSIGNED, ORDER_REASSIGNED,
    *   ORDER_CLAIMED, CALL_INITIATED, CALL_COMPLETED, CALL_NO_ANSWER, CALL_FAILED,
    *   MANUAL_CALL_LOGGED, SMS_SENT, WHATSAPP_SENT, ORDER_CONFIRMED, ORDER_CANCELLED,
-   *   ADDRESS_UPDATED, QUANTITY_UPDATED, CALLBACK_SCHEDULED, SUPERVISOR_WATCHING.
+   *   ADDRESS_UPDATED, QUANTITY_UPDATED, CALLBACK_SCHEDULED, SUPERVISOR_WATCHING,
+   *   CS_ORDER_COMMENT.
    * Logistics roles see: ORDER_ALLOCATED, ORDER_DISPATCHED, ORDER_IN_TRANSIT, ORDER_DELIVERED,
    *   ORDER_PARTIALLY_DELIVERED, ORDER_RETURNED, ORDER_RESTOCKED, ORDER_WRITTEN_OFF.
    * Marketing/Finance/SuperAdmin see all events.
@@ -6006,6 +6159,7 @@ export class OrdersService {
       'ORDER_CANCELLED', 'ADDRESS_UPDATED', 'QUANTITY_UPDATED', 'CALLBACK_SCHEDULED',
       'SUPERVISOR_WATCHING', 'PAYMENT_RECEIVED', 'ORDER_ARCHIVED',
       'LINE_PRICE_CHANGE_REQUESTED', 'LINE_PRICE_CHANGE_APPROVED', 'LINE_PRICE_CHANGE_REJECTED',
+      'CS_ORDER_COMMENT',
     ]);
     const LOGISTICS_EVENTS = new Set([
       'ORDER_ALLOCATED', 'ORDER_DISPATCHED', 'ORDER_IN_TRANSIT', 'ORDER_DELIVERED',
