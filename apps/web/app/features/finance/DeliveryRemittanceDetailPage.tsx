@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useFetcher, useLocation } from '@remix-run/react';
+import { generateInvoicePdf } from '~/lib/invoice-pdf';
+import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
+import { ReceiptPreviewModal } from '~/components/ui/receipt-preview-modal';
+import type { OrderInvoice } from '~/features/orders/types';
 import { Button } from '~/components/ui/button';
 import { Breadcrumb } from '~/components/ui/breadcrumb';
 import { PageHeader } from '~/components/ui/page-header';
@@ -44,6 +48,8 @@ export function DeliveryRemittanceDetailPage({
   const [disputeMode, setDisputeMode] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
   const [dismissedError, setDismissedError] = useState(false);
+  const [invoicePreview, setInvoicePreview] = useState<OrderInvoice | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<{ url: string; label: string } | null>(null);
 
   const listBackHref =
     typeof location.state === 'object' &&
@@ -128,6 +134,34 @@ export function DeliveryRemittanceDetailPage({
             <NairaPrice amount={Number(o.totalAmount)} className="text-sm font-medium tabular-nums" />
           ) : (
             <span className="text-app-fg-muted">—</span>
+          ),
+      },
+      {
+        key: 'invoice',
+        header: 'Invoice',
+        nowrap: true,
+        render: (o) =>
+          o.invoice ? (
+            <CompactTableActions className="justify-start">
+              <TableActionButton
+                variant="neutral"
+                title="View invoice"
+                onClick={() => setInvoicePreview(o.invoice)}
+              >
+                {o.invoice.referenceFormatted}
+              </TableActionButton>
+              <TableActionButton
+                variant="neutral"
+                title="Download PDF"
+                onClick={() => {
+                  if (o.invoice) void generateInvoicePdf(o.invoice);
+                }}
+              >
+                PDF
+              </TableActionButton>
+            </CompactTableActions>
+          ) : (
+            <span className="text-xs text-app-fg-muted">No invoice</span>
           ),
       },
       {
@@ -342,36 +376,41 @@ export function DeliveryRemittanceDetailPage({
 
       <div className="rounded-xl border border-app-border bg-app-elevated p-5 shadow-sm space-y-3">
         <h2 className="text-base font-semibold text-app-fg">Receipts</h2>
-        {/* Receipts open on demand — embedding the image inline made the page
-            heavy on long batches with multiple attachments and pushed the
-            "Orders in this batch" table below the fold. Tap to open in a new
-            tab when needed. */}
+        {/* Receipts open on demand in a modal — embedding the image inline made
+            the page heavy on long batches with multiple attachments and pushed
+            the "Orders in this batch" table below the fold. */}
         {(detail.receiptUrls ?? []).length > 0 ? (
           <ul className="flex flex-col gap-1.5">
-            {(detail.receiptUrls ?? []).map((url, i) => (
-              <li key={url}>
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline"
-                >
-                  {(detail.receiptUrls ?? []).length > 1
-                    ? `View receipt ${i + 1}`
-                    : 'View receipt'}
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    aria-hidden
+            {(detail.receiptUrls ?? []).map((url, i) => {
+              const label =
+                (detail.receiptUrls ?? []).length > 1 ? `Receipt ${i + 1}` : 'Receipt';
+              return (
+                <li key={url}>
+                  <button
+                    type="button"
+                    onClick={() => setReceiptPreview({ url, label })}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 hover:underline"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                  </svg>
-                </a>
-              </li>
-            ))}
+                    {`View ${label.toLowerCase()}`}
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="text-sm text-app-fg-muted italic">No receipts attached</p>
@@ -389,10 +428,20 @@ export function DeliveryRemittanceDetailPage({
           rows={detail.orders}
           rowKey={(o) => o.id}
           withCard={false}
-          className="min-w-[720px]"
+          className="min-w-[880px]"
           emptyTitle="No orders on this remittance"
         />
       </div>
+
+      <InvoicePreviewModal invoice={invoicePreview} onClose={() => setInvoicePreview(null)} />
+
+      <ReceiptPreviewModal
+        open={receiptPreview != null}
+        onClose={() => setReceiptPreview(null)}
+        receiptUrl={receiptPreview?.url ?? ''}
+        title={receiptPreview ? `Remittance ${receiptPreview.label.toLowerCase()}` : 'Receipt'}
+        imageAlt={receiptPreview?.label ?? 'Receipt'}
+      />
     </div>
   );
 }

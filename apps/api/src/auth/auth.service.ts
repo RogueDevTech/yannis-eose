@@ -143,7 +143,7 @@ export class AuthService {
 
     // Only PENDING (invited, never logged in) and ACTIVE can log in
     if (user.status === 'DEACTIVATED') {
-      throw new ForbiddenException('Account is deactivated. Contact admin to be re-invited.');
+      throw new ForbiddenException('Account is deactivated. Contact an administrator to be reactivated.');
     }
     if (user.status !== 'ACTIVE' && user.status !== 'PENDING') {
       throw new ForbiddenException('Account is deactivated');

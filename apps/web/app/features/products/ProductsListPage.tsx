@@ -310,12 +310,20 @@ export function ProductsListPage({
           badgeCount={productsToolbarFilterBadge}
           sheetSubtitle={<span>Status applies immediately</span>}
           searchRow={
-            <SearchInput
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="Search by name..."
-              wrapperClassName="min-w-0 flex-1 md:min-w-0"
-            />
+            <form
+              className="min-w-0 flex-1"
+              onSubmit={(e) => {
+                e.preventDefault();
+              }}
+            >
+              <SearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Search by name..."
+                withSubmitButton
+                wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
+              />
+            </form>
           }
           desktopInlineFilters={
             <FormSelect

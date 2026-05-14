@@ -1,4 +1,5 @@
 import { Link, useSearchParams } from '@remix-run/react';
+import { useEffect, useState } from 'react';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -76,6 +77,11 @@ export function StaffOnboardingDocumentsPage({
 }: StaffOnboardingDocumentsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isFilterLoading = useLoaderRefetchBusy().busy;
+
+  const [searchDraft, setSearchDraft] = useState(searchParam);
+  useEffect(() => {
+    setSearchDraft(searchParam);
+  }, [searchParam]);
 
   const patchParams = (patch: Record<string, string | undefined>) => {
     const next = new URLSearchParams(searchParams);
@@ -200,12 +206,23 @@ export function StaffOnboardingDocumentsPage({
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <div className="flex-1 min-w-[12rem]">
           <label className="block text-xs font-medium text-app-muted mb-1">Search</label>
-          <SearchInput
-            placeholder="Name or email…"
-            defaultValue={searchParam}
-            debounceMs={350}
-            onChange={(q) => patchParams({ search: q.trim() || undefined })}
-          />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              patchParams({ search: searchDraft.trim() || undefined });
+            }}
+          >
+            <SearchInput
+              placeholder="Name or email…"
+              value={searchDraft}
+              onChange={(q) => {
+                setSearchDraft(q);
+                if (q.trim() === '') patchParams({ search: undefined });
+              }}
+              withSubmitButton
+              wrapperClassName="w-full"
+            />
+          </form>
         </div>
         <div className="w-full sm:w-52">
           <label className="block text-xs font-medium text-app-muted mb-1">Onboarding</label>

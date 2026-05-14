@@ -527,7 +527,7 @@ export function CSOrdersLoadingShell({
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
               <form
                 method="get"
-                className="min-w-0 w-full md:flex-1"
+                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1"
                 onSubmit={(e) => {
                   e.preventDefault();
                   setSearchParams((p) => {
@@ -544,7 +544,8 @@ export function CSOrdersLoadingShell({
                   placeholder="Search by customer name..."
                   value={searchQuery}
                   onChange={(val) => setSearchQuery(val)}
-                  wrapperClassName="w-full"
+                  withSubmitButton
+                  wrapperClassName="w-full md:flex-1"
                 />
               </form>
               <div className="hidden shrink-0 items-center gap-3 md:flex">
@@ -814,13 +815,11 @@ export function CSTeamLoadingShell({
                   if (value === '' && (searchParams.get('q') ?? '').length > 0) mergeListParams({ q: '', page: 1 });
                 }}
                 placeholder="Search by closer, role, or branch…"
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
                 name="q"
                 autoComplete="off"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={

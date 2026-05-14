@@ -1193,11 +1193,9 @@ export function MarketingAdSpendPage({
                 value={searchQuery}
                 onChange={(val) => setSearchQuery(val)}
                 placeholder="Search ads…"
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={

@@ -406,7 +406,7 @@ export function InventoryOverviewLoadingShell() {
         />
         <form
           method="get"
-          className="flex-1 min-w-0"
+          className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
           onSubmit={(e) => {
             e.preventDefault();
             submitSearch(searchInput);
@@ -420,6 +420,7 @@ export function InventoryOverviewLoadingShell() {
               setSearchInput(val);
               if (val === '') submitSearch('');
             }}
+            withSubmitButton
             wrapperClassName="w-full"
           />
         </form>
@@ -682,6 +683,7 @@ export function ShipmentsListLoadingShell() {
               defaultValue={search}
               placeholder="Search label, supplier, or supplier ref…"
               wrapperClassName="w-full"
+              withSubmitButton={false}
             />
             <div className="flex shrink-0 items-center gap-2">
               <button type="submit" className="btn-primary btn-sm">
@@ -988,17 +990,21 @@ export function CategoriesLoadingShell() {
       />
 
       <div className="card">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            applySearch();
+          }}
+          className="flex flex-col gap-2 sm:flex-row sm:items-center"
+        >
           <SearchInput
             value={draft}
             onChange={setDraft}
             placeholder="Search categories or brand names…"
+            withSubmitButton
             wrapperClassName="min-w-0 flex-1"
           />
-          <Button type="button" variant="secondary" size="sm" className="shrink-0" onClick={() => applySearch()}>
-            Search
-          </Button>
-        </div>
+        </form>
       </div>
 
       <CompactTable<{ id: string }>

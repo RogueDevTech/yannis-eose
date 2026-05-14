@@ -91,6 +91,11 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   const [actionModalFieldError, setActionModalFieldError] = useState<string | null>(null);
   const [viewTarget, setViewTarget] = useState<TransferConfirmationRecord | null>(null);
 
+  const [searchDraft, setSearchDraft] = useState(filters.search);
+  useEffect(() => {
+    setSearchDraft(filters.search);
+  }, [filters.search]);
+
   useFetcherToast(fetcher.data, {
     successMessage: 'Transfer recorded',
     skipErrorToast: !!pendingAction,
@@ -396,14 +401,25 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SearchInput
-            controlSize="sm"
-            wrapperClassName="w-full sm:w-64"
-            placeholder="Search by ID or product"
-            value={filters.search}
-            onChange={(value) => setFilterParam('search', value)}
-            debounceMs={250}
-          />
+          <form
+            className="w-full sm:w-auto sm:min-w-[16rem]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setFilterParam('search', searchDraft);
+            }}
+          >
+            <SearchInput
+              controlSize="sm"
+              wrapperClassName="w-full"
+              placeholder="Search by ID or product"
+              value={searchDraft}
+              onChange={(value) => {
+                setSearchDraft(value);
+                if (value === '') setFilterParam('search', '');
+              }}
+              withSubmitButton
+            />
+          </form>
           <FormSelect
             controlSize="sm"
             wrapperClassName="w-full sm:w-52"

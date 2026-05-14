@@ -19,6 +19,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
+import { TableActionButton } from '~/components/ui/table-action-button';
 
 const FINANCE_OVERVIEW_STRIP = [
   { label: 'Revenue', value: <StatValuePulse className="min-w-[3.5rem]" /> },
@@ -376,12 +377,10 @@ export function FinanceDisbursementsLoadingShell({
                 placeholder="Search by sender, receiver, or ID…"
                 controlSize="sm"
                 clearable
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
                 aria-label="Search disbursements"
               />
-              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-                Search
-              </Button>
             </form>
             <FormSelect
               id="disbursement-status-filter-shell"
@@ -417,12 +416,10 @@ export function FinanceDisbursementsLoadingShell({
                 placeholder="Search recipient name…"
                 controlSize="sm"
                 clearable
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
                 aria-label="Search recipient balances"
               />
-              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-                Search
-              </Button>
             </form>
             <FormSelect
               id="balances-role-filter-shell"
@@ -469,9 +466,87 @@ export function FinanceDisbursementsLoadingShell({
   );
 }
 
-/** Cash remittances list — URL tabs + filters; stats + panels pulse. */
+const DELIVERY_REMITTANCES_LIST_SHELL_ROWS = 8;
+const DELIVERY_REMITTANCES_ELIGIBLE_SHELL_ROWS = 8;
+
+function deliveryRemittancesListShellColumns(): CompactTableColumn<{ id: string }>[] {
+  return [
+    { key: 'id', header: 'ID', tight: true, render: () => <TableCellTextPulse className="w-[4.5rem]" /> },
+    { key: 'location', header: 'Location', render: () => <TableCellTextPulse className="w-[14rem]" /> },
+    { key: 'sentBy', header: 'Sent by', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+    {
+      key: 'orderCount',
+      header: 'Orders',
+      align: 'right',
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[2rem]" />
+        </span>
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Batch total',
+      align: 'right',
+      nowrap: true,
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[5.5rem]" />
+        </span>
+      ),
+    },
+    { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5.5rem]" /> },
+    { key: 'sentAt', header: 'Sent at', nowrap: true, render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    {
+      key: 'actions',
+      header: '',
+      align: 'right',
+      tight: true,
+      render: () => <CompactTableActionButton disabled>Review</CompactTableActionButton>,
+    },
+  ];
+}
+
+function deliveryRemittanceEligibleShellColumns(): CompactTableColumn<{ id: string }>[] {
+  return [
+    { key: 'invoice', header: 'Invoice', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+    { key: 'billTo', header: 'Bill to', render: () => <TableCellTextPulse className="w-[12rem]" /> },
+    {
+      key: 'amount',
+      header: 'Amount',
+      align: 'right',
+      nowrap: true,
+      render: () => (
+        <span className="inline-flex w-full justify-end">
+          <TableCellTextPulse className="w-[5rem]" />
+        </span>
+      ),
+    },
+    { key: 'location', header: 'Location', render: () => <TableCellTextPulse className="w-[12rem]" /> },
+    { key: 'delivered', header: 'Delivered', nowrap: true, render: () => <TableCellTextPulse className="w-[9rem]" /> },
+    {
+      key: 'invoiceActions',
+      header: '',
+      align: 'right',
+      nowrap: true,
+      render: () => (
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <TableActionButton variant="primary" disabled className="opacity-60">
+            View Invoice
+          </TableActionButton>
+          <TableActionButton variant="neutral" disabled className="opacity-60">
+            Download
+          </TableActionButton>
+        </div>
+      ),
+    },
+  ];
+}
+
+/** Cash remittances list — URL tabs + filters; stats pulse; tables show real headers + row pulses. */
 export function DeliveryRemittancesLoadingShell({
   filters,
+  canCreateRemittance = false,
 }: {
   filters: {
     status: string;
@@ -482,6 +557,8 @@ export function DeliveryRemittancesLoadingShell({
     periodAllTime: boolean;
     eligibleQ: string;
   };
+  /** Mirrors loaded page — hides Confirm remittance when the actor cannot create. */
+  canCreateRemittance?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const viewTab = searchParams.get('tab') === 'remittances' ? 'remittances' : 'eligible';
@@ -563,6 +640,17 @@ export function DeliveryRemittancesLoadingShell({
 
   const remittanceToolbarBadge = (filters.location ? 1 : 0) + (filters.sentBy ? 1 : 0);
 
+  const listShellRows = useMemo(
+    () => shellPulsePlaceholderRows('dr-rem-list', DELIVERY_REMITTANCES_LIST_SHELL_ROWS),
+    [],
+  );
+  const eligibleShellRows = useMemo(
+    () => shellPulsePlaceholderRows('dr-rem-elig', DELIVERY_REMITTANCES_ELIGIBLE_SHELL_ROWS),
+    [],
+  );
+  const listShellColumns = useMemo(() => deliveryRemittancesListShellColumns(), []);
+  const eligibleShellColumns = useMemo(() => deliveryRemittanceEligibleShellColumns(), []);
+
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
@@ -629,80 +717,101 @@ export function DeliveryRemittancesLoadingShell({
       />
 
       {viewTab === 'remittances' ? (
-        <div className="card p-0 overflow-hidden">
-          <ToolbarFiltersCollapsible
-            className="!border-0"
-            badgeCount={remittanceToolbarBadge}
-            sheetSubtitle={<span>Location and sent-by apply immediately</span>}
-            desktopInlineFilters={
-              <>
-                <SearchableSelect
-                  id="delivery-remittance-location-filter-shell"
-                  value={filters.location}
-                  onChange={handleLocationChange}
-                  wrapperClassName="w-full min-w-0 sm:w-52"
-                  placeholder="All locations"
-                  searchPlaceholder="Search locations…"
-                  options={locationPickOptions}
-                />
-                <SearchableSelect
-                  id="delivery-remittance-sent-by-filter-shell"
-                  value={filters.sentBy}
-                  onChange={handleSentByChange}
-                  wrapperClassName="w-full min-w-0 sm:w-56"
-                  placeholder="Sent by anyone"
-                  searchPlaceholder="Search accountants…"
-                  options={sentByPickOptions}
-                />
-              </>
-            }
-            sheetFilterBody={
-              <>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Location</span>
+        <>
+          <div className="card p-0 overflow-hidden">
+            <ToolbarFiltersCollapsible
+              className="!border-0"
+              badgeCount={remittanceToolbarBadge}
+              sheetSubtitle={<span>Location and sent-by apply immediately</span>}
+              desktopInlineFilters={
+                <>
                   <SearchableSelect
-                    id="delivery-remittance-location-filter-sheet-shell"
+                    id="delivery-remittance-location-filter-shell"
                     value={filters.location}
                     onChange={handleLocationChange}
-                    wrapperClassName="w-full"
+                    wrapperClassName="w-full min-w-0 sm:w-52"
                     placeholder="All locations"
                     searchPlaceholder="Search locations…"
                     options={locationPickOptions}
                   />
-                </div>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
                   <SearchableSelect
-                    id="delivery-remittance-sent-by-filter-sheet-shell"
+                    id="delivery-remittance-sent-by-filter-shell"
                     value={filters.sentBy}
                     onChange={handleSentByChange}
-                    wrapperClassName="w-full"
+                    wrapperClassName="w-full min-w-0 sm:w-56"
                     placeholder="Sent by anyone"
                     searchPlaceholder="Search accountants…"
                     options={sentByPickOptions}
                   />
-                </div>
-              </>
-            }
+                </>
+              }
+              sheetFilterBody={
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Location</span>
+                    <SearchableSelect
+                      id="delivery-remittance-location-filter-sheet-shell"
+                      value={filters.location}
+                      onChange={handleLocationChange}
+                      wrapperClassName="w-full"
+                      placeholder="All locations"
+                      searchPlaceholder="Search locations…"
+                      options={locationPickOptions}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
+                    <SearchableSelect
+                      id="delivery-remittance-sent-by-filter-sheet-shell"
+                      value={filters.sentBy}
+                      onChange={handleSentByChange}
+                      wrapperClassName="w-full"
+                      placeholder="Sent by anyone"
+                      searchPlaceholder="Search accountants…"
+                      options={sentByPickOptions}
+                    />
+                  </div>
+                </>
+              }
+            />
+          </div>
+          <CompactTable<{ id: string }>
+            caption="Cash remittance batches"
+            columns={listShellColumns}
+            rows={listShellRows}
+            rowKey={(r) => r.id}
+            emptyTitle="Loading remittances…"
+            emptyDescription=""
+            pagination={{
+              page: 1,
+              totalPages: 1,
+              pageParam: 'page',
+              showWhenSinglePage: true,
+              summary: <span className="text-app-fg-muted">Loading…</span>,
+            }}
           />
-        </div>
+        </>
       ) : null}
 
       {viewTab === 'eligible' ? (
         <div className="card p-4 space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="flex min-w-0 gap-2">
+            <form
+              className="min-w-0"
+              onSubmit={(e) => {
+                e.preventDefault();
+                commitEligibleQ();
+              }}
+            >
               <SearchInput
                 value={eligibleDraft}
                 onChange={(v) => setEligibleDraft(v)}
                 placeholder="Search customer, order ID, invoice ref, or bill-to name"
                 controlSize="md"
-                wrapperClassName="min-w-0 flex-1"
+                withSubmitButton
+                wrapperClassName="w-full"
               />
-              <Button type="button" variant="secondary" size="sm" className="shrink-0 self-end" onClick={() => commitEligibleQ()}>
-                Search
-              </Button>
-            </div>
+            </form>
             <FormSelect
               id="eligible-remittance-location-shell"
               aria-label="Filter by logistics location"
@@ -714,23 +823,47 @@ export function DeliveryRemittancesLoadingShell({
               wrapperClassName="w-full"
             />
           </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-app-border bg-app-hover px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-app-fg-muted">
+              <span className="font-medium text-app-fg">0</span> selected
+              <span className="text-app-fg-muted"> · </span>
+              <span>Loading list…</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-semibold text-app-fg inline-flex items-center gap-1.5">
+                Selected total:
+                <StatValuePulse className="min-w-[4rem]" />
+              </span>
+              {canCreateRemittance ? (
+                <Button type="button" variant="primary" size="sm" disabled className="opacity-70">
+                  Confirm remittance
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-app-border">
+            <CompactTable<{ id: string }>
+              caption="Delivered orders awaiting remittance"
+              withCard={false}
+              className="min-w-[980px] [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
+              columns={eligibleShellColumns}
+              rows={eligibleShellRows}
+              rowKey={(r) => r.id}
+              emptyTitle="Loading orders…"
+              emptyDescription=""
+              pagination={{
+                page: 1,
+                totalPages: 1,
+                pageParam: 'eligiblePage',
+                showWhenSinglePage: true,
+                summary: <span className="text-app-fg-muted">Loading…</span>,
+              }}
+            />
+          </div>
         </div>
       ) : null}
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card p-4 space-y-2 min-h-[240px] animate-pulse">
-          <div className="h-5 w-40 rounded bg-app-hover" aria-hidden />
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-10 rounded bg-app-hover/80" aria-hidden />
-          ))}
-        </div>
-        <div className="card p-4 space-y-2 min-h-[240px] animate-pulse">
-          <div className="h-5 w-48 rounded bg-app-hover" aria-hidden />
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-12 rounded bg-app-hover/80" aria-hidden />
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -747,7 +880,14 @@ const REMITTANCE_ORDER_SHELL_ROWS = 4;
 function remittanceOrderShellColumns(): CompactTableColumn<{ id: string }>[] {
   return [
     { key: 'customer', header: 'Customer', render: () => <TableCellTextPulse className="w-[10rem]" /> },
-    { key: 'orderId', header: 'Order ID', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    { key: 'orderId', header: 'Order', render: () => <TableCellTextPulse className="w-[7rem]" /> },
+    { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5.5rem]" /> },
+    {
+      key: 'delivered',
+      header: 'Delivered',
+      nowrap: true,
+      render: () => <TableCellTextPulse className="w-[9rem]" />,
+    },
     {
       key: 'amount',
       header: 'Amount',
@@ -758,12 +898,11 @@ function remittanceOrderShellColumns(): CompactTableColumn<{ id: string }>[] {
         </span>
       ),
     },
-    { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[5.5rem]" /> },
     {
-      key: 'delivered',
-      header: 'Delivered',
+      key: 'invoice',
+      header: 'Invoice',
       nowrap: true,
-      render: () => <TableCellTextPulse className="w-[9rem]" />,
+      render: () => <TableCellTextPulse className="w-[7rem]" />,
     },
     {
       key: 'actions',
@@ -898,7 +1037,7 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
           rows={orderRows}
           rowKey={(o) => o.id}
           withCard={false}
-          className="min-w-[720px]"
+          className="min-w-[880px]"
           emptyTitle="Loading…"
           emptyDescription=""
         />

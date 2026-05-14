@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
-import { Link, useFetcher, useRevalidator } from '@remix-run/react';
+import { Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { EDGE_FORM_ACTOR_ID } from '@yannis/shared';
@@ -38,6 +38,7 @@ import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { hasFinanceAccess, isAdminLevel, isOrgWideDepartmentHead } from '~/lib/rbac';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { STATUS_LABELS, formatStatus } from '~/features/shared/order-status';
+import { ordersListPathForDetailFrom } from '~/lib/order-detail-return';
 import type { CallLogEntry, TimelineEvent, OrderDetail, OrderDetailStreamData, OrderDetailPageExtraProps, OrderInvoice } from './types';
 
 /** Matches `orders.scheduleCallback` / Remix action validation (minutes). */
@@ -816,6 +817,25 @@ export function OrderDetailPage({
     return orderAfterFetcher;
   })();
 
+  const [searchParams] = useSearchParams();
+  const ordersListHref = useMemo(() => {
+    const fromPath = ordersListPathForDetailFrom(searchParams.get('from'));
+    if (fromPath) return fromPath;
+    if (
+      userRole === 'HEAD_OF_LOGISTICS' ||
+      userRole === 'LOGISTICS_MANAGER' ||
+      userRole === 'TPL_MANAGER' ||
+      userRole === 'TPL_RIDER' ||
+      userRole === 'STOCK_MANAGER'
+    ) {
+      return '/admin/logistics/orders';
+    }
+    if (userRole === 'HEAD_OF_MARKETING' || userRole === 'MEDIA_BUYER') {
+      return '/admin/marketing/orders';
+    }
+    return '/admin/cs/orders';
+  }, [searchParams, userRole]);
+
   // Team Live View — broadcast CS closer state to cs-all room.
   const isCSCloser = userRole === 'CS_CLOSER';
   useAgentStateBroadcast(
@@ -1384,39 +1404,17 @@ export function OrderDetailPage({
 
   return (
     <div className="space-y-4 overflow-x-hidden min-w-0">
-      {/* Breadcrumb — back-link routes to the user's home orders list so logistics
-          users land back on /admin/logistics/orders, marketing on /admin/marketing/orders,
-          etc. Previously hardcoded to /admin/cs/orders, which leaked CS as the default. */}
-      {(() => {
-        const ordersHref = (() => {
-          if (
-            userRole === 'HEAD_OF_LOGISTICS' ||
-            userRole === 'LOGISTICS_MANAGER' ||
-            userRole === 'TPL_MANAGER' ||
-            userRole === 'TPL_RIDER' ||
-            userRole === 'STOCK_MANAGER'
-          ) {
-            return '/admin/logistics/orders';
-          }
-          if (userRole === 'HEAD_OF_MARKETING' || userRole === 'MEDIA_BUYER') {
-            return '/admin/marketing/orders';
-          }
-          // CS_CLOSER, HEAD_OF_CS, SUPER_ADMIN, ADMIN, BRANCH_ADMIN, FINANCE_OFFICER,
-          // HR_MANAGER → CS orders is the canonical "orders" list.
-          return '/admin/cs/orders';
-        })();
-        return (
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <Link to={ordersHref} className="text-app-fg-muted hover:text-brand-500">
-              Orders
-            </Link>
-            <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-            </svg>
-            <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
-          </div>
-        );
-      })()}
+      {/* Breadcrumb — `?from=logistics|cs|marketing` wins (set by list pages) so admins
+          return to the list they opened from; else fall back to role-based home list. */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <Link to={ordersListHref} className="text-app-fg-muted hover:text-brand-500">
+          Orders
+        </Link>
+        <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+        <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
+      </div>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 min-w-0">

@@ -999,11 +999,11 @@ function BranchMembersPanel({
   // The panel is rendered inside a department's detail view (already filtered
   // to that dept's members), so the dept-filter pills the panel used to show
   // were always showing a single locked option. Removed (CEO 2026-05-10).
-  const [search, setSearch] = useState('');
-  // Backend-search fetcher — fires when `search` is non-empty. Falls back to
+  const [searchDraft, setSearchDraft] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  // Backend-search fetcher — fires when the applied query is non-empty. Falls back to
   // the in-memory `members` prop when search is cleared so the initial paint
-  // never has to wait for a network roundtrip. Debounced via the SearchInput's
-  // own `debounceMs={200}` (see input below).
+  // never has to wait for a network roundtrip. The user commits text with Search / Enter.
   const searchFetcher = useFetcher<{
     data?: {
       members: OverviewMember[];
@@ -1012,7 +1012,7 @@ function BranchMembersPanel({
     error?: string;
   }>();
   useEffect(() => {
-    const q = search.trim();
+    const q = appliedSearch.trim();
     if (q.length === 0) return; // empty search → use prop members; no fetch
     const params = new URLSearchParams({ branchId, q });
     if (department) params.set('department', department);
@@ -1020,8 +1020,8 @@ function BranchMembersPanel({
     // We intentionally do NOT include searchFetcher in deps — fetcher refs
     // change identity every render which would cause a loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, branchId, department]);
-  const isSearching = search.trim().length > 0;
+  }, [appliedSearch, branchId, department]);
+  const isSearching = appliedSearch.trim().length > 0;
   const isFetcherBusy = searchFetcher.state !== 'idle';
   const fetcherError = searchFetcher.data?.error ?? null;
   const fetchedMembers = searchFetcher.data?.data?.members ?? null;
@@ -1060,7 +1060,7 @@ function BranchMembersPanel({
       //   client-side `name.includes(q)` against the prop list so the panel
       //   doesn't blank out for ~200ms; once the fetcher returns we switch
       //   to the authoritative server result.
-      (fetchedMembers ?? members.filter((m) => m.name.toLowerCase().includes(search.trim().toLowerCase())))
+      (fetchedMembers ?? members.filter((m) => m.name.toLowerCase().includes(appliedSearch.trim().toLowerCase())))
     : members;
   const filtered = useMemo(() => {
     return sourceMembers.filter((m) => {
@@ -1077,7 +1077,7 @@ function BranchMembersPanel({
   // on a page that no longer has rows.
   useEffect(() => {
     setPage(1);
-  }, [search, teamFilter]);
+  }, [appliedSearch, teamFilter]);
 
   // Defensive: if `members` shrinks (e.g. someone is removed) and the current
   // page is now empty, step back rather than rendering nothing.
@@ -1113,15 +1113,25 @@ function BranchMembersPanel({
       <div className="space-y-2">
         <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-start md:gap-3">
           <div className="min-w-0 w-full md:flex-1">
-            <SearchInput
-              value={search}
-              onChange={setSearch}
-              placeholder="Search by name or email…"
-              aria-label="Search members by name or email"
-              controlSize="sm"
-              debounceMs={200}
-              wrapperClassName="w-full"
-            />
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setAppliedSearch(searchDraft.trim());
+              }}
+            >
+              <SearchInput
+                value={searchDraft}
+                onChange={(v) => {
+                  setSearchDraft(v);
+                  if (v.trim() === '') setAppliedSearch('');
+                }}
+                placeholder="Search by name or email…"
+                aria-label="Search members by name or email"
+                controlSize="sm"
+                withSubmitButton
+                wrapperClassName="w-full"
+              />
+            </form>
             {isSearching && isFetcherBusy ? (
               <p className="mt-1 text-[11px] text-app-fg-muted">Searching…</p>
             ) : isSearching && fetcherError ? (

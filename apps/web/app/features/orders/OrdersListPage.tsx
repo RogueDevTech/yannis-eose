@@ -1,4 +1,4 @@
-import { Suspense, useState, useEffect, useRef, useMemo } from 'react';
+import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { SmartPick } from '~/components/ui/smart-pick';
@@ -37,6 +37,7 @@ import {
   formatStatus,
 } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
+import { orderDetailHref, type OrderDetailListFrom } from '~/lib/order-detail-return';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -173,6 +174,8 @@ export interface OrdersListPageProps {
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
   dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
+  /** CS orders route passes `cs` so unified order detail breadcrumb returns here for admins. */
+  orderDetailFrom?: OrderDetailListFrom | null;
   /** CS orders: per-day callback + delivery heat (optional — only `/admin/cs/orders` passes this). */
   scheduleHeat?: ScheduleHeatDay[];
   scheduleFilters?: {
@@ -219,9 +222,14 @@ function OrdersListPageImpl({
   dailyCounts,
   scheduleHeat,
   scheduleFilters,
+  orderDetailFrom = 'cs',
   deferredLoading = false,
 }: OrdersListPageImplProps) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const toOrderDetail = useCallback(
+    (orderId: string) => orderDetailHref('/admin/orders', orderId, orderDetailFrom ?? undefined),
+    [orderDetailFrom],
+  );
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const [showChartView, setShowChartView] = useState(false);
   /** Schedule heat calendar lives in a modal — opens when the user picks a "…on date"
@@ -557,7 +565,7 @@ function OrdersListPageImpl({
       {
         key: 'orderId',
         header: 'Order ID',
-        render: (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
+        render: (order) => <OrderIdBadge id={order.id} linkTo={toOrderDetail(order.id)} />,
       },
       {
         key: 'customer',
@@ -654,11 +662,11 @@ function OrdersListPageImpl({
         headerClassName: 'text-center',
         tight: true,
         mobileShowLabel: false,
-        render: (order) => <TableActionButton to={`/admin/orders/${order.id}`} variant="primary">View</TableActionButton>,
+        render: (order) => <TableActionButton to={toOrderDetail(order.id)} variant="primary">View</TableActionButton>,
       },
     );
     return cols;
-  }, [showCSCloserColumn, showCampaignColumn]);
+  }, [showCSCloserColumn, showCampaignColumn, toOrderDetail]);
 
   const statusOptions = STATUS_OPTIONS.map((status) => ({
     value: status,
@@ -1127,11 +1135,9 @@ function OrdersListPageImpl({
                   placeholder="Search by customer name or phone number…"
                   value={searchQuery}
                   onChange={(val) => setSearchQuery(val)}
+                  withSubmitButton
                   wrapperClassName="min-w-0 w-full flex-1"
                 />
-                <Button type="submit" variant="secondary" size="sm" className="w-full shrink-0 sm:w-auto">
-                  Search
-                </Button>
               </form>
               <div className="hidden shrink-0 items-center gap-3 md:flex">
                 <FormSelect

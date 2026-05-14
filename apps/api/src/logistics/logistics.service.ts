@@ -1977,12 +1977,28 @@ export class LogisticsService {
     const locationName = locationLookupRow?.name ?? null;
     const locationProviderName = locationLookupRow?.providerName ?? null;
 
+    const markedPaidForBatch = remittance.status === 'RECEIVED';
+
     let orders: Array<{
       id: string;
       customerName: string;
       totalAmount: string | null;
       deliveredAt: string | null;
       status: string;
+      invoice: {
+        id: string;
+        orderId: string;
+        referenceNumber: number;
+        referenceFormatted: string;
+        recipientInfo: { name: string; address?: string; email?: string; phone?: string };
+        lineItems: Array<{ description: string; quantity: number; unitPrice: string }>;
+        totalAmount: string;
+        taxRate: string | null;
+        status: string;
+        dueDate: string | null;
+        createdAt: string;
+        markedPaid: boolean;
+      } | null;
     }> = [];
     if (orderIds.length > 0) {
       const orderRows = await this.db
@@ -1992,8 +2008,18 @@ export class LogisticsService {
           totalAmount: schema.orders.totalAmount,
           deliveredAt: schema.orders.deliveredAt,
           status: schema.orders.status,
+          invoiceId: schema.invoices.id,
+          invoiceReferenceNumber: schema.invoices.referenceNumber,
+          invoiceRecipientInfo: schema.invoices.recipientInfo,
+          invoiceLineItems: schema.invoices.lineItems,
+          invoiceTaxRate: schema.invoices.taxRate,
+          invoiceTotalAmount: schema.invoices.totalAmount,
+          invoiceStatus: schema.invoices.status,
+          invoiceDueDate: schema.invoices.dueDate,
+          invoiceCreatedAt: schema.invoices.createdAt,
         })
         .from(schema.orders)
+        .leftJoin(schema.invoices, eq(schema.invoices.orderId, schema.orders.id))
         .where(inArray(schema.orders.id, orderIds));
       orders = orderRows.map((o) => ({
         id: o.id,
@@ -2001,6 +2027,24 @@ export class LogisticsService {
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
         status: o.status,
+        invoice:
+          o.invoiceId != null && o.invoiceReferenceNumber != null && o.invoiceCreatedAt
+            ? {
+                id: o.invoiceId,
+                orderId: o.id,
+                referenceNumber: o.invoiceReferenceNumber,
+                referenceFormatted: this.formatInvoiceReference(o.invoiceReferenceNumber),
+                recipientInfo: this.parseInvoiceRecipient(o.invoiceRecipientInfo),
+                lineItems: this.parseInvoiceLineItems(o.invoiceLineItems),
+                totalAmount:
+                  o.invoiceTotalAmount != null ? String(o.invoiceTotalAmount) : '0',
+                taxRate: o.invoiceTaxRate != null ? String(o.invoiceTaxRate) : null,
+                status: o.invoiceStatus ?? 'DRAFT',
+                dueDate: o.invoiceDueDate?.toISOString() ?? null,
+                createdAt: o.invoiceCreatedAt.toISOString(),
+                markedPaid: markedPaidForBatch,
+              }
+            : null,
       }));
     }
 

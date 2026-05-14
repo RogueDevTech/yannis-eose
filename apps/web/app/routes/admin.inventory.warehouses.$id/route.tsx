@@ -242,11 +242,10 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
                 placeholder="Search shipments…"
                 className="sm:max-w-sm"
                 aria-label="Search shipments"
+                withSubmitButton
+                wrapperClassName="w-full sm:max-w-sm"
               />
               <input type="hidden" name="page" value="1" />
-              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-                Search
-              </Button>
             </Form>
           }
           desktopInlineFilters={

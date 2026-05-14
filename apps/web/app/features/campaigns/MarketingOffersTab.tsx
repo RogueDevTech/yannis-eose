@@ -198,12 +198,21 @@ export function MarketingOffersTab({
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
           <div className="min-w-0 flex-1 sm:max-w-xs">
             <FormField label="Search offers" htmlFor="offers-hub-search">
-              <SearchInput
-                id="offers-hub-search"
-                value={offerSearch}
-                onChange={setOfferSearch}
-                placeholder="Name or product…"
-              />
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                }}
+                className="w-full"
+              >
+                <SearchInput
+                  id="offers-hub-search"
+                  value={offerSearch}
+                  onChange={setOfferSearch}
+                  placeholder="Name or product…"
+                  withSubmitButton
+                  wrapperClassName="w-full"
+                />
+              </form>
             </FormField>
           </div>
           <div className="min-w-0 flex-1 sm:max-w-sm">

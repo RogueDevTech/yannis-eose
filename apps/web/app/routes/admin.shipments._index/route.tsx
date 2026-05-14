@@ -360,6 +360,7 @@ function ShipmentsIndexContent(data: {
               defaultValue={data.filters.search}
               placeholder="Search label, supplier, or supplier ref…"
               wrapperClassName="w-full"
+              withSubmitButton={false}
             />
             <div className="flex items-center gap-2 shrink-0">
               <button type="submit" className="btn-primary btn-sm">

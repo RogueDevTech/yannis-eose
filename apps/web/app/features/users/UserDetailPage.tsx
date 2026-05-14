@@ -125,6 +125,7 @@ export function UserDetailPage({
   templatePermissionsById,
   userStampPreview,
   isSuperAdmin = false,
+  canReactivateDeactivatedStaff = false,
   isViewerHeadOfMarketing = false,
   isViewerHeadOfCS = false,
   canEditLimited = false,
@@ -172,6 +173,7 @@ export function UserDetailPage({
   const [openModal, setOpenModal] = useState<ModalId | null>(null);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [showReactivateConfirm, setShowReactivateConfirm] = useState(false);
   const [showEmailChangeModal, setShowEmailChangeModal] = useState<{
     requestId: string;
     action: 'APPROVED' | 'REJECTED';
@@ -221,6 +223,12 @@ export function UserDetailPage({
     ) {
       setShowEmailChangeModal(null);
       setEmailChangeReason('');
+    }
+  }, [actionData?.success, actionData?.message]);
+
+  useEffect(() => {
+    if (actionData?.success && actionData.message?.toLowerCase().includes('reactivat')) {
+      setShowReactivateConfirm(false);
     }
   }, [actionData?.success, actionData?.message]);
 
@@ -921,7 +929,11 @@ export function UserDetailPage({
       </div>
 
       {/* Action feedback */}
-      {actionData?.error && !dismissedError && !showDeactivateConfirm && !showEmailChangeModal && (
+      {actionData?.error &&
+        !dismissedError &&
+        !showDeactivateConfirm &&
+        !showReactivateConfirm &&
+        !showEmailChangeModal && (
         <PageNotification
           variant="error"
           message={humanizeZodIssuesString(actionData.error)}
@@ -1122,25 +1134,23 @@ export function UserDetailPage({
                                       Deactivate
                                     </Button>
                                   )}
-                                {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
-                                  <Form method="post" data-branch-scoped-action="true">
-                                    <input type="hidden" name="intent" value="reactivate" />
-                                    <Button
-                                      type="submit"
-                                      variant="secondary"
-                                      size="sm"
-                                      loading={isReactivating}
-                                      loadingText="Reactivating..."
-                                      className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
-                                    >
-                                      Reactivate
-                                    </Button>
-                                  </Form>
+                                {(user.status === 'INACTIVE' ||
+                                  user.status === 'ARCHIVED' ||
+                                  (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setShowReactivateConfirm(true)}
+                                    className="text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300 flex items-center gap-1.5"
+                                  >
+                                    Reactivate
+                                  </Button>
                                 )}
-                                {user.status === 'DEACTIVATED' && (
+                                {user.status === 'DEACTIVATED' && !canReactivateDeactivatedStaff && (
                                   <p className="text-xs text-app-fg-muted italic">
-                                    Deactivated accounts cannot be reactivated. Re-invite the user to
-                                    create a new account.
+                                    Reactivating deactivated staff requires Super Admin / Admin access or the
+                                    users deactivate permission.
                                   </p>
                                 )}
                               </>
@@ -1218,24 +1228,26 @@ export function UserDetailPage({
                                       Deactivate
                                     </Button>
                                   )}
-                                {(user.status === 'INACTIVE' || user.status === 'ARCHIVED') && (
-                                  <Form method="post" data-branch-scoped-action="true" className="w-full">
-                                    <input type="hidden" name="intent" value="reactivate" />
-                                    <Button
-                                      type="submit"
-                                      variant="secondary"
-                                      size="sm"
-                                      loading={isReactivating}
-                                      loadingText="Reactivating..."
-                                      className="w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
-                                    >
-                                      Reactivate
-                                    </Button>
-                                  </Form>
+                                {(user.status === 'INACTIVE' ||
+                                  user.status === 'ARCHIVED' ||
+                                  (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    className="w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300"
+                                    onClick={() => {
+                                      closeSheet();
+                                      setShowReactivateConfirm(true);
+                                    }}
+                                  >
+                                    Reactivate
+                                  </Button>
                                 )}
-                                {user.status === 'DEACTIVATED' && (
-                                  <p className="text-xs text-app-fg-muted italic">
-                                    Deactivated accounts cannot be reactivated.
+                                {user.status === 'DEACTIVATED' && !canReactivateDeactivatedStaff && (
+                                  <p className="text-xs text-app-fg-muted italic w-full">
+                                    Reactivating deactivated staff requires Super Admin / Admin access or the
+                                    users deactivate permission.
                                   </p>
                                 )}
                               </>
@@ -1969,12 +1981,12 @@ export function UserDetailPage({
               id="deactivate-modal-title"
               className="text-lg font-semibold text-danger-700 dark:text-danger-300"
             >
-              Deactivate user permanently
+              Deactivate user
             </h3>
           </div>
           <p id="deactivate-modal-desc" className="text-sm text-app-fg-muted">
-            You are about to deactivate <strong>{user.name}</strong> ({user.email}). This action is{' '}
-            <strong>irreversible</strong> for this account.
+            You are about to deactivate <strong>{user.name}</strong> ({user.email}). They will be signed out
+            immediately and cannot sign in until an authorized administrator reactivates the account.
           </p>
           <div className="rounded-lg bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-800 p-4 space-y-2">
             <p className="text-sm font-medium text-danger-800 dark:text-danger-200">
@@ -1987,8 +1999,8 @@ export function UserDetailPage({
                 “Deactivated”).
               </li>
               <li>
-                This account <strong>cannot be reactivated</strong>. To give them access again you
-                must re-invite them, which creates a new account and new audit history.
+                Super Admins, Admins, or holders of the deactivate-user permission can restore them to
+                Active from this profile when appropriate.
               </li>
               <li>
                 Existing audit trail and historical data (orders, payouts, etc.) remain tied to this
@@ -1997,9 +2009,9 @@ export function UserDetailPage({
             </ul>
           </div>
           <p className="text-xs text-app-fg-muted">
-            Only Super Admins can deactivate users. If you need to temporarily disable access, use{' '}
-            <strong>Inactive</strong> or <strong>Archived</strong> instead (those can be
-            reactivated).
+            Only Super Admins can use the Deactivate button here. To pause access without this flow, set
+            status to <strong>Inactive</strong> or <strong>Archived</strong> on the edit form (those can
+            also be reactivated from the profile).
           </p>
           {actionData?.error && !dismissedError ? (
             <InlineNotification
@@ -2025,7 +2037,91 @@ export function UserDetailPage({
                 loadingText="Deactivating..."
                 className="bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700"
               >
-                Deactivate permanently
+                Deactivate user
+              </Button>
+            </Form>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Reactivate Confirmation Modal ───────────────── */}
+      {showReactivateConfirm && (
+        <Modal
+          open
+          onClose={() => !isReactivating && setShowReactivateConfirm(false)}
+          maxWidth="max-w-lg"
+          role="alertdialog"
+          aria-labelledby="reactivate-modal-title"
+          aria-describedby="reactivate-modal-desc"
+          contentClassName="p-6 space-y-5 border-2 border-success-200 dark:border-success-800"
+        >
+          <div className="flex items-center gap-3 pb-2 border-b border-success-100 dark:border-success-900/50">
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-success-100 dark:bg-success-900/40 flex items-center justify-center">
+              <svg
+                className="w-5 h-5 text-success-600 dark:text-success-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+            <h3
+              id="reactivate-modal-title"
+              className="text-lg font-semibold text-success-800 dark:text-success-200"
+            >
+              Reactivate {user.name}?
+            </h3>
+          </div>
+          <p id="reactivate-modal-desc" className="text-sm text-app-fg-muted">
+            {user.status === 'DEACTIVATED' ? (
+              <>
+                This account was <strong>deactivated</strong> (sign-in blocked). Reactivating sets status
+                to <strong>Active</strong> and allows <strong>{user.email}</strong> to sign in again with their
+                existing password (unless it was reset in the meantime).
+              </>
+            ) : (
+              <>
+                This account is <strong>{user.status === 'INACTIVE' ? 'inactive' : 'archived'}</strong>.
+                Reactivating sets status to <strong>Active</strong> so <strong>{user.email}</strong> can sign
+                in again.
+              </>
+            )}
+          </p>
+          <ul className="text-sm text-app-fg-muted space-y-1.5 list-disc list-inside rounded-lg bg-app-hover/50 border border-app-border/70 p-4">
+            <li>Confirm this is the right person before restoring access.</li>
+            <li>Branch memberships and permissions stay as they were before this status change.</li>
+          </ul>
+          {actionData?.error && !dismissedError ? (
+            <InlineNotification
+              variant="danger"
+              message={humanizeZodIssuesString(actionData.error)}
+            />
+          ) : null}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setShowReactivateConfirm(false)}
+              disabled={isReactivating}
+            >
+              Cancel
+            </Button>
+            <Form method="post" data-branch-scoped-action="true">
+              <input type="hidden" name="intent" value="reactivate" />
+              <Button
+                type="submit"
+                variant="success"
+                loading={isReactivating}
+                loadingText="Reactivating..."
+                className="bg-success-600 hover:bg-success-700 text-white border-success-600 hover:border-success-700 dark:bg-success-600 dark:hover:bg-success-700"
+              >
+                Reactivate account
               </Button>
             </Form>
           </div>

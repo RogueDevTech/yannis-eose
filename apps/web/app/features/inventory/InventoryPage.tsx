@@ -881,7 +881,7 @@ export function InventoryPage(props: InventoryStreamData) {
             />
             <form
               method="get"
-              className="flex-1"
+              className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
               onSubmit={(e) => {
                 e.preventDefault();
                 submitSearch(searchInput);
@@ -896,6 +896,7 @@ export function InventoryPage(props: InventoryStreamData) {
                   // Clearing the field commits the reset immediately so the list doesn't look stuck.
                   if (val === '') submitSearch('');
                 }}
+                withSubmitButton
                 wrapperClassName="w-full"
               />
             </form>

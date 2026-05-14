@@ -385,6 +385,7 @@ function UserPicker({ value, onChange }: UserPickerProps) {
             aria-autocomplete="list"
             aria-expanded
             role="combobox"
+            withSubmitButton={false}
           />
           {loadingInitial && (
             <svg

@@ -250,11 +250,10 @@ export function WarehousesPage({
                 placeholder="Search by warehouse name…"
                 className="sm:max-w-xs"
                 aria-label="Search warehouses"
+                withSubmitButton
+                wrapperClassName="w-full sm:max-w-xs"
               />
               <input type="hidden" name="page" value="1" />
-              <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-                Search
-              </Button>
             </Form>
             <SortMenu
               value={{ sortBy, sortDir }}

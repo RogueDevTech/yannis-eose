@@ -1431,11 +1431,9 @@ function SliceFilterBar({
           value={searchQuery}
           onChange={(val) => onSearchChange(val)}
           placeholder={placeholder}
+          withSubmitButton
           wrapperClassName="flex-1 min-w-0"
         />
-        <Button type="submit" variant="secondary" size="sm">
-          Search
-        </Button>
       </form>
       {isTransfers ? (
         <FormSelect
@@ -1509,11 +1507,9 @@ function UnifiedDistributingFilterBar({
             value={searchQuery}
             onChange={(val) => onSearchChange(val)}
             placeholder="Search by requester, sender, receiver, or reason..."
+            withSubmitButton
             wrapperClassName="min-w-0 flex-1"
           />
-          <Button type="submit" variant="secondary" size="sm">
-            Search
-          </Button>
         </form>
       }
       desktopInlineFilters={
@@ -1810,11 +1806,9 @@ function UnifiedReceivedFilterBar({
             value={searchQuery}
             onChange={(val) => onSearchChange(val)}
             placeholder="Search by sender, requester, or reason..."
+            withSubmitButton
             wrapperClassName="min-w-0 flex-1"
           />
-          <Button type="submit" variant="secondary" size="sm">
-            Search
-          </Button>
         </form>
       }
       desktopInlineFilters={

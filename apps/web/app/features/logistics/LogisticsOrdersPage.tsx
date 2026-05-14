@@ -1,4 +1,4 @@
-import { Suspense, useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -14,6 +14,7 @@ import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fe
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FileUpload } from '~/components/ui/file-upload';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
+import { orderDetailHref, type OrderDetailListFrom } from '~/lib/order-detail-return';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
@@ -89,6 +90,11 @@ interface LogisticsOrdersPageProps {
   pageTitle?: string;
   /** Base path for order detail links (e.g. "/tpl/orders" for TPL, "/admin/logistics/orders" for admin) */
   orderDetailBasePath?: string;
+  /**
+   * When opening unified `/admin/orders/:id`, append `?from=` so breadcrumb "Orders" returns here
+   * (important for admin-class users who are not logistics-role in session).
+   */
+  orderDetailFrom?: OrderDetailListFrom | null;
   /**
    * When true, pipeline actions (allocate, dispatch, in-transit, mark delivered) live on the order
    * detail page only — the list shows View (and optional TPL-only controls like Resolve order).
@@ -176,6 +182,7 @@ function LogisticsOrdersPageImpl({
   isTplManagerScoped = false,
   pageTitle = 'Logistics Orders',
   orderDetailBasePath = '/admin/logistics/orders',
+  orderDetailFrom = null,
   allocationOnDetailOnly = false,
   canEditDeliveryDate = false,
   markInTransitLabel = 'Start Delivery',
@@ -197,6 +204,11 @@ function LogisticsOrdersPageImpl({
       riderName: o.riderId ? riderById.get(o.riderId)?.name ?? '—' : '—',
     }));
   }, [orders, locations, riders]);
+
+  const toOrderDetail = useCallback(
+    (orderId: string) => orderDetailHref(orderDetailBasePath, orderId, orderDetailFrom ?? undefined),
+    [orderDetailBasePath, orderDetailFrom],
+  );
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [showChartView, setShowChartView] = useState(false);
@@ -365,7 +377,7 @@ function LogisticsOrdersPageImpl({
         key: 'orderId',
         header: 'Order ID',
         render: (order) => (
-          <OrderIdBadge id={order.id} linkTo={`${orderDetailBasePath}/${order.id}`} />
+          <OrderIdBadge id={order.id} linkTo={toOrderDetail(order.id)} />
         ),
       },
       {
@@ -408,7 +420,7 @@ function LogisticsOrdersPageImpl({
         render: (order) => {
           return (
             <CompactTableActions className="inline-flex shrink-0 flex-nowrap items-center justify-end gap-1.5">
-              <TableActionButton to={`${orderDetailBasePath}/${order.id}`} variant="primary">
+              <TableActionButton to={toOrderDetail(order.id)} variant="primary">
                 View
               </TableActionButton>
               {canEditDeliveryDate && order.status === 'CONFIRMED' && (
@@ -523,6 +535,7 @@ function LogisticsOrdersPageImpl({
     fetcher,
     isSubmitting,
     orderDetailBasePath,
+    toOrderDetail,
     canEditDeliveryDate,
     allocationOnDetailOnly,
     rowAllocateLocationByOrder,
@@ -549,7 +562,7 @@ function LogisticsOrdersPageImpl({
         <div className="flex items-center justify-between">
           <OrderIdBadge
             id={order.id}
-            linkTo={`${orderDetailBasePath}/${order.id}`}
+            linkTo={toOrderDetail(order.id)}
             textClassName="font-medium text-brand-500 hover:text-brand-600"
           />
           <OrderStatusBadge status={order.status} expanded />
@@ -565,7 +578,7 @@ function LogisticsOrdersPageImpl({
           )}
         </div>
         <div className="flex flex-wrap gap-2 pt-2">
-          <TableActionButton to={`${orderDetailBasePath}/${order.id}`} variant="primary">
+          <TableActionButton to={toOrderDetail(order.id)} variant="primary">
             View
           </TableActionButton>
           {canEditDeliveryDate && order.status === 'CONFIRMED' && (
@@ -874,7 +887,7 @@ function LogisticsOrdersPageImpl({
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
               <form
                 method="get"
-                className="min-w-0 w-full md:flex-1"
+                className="flex min-w-0 w-full flex-col gap-2 sm:flex-row sm:items-center md:flex-1"
                 onSubmit={(e) => {
                   e.preventDefault();
                   setSearchParams((p) => {
@@ -892,7 +905,8 @@ function LogisticsOrdersPageImpl({
                   placeholder="Search by customer name..."
                   value={searchQuery}
                   onChange={(val) => setSearchQuery(val)}
-                  wrapperClassName="w-full"
+                  withSubmitButton
+                  wrapperClassName="w-full md:flex-1"
                 />
               </form>
               <div className="hidden shrink-0 items-center gap-3 md:flex">

@@ -105,12 +105,19 @@ export function PermissionCheckboxPicker({
   return (
     <div className="space-y-3">
       {summary ? <p className="text-xs text-app-fg-muted">{summary}</p> : null}
-      <SearchInput
-        value={query}
-        onChange={setQuery}
-        placeholder="Search permissions (code, resource, action)..."
-        debounceMs={120}
-      />
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+        }}
+      >
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Search permissions (code, resource, action)..."
+          debounceMs={120}
+          withSubmitButton
+        />
+      </form>
       <div className="rounded-lg border border-app-border divide-y divide-app-border max-h-[min(50vh,22rem)] overflow-y-auto">
         {permissions.length === 0 ? (
           <div className="p-4 text-sm text-app-fg-muted">{emptyMessage}</div>
