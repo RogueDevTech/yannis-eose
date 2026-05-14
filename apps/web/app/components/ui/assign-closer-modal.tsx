@@ -125,14 +125,16 @@ export function AssignCloserModal({
       </div>
 
       {/* Search */}
-      <div className="shrink-0 px-4 pt-3 pb-1">
+      <form onSubmit={(e) => e.preventDefault()} className="shrink-0 px-4 pt-3 pb-1">
         <SearchInput
           placeholder="Search closers…"
           value={search}
           onChange={setSearch}
           controlSize="sm"
+          withSubmitButton
+          wrapperClassName="w-full"
         />
-      </div>
+      </form>
 
       {errorMessage && (
         <ModalFetcherInlineError message={errorMessage} className="shrink-0 px-4 pt-2" />

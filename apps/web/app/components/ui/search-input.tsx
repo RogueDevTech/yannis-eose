@@ -6,10 +6,13 @@
  *   <SearchInput value={q} onChange={setQ} debounceMs={300} placeholder="Search orders..." />
  *
  * Usage (form submit):
- *   <SearchInput name="q" defaultValue={q} placeholder="Search..." />
+ *   <form onSubmit={...}>
+ *     <SearchInput name="q" defaultValue={q} placeholder="Search..." withSubmitButton />
+ *   </form>
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
+import { Button } from '~/components/ui/button';
 
 interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'size'> {
   onChange?: (value: string) => void;
@@ -19,7 +22,15 @@ interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEleme
   clearable?: boolean;
   /** Visual height — distinct from native HTML `input size` */
   controlSize?: 'sm' | 'md' | 'lg';
+  /** Applied to the outer flex row when `withSubmitButton`, else to the inner input wrapper */
   wrapperClassName?: string;
+  /**
+   * Renders a trailing "Search" submit button. Parent must wrap in `<form onSubmit>`.
+   * Omit inside dropdowns / live client filters — use `withSubmitButton={false}` (default).
+   */
+  withSubmitButton?: boolean;
+  submitButtonLabel?: string;
+  submitButtonClassName?: string;
 }
 
 const sizeClasses = {
@@ -42,6 +53,9 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
       clearable = true,
       controlSize = 'md',
       wrapperClassName = '',
+      withSubmitButton = false,
+      submitButtonLabel = 'Search',
+      submitButtonClassName = '',
       className = '',
       value: controlledValue,
       defaultValue,
@@ -81,8 +95,8 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
 
     const hasValue = String(displayValue ?? '').length > 0;
 
-    return (
-      <div className={['relative', wrapperClassName].filter(Boolean).join(' ')}>
+    const inputBlock = (
+      <div className={['relative', withSubmitButton ? 'min-w-0 w-full flex-1' : wrapperClassName].filter(Boolean).join(' ')}>
         <span
           className={[
             'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
@@ -131,7 +145,32 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
         )}
       </div>
     );
-  }
+
+    if (!withSubmitButton) {
+      return inputBlock;
+    }
+
+    return (
+      <div
+        className={[
+          'flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center',
+          wrapperClassName,
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {inputBlock}
+        <Button
+          type="submit"
+          variant="secondary"
+          size="sm"
+          className={['w-full shrink-0 sm:w-auto', submitButtonClassName].filter(Boolean).join(' ')}
+        >
+          {submitButtonLabel}
+        </Button>
+      </div>
+    );
+  },
 );
 
 SearchInput.displayName = 'SearchInput';

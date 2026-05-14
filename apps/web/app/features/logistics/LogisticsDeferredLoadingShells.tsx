@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import {
   CompactTable,
@@ -300,6 +300,11 @@ export function LogisticsRemittancesLoadingShell() {
   const minQty = searchParams.get('minQty') ?? '';
   const maxQty = searchParams.get('maxQty') ?? '';
 
+  const [searchDraft, setSearchDraft] = useState(search);
+  useEffect(() => {
+    setSearchDraft(search);
+  }, [search]);
+
   const setFilterParam = useCallback(
     (key: string, value: string) => {
       const next = new URLSearchParams(searchParams);
@@ -399,14 +404,25 @@ export function LogisticsRemittancesLoadingShell() {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SearchInput
-            controlSize="sm"
-            wrapperClassName="w-full sm:w-64"
-            placeholder="Search by ID or product"
-            value={search}
-            onChange={(value) => setFilterParam('search', value)}
-            debounceMs={250}
-          />
+          <form
+            className="w-full sm:w-auto sm:min-w-[16rem]"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setFilterParam('search', searchDraft);
+            }}
+          >
+            <SearchInput
+              controlSize="sm"
+              wrapperClassName="w-full"
+              placeholder="Search by ID or product"
+              value={searchDraft}
+              onChange={(value) => {
+                setSearchDraft(value);
+                if (value.trim() === '') setFilterParam('search', '');
+              }}
+              withSubmitButton
+            />
+          </form>
           <FormSelect
             controlSize="sm"
             wrapperClassName="w-full sm:w-52"

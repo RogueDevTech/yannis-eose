@@ -1067,12 +1067,10 @@ export function DisbursementsPage({
                   placeholder="Search by sender, receiver, or ID..."
                   controlSize="sm"
                   clearable
+                  withSubmitButton
                   wrapperClassName="flex-1 min-w-0"
                   aria-label="Search disbursements"
                 />
-                <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-                  Search
-                </Button>
               </form>
 
               <FormSelect
@@ -1227,12 +1225,10 @@ export function DisbursementsPage({
                   placeholder="Search recipient name..."
                   controlSize="sm"
                   clearable
+                  withSubmitButton
                   wrapperClassName="flex-1 min-w-0"
                   aria-label="Search recipient balances"
                 />
-                <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-                  Search
-                </Button>
               </form>
               <FormSelect
                 id="balances-role-filter"

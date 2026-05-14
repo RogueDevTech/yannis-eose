@@ -237,6 +237,7 @@ function parseLogisticsOrdersTransitionPage(sp: URLSearchParams) {
     canEditDeliveryDate: false,
     allocationOnDetailOnly: true,
     orderDetailBasePath: '/admin/orders',
+    orderDetailFrom: 'logistics' as const,
     pageDescription:
       'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
   };

@@ -302,13 +302,17 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
 
   const search = searchParams.get('search') || '';
 
-  const updateSearch = (value: string) => {
+  const [draftSearch, setDraftSearch] = useState(search);
+  useEffect(() => {
+    setDraftSearch(search);
+  }, [search]);
+
+  const applySearch = (e: React.FormEvent) => {
+    e.preventDefault();
     const params = new URLSearchParams(searchParams);
-    if (value) {
-      params.set('search', value);
-    } else {
-      params.delete('search');
-    }
+    const t = draftSearch.trim();
+    if (t) params.set('search', t);
+    else params.delete('search');
     setSearchParams(params);
   };
 
@@ -439,14 +443,22 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
 
       {/* Search */}
       <div className="card">
-        <div className="flex items-center gap-2">
+        <form onSubmit={applySearch} className="flex items-center gap-2">
           <SearchInput
-            value={search}
-            onChange={updateSearch}
+            value={draftSearch}
+            onChange={(v) => {
+              setDraftSearch(v);
+              if (v === '') {
+                const params = new URLSearchParams(searchParams);
+                params.delete('search');
+                setSearchParams(params);
+              }
+            }}
             placeholder="Search categories or brand names..."
-            className="flex-1"
+            withSubmitButton
+            wrapperClassName="flex-1 min-w-0"
           />
-        </div>
+        </form>
       </div>
 
       <div className="card p-4 sm:p-6">

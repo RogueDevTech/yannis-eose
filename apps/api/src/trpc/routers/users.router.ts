@@ -314,8 +314,8 @@ export const usersRouter = router({
     }),
 
   /**
-   * Deactivate a staff member (SuperAdmin only).
-   * Kills all their active sessions immediately.
+   * Deactivate a staff member (sets DEACTIVATED, kills sessions).
+   * Gated by `users.deactivate` (SuperAdmin always allowed in service).
    */
   deactivate: permissionProcedure('users.deactivate')
     .meta({ branchScopedMutation: true })

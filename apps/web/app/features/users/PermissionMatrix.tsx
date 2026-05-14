@@ -264,12 +264,15 @@ export function PermissionMatrix({
           Checks come from the role you picked. Toggle to add or remove individual permissions for this user.
         </p>
 
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search permissions (code, resource, action)..."
-          debounceMs={120}
-        />
+        <form onSubmit={(e) => e.preventDefault()}>
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Search permissions (code, resource, action)..."
+            debounceMs={120}
+            withSubmitButton
+          />
+        </form>
 
         <div className="rounded-lg border border-app-border divide-y divide-app-border">
           {Object.keys(grouped).length === 0 ? (

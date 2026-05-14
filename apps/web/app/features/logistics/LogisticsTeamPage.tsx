@@ -452,13 +452,11 @@ export function LogisticsTeamPage({
                 value={searchQuery}
                 onChange={(v) => setSearchQuery(v)}
                 placeholder="Search by provider name…"
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
                 name="q"
                 autoComplete="off"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={

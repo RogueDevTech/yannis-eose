@@ -507,13 +507,11 @@ export function CSTeamPage({
                   if (value === '' && q.length > 0) mergeListParams({ q: '', page: 1 });
                 }}
                 placeholder="Search by closer, role, or branch…"
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
                 name="q"
                 autoComplete="off"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={

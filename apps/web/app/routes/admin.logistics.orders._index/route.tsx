@@ -120,6 +120,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canEditDeliveryDate: false,
     allocationOnDetailOnly: true,
     orderDetailBasePath: '/admin/orders',
+    orderDetailFrom: 'logistics' as const,
     pageDescription:
       'Confirmed and in-flight orders. Open one to allocate, dispatch, or confirm delivery.',
   };
@@ -186,6 +187,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       canEditDeliveryDate: logisticsOrdersShell.canEditDeliveryDate,
       allocationOnDetailOnly: logisticsOrdersShell.allocationOnDetailOnly,
       orderDetailBasePath: logisticsOrdersShell.orderDetailBasePath,
+      orderDetailFrom: logisticsOrdersShell.orderDetailFrom,
       pageDescription: logisticsOrdersShell.pageDescription,
     };
   })();
@@ -392,6 +394,7 @@ export default function LogisticsOrdersRoute() {
           canEditDeliveryDate={logisticsOrdersShell.canEditDeliveryDate}
           allocationOnDetailOnly={logisticsOrdersShell.allocationOnDetailOnly}
           orderDetailBasePath={logisticsOrdersShell.orderDetailBasePath}
+          orderDetailFrom={logisticsOrdersShell.orderDetailFrom}
           pageDescription={logisticsOrdersShell.pageDescription}
         />
       }

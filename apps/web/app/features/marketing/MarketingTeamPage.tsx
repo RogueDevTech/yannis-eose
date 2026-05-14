@@ -443,13 +443,11 @@ export function MarketingTeamPage({
                 value={searchQuery}
                 onChange={(v) => setSearchQuery(v)}
                 placeholder="Search by name or role…"
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
                 name="q"
                 autoComplete="off"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={

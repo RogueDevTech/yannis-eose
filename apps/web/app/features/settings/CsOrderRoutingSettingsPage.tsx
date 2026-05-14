@@ -367,13 +367,16 @@ export function CsOrderRoutingSettingsPage({
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <SearchInput
-                placeholder="Search products…"
-                value={productSearch}
-                onChange={setProductSearch}
-                controlSize="sm"
-                wrapperClassName="max-w-md"
-              />
+              <form onSubmit={(e) => e.preventDefault()} className="max-w-md w-full min-w-0">
+                <SearchInput
+                  placeholder="Search products…"
+                  value={productSearch}
+                  onChange={setProductSearch}
+                  controlSize="sm"
+                  withSubmitButton
+                  wrapperClassName="w-full"
+                />
+              </form>
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"

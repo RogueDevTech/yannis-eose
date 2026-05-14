@@ -285,7 +285,14 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminFinanceDeliveryRemittancesRoute() {
   const { remittancesShell, pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait resolve={pageData} fallback={<DeliveryRemittancesLoadingShell filters={remittancesShell.filters} />}
+    <CachedAwait
+      resolve={pageData}
+      fallback={
+        <DeliveryRemittancesLoadingShell
+          filters={remittancesShell.filters}
+          canCreateRemittance={remittancesShell.canCreateRemittance}
+        />
+      }
       loaderShell={{ remittancesShell }}
       deferredKey="pageData"
     >

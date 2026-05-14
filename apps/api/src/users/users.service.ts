@@ -1393,17 +1393,32 @@ export class UsersService {
       .where(eq(schema.userProductAssignments.userId, input.userId));
     const beforeProductIds = [...new Set(assignmentRowsBefore.map((r) => r.productId))].sort();
 
-    // DEACTIVATED is permanent: cannot reactivate; admin must re-invite
+    // DEACTIVATED → only ACTIVE is allowed (same authority as `deactivate`).
     const currentStatus = beforeRow.status;
-    if (
-      currentStatus === 'DEACTIVATED' &&
-      input.status !== undefined &&
-      input.status !== 'DEACTIVATED'
-    ) {
-      throw new TRPCError({
-        code: 'FORBIDDEN',
-        message: 'Deactivated accounts cannot be reactivated. Re-invite the user to create a new account.',
-      });
+    if (currentStatus === 'DEACTIVATED' && input.status !== undefined && input.status !== 'DEACTIVATED') {
+      if (input.status !== 'ACTIVE') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Deactivated accounts can only be restored to ACTIVE.',
+        });
+      }
+      const permSet = new Set((actor.permissions ?? []).map((c) => canonicalPermissionCode(c)));
+      const canReactivate =
+        actor.role === 'SUPER_ADMIN' ||
+        permSet.has(canonicalPermissionCode('users.deactivate')) ||
+        permSet.has(canonicalPermissionCode('users.staff.deactivate'));
+      if (!canReactivate) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Missing permission to reactivate users.',
+        });
+      }
+      if (actor.role !== 'SUPER_ADMIN' && isAdminLevelRole(String(beforeRow.role))) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only SuperAdmin can reactivate admin-level accounts.',
+        });
+      }
     }
 
     // Scoped team-lead edits: anyone holding `users.staff.update_supervised` can narrow-edit
@@ -2024,9 +2039,10 @@ export class UsersService {
   }
 
   /**
-   * Deactivate a staff member. Permanent (no reactivation).
+   * Deactivate a staff member (status DEACTIVATED, sessions killed).
+   * Reactivation: `users.update` with `status: 'ACTIVE'` — same permission model as below.
    * - SuperAdmin may deactivate anyone (except themselves).
-   * - Admin may deactivate non-admin-level users only.
+   * - Callers with `users.deactivate` may deactivate non-admin-level users only.
    * - Others: forbidden.
    */
   async deactivate(userId: string, actor: SessionUser) {

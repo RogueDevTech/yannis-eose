@@ -28,6 +28,7 @@ import { ExportModal, type ExportModalPicklists } from '~/components/ui/export-m
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from '~/features/orders/types';
+import { orderDetailHref } from '~/lib/order-detail-return';
 import { DeferredError } from '~/components/ui/deferred-section';
 import {
   OrdersChartViewShellSkeleton,
@@ -186,7 +187,7 @@ export function MarketingOrdersPage({
         header: 'Order ID',
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
-          : (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
+          : (order) => <OrderIdBadge id={order.id} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />,
       },
       {
         key: 'customer',
@@ -290,7 +291,7 @@ export function MarketingOrdersPage({
         render: showSkeletonRows
           ? () => <CompactTableActionButton disabled>View</CompactTableActionButton>
           : (order) => (
-              <CompactTableActionButton to={`/admin/orders/${order.id}`}>View</CompactTableActionButton>
+              <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
             ),
       },
     );
@@ -433,11 +434,9 @@ export function MarketingOrdersPage({
                     placeholder="Search by customer or order ID..."
                     value={searchQuery}
                     onChange={(val) => setSearchQuery(val)}
+                    withSubmitButton
                     wrapperClassName="min-w-0 flex-1"
                   />
-                  <Button type="submit" variant="secondary" size="sm">
-                    Search
-                  </Button>
                 </form>
               }
               desktopInlineFilters={
@@ -570,11 +569,9 @@ export function MarketingOrdersPage({
                         placeholder="Search by customer or order ID..."
                         value={searchQuery}
                         onChange={(val) => setSearchQuery(val)}
+                        withSubmitButton
                         wrapperClassName="min-w-0 flex-1"
                       />
-                      <Button type="submit" variant="secondary" size="sm">
-                        Search
-                      </Button>
                     </form>
                   }
                   desktopInlineFilters={

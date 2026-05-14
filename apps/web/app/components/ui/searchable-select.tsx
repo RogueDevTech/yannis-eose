@@ -287,6 +287,7 @@ export function SearchableSelect({
             onChange={updateQuery}
             placeholder={searchPlaceholder}
             controlSize="sm"
+            withSubmitButton={false}
             wrapperClassName="mb-2"
             className="!rounded-md !text-sm !placeholder:text-sm"
             onWheel={forwardWheelToListbox}

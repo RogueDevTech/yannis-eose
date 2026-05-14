@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generateInvoicePdf } from '~/lib/invoice-pdf';
 import { InvoicePreviewModal } from '~/components/ui/invoice-preview-modal';
 import type { OrderInvoice } from '~/features/orders/types';
@@ -56,6 +56,7 @@ export interface DeliveryRemittanceDetail extends DeliveryRemittanceListItem {
     totalAmount: string | null;
     deliveredAt: string | null;
     status: string;
+    invoice: OrderInvoice | null;
   }>;
 }
 
@@ -162,6 +163,10 @@ export function DeliveryRemittancesPage({
   const [selectedEligibleById, setSelectedEligibleById] = useState<Map<string, EligibleOrder>>(
     () => new Map(),
   );
+  const [eligibleSearchDraft, setEligibleSearchDraft] = useState(filters.eligibleQ);
+  useEffect(() => {
+    setEligibleSearchDraft(filters.eligibleQ);
+  }, [filters.eligibleQ]);
 
   /**
    * Default: Awaiting remittance; `?tab=remittances` is the batch list.
@@ -200,7 +205,7 @@ export function DeliveryRemittancesPage({
       const next = new URLSearchParams(p);
       next.set('page', '1');
       next.set('eligiblePage', '1');
-      if (!locationId) next.delete('location');
+      if (!locationId || locationId === 'ALL') next.delete('location');
       else next.set('location', locationId);
       return next;
     });
@@ -753,21 +758,32 @@ export function DeliveryRemittancesPage({
           ) : null}
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <SearchInput
-              value={filters.eligibleQ}
-              onChange={handleEligibleSearchChange}
-              debounceMs={300}
-              placeholder="Search customer, order ID, invoice ref, or bill-to name"
-              controlSize="md"
-            />
+            <form
+              className="min-w-0"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleEligibleSearchChange(eligibleSearchDraft);
+              }}
+            >
+              <SearchInput
+                value={eligibleSearchDraft}
+                onChange={(v) => {
+                  setEligibleSearchDraft(v);
+                  if (v.trim() === '') handleEligibleSearchChange('');
+                }}
+                withSubmitButton
+                placeholder="Search customer, order ID, invoice ref, or bill-to name"
+                controlSize="md"
+              />
+            </form>
             <FormSelect
               id="eligible-remittance-location"
               aria-label="Filter by logistics location"
-              value={filters.location}
+              value={filters.location || 'ALL'}
               onChange={(e) => handleLocationChange(e.target.value)}
               placeholder="All locations"
               options={[
-                { value: '', label: 'All locations' },
+                { value: 'ALL', label: 'All locations' },
                 ...locations.map((loc) => ({
                   value: loc.id,
                   label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,

@@ -110,9 +110,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const user = profileUser;
 
   const userDetailPromise = (async (): Promise<UserDetailLoaderData | { notFound: true }> => {
-    const perms = currentUser?.permissions ?? [];
     // Treat ADMIN the same as SUPER_ADMIN for admin-level capabilities on this page.
     const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'ADMIN';
+    const permsSetForReactivate = new Set(
+      (currentUser?.permissions ?? []).map((c) => canonicalPermissionCode(c)),
+    );
+    const canReactivateDeactivatedStaff =
+      isSuperAdmin ||
+      permsSetForReactivate.has(canonicalPermissionCode('users.deactivate')) ||
+      permsSetForReactivate.has(canonicalPermissionCode('users.staff.deactivate'));
     const isViewerHeadOfMarketing = currentUser?.role === 'HEAD_OF_MARKETING';
     const isViewerHeadOfCS = currentUser?.role === 'HEAD_OF_CS';
     // Per-target edit access — single source of truth in rbac.ts (mirrored on
@@ -194,6 +200,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return {
       user,
       isSuperAdmin,
+      canReactivateDeactivatedStaff,
       isViewerHeadOfMarketing,
       isViewerHeadOfCS,
       canEditLimited,
@@ -467,19 +474,18 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   if (intent === 'reactivate') {
+    const currentUser = await getCurrentUser(request);
     const targetRes = await apiRequest<unknown>(
       `/trpc/users.getById?input=${encodeURIComponent(JSON.stringify({ userId }))}`,
       { method: 'GET', cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS },
     );
     const targetData = targetRes.data as { result?: { data?: { role: string } } };
-    if (
-      targetData?.result?.data?.role === 'SUPER_ADMIN' ||
-      targetData?.result?.data?.role === 'ADMIN'
-    ) {
-      return json(
-        { error: 'SuperAdmin/Admin accounts cannot be reactivated from this page.' },
-        { status: 403 },
-      );
+    const targetRole = targetData?.result?.data?.role;
+    if (targetRole === 'SUPER_ADMIN') {
+      return json({ error: 'SuperAdmin accounts cannot be reactivated.' }, { status: 403 });
+    }
+    if (targetRole === 'ADMIN' && currentUser?.role !== 'SUPER_ADMIN') {
+      return json({ error: 'Only the SuperAdmin can reactivate another Admin.' }, { status: 403 });
     }
 
     const res = await apiRequest<unknown>('/trpc/users.update', {

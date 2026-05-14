@@ -738,27 +738,18 @@ export function UserCreatePage({
 
             <div>
               {isEditMode ? (
-                editingUser?.status === 'DEACTIVATED' ? (
-                  <>
-                    <p className="text-sm font-medium text-app-fg-muted mb-1.5">Status</p>
-                    <p className="text-sm text-app-fg-muted">
-                      Deactivated accounts cannot be reactivated. Re-invite to create a new account.
-                    </p>
-                  </>
-                ) : (
-                  <RadioGroup
-                    name="status"
-                    label="Status"
-                    layout="horizontal"
-                    defaultValue={editingUser?.status ?? 'PENDING'}
-                    options={(
-                      ['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const
-                    ).map((s) => ({
-                      value: s,
-                      label: s.charAt(0) + s.slice(1).toLowerCase(),
-                    }))}
-                  />
-                )
+                <RadioGroup
+                  name="status"
+                  label="Status"
+                  layout="horizontal"
+                  defaultValue={editingUser?.status ?? 'PENDING'}
+                  options={(
+                    ['PENDING', 'ACTIVE', 'INACTIVE', 'DEACTIVATED', 'ARCHIVED'] as const
+                  ).map((s) => ({
+                    value: s,
+                    label: s.charAt(0) + s.slice(1).toLowerCase(),
+                  }))}
+                />
               ) : (
                 <>
                   <label className="block text-sm font-medium text-app-fg-muted mb-1.5">

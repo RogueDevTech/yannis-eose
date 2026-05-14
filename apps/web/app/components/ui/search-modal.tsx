@@ -170,24 +170,25 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
   return (
     <Modal open onClose={onClose} maxWidth="max-w-lg" backdropBlur contentClassName="p-0 max-h-[85dvh] flex flex-col overflow-hidden border border-app-border bg-app-elevated">
       {/* Search input */}
-          <div className="flex items-center gap-3 px-4 border-b border-app-border shrink-0">
-            <SearchInput
-              ref={inputRef}
-              value={query}
-              onChange={setQuery}
-              onKeyDown={handleKeyDown}
-              placeholder="Search orders, products, users..."
-              wrapperClassName="flex-1"
-              clearable={false}
-              className="!h-auto !rounded-none !border-0 !bg-transparent !py-3.5 !pr-0 focus:!border-0 focus:!ring-0"
-            />
-            {loading && (
-              <div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-            )}
-            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] text-app-fg-muted bg-app-hover border border-app-border rounded font-mono">
-              ESC
-            </kbd>
-          </div>
+      <div className="flex items-center gap-3 px-4 border-b border-app-border shrink-0">
+        <SearchInput
+          ref={inputRef}
+          value={query}
+          onChange={setQuery}
+          onKeyDown={handleKeyDown}
+          placeholder="Search orders, products, users..."
+          wrapperClassName="flex-1"
+          clearable={false}
+          withSubmitButton={false}
+          className="!h-auto !rounded-none !border-0 !bg-transparent !py-3.5 !pr-0 focus:!border-0 focus:!ring-0"
+        />
+        {loading && (
+          <div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+        )}
+        <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] text-app-fg-muted bg-app-hover border border-app-border rounded font-mono">
+          ESC
+        </kbd>
+      </div>
 
           {/* Results + empty + hint */}
           <div className="flex-1 min-h-0 overflow-y-auto">

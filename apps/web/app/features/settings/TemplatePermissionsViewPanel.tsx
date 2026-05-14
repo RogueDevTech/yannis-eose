@@ -80,12 +80,15 @@ export function TemplatePermissionsViewPanel({ catalog, grantedCodes }: Template
 
   return (
     <div className="space-y-3">
-      <SearchInput
-        value={query}
-        onChange={setQuery}
-        placeholder="Search granted permissions…"
-        debounceMs={120}
-      />
+      <form onSubmit={(e) => e.preventDefault()}>
+        <SearchInput
+          value={query}
+          onChange={setQuery}
+          placeholder="Search granted permissions…"
+          debounceMs={120}
+          withSubmitButton
+        />
+      </form>
       <div className="rounded-lg border border-app-border divide-y divide-app-border max-h-[min(50vh,22rem)] overflow-y-auto">
         {grantedCount === 0 ? (
           <div className="p-4 text-sm text-app-fg-muted">This template has no permissions assigned.</div>

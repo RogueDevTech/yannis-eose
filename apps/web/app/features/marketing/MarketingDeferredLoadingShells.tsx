@@ -392,11 +392,9 @@ export function MarketingFundingLoadingShell({
                 placeholder="Search ledger…"
                 value={searchQuery}
                 onChange={(val) => setSearchQuery(val)}
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={
@@ -671,11 +669,9 @@ export function MarketingAdSpendLoadingShell({
                 placeholder="Search buyer, product, campaign, or entry ID..."
                 value={searchQuery}
                 onChange={(val) => setSearchQuery(val)}
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={
@@ -920,13 +916,11 @@ export function MarketingTeamLoadingShell({
                 placeholder="Search by name or role…"
                 value={searchQuery}
                 onChange={(v) => setSearchQuery(v)}
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
                 name="q"
                 autoComplete="off"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={
@@ -1614,11 +1608,9 @@ export function MarketingOrdersLoadingShell({
                     applyListParams({ search: '', page: 1 });
                   }
                 }}
+                withSubmitButton
                 wrapperClassName="min-w-0 flex-1"
               />
-              <Button type="submit" variant="secondary" size="sm">
-                Search
-              </Button>
             </form>
           }
           desktopInlineFilters={

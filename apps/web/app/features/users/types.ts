@@ -350,6 +350,8 @@ export interface UserDetailLoaderData {
   /** When set, Overview permissions card hydrates from SSR; client resource route is skipped. */
   overviewPermissionsSlice?: UserDetailPermissionsOverviewSlice | null;
   isSuperAdmin?: boolean;
+  /** SuperAdmin/Admin or `users.deactivate` / `users.staff.deactivate` — can restore DEACTIVATED staff to ACTIVE. */
+  canReactivateDeactivatedStaff?: boolean;
   isViewerHeadOfMarketing?: boolean;
   isViewerHeadOfCS?: boolean;
   /**
