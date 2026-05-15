@@ -926,7 +926,7 @@ export function InventoryPage(props: InventoryStreamData) {
                     <span className="tabular-nums">{a.threshold}</span>-unit threshold or with no stock
                   </p>
                 </div>
-                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">
                   {preview.map((item) => {
                     const isEmpty = !item.productId;
                     const cardContent = (
@@ -947,7 +947,7 @@ export function InventoryPage(props: InventoryStreamData) {
                     return (
                       <div
                         key={item.levelId}
-                        className="rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 min-w-0 shadow-sm"
+                        className="shrink-0 w-36 rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 shadow-sm"
                       >
                         {isEmpty ? (
                           <div title={`${item.locationName} — no stock received yet`}>

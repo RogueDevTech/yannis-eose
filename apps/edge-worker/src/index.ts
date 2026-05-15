@@ -1028,7 +1028,7 @@ function getFormScript(
       // rendered fields (custom builder fields) are covered automatically.
       form.addEventListener('input', maybeSaveCart);
       form.addEventListener('blur', maybeSaveCart, true);
-      // `phoneInput` is still consumed by the phone validation + sanitizer block
+      // phoneInput is still consumed by the phone validation + sanitizer block
       // below — keep the local handle even though save listening is delegated to
       // the form element above.
       var phoneInput = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
