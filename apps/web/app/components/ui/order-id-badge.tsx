@@ -23,6 +23,8 @@ export interface OrderIdBadgeProps {
    * the copy button always stops propagation so it never triggers nav.
    */
   linkTo?: string;
+  /** Open the link in a new tab. Only applies when `linkTo` is set. */
+  newTab?: boolean;
   /** Class names for the display text element. */
   textClassName?: string;
   /** Class names for the outer wrapper. */
@@ -48,6 +50,7 @@ export function OrderIdBadge({
   uppercase = false,
   ellipsis = '...',
   linkTo,
+  newTab,
   textClassName,
   className,
   hideCopy = false,
@@ -59,6 +62,7 @@ export function OrderIdBadge({
     <Link
       to={linkTo}
       className={textClassName ?? 'text-brand-500 hover:text-brand-600 font-medium'}
+      {...(newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
     >
       {visible}
     </Link>

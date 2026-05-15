@@ -117,19 +117,31 @@ export class OnboardingService {
         dateOfBirth: null,
         residentialAddress: null,
         proofOfAddressUrl: null,
+        currentStateOfResidence: null,
         supportingDocuments: [] as Array<{ label: string; url: string }>,
+        signedContractUrl: null,
+        governmentIdUrl: null,
+        additionalPhoneNumbers: null,
+        taxId: null,
+        rentReceiptUrl: null,
+        academicRecordsUrl: null,
+        employmentHistoryUrl: null,
         guarantor1Name: null,
         guarantor1Phone: null,
         guarantor1Email: null,
         guarantor1Address: null,
         guarantor1Relationship: null,
         guarantor1LetterUrl: null,
+        guarantor1FormUrl: null,
+        guarantor1IdUrl: null,
         guarantor2Name: null,
         guarantor2Phone: null,
         guarantor2Email: null,
         guarantor2Address: null,
         guarantor2Relationship: null,
         guarantor2LetterUrl: null,
+        guarantor2FormUrl: null,
+        guarantor2IdUrl: null,
         submittedAt: null,
         approvedAt: null,
         approvedBy: null,
@@ -188,21 +200,38 @@ export class OnboardingService {
       setIfPresent('dateOfBirth', 'dateOfBirth');
       setIfPresent('residentialAddress', 'residentialAddress');
       setIfPresent('proofOfAddressUrl', 'proofOfAddressUrl');
+      setIfPresent('currentStateOfResidence', 'currentStateOfResidence');
       if (input.supportingDocuments !== undefined) {
         patch['supportingDocuments'] = input.supportingDocuments;
       }
+      // Identification + contracts (HR feedback 2026-05).
+      setIfPresent('signedContractUrl', 'signedContractUrl');
+      setIfPresent('governmentIdUrl', 'governmentIdUrl');
+      setIfPresent('additionalPhoneNumbers', 'additionalPhoneNumbers');
+      // Statutory + financial assistance docs.
+      setIfPresent('taxId', 'taxId');
+      setIfPresent('rentReceiptUrl', 'rentReceiptUrl');
+      // Academic + employment.
+      setIfPresent('academicRecordsUrl', 'academicRecordsUrl');
+      setIfPresent('employmentHistoryUrl', 'employmentHistoryUrl');
+      // Guarantor 1 — file-only (legacy text columns still writable for back-compat).
       setIfPresent('guarantor1Name', 'guarantor1Name');
       setIfPresent('guarantor1Phone', 'guarantor1Phone');
       setIfPresent('guarantor1Email', 'guarantor1Email');
       setIfPresent('guarantor1Address', 'guarantor1Address');
       setIfPresent('guarantor1Relationship', 'guarantor1Relationship');
       setIfPresent('guarantor1LetterUrl', 'guarantor1LetterUrl');
+      setIfPresent('guarantor1FormUrl', 'guarantor1FormUrl');
+      setIfPresent('guarantor1IdUrl', 'guarantor1IdUrl');
+      // Guarantor 2.
       setIfPresent('guarantor2Name', 'guarantor2Name');
       setIfPresent('guarantor2Phone', 'guarantor2Phone');
       setIfPresent('guarantor2Email', 'guarantor2Email');
       setIfPresent('guarantor2Address', 'guarantor2Address');
       setIfPresent('guarantor2Relationship', 'guarantor2Relationship');
       setIfPresent('guarantor2LetterUrl', 'guarantor2LetterUrl');
+      setIfPresent('guarantor2FormUrl', 'guarantor2FormUrl');
+      setIfPresent('guarantor2IdUrl', 'guarantor2IdUrl');
 
       // Bank fields live on `users` (finance-only visibility). Write them in
       // the same withActor transaction so the audit trigger attributes them to
@@ -328,16 +357,22 @@ export class OnboardingService {
         .where(eq(schema.users.id, targetUserId))
         .limit(1);
 
+      // Submission checklist — kept in sync with the StaffOnboardingPage UI
+      // sections. HR feedback 2026-05 moved guarantors to file-only (form + ID)
+      // and added state, contract, government ID as required.
       const missing: string[] = [];
       if (!existing.gender) missing.push('gender');
       if (!existing.dateOfBirth) missing.push('date of birth');
       if (!existing.residentialAddress) missing.push('residential address');
+      if (!existing.currentStateOfResidence) missing.push('current state of residence');
       if (!existing.proofOfAddressUrl) missing.push('proof of address');
-      if (!existing.guarantor1Name || !existing.guarantor1Phone || !existing.guarantor1LetterUrl) {
-        missing.push('guarantor 1 (name, phone, signed letter)');
+      if (!existing.signedContractUrl) missing.push('signed contract');
+      if (!existing.governmentIdUrl) missing.push('government ID (NIN slip or passport)');
+      if (!existing.guarantor1FormUrl || !existing.guarantor1IdUrl) {
+        missing.push('guarantor 1 (signed form + means of ID)');
       }
-      if (!existing.guarantor2Name || !existing.guarantor2Phone || !existing.guarantor2LetterUrl) {
-        missing.push('guarantor 2 (name, phone, signed letter)');
+      if (!existing.guarantor2FormUrl || !existing.guarantor2IdUrl) {
+        missing.push('guarantor 2 (signed form + means of ID)');
       }
       if (
         !bankRow?.payoutBankName?.trim() ||

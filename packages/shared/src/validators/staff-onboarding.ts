@@ -25,27 +25,51 @@ export const updateOnboardingProfileSchema = z.object({
     .nullish(),
   residentialAddress: z.string().max(500).nullish(),
   proofOfAddressUrl: z.string().max(500).nullish(),
+  /** Current state of residence — validated against `NIGERIAN_STATES` on the UI. */
+  currentStateOfResidence: z.string().max(80).nullish(),
   supportingDocuments: z.array(supportingDocumentSchema).max(20).optional(),
 
+  // Identification + contracts (HR feedback 2026-05).
+  signedContractUrl: z.string().max(500).nullish(),
+  governmentIdUrl: z.string().max(500).nullish(),
+  additionalPhoneNumbers: z.string().max(500).nullish(),
+
+  // Statutory + financial assistance docs.
+  taxId: z.string().max(60).nullish(),
+  rentReceiptUrl: z.string().max(500).nullish(),
+
+  // Academic + employment background.
+  academicRecordsUrl: z.string().max(500).nullish(),
+  employmentHistoryUrl: z.string().max(500).nullish(),
+
+  // Guarantor 1 — file-only per HR feedback 2026-05. Legacy text fields kept
+  // optional so existing rows can still round-trip until they re-submit.
   guarantor1Name: z.string().max(120).nullish(),
   guarantor1Phone: z.string().max(40).nullish(),
   guarantor1Email: z.string().email().max(120).nullish().or(z.literal('')),
   guarantor1Address: z.string().max(500).nullish(),
   guarantor1Relationship: z.string().max(80).nullish(),
   guarantor1LetterUrl: z.string().max(500).nullish(),
+  guarantor1FormUrl: z.string().max(500).nullish(),
+  guarantor1IdUrl: z.string().max(500).nullish(),
 
+  // Guarantor 2.
   guarantor2Name: z.string().max(120).nullish(),
   guarantor2Phone: z.string().max(40).nullish(),
   guarantor2Email: z.string().email().max(120).nullish().or(z.literal('')),
   guarantor2Address: z.string().max(500).nullish(),
   guarantor2Relationship: z.string().max(80).nullish(),
   guarantor2LetterUrl: z.string().max(500).nullish(),
+  guarantor2FormUrl: z.string().max(500).nullish(),
+  guarantor2IdUrl: z.string().max(500).nullish(),
 
   /**
    * Payout beneficiary bank details. Live on `users` (finance-only visibility);
    * onboarding writes them through to the user row in the same transaction so
    * `/admin/finance/staff-accounts` and payout exports stay aligned with what
-   * staff filled in here.
+   * staff filled in here. `payoutBankCode` is auto-filled from `payoutBankName`
+   * by the UI bank picker (NIGERIAN_BANKS) — server doesn't enforce that pair
+   * so legacy free-text rows still round-trip.
    */
   payoutBankName: z.string().max(120).nullish(),
   payoutAccountName: z.string().max(120).nullish(),

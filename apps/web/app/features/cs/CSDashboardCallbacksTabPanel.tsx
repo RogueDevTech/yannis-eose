@@ -1,14 +1,19 @@
 import { useRef } from 'react';
 import { Link } from '@remix-run/react';
+import { Checkbox } from '~/components/ui/checkbox';
 import { StripToolbar } from '~/components/ui/strip-toolbar';
 import type { AgentWorkload, CSOrder } from './types';
 
 export function CSDashboardCallbacksTabPanel({
   orders,
   workloads,
+  selectedIds,
+  onToggle,
 }: {
   orders: CSOrder[];
   workloads: AgentWorkload[];
+  selectedIds: Set<string>;
+  onToggle: (orderId: string) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = (delta: number) =>
@@ -37,15 +42,36 @@ export function CSDashboardCallbacksTabPanel({
             {orders.map((order: CSOrder) => {
               const isDue = order.callbackScheduledAt && new Date(order.callbackScheduledAt) <= new Date();
               const agent = workloads.find((w: AgentWorkload) => w.agentId === order.assignedCsId);
+              const isSelected = selectedIds.has(order.id);
               return (
                 <div
                   key={order.id}
-                  className={`group relative shrink-0 w-48 rounded-xl border bg-app-elevated transition-all duration-200 ${
-                    isDue
-                      ? 'border-danger-300 dark:border-danger-700 hover:shadow-md hover:border-danger-400 dark:hover:border-danger-600'
-                      : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
+                  onClick={() => onToggle(order.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onToggle(order.id);
+                    }
+                  }}
+                  role="checkbox"
+                  aria-checked={isSelected}
+                  tabIndex={0}
+                  className={`group relative shrink-0 w-48 text-left rounded-xl border bg-app-elevated transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                    isSelected
+                      ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
+                      : isDue
+                        ? 'border-danger-300 dark:border-danger-700 hover:shadow-md hover:border-danger-400 dark:hover:border-danger-600'
+                        : 'border-warning-200 dark:border-warning-800/60 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
                   }`}
                 >
+                  <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={isSelected}
+                      onChange={() => onToggle(order.id)}
+                      aria-label={`Select callback for ${order.customerName}`}
+                    />
+                  </span>
+
                   <span className="absolute top-2 right-2 flex h-2 w-2 pointer-events-none">
                     <span
                       className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${
@@ -59,7 +85,7 @@ export function CSDashboardCallbacksTabPanel({
                     />
                   </span>
 
-                  <div className="px-2.5 py-2 pr-5">
+                  <div className="px-2.5 py-2 pl-7 pr-5">
                     <div className="flex items-baseline justify-between gap-2 mb-1">
                       <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
                         {order.customerName}
@@ -100,7 +126,8 @@ export function CSDashboardCallbacksTabPanel({
                       </p>
                     ) : null}
 
-                    <div className="flex flex-wrap items-center gap-2">
+                    {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+                    <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <Link
                         to={`/admin/orders/${order.id}`}
                         className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"

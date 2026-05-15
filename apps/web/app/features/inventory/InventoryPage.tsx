@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { isOptimisticId } from '~/lib/optimistic';
@@ -43,7 +43,101 @@ import type {
   LocationLowStockThreshold,
 } from './types';
 import { REASON_LABELS } from './types';
+import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { LowStockAlertsDeferredFallback, ReconciliationTableDeferredFallback } from './InventoryDeferredFallbacks';
+
+/** Horizontally scrollable alert card strip with left/right arrow buttons. */
+function LowStockAlertStrip({ items }: { items: LowStockAlertItem[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 2);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+
+  useEffect(() => {
+    checkScroll();
+    const el = scrollRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', checkScroll, { passive: true });
+    const ro = new ResizeObserver(checkScroll);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', checkScroll); ro.disconnect(); };
+  }, [checkScroll, items.length]);
+
+  const scroll = (dir: 'left' | 'right') => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir === 'left' ? -300 : 300, behavior: 'smooth' });
+  };
+
+  const ArrowBtn = ({ dir }: { dir: 'left' | 'right' }) => (
+    <button
+      type="button"
+      onClick={() => scroll(dir)}
+      className={`absolute top-1/2 -translate-y-1/2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-warning-100 dark:bg-warning-900/60 border border-warning-300 dark:border-warning-700 shadow-sm text-warning-700 dark:text-warning-300 hover:bg-warning-200 dark:hover:bg-warning-800 transition-colors ${dir === 'left' ? 'left-0' : 'right-0'}`}
+      aria-label={`Scroll ${dir}`}
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d={dir === 'left' ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} />
+      </svg>
+    </button>
+  );
+
+  return (
+    <div className="relative mt-3">
+      {canScrollLeft && <ArrowBtn dir="left" />}
+      {canScrollRight && <ArrowBtn dir="right" />}
+      <div ref={scrollRef} className="flex gap-2 overflow-x-auto scrollbar-hide px-1 -mx-1">
+        {items.map((item) => {
+          const isEmpty = !item.productId;
+          const cardContent = (
+            <>
+              <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
+              <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
+              <p
+                className={`text-xs font-bold tabular-nums mt-1.5 ${
+                  item.availableCount <= 0
+                    ? 'text-danger-600 dark:text-danger-400'
+                    : 'text-warning-800 dark:text-warning-200'
+                }`}
+              >
+                {isEmpty ? '0 stock' : `${item.availableCount} avail`}
+              </p>
+            </>
+          );
+          return (
+            <div
+              key={item.levelId}
+              className="shrink-0 w-36 rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 shadow-sm"
+            >
+              {isEmpty ? (
+                <div title={`${item.locationName} — no stock received yet`}>
+                  {cardContent}
+                </div>
+              ) : (
+                <Link
+                  to={`/admin/inventory/${item.levelId}`}
+                  prefetch="intent"
+                  className="block hover:opacity-90 transition-opacity"
+                  title={`${item.productName} — ${item.locationName}`}
+                >
+                  {cardContent}
+                </Link>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type LowStockAlertItem = LowStockAlertsResult['items'][number];
 
 export function InventoryPage(props: InventoryStreamData) {
   if (props.inventoryExtras) {
@@ -165,7 +259,11 @@ export function InventoryPage(props: InventoryStreamData) {
 
   const isLoadingLevels = useLoaderRefetchBusy().busy;
 
-  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
+  const isEmptyLocationRow = (id: string) => id.startsWith('empty:');
+  const productName = (id: string) => {
+    if (id.startsWith('empty:')) return 'No product';
+    return products.find((p) => p.id === id)?.name ?? 'No stock received';
+  };
   const locationTagClasses = (providerKind: LocationOption['providerKind']) =>
     providerKind === 'WAREHOUSE'
       ? 'border-brand-600 bg-brand-600 text-white shadow-sm dark:border-brand-500 dark:bg-brand-500 dark:text-slate-950'
@@ -239,6 +337,20 @@ export function InventoryPage(props: InventoryStreamData) {
   }, [adjustFetcher.state, adjustFetcher.data]);
 
   const fetcher = useFetcher();
+
+  // Products stocked per location — derived from levels for the low-stock modal.
+  const productsAtLocation = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const lv of levels) {
+      if (!lv.locationId || !lv.productId) continue;
+      const name = products.find((p) => p.id === lv.productId)?.name;
+      if (!name) continue;
+      const arr = map.get(lv.locationId);
+      if (arr) { if (!arr.includes(name)) arr.push(name); }
+      else map.set(lv.locationId, [name]);
+    }
+    return map;
+  }, [levels, products]);
 
   // Low-stock threshold editor (admin-only)
   const [showThresholdModal, setShowThresholdModal] = useState(false);
@@ -322,8 +434,9 @@ export function InventoryPage(props: InventoryStreamData) {
       header: 'Product',
       render: (level) => {
         const isOptimistic = isOptimisticId(level.id);
+        const isEmpty = isEmptyLocationRow(level.id);
         return (
-          <span className="font-medium text-app-fg">
+          <span className={`font-medium ${isEmpty ? 'text-app-fg-muted italic' : 'text-app-fg'}`}>
             {productName(level.productId)}
             {isOptimistic && (
               <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted italic">Saving…</span>
@@ -418,17 +531,31 @@ export function InventoryPage(props: InventoryStreamData) {
       key: 'available',
       header: 'Available',
       align: 'right',
-      render: (level) => (
-        <span className="font-medium text-success-600 dark:text-success-400 tabular-nums">
-          {level.stockCount - level.reservedCount}
-        </span>
-      ),
+      render: (level) => {
+        const available = level.stockCount - level.reservedCount;
+        const isLow = available < lowStockThreshold;
+        return (
+          <span className={`font-medium tabular-nums ${isLow ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+            {available}
+          </span>
+        );
+      },
     },
     {
       key: 'status',
       header: 'Status',
       hideOnMobile: true,
-      render: (level) => <StatusBadge status={level.status} />,
+      render: (level) => {
+        if (isEmptyLocationRow(level.id)) {
+          return <StatusBadge status="Low stock" />;
+        }
+        const available = level.stockCount - level.reservedCount;
+        const isLow = available < lowStockThreshold;
+        if (isLow) {
+          return <StatusBadge status="Low stock" />;
+        }
+        return <StatusBadge status={level.status} />;
+      },
     },
     {
       key: 'actions',
@@ -436,10 +563,8 @@ export function InventoryPage(props: InventoryStreamData) {
       align: 'right',
       tight: true,
       render: (level) => {
+        if (isEmptyLocationRow(level.id)) return null;
         const isOptimistic = isOptimisticId(level.id);
-        // Variant rule (CLAUDE.md → "Table Action Buttons"): one action →
-        // primary; two-or-more → primary (View) + neutral (secondary) + danger
-        // (destructive). When optimistic, View becomes inert.
         return (
           <div className="inline-flex items-center justify-end gap-1.5">
             {isOptimistic ? (
@@ -772,7 +897,7 @@ export function InventoryPage(props: InventoryStreamData) {
           {/* Per-location overrides — all inputs always editable */}
           <section className="space-y-2">
             <div className="flex items-baseline justify-between gap-3">
-              <h4 className="text-sm font-semibold text-app-fg">Per-location overrides</h4>
+              <h4 className="text-sm font-semibold text-app-fg">Per-location &amp; product overrides</h4>
               <span className="text-xs text-app-fg-muted">
                 Leave blank to inherit default. {locationChanges.length > 0 && (
                   <span className="text-brand-600 dark:text-brand-400 font-medium">
@@ -793,6 +918,7 @@ export function InventoryPage(props: InventoryStreamData) {
                   <thead className="sticky top-0 z-10 bg-app-elevated text-xs uppercase tracking-wide text-app-fg-muted">
                     <tr>
                       <th className="text-left font-medium px-3 py-2">Location</th>
+                      <th className="text-left font-medium px-3 py-2">Products</th>
                       <th className="text-right font-medium px-3 py-2 w-32">Threshold</th>
                     </tr>
                   </thead>
@@ -832,6 +958,19 @@ export function InventoryPage(props: InventoryStreamData) {
                                 <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" title="Changed" />
                               )}
                             </div>
+                          </td>
+                          <td className="px-3 py-1.5 min-w-0">
+                            {(() => {
+                              const names = productsAtLocation.get(loc.id);
+                              if (!names || names.length === 0) {
+                                return <span className="text-[10px] text-app-fg-muted italic">No stock</span>;
+                              }
+                              return (
+                                <span className="text-[10px] text-app-fg-muted truncate block max-w-[12rem]" title={names.join(', ')}>
+                                  {names.join(', ')}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-3 py-1.5 text-right">
                             <div className="inline-flex items-center gap-1.5">
@@ -913,8 +1052,7 @@ export function InventoryPage(props: InventoryStreamData) {
           {(alerts) => {
             const a = alerts as LowStockAlertsResult;
             if (a.items.length === 0) return null;
-            const preview = a.items.slice(0, 8);
-            const extra = a.items.length - preview.length;
+            const preview = a.items;
             return (
               <div className="rounded-lg border border-warning-300 dark:border-warning-700 bg-warning-50 dark:bg-warning-900/20 px-3 py-3 sm:px-4">
                 <div className="flex items-center gap-2">
@@ -926,56 +1064,7 @@ export function InventoryPage(props: InventoryStreamData) {
                     <span className="tabular-nums">{a.threshold}</span>-unit threshold or with no stock
                   </p>
                 </div>
-                <div className="mt-3 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">
-                  {preview.map((item) => {
-                    const isEmpty = !item.productId;
-                    const cardContent = (
-                      <>
-                        <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
-                        <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
-                        <p
-                          className={`text-xs font-bold tabular-nums mt-1.5 ${
-                            item.availableCount <= 0
-                              ? 'text-danger-600 dark:text-danger-400'
-                              : 'text-warning-800 dark:text-warning-200'
-                          }`}
-                        >
-                          {isEmpty ? '0 stock' : `${item.availableCount} avail`}
-                        </p>
-                      </>
-                    );
-                    return (
-                      <div
-                        key={item.levelId}
-                        className="shrink-0 w-36 rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 shadow-sm"
-                      >
-                        {isEmpty ? (
-                          <div title={`${item.locationName} — no stock received yet`}>
-                            {cardContent}
-                          </div>
-                        ) : (
-                          <Link
-                            to={`/admin/inventory/${item.levelId}`}
-                            prefetch="intent"
-                            className="block hover:opacity-90 transition-opacity"
-                            title={`${item.productName} — ${item.locationName}`}
-                          >
-                            {cardContent}
-                          </Link>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {extra > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => updateLevelsParam('sort', 'lowestAvailable')}
-                    className="mt-2.5 w-full sm:w-auto text-left text-xs font-medium text-warning-800 dark:text-warning-200 underline underline-offset-2 hover:text-warning-900 dark:hover:text-warning-100"
-                  >
-                    + {extra} more — sort table by lowest available →
-                  </button>
-                )}
+                <LowStockAlertStrip items={preview} />
               </div>
             );
           }}
@@ -997,21 +1086,29 @@ export function InventoryPage(props: InventoryStreamData) {
       {/* Content */}
       {activeTab === 'levels' && (
         <>
-        {/* Filter + search + sort row. Hidden only when there is no data AND no active filter. */}
-        {(totalLevels > 0 ||
-          currentProductFilter !== 'ALL' ||
-          currentLocationFilter !== 'ALL' ||
-          currentShipmentFilter !== 'ALL' ||
-          currentSort !== 'default' ||
-          serverSortBy !== 'updatedAt' ||
-          serverSortDir !== 'desc' ||
-          serverSearch) && (
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        {/* Filter + search + sort — mobile: collapsible sheet; desktop: inline row. */}
+        {(() => {
+          const hasActiveFilters =
+            currentProductFilter !== 'ALL' ||
+            currentLocationFilter !== 'ALL' ||
+            currentShipmentFilter !== 'ALL' ||
+            serverSortBy !== 'updatedAt' ||
+            serverSortDir !== 'desc' ||
+            !!serverSearch;
+          const filterBadgeCount =
+            (currentProductFilter !== 'ALL' ? 1 : 0) +
+            (currentLocationFilter !== 'ALL' ? 1 : 0) +
+            (currentShipmentFilter !== 'ALL' ? 1 : 0) +
+            (serverSortBy !== 'updatedAt' || serverSortDir !== 'desc' ? 1 : 0);
+
+          if (totalLevels === 0 && !hasActiveFilters) return null;
+
+          const productSelect = (
             <SearchableSelect
               id="levels-product-filter"
               value={currentProductFilter}
               onChange={(v) => updateLevelsParam('productId', v)}
-              wrapperClassName="w-full sm:w-48"
+              wrapperClassName="w-full md:w-48"
               placeholder="All products"
               searchPlaceholder="Search products..."
               options={[
@@ -1019,11 +1116,13 @@ export function InventoryPage(props: InventoryStreamData) {
                 ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
               ]}
             />
+          );
+          const locationSelect = (
             <SearchableSelect
               id="levels-location-filter"
               value={currentLocationFilter}
               onChange={(v) => updateLevelsParam('locationId', v)}
-              wrapperClassName="w-full min-w-0 sm:w-48"
+              wrapperClassName="w-full md:w-48"
               placeholder="All locations"
               searchPlaceholder="Search locations..."
               options={[
@@ -1033,7 +1132,6 @@ export function InventoryPage(props: InventoryStreamData) {
                   label: l.name,
                   ...(l.providerKind === 'WAREHOUSE'
                     ? {
-                        // "Our warehouse" — circle-only tag (text dropped per CEO ask).
                         leading: (
                           <span
                             className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
@@ -1056,11 +1154,13 @@ export function InventoryPage(props: InventoryStreamData) {
                 })),
               ]}
             />
+          );
+          const shipmentSelect = (
             <SearchableSelect
               id="levels-shipment-filter"
               value={currentShipmentFilter}
               onChange={(v) => updateLevelsParam('shipmentId', v)}
-              wrapperClassName="w-full min-w-0 sm:w-52"
+              wrapperClassName="w-full md:w-52"
               placeholder="All shipments"
               searchPlaceholder="Search SHIP ref…"
               options={[
@@ -1071,27 +1171,8 @@ export function InventoryPage(props: InventoryStreamData) {
                 })),
               ]}
             />
-            <form
-              method="get"
-              className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center"
-              onSubmit={(e) => {
-                e.preventDefault();
-                submitSearch(searchInput);
-              }}
-            >
-              <SearchInput
-                name="search"
-                placeholder="Search by product name…"
-                value={searchInput}
-                onChange={(val) => {
-                  setSearchInput(val);
-                  // Clearing the field commits the reset immediately so the list doesn't look stuck.
-                  if (val === '') submitSearch('');
-                }}
-                withSubmitButton
-                wrapperClassName="w-full"
-              />
-            </form>
+          );
+          const sortMenu = (
             <SortMenu
               value={{ sortBy: serverSortBy, sortDir: serverSortDir }}
               onChange={(next) =>
@@ -1120,23 +1201,63 @@ export function InventoryPage(props: InventoryStreamData) {
                 },
               ]}
             />
-            {(currentProductFilter !== 'ALL' ||
-              currentLocationFilter !== 'ALL' ||
-              currentShipmentFilter !== 'ALL' ||
-              currentSort !== 'default' ||
-              serverSortBy !== 'updatedAt' ||
-              serverSortDir !== 'desc' ||
-              serverSearch) && (
-              <button
-                type="button"
-                onClick={resetLevelsFilters}
-                className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
-              >
-                Reset
-              </button>
-            )}
-          </div>
-        )}
+          );
+          const resetBtn = hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={resetLevelsFilters}
+              className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
+            >
+              Reset
+            </button>
+          ) : null;
+
+          return (
+            <ToolbarFiltersCollapsible
+              badgeCount={filterBadgeCount}
+              searchRow={
+                <form
+                  method="get"
+                  className="flex min-w-0 flex-1 items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitSearch(searchInput);
+                  }}
+                >
+                  <SearchInput
+                    name="search"
+                    placeholder="Search by product name…"
+                    value={searchInput}
+                    onChange={(val) => {
+                      setSearchInput(val);
+                      if (val === '') submitSearch('');
+                    }}
+                    withSubmitButton
+                    wrapperClassName="w-full"
+                  />
+                </form>
+              }
+              desktopInlineFilters={
+                <>
+                  {productSelect}
+                  {locationSelect}
+                  {shipmentSelect}
+                  {sortMenu}
+                  {resetBtn}
+                </>
+              }
+              sheetFilterBody={
+                <div className="space-y-3">
+                  {productSelect}
+                  {locationSelect}
+                  {shipmentSelect}
+                  {sortMenu}
+                  {resetBtn && <div className="pt-1">{resetBtn}</div>}
+                </div>
+              }
+            />
+          );
+        })()}
         <CompactTable<InventoryLevel>
           columns={levelColumns}
           rows={levels}
@@ -1218,7 +1339,7 @@ function TransfersTab({
   locations: LocationOption[];
   routeLoaderBusy?: boolean;
 }) {
-  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'No stock received';
   const locationName = (id: string) => {
     const loc = locations.find((l) => l.id === id);
     if (!loc) return 'Unknown location';
@@ -1512,7 +1633,7 @@ function ReconciliationTab({
   useCloseOnFetcherSuccess(fetcher, handleReconciliationSuccess);
 
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? 'Unknown location';
-  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'Unknown product';
+  const productName = (id: string) => products.find((p) => p.id === id)?.name ?? 'No stock received';
   const activeLocations = locationsWithLock.filter((l) => l.status === 'ACTIVE');
 
   const reconciliationColumns = useMemo((): CompactTableColumn<Reconciliation>[] => [

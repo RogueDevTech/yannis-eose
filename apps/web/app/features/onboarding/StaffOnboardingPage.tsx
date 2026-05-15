@@ -6,6 +6,7 @@ import { Card, CardBody, CardHeader } from '~/components/ui/card';
 import { DescriptionList } from '~/components/ui/description-list';
 import { FormField } from '~/components/ui/form-field';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
@@ -17,6 +18,20 @@ import { FileUpload } from '~/components/ui/file-upload';
 import { ASSET_FOLDERS } from '~/lib/object-storage';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
+import { NIGERIAN_BANKS, NIGERIAN_STATES, findBankByName } from '@yannis/shared';
+
+/** Public FIRS TaxProMax portal where staff can request a Tax Identification Number. */
+const TAX_ID_REGISTER_URL = 'https://taxpromax.firs.gov.ng/';
+
+const STATE_OPTIONS = [
+  { value: '', label: 'Select…' },
+  ...NIGERIAN_STATES.map((s) => ({ value: s, label: s })),
+];
+
+const BANK_SELECT_OPTIONS = [
+  { value: '', label: 'Select your bank…' },
+  ...NIGERIAN_BANKS.map((b) => ({ value: b.name, label: b.name })),
+];
 
 type OnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'SUBMITTED' | 'APPROVED';
 
@@ -26,20 +41,38 @@ export interface OnboardingRecord {
   gender: 'MALE' | 'FEMALE' | 'OTHER' | 'PREFER_NOT_TO_SAY' | null;
   dateOfBirth: string | null;
   residentialAddress: string | null;
+  currentStateOfResidence: string | null;
   proofOfAddressUrl: string | null;
   supportingDocuments: Array<{ label: string; url: string }>;
+  /** Identification + contracts (HR feedback 2026-05). */
+  signedContractUrl: string | null;
+  governmentIdUrl: string | null;
+  additionalPhoneNumbers: string | null;
+  /** Statutory + financial assistance. */
+  taxId: string | null;
+  rentReceiptUrl: string | null;
+  /** Academic + employment background. */
+  academicRecordsUrl: string | null;
+  employmentHistoryUrl: string | null;
+  /** Guarantor 1 — file-only post HR feedback 2026-05. Legacy text columns
+   *  preserved on the type so older records still render. */
   guarantor1Name: string | null;
   guarantor1Phone: string | null;
   guarantor1Email: string | null;
   guarantor1Address: string | null;
   guarantor1Relationship: string | null;
   guarantor1LetterUrl: string | null;
+  guarantor1FormUrl: string | null;
+  guarantor1IdUrl: string | null;
+  /** Guarantor 2. */
   guarantor2Name: string | null;
   guarantor2Phone: string | null;
   guarantor2Email: string | null;
   guarantor2Address: string | null;
   guarantor2Relationship: string | null;
   guarantor2LetterUrl: string | null;
+  guarantor2FormUrl: string | null;
+  guarantor2IdUrl: string | null;
   submittedAt: string | null;
   approvedAt: string | null;
   approvedBy: string | null;
@@ -142,6 +175,7 @@ function DocumentOpenLink({ href, label }: { href: string; label: string }) {
 function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
   const genderDisplay = formatGenderLabel(record.gender);
   const dobDisplay = formatDobDisplay(record.dateOfBirth);
+  const empty = <span className="text-app-fg-muted">Not provided</span>;
 
   return (
     <div className="space-y-4">
@@ -152,21 +186,24 @@ function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
             layout="grid"
             divided
             items={[
+              { label: 'Gender', value: genderDisplay || empty },
+              { label: 'Date of birth', value: dobDisplay || empty },
               {
-                label: 'Gender',
-                value: genderDisplay || <span className="text-app-fg-muted">Not provided</span>,
-              },
-              {
-                label: 'Date of birth',
-                value: dobDisplay || <span className="text-app-fg-muted">Not provided</span>,
+                label: 'Current state of residence',
+                value: record.currentStateOfResidence?.trim() ? record.currentStateOfResidence : empty,
               },
               {
                 label: 'Residential address',
                 value: record.residentialAddress?.trim() ? (
                   <span className="whitespace-pre-wrap">{record.residentialAddress}</span>
                 ) : (
-                  <span className="text-app-fg-muted">Not provided</span>
+                  empty
                 ),
+                fullWidth: true,
+              },
+              {
+                label: 'Additional phone numbers',
+                value: record.additionalPhoneNumbers?.trim() ? record.additionalPhoneNumbers : empty,
                 fullWidth: true,
               },
               {
@@ -174,7 +211,7 @@ function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
                 value: record.proofOfAddressUrl ? (
                   <DocumentOpenLink href={record.proofOfAddressUrl} label="Open proof of address" />
                 ) : (
-                  <span className="text-app-fg-muted">Not provided</span>
+                  empty
                 ),
                 fullWidth: true,
               },
@@ -185,13 +222,108 @@ function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
 
       <Card>
         <CardHeader
-          title="Supporting documents"
-          description="Additional documents supplied with onboarding."
+          title="Identification & contracts"
+          description="Signed contract and government-issued ID. Required at submission."
         />
-        <CardBody className="space-y-2">
-          {record.supportingDocuments.length === 0 ? (
-            <p className="text-sm text-app-fg-muted">No supporting documents attached.</p>
-          ) : (
+        <CardBody>
+          <DescriptionList
+            layout="grid"
+            divided
+            items={[
+              {
+                label: 'Signed contract',
+                value: record.signedContractUrl ? (
+                  <DocumentOpenLink href={record.signedContractUrl} label="Open signed contract" />
+                ) : (
+                  empty
+                ),
+                fullWidth: true,
+              },
+              {
+                label: 'Government ID (NIN slip or international passport)',
+                value: record.governmentIdUrl ? (
+                  <DocumentOpenLink href={record.governmentIdUrl} label="Open ID document" />
+                ) : (
+                  empty
+                ),
+                fullWidth: true,
+              },
+            ]}
+          />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Statutory documents"
+          description="Tax ID and any rent relief documents for payroll."
+        />
+        <CardBody>
+          <DescriptionList
+            layout="grid"
+            divided
+            items={[
+              {
+                label: 'Tax ID (TIN)',
+                value: record.taxId?.trim() ? (
+                  <span className="tabular-nums">{record.taxId}</span>
+                ) : (
+                  empty
+                ),
+              },
+              {
+                label: 'Rent receipt',
+                value: record.rentReceiptUrl ? (
+                  <DocumentOpenLink href={record.rentReceiptUrl} label="Open rent receipt" />
+                ) : (
+                  empty
+                ),
+              },
+            ]}
+          />
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Academic & employment background"
+          description="Records covering the applicant's education and prior employment."
+        />
+        <CardBody>
+          <DescriptionList
+            layout="grid"
+            divided
+            items={[
+              {
+                label: 'Academic records',
+                value: record.academicRecordsUrl ? (
+                  <DocumentOpenLink href={record.academicRecordsUrl} label="Open academic records" />
+                ) : (
+                  empty
+                ),
+                fullWidth: true,
+              },
+              {
+                label: 'Employment history',
+                value: record.employmentHistoryUrl ? (
+                  <DocumentOpenLink href={record.employmentHistoryUrl} label="Open employment history" />
+                ) : (
+                  empty
+                ),
+                fullWidth: true,
+              },
+            ]}
+          />
+        </CardBody>
+      </Card>
+
+      {record.supportingDocuments.length > 0 ? (
+        <Card>
+          <CardHeader
+            title="Other supporting documents"
+            description="Extras outside the standard checklist."
+          />
+          <CardBody className="space-y-2">
             <ul className="space-y-2">
               {record.supportingDocuments.map((doc, idx) => (
                 <li
@@ -205,9 +337,9 @@ function OnboardingReadOnlyView({ record }: { record: OnboardingRecord }) {
                 </li>
               ))}
             </ul>
-          )}
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <GuarantorReadOnlyCard index={1} record={record} />
@@ -259,41 +391,60 @@ function BankDetailsReadOnlyCard({ record }: { record: OnboardingRecord }) {
 
 function GuarantorReadOnlyCard({ index, record }: { index: 1 | 2; record: OnboardingRecord }) {
   const prefix = `guarantor${index}` as const;
-  const letterUrl = record[`${prefix}LetterUrl` as const];
-  const name = record[`${prefix}Name` as const];
-  const phone = record[`${prefix}Phone` as const];
-  const email = record[`${prefix}Email` as const];
-  const relationship = record[`${prefix}Relationship` as const];
-  const address = record[`${prefix}Address` as const];
+  const formUrl = record[`${prefix}FormUrl` as const];
+  const idUrl = record[`${prefix}IdUrl` as const];
+  // Legacy fields kept visible only when present so older records still display
+  // the original reference text. New onboardings skip them entirely.
+  const legacyName = record[`${prefix}Name` as const];
+  const legacyPhone = record[`${prefix}Phone` as const];
+  const legacyLetter = record[`${prefix}LetterUrl` as const];
+  const hasLegacy = !!(legacyName?.trim() || legacyPhone?.trim() || legacyLetter?.trim());
 
   const empty = <span className="text-app-fg-muted">Not provided</span>;
 
   return (
     <Card>
-      <CardHeader title={`Guarantor ${index}`} description="Reference and signed letter on file." />
+      <CardHeader title={`Guarantor ${index}`} description="Signed guarantor form and means of ID on file." />
       <CardBody>
         <DescriptionList
           layout="grid"
           divided
           items={[
-            { label: 'Full name', value: name?.trim() ? name : empty },
-            { label: 'Phone', value: phone?.trim() ? phone : empty },
-            { label: 'Email', value: email?.trim() ? email : empty },
-            { label: 'Relationship', value: relationship?.trim() ? relationship : empty },
             {
-              label: 'Address',
-              value: address?.trim() ? <span className="whitespace-pre-wrap">{address}</span> : empty,
-              fullWidth: true,
-            },
-            {
-              label: 'Signed letter',
-              value: letterUrl ? (
-                <DocumentOpenLink href={letterUrl} label="Open signed letter" />
+              label: 'Guarantor form',
+              value: formUrl ? (
+                <DocumentOpenLink href={formUrl} label="Open signed guarantor form" />
               ) : (
                 empty
               ),
               fullWidth: true,
             },
+            {
+              label: 'Means of ID',
+              value: idUrl ? (
+                <DocumentOpenLink href={idUrl} label="Open means of ID" />
+              ) : (
+                empty
+              ),
+              fullWidth: true,
+            },
+            ...(hasLegacy
+              ? [
+                  {
+                    label: 'Legacy reference (pre HR feedback 2026-05)',
+                    value: (
+                      <div className="space-y-1 text-sm">
+                        {legacyName?.trim() ? <p>{legacyName}</p> : null}
+                        {legacyPhone?.trim() ? <p className="text-app-fg-muted">{legacyPhone}</p> : null}
+                        {legacyLetter?.trim() ? (
+                          <DocumentOpenLink href={legacyLetter} label="Open legacy signed letter" />
+                        ) : null}
+                      </div>
+                    ),
+                    fullWidth: true,
+                  },
+                ]
+              : []),
           ]}
         />
       </CardBody>
@@ -321,13 +472,34 @@ export function StaffOnboardingPage({
   const readOnly = (mode === 'self' && lockedForStaff) || mode === 'hr' || isMirroring;
 
   const [proofUrl, setProofUrl] = useState(record.proofOfAddressUrl ?? '');
-  const [g1Letter, setG1Letter] = useState(record.guarantor1LetterUrl ?? '');
-  const [g2Letter, setG2Letter] = useState(record.guarantor2LetterUrl ?? '');
+  const [signedContractUrl, setSignedContractUrl] = useState(record.signedContractUrl ?? '');
+  const [governmentIdUrl, setGovernmentIdUrl] = useState(record.governmentIdUrl ?? '');
+  const [rentReceiptUrl, setRentReceiptUrl] = useState(record.rentReceiptUrl ?? '');
+  const [academicRecordsUrl, setAcademicRecordsUrl] = useState(record.academicRecordsUrl ?? '');
+  const [employmentHistoryUrl, setEmploymentHistoryUrl] = useState(record.employmentHistoryUrl ?? '');
+  const [g1Form, setG1Form] = useState(record.guarantor1FormUrl ?? '');
+  const [g1IdDoc, setG1IdDoc] = useState(record.guarantor1IdUrl ?? '');
+  const [g2Form, setG2Form] = useState(record.guarantor2FormUrl ?? '');
+  const [g2IdDoc, setG2IdDoc] = useState(record.guarantor2IdUrl ?? '');
   const [supportingDocs, setSupportingDocs] = useState(record.supportingDocuments);
+  // Bank picker — track the name so we can auto-fill the matching code when
+  // the user picks from the dropdown. Free-text legacy values (not in the
+  // list) stay editable via the same input.
+  const [bankName, setBankName] = useState(record.payoutBankName ?? '');
+  const [bankCode, setBankCode] = useState(record.payoutBankCode ?? '');
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [confirmApprove, setConfirmApprove] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const [requestChangesReason, setRequestChangesReason] = useState('');
+
+  const handleBankChange = (nextName: string) => {
+    setBankName(nextName);
+    const match = findBankByName(nextName);
+    // Auto-fill the code from the canonical list. If staff picked a bank
+    // that's not in NIGERIAN_BANKS (legacy free text), leave whatever code
+    // they already had so we don't blow it away.
+    if (match) setBankCode(match.code);
+  };
 
   // Close confirm modals only AFTER the action returns success — keeps the
   // user on the spinner until the request actually resolves so they know
@@ -363,9 +535,20 @@ export function StaffOnboardingPage({
     const fd = new FormData(formEl);
     fd.set('intent', 'updateOnboarding');
     fd.set('proofOfAddressUrl', proofUrl);
-    fd.set('guarantor1LetterUrl', g1Letter);
-    fd.set('guarantor2LetterUrl', g2Letter);
+    fd.set('signedContractUrl', signedContractUrl);
+    fd.set('governmentIdUrl', governmentIdUrl);
+    fd.set('rentReceiptUrl', rentReceiptUrl);
+    fd.set('academicRecordsUrl', academicRecordsUrl);
+    fd.set('employmentHistoryUrl', employmentHistoryUrl);
+    fd.set('guarantor1FormUrl', g1Form);
+    fd.set('guarantor1IdUrl', g1IdDoc);
+    fd.set('guarantor2FormUrl', g2Form);
+    fd.set('guarantor2IdUrl', g2IdDoc);
     fd.set('supportingDocuments', JSON.stringify(supportingDocs));
+    // Bank picker — push the controlled values so the bank-name code pair
+    // stays in sync (matching the NIGERIAN_BANKS auto-fill above).
+    fd.set('payoutBankName', bankName);
+    fd.set('payoutBankCode', bankCode);
     fetcher.submit(fd, { method: 'post', action: actionUrl });
   };
 
@@ -502,6 +685,21 @@ export function StaffOnboardingPage({
                   max={new Date().toISOString().slice(0, 10)}
                 />
               </FormField>
+              <FormField label="Current state of residence">
+                <FormSelect
+                  name="currentStateOfResidence"
+                  defaultValue={record.currentStateOfResidence ?? ''}
+                  options={STATE_OPTIONS}
+                />
+              </FormField>
+              <FormField label="Additional phone numbers" hint="Optional — separate with commas">
+                <TextInput
+                  name="additionalPhoneNumbers"
+                  defaultValue={record.additionalPhoneNumbers ?? ''}
+                  maxLength={500}
+                  placeholder="e.g. 0803… , 0810…"
+                />
+              </FormField>
               <FormField label="Residential address" className="sm:col-span-2">
                 <Textarea
                   name="residentialAddress"
@@ -526,8 +724,117 @@ export function StaffOnboardingPage({
 
           <Card>
             <CardHeader
-              title="Supporting documents"
-              description="Anything else HR should keep on file (NIN, NYSC, certificates)."
+              title="Identification & contracts"
+              description="Signed contract and a government-issued ID. Both required at submission."
+            />
+            <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField label="Signed contract" hint="PDF or image, ≤10MB" className="sm:col-span-2">
+                <FileUpload
+                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+                  accept="application/pdf,image/*"
+                  maxSizeMB={10}
+                  onUpload={setSignedContractUrl}
+                />
+                {signedContractUrl ? (
+                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {signedContractUrl}</p>
+                ) : null}
+              </FormField>
+              <FormField
+                label="Government ID"
+                hint="NIN slip OR international passport (PDF / image, ≤10MB)"
+                className="sm:col-span-2"
+              >
+                <FileUpload
+                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+                  accept="application/pdf,image/*"
+                  maxSizeMB={10}
+                  onUpload={setGovernmentIdUrl}
+                />
+                {governmentIdUrl ? (
+                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {governmentIdUrl}</p>
+                ) : null}
+              </FormField>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Statutory documents"
+              description="Tax ID for payroll, and a rent receipt if you'd like to claim rent relief."
+            />
+            <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField
+                label="Tax ID (TIN)"
+                hint={
+                  <>
+                    Don't have one yet?{' '}
+                    <a
+                      href={TAX_ID_REGISTER_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Register on FIRS TaxProMax →
+                    </a>
+                  </>
+                }
+              >
+                <TextInput
+                  name="taxId"
+                  defaultValue={record.taxId ?? ''}
+                  maxLength={60}
+                  inputMode="numeric"
+                />
+              </FormField>
+              <FormField label="Rent receipt" hint="Optional — PDF or image, ≤10MB">
+                <FileUpload
+                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+                  accept="application/pdf,image/*"
+                  maxSizeMB={10}
+                  onUpload={setRentReceiptUrl}
+                />
+                {rentReceiptUrl ? (
+                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {rentReceiptUrl}</p>
+                ) : null}
+              </FormField>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Academic & employment background"
+              description="Attach one combined PDF per row — certificates, transcripts, CV, prior employment letters."
+            />
+            <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormField label="Academic records" hint="PDF or image, ≤10MB">
+                <FileUpload
+                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+                  accept="application/pdf,image/*"
+                  maxSizeMB={10}
+                  onUpload={setAcademicRecordsUrl}
+                />
+                {academicRecordsUrl ? (
+                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {academicRecordsUrl}</p>
+                ) : null}
+              </FormField>
+              <FormField label="Employment history" hint="PDF or image, ≤10MB">
+                <FileUpload
+                  folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+                  accept="application/pdf,image/*"
+                  maxSizeMB={10}
+                  onUpload={setEmploymentHistoryUrl}
+                />
+                {employmentHistoryUrl ? (
+                  <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {employmentHistoryUrl}</p>
+                ) : null}
+              </FormField>
+            </CardBody>
+          </Card>
+
+          <Card>
+            <CardHeader
+              title="Other supporting documents"
+              description="Optional — anything outside the standard checklist HR should keep on file."
             />
             <CardBody className="space-y-3">
               {supportingDocs.length === 0 ? (
@@ -572,17 +879,17 @@ export function StaffOnboardingPage({
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <GuarantorCard
               index={1}
-              record={record}
-              readOnly={false}
-              letterUrl={g1Letter}
-              onLetterUpload={setG1Letter}
+              formUrl={g1Form}
+              idUrl={g1IdDoc}
+              onFormUpload={setG1Form}
+              onIdUpload={setG1IdDoc}
             />
             <GuarantorCard
               index={2}
-              record={record}
-              readOnly={false}
-              letterUrl={g2Letter}
-              onLetterUpload={setG2Letter}
+              formUrl={g2Form}
+              idUrl={g2IdDoc}
+              onFormUpload={setG2Form}
+              onIdUpload={setG2IdDoc}
             />
           </div>
 
@@ -592,12 +899,26 @@ export function StaffOnboardingPage({
               description="Where Finance sends your payroll. Required before review."
             />
             <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField label="Bank name" hint="e.g. GTBank, Access Bank, OPay">
-                <TextInput
-                  name="payoutBankName"
-                  defaultValue={record.payoutBankName ?? ''}
-                  maxLength={120}
+              <FormField label="Bank" hint="Pick from the list — bank code fills in automatically">
+                <SearchableSelect
+                  id="onboarding-bank-name"
+                  value={bankName}
+                  onChange={handleBankChange}
+                  options={BANK_SELECT_OPTIONS}
+                  placeholder="Select your bank…"
+                  searchPlaceholder="Search banks…"
+                  wrapperClassName="w-full"
                 />
+                {/* Hidden inputs so the controlled bank name + code reach the
+                    server even though the visible control is SearchableSelect. */}
+                <input type="hidden" name="payoutBankName" value={bankName} />
+                <input type="hidden" name="payoutBankCode" value={bankCode} />
+              </FormField>
+              <FormField
+                label="Bank code"
+                hint={bankCode ? `Auto-filled from ${bankName || 'selected bank'}` : '3-digit CBN code'}
+              >
+                <TextInput value={bankCode} disabled readOnly placeholder="—" />
               </FormField>
               <FormField label="Account name" hint="As it appears on your bank statement">
                 <TextInput
@@ -613,14 +934,6 @@ export function StaffOnboardingPage({
                   maxLength={20}
                   inputMode="numeric"
                   pattern="[0-9]*"
-                />
-              </FormField>
-              <FormField label="Bank code" hint="Optional — 3-digit CBN code (e.g. 058 for GTBank)">
-                <TextInput
-                  name="payoutBankCode"
-                  defaultValue={record.payoutBankCode ?? ''}
-                  maxLength={20}
-                  inputMode="numeric"
                 />
               </FormField>
             </CardBody>
@@ -800,75 +1113,44 @@ function AddSupportingDocument({
 
 function GuarantorCard({
   index,
-  record,
-  readOnly,
-  letterUrl,
-  onLetterUpload,
+  formUrl,
+  idUrl,
+  onFormUpload,
+  onIdUpload,
 }: {
   index: 1 | 2;
-  record: OnboardingRecord;
-  readOnly: boolean;
-  letterUrl: string;
-  onLetterUpload: (url: string) => void;
+  formUrl: string;
+  idUrl: string;
+  onFormUpload: (url: string) => void;
+  onIdUpload: (url: string) => void;
 }) {
-  const prefix = `guarantor${index}` as const;
-  const data = {
-    name: record[`${prefix}Name` as const] ?? '',
-    phone: record[`${prefix}Phone` as const] ?? '',
-    email: record[`${prefix}Email` as const] ?? '',
-    address: record[`${prefix}Address` as const] ?? '',
-    relationship: record[`${prefix}Relationship` as const] ?? '',
-  };
-
   return (
     <Card>
-      <CardHeader title={`Guarantor ${index}`} description="Mandatory at submission. Two guarantors required." />
-      <CardBody className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FormField label="Full name">
-          <TextInput name={`${prefix}Name`} defaultValue={data.name} disabled={readOnly} maxLength={120} />
-        </FormField>
-        <FormField label="Phone">
-          <TextInput name={`${prefix}Phone`} defaultValue={data.phone} disabled={readOnly} maxLength={40} />
-        </FormField>
-        <FormField label="Email">
-          <TextInput type="email" name={`${prefix}Email`} defaultValue={data.email} disabled={readOnly} maxLength={120} />
-        </FormField>
-        <FormField label="Relationship">
-          <TextInput
-            name={`${prefix}Relationship`}
-            defaultValue={data.relationship}
-            disabled={readOnly}
-            maxLength={80}
-            placeholder="e.g. Uncle, former employer"
+      <CardHeader
+        title={`Guarantor ${index}`}
+        description="Upload the signed guarantor form and a means of ID. Both files required at submission."
+      />
+      <CardBody className="grid grid-cols-1 gap-4">
+        <FormField label="Signed guarantor form" hint="PDF or image, ≤10MB">
+          <FileUpload
+            folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+            accept="application/pdf,image/*"
+            maxSizeMB={10}
+            onUpload={onFormUpload}
           />
+          {formUrl ? (
+            <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {formUrl}</p>
+          ) : null}
         </FormField>
-        <FormField label="Address" className="sm:col-span-2">
-          <Textarea name={`${prefix}Address`} rows={2} defaultValue={data.address} disabled={readOnly} />
-        </FormField>
-        <FormField label="Signed letter" hint="PDF or image, ≤10MB" className="sm:col-span-2">
-          {readOnly ? (
-            letterUrl ? (
-              <a
-                href={letterUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-brand-500 hover:text-brand-600"
-              >
-                View uploaded letter
-              </a>
-            ) : (
-              <p className="text-sm text-app-fg-muted">No letter uploaded.</p>
-            )
-          ) : (
-            <FileUpload
-              folder={ASSET_FOLDERS.ONBOARDING_DOCS}
-              accept="application/pdf,image/*"
-              maxSizeMB={10}
-              onUpload={onLetterUpload}
-            />
-          )}
-          {!readOnly && letterUrl ? (
-            <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {letterUrl}</p>
+        <FormField label="Means of ID" hint="NIN slip / passport / driver's licence (PDF / image, ≤10MB)">
+          <FileUpload
+            folder={ASSET_FOLDERS.ONBOARDING_DOCS}
+            accept="application/pdf,image/*"
+            maxSizeMB={10}
+            onUpload={onIdUpload}
+          />
+          {idUrl ? (
+            <p className="mt-1 text-xs text-app-fg-muted break-all">Uploaded: {idUrl}</p>
           ) : null}
         </FormField>
       </CardBody>

@@ -11,21 +11,42 @@ type RevealResult = { ok: boolean; phone?: string; isDialable?: boolean; error?:
 export function AbandonedCartDetailModal({
   cart,
   canReveal,
+  canRecover,
   onClose,
   onClear,
-  onAssign,
 }: {
   cart: PendingCart | null;
   canReveal: boolean;
+  /** When true, the "Recover as order" button is shown (uses edge-form path for MB attribution). */
+  canRecover?: boolean;
   onClose: () => void;
   onClear?: (cart: PendingCart) => void;
-  /** Open the offline-order modal pre-filled with cart data for recovery. */
-  onAssign?: (cart: PendingCart, phone: string | null) => void;
 }) {
   const revealFetcher = useFetcher<RevealResult>();
+  const recoverFetcher = useFetcher<{ success?: boolean; error?: string; orderId?: string }>();
   const [phone, setPhone] = useState<string | null>(null);
   const [phoneState, setPhoneState] = useState<'idle' | 'loading' | 'masked' | 'unavailable' | 'error'>('idle');
   const { toast } = useToast();
+  const isRecovering = recoverFetcher.state !== 'idle';
+
+  // Close modal + toast on successful recovery.
+  useEffect(() => {
+    if (recoverFetcher.state !== 'idle' || !recoverFetcher.data) return;
+    if (recoverFetcher.data.success) {
+      toast.success('Order created from cart — MB attribution preserved');
+      onClose();
+    } else if (recoverFetcher.data.error) {
+      toast.error('Recovery failed', recoverFetcher.data.error);
+    }
+  }, [recoverFetcher.state, recoverFetcher.data]);
+
+  function handleRecover() {
+    if (!cart) return;
+    const fd = new FormData();
+    fd.set('intent', 'recoverFromCart');
+    fd.set('cartId', cart.id);
+    recoverFetcher.submit(fd, { method: 'post', action: '/admin/cs/queue/carts' });
+  }
 
   useEffect(() => {
     if (!cart) {
@@ -274,16 +295,21 @@ export function AbandonedCartDetailModal({
               </p>
             )}
 
-            {onAssign && (
+            {canRecover && (
               <button
                 type="button"
-                onClick={() => onAssign(cart, phone)}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 transition-colors mb-2"
+                onClick={handleRecover}
+                disabled={isRecovering}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-60 transition-colors mb-2"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                Assign — Create order from this cart
+                {isRecovering ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                )}
+                {isRecovering ? 'Creating order…' : 'Recover as order'}
               </button>
             )}
 

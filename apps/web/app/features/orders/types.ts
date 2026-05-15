@@ -7,6 +7,8 @@ export interface Order {
   createdAt: string;
   /** ISO `YYYY-MM-DD` when set (CS confirm); list API includes full row. */
   preferredDeliveryDate?: string | null;
+  /** ISO datetime — when a CS callback was scheduled. Drives the "Callback due" row tag. */
+  callbackScheduledAt?: string | null;
   assignedCsId: string | null;
   /** Set in list when available (e.g. CS orders for HoS/SuperAdmin) */
   assignedCsName?: string | null;

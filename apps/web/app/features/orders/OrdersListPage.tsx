@@ -46,6 +46,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
+import { fetchOrdersMatchingIds, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
 
 /** Deferred loader bundle for `/admin/cs/orders` (counts, chart series, heat, picklists). */
 export type CsOrdersDeferredSecondary = {
@@ -66,7 +67,11 @@ export type CsOrdersDeferredSecondary = {
 };
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
-import { isPreferredDeliveryDueToday } from '~/lib/order-delivery-today';
+import {
+  isPreferredDeliveryDueToday,
+  isPreferredDeliveryOverdue,
+  isCallbackDue,
+} from '~/lib/order-delivery-today';
 
 function DueTodayTag() {
   return (
@@ -75,6 +80,28 @@ function DueTodayTag() {
       title="Preferred delivery date is today (Africa/Lagos calendar)"
     >
       Due today
+    </span>
+  );
+}
+
+function OverdueTag() {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full border border-danger-300/80 bg-danger-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger-800 shadow-sm dark:border-danger-600/50 dark:bg-danger-900/35 dark:text-danger-100"
+      title="Preferred delivery date has passed and the order is still undelivered"
+    >
+      Overdue
+    </span>
+  );
+}
+
+function CallbackDueTag() {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full border border-warning-300/80 bg-warning-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-800 shadow-sm dark:border-warning-600/50 dark:bg-warning-900/35 dark:text-warning-100"
+      title="Scheduled callback time has arrived"
+    >
+      Callback due
     </span>
   );
 }
@@ -191,8 +218,24 @@ export interface OrdersListPageProps {
     scheduleKind: ListOrdersScheduleKind | null;
     scheduleDate: string | null;
   };
+  /**
+   * Serialised `listInput` (the same payload the loader sent to `orders.list`).
+   * When provided, enables the "Select all matching this filter" deep-select
+   * banner — the page calls `orders.list` client-side with this exact input
+   * (capped at ORDERS_DEEP_SELECT_MAX) so authz/scope match the visible list.
+   * Omit it to hide the feature for a given surface.
+   */
+  bulkSelectAllMatchingInput?: string;
   /** CS orders route — streams counts, chart data, heat, and bulk-action picklists after the list paints. */
   deferredSecondary?: Promise<CsOrdersDeferredSecondary>;
+  /**
+   * CS orders route — adds a "Cart abandonment" pseudo-option to the status
+   * dropdown for HoCS+. Maps to `?fromCart=1` (which the loader filters on).
+   * When this prop is true the dropdown gains the option and selecting it
+   * deletes any `status` param. Selecting any real status clears `fromCart`.
+   * Server still enforces the role gate; this prop is just UI visibility.
+   */
+  enableFromCartStatusOption?: boolean;
 }
 
 type OrdersListPageImplProps = Omit<OrdersListPageProps, 'deferredSecondary'> & {
@@ -233,6 +276,8 @@ function OrdersListPageImpl({
   scheduleFilters,
   orderDetailFrom = 'cs',
   deferredLoading = false,
+  enableFromCartStatusOption = false,
+  bulkSelectAllMatchingInput,
 }: OrdersListPageImplProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const toOrderDetail = useCallback(
@@ -248,18 +293,34 @@ function OrdersListPageImpl({
 
   const liveState = useLiveIndicator(liveEvents ?? []);
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
-  const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
+  /** Sentinel — not an order status, indicates the `?fromCart=1` pseudo-filter is active. */
+  const FROM_CART_STATUS_VALUE = '__from_cart__';
+  const fromCartUrlActive = searchParams.get('fromCart') === '1';
+  const initialSelectedStatus =
+    enableFromCartStatusOption && fromCartUrlActive
+      ? FROM_CART_STATUS_VALUE
+      : statusFilter || 'ALL';
+  const [selectedStatus, setSelectedStatus] = useState(initialSelectedStatus);
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSelectedExportModal, setShowSelectedExportModal] = useState(false);
 
   // Sync URL params to local state when loader data changes (e.g. back/forward)
   useEffect(() => {
-    setSelectedStatus(statusFilter || 'ALL');
+    setSelectedStatus(
+      enableFromCartStatusOption && fromCartUrlActive
+        ? FROM_CART_STATUS_VALUE
+        : statusFilter || 'ALL',
+    );
     setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter]);
+  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive]);
 
-  // Track new/updated rows for 3s highlight effect (e.g. from socket refresh)
+  // Track new/updated rows for 3s highlight effect. Gated on
+  // `liveState.showGreen` so it only fires when a relevant socket event
+  // (order:new / order:status_changed / etc.) was received within the last
+  // 4s — i.e. an actual realtime update. Filter changes, search, schedule
+  // picks and page navigations also mutate `orders`, but they shouldn't paint
+  // a green border on every visible row.
   const prevOrdersRef = useRef<Map<string, string>>(new Map());
   const [highlightedIds, setHighlightedIds] = useState<Set<string>>(new Set());
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -269,7 +330,7 @@ function OrdersListPageImpl({
     const newIds = new Set<string>();
     const isFirstLoad = prev.size === 0;
 
-    if (!isFirstLoad) {
+    if (!isFirstLoad && liveState.showGreen) {
       for (const order of orders) {
         const prevStatus = prev.get(order.id);
         if (!prevStatus) {
@@ -299,11 +360,18 @@ function OrdersListPageImpl({
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [orders]);
+  }, [orders, liveState.showGreen]);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<string | null>(null);
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
+  // "Select all matching this filter" deep-select state. Active when the user
+  // chose to extend the page-only selection to every order matching the
+  // current filter (server-fetched, capped at ORDERS_DEEP_SELECT_MAX).
+  const [selectAllMatchingActive, setSelectAllMatchingActive] = useState(false);
+  const [selectAllMatchingLoading, setSelectAllMatchingLoading] = useState(false);
+  const [selectAllMatchingCapped, setSelectAllMatchingCapped] = useState(false);
+  const [selectAllMatchingError, setSelectAllMatchingError] = useState<string | null>(null);
   const fetcher = useFetcher();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
 
@@ -429,7 +497,45 @@ function OrdersListPageImpl({
     setSelectedIds(new Set());
     setBulkAction(null);
     setBulkResult(null);
+    setSelectAllMatchingActive(false);
+    setSelectAllMatchingCapped(false);
+    setSelectAllMatchingError(null);
   };
+
+  // Reset the deep-select state whenever the filter changes — the previously
+  // fetched ID set no longer matches the new filter, so keeping it active
+  // would let bulk actions hit orders the user can no longer see.
+  useEffect(() => {
+    if (selectAllMatchingActive) {
+      setSelectedIds(new Set());
+      setSelectAllMatchingActive(false);
+      setSelectAllMatchingCapped(false);
+      setSelectAllMatchingError(null);
+    }
+    // Intentionally narrow deps to the URL string — covers status, search,
+    // dates, schedule filters, pagination, etc. in one shot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.toString()]);
+
+  async function selectAllMatchingFilter() {
+    if (!bulkSelectAllMatchingInput) return;
+    setSelectAllMatchingLoading(true);
+    setSelectAllMatchingError(null);
+    try {
+      const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput);
+      if (ids.length === 0) {
+        setSelectAllMatchingError('Could not load matching orders. Try again.');
+        return;
+      }
+      setSelectedIds(new Set(ids));
+      setSelectAllMatchingActive(true);
+      setSelectAllMatchingCapped(capped);
+    } catch {
+      setSelectAllMatchingError('Could not load matching orders. Try again.');
+    } finally {
+      setSelectAllMatchingLoading(false);
+    }
+  }
 
   // Determine what bulk transitions are available based on selected orders
   const selectedOrders = filteredOrders.filter((o) => selectedIds.has(o.id));
@@ -583,6 +689,8 @@ function OrdersListPageImpl({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="font-medium text-app-fg">{order.customerName}</span>
             {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
+            {isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ? <OverdueTag /> : null}
+            {isCallbackDue(order.callbackScheduledAt, order.status) ? <CallbackDueTag /> : null}
           </div>
         ),
       },
@@ -677,12 +785,15 @@ function OrdersListPageImpl({
     return cols;
   }, [showCSCloserColumn, showCampaignColumn, toOrderDetail]);
 
-  const statusOptions = STATUS_OPTIONS.filter((status) => !excludeStatuses?.includes(status)).map(
-    (status) => ({
+  const statusOptions = [
+    ...STATUS_OPTIONS.filter((status) => !excludeStatuses?.includes(status)).map((status) => ({
       value: status,
       label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
-    }),
-  );
+    })),
+    ...(enableFromCartStatusOption
+      ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
+      : []),
+  ];
 
   const csCloserOptions = [
     { value: 'ALL', label: 'All closers' },
@@ -709,7 +820,27 @@ function OrdersListPageImpl({
     campaignFilter,
   ]);
 
-  const scheduleFilterFields = scheduleFilters ? (
+  const scheduleFilterFields = scheduleFilters ? (() => {
+    // Inline the picked date into the schedule label so we don't need a
+    // separate date pill next to the dropdown. The calendar still opens
+    // on selection (always — including Overdue) so a fresh date can be
+    // chosen any time by re-selecting the same option.
+    const formattedScheduleDate = scheduleFilters.scheduleDate
+      ? new Date(scheduleFilters.scheduleDate).toLocaleDateString('en-NG', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })
+      : null;
+    const deliveryOnDayLabel =
+      scheduleSelectValue === 'delivery_on_day' && formattedScheduleDate
+        ? `Deliveries on ${formattedScheduleDate}`
+        : 'Deliveries (on date)';
+    const callbackOnDayLabel =
+      scheduleSelectValue === 'callback_on_day' && formattedScheduleDate
+        ? `Callbacks on ${formattedScheduleDate}`
+        : 'Callbacks (on date)';
+    return (
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
         <div className="flex min-w-0 flex-col gap-1 sm:flex-1">
           <FormSelect
@@ -721,67 +852,26 @@ function OrdersListPageImpl({
               setBulkResult(null);
               const v = e.target.value;
               applyScheduleKind(v);
-              if ((v === 'delivery_on_day' || v === 'callback_on_day') && !scheduleFilters.scheduleDate) {
+              // All three date-aware options now open the calendar so users
+              // can pick / change the date inline. Overdue is date-less in
+              // the URL today, but opening the calendar still lets them
+              // see the heat map at a glance.
+              if (v === 'delivery_on_day' || v === 'callback_on_day' || v === 'delivery_overdue') {
                 setScheduleCalendarModalOpen(true);
               }
             }}
             options={[
               { value: '', label: 'All schedules' },
-              { value: 'delivery_on_day', label: 'Deliveries (on date)' },
-              { value: 'callback_on_day', label: 'Callbacks (on date)' },
+              { value: 'delivery_on_day', label: deliveryOnDayLabel },
+              { value: 'callback_on_day', label: callbackOnDayLabel },
               { value: 'delivery_overdue', label: 'Overdue (undelivered)' },
             ]}
             wrapperClassName="w-full min-w-0 sm:w-52"
           />
         </div>
-        {(scheduleSelectValue === 'delivery_on_day' || scheduleSelectValue === 'callback_on_day') && (
-          <div className="inline-flex w-full min-w-0 sm:w-auto items-stretch gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setScheduleCalendarModalOpen(true);
-                }}
-                className="inline-flex flex-1 items-center justify-between gap-2 h-9 px-3 rounded-md border border-app-border bg-app-elevated text-sm text-app-fg hover:border-brand-300 dark:hover:border-brand-700 transition-colors min-w-[10rem]"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <svg className="w-3.5 h-3.5 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <span>
-                    {scheduleFilters.scheduleDate
-                      ? new Date(scheduleFilters.scheduleDate).toLocaleDateString('en-NG', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })
-                      : 'Pick a date…'}
-                  </span>
-                </span>
-                <svg className="w-3 h-3 text-app-fg-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {/* Clear schedule filter — wipes both the kind and the date so the page
-                  returns to the default "no schedule filter" state. */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedIds(new Set());
-                  setBulkResult(null);
-                  applyScheduleKind('');
-                }}
-                className="inline-flex items-center justify-center h-9 w-9 rounded-md border border-app-border bg-app-elevated text-app-fg-muted hover:text-app-fg hover:border-brand-300 dark:hover:border-brand-700 transition-colors"
-                aria-label="Clear schedule filter"
-                title="Clear schedule filter"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-          </div>
-        )}
       </div>
-    ) : null;
+    );
+  })() : null;
 
   return (
     <div className="space-y-4">
@@ -1167,8 +1257,14 @@ function OrdersListPageImpl({
                     setSearchParams((p) => {
                       const next = new URLSearchParams(p);
                       next.set('page', '1');
-                      if (v === 'ALL') next.delete('status');
-                      else next.set('status', v);
+                      if (v === FROM_CART_STATUS_VALUE) {
+                        next.delete('status');
+                        next.set('fromCart', '1');
+                      } else {
+                        next.delete('fromCart');
+                        if (v === 'ALL') next.delete('status');
+                        else next.set('status', v);
+                      }
                       return next;
                     });
                   }}
@@ -1272,8 +1368,14 @@ function OrdersListPageImpl({
                     setSearchParams((p) => {
                       const next = new URLSearchParams(p);
                       next.set('page', '1');
-                      if (v === 'ALL') next.delete('status');
-                      else next.set('status', v);
+                      if (v === FROM_CART_STATUS_VALUE) {
+                        next.delete('status');
+                        next.set('fromCart', '1');
+                      } else {
+                        next.delete('fromCart');
+                        if (v === 'ALL') next.delete('status');
+                        else next.set('status', v);
+                      }
                       return next;
                     });
                   }}
@@ -1386,6 +1488,67 @@ function OrdersListPageImpl({
           />
         </div>
       )}
+
+      {/* Deep-select — "Select all matching this filter" (capped at
+          ORDERS_DEEP_SELECT_MAX, matches server-side bulk-action caps).
+          Always visible when bulk-pick is enabled so CS can deep-select even
+          when all results fit on one page. */}
+      {canBulkPick &&
+        canBulkAction &&
+        bulkSelectAllMatchingInput &&
+        total > 0 && (
+          <div
+            className={`rounded-lg border px-3 py-2 ${
+              selectAllMatchingActive
+                ? 'border-warning-400 bg-warning-50 dark:border-warning-700 dark:bg-warning-900/20'
+                : 'border-app-border bg-app-elevated'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-app-border text-brand-600 focus:ring-brand-500"
+                  checked={selectAllMatchingActive}
+                  disabled={selectAllMatchingLoading}
+                  onChange={(e) => {
+                    if (e.target.checked) selectAllMatchingFilter();
+                    else clearSelection();
+                  }}
+                />
+                <span className="min-w-0">
+                  <span className="font-medium text-app-fg">
+                    {selectAllMatchingActive
+                      ? `${selectedIds.size} orders selected across the entire filter`
+                      : `Select all ${total.toLocaleString()} orders matching this filter`}
+                  </span>
+                  {!selectAllMatchingActive && total > ORDERS_DEEP_SELECT_MAX && (
+                    <span className="block text-xs text-app-fg-muted">
+                      Capped at {ORDERS_DEEP_SELECT_MAX}. To process more, narrow the filter or run the action again.
+                    </span>
+                  )}
+                  {selectAllMatchingActive && (
+                    <span className="block text-xs text-warning-800 dark:text-warning-200">
+                      Bulk actions will affect all {selectedIds.size} selected orders.
+                      {selectedIds.size > filteredOrders.length &&
+                        ` ${selectedIds.size - filteredOrders.length} are not visible on this page.`}
+                      {selectAllMatchingCapped &&
+                        ` (Capped at ${ORDERS_DEEP_SELECT_MAX} of ${total.toLocaleString()} matching.)`}
+                    </span>
+                  )}
+                  {selectAllMatchingError && (
+                    <span className="block text-xs text-danger-600 dark:text-danger-400">
+                      {selectAllMatchingError}
+                    </span>
+                  )}
+                </span>
+              </label>
+              {selectAllMatchingLoading && (
+                <span className="text-xs text-app-fg-muted">Loading…</span>
+              )}
+            </div>
+          </div>
+        )}
 
       {/* Schedule heat calendar — modal only. The Schedule dropdown's "…on date" options
           open this; the date badge next to the dropdown reopens it to change the day. */}
@@ -1519,6 +1682,12 @@ function OrdersListPageImpl({
                 ? {
                     selectedIds,
                     onToggle: (id, selected) => {
+                      // Any per-row toggle exits deep-select mode — the user
+                      // is now picking individually, not "all matching".
+                      if (selectAllMatchingActive) {
+                        setSelectAllMatchingActive(false);
+                        setSelectAllMatchingCapped(false);
+                      }
                       setSelectedIds((prev) => {
                         const next = new Set(prev);
                         if (selected) next.add(id);
@@ -1527,6 +1696,10 @@ function OrdersListPageImpl({
                       });
                     },
                     onToggleAll: (selectAll) => {
+                      if (selectAllMatchingActive) {
+                        setSelectAllMatchingActive(false);
+                        setSelectAllMatchingCapped(false);
+                      }
                       if (selectAll) setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
                       else setSelectedIds(new Set());
                     },

@@ -80,6 +80,8 @@ const STATUS_VARIANT_MAP: Record<string, BadgeVariant> = {
   submitted: 'warning',
   // Inventory / stock transfers (pending reused from Generic)
   in_transit: 'brand',
+  low_stock: 'danger',
+  'low stock': 'danger',
 };
 
 interface StatusBadgeProps {

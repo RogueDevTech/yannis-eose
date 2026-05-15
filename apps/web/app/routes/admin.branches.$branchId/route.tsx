@@ -1515,10 +1515,7 @@ function sourceBadge(setting: EffectiveTeamSetting): {
   return { label: 'Unset', tone: 'warning' };
 }
 
-interface SettingEditorState {
-  setting: EffectiveTeamSetting;
-  catalog: { key: string; label: string; description: string };
-}
+// (SettingEditorModal removed — settings are now inline radio cards + number input.)
 
 function TeamSettingsSection({
   team,
@@ -1537,304 +1534,165 @@ function TeamSettingsSection({
     successMessage: 'Team setting updated',
     skipErrorToast: !!surface.friendlyError,
   });
-
-  const [editor, setEditor] = useState<SettingEditorState | null>(null);
-  const [confirmClear, setConfirmClear] = useState<EffectiveTeamSetting | null>(null);
   const isBusy = fetcher.state !== 'idle';
 
-  // Close editor on success.
-  useEffect(() => {
-    if (fetcher.state === 'idle' && fetcher.data?.success) {
-      setEditor(null);
-      setConfirmClear(null);
-    }
-  }, [fetcher.state, fetcher.data]);
+  // Resolve each setting into its effective value — team override > system default.
+  const dispatchSetting = bundle.settings.find((s) => s.key === 'CS_DISPATCH_STRATEGY');
+  const claimCapSetting = bundle.settings.find((s) => s.key === 'CS_CLAIM_CAP');
 
-  const catalogByKey = useMemo(() => {
-    const m = new Map<string, { key: string; label: string; description: string }>();
-    for (const c of bundle.catalog) m.set(c.key, c);
-    return m;
-  }, [bundle.catalog]);
+  const effectiveStrategy =
+    ((dispatchSetting?.value as { strategy?: string } | null)?.strategy as
+      | 'manual' | 'load_balanced' | 'performance' | 'claim'
+      | undefined) ?? 'manual';
+  const effectiveCap =
+    (claimCapSetting?.value as { cap?: number } | null)?.cap ?? 2;
+
+  const [strategy, setStrategy] = useState(effectiveStrategy);
+  const [claimCap, setClaimCap] = useState(String(effectiveCap));
+
+  // Track whether the user changed anything from the effective value.
+  const strategyChanged = strategy !== effectiveStrategy;
+  const capChanged = Number(claimCap) !== effectiveCap;
+  const hasChanges = strategyChanged || capChanged;
+
+  // Sync drafts when server data reloads (after save).
+  useEffect(() => { setStrategy(effectiveStrategy); }, [effectiveStrategy]);
+  useEffect(() => { setClaimCap(String(effectiveCap)); }, [effectiveCap]);
+
+  const handleSave = () => {
+    // Save dispatch strategy if changed.
+    if (strategyChanged && dispatchSetting) {
+      fetcher.submit(
+        {
+          intent: 'setTeamSetting',
+          teamId: team.id,
+          key: 'CS_DISPATCH_STRATEGY',
+          value: JSON.stringify({ strategy }),
+        },
+        { method: 'post' },
+      );
+    }
+    // Save claim cap if changed.
+    if (capChanged && claimCapSetting) {
+      const n = Number(claimCap);
+      if (Number.isFinite(n) && n >= 1 && n <= 50) {
+        fetcher.submit(
+          {
+            intent: 'setTeamSetting',
+            teamId: team.id,
+            key: 'CS_CLAIM_CAP',
+            value: JSON.stringify({ cap: Math.floor(n) }),
+          },
+          { method: 'post' },
+        );
+      }
+    }
+  };
+
+  const systemStrategyLabel = describeSettingValue(
+    'CS_DISPATCH_STRATEGY',
+    dispatchSetting?.systemValue ?? null,
+  );
 
   return (
-    <div className="border-t border-app-border pt-4 space-y-3">
+    <div className="border-t border-app-border pt-4 space-y-4">
       <div>
         <p className="text-sm font-semibold text-app-fg">Team configuration</p>
         <p className="text-xs text-app-fg-muted mt-0.5">
-          Inherited from system defaults unless overridden here. An admin can <strong>lock</strong>{' '}
-          a setting at the system level — locked settings ignore team overrides.
+          Select how orders are distributed to agents on this team.
+          {dispatchSetting?.systemValue && (
+            <> System default: <strong>{systemStrategyLabel}</strong>.</>
+          )}
         </p>
       </div>
-      <div className="space-y-2">
-        {bundle.settings.map((setting) => {
-          const cat = catalogByKey.get(setting.key);
-          if (!cat) return null;
-          const badge = sourceBadge(setting);
-          return (
-            <div
-              key={setting.key}
-              className="rounded-lg border border-app-border bg-app-elevated/30 p-3 flex flex-wrap items-start gap-3 justify-between"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-medium text-app-fg">{cat.label}</p>
-                  <StatusBadge status={badge.label} />
-                </div>
-                <p className="text-xs text-app-fg-muted mt-0.5">{cat.description}</p>
-                <p className="text-sm text-app-fg mt-1">
-                  Effective:{' '}
-                  <span className="font-semibold">
-                    {describeSettingValue(setting.key, setting.value)}
-                  </span>
-                  {setting.source === 'team' && setting.systemValue !== null && (
-                    <span className="text-app-fg-muted">
-                      {' '}
-                      · system default: {describeSettingValue(setting.key, setting.systemValue)}
-                    </span>
-                  )}
-                </p>
-              </div>
-              {canManage && (
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    disabled={isBusy || setting.systemEnforced}
-                    onClick={() => setEditor({ setting, catalog: cat })}
-                  >
-                    {setting.source === 'team' ? 'Edit override' : 'Override'}
-                  </Button>
-                  {setting.source === 'team' && (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      disabled={isBusy}
-                      onClick={() => setConfirmClear(setting)}
-                    >
-                      Reset
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
 
-      {editor && (
-        <SettingEditorModal
-          team={team}
-          teamTitle={teamTitle}
-          editor={editor}
-          fetcher={fetcher}
-          isBusy={isBusy}
-          error={surface.friendlyError ?? null}
-          onClose={() => {
-            if (isBusy) return;
-            setEditor(null);
-          }}
-        />
+      <ModalFetcherInlineError message={surface.friendlyError ?? null} />
+
+      {/* CS order distribution — radio cards */}
+      {dispatchSetting && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wide">
+            CS order distribution
+          </p>
+          <div className="space-y-2">
+            {DISPATCH_STRATEGIES.map((opt) => {
+              const isSelected = strategy === opt.value;
+              const isLocked = dispatchSetting.systemEnforced;
+              return (
+                <label
+                  key={opt.value}
+                  className={[
+                    'flex gap-3 rounded-lg border p-3 transition-colors',
+                    isLocked ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
+                    isSelected
+                      ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20'
+                      : 'border-app-border hover:bg-app-hover',
+                  ].join(' ')}
+                >
+                  <input
+                    type="radio"
+                    name={`strategy-${team.id}`}
+                    value={opt.value}
+                    checked={isSelected}
+                    onChange={() => !isLocked && setStrategy(opt.value)}
+                    disabled={isLocked || !canManage}
+                    className="mt-1 accent-brand-600"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-app-fg">{opt.label}</p>
+                    <p className="text-xs text-app-fg-muted mt-0.5">{opt.description}</p>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
       )}
 
-      {confirmClear && (
-        <ConfirmActionModal
-          open
-          title="Reset to system default?"
-          description={
-            <>
-              Remove the team override on{' '}
-              <strong>{catalogByKey.get(confirmClear.key)?.label ?? confirmClear.key}</strong>?{' '}
-              <strong>{teamTitle}</strong> will fall back to the system value (
-              <strong>{describeSettingValue(confirmClear.key, confirmClear.systemValue)}</strong>).
-            </>
-          }
-          confirmLabel="Reset"
-          variant="danger"
-          loading={isBusy}
-          error={surface.friendlyError ?? null}
-          onClose={() => {
-            if (isBusy) return;
-            setConfirmClear(null);
-          }}
-          onConfirm={() => {
-            fetcher.submit(
-              { intent: 'clearTeamSetting', teamId: team.id, key: confirmClear.key },
-              { method: 'post' },
-            );
-          }}
-        />
+      {/* CS claim cap — inline number input (only relevant for claim mode) */}
+      {claimCapSetting && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wide">
+            CS claim cap
+          </p>
+          <div className="flex items-center gap-3">
+            <TextInput
+              id={`claim-cap-${team.id}`}
+              type="number"
+              min={1}
+              max={50}
+              value={claimCap}
+              onChange={(e) => setClaimCap(e.target.value)}
+              disabled={claimCapSetting.systemEnforced || !canManage}
+              wrapperClassName="w-24"
+            />
+            <span className="text-xs text-app-fg-muted">
+              Max unconfirmed orders per agent in claim mode.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Save */}
+      {canManage && (
+        <div className="flex items-center gap-3 pt-1">
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={!hasChanges || isBusy}
+            loading={isBusy}
+            loadingText="Saving…"
+            onClick={handleSave}
+          >
+            Save changes
+          </Button>
+          {hasChanges && (
+            <span className="text-xs text-app-fg-muted">Unsaved changes</span>
+          )}
+        </div>
       )}
     </div>
-  );
-}
-
-function SettingEditorModal({
-  team,
-  teamTitle,
-  editor,
-  fetcher,
-  isBusy,
-  error,
-  onClose,
-}: {
-  team: BranchTeamWithMembers;
-  teamTitle: string;
-  editor: SettingEditorState;
-  fetcher: ReturnType<typeof useFetcher<{ success?: boolean; error?: string }>>;
-  isBusy: boolean;
-  error: string | null;
-  onClose: () => void;
-}) {
-  const initialValue = editor.setting.teamValue ?? editor.setting.systemValue ?? null;
-  const [strategy, setStrategy] = useState<'manual' | 'load_balanced' | 'performance' | 'claim'>(
-    editor.setting.key === 'CS_DISPATCH_STRATEGY'
-      ? ((initialValue?.strategy as
-          | 'manual'
-          | 'load_balanced'
-          | 'performance'
-          | 'claim'
-          | undefined) ?? 'manual')
-      : 'manual',
-  );
-  const [claimCap, setClaimCap] = useState<string>(
-    editor.setting.key === 'CS_CLAIM_CAP'
-      ? String((initialValue?.cap as number | undefined) ?? 2)
-      : '',
-  );
-
-  const handleSave = () => {
-    let value: Record<string, unknown> | null = null;
-    if (editor.setting.key === 'CS_DISPATCH_STRATEGY') {
-      value = { strategy };
-    } else if (editor.setting.key === 'CS_CLAIM_CAP') {
-      const n = Number(claimCap);
-      if (!Number.isFinite(n) || n < 1 || n > 50) {
-        return;
-      }
-      value = { cap: Math.floor(n) };
-    }
-    if (!value) return;
-    fetcher.submit(
-      {
-        intent: 'setTeamSetting',
-        teamId: team.id,
-        key: editor.setting.key,
-        value: JSON.stringify(value),
-      },
-      { method: 'post' },
-    );
-  };
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      maxWidth="max-w-lg"
-      role="dialog"
-      aria-labelledby="team-setting-edit-title"
-      contentClassName="p-0 flex flex-col overflow-hidden min-h-0 max-h-[90dvh]"
-    >
-      <div className="flex items-center justify-between pb-3 border-b border-app-border shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
-        <div>
-          <h3 id="team-setting-edit-title" className="text-lg font-semibold text-app-fg">
-            {editor.catalog.label}
-          </h3>
-          <p className="text-sm text-app-fg-muted mt-0.5">{teamTitle}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={isBusy}
-          className="text-app-fg-muted hover:text-app-fg shrink-0"
-          aria-label="Close"
-        >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4 px-4 sm:px-5">
-        <p className="text-sm text-app-fg-muted">{editor.catalog.description}</p>
-
-        {editor.setting.key === 'CS_DISPATCH_STRATEGY' && (
-          <div className="space-y-2">
-            {DISPATCH_STRATEGIES.map((opt) => (
-              <label
-                key={opt.value}
-                className={`flex gap-3 rounded-lg border p-3 cursor-pointer ${
-                  strategy === opt.value
-                    ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/20'
-                    : 'border-app-border hover:bg-app-hover'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="strategy"
-                  value={opt.value}
-                  checked={strategy === opt.value}
-                  onChange={() => setStrategy(opt.value)}
-                  className="mt-1"
-                />
-                <div>
-                  <p className="text-sm font-medium text-app-fg">{opt.label}</p>
-                  <p className="text-xs text-app-fg-muted mt-0.5">{opt.description}</p>
-                </div>
-              </label>
-            ))}
-          </div>
-        )}
-
-        {editor.setting.key === 'CS_CLAIM_CAP' && (
-          <TextInput
-            label="Maximum unconfirmed orders per agent"
-            id="claim-cap"
-            type="number"
-            min={1}
-            max={50}
-            value={claimCap}
-            onChange={(e) => setClaimCap(e.target.value)}
-            hint="Applies only when the team's strategy is set to claim mode."
-          />
-        )}
-
-        {editor.setting.systemValue !== null && (
-          <div className="rounded-lg border border-app-border bg-app-elevated/40 p-3">
-            <p className="text-xs text-app-fg-muted">
-              System default:{' '}
-              <strong>
-                {describeSettingValue(editor.setting.key, editor.setting.systemValue)}
-              </strong>
-            </p>
-          </div>
-        )}
-
-        <ModalFetcherInlineError message={error} />
-      </div>
-      <div className="border-t border-app-border px-5 py-3 flex items-center justify-end gap-2">
-        <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={isBusy}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          variant="primary"
-          size="sm"
-          onClick={handleSave}
-          disabled={isBusy}
-          loading={isBusy}
-          loadingText="Saving…"
-        >
-          Save override
-        </Button>
-      </div>
-    </Modal>
   );
 }
 
