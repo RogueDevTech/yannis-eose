@@ -54,10 +54,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
               id: string;
               customerName: string;
               customerPhoneDisplay: string;
+              customerPhone?: string | null;
+              productId?: string | null;
               productName: string | null;
               campaignName: string | null;
               offerLabel: string | null;
               updatedAt: string;
+              customerEmail?: string | null;
+              customerAddress?: string | null;
+              deliveryAddress?: string | null;
+              deliveryState?: string | null;
+              deliveryNotes?: string | null;
+              customerGender?: string | null;
+              preferredDeliveryDate?: string | null;
+              paymentMethod?: string | null;
+              quantity?: number | null;
+              customFieldValues?: Record<string, unknown> | null;
             }>;
             total: number;
             page: number;
@@ -98,6 +110,34 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ ok: false, error: 'Failed to delete cart' }, { status: 500 });
     }
     return json({ ok: true });
+  }
+
+  if (intent === 'deleteAbandonedMany') {
+    const raw = formData.get('cartIds');
+    if (!raw || typeof raw !== 'string') {
+      return json({ ok: false, error: 'Missing cartIds' }, { status: 400 });
+    }
+    const cartIds = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (cartIds.length === 0) {
+      return json({ ok: false, error: 'No carts selected' }, { status: 400 });
+    }
+    const results = await Promise.all(
+      cartIds.map((cartId) =>
+        apiRequest<unknown>('/trpc/cart.deleteAbandoned', {
+          method: 'POST',
+          cookie,
+          body: { cartId },
+        }),
+      ),
+    );
+    const failed = results.filter((r) => !r.ok).length;
+    return json({
+      ok: failed === 0,
+      deleted: cartIds.length - failed,
+      failed,
+      total: cartIds.length,
+      error: failed > 0 ? `${failed} of ${cartIds.length} carts could not be deleted` : undefined,
+    });
   }
 
   if (intent === 'revealAbandonedPhone') {

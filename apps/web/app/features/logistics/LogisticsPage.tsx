@@ -41,6 +41,7 @@ interface LogisticsPageProps {
   totalProviders: number;
   locations: Location[];
   totalLocations: number;
+  globalLowStockThreshold: number;
 }
 
 interface ProviderRow {
@@ -155,9 +156,9 @@ function AddProviderForm({
   );
 }
 
-export function LogisticsPage({ providers, totalProviders, locations, totalLocations }: LogisticsPageProps) {
+export function LogisticsPage({ providers, totalProviders, locations, totalLocations, globalLowStockThreshold }: LogisticsPageProps) {
   const fetcher = useFetcher();
-  const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('providers');
+  const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('locations');
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
@@ -234,6 +235,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       const providerId = fd.get('providerId')?.toString().trim();
       if (!name || !providerId) return null;
       const providerName = providers.find((p) => p.id === providerId)?.name ?? null;
+      const lowStockRaw = fd.get('lowStockThreshold')?.toString().trim() ?? '';
+      const lowStockParsed = lowStockRaw === '' ? null : Number.parseInt(lowStockRaw, 10);
       return [
         {
           id: optimisticId(),
@@ -242,6 +245,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           address: fd.get('address')?.toString().trim() ?? '',
           coordinates: fd.get('coordinates')?.toString().trim() || null,
           whatsappGroupLink: fd.get('whatsappGroupLink')?.toString().trim() || null,
+          lowStockThreshold: Number.isFinite(lowStockParsed) ? (lowStockParsed as number) : null,
           status: 'ACTIVE',
           createdAt: new Date().toISOString(),
           providerName,
@@ -289,6 +293,16 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     if (coordinates !== undefined) patch.coordinates = coordinates || null;
     const whatsapp = fd.get('whatsappGroupLink')?.toString().trim();
     if (whatsapp !== undefined) patch.whatsappGroupLink = whatsapp || null;
+    const lowStockRaw = fd.get('lowStockThreshold');
+    if (lowStockRaw !== null) {
+      const lowStockStr = lowStockRaw.toString().trim();
+      if (lowStockStr === '') {
+        patch.lowStockThreshold = null;
+      } else {
+        const parsed = Number.parseInt(lowStockStr, 10);
+        if (Number.isFinite(parsed)) patch.lowStockThreshold = parsed;
+      }
+    }
     const status = fd.get('status')?.toString();
     if (status) patch.status = status;
     return [{ id, patch }];
@@ -391,6 +405,32 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         render: (l) => {
           const provider = displayProviders.find((p: Provider) => p.id === l.providerId);
           return <span className="text-app-fg-muted">{provider?.name ?? 'Unknown logistics company'}</span>;
+        },
+      },
+      {
+        key: 'totalStock',
+        header: 'Total stock',
+        align: 'right',
+        hideOnMobile: true,
+        render: (l) => (
+          <span className={`tabular-nums ${(l.totalStock ?? 0) === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>
+            {(l.totalStock ?? 0).toLocaleString()}
+          </span>
+        ),
+      },
+      {
+        key: 'lowStock',
+        header: 'Alert threshold',
+        align: 'right',
+        hideOnMobile: true,
+        render: (l) => {
+          const hasOverride = l.lowStockThreshold != null;
+          const effective = hasOverride ? (l.lowStockThreshold as number) : globalLowStockThreshold;
+          return (
+            <span className="tabular-nums text-app-fg-muted">
+              {effective} units{!hasOverride ? ' · global' : ''}
+            </span>
+          );
         },
       },
       {
@@ -662,6 +702,18 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 hint="Used by the CS Share to logistics company flow. Optional."
                 wrapperClassName="sm:col-span-2"
               />
+              <TextInput
+                id="add-location-low-stock"
+                name="lowStockThreshold"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10000}
+                label="Low-stock alert (units)"
+                placeholder="e.g. 25"
+                hint="Optional. Leave empty to inherit the org-wide default."
+                wrapperClassName="sm:col-span-2"
+              />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button
@@ -808,6 +860,17 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 </dd>
               </div>
               <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Low-stock alert</dt>
+                <dd className="mt-0.5 text-sm text-app-fg tabular-nums">
+                  {viewingLocation.lowStockThreshold != null
+                    ? `${viewingLocation.lowStockThreshold} units`
+                    : `${globalLowStockThreshold} units`}
+                  {viewingLocation.lowStockThreshold == null && (
+                    <span className="text-app-fg-muted"> · inherited from org-wide default</span>
+                  )}
+                </dd>
+              </div>
+              <div>
                 <dt className="text-xs font-medium text-app-fg-muted">Status</dt>
                 <dd className="mt-0.5">
                   <StatusBadge status={viewingLocation.status} />
@@ -925,6 +988,19 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 defaultValue={editingLocation.whatsappGroupLink ?? ''}
                 placeholder="https://chat.whatsapp.com/…"
                 hint="Leave empty to remove. Used by the CS Share to logistics company flow."
+                wrapperClassName="sm:col-span-2"
+              />
+              <TextInput
+                id="edit-location-low-stock"
+                name="lowStockThreshold"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={10000}
+                label="Low-stock alert (units)"
+                defaultValue={editingLocation.lowStockThreshold ?? ''}
+                placeholder="Inherits global"
+                hint="Leave empty to inherit the org-wide default."
                 wrapperClassName="sm:col-span-2"
               />
               <FormSelect
@@ -1062,8 +1138,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         value={activeTab}
         onChange={(v) => setActiveTab(v as typeof activeTab)}
         tabs={[
-          { value: 'providers', label: `Companies (${displayTotalProviders})` },
           { value: 'locations', label: `Locations (${displayTotalLocations})` },
+          { value: 'providers', label: `Companies (${displayTotalProviders})` },
         ]}
       />
 

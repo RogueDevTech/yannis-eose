@@ -32,6 +32,10 @@ const emptyPulse: FinanceOverviewPulse = {
   pendingRemittanceAmount: 0,
   pendingRemittanceBatchCount: 0,
   disputedRemittanceBatchCount: 0,
+  totalRemitted: 0,
+  totalRemittedCount: 0,
+  receivedAmount: 0,
+  receivedCount: 0,
   payrollPendingFinanceCount: 0,
   approvalsPendingCount: 0,
 };
@@ -88,6 +92,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       { method: 'GET', cookie },
     );
 
+    type BreakdownRow = { productId?: string; locationId?: string | null; productName?: string; locationName?: string; totalAmount: string; orderCount: number };
     type BundleData = {
       profit: ProfitReport | null;
       remittanceSummary: Record<string, string | number> | null;
@@ -95,25 +100,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
       approvalsPendingCount: number;
       branches: Array<{ id: string; name: string }>;
       mediaBuyers: Array<{ id: string; name: string }>;
+      fundingSummary: { totalSent: string; totalCompleted: string; totalDisputed: string; sentCount: number; completedCount: number; disputedCount: number } | null;
+      byProduct: BreakdownRow[];
+      byLocation: BreakdownRow[];
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
       : null;
 
-    let pulse: FinanceOverviewPulse = { ...emptyPulse };
-    if (bundle?.remittanceSummary) {
-      const summary = bundle.remittanceSummary;
-      pulse = {
-        ...pulse,
-        awaitingCash: Number(summary.awaitingAmount ?? 0),
-        awaitingOrderCount: Number(summary.awaitingCount ?? 0),
-        pendingRemittanceAmount: Number(summary.pendingAmount ?? 0),
-        pendingRemittanceBatchCount: Number(summary.pendingCount ?? 0),
-        disputedRemittanceBatchCount: Number(summary.disputedCount ?? 0),
-      };
-    }
-    pulse = {
-      ...pulse,
+    const remSummary = bundle?.remittanceSummary;
+    let pulse: FinanceOverviewPulse = {
+      ...emptyPulse,
+      awaitingCash: Number(remSummary?.awaitingAmount ?? 0),
+      awaitingOrderCount: Number(remSummary?.awaitingCount ?? 0),
+      pendingRemittanceAmount: Number(remSummary?.pendingAmount ?? 0),
+      pendingRemittanceBatchCount: Number(remSummary?.pendingCount ?? 0),
+      disputedRemittanceBatchCount: Number(remSummary?.disputedCount ?? 0),
+      totalRemitted: Number(remSummary?.totalRemitted ?? 0),
+      totalRemittedCount: Number(remSummary?.totalCount ?? 0),
+      receivedAmount: Number(remSummary?.receivedAmount ?? 0),
+      receivedCount: Number(remSummary?.receivedCount ?? 0),
       payrollPendingFinanceCount: bundle?.payrollBatchCount ?? 0,
       approvalsPendingCount: bundle?.approvalsPendingCount ?? 0,
     };
@@ -124,6 +130,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       filters: financeShell.filters,
       branches: bundle?.branches ?? [],
       mediaBuyers: bundle?.mediaBuyers ?? [],
+      fundingSummary: bundle?.fundingSummary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 },
+      byProduct: (bundle?.byProduct ?? []).map((r) => ({
+        productId: r.productId ?? '',
+        productName: r.productName ?? '',
+        totalAmount: r.totalAmount,
+        orderCount: r.orderCount,
+      })),
+      byLocation: (bundle?.byLocation ?? []).map((r) => ({
+        locationId: r.locationId ?? '',
+        locationName: r.locationName ?? '',
+        totalAmount: r.totalAmount,
+        orderCount: r.orderCount,
+      })),
     };
   })();
 

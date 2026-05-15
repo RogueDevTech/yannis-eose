@@ -96,6 +96,9 @@ export type CreateOrderInput = z.infer<typeof createOrderSchema>;
  * Accepts raw customerPhone; API hashes it server-side. Creator is set as assignee (no auto-dispatch).
  */
 export const createOfflineOrderSchema = z.object({
+  /** Back-link to an abandoned cart this order is recovering. When set the
+   *  service flips the cart to CONVERTED and copies the MB attribution. */
+  cartId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   mediaBuyerId: z.string().uuid().optional(),
   customerName: z.string().min(2, 'Customer name is required'),
@@ -271,6 +274,13 @@ export const listOrdersSchema = z
     productId: z.string().uuid().optional(),
     riderId: z.string().uuid().optional(),
     logisticsLocationId: z.string().uuid().optional(),
+    /**
+     * When true, returns only orders that were recovered from a dropped-off cart
+     * (i.e. `orders.cart_id IS NOT NULL`). Used by the `/admin/orders` "Recovered
+     * from cart" filter pill. When false or omitted, no filtering by cart origin.
+     * Migration 0142 added the back-link column + index.
+     */
+    fromCart: z.boolean().optional(),
     search: z.string().optional(),
     // Accept either `YYYY-MM-DD` (whole-day default) OR `YYYY-MM-DDTHH:MM[:SS]`
     // (precise moment from the time-aware DateFilterBar). API service detects the

@@ -3,6 +3,7 @@ import { router, authedProcedure, permissionProcedure } from '../trpc';
 import {
   stockIntakeSchema,
   stockTransferSchema,
+  stockTransferBatchSchema,
   verifyTransferSchema,
   approveTransferSchema,
   rejectTransferSchema,
@@ -19,6 +20,7 @@ import {
   listShipmentsSchema,
   getShipmentSchema,
   createWarehouseSchema,
+  updateWarehouseSchema,
   listWarehousesSchema,
 } from '@yannis/shared';
 import type { InventoryService } from '../../inventory/inventory.service';
@@ -148,6 +150,16 @@ export const inventoryRouter = router({
     }),
 
   /**
+   * Multi-product stock transfer — one source → one destination, N product
+   * lines, created atomically in a single transaction.
+   */
+  transferBatch: permissionProcedure('inventory.transfer')
+    .input(stockTransferBatchSchema)
+    .mutation(async ({ input, ctx }) => {
+      return getInventoryService().initiateTransferBatch(input, ctx.user);
+    }),
+
+  /**
    * Approve a PENDING transfer. Source authority only (gated by
    * `inventory.approveTransfer` permission AND a server-side
    * `canApproveSourceTransfer` check that compares the actor's role against
@@ -229,6 +241,38 @@ export const inventoryRouter = router({
   lowStockAlerts: permissionProcedure('inventory.lowStockAlerts')
     .query(async () => {
       return getInventoryService().getLowStockAlerts();
+    }),
+
+  /**
+   * List every active location alongside the per-location low-stock override
+   * and the resolved org-wide threshold. Surfaces zero-inventory locations
+   * too — drives the per-location alert editor on /admin/inventory.
+   */
+  locationLowStockThresholds: permissionProcedure('inventory.lowStockAlerts')
+    .query(async () => {
+      return getInventoryService().listLocationThresholds();
+    }),
+
+  /**
+   * Set (or clear) a location's per-location low-stock alert threshold.
+   * Passing `threshold: null` clears the override so the location inherits
+   * the org-wide threshold again. Admin-class only — gated by the
+   * `system_settings` write capability.
+   */
+  setLocationLowStockThreshold: permissionProcedure('settings.write')
+    .input(
+      z.object({
+        locationId: z.string().uuid(),
+        threshold: z.number().int().min(1).max(10000).nullable(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      await getInventoryService().setLocationLowStockThreshold(
+        input.locationId,
+        input.threshold,
+        ctx.user,
+      );
+      return { success: true };
     }),
 
   /**
@@ -411,6 +455,7 @@ export const inventoryRouter = router({
         displayLocations,
         systemSettings,
         lowStockAlerts,
+        locationThresholds,
         shipments,
         warehouses,
       ] = await Promise.all([
@@ -431,7 +476,13 @@ export const inventoryRouter = router({
         }),
         getLogisticsService().listLocationOptions({ status: 'ACTIVE' }),
         getSettingsService().getAll().catch(() => [] as unknown[]),
-        getInventoryService().getLowStockAlerts().catch(() => ({ threshold: 10, items: [] as unknown[] })),
+        getInventoryService().getLowStockAlerts().catch((err) => {
+          console.error('[inventoryAdminPageBundle] getLowStockAlerts failed:', err?.message ?? err);
+          return { threshold: 10, items: [] as unknown[] };
+        }),
+        getInventoryService()
+          .listLocationThresholds()
+          .catch(() => ({ globalThreshold: 10, locations: [] as Array<unknown> })),
         getShipmentsService()
           .listShipments(
             { page: 1, limit: input.shipmentsLimit },
@@ -452,6 +503,7 @@ export const inventoryRouter = router({
         displayLocations,
         systemSettings,
         lowStockAlerts,
+        locationThresholds,
         shipments,
         warehouses,
       };
@@ -555,6 +607,20 @@ export const inventoryRouter = router({
       .mutation(async ({ input, ctx }) => {
         return getLogisticsServiceForInventory().createWarehouse(
           { name: input.name, address: input.address, coordinates: input.coordinates },
+          ctx.user.id,
+        );
+      }),
+
+    update: permissionProcedure('inventory.warehouses.write')
+      .input(updateWarehouseSchema)
+      .mutation(async ({ input, ctx }) => {
+        return getLogisticsServiceForInventory().updateWarehouse(
+          {
+            warehouseId: input.warehouseId,
+            name: input.name,
+            address: input.address,
+            coordinates: input.coordinates,
+          },
           ctx.user.id,
         );
       }),

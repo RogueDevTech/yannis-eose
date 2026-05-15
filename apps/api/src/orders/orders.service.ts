@@ -387,38 +387,34 @@ export class OrdersService {
       permissionRequestKind: 'order_line_price',
     };
 
+    // Three independent recipient lookups — run them in one parallel wave
+    // instead of three sequential round-trips. The Set dedupes, so result
+    // ordering doesn't matter. Org-wide HoLogistics often has no primary_branch
+    // match to the order branch, so notify every active Head of Logistics.
     const recipientIds = new Set<string>();
-    const admins = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN'])));
-    for (const r of admins) {
-      if (r.id !== params.excludeUserId) recipientIds.add(r.id);
-    }
-
-    if (params.branchId) {
-      const heads = await this.db
+    const [admins, heads, hoLogistics] = await Promise.all([
+      this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.status, 'ACTIVE'),
-            inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
-            eq(schema.users.primaryBranchId, params.branchId),
-          ),
-        );
-      for (const r of heads) {
-        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
-      }
-    }
-
-    // Org-wide HoLogistics often has no primary_branch match to the order branch;
-    // notify every active Head of Logistics (multi-holder safe — Set dedupes).
-    const hoLogistics = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS')));
-    for (const r of hoLogistics) {
+        .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
+      params.branchId
+        ? this.db
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(
+              and(
+                eq(schema.users.status, 'ACTIVE'),
+                inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
+                eq(schema.users.primaryBranchId, params.branchId),
+              ),
+            )
+        : Promise.resolve([] as Array<{ id: string }>),
+      this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS'))),
+    ]);
+    for (const r of [...admins, ...heads, ...hoLogistics]) {
       if (r.id !== params.excludeUserId) recipientIds.add(r.id);
     }
 
@@ -449,36 +445,31 @@ export class OrdersService {
       permissionRequestKind: 'order_deletion',
     };
 
+    // Three independent recipient lookups in one parallel wave (Set dedupes).
     const recipientIds = new Set<string>();
-    const admins = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN'])));
-    for (const r of admins) {
-      if (r.id !== params.excludeUserId) recipientIds.add(r.id);
-    }
-
-    if (params.branchId) {
-      const heads = await this.db
+    const [admins, heads, hoLogisticsDeletion] = await Promise.all([
+      this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.status, 'ACTIVE'),
-            inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
-            eq(schema.users.primaryBranchId, params.branchId),
-          ),
-        );
-      for (const r of heads) {
-        if (r.id !== params.excludeUserId) recipientIds.add(r.id);
-      }
-    }
-
-    const hoLogisticsDeletion = await this.db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS')));
-    for (const r of hoLogisticsDeletion) {
+        .where(and(eq(schema.users.status, 'ACTIVE'), inArray(schema.users.role, ['SUPER_ADMIN', 'ADMIN']))),
+      params.branchId
+        ? this.db
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(
+              and(
+                eq(schema.users.status, 'ACTIVE'),
+                inArray(schema.users.role, ['HEAD_OF_CS', 'BRANCH_ADMIN']),
+                eq(schema.users.primaryBranchId, params.branchId),
+              ),
+            )
+        : Promise.resolve([] as Array<{ id: string }>),
+      this.db
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(and(eq(schema.users.status, 'ACTIVE'), eq(schema.users.role, 'HEAD_OF_LOGISTICS'))),
+    ]);
+    for (const r of [...admins, ...heads, ...hoLogisticsDeletion]) {
       if (r.id !== params.excludeUserId) recipientIds.add(r.id);
     }
 
@@ -968,6 +959,133 @@ export class OrdersService {
   }
 
   /**
+   * Campaign-scoped offer tiers for each product on an order. Powers the
+   * "select an offer" picker in the Adjust order items modal — picking a tier
+   * sets quantity + unit price together so a bundled discount applies instead
+   * of hand-editing the amount. Tier resolution mirrors the edge-form tamper
+   * gate (`assertEdgeFormLineItemsAllowlisted`): offer group → campaign-selected
+   * offer templates → embedded product offers → a single "Standard" base tier.
+   * Returns an empty tier list for products with no offers (UI falls back to
+   * manual "Custom" entry).
+   */
+  async listOrderItemOffers(orderId: string, actor: SessionUser) {
+    const [order] = await this.db
+      .select()
+      .from(schema.orders)
+      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .limit(1);
+    if (!order) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
+    }
+    this.assertActorMayViewOrderForRead(actor, order);
+
+    const itemRows = await this.db
+      .select({ productId: schema.orderItems.productId })
+      .from(schema.orderItems)
+      .where(eq(schema.orderItems.orderId, orderId));
+    const orderProductIds = [...new Set(itemRows.map((r) => r.productId))];
+    if (orderProductIds.length === 0) return [];
+
+    type Tier = { label: string; quantity: number; unitPrice: number };
+    const tiersByProduct = new Map<string, Tier[]>();
+
+    if (order.campaignId) {
+      const [camp] = await this.db
+        .select({
+          productIds: schema.campaigns.productIds,
+          formConfig: schema.campaigns.formConfig,
+          offerGroupId: schema.campaigns.offerGroupId,
+        })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.id, order.campaignId))
+        .limit(1);
+
+      if (camp?.offerGroupId) {
+        const rows = await this.db
+          .select({
+            productId: schema.offerGroupItems.productId,
+            label: schema.offerGroupItems.label,
+            price: schema.offerGroupItems.price,
+            quantity: schema.offerGroupItems.quantity,
+          })
+          .from(schema.offerGroupItems)
+          .where(
+            and(
+              eq(schema.offerGroupItems.offerGroupId, camp.offerGroupId),
+              eq(schema.offerGroupItems.status, 'ACTIVE'),
+            ),
+          );
+        for (const r of rows) {
+          const list = tiersByProduct.get(r.productId) ?? [];
+          list.push({ label: r.label, quantity: r.quantity ?? 1, unitPrice: Number(r.price) });
+          tiersByProduct.set(r.productId, list);
+        }
+      } else {
+        const campaignProductId = ((camp?.productIds ?? []) as string[])[0];
+        if (campaignProductId) {
+          const selectedIds = (
+            camp?.formConfig as { selectedOfferTemplateIds?: string[] } | null | undefined
+          )?.selectedOfferTemplateIds;
+          const tmplConds = [
+            eq(schema.offerTemplates.productId, campaignProductId),
+            eq(schema.offerTemplates.status, 'ACTIVE'),
+          ];
+          if (selectedIds?.length) {
+            tmplConds.push(inArray(schema.offerTemplates.id, selectedIds));
+          }
+          const templates = await this.db
+            .select({
+              name: schema.offerTemplates.name,
+              price: schema.offerTemplates.price,
+              quantity: schema.offerTemplates.quantity,
+            })
+            .from(schema.offerTemplates)
+            .where(and(...tmplConds));
+
+          let tiers: Tier[] = templates.map((t) => ({
+            label: t.name,
+            quantity: t.quantity ?? 1,
+            unitPrice: Number(t.price),
+          }));
+
+          if (tiers.length === 0) {
+            const [p] = await this.db
+              .select({
+                baseSalePrice: schema.products.baseSalePrice,
+                offers: schema.products.offers,
+              })
+              .from(schema.products)
+              .where(eq(schema.products.id, campaignProductId))
+              .limit(1);
+            const embedded = (p?.offers ?? []) as Array<{
+              label?: string;
+              qty?: number;
+              price?: string | number;
+            }>;
+            if (Array.isArray(embedded) && embedded.length > 0) {
+              tiers = embedded.map((o) => ({
+                label: typeof o.label === 'string' ? o.label : 'Offer',
+                quantity: typeof o.qty === 'number' && o.qty >= 1 ? o.qty : 1,
+                unitPrice: Number(o.price ?? p?.baseSalePrice ?? 0),
+              }));
+            } else if (p) {
+              tiers = [{ label: 'Standard', quantity: 1, unitPrice: Number(p.baseSalePrice) }];
+            }
+          }
+          if (tiers.length > 0) {
+            tiersByProduct.set(campaignProductId, tiers);
+          }
+        }
+      }
+    }
+
+    return orderProductIds.map((productId) => ({
+      productId,
+      offers: tiersByProduct.get(productId) ?? [],
+    }));
+  }
+
+  /**
    * Create a new order with status UNPROCESSED.
    * Called by Edge Worker or admin manual entry.
    * When paymentMethod is PAY_ONLINE, initializes Paystack and returns authorizationUrl for redirect.
@@ -1101,6 +1219,9 @@ export class OrdersService {
           customFields: orderInput.customFields ?? null,
           isDuplicate: duplicateFlag,
           duplicateOfId,
+          // Back-link to the originating cart so HoCS can filter "Recovered from
+          // cart" on /admin/cs/orders (migration 0142). NULL for direct orders.
+          cartId: cartId ?? null,
         })
         .returning();
       const created = rows[0];
@@ -1284,6 +1405,24 @@ export class OrdersService {
       });
     }
 
+    // When recovering from a cart, pull attribution (MB + campaign) from the
+    // cart row if the CS rep didn't explicitly set it on the modal.
+    if (input.cartId && (!input.campaignId || !input.mediaBuyerId)) {
+      const cartRows = await this.db
+        .select({
+          campaignId: schema.cartAbandonments.campaignId,
+          mediaBuyerId: schema.cartAbandonments.mediaBuyerId,
+        })
+        .from(schema.cartAbandonments)
+        .where(eq(schema.cartAbandonments.id, input.cartId))
+        .limit(1);
+      const cart = cartRows[0];
+      if (cart) {
+        if (!input.campaignId && cart.campaignId) input.campaignId = cart.campaignId;
+        if (!input.mediaBuyerId && cart.mediaBuyerId) input.mediaBuyerId = cart.mediaBuyerId;
+      }
+    }
+
     const branchId = await this.resolveBranchIdForNewOrder({
       campaignId: input.campaignId ?? null,
       mediaBuyerId: input.mediaBuyerId ?? null,
@@ -1333,6 +1472,9 @@ export class OrdersService {
           orderSource: 'offline',
           isDuplicate: offlineDuplicateFlag,
           duplicateOfId: offlineDuplicateOfId,
+          // Back-link to the cart when this offline order was created from a
+          // recovered cart (Assign-from-Modal flow). NULL for direct offline orders.
+          cartId: input.cartId ?? null,
         })
         .returning();
 
@@ -1352,6 +1494,11 @@ export class OrdersService {
       );
       return created;
     });
+
+    // If recovered from a cart, flip the cart row to CONVERTED + link.
+    if (input.cartId) {
+      this.cartService.convert(input.cartId, order.id, actorId).catch(() => {});
+    }
 
     this.events.emitNewOrder({
       orderId: order.id,
@@ -1518,36 +1665,6 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
-    // Get order items with product name
-    const itemRows = await this.db
-      .select({
-        id: schema.orderItems.id,
-        orderId: schema.orderItems.orderId,
-        productId: schema.orderItems.productId,
-        quantity: schema.orderItems.quantity,
-        unitPrice: schema.orderItems.unitPrice,
-        productName: schema.products.name,
-      })
-      .from(schema.orderItems)
-      .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
-      .where(eq(schema.orderItems.orderId, orderId));
-
-    const items = itemRows.map((row) => ({
-      id: row.id,
-      orderId: row.orderId,
-      productId: row.productId,
-      quantity: row.quantity,
-      unitPrice: row.unitPrice,
-      productName: row.productName ?? null,
-    }));
-
-    // Get call logs
-    const calls = await this.db
-      .select()
-      .from(schema.callLogs)
-      .where(eq(schema.callLogs.orderId, orderId))
-      .orderBy(desc(schema.callLogs.startedAt));
-
     // Get allowed next statuses for UI button state
     const allowedTransitions = getAllowedNextStatuses(order.status as OrderStatus);
 
@@ -1560,7 +1677,28 @@ export class OrdersService {
     ].filter((id): id is string => Boolean(id));
     const uniqueUserIds = [...new Set(userIds)];
 
-    const [userRows, campaignRow, providerRow, locationRow] = await Promise.all([
+    // One parallel wave. Order items + call logs are keyed only on `orderId`
+    // and independent of the name-resolution queries, so they run alongside
+    // them rather than as two extra sequential round-trips beforehand.
+    const [itemRows, calls, userRows, campaignRow, providerRow, locationRow] = await Promise.all([
+      this.db
+        .select({
+          id: schema.orderItems.id,
+          orderId: schema.orderItems.orderId,
+          productId: schema.orderItems.productId,
+          quantity: schema.orderItems.quantity,
+          unitPrice: schema.orderItems.unitPrice,
+          offerLabel: schema.orderItems.offerLabel,
+          productName: schema.products.name,
+        })
+        .from(schema.orderItems)
+        .leftJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+        .where(eq(schema.orderItems.orderId, orderId)),
+      this.db
+        .select()
+        .from(schema.callLogs)
+        .where(eq(schema.callLogs.orderId, orderId))
+        .orderBy(desc(schema.callLogs.startedAt)),
       uniqueUserIds.length > 0
         ? this.db
             .select({ id: schema.users.id, name: schema.users.name })
@@ -1593,6 +1731,16 @@ export class OrdersService {
             .limit(1)
         : Promise.resolve([]),
     ]);
+
+    const items = itemRows.map((row) => ({
+      id: row.id,
+      orderId: row.orderId,
+      productId: row.productId,
+      quantity: row.quantity,
+      unitPrice: row.unitPrice,
+      offerLabel: row.offerLabel ?? null,
+      productName: row.productName ?? null,
+    }));
 
     const userNames = new Map(userRows.map((r) => [r.id, r.name]));
     const assignedCsName = order.assignedCsId ? userNames.get(order.assignedCsId) ?? null : null;
@@ -2120,6 +2268,12 @@ export class OrdersService {
     }
     if (input.logisticsLocationId) {
       conditions.push(eq(schema.orders.logisticsLocationId, input.logisticsLocationId));
+    }
+    if (input.fromCart) {
+      // Recovered-from-cart filter — orders.cart_id back-link populated when
+      // the order was created from an abandoned/converted cart. Index lives on
+      // the partial index `orders_cart_id_idx` (migration 0142).
+      conditions.push(sql`${schema.orders.cartId} IS NOT NULL`);
     }
     if (input.search) {
       const trimmed = input.search.trim();

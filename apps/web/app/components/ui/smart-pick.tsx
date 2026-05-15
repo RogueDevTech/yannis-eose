@@ -147,6 +147,7 @@ export function SmartPick({
             min={1}
             max={total || undefined}
             value={customValue}
+            commitOnChange
             onValueChange={(value) => {
               setCustomValue(value);
               setLastPicked('custom');

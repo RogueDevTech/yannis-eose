@@ -40,6 +40,12 @@ export const logisticsLocations = pgTable('logistics_locations', {
    * copy + open pattern is the best one-click UX available.
    */
   whatsappGroupLink: text('whatsapp_group_link'),
+  /**
+   * Per-location low-stock alert threshold (units). NULL = inherit the org-wide
+   * threshold (`system_settings.INVENTORY_LOW_STOCK_CONFIG.threshold`). Effective
+   * threshold for any (product, location) = COALESCE(this, global).
+   */
+  lowStockThreshold: integer('low_stock_threshold'),
   status: recordStatusEnum('status').default('ACTIVE').notNull(),
   ...temporalColumns,
   ...timestampColumns,

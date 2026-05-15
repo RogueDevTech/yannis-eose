@@ -87,8 +87,26 @@ interface OrderCreatePayload {
   customFields?: Record<string, CustomFieldValue>;
 }
 
+/**
+ * Progressive form-field capture shared by `CartFormData` and `CartSavePayload`.
+ * Every field is optional — Edge debounces saves as the customer types, so any
+ * given payload may only carry a subset of the form. The API merges field-by-field.
+ */
+interface ProgressiveCartFields {
+  customerEmail?: string;
+  customerAddress?: string;
+  deliveryAddress?: string;
+  deliveryState?: string;
+  deliveryNotes?: string;
+  customerGender?: string;
+  preferredDeliveryDate?: string;
+  paymentMethod?: string;
+  quantity?: number;
+  customFieldValues?: Record<string, CustomFieldValue>;
+}
+
 /** Validated cart form data (has raw customerPhone from form) */
-interface CartFormData {
+interface CartFormData extends ProgressiveCartFields {
   campaignId: string;
   mediaBuyerId?: string;
   customerName: string;
@@ -97,7 +115,7 @@ interface CartFormData {
   offerLabel?: string;
 }
 
-interface CartSavePayload {
+interface CartSavePayload extends ProgressiveCartFields {
   campaignId: string;
   mediaBuyerId?: string;
   customerName: string;
@@ -930,30 +948,90 @@ function getFormScript(
         // but a malformed phone produces a visible network error otherwise.
         if (!isValidNgPhone(phoneEl.value)) return;
         if (!isOnline) return;
+        // Helper: read a field by name, return trimmed value or undefined if blank.
+        function fv(name) {
+          var el = form.querySelector('[name="' + name + '"]');
+          if (!el) return undefined;
+          var v = (el.value || '').trim();
+          return v.length > 0 ? v : undefined;
+        }
+        // Custom form-builder fields are rendered with [data-custom-field="<id>"].
+        function readCustomFieldValues() {
+          var els = form.querySelectorAll('[data-custom-field]');
+          if (!els || els.length === 0) return undefined;
+          var out = {};
+          var count = 0;
+          for (var i = 0; i < els.length; i++) {
+            var el = els[i];
+            var key = el.getAttribute('data-custom-field');
+            if (!key) continue;
+            var val;
+            if (el.type === 'checkbox') {
+              val = !!el.checked;
+            } else {
+              val = (el.value || '').trim();
+              if (val.length === 0) continue;
+            }
+            out[key] = val;
+            count++;
+          }
+          return count > 0 ? out : undefined;
+        }
         clearTimeout(cartSaveTimeout);
         cartSaveTimeout = setTimeout(function() {
+          var payload = {
+            campaignId: '${campaignId}',
+            mediaBuyerId: ${mediaBuyerIdJson},
+            customerName: name,
+            customerPhone: phoneEl.value,
+            productId: selectedProduct,
+            offerLabel: selectedOffer.label
+          };
+          // Progressive capture — only include fields that have a value right now.
+          // API merges field-by-field, so a missing value never wipes earlier capture.
+          var addr = fv('customerAddress');
+          if (addr) payload.customerAddress = addr;
+          var delAddr = fv('deliveryAddress');
+          if (delAddr) payload.deliveryAddress = delAddr;
+          var delState = fv('deliveryState');
+          if (delState) payload.deliveryState = delState;
+          var delNotes = fv('deliveryNotes');
+          if (delNotes) payload.deliveryNotes = delNotes;
+          var gender = fv('customerGender');
+          if (gender) payload.customerGender = gender;
+          var prefDate = fv('preferredDeliveryDate');
+          if (prefDate) payload.preferredDeliveryDate = prefDate;
+          var payMethod = fv('paymentMethod');
+          if (payMethod) payload.paymentMethod = payMethod;
+          var email = fv('customerEmail');
+          if (email) payload.customerEmail = email;
+          var qtyRaw = fv('quantity');
+          if (qtyRaw) {
+            var qty = parseInt(qtyRaw, 10);
+            if (qty > 0) payload.quantity = qty;
+          }
+          var cfv = readCustomFieldValues();
+          if (cfv) payload.customFieldValues = cfv;
           fetch('${workerUrl}/cart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              campaignId: '${campaignId}',
-              mediaBuyerId: ${mediaBuyerIdJson},
-              customerName: name,
-              customerPhone: phoneEl.value,
-              productId: selectedProduct,
-              offerLabel: selectedOffer.label
-            })
+            body: JSON.stringify(payload)
           }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.id) savedCartId = d.id;
           }).catch(function() {});
         }, CART_DEBOUNCE_MS);
       }
-      var nameInput = form.querySelector('#customerName') || form.querySelector('[name="customerName"]');
+      // Trigger save on input/blur for every field the form might collect —
+      // address, state, email, etc. — not just name/phone. The function gates
+      // on name + valid phone before issuing a request, so empty progressive
+      // fields are harmless. Use event delegation on the form so dynamically
+      // rendered fields (custom builder fields) are covered automatically.
+      form.addEventListener('input', maybeSaveCart);
+      form.addEventListener('blur', maybeSaveCart, true);
+      // `phoneInput` is still consumed by the phone validation + sanitizer block
+      // below — keep the local handle even though save listening is delegated to
+      // the form element above.
       var phoneInput = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
-      if (nameInput) nameInput.addEventListener('input', maybeSaveCart);
-      if (nameInput) nameInput.addEventListener('blur', maybeSaveCart);
-      if (phoneInput) phoneInput.addEventListener('input', maybeSaveCart);
-      if (phoneInput) phoneInput.addEventListener('blur', maybeSaveCart);
 
       // Inline phone validation — show a friendly error below the input on blur
       // if the value is filled but invalid. Cleared on input.
@@ -1894,6 +1972,26 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
     return { valid: false, error: 'Product ID is required' };
   }
 
+  const strField = (key: string): string | undefined => {
+    const v = b[key];
+    if (typeof v !== 'string') return undefined;
+    const t = v.trim();
+    return t.length > 0 ? t : undefined;
+  };
+  const numField = (key: string): number | undefined => {
+    const v = b[key];
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return Math.floor(v);
+    if (typeof v === 'string' && v.trim().length > 0) {
+      const n = Number.parseInt(v, 10);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    }
+    return undefined;
+  };
+  const cfv =
+    b['customFieldValues'] && typeof b['customFieldValues'] === 'object' && !Array.isArray(b['customFieldValues'])
+      ? (b['customFieldValues'] as Record<string, CustomFieldValue>)
+      : undefined;
+
   return {
     valid: true,
     data: {
@@ -1903,6 +2001,16 @@ function validateCart(body: unknown): { valid: true; data: CartFormData } | { va
       customerPhone: b['customerPhone'] as string,
       productId: b['productId'] as string,
       offerLabel: typeof b['offerLabel'] === 'string' ? b['offerLabel'] : undefined,
+      customerEmail: strField('customerEmail'),
+      customerAddress: strField('customerAddress'),
+      deliveryAddress: strField('deliveryAddress'),
+      deliveryState: strField('deliveryState'),
+      deliveryNotes: strField('deliveryNotes'),
+      customerGender: strField('customerGender'),
+      preferredDeliveryDate: strField('preferredDeliveryDate'),
+      paymentMethod: strField('paymentMethod'),
+      quantity: numField('quantity'),
+      customFieldValues: cfv && Object.keys(cfv).length > 0 ? cfv : undefined,
     },
   };
 }
@@ -1931,6 +2039,16 @@ async function handleCart(request: Request, env: Env): Promise<Response> {
     customerPhone: data.customerPhone,
     productId: data.productId,
     offerLabel: data.offerLabel,
+    customerEmail: data.customerEmail,
+    customerAddress: data.customerAddress,
+    deliveryAddress: data.deliveryAddress,
+    deliveryState: data.deliveryState,
+    deliveryNotes: data.deliveryNotes,
+    customerGender: data.customerGender,
+    preferredDeliveryDate: data.preferredDeliveryDate,
+    paymentMethod: data.paymentMethod,
+    quantity: data.quantity,
+    customFieldValues: data.customFieldValues,
   };
 
   const result = await forwardCartToApi(payload, env);

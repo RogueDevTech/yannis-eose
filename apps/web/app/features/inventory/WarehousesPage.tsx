@@ -4,6 +4,11 @@ import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
+import {
+  useOptimisticListPatches,
+  applyOptimisticPatches,
+  isOptimisticPatched,
+} from '~/hooks/useOptimisticListPatches';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Button } from '~/components/ui/button';
 import { Card, CardBody, CardFooter, StatCard } from '~/components/ui/card';
@@ -93,19 +98,28 @@ export function WarehousesPage({
   const [address, setAddress] = useState('');
   const [coordinates, setCoordinates] = useState('');
 
+  // Edit modal — `editTarget` is the warehouse row being edited (null = closed).
+  const [editTarget, setEditTarget] = useState<WarehouseRow | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editCoordinates, setEditCoordinates] = useState('');
+
   useFetcherToast(fetcher.data, {
     successMessage: 'Warehouse saved',
-    skipErrorToast: showCreate,
+    skipErrorToast: showCreate || editTarget !== null,
   });
 
   const isCreating =
     fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'createWarehouse';
+  const isUpdating =
+    fetcher.state !== 'idle' && fetcher.formData?.get('intent') === 'updateWarehouse';
 
   useCloseOnFetcherSuccess(fetcher, () => {
     setShowCreate(false);
     setName('');
     setAddress('');
     setCoordinates('');
+    setEditTarget(null);
   });
 
   const optimisticWarehouses = useOptimisticListMerge<WarehouseRow>(fetcher, (fd, intent) => {
@@ -129,8 +143,32 @@ export function WarehousesPage({
     ];
   });
 
-  const display = [...optimisticWarehouses, ...warehouses];
+  const warehousePatches = useOptimisticListPatches<WarehouseRow>(fetcher, (fd, intent) => {
+    if (intent !== 'updateWarehouse') return null;
+    const id = fd.get('warehouseId')?.toString();
+    if (!id) return null;
+    const draftName = fd.get('name')?.toString().trim();
+    const draftAddress = fd.get('address')?.toString().trim();
+    if (!draftName || !draftAddress) return null;
+    return [
+      {
+        id,
+        patch: {
+          name: draftName,
+          address: draftAddress,
+          coordinates: fd.get('coordinates')?.toString().trim() || null,
+        },
+      },
+    ];
+  });
+
+  const display = applyOptimisticPatches(
+    [...optimisticWarehouses, ...warehouses],
+    warehousePatches,
+  );
   const ready = name.trim().length >= 2 && address.trim().length >= 2;
+  const editReady =
+    editName.trim().length >= 2 && editAddress.trim().length >= 2;
 
   const submit = () => {
     if (!ready) return;
@@ -139,6 +177,24 @@ export function WarehousesPage({
     fd.set('name', name.trim());
     fd.set('address', address.trim());
     fd.set('coordinates', coordinates.trim());
+    fetcher.submit(fd, { method: 'post', action: '/admin/inventory/warehouses' });
+  };
+
+  const openEdit = (w: WarehouseRow) => {
+    setEditTarget(w);
+    setEditName(w.name);
+    setEditAddress(w.address);
+    setEditCoordinates(w.coordinates ?? '');
+  };
+
+  const submitEdit = () => {
+    if (!editTarget || !editReady) return;
+    const fd = new FormData();
+    fd.set('intent', 'updateWarehouse');
+    fd.set('warehouseId', editTarget.id);
+    fd.set('name', editName.trim());
+    fd.set('address', editAddress.trim());
+    fd.set('coordinates', editCoordinates.trim());
     fetcher.submit(fd, { method: 'post', action: '/admin/inventory/warehouses' });
   };
 
@@ -213,6 +269,15 @@ export function WarehousesPage({
           </div>
         ) : (
           <div className="inline-flex items-center justify-end gap-1.5">
+            {canManage ? (
+              <TableActionButton
+                variant="neutral"
+                onClick={() => openEdit(w)}
+                disabled={isOptimisticPatched(warehousePatches, w.id)}
+              >
+                Edit
+              </TableActionButton>
+            ) : null}
             <TableActionButton to={`/admin/inventory?locationId=${w.id}`} variant="primary">
               View stock
             </TableActionButton>
@@ -400,7 +465,11 @@ export function WarehousesPage({
                 columns={columns}
                 rows={display}
                 rowKey={(r) => r.id}
-                rowClassName={(w) => (isOptimisticId(w.id) ? 'opacity-60' : '')}
+                rowClassName={(w) =>
+                  isOptimisticId(w.id) || isOptimisticPatched(warehousePatches, w.id)
+                    ? 'opacity-60'
+                    : ''
+                }
                 emptyTitle="No warehouses match your filter"
               />
             )}
@@ -475,6 +544,68 @@ export function WarehousesPage({
               onClick={submit}
             >
               Add warehouse
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={editTarget !== null}
+        onClose={() => {
+          if (isUpdating) return;
+          setEditTarget(null);
+        }}
+        aria-labelledby="edit-warehouse-title"
+      >
+        <div className="space-y-3 p-5">
+          <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('updateWarehouse')} />
+          <h3 id="edit-warehouse-title" className="text-base font-semibold text-app-fg">
+            Edit warehouse
+          </h3>
+          <p className="text-sm text-app-fg-muted">
+            Update the name, address, or coordinates of this company-owned warehouse.
+          </p>
+          <FormField label="Name" hint="e.g. Lagos main warehouse">
+            <TextInput
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              maxLength={160}
+              autoFocus
+            />
+          </FormField>
+          <FormField label="Address" hint="Street, area, city, state">
+            <Textarea
+              value={editAddress}
+              onChange={(e) => setEditAddress(e.target.value)}
+              maxLength={500}
+              rows={2}
+            />
+          </FormField>
+          <FormField label="Coordinates" hint="Optional — lat,lng">
+            <TextInput
+              value={editCoordinates}
+              onChange={(e) => setEditCoordinates(e.target.value)}
+              maxLength={100}
+              placeholder="6.5244, 3.3792"
+            />
+          </FormField>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setEditTarget(null)}
+              disabled={isUpdating}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              loading={isUpdating}
+              disabled={!editReady}
+              onClick={submitEdit}
+            >
+              Save changes
             </Button>
           </div>
         </div>

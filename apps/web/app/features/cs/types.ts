@@ -108,10 +108,32 @@ export interface PendingCart {
   id: string;
   customerName: string;
   customerPhoneDisplay: string;
+  /**
+   * Raw customer phone — populated only for ABANDONED carts when the caller has
+   * `cart.delete` permission (or SUPER_ADMIN). Used by the abandoned-cart detail
+   * modal to render dialable contact details without a per-card reveal round-trip.
+   * Always null for PENDING carts and for callers without reveal authority.
+   * CEO directive 2026-05-08, Pillar 2 still applies — UI must not render this in
+   * lists, only in the detail modal opened by an authorized actor.
+   */
+  customerPhone?: string | null;
+  productId?: string | null;
   productName: string | null;
   campaignName: string | null;
   offerLabel: string | null;
   updatedAt: string;
+  // Progressive form-field capture (migration 0142). All optional — a dropped
+  // cart may carry any subset of these depending on how far the customer got.
+  customerEmail?: string | null;
+  customerAddress?: string | null;
+  deliveryAddress?: string | null;
+  deliveryState?: string | null;
+  deliveryNotes?: string | null;
+  customerGender?: string | null;
+  preferredDeliveryDate?: string | null;
+  paymentMethod?: string | null;
+  quantity?: number | null;
+  customFieldValues?: Record<string, unknown> | null;
 }
 
 /** Pagination meta for `cart.listAbandoned` (CS abandoned tab + cart resource loader). */

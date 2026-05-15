@@ -247,48 +247,6 @@ const navStructure: NavGroupDef[] = [
     ],
   },
   {
-    group: 'Finance',
-    items: [
-      {
-        label: 'Finance',
-        href: '/admin/finance/overview',
-        icon: SidebarIcons.finance,
-        permission: 'finance.read',
-      },
-      {
-        label: 'Cash remittance',
-        href: '/admin/finance/delivery-remittances',
-        icon: SidebarIcons.remittances,
-        permission: 'finance.read',
-      },
-      {
-        label: 'Payout',
-        href: '/admin/finance/payout',
-        icon: SidebarIcons.finance,
-        permission: 'finance.read',
-      },
-      {
-        label: 'Disbursements',
-        href: '/admin/finance/disbursements',
-        icon: SidebarIcons.disbursements,
-        permission: 'finance.disburse',
-      },
-      {
-        // Sidebar gate is OR(permission, roles). Listing `permission: 'users.read'`
-        // here let HoM in (they hold `users.read` for team management).
-        // CEO directive 2026-05-10: HoM does NOT manage staff accounts.
-        // Roles-only restricts to HR_MANAGER + FINANCE_OFFICER (+ admin-class
-        // via `navBypass`). The page itself is also gated by
-        // `requireStaffAccountsAccess` so an unauthorized user typing the URL
-        // is redirected anyway.
-        label: 'Staff Accounts',
-        href: '/admin/finance/staff-accounts',
-        icon: SidebarIcons.users,
-        roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
-      },
-    ],
-  },
-  {
     group: 'Stock Management',
     items: [
       {
@@ -337,6 +295,48 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/categories',
         icon: SidebarIcons.categories,
         permission: 'categories.read',
+      },
+    ],
+  },
+  {
+    group: 'Finance',
+    items: [
+      {
+        label: 'Finance',
+        href: '/admin/finance/overview',
+        icon: SidebarIcons.finance,
+        permission: 'finance.read',
+      },
+      {
+        label: 'Cash remittance',
+        href: '/admin/finance/delivery-remittances',
+        icon: SidebarIcons.remittances,
+        permission: 'finance.read',
+      },
+      {
+        label: 'Payout',
+        href: '/admin/finance/payout',
+        icon: SidebarIcons.finance,
+        permission: 'finance.read',
+      },
+      {
+        label: 'Disbursements',
+        href: '/admin/finance/disbursements',
+        icon: SidebarIcons.disbursements,
+        permission: 'finance.disburse',
+      },
+      {
+        // Sidebar gate is OR(permission, roles). Listing `permission: 'users.read'`
+        // here let HoM in (they hold `users.read` for team management).
+        // CEO directive 2026-05-10: HoM does NOT manage staff accounts.
+        // Roles-only restricts to HR_MANAGER + FINANCE_OFFICER (+ admin-class
+        // via `navBypass`). The page itself is also gated by
+        // `requireStaffAccountsAccess` so an unauthorized user typing the URL
+        // is redirected anyway.
+        label: 'Staff Accounts',
+        href: '/admin/finance/staff-accounts',
+        icon: SidebarIcons.users,
+        roles: ['HR_MANAGER', 'FINANCE_OFFICER'],
       },
     ],
   },

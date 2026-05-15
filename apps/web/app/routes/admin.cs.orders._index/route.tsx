@@ -27,8 +27,10 @@ import { STATUS_OPTIONS } from '~/features/shared/order-status';
 // Bookmarked URLs targeting a status outside this set — e.g.
 // `?status=DISPATCHED` from the old long dropdown — redirect to the unfiltered
 // list so the page stays consistent with what the dropdown can actually pick.
+// REMITTED is dropped here too: cash remittance is accountant-led; CS surfaces
+// shouldn't filter by it, and a stale `?status=REMITTED` bookmark should bounce.
 const CS_ORDERS_VISIBLE_STATUSES = new Set(
-  STATUS_OPTIONS.filter((s) => s !== 'ALL'),
+  STATUS_OPTIONS.filter((s) => s !== 'ALL' && s !== 'REMITTED'),
 );
 export const meta: MetaFunction = () => [
   { title: 'CS Orders — Yannis EOSE' },
@@ -161,12 +163,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
     (scheduleKind === 'delivery_on_day' && !!scheduleDate) ||
     (scheduleKind === 'callback_on_day' && !!scheduleDate);
 
+  // HoCS-only "Recovered from cart" pill — toggles `fromCart` on the API list.
+  // CS_CLOSER never sees the option in the UI, but enforce here so a hand-crafted
+  // URL doesn't widen scope. Note: filtering down to `cart_id IS NOT NULL`
+  // happens server-side via the partial index added in migration 0142.
+  const fromCartParam = url.searchParams.get('fromCart') === '1';
+  const canFilterFromCart =
+    user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const fromCart = fromCartParam && canFilterFromCart;
+
   const listInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
     status: status || undefined,
     search: search || undefined,
     ...(assignedCsId && { assignedCsId }),
+    ...(fromCart && { fromCart: true }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -392,6 +404,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: {
         customerName,
         customerPhone,
+        cartId: form.get('cartId')?.toString()?.trim() || undefined,
         customerAddress: form.get('customerAddress')?.toString()?.trim() || undefined,
         deliveryAddress: form.get('deliveryAddress')?.toString()?.trim() || undefined,
         deliveryNotes: form.get('deliveryNotes')?.toString()?.trim() || undefined,
@@ -573,8 +586,50 @@ export default function CSOrdersRoute() {
   };
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
+  // HoCS / Admin / SuperAdmin can both (a) filter the list to recovered-from-cart
+  // orders and (b) jump straight to the abandoned-cart view on the live queue.
+  // CS_CLOSER never sees either control (filter is also enforced server-side).
+  const isHoCSPlus =
+    userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
+  // Active filter state is read from the URL so refresh + back-button keep it.
+  const fromCartActive =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('fromCart') === '1';
   return (
+    <>
+      {isHoCSPlus && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-app-border bg-app-elevated px-3 py-2 text-sm">
+          <span className="text-app-fg-muted">
+            {fromCartActive
+              ? 'Showing only orders recovered from a dropped-off cart.'
+              : 'Filter to orders recovered from cart abandonment, or jump to the live recovery queue.'}
+          </span>
+          <div className="flex items-center gap-3 shrink-0">
+            {fromCartActive ? (
+              <a
+                href="?"
+                className="text-xs font-semibold text-app-fg-muted hover:text-app-fg hover:underline"
+              >
+                Clear filter
+              </a>
+            ) : (
+              <a
+                href="?fromCart=1"
+                className="text-xs font-semibold text-brand-700 dark:text-brand-300 hover:underline"
+              >
+                Show recovered orders
+              </a>
+            )}
+            <a
+              href="/admin/cs/queue?tab=abandoned"
+              className="text-xs font-semibold text-app-fg-muted hover:text-app-fg hover:underline"
+            >
+              Open recovery queue →
+            </a>
+          </div>
+        </div>
+      )}
     <CachedAwait
       resolve={pageData}
       fallback={
@@ -597,8 +652,10 @@ export default function CSOrdersRoute() {
           statusCounts={{}}
           userRole={userRole}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
+          excludeStatuses={['REMITTED']}
         />
       )}
     </CachedAwait>
+    </>
   );
 }

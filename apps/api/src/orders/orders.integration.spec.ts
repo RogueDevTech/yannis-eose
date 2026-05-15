@@ -20,6 +20,7 @@ import {
   insertTestBranchTeam,
 } from '../test/factories/order.factory';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { createFakeCacheService } from '../test/fake-cache';
 import { isTransitionAllowed } from './order-state-machine';
 import { OrdersService } from './orders.service';
 
@@ -50,7 +51,7 @@ function createOrdersServiceForTest(dbRef: any, overrides?: { settingsService?: 
     {} as any,
     {} as any,
     {} as any,
-    new BranchTeamsService(dbRef as any),
+    new BranchTeamsService(dbRef as any, createFakeCacheService()),
     {} as any,
     stubCsOrderRouting as any,
   );
@@ -125,7 +126,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       {} as any,
-      new BranchTeamsService(db as any),
+      new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
     );
@@ -638,7 +639,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       {} as any,
-      new BranchTeamsService(db as any),
+      new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
     );
@@ -683,7 +684,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       {} as any,
-      new BranchTeamsService(db as any),
+      new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
     );
@@ -715,7 +716,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       {} as any,
-      new BranchTeamsService(db as any),
+      new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
     );
@@ -744,7 +745,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       {} as any,
-      new BranchTeamsService(db as any),
+      new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
     );
@@ -780,7 +781,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       {} as any,
       {} as any,
       {} as any,
-      new BranchTeamsService(db as any),
+      new BranchTeamsService(db as any, createFakeCacheService()),
       {} as any,
       stubCsOrderRouting as any,
     );

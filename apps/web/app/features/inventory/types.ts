@@ -99,8 +99,8 @@ export interface WarehouseRowLite {
 /** Streaming loader shape — movements arrive as a deferred promise */
 export interface InventoryStreamData {
   levels: InventoryLevel[];
-  /** Sum of stock/reserved across all rows matching current filters (not just this page). */
-  levelsTotals?: { totalStock: number; totalReserved: number };
+  /** Sum of stock/reserved/delivered across all rows matching current filters (not just this page). */
+  levelsTotals?: { totalStock: number; totalReserved: number; totalDelivered: number };
   totalLevels: number;
   /** Server-side pagination state for the Stock Levels tab. */
   levelsPage?: number;
@@ -146,6 +146,12 @@ export interface InventoryStreamData {
   canEditLowStock?: boolean;
   /** Low-stock items currently below threshold — drives the inline banner. Streamed. */
   lowStockAlerts?: Promise<LowStockAlertsResult> | LowStockAlertsResult;
+  /**
+   * Every active location with its per-location low-stock override (or NULL to
+   * inherit the org-wide threshold). Includes zero-inventory locations so admins
+   * can pre-set alerts before stock arrives.
+   */
+  locationThresholds?: LocationLowStockThreshold[];
   /** Lightweight shipment labels for the stock-level `shipmentId` filter. */
   shipmentOptions?: ShipmentFilterOption[];
   /** Inhouse warehouses summary list (so warehouse stock is visible on /admin/inventory). */
@@ -168,7 +174,8 @@ export interface InventoryStreamData {
 
 export interface LowStockAlertItem {
   levelId: string;
-  productId: string;
+  /** null for locations that have never received any stock. */
+  productId: string | null;
   productName: string;
   locationId: string;
   locationName: string;
@@ -180,6 +187,20 @@ export interface LowStockAlertItem {
 export interface LowStockAlertsResult {
   threshold: number;
   items: LowStockAlertItem[];
+}
+
+/**
+ * Per-location low-stock alert configuration. `lowStockThreshold` is the
+ * location-specific override (NULL = inherit org-wide). `effectiveThreshold`
+ * is what the alert engine actually uses for this location right now.
+ */
+export interface LocationLowStockThreshold {
+  id: string;
+  name: string;
+  providerName: string | null;
+  providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null;
+  lowStockThreshold: number | null;
+  effectiveThreshold: number;
 }
 
 /* ── Transfer & Returns types (for combined TPL inventory view) ── */

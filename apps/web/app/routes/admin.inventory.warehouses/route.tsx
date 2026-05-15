@@ -180,6 +180,32 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'updateWarehouse') {
+    await requirePermission(request, 'inventory.warehouses.write');
+    const warehouseId = fd.get('warehouseId')?.toString().trim() ?? '';
+    const name = fd.get('name')?.toString().trim() ?? '';
+    const address = fd.get('address')?.toString().trim() ?? '';
+    const coordinates = fd.get('coordinates')?.toString().trim() ?? '';
+    if (!warehouseId) {
+      return json({ error: 'Missing warehouse id.' }, { status: 400 });
+    }
+    if (name.length < 2 || address.length < 2) {
+      return json({ error: 'Name and address are required.' }, { status: 400 });
+    }
+    const res = await apiRequest<unknown>('/trpc/inventory.warehouses.update', {
+      method: 'POST',
+      cookie,
+      body: { warehouseId, name, address, coordinates },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update warehouse') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   return json({ error: 'Unknown intent' }, { status: 400 });
 }
 
@@ -198,6 +224,8 @@ export default function WarehousesRoute() {
             limit={data.limit}
             totalPages={data.totalPages}
             search={data.search}
+            sortBy={data.sortBy}
+            sortDir={data.sortDir}
             canManage={data.canManage}
             overview={data.overview}
           />

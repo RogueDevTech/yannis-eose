@@ -417,8 +417,8 @@ export function DeliveryRemittanceDetailPage({
         )}
       </div>
 
-      <div className="rounded-xl border border-app-border bg-app-elevated p-0 overflow-hidden shadow-sm">
-        <div className="px-5 py-4 border-b border-app-border">
+      <div className="space-y-2">
+        <div className="px-1">
           <h2 className="text-base font-semibold text-app-fg">Orders in this batch</h2>
           <p className="text-sm text-app-fg-muted mt-0.5">{detail.orders.length} linked order(s)</p>
         </div>
@@ -427,9 +427,54 @@ export function DeliveryRemittanceDetailPage({
           columns={orderColumns}
           rows={detail.orders}
           rowKey={(o) => o.id}
-          withCard={false}
-          className="min-w-[880px]"
           emptyTitle="No orders on this remittance"
+          renderMobileCard={(o) => (
+            <div className="space-y-1.5">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-app-fg truncate" title={o.customerName}>
+                    {o.customerName}
+                  </p>
+                  <OrderIdBadge id={o.id} ellipsis="" textClassName="font-mono text-[11px] text-app-fg-muted" />
+                </div>
+                <div className="shrink-0 text-right">
+                  {o.totalAmount != null ? (
+                    <NairaPrice
+                      amount={Number(o.totalAmount)}
+                      className="text-sm font-semibold text-app-fg tabular-nums"
+                    />
+                  ) : (
+                    <span className="text-sm text-app-fg-muted">—</span>
+                  )}
+                  <p className="text-[11px] text-app-fg-muted">
+                    {o.deliveredAt
+                      ? new Date(o.deliveredAt).toLocaleDateString('en-NG', {
+                          month: 'short',
+                          day: 'numeric',
+                        })
+                      : '—'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <OrderStatusBadge status={o.status} showDot={false} className="!text-xs" />
+                <div className="flex items-center gap-1.5">
+                  {o.invoice ? (
+                    <TableActionButton
+                      variant="neutral"
+                      title="View invoice"
+                      onClick={() => setInvoicePreview(o.invoice)}
+                    >
+                      Invoice
+                    </TableActionButton>
+                  ) : null}
+                  <TableActionButton to={`/admin/orders/${o.id}`} variant="primary">
+                    View
+                  </TableActionButton>
+                </div>
+              </div>
+            </div>
+          )}
         />
       </div>
 

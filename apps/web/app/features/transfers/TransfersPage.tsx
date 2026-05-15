@@ -82,7 +82,12 @@ export function TransfersPage({
   const [rejectTarget, setRejectTarget] = useState<Transfer | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectInlineError, setRejectInlineError] = useState<string | null>(null);
-  const [selectedProductId, setSelectedProductId] = useState('');
+  // Multi-product transfer: one source → one destination, N (product, quantity)
+  // line rows. Quantity stays a string while editing (raw TextInput value);
+  // it's parsed to a number on serialise.
+  const [transferLines, setTransferLines] = useState<Array<{ productId: string; quantity: string }>>([
+    { productId: '', quantity: '' },
+  ]);
   const [selectedFromLocation, setSelectedFromLocation] = useState('');
   const [selectedToLocationId, setSelectedToLocationId] = useState('');
   const openedFromUrlRef = useRef<string | null>(null);
@@ -227,42 +232,77 @@ export function TransfersPage({
   // Close-on-success — edge-triggered via the shared hook. Resets the
   // selection state at the same instant the toast appears so a user
   // submitting two transfers in a row doesn't see stale field values.
-  const handleCreateTransferSuccess = useCallback(() => {
-    setShowForm(false);
-    setSelectedProductId('');
+  const resetTransferFormState = useCallback(() => {
+    setTransferLines([{ productId: '', quantity: '' }]);
     setSelectedFromLocation('');
     setSelectedToLocationId('');
   }, []);
+  const closeTransferForm = useCallback(() => {
+    setShowForm(false);
+    resetTransferFormState();
+  }, [resetTransferFormState]);
+  const openTransferForm = useCallback(() => {
+    resetTransferFormState();
+    setShowForm(true);
+  }, [resetTransferFormState]);
+  const addTransferLine = useCallback(() => {
+    setTransferLines((ls) => [...ls, { productId: '', quantity: '' }]);
+  }, []);
+  const removeTransferLine = useCallback((idx: number) => {
+    setTransferLines((ls) => (ls.length > 1 ? ls.filter((_, i) => i !== idx) : ls));
+  }, []);
+  const updateTransferLine = useCallback(
+    (idx: number, patch: Partial<{ productId: string; quantity: string }>) => {
+      setTransferLines((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+    },
+    [],
+  );
+
+  const handleCreateTransferSuccess = useCallback(() => {
+    closeTransferForm();
+  }, [closeTransferForm]);
   useCloseOnFetcherSuccess(fetcher, handleCreateTransferSuccess);
 
-  // Optimistic-add: synthesise a Transfer row from the in-flight payload so
-  // the table shows the new entry the instant the user clicks Submit.
+  // Optimistic-add: synthesise one Transfer row per product line in the in-flight
+  // payload so the table shows every new entry the instant the user clicks Save.
   const buildOptimisticTransfers = useCallback(
     (fd: FormData, intent: string): Transfer[] | null => {
       if (intent !== 'initiateTransfer') return null;
-      const productId = fd.get('productId')?.toString().trim();
       const fromLocationId = fd.get('fromLocationId')?.toString().trim();
       const toLocationId = fd.get('toLocationId')?.toString().trim();
-      const quantitySent = Number(fd.get('quantity')?.toString() ?? '0');
-      if (!productId || !fromLocationId || !toLocationId || !Number.isFinite(quantitySent) || quantitySent <= 0) {
+      if (!fromLocationId || !toLocationId) return null;
+
+      let lines: Array<{ productId: string; quantity: number }>;
+      try {
+        const raw = JSON.parse(fd.get('lines')?.toString() ?? '[]') as unknown;
+        if (!Array.isArray(raw)) return null;
+        lines = raw.map((l) => {
+          const o = (l ?? {}) as { productId?: unknown; quantity?: unknown };
+          return { productId: String(o.productId ?? ''), quantity: Number(o.quantity ?? 0) };
+        });
+      } catch {
         return null;
       }
-      return [
-        {
-          id: optimisticId(),
-          productId,
-          quantitySent,
-          quantityReceived: null,
-          fromLocationId,
-          toLocationId,
-          transferStatus: 'IN_TRANSIT',
-          shrinkageReason: null,
-          receiverNotes: null,
-          transferCost: fd.get('transferCost')?.toString().trim() || null,
-          createdAt: new Date().toISOString(),
-          verifiedAt: null,
-        },
-      ];
+      const valid = lines.filter(
+        (l) => l.productId && Number.isFinite(l.quantity) && l.quantity > 0,
+      );
+      if (valid.length === 0) return null;
+
+      const createdAt = new Date().toISOString();
+      return valid.map((l) => ({
+        id: optimisticId(),
+        productId: l.productId,
+        quantitySent: l.quantity,
+        quantityReceived: null,
+        fromLocationId,
+        toLocationId,
+        transferStatus: 'IN_TRANSIT',
+        shrinkageReason: null,
+        receiverNotes: null,
+        transferCost: null,
+        createdAt,
+        verifiedAt: null,
+      }));
     },
     [],
   );
@@ -498,16 +538,7 @@ export function TransfersPage({
                   />
                 </div>
                 {canInitiate && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => {
-                      setSelectedProductId('');
-                      setSelectedFromLocation('');
-                      setSelectedToLocationId('');
-                      setShowForm(true);
-                    }}
-                  >
+                  <Button variant="primary" size="sm" onClick={openTransferForm}>
                     {initiateTransferCta}
                   </Button>
                 )}
@@ -531,10 +562,7 @@ export function TransfersPage({
                     className="w-full justify-center"
                     onClick={() => {
                       closeSheet();
-                      setSelectedProductId('');
-                      setSelectedFromLocation('');
-                      setSelectedToLocationId('');
-                      setShowForm(true);
+                      openTransferForm();
                     }}
                   >
                     {initiateTransferCta}
@@ -659,12 +687,7 @@ export function TransfersPage({
       {canInitiate && (
         <Modal
           open={showForm}
-          onClose={() => {
-            setShowForm(false);
-            setSelectedProductId('');
-            setSelectedFromLocation('');
-            setSelectedToLocationId('');
-          }}
+          onClose={closeTransferForm}
           maxWidth="max-w-2xl"
           aria-labelledby="transfer-form-title"
         >
@@ -698,6 +721,38 @@ export function TransfersPage({
                 return level ? level.stockCount - level.reservedCount : 0;
               };
 
+              // Total available units across all products at a location — shown
+              // on the From / To dropdowns so the user can see which locations
+              // actually hold stock before picking products.
+              const getLocationTotalStock = (locationId: string) =>
+                resolvedLevels
+                  .filter((l: InventoryLevel) => l.locationId === locationId)
+                  .reduce(
+                    (sum: number, l: InventoryLevel) =>
+                      sum + (l.stockCount - l.reservedCount),
+                    0,
+                  );
+
+              // Products already chosen on other line rows — hidden from the
+              // remaining product pickers so the same product can't be added
+              // twice (the server rejects duplicates too).
+              const usedProductIds = new Set(
+                transferLines.map((l) => l.productId).filter(Boolean),
+              );
+              const filledLines = transferLines.filter(
+                (l) => l.productId && Number(l.quantity) > 0,
+              );
+              const linesValid =
+                transferLines.length === filledLines.length && filledLines.length > 0;
+              const canSubmitTransfer =
+                !!selectedFromLocation &&
+                !!selectedToLocationId &&
+                selectedFromLocation !== selectedToLocationId &&
+                linesValid;
+              const serializedLines = JSON.stringify(
+                filledLines.map((l) => ({ productId: l.productId, quantity: Number(l.quantity) })),
+              );
+
               return (
                 <fetcher.Form method="post" className="space-y-4">
                         <div className="flex items-center justify-between gap-2">
@@ -706,12 +761,7 @@ export function TransfersPage({
                           </h3>
                           <button
                             type="button"
-                            onClick={() => {
-                              setShowForm(false);
-                              setSelectedProductId('');
-                              setSelectedFromLocation('');
-                              setSelectedToLocationId('');
-                            }}
+                            onClick={closeTransferForm}
                             className="text-app-fg-muted hover:text-app-fg shrink-0"
                             aria-label="Close"
                           >
@@ -722,25 +772,13 @@ export function TransfersPage({
                         </div>
 
                         <input type="hidden" name="intent" value="initiateTransfer" />
-                        <input type="hidden" name="productId" value={selectedProductId} />
                         <input type="hidden" name="fromLocationId" value={selectedFromLocation} />
                         <input type="hidden" name="toLocationId" value={selectedToLocationId} />
+                        {/* All product lines serialised as JSON — the route action
+                            and `inventory.transferBatch` consume this shape. */}
+                        <input type="hidden" name="lines" value={serializedLines} />
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <SearchableSelect
-                            id="transfer-product"
-                            label="Product"
-                            required
-                            value={selectedProductId}
-                            onChange={setSelectedProductId}
-                            placeholder="Select product..."
-                            searchPlaceholder="Search products..."
-                            options={activeProducts.map((p: Product) => ({
-                              value: p.id,
-                              label: p.name,
-                            }))}
-                          />
-
                           <SearchableSelect
                             id="transfer-from-location"
                             label="From location"
@@ -752,9 +790,7 @@ export function TransfersPage({
                             options={activeLocations.map((l: Location) => ({
                               value: l.id,
                               label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
-                              description: selectedProductId
-                                ? `${getAvailableStock(selectedProductId, l.id)} available`
-                                : undefined,
+                              description: `${getLocationTotalStock(l.id)} units in stock`,
                             }))}
                           />
 
@@ -766,44 +802,118 @@ export function TransfersPage({
                             onChange={setSelectedToLocationId}
                             placeholder="Select destination..."
                             searchPlaceholder="Search locations..."
-                            // Mirror the From-location dropdown: when a product
-                            // is picked, show the destination's current stock
-                            // for that product so the user knows what they're
-                            // adding to (e.g. avoid double-stocking a location
-                            // that already has plenty).
                             options={activeLocations
                               .filter((l: Location) => l.id !== selectedFromLocation)
                               .map((l: Location) => ({
                                 value: l.id,
                                 label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
-                                description: selectedProductId
-                                  ? `${getAvailableStock(selectedProductId, l.id)} available`
-                                  : undefined,
+                                description: `${getLocationTotalStock(l.id)} units in stock`,
                               }))}
-                          />
-
-                          <TextInput
-                            name="quantity"
-                            type="number"
-                            label={
-                              selectedProductId && selectedFromLocation
-                                ? `Quantity (max: ${getAvailableStock(selectedProductId, selectedFromLocation)})`
-                                : 'Quantity'
-                            }
-                            min={1}
-                            max={selectedProductId && selectedFromLocation ? getAvailableStock(selectedProductId, selectedFromLocation) : undefined}
-                            required
-                            placeholder="Units to move"
                           />
                         </div>
 
-                        {selectedProductId && selectedFromLocation && (
+                        {/* Multi-product line rows — one stock_transfers row per
+                            product, all created together to the same destination. */}
+                        <div className="space-y-2">
+                          <span className="text-xs font-medium text-app-fg-muted">
+                            Products to transfer
+                          </span>
+                          {transferLines.map((line, idx) => {
+                            const lineOptions = activeProducts
+                              .filter(
+                                (p: Product) =>
+                                  p.id === line.productId || !usedProductIds.has(p.id),
+                              )
+                              .map((p: Product) => ({
+                                value: p.id,
+                                label: p.name,
+                                // Once a source is picked, show each product's
+                                // available stock at that location so the user
+                                // can see what they have before selecting.
+                                description: selectedFromLocation
+                                  ? `${getAvailableStock(p.id, selectedFromLocation)} available`
+                                  : undefined,
+                              }));
+                            const lineAvailable =
+                              line.productId && selectedFromLocation
+                                ? getAvailableStock(line.productId, selectedFromLocation)
+                                : null;
+                            const qtyNum = Number(line.quantity);
+                            const overStock =
+                              lineAvailable != null &&
+                              line.quantity !== '' &&
+                              Number.isFinite(qtyNum) &&
+                              qtyNum > lineAvailable;
+                            return (
+                              <div
+                                key={idx}
+                                className="flex flex-col gap-2 sm:flex-row sm:items-start"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <SearchableSelect
+                                    id={`transfer-product-${idx}`}
+                                    label={idx === 0 ? 'Product' : undefined}
+                                    value={line.productId}
+                                    onChange={(v) => updateTransferLine(idx, { productId: v })}
+                                    placeholder="Select product..."
+                                    searchPlaceholder="Search products..."
+                                    options={lineOptions}
+                                  />
+                                </div>
+                                <div className="w-full sm:w-44">
+                                  <TextInput
+                                    type="number"
+                                    min={1}
+                                    value={line.quantity}
+                                    onChange={(e) =>
+                                      updateTransferLine(idx, { quantity: e.target.value })
+                                    }
+                                    label={
+                                      idx === 0
+                                        ? lineAvailable != null
+                                          ? `Quantity (max: ${lineAvailable})`
+                                          : 'Quantity'
+                                        : undefined
+                                    }
+                                    placeholder="Units"
+                                    error={
+                                      overStock ? `Only ${lineAvailable} available` : undefined
+                                    }
+                                  />
+                                </div>
+                                <div className={idx === 0 ? 'sm:pt-[1.625rem]' : undefined}>
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    className="w-full sm:w-auto"
+                                    disabled={transferLines.length === 1}
+                                    onClick={() => removeTransferLine(idx)}
+                                    aria-label="Remove product line"
+                                  >
+                                    Remove
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={addTransferLine}
+                          >
+                            + Add another product
+                          </Button>
+                        </div>
+
+                        {selectedFromLocation && selectedToLocationId && (
                           <div className="flex items-center justify-center gap-3 py-2 text-sm text-app-fg-muted">
                             <span className="font-medium text-app-fg-muted">{getLocationName(selectedFromLocation)}</span>
                             <svg className="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                             </svg>
-                            <span className="text-app-fg-muted">Destination</span>
+                            <span className="font-medium text-app-fg-muted">{getLocationName(selectedToLocationId)}</span>
                           </div>
                         )}
 
@@ -812,7 +922,7 @@ export function TransfersPage({
                             type="submit"
                             variant="primary"
                             size="sm"
-                            disabled={!selectedProductId || !selectedFromLocation || !selectedToLocationId}
+                            disabled={!canSubmitTransfer}
                             loading={fetcher.state === 'submitting'}
                             loadingText={
                               transfersPageVariant === 'logistics' ? 'Submitting…' : 'Saving…'
@@ -826,9 +936,7 @@ export function TransfersPage({
                             size="sm"
                             onClick={() => {
                               setShowForm(false);
-                              setSelectedProductId('');
-                              setSelectedFromLocation('');
-                              setSelectedToLocationId('');
+                              resetTransferFormState();
                             }}
                           >
                             Cancel

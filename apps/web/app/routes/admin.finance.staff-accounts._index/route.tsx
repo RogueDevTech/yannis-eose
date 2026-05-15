@@ -33,6 +33,7 @@ export default function FinanceStaffAccountsRoute() {
           searchParam={usersShell.searchParam}
           pageSize={usersShell.perPage}
           pageSizeOptions={usersShell.pageSizeOptions}
+          canExport={usersShell.canExport}
           usersBasePath="/admin/finance/staff-accounts"
           variant="staffAccounts"
         />
@@ -48,6 +49,7 @@ export default function FinanceStaffAccountsRoute() {
           usersPromise={roster}
           pageSize={usersShell.perPage}
           pageSizeOptions={usersShell.pageSizeOptions}
+          canExport={usersShell.canExport}
           usersBasePath="/admin/finance/staff-accounts"
           variant="staffAccounts"
         />

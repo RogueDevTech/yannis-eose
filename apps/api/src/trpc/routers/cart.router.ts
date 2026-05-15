@@ -59,10 +59,17 @@ export const cartRouter = router({
         })
         .optional(),
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      // Caller can see the raw phone inline only if they could already trigger
+      // the audited reveal endpoint (`cart.delete` is the gate for reveal/delete).
+      // SUPER_ADMIN bypasses permissions. CEO directive 2026-05-08.
+      const canReveal =
+        ctx.user.role === 'SUPER_ADMIN' ||
+        (ctx.user.permissions ?? []).includes('cart.delete');
       return getCartService().listAbandoned({
         page: input?.page ?? 1,
         limit: input?.limit ?? 25,
+        includeRawPhone: canReveal,
       });
     }),
 

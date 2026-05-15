@@ -63,6 +63,8 @@ export interface OrderDetail {
     unitPrice: string;
     /** Resolved from products.name when loading order detail */
     productName?: string | null;
+    /** Selected offer tier label, when this line was set from a campaign offer */
+    offerLabel?: string | null;
   }>;
   callLogs: Array<{
     id: string;
@@ -137,6 +139,16 @@ export interface OrderDetail {
   pendingOrderDeletionRequestId?: string | null;
 }
 
+/**
+ * A campaign-scoped offer tier available for one product on an order. Selecting
+ * a tier in the Adjust order items modal sets quantity + unit price together so
+ * a bundled discount applies instead of hand-editing the amount.
+ */
+export interface OrderItemOffers {
+  productId: string;
+  offers: Array<{ label: string; quantity: number; unitPrice: number }>;
+}
+
 export interface HistoryEntry {
   id: string;
   tableName: string;
@@ -184,6 +196,8 @@ export interface OrderDetailStreamData {
   voipEnabled: boolean;
   /** Display name of the active provider — kept as a string so the UI doesn't hard-code the brand. */
   voipProviderDisplayName?: string;
+  /** Campaign-scoped offer tiers per product — powers the Adjust order items offer picker. */
+  itemOffers: OrderItemOffers[];
 }
 
 /** Passed from route when user has view-only access (e.g. Media Buyer) */
@@ -244,6 +258,8 @@ export interface OrderDetailPageExtraProps {
   logisticsDispatchTemplates?: Array<{ id: string; name: string; body: string }>;
   /** Auto-generated invoice for the order (CONFIRMED side effect). null if none yet. Streamed. */
   invoice?: Promise<OrderInvoice | null> | OrderInvoice | null;
+  /** Campaign-scoped offer tiers per product — powers the Adjust order items offer picker. */
+  itemOffers?: OrderItemOffers[];
 }
 
 export interface OrderInvoice {

@@ -20,6 +20,20 @@ export const userRoleSchema = z.enum([
   'HR_MANAGER',
 ]);
 
+/**
+ * Roles that are branch-scoped and therefore must carry at least one branch.
+ * Every other non-SuperAdmin role (Stock Manager, Finance, HR, org-wide Heads,
+ * TPL, etc.) is company-wide and is not assigned to branches.
+ * Migration 0136 — CEO directive 2026-05-10.
+ */
+export const BRANCH_ELIGIBLE_ROLES = new Set([
+  'MEDIA_BUYER',
+  'HEAD_OF_MARKETING',
+  'CS_CLOSER',
+  'HEAD_OF_CS',
+  'BRANCH_ADMIN',
+]);
+
 // ============================================
 // Order Status values (for visible tabs)
 // ============================================
@@ -127,19 +141,21 @@ export const createStaffSchema = z.object({
   isProbation: z.boolean().optional(),
   probationUntil: z.coerce.date().optional(),
 }).superRefine((data, ctx) => {
-  // Every non-SuperAdmin user must have at least one branch and a primary branch.
-  if (data.role !== 'SUPER_ADMIN' && (!data.branchIds || data.branchIds.length === 0)) {
+  // Only branch-eligible roles must carry a branch + primary branch. Company-wide
+  // roles (Stock Manager, Finance, HR, org-wide Heads, TPL) are not branch-scoped.
+  const roleNeedsBranch = BRANCH_ELIGIBLE_ROLES.has(data.role);
+  if (roleNeedsBranch && (!data.branchIds || data.branchIds.length === 0)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['branchIds'],
-      message: 'At least one branch is required for non-SuperAdmin users',
+      message: 'At least one branch is required for this role',
     });
   }
-  if (data.role !== 'SUPER_ADMIN' && !data.primaryBranchId) {
+  if (roleNeedsBranch && !data.primaryBranchId) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['primaryBranchId'],
-      message: 'Primary branch is required for non-SuperAdmin users',
+      message: 'Primary branch is required for this role',
     });
   }
   if (data.primaryBranchId && data.branchIds && !data.branchIds.includes(data.primaryBranchId)) {

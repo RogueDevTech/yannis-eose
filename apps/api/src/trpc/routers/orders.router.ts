@@ -408,6 +408,16 @@ export const ordersRouter = router({
     }),
 
   /**
+   * Campaign-scoped offer tiers per product on an order — powers the "select an
+   * offer" picker in the Adjust order items modal. Same visibility as `getById`.
+   */
+  listItemOffers: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().listOrderItemOffers(input.orderId, ctx.user);
+    }),
+
+  /**
    * Full-field plain-text order summary for clipboard (includes stored customer phone when present).
    * Same visibility as `orders.getById` — does not bypass Lead Fortress for hash-only intakes.
    */
@@ -447,47 +457,65 @@ export const ordersRouter = router({
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
       const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
-      if (ctx.user.role === 'SUPER_ADMIN') {
-        return getOrdersService().list(input, branchId, buildOrdersListOpts(ctx.user, input));
-      }
-      const perms = ctx.user.permissions ?? [];
-      const hasOrdersRead = perms.includes('orders.read');
-      const hasMarketingOrders = perms.includes('marketing.orders');
-      const hasLogisticsRead = perms.includes('logistics.read');
-      // Org-wide scope holders see everything (admin via ALL_PERMISSION_CODES, org-wide heads via *.scope.global).
-      const hasOrgWideScope =
-        perms.includes('cs.scope.global') ||
-        perms.includes('marketing.scope.global') ||
-        perms.includes('logistics.scope.global');
-      const marketingTeamSupervisorOrders =
-        ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!ctx.currentBranchId;
-      if (
-        !hasOrdersRead &&
-        !hasMarketingOrders &&
-        !hasLogisticsRead &&
-        !hasOrgWideScope &&
-        !marketingTeamSupervisorOrders
-      ) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Missing orders.read, marketing.orders, or logistics.read permission',
-        });
-      }
-      if (hasOrgWideScope) {
-        return getOrdersService().list(input, branchId, buildOrdersListOpts(ctx.user, input));
-      }
+
+      // Resolve scoping (authz + effective filters) BEFORE the cache so a cache
+      // hit can never bypass a permission check.
       let effectiveInput = input;
-      if (ctx.user.role === 'MEDIA_BUYER') {
-        effectiveInput = { ...effectiveInput, mediaBuyerId: ctx.user.id };
+      if (ctx.user.role === 'SUPER_ADMIN') {
+        // Org-wide — no scoping narrowing.
+      } else {
+        const perms = ctx.user.permissions ?? [];
+        const hasOrdersRead = perms.includes('orders.read');
+        const hasMarketingOrders = perms.includes('marketing.orders');
+        const hasLogisticsRead = perms.includes('logistics.read');
+        // Org-wide scope holders see everything (admin via ALL_PERMISSION_CODES, org-wide heads via *.scope.global).
+        const hasOrgWideScope =
+          perms.includes('cs.scope.global') ||
+          perms.includes('marketing.scope.global') ||
+          perms.includes('logistics.scope.global');
+        const marketingTeamSupervisorOrders =
+          ctx.user.isMarketingTeamSupervisorOnActiveBranch === true && !!ctx.currentBranchId;
+        if (
+          !hasOrdersRead &&
+          !hasMarketingOrders &&
+          !hasLogisticsRead &&
+          !hasOrgWideScope &&
+          !marketingTeamSupervisorOrders
+        ) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Missing orders.read, marketing.orders, or logistics.read permission',
+          });
+        }
+        if (!hasOrgWideScope) {
+          if (ctx.user.role === 'MEDIA_BUYER') {
+            effectiveInput = { ...effectiveInput, mediaBuyerId: ctx.user.id };
+          }
+          if (hasOrdersRead && ctx.user.role === 'CS_CLOSER') {
+            effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
+          }
+          // Supervisor scoping (Phase B): non-org-wide branch supervisors only see
+          // orders assigned to their CS team agents OR created by their MB team
+          // members. Their own work is always included.
+          effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
+        }
       }
-      if (hasOrdersRead && ctx.user.role === 'CS_CLOSER') {
-        effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
+
+      const opts = buildOrdersListOpts(ctx.user, effectiveInput);
+      const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);
+
+      // Cache page 1 only — the dominant traffic for the hottest CS/marketing
+      // list, and bounding to page 1 keeps the keyspace small. Lives under the
+      // `cache:orders:aggregates:*` namespace so every existing
+      // `invalidateOrdersAggregatesCache()` call (create / createOffline /
+      // transition / bulk / edits) already drops it.
+      if (input.page !== 1 || !ordersCacheService) {
+        return fetchList();
       }
-      // Supervisor scoping (Phase B): non-org-wide branch supervisors only see
-      // orders assigned to their CS team agents OR created by their MB team
-      // members. Their own work is always included.
-      effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
-      return getOrdersService().list(effectiveInput, branchId, buildOrdersListOpts(ctx.user, effectiveInput));
+      const key =
+        'cache:orders:aggregates:list:' +
+        CacheService.hashInput({ userId: ctx.user.id, branchId, effectiveInput, opts });
+      return ordersCacheService.getOrSet(key, ORDERS_AGG_TTL_SECONDS, fetchList);
     }),
 
   /**

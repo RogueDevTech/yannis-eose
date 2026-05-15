@@ -17,6 +17,24 @@ export interface ProductOption {
   offers?: Array<{ label: string; price: string; qty: number }>;
 }
 
+/** Cart data to pre-fill when recovering from an abandoned cart. */
+export interface CartPrefill {
+  cartId: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  deliveryAddress?: string;
+  deliveryState?: string;
+  deliveryNotes?: string;
+  customerGender?: string;
+  preferredDeliveryDate?: string;
+  customerEmail?: string;
+  paymentMethod?: string;
+  productId?: string;
+  offerLabel?: string;
+  quantity?: number;
+}
+
 interface CreateOfflineOrderModalProps {
   open: boolean;
   onClose: () => void;
@@ -24,6 +42,8 @@ interface CreateOfflineOrderModalProps {
   products: ProductOption[];
   /** Prefill customer name when opening from Cart Abandonment */
   initialCustomerName?: string;
+  /** Full cart prefill when recovering from an abandoned cart (overrides initialCustomerName). */
+  cartPrefill?: CartPrefill | null;
   /** SuperAdmin / org-wide heads: session may have no branch — required for `orders.createOffline` middleware. */
   branchId?: string;
 }
@@ -36,6 +56,7 @@ export function CreateOfflineOrderModal({
   onSuccess,
   products,
   initialCustomerName,
+  cartPrefill,
   branchId,
 }: CreateOfflineOrderModalProps) {
   const fetcher = useFetcher();
@@ -67,10 +88,34 @@ export function CreateOfflineOrderModal({
   }, [open]);
 
   useEffect(() => {
-    if (open && initialCustomerName?.trim()) {
+    if (open && cartPrefill) {
+      // Full prefill from abandoned cart — overrides initialCustomerName.
+      if (cartPrefill.customerName) setCustomerName(cartPrefill.customerName);
+      if (cartPrefill.customerPhone) setCustomerPhone(cartPrefill.customerPhone);
+      if (cartPrefill.customerAddress) setCustomerAddress(cartPrefill.customerAddress);
+      if (cartPrefill.deliveryAddress) setDeliveryAddress(cartPrefill.deliveryAddress);
+      if (cartPrefill.deliveryState) setDeliveryState(cartPrefill.deliveryState);
+      if (cartPrefill.deliveryNotes) setDeliveryNotes(cartPrefill.deliveryNotes);
+      if (cartPrefill.customerGender) setCustomerGender(cartPrefill.customerGender as 'male' | 'female');
+      if (cartPrefill.preferredDeliveryDate) setPreferredDeliveryDate(cartPrefill.preferredDeliveryDate);
+      if (cartPrefill.customerEmail) setCustomerEmail(cartPrefill.customerEmail);
+      if (cartPrefill.paymentMethod === 'PAY_ONLINE') setPaymentMethod('PAY_ONLINE');
+      if (cartPrefill.productId) {
+        const product = products.find((p) => p.id === cartPrefill.productId);
+        const offer = cartPrefill.offerLabel
+          ? product?.offers?.find((o) => o.label === cartPrefill.offerLabel)
+          : product?.offers?.[0];
+        setItems([{
+          productId: cartPrefill.productId,
+          quantity: cartPrefill.quantity ?? offer?.qty ?? 1,
+          unitPrice: offer?.price ?? '',
+          offerLabel: offer?.label ?? cartPrefill.offerLabel ?? '',
+        }]);
+      }
+    } else if (open && initialCustomerName?.trim()) {
       setCustomerName(initialCustomerName.trim());
     }
-  }, [open, initialCustomerName]);
+  }, [open, initialCustomerName, cartPrefill]);
 
   const handleCreateOrderSuccess = useCallback(
     (data: { success: true } & Record<string, unknown>) => {
@@ -176,6 +221,7 @@ export function CreateOfflineOrderModal({
     formData.set('paymentMethod', paymentMethod);
     formData.set('items', JSON.stringify(validItems));
     formData.set('totalAmount', String(totalAmount.toFixed(2)));
+    if (cartPrefill?.cartId) formData.set('cartId', cartPrefill.cartId);
     if (customerAddress.trim()) formData.set('customerAddress', customerAddress.trim());
     if (deliveryAddress.trim()) formData.set('deliveryAddress', deliveryAddress.trim());
     if (deliveryNotes.trim()) formData.set('deliveryNotes', deliveryNotes.trim());
@@ -202,7 +248,7 @@ export function CreateOfflineOrderModal({
     >
         <div className="flex items-center justify-between border-b border-app-border pb-3 shrink-0 px-4 pt-4 sm:px-5 sm:pt-5">
           <h2 id="create-offline-order-title" className="text-lg font-semibold text-app-fg">
-            Create offline order
+            {cartPrefill ? 'Recover from cart' : 'Create offline order'}
           </h2>
           <button
             type="button"

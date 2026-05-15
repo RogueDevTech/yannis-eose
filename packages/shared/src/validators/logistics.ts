@@ -49,6 +49,8 @@ export const createLocationSchema = z.object({
   address: z.string().min(5).max(500),
   coordinates: z.string().max(100).optional(),
   whatsappGroupLink: whatsappGroupLinkSchema.optional().nullable(),
+  /** Per-location low-stock alert threshold. NULL = inherit the org-wide setting. */
+  lowStockThreshold: z.number().int().min(1).max(10000).optional().nullable(),
 });
 export type CreateLocationInput = z.infer<typeof createLocationSchema>;
 
@@ -59,6 +61,7 @@ export const updateLocationSchema = z.object({
   coordinates: z.string().max(100).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
   whatsappGroupLink: whatsappGroupLinkSchema.optional().nullable(),
+  lowStockThreshold: z.number().int().min(1).max(10000).optional().nullable(),
 });
 export type UpdateLocationInput = z.infer<typeof updateLocationSchema>;
 

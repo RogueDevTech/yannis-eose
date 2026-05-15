@@ -21,32 +21,99 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { TableActionButton } from '~/components/ui/table-action-button';
 
-const FINANCE_OVERVIEW_STRIP = [
-  { label: 'Revenue', value: <StatValuePulse className="min-w-[3.5rem]" /> },
-  { label: 'True Profit', value: <StatValuePulse className="min-w-[3.5rem]" /> },
-  { label: 'Net Margin', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-  { label: 'Total Costs', value: <StatValuePulse className="min-w-[3.5rem]" /> },
-  { label: 'AOV', value: <StatValuePulse className="min-w-[3rem]" /> },
-  { label: 'Cost / Order', value: <StatValuePulse className="min-w-[3rem]" /> },
-  { label: 'Profit / Order', value: <StatValuePulse className="min-w-[3rem]" /> },
-];
-
-function FinanceOverviewPulseRailShell() {
+function CashRemittanceSectionShell() {
   const tiles = [
-    { title: 'Awaiting cash batch', subtitle: 'Delivered orders not on a remittance' },
-    { title: 'Pending remittance batches', subtitle: 'Batches still SENT' },
-    { title: 'Disputed remittances', subtitle: 'Needs attention' },
+    { title: 'Total delivered', subtitle: 'All orders' },
+    { title: 'Remitted', subtitle: 'Batches received' },
+    { title: 'Awaiting batch', subtitle: 'Not on a remittance' },
+    { title: 'Pending batches', subtitle: 'Batches SENT' },
+    { title: 'Disputed', subtitle: 'Needs attention' },
+  ];
+  return (
+    <Card>
+      <CardHeader
+        title="Cash remittance"
+        description="Delivered orders and remittance status."
+      />
+      <CardBody className="-mt-2 space-y-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {tiles.map((t) => (
+            <div
+              key={t.title}
+              className="rounded-lg border border-app-border bg-app-hover/60 p-3 animate-pulse space-y-2"
+              aria-hidden
+            >
+              <p className="text-xs font-medium text-app-fg-muted">{t.title}</p>
+              <div className="h-7 w-24 rounded-md bg-app-hover" />
+              <p className="text-xs text-app-fg-muted">{t.subtitle}</p>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {['By product', 'By location'].map((label) => (
+            <div key={label}>
+              <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wide mb-2">{label}</p>
+              <div className="space-y-1.5">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="rounded-md border border-app-border bg-app-hover/40 px-3 py-2 animate-pulse space-y-1.5" aria-hidden>
+                    <div className="h-3 w-32 rounded bg-app-hover" />
+                    <div className="h-1.5 w-full rounded-full bg-app-hover" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function PayrollSectionShell() {
+  const tiles = [
     { title: 'Payroll awaiting Finance', subtitle: 'Batches in PENDING_FINANCE' },
     { title: 'Approval inbox', subtitle: 'Funding requests pending' },
   ];
   return (
     <Card>
       <CardHeader
-        title="Cash & close queue"
-        description="Live operational signals — not filtered by the profit date range above."
+        title="Payroll"
+        description="Payroll batches and approval requests awaiting finance action."
       />
       <CardBody className="-mt-2">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {tiles.map((t) => (
+            <div
+              key={t.title}
+              className="rounded-lg border border-app-border bg-app-hover/60 p-3 animate-pulse space-y-2"
+              aria-hidden
+            >
+              <p className="text-xs font-medium text-app-fg-muted">{t.title}</p>
+              <div className="h-7 w-24 rounded-md bg-app-hover" />
+              <p className="text-xs text-app-fg-muted">{t.subtitle}</p>
+            </div>
+          ))}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+function DisbursementSectionShell() {
+  const tiles = [
+    { title: 'Total disbursed', subtitle: 'All funding transfers' },
+    { title: 'Pending', subtitle: 'Awaiting confirmation' },
+    { title: 'Received', subtitle: 'Confirmed by recipient' },
+    { title: 'Disputed', subtitle: 'Needs resolution' },
+  ];
+  return (
+    <Card>
+      <CardHeader
+        title="Disbursements"
+        description="Money disbursed to Head of Marketing for ad spend."
+      />
+      <CardBody className="-mt-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {tiles.map((t) => (
             <div
               key={t.title}
@@ -103,7 +170,7 @@ export function FinanceOverviewLoadingShell({
       <PageHeader
         title="Finance"
         mobileInlineActions
-        description="See revenue, profit, and costs for the selected period."
+        description="Cash remittance, disbursements, and payroll."
         actions={
           <PageHeaderMobileTools
             sheetTitle="Finance tools"
@@ -134,20 +201,17 @@ export function FinanceOverviewLoadingShell({
           />
         }
       />
-      <OverviewStatStrip items={FINANCE_OVERVIEW_STRIP} />
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="card p-4 space-y-2 animate-pulse">
-            <div className="h-4 w-24 rounded bg-app-hover" aria-hidden />
-            <div className="h-8 w-20 rounded bg-app-hover" aria-hidden />
-          </div>
-        ))}
-      </div>
-      <div className="card p-4 space-y-3 animate-pulse">
-        <div className="h-6 w-48 rounded bg-app-hover" aria-hidden />
-        <div className="h-64 rounded-lg bg-app-hover" aria-hidden />
-      </div>
-      <FinanceOverviewPulseRailShell />
+      <Tabs
+        variant="underline"
+        value="remittance"
+        onChange={() => {}}
+        tabs={[
+          { value: 'remittance', label: 'Cash remittance' },
+          { value: 'disbursements', label: 'Disbursements' },
+          { value: 'payroll', label: 'Payroll' },
+        ]}
+      />
+      <CashRemittanceSectionShell />
     </div>
   );
 }
@@ -794,8 +858,8 @@ export function DeliveryRemittancesLoadingShell({
       ) : null}
 
       {viewTab === 'eligible' ? (
-        <div className="card p-4 space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <form
               className="min-w-0"
               onSubmit={(e) => {
@@ -824,44 +888,38 @@ export function DeliveryRemittancesLoadingShell({
             />
           </div>
 
-          <div className="flex flex-col gap-3 rounded-lg border border-app-border bg-app-hover px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-app-fg-muted">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-app-hover px-2.5 py-2 sm:px-3">
+            <div className="text-xs text-app-fg-muted sm:text-sm">
               <span className="font-medium text-app-fg">0</span> selected
               <span className="text-app-fg-muted"> · </span>
-              <span>Loading list…</span>
+              <span>Loading…</span>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm font-semibold text-app-fg inline-flex items-center gap-1.5">
-                Selected total:
-                <StatValuePulse className="min-w-[4rem]" />
-              </span>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <StatValuePulse className="min-w-[4rem]" />
               {canCreateRemittance ? (
                 <Button type="button" variant="primary" size="sm" disabled className="opacity-70">
-                  Confirm remittance
+                  Confirm
                 </Button>
               ) : null}
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border border-app-border">
-            <CompactTable<{ id: string }>
-              caption="Delivered orders awaiting remittance"
-              withCard={false}
-              className="min-w-[980px] [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
-              columns={eligibleShellColumns}
-              rows={eligibleShellRows}
-              rowKey={(r) => r.id}
-              emptyTitle="Loading orders…"
-              emptyDescription=""
-              pagination={{
-                page: 1,
-                totalPages: 1,
-                pageParam: 'eligiblePage',
-                showWhenSinglePage: true,
-                summary: <span className="text-app-fg-muted">Loading…</span>,
-              }}
-            />
-          </div>
+          <CompactTable<{ id: string }>
+            caption="Delivered orders awaiting remittance"
+            className="[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
+            columns={eligibleShellColumns}
+            rows={eligibleShellRows}
+            rowKey={(r) => r.id}
+            emptyTitle="Loading orders…"
+            emptyDescription=""
+            pagination={{
+              page: 1,
+              totalPages: 1,
+              pageParam: 'eligiblePage',
+              showWhenSinglePage: true,
+              summary: <span className="text-app-fg-muted">Loading…</span>,
+            }}
+          />
         </div>
       ) : null}
     </div>
@@ -1023,8 +1081,8 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
 
       {/* Orders in this batch — section heading + count pulse + table headers
           rendered, rows pulse. */}
-      <div className="rounded-xl border border-app-border bg-app-elevated p-0 overflow-hidden shadow-sm">
-        <div className="px-5 py-4 border-b border-app-border">
+      <div className="space-y-2">
+        <div className="px-1">
           <h2 className="text-base font-semibold text-app-fg">Orders in this batch</h2>
           <p className="text-sm text-app-fg-muted mt-0.5">
             <span className="inline-block h-3.5 w-16 rounded bg-app-border/65 dark:bg-app-border/55 animate-pulse align-middle" aria-hidden />
@@ -1036,8 +1094,6 @@ export function DeliveryRemittanceDetailLoadingShell({ remittanceId }: { remitta
           columns={orderColumns}
           rows={orderRows}
           rowKey={(o) => o.id}
-          withCard={false}
-          className="min-w-[880px]"
           emptyTitle="Loading…"
           emptyDescription=""
         />

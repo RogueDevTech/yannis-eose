@@ -22,6 +22,7 @@ import type {
   OrderDetailLoaderResult,
   OrderDetailStreamData,
   OrderInvoice,
+  OrderItemOffers,
   TimelineEvent,
 } from '~/features/orders/types';
 import { trpcOrderGetByIdIsNotFound } from '~/lib/trpc-http-response';
@@ -101,25 +102,45 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const voipEnabled = voipPayload?.enabled ?? false;
     const voipProviderDisplayName = voipPayload?.providerDisplayName ?? "Africa's Talking";
 
-    // latestCall is still loaded here (small + used for confirm gate UX). Timeline is loaded
-    // client-side after mount (resource route) to keep the main page fast.
-    const latestCallValue = await apiRequest<unknown>(
-      `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
-      deferredOpt,
-    )
-      .then((callRes) => {
-        if (!callRes.ok) {
-          logOrderDetailLoaderWarning(orderId, 'orders.latestCall', `status ${callRes.status}`);
+    // latestCall is still loaded here (small + used for confirm gate UX). itemOffers powers the
+    // Adjust order items offer picker — small + needed when the modal opens, fetched in parallel.
+    // Timeline is loaded client-side after mount (resource route) to keep the main page fast.
+    const [latestCallValue, itemOffersValue] = await Promise.all([
+      apiRequest<unknown>(
+        `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+        deferredOpt,
+      )
+        .then((callRes) => {
+          if (!callRes.ok) {
+            logOrderDetailLoaderWarning(orderId, 'orders.latestCall', `status ${callRes.status}`);
+            return null;
+          }
+          const callData = callRes.data as { result?: { data?: CallLogEntry | null } };
+          return callData?.result?.data ?? null;
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'unknown';
+          logOrderDetailLoaderWarning(orderId, 'orders.latestCall', msg);
           return null;
-        }
-        const callData = callRes.data as { result?: { data?: CallLogEntry | null } };
-        return callData?.result?.data ?? null;
-      })
-      .catch((err) => {
-        const msg = err instanceof Error ? err.message : 'unknown';
-        logOrderDetailLoaderWarning(orderId, 'orders.latestCall', msg);
-        return null;
-      });
+        }),
+      apiRequest<unknown>(
+        `/trpc/orders.listItemOffers?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+        deferredOpt,
+      )
+        .then((offersRes) => {
+          if (!offersRes.ok) {
+            logOrderDetailLoaderWarning(orderId, 'orders.listItemOffers', `status ${offersRes.status}`);
+            return [] as OrderItemOffers[];
+          }
+          const offersData = offersRes.data as { result?: { data?: OrderItemOffers[] } };
+          return offersData?.result?.data ?? [];
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'unknown';
+          logOrderDetailLoaderWarning(orderId, 'orders.listItemOffers', msg);
+          return [] as OrderItemOffers[];
+        }),
+    ]);
 
     return {
       order,
@@ -128,6 +149,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       timeline: undefined,
       voipEnabled,
       voipProviderDisplayName,
+      itemOffers: itemOffersValue,
     };
   })();
 
@@ -510,7 +532,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!itemsRaw) {
       return json({ error: 'Items are required' }, { status: 400 });
     }
-    let parsedItems: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    let parsedItems: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
     try {
       const arr = JSON.parse(itemsRaw) as unknown;
       if (!Array.isArray(arr) || arr.length === 0) {
@@ -525,7 +547,11 @@ export async function action({ request, params }: ActionFunctionArgs) {
         if (!productId || Number.isNaN(quantity) || quantity < 1 || Number.isNaN(unitPrice) || unitPrice < 0) {
           throw new Error('Invalid item fields');
         }
-        return { productId, quantity, unitPrice };
+        const offerLabel =
+          typeof o.offerLabel === 'string' && o.offerLabel.trim() !== ''
+            ? o.offerLabel.trim()
+            : undefined;
+        return { productId, quantity, unitPrice, ...(offerLabel ? { offerLabel } : {}) };
       });
     } catch {
       return json({ error: 'Invalid items format' }, { status: 400 });
@@ -570,7 +596,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (reason.length < 10) {
       return json({ error: 'Reason must be at least 10 characters' }, { status: 400 });
     }
-    let parsedItems: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    let parsedItems: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
     try {
       const arr = JSON.parse(itemsRaw) as unknown;
       if (!Array.isArray(arr) || arr.length === 0) {
@@ -585,7 +611,16 @@ export async function action({ request, params }: ActionFunctionArgs) {
         if (!productId || Number.isNaN(quantity) || quantity < 1 || Number.isNaN(unitPrice) || unitPrice < 0) {
           throw new Error('Invalid item fields');
         }
-        return { productId, quantity, unitPrice: Math.round(unitPrice * 100) / 100 };
+        const offerLabel =
+          typeof o.offerLabel === 'string' && o.offerLabel.trim() !== ''
+            ? o.offerLabel.trim()
+            : undefined;
+        return {
+          productId,
+          quantity,
+          unitPrice: Math.round(unitPrice * 100) / 100,
+          ...(offerLabel ? { offerLabel } : {}),
+        };
       });
     } catch {
       return json({ error: 'Invalid items format' }, { status: 400 });
@@ -869,6 +904,7 @@ export default function OrderDetailRoute() {
               timeline={(orderDetail as OrderDetailStreamData).timeline}
               voipEnabled={(orderDetail as OrderDetailStreamData).voipEnabled}
               voipProviderDisplayName={(orderDetail as OrderDetailStreamData).voipProviderDisplayName}
+              itemOffers={(orderDetail as OrderDetailStreamData).itemOffers}
               canEditOrder={canEditOrder}
               userRole={userRole}
               userId={userId}

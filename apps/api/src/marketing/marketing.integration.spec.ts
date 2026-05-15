@@ -15,6 +15,7 @@ import {
 } from '../test/factories/order.factory';
 import { MarketingService } from './marketing.service';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { createFakeCacheService } from '../test/fake-cache';
 import type { EventsService } from '../events/events.service';
 import type { NotificationsService } from '../notifications/notifications.service';
 import type { SettingsService } from '../settings/settings.service';
@@ -46,7 +47,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing funding — approve creates ledger', (
       db as any,
       eventsStub,
       notificationsStub,
-      new BranchTeamsService(db as any),
+      new BranchTeamsService(db as any, createFakeCacheService()),
       settingsStub,
     );
 
@@ -486,7 +487,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Marketing supervisor — funding balances + ad s
       db as never,
       eventsStub,
       notificationsStub,
-      new BranchTeamsService(db as never),
+      new BranchTeamsService(db as never, createFakeCacheService()),
       settingsStub,
     );
 

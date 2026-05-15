@@ -17,6 +17,7 @@ import { getOrdersService } from './orders.router';
 import { getLogisticsService } from './logistics.router';
 import { getPayrollBatchService } from './hr.router';
 import { getUsersService } from './users.router';
+import { getMarketingService } from './marketing.router';
 import { listBranchesForUser } from './branches.router';
 import { isAdminLevel } from '../../common/authz';
 
@@ -223,7 +224,7 @@ export const financeRouter = router({
         includeProductBreakdown: true,
       };
 
-      const [profit, remit, payroll, approvals, branches, buyers] = await Promise.all([
+      const [profit, remit, payroll, approvals, branches, buyers, fundingSummary, byProduct, byLocation] = await Promise.all([
         getFinanceService().getProfitReport(profitInput),
         getLogisticsService()
           .listDeliveryRemittances({ page: 1, limit: 1 }, ctx.user)
@@ -235,8 +236,6 @@ export const financeRouter = router({
           .listApprovalRequests({ status: 'PENDING' as const, page: 1, limit: 1 })
           .catch(() => null),
         listBranchesForUser(ctx.user).catch(() => [] as Array<{ id: string; name: string }>),
-        // Finance Overview "by media buyer" panel only needs id + name + role
-        // — skip the branch-memberships join.
         getUsersService()
           .list(
             {
@@ -252,6 +251,11 @@ export const financeRouter = router({
             ctx.currentBranchId,
           )
           .catch(() => null),
+        getMarketingService()
+          .getFundingSummary(input.branchId ?? null)
+          .catch(() => ({ totalSent: '0', totalCompleted: '0', totalDisputed: '0', sentCount: 0, completedCount: 0, disputedCount: 0 })),
+        getLogisticsService().deliveredOrdersByProduct(input.branchId).catch(() => []),
+        getLogisticsService().deliveredOrdersByLocation(input.branchId).catch(() => []),
       ]);
 
       return {
@@ -264,6 +268,9 @@ export const financeRouter = router({
           (approvals as { pagination?: { total?: number } } | null)?.pagination?.total ?? 0,
         branches: (branches ?? []).map((b) => ({ id: b.id, name: b.name })),
         mediaBuyers: buyers ? (buyers.users ?? []).map((u) => ({ id: u.id, name: u.name })) : [],
+        fundingSummary,
+        byProduct,
+        byLocation,
       };
     }),
 });

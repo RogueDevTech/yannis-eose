@@ -28,8 +28,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/logistics.listLocations?input=${encodeURIComponent(locationsInput)}`,
       { method: 'GET', cookie },
     );
+    const settingsPromise = apiRequest<unknown>(
+      '/trpc/settings.getSystemSettings',
+      { method: 'GET', cookie },
+    );
 
-    const [providersRes, locationsRes] = await Promise.all([providersPromise, locationsPromise]);
+    const [providersRes, locationsRes, settingsRes] = await Promise.all([
+      providersPromise,
+      locationsPromise,
+      settingsPromise,
+    ]);
 
     const providersData = providersRes.ok
       ? (providersRes.data as { result?: { data?: { providers: Provider[]; pagination: { total: number } } } })?.result?.data
@@ -39,11 +47,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       ? (locationsRes.data as { result?: { data?: { locations: Location[]; pagination: { total: number } } } })?.result?.data
       : null;
 
+    let globalLowStockThreshold = 10;
+    if (settingsRes.ok) {
+      const rows =
+        (settingsRes.data as { result?: { data?: Array<{ key: string; value: unknown }> } })?.result
+          ?.data ?? [];
+      const cfg = rows.find((s) => s.key === 'INVENTORY_LOW_STOCK_CONFIG');
+      const t = (cfg?.value as { threshold?: number } | null)?.threshold;
+      if (typeof t === 'number' && t > 0) globalLowStockThreshold = t;
+    }
+
     return {
       providers: providersData?.providers ?? [],
       totalProviders: providersData?.pagination?.total ?? 0,
       locations: locationsData?.locations ?? [],
       totalLocations: locationsData?.pagination?.total ?? 0,
+      globalLowStockThreshold,
     };
   })();
 
@@ -137,6 +156,11 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 
   if (intent === 'createLocation') {
+    const thresholdRaw = formData.get('lowStockThreshold')?.toString().trim() ?? '';
+    const thresholdParsed = thresholdRaw === '' ? null : Number.parseInt(thresholdRaw, 10);
+    if (thresholdParsed !== null && (!Number.isFinite(thresholdParsed) || thresholdParsed < 1)) {
+      return json({ error: 'Low-stock threshold must be a positive whole number.' }, { status: 400 });
+    }
     const res = await apiRequest<unknown>('/trpc/logistics.createLocation', {
       method: 'POST',
       cookie,
@@ -146,6 +170,7 @@ export async function action({ request }: ActionFunctionArgs) {
         address: formData.get('address')?.toString() ?? '',
         coordinates: formData.get('coordinates')?.toString() || undefined,
         whatsappGroupLink: formData.get('whatsappGroupLink')?.toString() || undefined,
+        lowStockThreshold: thresholdParsed,
       },
     });
     if (!res.ok) {
@@ -180,6 +205,18 @@ export async function action({ request }: ActionFunctionArgs) {
       body.whatsappGroupLink = whatsappRaw;
     } else {
       body.whatsappGroupLink = null;
+    }
+    const thresholdRaw = formData.get('lowStockThreshold')?.toString().trim();
+    if (thresholdRaw !== undefined) {
+      if (thresholdRaw === '') {
+        body.lowStockThreshold = null;
+      } else {
+        const parsed = Number.parseInt(thresholdRaw, 10);
+        if (!Number.isFinite(parsed) || parsed < 1) {
+          return json({ error: 'Low-stock threshold must be a positive whole number.' }, { status: 400 });
+        }
+        body.lowStockThreshold = parsed;
+      }
     }
     const res = await apiRequest<unknown>('/trpc/logistics.updateLocation', {
       method: 'POST',

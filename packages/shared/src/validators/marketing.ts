@@ -60,6 +60,10 @@ export const fundingRequestStatusCountsSchema = z.object({
   excludeSelfAsRequester: z.boolean().optional(),
   /** Migration 0106 — count only requests targeted at this user (post-broadcast flow). */
   targetUserId: z.string().uuid().optional(),
+  /** Count only requests whose requester holds this role. The Finance Disbursements
+   * page pins this to HEAD_OF_MARKETING — Finance disburses to HoMs only; Media Buyer
+   * requests are the HoM's to manage, not Finance's. */
+  requesterRole: z.enum(['HEAD_OF_MARKETING', 'MEDIA_BUYER']).optional(),
 });
 export type FundingRequestStatusCountsInput = z.infer<typeof fundingRequestStatusCountsSchema>;
 
@@ -80,6 +84,10 @@ export const listFundingRequestsSchema = z.object({
   /** Migration 0106 — list only requests targeted at this user. The router auto-applies
    * this for non-admin viewers so they only see their own inbox. */
   targetUserId: z.string().uuid().optional(),
+  /** List only requests whose requester holds this role. The Finance Disbursements
+   * page pins this to HEAD_OF_MARKETING — Finance disburses to HoMs only; Media Buyer
+   * requests are the HoM's to manage, not Finance's. */
+  requesterRole: z.enum(['HEAD_OF_MARKETING', 'MEDIA_BUYER']).optional(),
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),

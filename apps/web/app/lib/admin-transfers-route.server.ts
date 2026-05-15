@@ -66,20 +66,37 @@ export async function transfersRouteAction({ request }: ActionFunctionArgs) {
   const intent = formData.get('intent')?.toString();
 
   if (intent === 'initiateTransfer') {
-    const quantity = parseInt(formData.get('quantity')?.toString() ?? '0', 10);
-    if (quantity <= 0) {
-      return json({ error: 'Quantity must be at least 1' }, { status: 400 });
+    // Multi-product transfer: one source → one destination, N product lines.
+    // The modal serialises `lines` as JSON so we don't juggle indexed field names.
+    const fromLocationId = formData.get('fromLocationId')?.toString() ?? '';
+    const toLocationId = formData.get('toLocationId')?.toString() ?? '';
+
+    let lines: Array<{ productId: string; quantity: number }>;
+    try {
+      const raw = JSON.parse(formData.get('lines')?.toString() ?? '[]') as unknown;
+      if (!Array.isArray(raw)) throw new Error('lines is not an array');
+      lines = raw.map((l) => {
+        const o = (l ?? {}) as { productId?: unknown; quantity?: unknown };
+        return { productId: String(o.productId ?? ''), quantity: Number(o.quantity ?? 0) };
+      });
+    } catch {
+      return json({ error: 'Invalid transfer lines payload' }, { status: 400 });
     }
 
-    const res = await apiRequest<unknown>('/trpc/inventory.transfer', {
+    if (lines.length === 0) {
+      return json({ error: 'Add at least one product to transfer' }, { status: 400 });
+    }
+    if (lines.some((l) => !l.productId || !Number.isFinite(l.quantity) || l.quantity <= 0)) {
+      return json(
+        { error: 'Every product line needs a product and a quantity of at least 1' },
+        { status: 400 },
+      );
+    }
+
+    const res = await apiRequest<unknown>('/trpc/inventory.transferBatch', {
       method: 'POST',
       cookie,
-      body: {
-        productId: formData.get('productId')?.toString() ?? '',
-        fromLocationId: formData.get('fromLocationId')?.toString() ?? '',
-        toLocationId: formData.get('toLocationId')?.toString() ?? '',
-        quantity,
-      },
+      body: { fromLocationId, toLocationId, lines },
     });
 
     if (!res.ok) {

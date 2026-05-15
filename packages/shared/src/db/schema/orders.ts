@@ -71,6 +71,14 @@ export const orders = pgTable('orders', {
   customFields: jsonb('custom_fields'),
   /** Branch this order belongs to. Set on creation, enforced by RLS. */
   branchId: uuid('branch_id'),
+  /**
+   * Back-link to the originating cart_abandonments row when this order was
+   * recovered from a dropped-off cart (CS-led recovery OR direct edge-form
+   * conversion with the cartId in the submit payload). NULL for orders that
+   * were never preceded by a cart row. Indexed for the `/admin/orders` filter
+   * "Recovered from cart". Migration 0142.
+   */
+  cartId: uuid('cart_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   allocatedAt: timestamp('allocated_at', { withTimezone: true }),

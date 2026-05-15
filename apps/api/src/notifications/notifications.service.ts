@@ -580,19 +580,28 @@ export class NotificationsService {
 
   /**
    * Get unread count for a user.
+   *
+   * Cached: the notification bell calls this on every page load, so it's the
+   * highest-frequency notification read. Shares the `cache:notif:{userId}:*`
+   * namespace, so the existing invalidations in `create` / `markAsRead` /
+   * `markAllAsRead` already cover it — no extra wiring needed.
    */
   async getUnreadCount(userId: string) {
-    const rows = await this.db
-      .select({ count: count() })
-      .from(schema.notifications)
-      .where(
-        and(
-          eq(schema.notifications.userId, userId),
-          eq(schema.notifications.read, false),
-        ),
-      );
+    const cacheKey = `cache:notif:${userId}:unreadCount`;
+    const TTL = 15; // seconds — matches the list cache
+    return this.cache.getOrSet(cacheKey, TTL, async () => {
+      const rows = await this.db
+        .select({ count: count() })
+        .from(schema.notifications)
+        .where(
+          and(
+            eq(schema.notifications.userId, userId),
+            eq(schema.notifications.read, false),
+          ),
+        );
 
-    return rows[0]?.count ?? 0;
+      return rows[0]?.count ?? 0;
+    });
   }
 
   /**
@@ -1108,24 +1117,38 @@ export class NotificationsService {
   // PUSH AUTOMATION RULE METHODS
   // ============================================================
 
+  /** Drop every cached automation-rules page. Automation mutations are rare
+   *  (admin config) so a broad pattern delete is cheap and avoids having to
+   *  resolve a rule's branchId on update/toggle/delete. */
+  private invalidateAutomationRulesCache(): void {
+    this.cache.delPattern('cache:notif:automationRules:*').catch(() => undefined);
+  }
+
   /**
    * Get all automation rules.
    * When branchId is null (SuperAdmin), returns all rules across all branches.
+   *
+   * Cached (5 min): read-mostly admin config; invalidated on every automation
+   * rule mutation via `invalidateAutomationRulesCache`.
    */
   async getAutomationRules(branchId: string | null) {
-    if (branchId === null) {
+    const cacheKey = `cache:notif:automationRules:${branchId ?? 'global'}`;
+    const TTL = 300; // seconds
+    return this.cache.getOrSet(cacheKey, TTL, async () => {
+      if (branchId === null) {
+        return this.db
+          .select()
+          .from(schema.pushAutomationRules)
+          .orderBy(desc(schema.pushAutomationRules.validFrom));
+      }
+
+      // Non-SuperAdmin sees only their branch's rules
       return this.db
         .select()
         .from(schema.pushAutomationRules)
+        .where(eq(schema.pushAutomationRules.branchId, branchId))
         .orderBy(desc(schema.pushAutomationRules.validFrom));
-    }
-
-    // Non-SuperAdmin sees only their branch's rules
-    return this.db
-      .select()
-      .from(schema.pushAutomationRules)
-      .where(eq(schema.pushAutomationRules.branchId, branchId))
-      .orderBy(desc(schema.pushAutomationRules.validFrom));
+    });
   }
 
   /**
@@ -1154,6 +1177,7 @@ export class NotificationsService {
       })
       .returning();
 
+    this.invalidateAutomationRulesCache();
     return rows[0]!;
   }
 
@@ -1182,6 +1206,7 @@ export class NotificationsService {
       .where(eq(schema.pushAutomationRules.id, id))
       .returning();
 
+    this.invalidateAutomationRulesCache();
     return rows[0]!;
   }
 
@@ -1195,6 +1220,7 @@ export class NotificationsService {
       .where(eq(schema.pushAutomationRules.id, id))
       .returning();
 
+    this.invalidateAutomationRulesCache();
     return rows[0]!;
   }
 
@@ -1205,6 +1231,7 @@ export class NotificationsService {
     await this.db
       .delete(schema.pushAutomationRules)
       .where(eq(schema.pushAutomationRules.id, id));
+    this.invalidateAutomationRulesCache();
   }
 
   /**

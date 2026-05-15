@@ -6,6 +6,7 @@ import { db as schema } from '@yannis/shared';
 import type {
   StockIntakeInput,
   StockTransferInput,
+  StockTransferBatchInput,
   VerifyTransferInput,
   ApproveTransferInput,
   RejectTransferInput,
@@ -20,6 +21,14 @@ import type {
 type InventoryDbTx = Parameters<
   Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]
 >[0];
+
+/** Result of creating a single transfer line — drives the post-commit side effects. */
+type TransferLineResult = {
+  transfer: typeof schema.stockTransfers.$inferSelect;
+  requiresApproval: boolean;
+  sourceProviderKind: 'WAREHOUSE' | 'THIRD_PARTY' | null;
+  sourceLocationName: string;
+};
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -46,28 +55,69 @@ export class InventoryService {
   /** Default low-stock threshold used when the setting row is missing or malformed. */
   private static readonly DEFAULT_LOW_STOCK_THRESHOLD = 10;
   private static readonly LOW_STOCK_DEDUP_HOURS = 6;
+
+  /**
+   * Cached check for migration 0143 (`logistics_locations.low_stock_threshold`).
+   * `null` = not yet checked, `true` = column exists, `false` = column missing.
+   * Re-checked on each app restart.
+   */
+  private hasLocationThresholdCol: boolean | null = null;
+  private async locationThresholdColExists(): Promise<boolean> {
+    if (this.hasLocationThresholdCol !== null) return this.hasLocationThresholdCol;
+    try {
+      await this.db.execute(sql`SELECT low_stock_threshold FROM logistics_locations LIMIT 0`);
+      this.hasLocationThresholdCol = true;
+    } catch {
+      this.hasLocationThresholdCol = false;
+    }
+    return this.hasLocationThresholdCol;
+  }
   private static readonly FIFO_BATCH_PAGE_SIZE = 256;
 
   /**
+   * Org-wide low-stock threshold from `system_settings.INVENTORY_LOW_STOCK_CONFIG`.
+   * Falls back to {@link DEFAULT_LOW_STOCK_THRESHOLD} when the row is missing or
+   * malformed. A configured `0` is honoured (it means "global alerts off") —
+   * per-location overrides can still fire independently.
+   */
+  private async getGlobalLowStockThreshold(): Promise<number> {
+    const cfg = await this.settings.get('INVENTORY_LOW_STOCK_CONFIG');
+    const raw =
+      (cfg?.['threshold'] as number | string | undefined) ??
+      InventoryService.DEFAULT_LOW_STOCK_THRESHOLD;
+    const n = typeof raw === 'string' ? parseInt(raw, 10) : raw;
+    return typeof n === 'number' && Number.isFinite(n)
+      ? n
+      : InventoryService.DEFAULT_LOW_STOCK_THRESHOLD;
+  }
+
+  /**
    * Fire in-app + push notifications to stock-aware admins when available stock at
-   * (productId, locationId) drops below the configured threshold after a reduction.
+   * (productId, locationId) drops below the EFFECTIVE threshold after a reduction.
+   * Effective threshold = the location's own `low_stock_threshold` if set,
+   * otherwise the org-wide threshold.
    *
    * Rate-limited: at most one notification per (productId, locationId) per 6 hours,
    * deduped against the notifications table by type and data payload.
    */
   async checkLowStockAndNotify(productId: string, locationId: string): Promise<void> {
     try {
-      const cfg = await this.settings.get('INVENTORY_LOW_STOCK_CONFIG');
-      const thresholdRaw = (cfg?.['threshold'] as number | string | undefined) ?? InventoryService.DEFAULT_LOW_STOCK_THRESHOLD;
-      const threshold = typeof thresholdRaw === 'string' ? parseInt(thresholdRaw, 10) : thresholdRaw;
-      if (!Number.isFinite(threshold) || threshold <= 0) return;
+      const globalThreshold = await this.getGlobalLowStockThreshold();
 
-      const [level] = await this.db
+      const hasLocCol = await this.locationThresholdColExists();
+
+      const [row] = await this.db
         .select({
           stockCount: schema.inventoryLevels.stockCount,
           reservedCount: schema.inventoryLevels.reservedCount,
+          locationName: schema.logisticsLocations.name,
+          ...(hasLocCol ? { locationThreshold: schema.logisticsLocations.lowStockThreshold } : {}),
         })
         .from(schema.inventoryLevels)
+        .leftJoin(
+          schema.logisticsLocations,
+          eq(schema.logisticsLocations.id, schema.inventoryLevels.locationId),
+        )
         .where(
           and(
             eq(schema.inventoryLevels.productId, productId),
@@ -75,9 +125,13 @@ export class InventoryService {
           ),
         )
         .limit(1);
-      if (!level) return;
+      if (!row) return;
 
-      const available = level.stockCount - level.reservedCount;
+      // Per-location override wins; null inherits the org-wide threshold.
+      const threshold = (row as { locationThreshold?: number | null }).locationThreshold ?? globalThreshold;
+      if (!Number.isFinite(threshold) || threshold <= 0) return;
+
+      const available = row.stockCount - row.reservedCount;
       if (available >= threshold) return;
 
       // Dedup: skip if we already notified about this (productId, locationId) recently.
@@ -93,19 +147,14 @@ export class InventoryService {
       `);
       if (recent.length > 0) return;
 
-      // Lookup product + location names for a friendly body.
+      // Lookup product name for a friendly body (location name came back above).
       const [productRow] = await this.db
         .select({ name: schema.products.name })
         .from(schema.products)
         .where(eq(schema.products.id, productId))
         .limit(1);
-      const [locationRow] = await this.db
-        .select({ name: schema.logisticsLocations.name })
-        .from(schema.logisticsLocations)
-        .where(eq(schema.logisticsLocations.id, locationId))
-        .limit(1);
       const productName = productRow?.name ?? 'Unknown product';
-      const locationName = locationRow?.name ?? 'Unknown location';
+      const locationName = row.locationName ?? 'Unknown location';
 
       const body = `Only ${available} unit${available === 1 ? '' : 's'} of ${productName} left at ${locationName} (threshold ${threshold}). Time to restock.`;
       const payload = {
@@ -457,83 +506,185 @@ export class InventoryService {
     const now = new Date();
     const result = await withActor(this.db, actor, async (tx) => {
       const sourceInfo = await this.getSourceLocationInfo(tx, input.fromLocationId);
-      const requiresApproval = !this.canApproveSourceTransfer(actor, sourceInfo.providerKind);
-
-      const sourceLevel = await tx
-        .select()
-        .from(schema.inventoryLevels)
-        .where(
-          and(
-            eq(schema.inventoryLevels.productId, input.productId),
-            eq(schema.inventoryLevels.locationId, input.fromLocationId),
-          ),
-        )
-        .limit(1);
-
-      const available = (sourceLevel[0]?.stockCount ?? 0) - (sourceLevel[0]?.reservedCount ?? 0);
-      if (available < input.quantity) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `Insufficient stock. Available: ${available}, Requested: ${input.quantity}`,
-        });
-      }
-
-      const transferCostTotal = await this.computeFifoLandedCostForQuantityInTx(
+      return this.createTransferLineInTx(
         tx,
-        input.productId,
-        input.quantity,
+        { productId: input.productId, quantity: input.quantity },
+        input.fromLocationId,
+        input.toLocationId,
+        sourceInfo,
+        actor,
+        now,
       );
-
-      const transferRows = await tx
-        .insert(schema.stockTransfers)
-        .values({
-          productId: input.productId,
-          quantitySent: input.quantity,
-          quantityReceived: null,
-          fromLocationId: input.fromLocationId,
-          toLocationId: input.toLocationId,
-          transferStatus: requiresApproval ? 'PENDING' : 'IN_TRANSIT',
-          transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
-          verifiedAt: null,
-          initiatedBy: actor.id,
-        })
-        .returning();
-
-      const newTransfer = transferRows[0];
-      if (!newTransfer) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer' });
-      }
-
-      // Fast-path (source-authority initiator): deduct source + write movement
-      // inside the same transaction. Otherwise the side effects defer to approve.
-      if (!requiresApproval) {
-        if (sourceLevel[0]) {
-          await tx
-            .update(schema.inventoryLevels)
-            .set({
-              stockCount: sql`${schema.inventoryLevels.stockCount} - ${input.quantity}`,
-              updatedAt: now,
-            })
-            .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
-        }
-        await tx.insert(schema.stockMovements).values({
-          productId: input.productId,
-          movementType: 'TRANSFER_OUT',
-          quantity: input.quantity,
-          fromLocationId: input.fromLocationId,
-          toLocationId: input.toLocationId,
-          referenceId: newTransfer.id,
-          actorId: actor.id,
-        });
-      }
-
-      return { transfer: newTransfer, requiresApproval, sourceProviderKind: sourceInfo.providerKind, sourceLocationName: sourceInfo.locationName };
     });
 
+    await this.emitTransferSideEffects(
+      result,
+      { productId: input.productId, quantity: input.quantity },
+      input.fromLocationId,
+      input.toLocationId,
+      actor,
+    );
+
+    return result.transfer;
+  }
+
+  /**
+   * Multi-product transfer — one source → one destination, N product lines,
+   * all created atomically in a single transaction. Either every line is
+   * recorded or none is (one line short on stock rolls the whole batch back).
+   * Each line still becomes its own `stock_transfers` row with an independent
+   * approve / verify lifecycle, since a 3PL receives per product.
+   *
+   * See CLAUDE.md → Transfer Approval Gate.
+   */
+  async initiateTransferBatch(input: StockTransferBatchInput, actor: SessionUser) {
+    const now = new Date();
+    const results = await withActor(this.db, actor, async (tx) => {
+      // Source location info is identical for every line — resolve it once.
+      const sourceInfo = await this.getSourceLocationInfo(tx, input.fromLocationId);
+      const lineResults: TransferLineResult[] = [];
+      for (const line of input.lines) {
+        lineResults.push(
+          await this.createTransferLineInTx(
+            tx,
+            line,
+            input.fromLocationId,
+            input.toLocationId,
+            sourceInfo,
+            actor,
+            now,
+          ),
+        );
+      }
+      return lineResults;
+    });
+
+    // Post-commit side effects, per line (events + notification fan-out).
+    for (let i = 0; i < results.length; i += 1) {
+      await this.emitTransferSideEffects(
+        results[i]!,
+        input.lines[i]!,
+        input.fromLocationId,
+        input.toLocationId,
+        actor,
+      );
+    }
+
+    return results.map((r) => r.transfer);
+  }
+
+  /**
+   * Create one transfer row inside an existing transaction — the per-line core
+   * shared by {@link initiateTransfer} (single) and {@link initiateTransferBatch}
+   * (multi-product). Validates source stock, computes FIFO landed cost, inserts
+   * the `stock_transfers` row, and — on the source-authority fast-path — deducts
+   * source stock + writes the TRANSFER_OUT movement. Side effects that must run
+   * AFTER commit (socket events, notifications) are returned for the caller to
+   * hand to {@link emitTransferSideEffects}.
+   */
+  private async createTransferLineInTx(
+    tx: InventoryDbTx,
+    line: { productId: string; quantity: number },
+    fromLocationId: string,
+    toLocationId: string,
+    sourceInfo: { providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null; locationName: string },
+    actor: SessionUser,
+    now: Date,
+  ): Promise<TransferLineResult> {
+    const requiresApproval = !this.canApproveSourceTransfer(actor, sourceInfo.providerKind);
+
+    const sourceLevel = await tx
+      .select()
+      .from(schema.inventoryLevels)
+      .where(
+        and(
+          eq(schema.inventoryLevels.productId, line.productId),
+          eq(schema.inventoryLevels.locationId, fromLocationId),
+        ),
+      )
+      .limit(1);
+
+    const available = (sourceLevel[0]?.stockCount ?? 0) - (sourceLevel[0]?.reservedCount ?? 0);
+    if (available < line.quantity) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: `Insufficient stock. Available: ${available}, Requested: ${line.quantity}`,
+      });
+    }
+
+    const transferCostTotal = await this.computeFifoLandedCostForQuantityInTx(
+      tx,
+      line.productId,
+      line.quantity,
+    );
+
+    const transferRows = await tx
+      .insert(schema.stockTransfers)
+      .values({
+        productId: line.productId,
+        quantitySent: line.quantity,
+        quantityReceived: null,
+        fromLocationId,
+        toLocationId,
+        transferStatus: requiresApproval ? 'PENDING' : 'IN_TRANSIT',
+        transferCost: transferCostTotal > 0 ? transferCostTotal.toFixed(2) : null,
+        verifiedAt: null,
+        initiatedBy: actor.id,
+      })
+      .returning();
+
+    const newTransfer = transferRows[0];
+    if (!newTransfer) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create transfer' });
+    }
+
+    // Fast-path (source-authority initiator): deduct source + write movement
+    // inside the same transaction. Otherwise the side effects defer to approve.
+    if (!requiresApproval) {
+      if (sourceLevel[0]) {
+        await tx
+          .update(schema.inventoryLevels)
+          .set({
+            stockCount: sql`${schema.inventoryLevels.stockCount} - ${line.quantity}`,
+            updatedAt: now,
+          })
+          .where(eq(schema.inventoryLevels.id, sourceLevel[0].id));
+      }
+      await tx.insert(schema.stockMovements).values({
+        productId: line.productId,
+        movementType: 'TRANSFER_OUT',
+        quantity: line.quantity,
+        fromLocationId,
+        toLocationId,
+        referenceId: newTransfer.id,
+        actorId: actor.id,
+      });
+    }
+
+    return {
+      transfer: newTransfer,
+      requiresApproval,
+      sourceProviderKind: sourceInfo.providerKind,
+      sourceLocationName: sourceInfo.locationName,
+    };
+  }
+
+  /**
+   * Post-commit side effects for one created transfer line: socket events plus,
+   * for approval-gated transfers, the source-authority notification fan-out, or
+   * for fast-path transfers the low-stock check. Best-effort — never throws.
+   */
+  private async emitTransferSideEffects(
+    result: TransferLineResult,
+    line: { productId: string; quantity: number },
+    fromLocationId: string,
+    toLocationId: string,
+    actor: SessionUser,
+  ): Promise<void> {
     if (result.requiresApproval) {
       this.events.emitToRoom('inventory', 'transfer:pending_approval', {
         transferId: result.transfer.id,
-        productId: input.productId,
+        productId: line.productId,
       });
 
       // Fan out to the source-authority pool. Best-effort, non-blocking.
@@ -541,19 +692,19 @@ export class InventoryService {
         const [productRow] = await this.db
           .select({ name: schema.products.name })
           .from(schema.products)
-          .where(eq(schema.products.id, input.productId))
+          .where(eq(schema.products.id, line.productId))
           .limit(1);
         const productName = productRow?.name ?? 'product';
         const payload = {
           type: 'inventory:transfer_pending_approval' as const,
           title: 'Transfer awaiting your approval',
-          body: `${actor.name ?? 'Someone'} initiated a transfer of ${input.quantity} × ${productName} out of ${result.sourceLocationName}. Approve before stock leaves.`,
+          body: `${actor.name ?? 'Someone'} initiated a transfer of ${line.quantity} × ${productName} out of ${result.sourceLocationName}. Approve before stock leaves.`,
           data: {
             transferId: result.transfer.id,
-            productId: input.productId,
-            quantity: input.quantity,
-            fromLocationId: input.fromLocationId,
-            toLocationId: input.toLocationId,
+            productId: line.productId,
+            quantity: line.quantity,
+            fromLocationId,
+            toLocationId,
             initiatedBy: actor.id,
           },
         };
@@ -566,13 +717,11 @@ export class InventoryService {
     } else {
       this.events.emitToRoom('inventory', 'transfer:created', {
         transferId: result.transfer.id,
-        productId: input.productId,
+        productId: line.productId,
         completed: false,
       });
-      this.scheduleLowStockCheck(input.productId, input.fromLocationId);
+      this.scheduleLowStockCheck(line.productId, fromLocationId);
     }
-
-    return result.transfer;
   }
 
   /**
@@ -1325,34 +1474,143 @@ export class InventoryService {
           : sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) DESC`
         : direction(schema.inventoryLevels.updatedAt);
 
-    const [levelsRaw, totalRows, sumsRows] = await Promise.all([
-      this.db
-        .select()
-        .from(schema.inventoryLevels)
-        .where(whereClause)
-        .orderBy(orderBy)
-        .limit(input.limit)
-        .offset(offset),
-      this.db
-        .select({ count: count() })
-        .from(schema.inventoryLevels)
-        .where(whereClause),
-      this.db
-        .select({
-          totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`.mapWith(
-            Number,
-          ),
-          totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`.mapWith(
-            Number,
-          ),
-        })
-        .from(schema.inventoryLevels)
-        .where(whereClause),
-    ]);
+    // Units delivered to customers — sum of DELIVERY stock-movement quantities
+    // (stored negative; ABS gives units shipped out). Scoped to the same
+    // product/location filters as the level sums so the overview strip stays
+    // internally consistent. `stock_movements` has no shipment/search linkage,
+    // so those filters don't narrow this figure.
+    const deliveredConditions = [eq(schema.stockMovements.movementType, 'DELIVERY')];
+    if (input.productId) {
+      deliveredConditions.push(eq(schema.stockMovements.productId, input.productId));
+    }
+    if (input.locationId) {
+      deliveredConditions.push(eq(schema.stockMovements.fromLocationId, input.locationId));
+    }
 
-    const levels = await this.enrichLevelsWithShipmentLayers(levelsRaw);
+    // "Show every location even at zero inventory" — only when a product is the
+    // sole narrowing filter (no shipment / location filter). Bounded by the
+    // active-location count, so we fetch all rows and paginate in memory.
+    const expandAllLocations =
+      !!input.productId && !input.shipmentId && !input.locationId;
 
-    const total = totalRows[0]?.count ?? 0;
+    // Explicit column projection (was `select()`): keeps synthetic zero rows
+    // trivial to construct and avoids over-fetching temporal/JSON columns.
+    const levelsQuery = this.db
+      .select({
+        id: schema.inventoryLevels.id,
+        productId: schema.inventoryLevels.productId,
+        locationId: schema.inventoryLevels.locationId,
+        batchId: schema.inventoryLevels.batchId,
+        stockCount: schema.inventoryLevels.stockCount,
+        reservedCount: schema.inventoryLevels.reservedCount,
+        status: schema.inventoryLevels.status,
+        updatedAt: schema.inventoryLevels.updatedAt,
+      })
+      .from(schema.inventoryLevels)
+      .where(whereClause)
+      .orderBy(orderBy);
+
+    const [levelsRaw, totalRows, sumsRows, deliveredRows, activeLocations, globalThreshold] =
+      await Promise.all([
+        expandAllLocations ? levelsQuery : levelsQuery.limit(input.limit).offset(offset),
+        this.db
+          .select({ count: count() })
+          .from(schema.inventoryLevels)
+          .where(whereClause),
+        this.db
+          .select({
+            totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`.mapWith(
+              Number,
+            ),
+            totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)`.mapWith(
+              Number,
+            ),
+          })
+          .from(schema.inventoryLevels)
+          .where(whereClause),
+        this.db
+          .select({
+            totalDelivered: sql<number>`COALESCE(SUM(ABS(${schema.stockMovements.quantity})), 0)`.mapWith(
+              Number,
+            ),
+          })
+          .from(schema.stockMovements)
+          .where(and(...deliveredConditions)),
+        // Active locations + their per-location threshold overrides — drives the
+        // effective-threshold annotation and the all-locations expansion.
+        (async () => {
+          const hasLocCol = await this.locationThresholdColExists();
+          return this.db
+            .select({
+              id: schema.logisticsLocations.id,
+              ...(hasLocCol ? { lowStockThreshold: schema.logisticsLocations.lowStockThreshold } : {}),
+            })
+            .from(schema.logisticsLocations)
+            .where(eq(schema.logisticsLocations.status, 'ACTIVE'));
+        })(),
+        this.getGlobalLowStockThreshold(),
+      ]);
+
+    const thresholdByLocation = new Map(
+      activeLocations.map((l) => [l.id, (l as { lowStockThreshold?: number | null }).lowStockThreshold ?? null]),
+    );
+
+    type RawLevel = (typeof levelsRaw)[number];
+    let workingRaw: RawLevel[] = levelsRaw;
+    if (expandAllLocations && input.productId) {
+      const productId = input.productId;
+      const byLocation = new Map(levelsRaw.map((l) => [l.locationId, l]));
+      const now = new Date();
+      workingRaw = activeLocations.map((loc): RawLevel => {
+        const real = byLocation.get(loc.id);
+        if (real) return real;
+        // Synthetic zero row — id prefixed `zero:` so the UI renders it
+        // read-only (no View / Reconcile, just the threshold cell).
+        return {
+          id: `zero:${productId}:${loc.id}`,
+          productId,
+          locationId: loc.id,
+          batchId: null,
+          stockCount: 0,
+          reservedCount: 0,
+          status: 'AVAILABLE',
+          updatedAt: now,
+        };
+      });
+      // Re-apply the requested sort across the merged (real + synthetic) set.
+      workingRaw.sort((a, b) => {
+        if (input.sortBy === 'available') {
+          const av = a.stockCount - a.reservedCount;
+          const bv = b.stockCount - b.reservedCount;
+          return input.sortOrder === 'asc' ? av - bv : bv - av;
+        }
+        const at = a.updatedAt instanceof Date ? a.updatedAt.getTime() : 0;
+        const bt = b.updatedAt instanceof Date ? b.updatedAt.getTime() : 0;
+        return input.sortOrder === 'asc' ? at - bt : bt - at;
+      });
+    }
+
+    const total = expandAllLocations ? workingRaw.length : (totalRows[0]?.count ?? 0);
+    const pagedRaw = expandAllLocations
+      ? workingRaw.slice(offset, offset + input.limit)
+      : workingRaw;
+
+    // Enrich only real rows — synthetic zero rows have no FIFO shipment layers.
+    const realPaged = pagedRaw.filter((l) => !l.id.startsWith('zero:'));
+    const enrichedReal = await this.enrichLevelsWithShipmentLayers(realPaged);
+    const enrichedById = new Map(enrichedReal.map((l) => [l.id, l]));
+
+    const levels = pagedRaw.map((l) => {
+      const enriched = enrichedById.get(l.id);
+      const base = enriched ?? { ...l, shipmentLayers: [], hasManualFifoRemaining: false };
+      const locationThreshold = thresholdByLocation.get(l.locationId) ?? null;
+      return {
+        ...base,
+        locationLowStockThreshold: locationThreshold,
+        effectiveLowStockThreshold: locationThreshold ?? globalThreshold,
+      };
+    });
+
     const sums = sumsRows[0];
 
     return {
@@ -1360,6 +1618,7 @@ export class InventoryService {
       totals: {
         totalStock: sums?.totalStock ?? 0,
         totalReserved: sums?.totalReserved ?? 0,
+        totalDelivered: deliveredRows[0]?.totalDelivered ?? 0,
       },
       pagination: {
         page: input.page,
@@ -1905,53 +2164,158 @@ export class InventoryService {
    * TODO: re-implement once min_threshold is stored elsewhere (e.g. inventory settings).
    */
   /**
-   * Return all inventory levels where (stockCount - reservedCount) < configured threshold.
-   * Drives the low-stock banner on the inventory page. Joined with product + location names.
+   * Return all inventory levels where (stockCount - reservedCount) < the
+   * EFFECTIVE threshold — the location's own `low_stock_threshold` if set,
+   * otherwise the org-wide threshold. Drives the low-stock banner on the
+   * inventory page. Each item carries its own effective `threshold`.
+   *
+   * Note: no early-return when the global threshold is 0/disabled — a location
+   * with an explicit override should still surface (COALESCE handles it).
    */
   async getLowStockAlerts() {
-    const cfg = await this.settings.get('INVENTORY_LOW_STOCK_CONFIG');
-    const thresholdRaw = (cfg?.['threshold'] as number | string | undefined) ?? InventoryService.DEFAULT_LOW_STOCK_THRESHOLD;
-    const threshold = typeof thresholdRaw === 'string' ? parseInt(thresholdRaw, 10) : thresholdRaw;
-    if (!Number.isFinite(threshold) || threshold <= 0) {
-      return { threshold: 0, items: [] };
+    const globalThreshold = await this.getGlobalLowStockThreshold();
+    const hasLocCol = await this.locationThresholdColExists();
+
+    // Single raw query that covers BOTH cases:
+    //  1. inventory_levels rows where available < effective threshold
+    //  2. active locations with NO inventory_levels rows at all (0 stock)
+    // Uses a LEFT JOIN from locations → levels so empty locations appear as NULLs.
+    const thresholdSql = hasLocCol ? 'll.low_stock_threshold' : 'NULL::integer';
+
+    const rows = await this.db.execute<{
+      level_id: string | null;
+      product_id: string | null;
+      location_id: string;
+      stock_count: number;
+      reserved_count: number;
+      product_name: string | null;
+      location_name: string;
+      effective_threshold: number;
+    }>(sql.raw(`
+      SELECT
+        il.id AS level_id,
+        il.product_id,
+        ll.id AS location_id,
+        COALESCE(il.stock_count, 0) AS stock_count,
+        COALESCE(il.reserved_count, 0) AS reserved_count,
+        p.name AS product_name,
+        ll.name AS location_name,
+        COALESCE(${thresholdSql}, ${globalThreshold}) AS effective_threshold
+      FROM logistics_locations ll
+      LEFT JOIN inventory_levels il ON il.location_id = ll.id
+      LEFT JOIN products p ON p.id = il.product_id
+      WHERE ll.status = 'ACTIVE'
+        AND (
+          (il.id IS NOT NULL AND (il.stock_count - il.reserved_count) < COALESCE(${thresholdSql}, ${globalThreshold}))
+          OR
+          (il.id IS NULL)
+        )
+      ORDER BY COALESCE(il.stock_count - il.reserved_count, 0) ASC
+      LIMIT 50
+    `));
+
+    return {
+      threshold: globalThreshold,
+      items: rows.map((r) => ({
+        // Empty locations have no level — use a synthetic key so the UI can render them.
+        levelId: r.level_id ?? `empty-${r.location_id}`,
+        productId: r.product_id ?? null,
+        productName: r.product_name ?? (r.level_id ? 'Unknown product' : 'No stock received'),
+        locationId: r.location_id,
+        locationName: r.location_name ?? 'Unknown location',
+        stockCount: Number(r.stock_count),
+        reservedCount: Number(r.reserved_count),
+        availableCount: Number(r.stock_count) - Number(r.reserved_count),
+        threshold: Number(r.effective_threshold),
+      })),
+    };
+  }
+
+  /**
+   * Set (or clear) a location's per-location low-stock alert threshold.
+   * `threshold === null` clears the override so the location inherits the
+   * org-wide threshold again. Wrapped in `withActor` — the write is captured by
+   * the `logistics_locations` temporal-audit trigger (Pillar 4).
+   */
+  async setLocationLowStockThreshold(
+    locationId: string,
+    threshold: number | null,
+    actor: SessionUser,
+  ): Promise<void> {
+    const hasLocCol = await this.locationThresholdColExists();
+    if (!hasLocCol) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: 'Per-location thresholds require migration 0143. Run migrations and restart.',
+      });
     }
+    await withActor(this.db, actor, async (tx) => {
+      const updated = await tx
+        .update(schema.logisticsLocations)
+        .set({ lowStockThreshold: threshold, updatedAt: new Date() })
+        .where(eq(schema.logisticsLocations.id, locationId))
+        .returning({ id: schema.logisticsLocations.id });
+      if (!updated[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Location not found' });
+      }
+    });
+  }
+
+  /**
+   * List every active location with its per-location low-stock override and
+   * the resolved org-wide threshold. Drives the per-location threshold editor
+   * on the inventory page — surfaces locations even when they hold zero
+   * inventory so admins can pre-set alerts before stock arrives.
+   */
+  async listLocationThresholds(): Promise<{
+    globalThreshold: number;
+    locations: Array<{
+      id: string;
+      name: string;
+      providerName: string | null;
+      providerKind: 'WAREHOUSE' | 'THIRD_PARTY' | null;
+      lowStockThreshold: number | null;
+      effectiveThreshold: number;
+    }>;
+  }> {
+    const globalThreshold = await this.getGlobalLowStockThreshold();
+
+    const hasLocCol = await this.locationThresholdColExists();
 
     const rows = await this.db
       .select({
-        levelId: schema.inventoryLevels.id,
-        productId: schema.inventoryLevels.productId,
-        locationId: schema.inventoryLevels.locationId,
-        stockCount: schema.inventoryLevels.stockCount,
-        reservedCount: schema.inventoryLevels.reservedCount,
-        productName: schema.products.name,
-        locationName: schema.logisticsLocations.name,
+        id: schema.logisticsLocations.id,
+        name: schema.logisticsLocations.name,
+        ...(hasLocCol ? { lowStockThreshold: schema.logisticsLocations.lowStockThreshold } : {}),
+        providerName: schema.logisticsProviders.name,
+        providerKind: schema.logisticsProviders.kind,
       })
-      .from(schema.inventoryLevels)
-      .leftJoin(schema.products, eq(schema.inventoryLevels.productId, schema.products.id))
+      .from(schema.logisticsLocations)
       .leftJoin(
-        schema.logisticsLocations,
-        eq(schema.inventoryLevels.locationId, schema.logisticsLocations.id),
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
       )
-      .where(
-        sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) < ${threshold}`,
-      )
-      .orderBy(
-        sql`(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}) ASC`,
-      )
-      .limit(50);
+      .where(eq(schema.logisticsLocations.status, 'ACTIVE'))
+      .orderBy(asc(schema.logisticsLocations.name));
 
     return {
-      threshold,
-      items: rows.map((r) => ({
-        levelId: r.levelId,
-        productId: r.productId,
-        productName: r.productName ?? 'Unknown product',
-        locationId: r.locationId,
-        locationName: r.locationName ?? 'Unknown location',
-        stockCount: r.stockCount,
-        reservedCount: r.reservedCount,
-        availableCount: r.stockCount - r.reservedCount,
-      })),
+      globalThreshold,
+      locations: rows.map((r) => {
+        const locThreshold = (r as { lowStockThreshold?: number | null }).lowStockThreshold ?? null;
+        return {
+          id: r.id,
+          name: r.name,
+          providerName: r.providerName ?? null,
+          providerKind:
+            r.providerKind === 'WAREHOUSE'
+              ? ('WAREHOUSE' as const)
+              : r.providerKind === 'THIRD_PARTY'
+                ? ('THIRD_PARTY' as const)
+                : null,
+          lowStockThreshold: locThreshold,
+          effectiveThreshold: locThreshold ?? globalThreshold,
+        };
+      }),
     };
   }
 

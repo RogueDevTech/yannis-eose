@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { NairaPrice } from '~/components/ui/naira-price';
@@ -120,26 +121,23 @@ export function CSDashboardHotSwapTabPanel({
             <TableLoadingOverlay show={hotSwapListLoading}>
               {hotSwapSourceOrders.length > 0 ? (
                 <>
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-sm text-app-fg-muted">
-                      Select orders to reassign ({hotSwapOrderIds.length} selected)
-                      {hotSwapSourceTotal > hotSwapSourceOrders.length ? (
-                        <span className="block text-xs mt-0.5 text-warning-600 dark:text-warning-400">
-                          Showing {hotSwapSourceOrders.length} of {hotSwapSourceTotal} — narrow by reassigning in batches
-                          or use CS Orders with filters for the full list.
-                        </span>
-                      ) : null}
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-app-fg-muted">
+                      {hotSwapOrderIds.length} of {hotSwapSourceOrders.length} selected
                     </p>
                     <button
                       type="button"
                       onClick={selectAllHotSwap}
-                      className="text-sm text-brand-500 hover:text-brand-600 font-medium"
+                      className="text-xs text-brand-500 hover:text-brand-600 font-medium"
                     >
-                      Select All ({hotSwapSourceOrders.length})
+                      Select All
                     </button>
                   </div>
-
-                  <p className="text-xs text-app-fg-muted mb-2">Click cards to select — same layout as Unassigned Queue</p>
+                  {hotSwapSourceTotal > hotSwapSourceOrders.length ? (
+                    <p className="text-xs text-warning-600 dark:text-warning-400 mb-2">
+                      Showing {hotSwapSourceOrders.length} of {hotSwapSourceTotal} — reassign in batches
+                    </p>
+                  ) : null}
                   <div
                     ref={ordersScrollRef}
                     className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
@@ -203,6 +201,15 @@ export function CSDashboardHotSwapTabPanel({
                               textClassName="text-[10px] text-app-fg-muted"
                               className="inline-flex"
                             />
+                            <div className="mt-1.5">
+                              <Link
+                                to={`/admin/orders/${order.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                              >
+                                View
+                              </Link>
+                            </div>
                           </div>
                         </div>
                       );
@@ -215,7 +222,24 @@ export function CSDashboardHotSwapTabPanel({
                   assignee). If you expected more, confirm branch context and that orders are still in the CS stage.
                 </p>
               ) : (
-                <div className="min-h-[12rem]" aria-hidden />
+                <div className="flex flex-nowrap gap-3 overflow-x-hidden pb-1" aria-busy="true">
+                  {[1, 2, 3, 4].map((k) => (
+                    <div
+                      key={k}
+                      className="shrink-0 w-48 rounded-xl border border-warning-200 dark:border-warning-800/60 bg-app-elevated p-2.5 space-y-2 animate-pulse"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="h-3 w-24 rounded bg-app-hover" />
+                        <div className="h-3 w-12 rounded bg-app-hover" />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-4 w-16 rounded-full bg-app-hover" />
+                        <div className="h-3 w-14 rounded bg-app-hover" />
+                      </div>
+                      <div className="h-3 w-20 rounded bg-app-hover" />
+                    </div>
+                  ))}
+                </div>
               )}
             </TableLoadingOverlay>
           )}

@@ -107,12 +107,6 @@ export function CSDashboardCallbacksTabPanel({
                       >
                         View
                       </Link>
-                      <Link
-                        to={`/admin/orders/${order.id}`}
-                        className="text-[11px] font-medium text-success-600 dark:text-success-400 hover:underline"
-                      >
-                        Call now
-                      </Link>
                     </div>
                   </div>
                 </div>
