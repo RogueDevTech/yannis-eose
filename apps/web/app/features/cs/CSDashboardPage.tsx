@@ -45,6 +45,9 @@ const CreateOfflineOrderModal = lazy(() =>
 const CSDashboardDuplicatesTabPanel = lazy(() =>
   import('./CSDashboardDuplicatesTabPanel').then((m) => ({ default: m.CSDashboardDuplicatesTabPanel })),
 );
+const DuplicateCompareModal = lazy(() =>
+  import('./DuplicateCompareModal').then((m) => ({ default: m.DuplicateCompareModal })),
+);
 const CSDashboardCallbacksTabPanel = lazy(() =>
   import('./CSDashboardCallbacksTabPanel').then((m) => ({ default: m.CSDashboardCallbacksTabPanel })),
 );
@@ -968,6 +971,8 @@ function CSDashboardPageLoaded({
   const [selectedAbandonedIds, setSelectedAbandonedIds] = useState<Set<string>>(new Set());
   /** Multi-select for bulk dismiss on the Possible duplicates tab. */
   const [selectedDuplicateIds, setSelectedDuplicateIds] = useState<Set<string>>(new Set());
+  /** Multi-select for the Callbacks tab. */
+  const [selectedCallbackIds, setSelectedCallbackIds] = useState<Set<string>>(new Set());
   const bulkDismissDuplicatesFetcher = useFetcher<{
     success?: boolean;
     dismissed?: number;
@@ -994,6 +999,15 @@ function CSDashboardPageLoaded({
     error?: string;
   }>();
   const [bulkDeleteCartsConfirmOpen, setBulkDeleteCartsConfirmOpen] = useState(false);
+
+  const toggleCallbackSelection = (orderId: string) => {
+    setSelectedCallbackIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
 
   const toggleAbandonedSelection = (cartId: string) => {
     setSelectedAbandonedIds((prev) => {
@@ -1072,6 +1086,9 @@ function CSDashboardPageLoaded({
   } | null>(null);
   /** Delete abandoned cart confirmation modal */
   const [deleteCartConfirm, setDeleteCartConfirm] = useState<PendingCart | null>(null);
+  /** Side-by-side compare modal opened from the Possible duplicates tab.
+   *  Hosts the Merge / Dismiss actions, which hand off to the existing confirm modals below. */
+  const [compareDuplicatePair, setCompareDuplicatePair] = useState<DuplicatePair | null>(null);
   /** Merge / dismiss duplicate confirmation modals */
   const [mergeDuplicateConfirm, setMergeDuplicateConfirm] = useState<DuplicatePair | null>(null);
   const [dismissDuplicateConfirm, setDismissDuplicateConfirm] = useState<DuplicatePair | null>(null);
@@ -1794,31 +1811,9 @@ function CSDashboardPageLoaded({
       <AbandonedCartDetailModal
         cart={selectedAbandonedCart}
         canReveal={canDeleteCart}
+        canRecover={canDeleteCart}
         onClose={() => setSelectedAbandonedCart(null)}
         onClear={canDeleteCart ? (c) => { setSelectedAbandonedCart(null); setDeleteCartConfirm(c); } : undefined}
-        onAssign={canCreateOffline ? (c, revealedPhone) => {
-          setSelectedAbandonedCart(null);
-          setCreateOfflinePrefill({
-            customerName: c.customerName,
-            cartPrefill: {
-              cartId: c.id,
-              customerName: c.customerName,
-              customerPhone: revealedPhone ?? undefined,
-              customerAddress: c.customerAddress ?? undefined,
-              deliveryAddress: c.deliveryAddress ?? undefined,
-              deliveryState: c.deliveryState ?? undefined,
-              deliveryNotes: c.deliveryNotes ?? undefined,
-              customerGender: c.customerGender ?? undefined,
-              preferredDeliveryDate: c.preferredDeliveryDate ?? undefined,
-              customerEmail: c.customerEmail ?? undefined,
-              paymentMethod: c.paymentMethod ?? undefined,
-              productId: c.productId ?? undefined,
-              offerLabel: c.offerLabel ?? undefined,
-              quantity: c.quantity ?? undefined,
-            },
-          });
-          onCreateOfflineOpenChange(true);
-        } : undefined}
       />
 
       {/* Active order detail modal */}
@@ -2504,7 +2499,12 @@ function CSDashboardPageLoaded({
         <DeferredSection resolve={callbackOrders} fallback={<CSCallbacksTabDeferredFallback />}>
           {(resolvedCallbacks: CSOrder[]) => (
             <Suspense fallback={<CSCallbacksTabDeferredFallback />}>
-              <CSDashboardCallbacksTabPanel orders={resolvedCallbacks} workloads={workloads} />
+              <CSDashboardCallbacksTabPanel
+                orders={resolvedCallbacks}
+                workloads={workloads}
+                selectedIds={selectedCallbackIds}
+                onToggle={toggleCallbackSelection}
+              />
             </Suspense>
           )}
         </DeferredSection>
@@ -2517,9 +2517,7 @@ function CSDashboardPageLoaded({
             <Suspense fallback={<CSDuplicatesTabDeferredFallback />}>
               <CSDashboardDuplicatesTabPanel
                 pairs={pairs}
-                fetcherIdle={fetcher.state === 'idle'}
-                onMerge={setMergeDuplicateConfirm}
-                onDismiss={setDismissDuplicateConfirm}
+                onView={setCompareDuplicatePair}
                 selectedIds={selectedDuplicateIds}
                 onToggle={toggleDuplicateSelection}
                 onPickFirst={(count) =>
@@ -2616,10 +2614,22 @@ function CSDashboardPageLoaded({
                   return (
                   <div
                     key={c.id}
-                    className={`group relative shrink-0 w-48 rounded-xl border bg-app-elevated transition-all duration-200 hover:shadow-md ${
+                    onClick={canDeleteCart ? () => toggleAbandonedSelection(c.id) : undefined}
+                    onKeyDown={canDeleteCart ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleAbandonedSelection(c.id);
+                      }
+                    } : undefined}
+                    role={canDeleteCart ? 'checkbox' : undefined}
+                    aria-checked={canDeleteCart ? isSelected : undefined}
+                    tabIndex={canDeleteCart ? 0 : undefined}
+                    className={`group relative shrink-0 w-48 text-left rounded-xl border bg-app-elevated transition-all duration-200 ${
+                      canDeleteCart ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500' : ''
+                    } ${
                       isSelected
                         ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
-                        : 'border-app-border hover:border-brand-300 dark:hover:border-brand-700'
+                        : 'border-app-border hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
                     }`}
                   >
                     <span className="absolute top-2 right-2 flex h-2 w-2 pointer-events-none">
@@ -2628,7 +2638,7 @@ function CSDashboardPageLoaded({
                     </span>
 
                     {canDeleteCart && (
-                      <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                      <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={isSelected}
                           onChange={() => toggleAbandonedSelection(c.id)}
@@ -2661,7 +2671,8 @@ function CSDashboardPageLoaded({
                         })}
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-2">
+                      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+                      <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
                           onClick={() => setSelectedAbandonedCart(c)}
@@ -3019,6 +3030,25 @@ function CSDashboardPageLoaded({
             </div>
         </Modal>
       )}
+
+      {/* Side-by-side comparison — opened from the "View" affordance on each
+          duplicate card. Hands off Merge/Dismiss to the existing confirm
+          modals below so the audit-confirm step is preserved. */}
+      <Suspense fallback={null}>
+        <DuplicateCompareModal
+          pair={compareDuplicatePair}
+          onClose={() => setCompareDuplicatePair(null)}
+          actionsBusy={fetcher.state !== 'idle' && (fetcher.formData?.get('intent') === 'mergeDuplicate' || fetcher.formData?.get('intent') === 'dismissDuplicate')}
+          onMerge={(pair) => {
+            setCompareDuplicatePair(null);
+            setMergeDuplicateConfirm(pair);
+          }}
+          onDismiss={(pair) => {
+            setCompareDuplicatePair(null);
+            setDismissDuplicateConfirm(pair);
+          }}
+        />
+      </Suspense>
 
       {/* Merge duplicate confirmation */}
       <ConfirmActionModal

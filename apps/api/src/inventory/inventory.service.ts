@@ -1510,9 +1510,12 @@ export class InventoryService {
       .where(whereClause)
       .orderBy(orderBy);
 
+    // Must be computed before Promise.all so the levels query knows whether to skip LIMIT/OFFSET.
+    const shouldExpandLocations = expandAllLocations || (!input.productId && !input.shipmentId && !input.search && !input.locationId);
+
     const [levelsRaw, totalRows, sumsRows, deliveredRows, activeLocations, globalThreshold] =
       await Promise.all([
-        expandAllLocations ? levelsQuery : levelsQuery.limit(input.limit).offset(offset),
+        shouldExpandLocations ? levelsQuery : levelsQuery.limit(input.limit).offset(offset),
         this.db
           .select({ count: count() })
           .from(schema.inventoryLevels)
@@ -1557,26 +1560,31 @@ export class InventoryService {
 
     type RawLevel = (typeof levelsRaw)[number];
     let workingRaw: RawLevel[] = levelsRaw;
-    if (expandAllLocations && input.productId) {
-      const productId = input.productId;
-      const byLocation = new Map(levelsRaw.map((l) => [l.locationId, l]));
+
+    // Inject synthetic zero-rows for locations with no inventory when
+    // filtering by a single product — show every location (even those
+    // that never stocked the product) so stock gaps are visible.
+    if (shouldExpandLocations) {
       const now = new Date();
-      workingRaw = activeLocations.map((loc): RawLevel => {
-        const real = byLocation.get(loc.id);
-        if (real) return real;
-        // Synthetic zero row — id prefixed `zero:` so the UI renders it
-        // read-only (no View / Reconcile, just the threshold cell).
-        return {
-          id: `zero:${productId}:${loc.id}`,
-          productId,
-          locationId: loc.id,
-          batchId: null,
-          stockCount: 0,
-          reservedCount: 0,
-          status: 'AVAILABLE',
-          updatedAt: now,
-        };
-      });
+
+      if (expandAllLocations && input.productId) {
+        const byLocation = new Map(levelsRaw.map((l) => [l.locationId, l]));
+        workingRaw = activeLocations.map((loc): RawLevel => {
+          const real = byLocation.get(loc.id);
+          if (real) return real;
+          return {
+            id: `zero:${input.productId}:${loc.id}`,
+            productId: input.productId!,
+            locationId: loc.id,
+            batchId: null,
+            stockCount: 0,
+            reservedCount: 0,
+            status: 'AVAILABLE',
+            updatedAt: now,
+          };
+        });
+      }
+
       // Re-apply the requested sort across the merged (real + synthetic) set.
       workingRaw.sort((a, b) => {
         if (input.sortBy === 'available') {
@@ -1590,13 +1598,13 @@ export class InventoryService {
       });
     }
 
-    const total = expandAllLocations ? workingRaw.length : (totalRows[0]?.count ?? 0);
-    const pagedRaw = expandAllLocations
+    const total = shouldExpandLocations ? workingRaw.length : (totalRows[0]?.count ?? 0);
+    const pagedRaw = shouldExpandLocations
       ? workingRaw.slice(offset, offset + input.limit)
       : workingRaw;
 
     // Enrich only real rows — synthetic zero rows have no FIFO shipment layers.
-    const realPaged = pagedRaw.filter((l) => !l.id.startsWith('zero:'));
+    const realPaged = pagedRaw.filter((l) => !l.id.startsWith('zero:') && !l.id.startsWith('empty:'));
     const enrichedReal = await this.enrichLevelsWithShipmentLayers(realPaged);
     const enrichedById = new Map(enrichedReal.map((l) => [l.id, l]));
 

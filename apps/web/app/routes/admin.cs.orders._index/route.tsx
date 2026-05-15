@@ -242,6 +242,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'canCreateOffline'
       | 'canExport'
       | 'canBulkPick'
+      | 'bulkSelectAllMatchingInput'
       | 'deferredSecondary'
     >
   > => {
@@ -337,6 +338,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       scheduleKind: scheduleKind ?? null,
       scheduleDate: scheduleKind === 'delivery_overdue' ? null : (scheduleDate ?? null),
     },
+    // Serialised listInput so the page can power "Select all matching this
+    // filter" — fetched client-side via `fetchOrdersMatchingIds` so the same
+    // server-side authz/scope as the visible list applies.
+    bulkSelectAllMatchingInput: JSON.stringify(listInput),
     deferredSecondary,
   };
   })();
@@ -580,56 +585,20 @@ export default function CSOrdersRoute() {
         | 'canAssignDirectly'
         | 'currentUserId'
         | 'canCreateOffline'
+        | 'bulkSelectAllMatchingInput'
         | 'deferredSecondary'
       >
     >;
   };
   const parentData = useRouteLoaderData('routes/admin') as { user: { role: string } } | undefined;
   const userRole = parentData?.user?.role;
-  // HoCS / Admin / SuperAdmin can both (a) filter the list to recovered-from-cart
-  // orders and (b) jump straight to the abandoned-cart view on the live queue.
-  // CS_CLOSER never sees either control (filter is also enforced server-side).
+  // HoCS / Admin / SuperAdmin can filter the list to recovered-from-cart
+  // orders via the "Cart abandonment" pseudo-option in the status dropdown.
+  // CS_CLOSER never sees the option (filter is also enforced server-side).
   const isHoCSPlus =
     userRole === 'HEAD_OF_CS' || userRole === 'SUPER_ADMIN' || userRole === 'ADMIN';
   usePageRefreshOnEvent([...CS_ORDERS_LIVE_EVENTS]);
-  // Active filter state is read from the URL so refresh + back-button keep it.
-  const fromCartActive =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('fromCart') === '1';
   return (
-    <>
-      {isHoCSPlus && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-app-border bg-app-elevated px-3 py-2 text-sm">
-          <span className="text-app-fg-muted">
-            {fromCartActive
-              ? 'Showing only orders recovered from a dropped-off cart.'
-              : 'Filter to orders recovered from cart abandonment, or jump to the live recovery queue.'}
-          </span>
-          <div className="flex items-center gap-3 shrink-0">
-            {fromCartActive ? (
-              <a
-                href="?"
-                className="text-xs font-semibold text-app-fg-muted hover:text-app-fg hover:underline"
-              >
-                Clear filter
-              </a>
-            ) : (
-              <a
-                href="?fromCart=1"
-                className="text-xs font-semibold text-brand-700 dark:text-brand-300 hover:underline"
-              >
-                Show recovered orders
-              </a>
-            )}
-            <a
-              href="/admin/cs/queue?tab=abandoned"
-              className="text-xs font-semibold text-app-fg-muted hover:text-app-fg hover:underline"
-            >
-              Open recovery queue →
-            </a>
-          </div>
-        </div>
-      )}
     <CachedAwait
       resolve={pageData}
       fallback={
@@ -653,9 +622,9 @@ export default function CSOrdersRoute() {
           userRole={userRole}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
           excludeStatuses={['REMITTED']}
+          enableFromCartStatusOption={isHoCSPlus}
         />
       )}
     </CachedAwait>
-    </>
   );
 }

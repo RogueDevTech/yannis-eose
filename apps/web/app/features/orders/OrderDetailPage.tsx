@@ -897,6 +897,7 @@ export function OrderDetailPage({
   const [deliverModalOpen, setDeliverModalOpen] = useState(false);
   const [deliverNote, setDeliverNote] = useState('');
   const [deliverProofUrl, setDeliverProofUrl] = useState('');
+  const [deliverCost, setDeliverCost] = useState<number | null>(null);
   /** Logistics location selected at delivery time. Pre-filled with the order's
    *  current allocation (`order.logisticsLocationId`) so the common case (same provider
    *  delivered) is one click. Editable because a different provider may have stepped
@@ -1474,6 +1475,55 @@ export function OrderDetailPage({
           durationMs={5000}
           onDismiss={() => setDismissedError(true)}
         />
+      )}
+
+      {/* Duplicate linkage — surface the cross-order tie so a CS closer / MB
+          immediately sees that this order is the merged duplicate (or the
+          original it was merged into). The "Duplicate of" row in Details still
+          carries the raw UUID for power users; this banner makes the
+          relationship one click away regardless of where the user is on the
+          page. */}
+      {order.isDuplicate === 'MERGED' && order.duplicateOfId ? (
+        <div className="rounded-lg border border-app-border bg-app-hover px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="text-sm text-app-fg">
+              <p className="font-semibold">This order was merged into another</p>
+              <p className="mt-0.5 text-app-fg-muted">
+                Items and total were combined into the original. This duplicate is cancelled and kept
+                for audit. Media buyer attribution stays via the cross-funnel record.
+              </p>
+            </div>
+            <Link
+              to={`/admin/orders/${order.duplicateOfId}`}
+              className="btn-secondary btn-sm inline-flex shrink-0"
+            >
+              Open original →
+            </Link>
+          </div>
+        </div>
+      ) : null}
+      {(order.isDuplicate === 'FLAGGED' || order.isDuplicate === 'POSSIBLY_DUPLICATE') && (
+        <div className="rounded-lg border border-warning-300 dark:border-warning-700/60 bg-warning-50 dark:bg-warning-900/20 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="text-sm text-warning-900 dark:text-warning-100">
+              <p className="font-semibold">
+                {order.isDuplicate === 'FLAGGED'
+                  ? 'Flagged as a duplicate'
+                  : 'Possibly a duplicate'}
+              </p>
+              <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
+                Same phone matched another non-cancelled order. Review and resolve from the CS queue
+                duplicates tab.
+              </p>
+            </div>
+            <Link
+              to="/admin/cs/queue?tab=duplicates"
+              className="btn-secondary btn-sm inline-flex shrink-0"
+            >
+              Open duplicates →
+            </Link>
+          </div>
+        </div>
       )}
 
       {canEditOrder && order.pendingOrderLinePriceRequestId && (
@@ -2282,6 +2332,7 @@ export function OrderDetailPage({
                           // Pre-fill with the original allocation so the common path
                           // (same provider delivered) is a single click.
                           setDeliverLocationId(order.logisticsLocationId ?? '');
+                          setDeliverCost(null);
                           setDeliverModalOpen(true);
                         }}
                         disabled={fetcher.state === 'submitting'}
@@ -2922,6 +2973,20 @@ export function OrderDetailPage({
                 )}
             </div>
           )}
+          <div className="mb-4">
+            <NumberInput
+              id="delivery-cost"
+              label="Cost of delivery (optional)"
+              value={deliverCost}
+              onValueChange={setDeliverCost}
+              onValueCleared={() => setDeliverCost(null)}
+              allowEmpty
+              placeholder="e.g. 2500"
+              min={0}
+              coerce="decimal"
+              leftAddon="₦"
+            />
+          </div>
           <Textarea
             id="delivery-note"
             label="Delivery note (optional)"
@@ -2951,6 +3016,9 @@ export function OrderDetailPage({
               {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
               {deliverLocationId && (
                 <input type="hidden" name="logisticsLocationId" value={deliverLocationId} />
+              )}
+              {deliverCost != null && deliverCost > 0 && (
+                <input type="hidden" name="deliveryFeeAddOn" value={deliverCost} />
               )}
               {deliverNote.trim() && <input type="hidden" name="deliveryNote" value={deliverNote.trim()} />}
               {deliverProofUrl && <input type="hidden" name="deliveryProofUrl" value={deliverProofUrl} />}
@@ -3185,38 +3253,29 @@ export function OrderDetailPage({
                   </Button>
                 </div>
               </>
-            ) : !revealData?.phoneRevealed ? (
+            ) : revealData?.error ? (
               <>
-                {revealData?.error ? (
-                  <>
-                    <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
-                    <div className="flex gap-2 justify-end">
-                      <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>
-                        Close
-                      </Button>
-                      <revealFetcher.Form method="post">
-                        <input type="hidden" name="intent" value="revealPhone" />
-                        {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
-                        <Button
-                          type="submit"
-                          variant="primary"
-                          disabled={revealFetcher.state === 'submitting'}
-                          loading={revealFetcher.state === 'submitting'}
-                          loadingText="Retrying..."
-                        >
-                          Retry
-                        </Button>
-                      </revealFetcher.Form>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex items-center justify-center py-6">
-                    <Spinner size="sm" />
-                    <span className="ml-3 text-sm text-app-fg-muted">Preparing call…</span>
-                  </div>
-                )}
+                <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
+                <div className="flex gap-2 justify-end">
+                  <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>
+                    Close
+                  </Button>
+                  <revealFetcher.Form method="post">
+                    <input type="hidden" name="intent" value="revealPhone" />
+                    {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={revealFetcher.state === 'submitting'}
+                      loading={revealFetcher.state === 'submitting'}
+                      loadingText="Retrying..."
+                    >
+                      Retry
+                    </Button>
+                  </revealFetcher.Form>
+                </div>
               </>
-            ) : !revealData?.isDialable ? (
+            ) : revealData?.phoneRevealed && !revealData?.isDialable ? (
               <>
                 <p className="text-sm text-app-fg-muted mb-3">
                   This order was created with phone protection. The customer&apos;s number is not stored in a dialable form and cannot be shown. Enable VOIP in Settings to call via the app, or record that you called using your own records below.
@@ -3242,71 +3301,83 @@ export function OrderDetailPage({
               </>
             ) : (
               <>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={async () => {
-                      ensureBranchForAction({
-                        actionLabel: 'recording customer call',
-                        onProceed: () =>
-                          recordCallFetcher.submit(
-                            {
-                              intent: 'initiateCall',
-                              ...(order.branchId ? { branchId: order.branchId } : {}),
-                            },
-                            { method: 'post' },
-                          ),
-                      });
-                      const phone = revealData.phone ?? '';
-                      if (phone && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-                        await navigator.clipboard.writeText(phone);
-                        setCopyFeedback(true);
-                        setTimeout(() => setCopyFeedback(false), 2000);
-                      }
-                    }}
-                    disabled={recordCallFetcher.state === 'submitting'}
-                  >
-                    {copyFeedback ? 'Copied' : 'Copy number'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    className="inline-flex items-center justify-center gap-2"
-                    disabled={recordCallFetcher.state === 'submitting'}
-                    onClick={() => {
-                      ensureBranchForAction({
-                        actionLabel: 'recording customer call',
-                        onProceed: () =>
-                          recordCallFetcher.submit(
-                            {
-                              intent: 'initiateCall',
-                              ...(order.branchId ? { branchId: order.branchId } : {}),
-                            },
-                            { method: 'post' },
-                          ),
-                      });
-                      const phone = revealData.phone ?? '';
-                      if (phone) {
-                        window.location.href = `tel:${phone}`;
-                      }
-                    }}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                    </svg>
-                    Call on my phone
-                  </Button>
-                </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setCallCustomerModalOpen(false)}
-                  >
-                    Close
-                  </Button>
-                </div>
+                {(() => {
+                  const phoneReady = !!revealData?.phoneRevealed && !!revealData?.isDialable;
+                  const busy = !phoneReady || recordCallFetcher.state === 'submitting';
+                  return (
+                    <>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={async () => {
+                            ensureBranchForAction({
+                              actionLabel: 'recording customer call',
+                              onProceed: () =>
+                                recordCallFetcher.submit(
+                                  {
+                                    intent: 'initiateCall',
+                                    ...(order.branchId ? { branchId: order.branchId } : {}),
+                                  },
+                                  { method: 'post' },
+                                ),
+                            });
+                            const phone = revealData?.phone ?? '';
+                            if (phone && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                              await navigator.clipboard.writeText(phone);
+                              setCopyFeedback(true);
+                              setTimeout(() => setCopyFeedback(false), 2000);
+                            }
+                          }}
+                          disabled={busy}
+                          loading={!phoneReady}
+                          loadingText="Copy number"
+                        >
+                          {copyFeedback ? 'Copied' : 'Copy number'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          className="inline-flex items-center justify-center gap-2"
+                          disabled={busy}
+                          loading={!phoneReady}
+                          loadingText="Call on my phone"
+                          onClick={() => {
+                            ensureBranchForAction({
+                              actionLabel: 'recording customer call',
+                              onProceed: () =>
+                                recordCallFetcher.submit(
+                                  {
+                                    intent: 'initiateCall',
+                                    ...(order.branchId ? { branchId: order.branchId } : {}),
+                                  },
+                                  { method: 'post' },
+                                ),
+                            });
+                            const phone = revealData?.phone ?? '';
+                            if (phone) {
+                              window.location.href = `tel:${phone}`;
+                            }
+                          }}
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                          </svg>
+                          Call on my phone
+                        </Button>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setCallCustomerModalOpen(false)}
+                        >
+                          Close
+                        </Button>
+                      </div>
+                    </>
+                  );
+                })()}
               </>
             )}
         </Modal>

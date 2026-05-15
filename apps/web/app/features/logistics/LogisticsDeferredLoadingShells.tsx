@@ -245,7 +245,7 @@ export function LogisticsPartnersLoadingShell() {
             sheetSubtitle={<span>Refresh and add records</span>}
             triggerAriaLabel="Logistics toolbar"
             desktop={
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <PageRefreshButton />
                 <span className="h-8 w-36 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
                 <span className="h-8 w-24 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
@@ -261,24 +261,41 @@ export function LogisticsPartnersLoadingShell() {
         }
       />
       <Tabs
-        value="providers"
+        value="locations"
         onChange={() => {}}
         tabs={[
-          { value: 'providers', label: 'Companies' },
           { value: 'locations', label: 'Locations' },
+          { value: 'providers', label: 'Companies' },
         ]}
       />
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="card p-4 space-y-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-12 rounded bg-app-hover animate-pulse" aria-hidden />
-          ))}
-        </div>
-        <div className="card p-4 space-y-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-12 rounded bg-app-hover animate-pulse" aria-hidden />
-          ))}
-        </div>
+      {/* Skeleton table matching the locations CompactTable columns */}
+      <div className="overflow-hidden rounded-lg border border-app-border">
+        <table className="w-full text-sm">
+          <thead className="border-b border-app-border bg-app-elevated">
+            <tr>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Location</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Address</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Logistics company</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Total stock</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Alert threshold</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Status</th>
+              <th className="px-3 py-2 w-px" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-app-border">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <tr key={i}>
+                <td className="px-3 py-2.5"><span className="block h-4 w-28 rounded bg-app-hover animate-pulse" /></td>
+                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-36 rounded bg-app-hover animate-pulse" /></td>
+                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-24 rounded bg-app-hover animate-pulse" /></td>
+                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-12 rounded bg-app-hover animate-pulse ml-auto" /></td>
+                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-16 rounded bg-app-hover animate-pulse ml-auto" /></td>
+                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-5 w-14 rounded-full bg-app-hover animate-pulse" /></td>
+                <td className="px-3 py-2.5"><span className="block h-6 w-12 rounded bg-app-hover animate-pulse ml-auto" /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

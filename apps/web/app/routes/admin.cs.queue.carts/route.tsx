@@ -140,6 +140,23 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
+  if (intent === 'recoverFromCart') {
+    const cartId = formData.get('cartId');
+    if (!cartId || typeof cartId !== 'string') {
+      return json({ success: false, error: 'Missing cartId' }, { status: 400 });
+    }
+    const res = await apiRequest<{ result?: { data?: { id: string } } }>(
+      '/trpc/orders.recoverFromCart',
+      { method: 'POST', cookie, body: { cartId } },
+    );
+    if (!res.ok) {
+      const errMsg = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to recover cart';
+      return json({ success: false, error: errMsg }, { status: 500 });
+    }
+    const orderId = res.data?.result?.data?.id;
+    return json({ success: true, orderId });
+  }
+
   if (intent === 'revealAbandonedPhone') {
     const cartId = formData.get('cartId');
     if (!cartId || typeof cartId !== 'string') {

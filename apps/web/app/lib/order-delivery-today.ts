@@ -33,3 +33,27 @@ export function isPreferredDeliveryDueToday(
   if (TERMINAL_FOR_DUE_TAG.has(orderStatus)) return false;
   return d === getLagosCalendarYmd();
 }
+
+/** Preferred delivery date is earlier than today (Lagos), order not yet in a terminal state. */
+export function isPreferredDeliveryOverdue(
+  preferredDeliveryDate: string | null | undefined,
+  orderStatus: string,
+): boolean {
+  if (!preferredDeliveryDate?.trim()) return false;
+  const d = preferredDeliveryDate.trim();
+  if (!ISO_DATE.test(d)) return false;
+  if (TERMINAL_FOR_DUE_TAG.has(orderStatus)) return false;
+  return d < getLagosCalendarYmd();
+}
+
+/** Callback scheduled for now/earlier — still actionable, not terminal yet. */
+export function isCallbackDue(
+  callbackScheduledAt: string | null | undefined,
+  orderStatus: string,
+): boolean {
+  if (!callbackScheduledAt) return false;
+  if (TERMINAL_FOR_DUE_TAG.has(orderStatus)) return false;
+  const t = Date.parse(callbackScheduledAt);
+  if (Number.isNaN(t)) return false;
+  return t <= Date.now();
+}

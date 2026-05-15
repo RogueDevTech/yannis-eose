@@ -237,89 +237,79 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         ]}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] gap-4">
-        <div className="card p-0 overflow-hidden flex flex-col">
-          <div className="px-4 pt-3 pb-0 border-b border-app-border shrink-0">
-            <Tabs
-              value={status}
-              onChange={setStatus}
-              tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
-              variant="underline"
-            />
-          </div>
-          <CompactTable<PayrollBatch>
-            columns={batchColumns}
-            rows={pagedBatches}
-            rowKey={(b) => b.id}
-            withCard={false}
-            loading={isLoaderRefetchBusy}
-            loadingVariant="overlay"
-            emptyTitle="No payroll batches in this queue"
-            emptyDescription="When HR forwards payroll to finance, batches appear here for payout processing."
-            pagination={
-              batches.length > 0
-                ? {
-                    page: safePage,
-                    totalPages,
-                    onPageChange: setPage,
-                    summary: (
-                      <p className="text-sm text-app-fg-muted">
-                        Showing {(safePage - 1) * PAGE_SIZE + 1}–
-                        {Math.min(safePage * PAGE_SIZE, batches.length)} of {batches.length}
-                        <span className="text-app-fg-muted/90"> · {PAGE_SIZE} per page</span>
-                      </p>
-                    ),
-                    wrapperClassName:
-                      'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
-                    controlsClassName: 'sm:justify-end',
-                  }
-                : undefined
-            }
+      <div className="card p-0 overflow-hidden flex flex-col">
+        <div className="px-4 pt-3 pb-0 border-b border-app-border shrink-0">
+          <Tabs
+            value={status}
+            onChange={setStatus}
+            tabs={STATUS_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
+            variant="underline"
           />
         </div>
+        <CompactTable<PayrollBatch>
+          columns={batchColumns}
+          rows={pagedBatches}
+          rowKey={(b) => b.id}
+          withCard={false}
+          loading={isLoaderRefetchBusy}
+          loadingVariant="overlay"
+          emptyTitle="No payroll batches in this queue"
+          emptyDescription="When HR forwards payroll to finance, batches appear here for payout processing."
+          pagination={
+            batches.length > 0
+              ? {
+                  page: safePage,
+                  totalPages,
+                  onPageChange: setPage,
+                  summary: (
+                    <p className="text-sm text-app-fg-muted">
+                      Showing {(safePage - 1) * PAGE_SIZE + 1}–
+                      {Math.min(safePage * PAGE_SIZE, batches.length)} of {batches.length}
+                      <span className="text-app-fg-muted/90"> · {PAGE_SIZE} per page</span>
+                    </p>
+                  ),
+                  wrapperClassName:
+                    'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
+                  controlsClassName: 'sm:justify-end',
+                }
+              : undefined
+          }
+        />
+      </div>
 
-        <div className="card p-0 overflow-hidden flex flex-col min-h-[16rem] xl:max-h-[min(36rem,70vh)]">
-          <div className="px-4 py-3 border-b border-app-border shrink-0">
-            <h2 className="text-sm font-semibold text-app-fg">Payout lines</h2>
-            {selectedBatch ? (
+      {/* Payout lines for the currently-selected batch — stacks below the
+          batches table only when Review has been clicked. Stacking instead of
+          side-by-side per HR/Finance feedback: two tables side-by-side ate the
+          screen and the right pane was empty on first load. */}
+      {selectedBatch ? (
+        <div className="card p-0 overflow-hidden flex flex-col">
+          <div className="px-4 py-3 border-b border-app-border shrink-0 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-app-fg">Payout lines</h2>
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-app-fg-muted">
                 <span>{DEPT_LABEL[selectedBatch.batch.department]}</span>
                 <span aria-hidden>·</span>
                 <span>{formatBatchMonth(selectedBatch.batch.periodMonth)}</span>
                 <StatusBadge status={selectedBatch.batch.status} />
               </div>
-            ) : (
-              <p className="text-xs text-app-fg-muted mt-1">
-                Pick a batch on the left to review staff rows and export a document.
-              </p>
-            )}
+            </div>
           </div>
-          <div className="flex-1 min-h-0 overflow-auto">
-            {!selectedBatch ? (
-              <div className="p-4">
-                <EmptyState
-                  variant="inline"
-                  title="No batch selected"
-                  description="Select Review on a batch to load payout details."
-                />
-              </div>
-            ) : selectedBatch.payouts.length === 0 ? (
-              <div className="p-4">
-                <EmptyState variant="inline" title="No payout rows" description="This batch has no staff payout lines yet." />
-              </div>
-            ) : (
-              <CompactTable<PayoutLine>
-                columns={payoutLineColumns}
-                rows={selectedBatch.payouts}
-                rowKey={(p) => p.id}
-                withCard={false}
-                loading={isLoaderRefetchBusy}
-                loadingVariant="overlay"
-              />
-            )}
-          </div>
+          {selectedBatch.payouts.length === 0 ? (
+            <div className="p-4">
+              <EmptyState variant="inline" title="No payout rows" description="This batch has no staff payout lines yet." />
+            </div>
+          ) : (
+            <CompactTable<PayoutLine>
+              columns={payoutLineColumns}
+              rows={selectedBatch.payouts}
+              rowKey={(p) => p.id}
+              withCard={false}
+              loading={isLoaderRefetchBusy}
+              loadingVariant="overlay"
+            />
+          )}
         </div>
-      </div>
+      ) : null}
 
       {selectedBatch && (
         <LocalExportModal

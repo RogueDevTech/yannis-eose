@@ -232,6 +232,56 @@ export async function fetchCampaignOrderTotalForBatch(
   }
 }
 
+/**
+ * Hard cap for "Select all matching this filter" deep-selects. Matches the
+ * server-side bulk-action max (`bulkTransition` / `bulkAssignToCS` cap at 100),
+ * so a single deep-select never exceeds what a follow-up bulk action can process.
+ * If you ever raise this, raise the bulk-action caps in lock-step.
+ */
+export const ORDERS_DEEP_SELECT_MAX = 100;
+
+/**
+ * GET `orders.list` with the same filter input the loader used, capped at
+ * {@link ORDERS_DEEP_SELECT_MAX}. Returns just the order IDs so the page can
+ * populate `selectedIds` for a "select all matching this filter" deep-select.
+ *
+ * Pass the listInput that the loader serialized for the current page — the
+ * server applies the same authz/scope as the visible list, so we don't have to
+ * recreate that on the client.
+ */
+export async function fetchOrdersMatchingIds(serializedListInput: string): Promise<{
+  ids: string[];
+  capped: boolean;
+}> {
+  const base = getBrowserApiBaseUrl();
+  if (!base) return { ids: [], capped: false };
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(serializedListInput) as Record<string, unknown>;
+  } catch {
+    return { ids: [], capped: false };
+  }
+  const input = encodeURIComponent(
+    JSON.stringify({ ...parsed, page: 1, limit: ORDERS_DEEP_SELECT_MAX }),
+  );
+  try {
+    const res = await fetch(`${base}/trpc/orders.list?input=${input}`, {
+      credentials: 'include',
+    });
+    if (!res.ok) return { ids: [], capped: false };
+    const json = (await res.json()) as TrpcEnvelope<{
+      orders: Array<{ id: string }>;
+      pagination: { total: number };
+    }>;
+    const data = json?.result?.data;
+    const ids = (data?.orders ?? []).map((o) => o.id);
+    const total = data?.pagination?.total ?? ids.length;
+    return { ids, capped: total > ids.length };
+  } catch {
+    return { ids: [], capped: false };
+  }
+}
+
 export type OrderClipboardSummaryPayload = { text: string };
 
 /**

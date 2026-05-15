@@ -1,5 +1,4 @@
 import { useRef } from 'react';
-import { Link } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -10,9 +9,7 @@ import type { DuplicatePair } from './types';
 
 export function CSDashboardDuplicatesTabPanel({
   pairs,
-  fetcherIdle,
-  onMerge,
-  onDismiss,
+  onView,
   selectedIds,
   onToggle,
   onPickFirst,
@@ -21,9 +18,8 @@ export function CSDashboardDuplicatesTabPanel({
   bulkDismissBusy,
 }: {
   pairs: DuplicatePair[];
-  fetcherIdle: boolean;
-  onMerge: (pair: DuplicatePair) => void;
-  onDismiss: (pair: DuplicatePair) => void;
+  /** Opens the side-by-side compare modal; Merge/Dismiss live there. */
+  onView: (pair: DuplicatePair) => void;
   selectedIds: Set<string>;
   onToggle: (orderId: string) => void;
   onPickFirst: (count: number) => void;
@@ -96,14 +92,28 @@ export function CSDashboardDuplicatesTabPanel({
                 return (
                 <div
                   key={pair.duplicate.id}
-                  className={`group relative shrink-0 w-48 rounded-xl border transition-all duration-200 hover:shadow-md ${cardBorder}`}
+                  onClick={() => onToggle(pair.duplicate.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onToggle(pair.duplicate.id);
+                    }
+                  }}
+                  role="checkbox"
+                  aria-checked={isSelected}
+                  tabIndex={0}
+                  className={`group relative shrink-0 w-48 text-left rounded-xl border transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                    isSelected
+                      ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md bg-app-elevated'
+                      : cardBorder + ' hover:shadow-md'
+                  }`}
                   title={
                     isSoft
                       ? 'Same phone has a non-cancelled order older than 24h but within 30 days.'
                       : 'Same phone has a non-cancelled order in the last 24 hours.'
                   }
                 >
-                  <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                  <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                     <Checkbox
                       checked={isSelected}
                       onChange={() => onToggle(pair.duplicate.id)}
@@ -160,28 +170,13 @@ export function CSDashboardDuplicatesTabPanel({
                       </p>
                     )}
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        to={`/admin/orders/${pair.duplicate.id}`}
-                        className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
-                      >
-                        View
-                      </Link>
+                    <div className="flex items-center justify-end">
                       <button
                         type="button"
-                        disabled={!pair.original || !fetcherIdle}
-                        onClick={() => onMerge(pair)}
-                        className="text-[11px] font-medium text-app-fg hover:underline disabled:opacity-50"
+                        onClick={() => onView(pair)}
+                        className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
                       >
-                        Merge
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!fetcherIdle}
-                        onClick={() => onDismiss(pair)}
-                        className="text-[11px] font-medium text-danger-600 dark:text-danger-400 hover:underline disabled:opacity-50"
-                      >
-                        Dismiss
+                        View →
                       </button>
                     </div>
                   </div>

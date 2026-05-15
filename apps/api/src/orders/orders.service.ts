@@ -1544,6 +1544,86 @@ export class OrdersService {
     return { id: order.id };
   }
 
+  /**
+   * Recover an abandoned cart as a real edge-form order.
+   * Unlike `createOffline`, this creates the order with `orderSource: 'edge-form'`
+   * so the MB gets full attribution and the order counts toward their metrics.
+   * CS can supplement missing fields (address, items, etc.) from the modal.
+   */
+  async recoverFromCart(
+    cartId: string,
+    overrides: {
+      customerAddress?: string;
+      deliveryAddress?: string;
+      deliveryNotes?: string;
+      deliveryState?: string;
+      customerGender?: string;
+      preferredDeliveryDate?: string;
+      paymentMethod?: 'PAY_ON_DELIVERY' | 'PAY_ONLINE';
+      customerEmail?: string;
+      items?: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+      totalAmount?: number;
+    },
+    actorId: string,
+  ): Promise<{ id: string }> {
+    // 1. Read the cart row for attribution + customer data.
+    const [cart] = await this.db
+      .select()
+      .from(schema.cartAbandonments)
+      .where(eq(schema.cartAbandonments.id, cartId))
+      .limit(1);
+    if (!cart) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Cart not found' });
+    }
+    if (cart.status === 'CONVERTED') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'This cart has already been converted to an order' });
+    }
+    if (!cart.customerPhone) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Cart has no phone number — cannot create order' });
+    }
+
+    // 2. Build order input from cart + CS overrides.
+    const phoneHash = this.hashPhone(cart.customerPhone);
+    const items = overrides.items && overrides.items.length > 0
+      ? overrides.items
+      : cart.productId
+        ? [{ productId: cart.productId, quantity: cart.quantity ?? 1, unitPrice: 0, offerLabel: cart.offerLabel ?? undefined }]
+        : [];
+    if (items.length === 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'At least one item is required' });
+    }
+
+    const orderInput: CreateOrderInput & { cartId: string } = {
+      cartId,
+      campaignId: cart.campaignId ?? undefined,
+      mediaBuyerId: cart.mediaBuyerId ?? undefined,
+      customerName: cart.customerName,
+      customerPhoneHash: phoneHash,
+      customerPhone: cart.customerPhone,
+      customerAddress: overrides.customerAddress ?? cart.customerAddress ?? undefined,
+      deliveryAddress: overrides.deliveryAddress ?? cart.deliveryAddress ?? undefined,
+      deliveryNotes: overrides.deliveryNotes ?? cart.deliveryNotes ?? undefined,
+      deliveryState: overrides.deliveryState ?? cart.deliveryState ?? undefined,
+      customerGender: overrides.customerGender ?? cart.customerGender ?? undefined,
+      preferredDeliveryDate: overrides.preferredDeliveryDate ?? cart.preferredDeliveryDate ?? undefined,
+      paymentMethod: overrides.paymentMethod ?? (cart.paymentMethod as 'PAY_ON_DELIVERY' | 'PAY_ONLINE') ?? 'PAY_ON_DELIVERY',
+      customerEmail: overrides.customerEmail ?? cart.customerEmail ?? undefined,
+      items,
+      totalAmount: overrides.totalAmount,
+    };
+
+    // 3. Create via the standard edge-form path — UNPROCESSED, MB-attributed.
+    const result = await this.create(orderInput, actorId, 'edge-form');
+    if (!result.id) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Order creation returned no ID' });
+    }
+
+    // 4. Convert the cart (fire-and-forget — order is already created).
+    this.cartService.convert(cartId, result.id, actorId).catch(() => {});
+
+    return { id: result.id };
+  }
+
   /** SHA-256 hash of phone for offline order creation (server-side only). */
   private hashPhone(phone: string): string {
     return createHash('sha256').update(phone.trim()).digest('hex');
@@ -2385,6 +2465,7 @@ export class OrdersService {
       createdAt: schema.orders.createdAt,
       updatedAt: schema.orders.updatedAt,
       preferredDeliveryDate: schema.orders.preferredDeliveryDate,
+      callbackScheduledAt: schema.orders.callbackScheduledAt,
       assignedCsId: schema.orders.assignedCsId,
       mediaBuyerId: schema.orders.mediaBuyerId,
       campaignId: schema.orders.campaignId,

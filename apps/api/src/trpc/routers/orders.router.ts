@@ -1,6 +1,7 @@
 import {
   createOrderSchema,
   createOfflineOrderSchema,
+  orderItemSchema,
   EDGE_FORM_ACTOR_ID,
   transitionOrderSchema,
   updateOrderSchema,
@@ -364,6 +365,34 @@ export const ordersRouter = router({
         ctx.user.id,
         branchId ?? ctx.currentBranchId,
       );
+      await invalidateOrdersAggregatesCache();
+      return res;
+    }),
+
+  /**
+   * Recover an abandoned cart as a real edge-form order.
+   * Creates with `orderSource: 'edge-form'` so the MB gets full attribution.
+   * CS can supplement missing fields (address, items, etc.).
+   */
+  recoverFromCart: permissionProcedure('cart.delete')
+    .input(
+      z.object({
+        cartId: z.string().uuid(),
+        customerAddress: z.string().optional(),
+        deliveryAddress: z.string().optional(),
+        deliveryNotes: z.string().optional(),
+        deliveryState: z.string().max(100).optional(),
+        customerGender: z.string().max(50).optional(),
+        preferredDeliveryDate: z.string().max(100).optional(),
+        paymentMethod: z.enum(['PAY_ON_DELIVERY', 'PAY_ONLINE']).optional(),
+        customerEmail: z.string().email().max(255).optional(),
+        items: z.array(orderItemSchema).optional(),
+        totalAmount: z.coerce.number().min(0).optional(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { cartId, ...overrides } = input;
+      const res = await getOrdersService().recoverFromCart(cartId, overrides, ctx.user.id);
       await invalidateOrdersAggregatesCache();
       return res;
     }),

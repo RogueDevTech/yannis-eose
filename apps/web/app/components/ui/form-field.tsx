@@ -9,7 +9,8 @@
 
 interface FormFieldProps {
   label?: string;
-  hint?: string;
+  /** Plain text or rich content (e.g. an inline link) rendered under the input. */
+  hint?: React.ReactNode;
   error?: string;
   required?: boolean;
   /** htmlFor — passed to the label's `for` attribute */

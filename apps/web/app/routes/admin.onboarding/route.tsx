@@ -66,14 +66,33 @@ export async function action({ request }: ActionFunctionArgs) {
       gender: emptyToNull(fd.get('gender')),
       dateOfBirth: emptyToNull(fd.get('dateOfBirth')),
       residentialAddress: emptyToNull(fd.get('residentialAddress')),
+      currentStateOfResidence: emptyToNull(fd.get('currentStateOfResidence')),
       proofOfAddressUrl: emptyToNull(fd.get('proofOfAddressUrl')),
       supportingDocuments,
+      // Identification + contracts (HR feedback 2026-05)
+      signedContractUrl: emptyToNull(fd.get('signedContractUrl')),
+      governmentIdUrl: emptyToNull(fd.get('governmentIdUrl')),
+      additionalPhoneNumbers: emptyToNull(fd.get('additionalPhoneNumbers')),
+      // Statutory + financial assistance
+      taxId: emptyToNull(fd.get('taxId')),
+      rentReceiptUrl: emptyToNull(fd.get('rentReceiptUrl')),
+      // Academic + employment
+      academicRecordsUrl: emptyToNull(fd.get('academicRecordsUrl')),
+      employmentHistoryUrl: emptyToNull(fd.get('employmentHistoryUrl')),
+      // Guarantor 1 — file-only model
+      guarantor1FormUrl: emptyToNull(fd.get('guarantor1FormUrl')),
+      guarantor1IdUrl: emptyToNull(fd.get('guarantor1IdUrl')),
+      // Legacy guarantor 1 text kept in body for back-compat round-trip on
+      // older records — UI no longer surfaces them.
       guarantor1Name: emptyToNull(fd.get('guarantor1Name')),
       guarantor1Phone: emptyToNull(fd.get('guarantor1Phone')),
       guarantor1Email: emptyToNull(fd.get('guarantor1Email')),
       guarantor1Address: emptyToNull(fd.get('guarantor1Address')),
       guarantor1Relationship: emptyToNull(fd.get('guarantor1Relationship')),
       guarantor1LetterUrl: emptyToNull(fd.get('guarantor1LetterUrl')),
+      // Guarantor 2
+      guarantor2FormUrl: emptyToNull(fd.get('guarantor2FormUrl')),
+      guarantor2IdUrl: emptyToNull(fd.get('guarantor2IdUrl')),
       guarantor2Name: emptyToNull(fd.get('guarantor2Name')),
       guarantor2Phone: emptyToNull(fd.get('guarantor2Phone')),
       guarantor2Email: emptyToNull(fd.get('guarantor2Email')),
