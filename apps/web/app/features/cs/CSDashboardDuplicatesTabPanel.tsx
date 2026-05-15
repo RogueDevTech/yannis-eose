@@ -1,7 +1,10 @@
 import { useRef } from 'react';
 import { Link } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { EmptyState } from '~/components/ui/empty-state';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { SmartPick } from '~/components/ui/smart-pick';
 import { StripToolbar } from '~/components/ui/strip-toolbar';
 import type { DuplicatePair } from './types';
 
@@ -10,11 +13,23 @@ export function CSDashboardDuplicatesTabPanel({
   fetcherIdle,
   onMerge,
   onDismiss,
+  selectedIds,
+  onToggle,
+  onPickFirst,
+  onClearSelection,
+  onBulkDismiss,
+  bulkDismissBusy,
 }: {
   pairs: DuplicatePair[];
   fetcherIdle: boolean;
   onMerge: (pair: DuplicatePair) => void;
   onDismiss: (pair: DuplicatePair) => void;
+  selectedIds: Set<string>;
+  onToggle: (orderId: string) => void;
+  onPickFirst: (count: number) => void;
+  onClearSelection: () => void;
+  onBulkDismiss: () => void;
+  bulkDismissBusy: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = (delta: number) =>
@@ -24,6 +39,30 @@ export function CSDashboardDuplicatesTabPanel({
     <div className="h-[28rem] overflow-auto">
       <div className="space-y-4">
         <div className="card">
+          {pairs.length > 0 && (
+            <div className="mb-2 rounded-lg border border-app-border bg-app-elevated px-3 py-2 -mx-1 overflow-x-auto scrollbar-hide">
+              <div className="flex min-w-max items-center gap-2 px-1">
+                <SmartPick
+                  total={pairs.length}
+                  selectedCount={selectedIds.size}
+                  onPick={onPickFirst}
+                  onClear={onClearSelection}
+                  itemNoun="duplicates"
+                  compactMobile
+                  className="shrink-0"
+                />
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  disabled={selectedIds.size === 0 || bulkDismissBusy}
+                  onClick={onBulkDismiss}
+                >
+                  Dismiss{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+                </Button>
+              </div>
+            </div>
+          )}
           <StripToolbar
             title="Potential duplicates"
             description="Same phone in 24h = duplicate. Older within 30 days = possible duplicate. Merge or dismiss."
@@ -42,7 +81,10 @@ export function CSDashboardDuplicatesTabPanel({
             >
               {pairs.map((pair: DuplicatePair) => {
                 const isSoft = pair.flagKind === 'POSSIBLY_DUPLICATE';
-                const cardBorder = isSoft
+                const isSelected = selectedIds.has(pair.duplicate.id);
+                const cardBorder = isSelected
+                  ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md bg-app-elevated'
+                  : isSoft
                   ? 'border-warning-200 dark:border-warning-800/80 bg-warning-50/30 dark:bg-warning-900/10 hover:border-warning-300 dark:hover:border-warning-700'
                   : 'border-danger-200 dark:border-danger-800/80 bg-danger-50/40 dark:bg-danger-900/15 hover:border-danger-300 dark:hover:border-danger-700';
                 const dotPing = isSoft ? 'bg-warning-400' : 'bg-danger-400';
@@ -61,12 +103,19 @@ export function CSDashboardDuplicatesTabPanel({
                       : 'Same phone has a non-cancelled order in the last 24 hours.'
                   }
                 >
+                  <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={isSelected}
+                      onChange={() => onToggle(pair.duplicate.id)}
+                      aria-label={`Select duplicate for ${pair.duplicate.customerName}`}
+                    />
+                  </span>
                   <span className="absolute top-2 right-2 flex h-2 w-2 pointer-events-none">
                     <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-60 ${dotPing}`} />
                     <span className={`relative inline-flex rounded-full h-2 w-2 ${dotSolid}`} />
                   </span>
 
-                  <div className="px-2.5 py-2 pr-5">
+                  <div className="px-2.5 py-2 pl-7 pr-5">
                     <div className="flex items-baseline justify-between gap-2 mb-1">
                       <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
                         {pair.duplicate.customerName}

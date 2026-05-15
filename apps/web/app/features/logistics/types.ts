@@ -14,10 +14,14 @@ export interface Location {
   address: string;
   coordinates: string | null;
   whatsappGroupLink?: string | null;
+  /** Per-location low-stock alert threshold (units). NULL = inherit org-wide. */
+  lowStockThreshold?: number | null;
   status: string;
   dispatchLocked?: boolean;
   createdAt: string;
   providerName: string | null;
+  /** Total available stock (stock - reserved) across all products at this location. */
+  totalStock?: number;
 }
 
 export interface ShrinkageAlert {
@@ -71,4 +75,6 @@ export interface LogisticsStreamData {
   totalProviders: number;
   locations: Location[];
   totalLocations: number;
+  /** Org-wide low-stock alert threshold (units) — fallback when a location has no override. */
+  globalLowStockThreshold: number;
 }

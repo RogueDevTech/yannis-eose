@@ -32,6 +32,14 @@ interface NumberInputProps
   /** Integer (default) or decimal. Decimal allows `.` while typing. */
   coerce?: Coerce;
   /**
+   * Fire `onValueChange` on every keystroke (as soon as the text parses to a
+   * number) instead of waiting for blur/Enter. The displayed text is left
+   * untouched while typing — no mid-type clamp or reformat — so callers that
+   * want a live reaction (e.g. SmartPick) get one without the field snapping.
+   * Blur/Enter still run the usual clamp + format pass.
+   */
+  commitOnChange?: boolean;
+  /**
    * Number of decimals when rendering a decimal value back to the field
    * (only used after blur / external change). Default: max 4 fraction digits.
    */
@@ -69,6 +77,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       allowEmpty = false,
       coerce = 'integer',
       maxFractionDigits = 4,
+      commitOnChange = false,
       onBlur,
       onKeyDown,
       ...rest
@@ -131,6 +140,17 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
               ? raw.replace(/[^\d-]/g, '')
               : raw.replace(/[^\d.\-]/g, '');
           setText(allowed);
+          // Eager mode: report the parsed value immediately so callers can
+          // react on type. Text is left as-is (no clamp/format) so the user
+          // can keep typing — blur still runs the full commit pass.
+          if (commitOnChange) {
+            const parsed = parseFinite(allowed, coerce);
+            if (parsed === null) {
+              if (allowEmpty && value !== null) onValueCleared?.();
+            } else if (parsed !== value) {
+              onValueChange(parsed);
+            }
+          }
         }}
         onBlur={(e) => {
           commit(e.currentTarget.value);

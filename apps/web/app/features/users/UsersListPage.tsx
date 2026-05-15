@@ -16,6 +16,7 @@ import { Button } from '~/components/ui/button';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast } from '~/components/ui/toast';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
+import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { User } from './types';
 import { ROLE_OPTIONS, formatRole } from './types';
 import { RoleBadge } from '~/components/ui/role-badge';
@@ -69,6 +70,11 @@ interface UsersListPageProps {
   usersBasePath?: string;
   /** Finance roster: name + payment contact only — no HR stats, role grid, or invite actions. */
   variant?: 'default' | 'staffAccounts';
+  /**
+   * Staff-accounts variant only: shows the Export button. Server still enforces
+   * `hr.export` — this is just the UI gate. Default false.
+   */
+  canExport?: boolean;
   /** Per-page picker — caller supplies the clamped current size + the choices. */
   pageSize?: number;
   pageSizeOptions?: number[];
@@ -89,6 +95,7 @@ export function UsersListPage({
   searchParam = '',
   usersBasePath = '/hr/users',
   variant = 'default',
+  canExport = false,
   pageSize,
   pageSizeOptions,
 }: UsersListPageProps) {
@@ -153,6 +160,8 @@ export function UsersListPage({
   const isResending = resendFetcher.state !== 'idle';
   /** Single open-menu id for the page-header split-button (Add user ▾). */
   const [openHeaderMenuId, setOpenHeaderMenuId] = useState<string | null>(null);
+  /** Staff-accounts export modal (client-side CSV/PDF/XLSX of the current page). */
+  const [showExportModal, setShowExportModal] = useState(false);
   const navigate = useNavigate();
   const { requiresBranchSelection, ensureBranchForAction } = useBranchScopeActionGuard();
   /** Mirrors `<BranchScopedLink>` behaviour from inside an ActionDropdown
@@ -356,6 +365,36 @@ export function UsersListPage({
     [usersBasePath],
   );
 
+  // Staff-accounts export — current page only, payout/bank fields included.
+  // Server still enforces `hr.export`; this just builds the client-side file.
+  const staffExportColumns = useMemo(
+    () => [
+      { key: 'name', label: 'Name' },
+      { key: 'email', label: 'Email' },
+      { key: 'role', label: 'Role' },
+      { key: 'status', label: 'Status' },
+      { key: 'accountName', label: 'Account name' },
+      { key: 'accountNumber', label: 'Account number' },
+      { key: 'bankName', label: 'Bank' },
+      { key: 'bankCode', label: 'Bank code' },
+    ],
+    [],
+  );
+  const staffExportRows = useMemo(
+    () =>
+      users.map((user) => ({
+        name: user.name,
+        email: user.email,
+        role: formatRole(user.role),
+        status: user.status,
+        accountName: user.payoutAccountName?.trim() || '',
+        accountNumber: user.payoutAccountNumber?.trim() || '',
+        bankName: user.payoutBankName?.trim() || '',
+        bankCode: user.payoutBankCode?.trim() || '',
+      })),
+    [users],
+  );
+
   const hrUserColumns: CompactTableColumn<User>[] = useMemo(
     () => [
       {
@@ -448,23 +487,21 @@ export function UsersListPage({
         actions={
           <PageHeaderMobileTools
             sheetTitle={staffAccounts ? 'Staff accounts' : 'Users tools'}
-            sheetSubtitle={<span>Refresh and add user</span>}
+            sheetSubtitle={
+              <span>{staffAccounts ? 'Refresh and export' : 'Refresh and add user'}</span>
+            }
             triggerAriaLabel={staffAccounts ? 'Staff accounts toolbar' : 'Users toolbar'}
             desktop={
               <>
                 <PageRefreshButton />
                 {staffAccounts ? (
-                  // Staff-accounts variant has no Import flow — single button is fine.
-                  <BranchScopedLink
-                    to={`${usersBasePath}/new`}
-                    actionLabel="creating a user"
-                    className="btn-primary"
-                  >
-                    <svg className="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                    </svg>
-                    Add staff
-                  </BranchScopedLink>
+                  // Staff accounts are created via Staff onboarding — no Add button here.
+                  // Export is gated on `hr.export` (sensitive payout fields).
+                  canExport ? (
+                    <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
+                      Export
+                    </Button>
+                  ) : null
                 ) : (
                   <ActionDropdown
                     id="add-user"
@@ -483,30 +520,49 @@ export function UsersListPage({
             }
             sheet={({ closeSheet }) => (
               <div className="flex flex-col gap-2 w-full">
-                {!staffAccounts ? (
-                  <Link
-                    to="/hr/users/import"
-                    prefetch="intent"
-                    onClick={closeSheet}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-app-border bg-app-surface px-3 py-2 text-sm font-medium text-app-fg hover:bg-app-hover"
-                  >
-                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
-                    </svg>
-                    Import users
-                  </Link>
-                ) : null}
-                <BranchScopedLink
-                  to={`${usersBasePath}/new`}
-                  actionLabel="creating a user"
-                  className="btn-primary inline-flex w-full items-center justify-center gap-2"
-                  onClick={() => closeSheet()}
-                >
-                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                  {staffAccounts ? 'Add staff' : 'Add User'}
-                </BranchScopedLink>
+                {staffAccounts ? (
+                  canExport ? (
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        closeSheet();
+                        setShowExportModal(true);
+                      }}
+                    >
+                      Export staff accounts
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-app-fg-muted">
+                      Staff accounts are added through Staff onboarding.
+                    </p>
+                  )
+                ) : (
+                  <>
+                    <Link
+                      to="/hr/users/import"
+                      prefetch="intent"
+                      onClick={closeSheet}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-app-border bg-app-surface px-3 py-2 text-sm font-medium text-app-fg hover:bg-app-hover"
+                    >
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+                      </svg>
+                      Import users
+                    </Link>
+                    <BranchScopedLink
+                      to={`${usersBasePath}/new`}
+                      actionLabel="creating a user"
+                      className="btn-primary inline-flex w-full items-center justify-center gap-2"
+                      onClick={() => closeSheet()}
+                    >
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                      Add User
+                    </BranchScopedLink>
+                  </>
+                )}
               </div>
             )}
           />
@@ -866,6 +922,18 @@ export function UsersListPage({
         fetcher={resendFetcher}
         onClose={() => setResendConfirm(null)}
       />
+      {staffAccounts && canExport && (
+        <LocalExportModal
+          open={showExportModal}
+          onClose={() => setShowExportModal(false)}
+          title="Export staff accounts"
+          description={`Exports the ${users.length} staff ${users.length === 1 ? 'account' : 'accounts'} on this page, including payout and bank details.`}
+          rows={staffExportRows}
+          columns={staffExportColumns}
+          defaultColumns={staffExportColumns.map((c) => c.key)}
+          filenamePrefix="staff-accounts"
+        />
+      )}
       {/* The legacy <UsersImportModal/> render-block lived here. Removed
           alongside the new dedicated /hr/users/import page (CEO directive
           2026-05-11). The list auto-refreshes when the user navigates back

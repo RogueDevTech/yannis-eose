@@ -121,6 +121,14 @@ export interface OrdersListPageProps {
   limit: number;
   statusCounts: Record<string, number>;
   statusFilter?: string;
+  /**
+   * Statuses to omit from the status filter dropdown for this surface.
+   * CS context passes `['REMITTED']` because cash remittance is accountant-only
+   * and irrelevant to CS — leaving it in the dropdown is just noise.
+   * The status pills + buckets above the table are unaffected (they read from
+   * `statusCounts` directly).
+   */
+  excludeStatuses?: string[];
   searchFilter?: string;
   filters?: { startDate: string; endDate: string; startTime?: string; endTime?: string; periodAllTime: boolean };
   userRole?: string;
@@ -199,6 +207,7 @@ function OrdersListPageImpl({
   limit,
   statusCounts,
   statusFilter,
+  excludeStatuses,
   searchFilter,
   filters,
   userRole,
@@ -668,10 +677,12 @@ function OrdersListPageImpl({
     return cols;
   }, [showCSCloserColumn, showCampaignColumn, toOrderDetail]);
 
-  const statusOptions = STATUS_OPTIONS.map((status) => ({
-    value: status,
-    label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
-  }));
+  const statusOptions = STATUS_OPTIONS.filter((status) => !excludeStatuses?.includes(status)).map(
+    (status) => ({
+      value: status,
+      label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+    }),
+  );
 
   const csCloserOptions = [
     { value: 'ALL', label: 'All closers' },
@@ -975,7 +986,7 @@ function OrdersListPageImpl({
                 Clear
               </button>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               {/* Bulk assign — unprocessed orders only */}
               {canBulkAssignToCS && (
                 <Button
@@ -1006,12 +1017,6 @@ function OrdersListPageImpl({
                   Reassign closers
                 </Button>
               )}
-              {bulkCloserSelectionMixed && (
-                <span className="text-xs text-app-fg-muted max-w-[14rem] sm:max-w-none">
-                  Use Assign for unassigned orders only, or Reassign when every selected order already has a closer — not
-                  both in one selection.
-                </span>
-              )}
               {/* Bulk Allocate to 3PL — appears when every selection is CONFIRMED */}
               {canBulkAllocateTo3PL && (
                 <Button
@@ -1040,11 +1045,6 @@ function OrdersListPageImpl({
                   {bulkTransitionLabel(status)}
                 </Button>
               ))}
-              {selectedStatuses.length > 1 && (
-                <span className="text-xs text-app-fg-muted italic">
-                  Select orders with same status for bulk transition
-                </span>
-              )}
               {/* Export selected — same orders.export gate as the full report button. */}
               {canExport && (
                 <Button variant="secondary" size="sm" onClick={() => setShowSelectedExportModal(true)}>
@@ -1053,6 +1053,23 @@ function OrdersListPageImpl({
               )}
             </div>
           </div>
+          {/* Helper notes — kept on their own lines so they don't wedge between
+              the action buttons and make the toolbar look scattered. */}
+          {(bulkCloserSelectionMixed || selectedStatuses.length > 1) && (
+            <div className="mt-2 space-y-1 border-t border-brand-200/60 dark:border-brand-700/40 pt-2">
+              {bulkCloserSelectionMixed && (
+                <p className="text-xs text-app-fg-muted">
+                  Use Assign for unassigned orders only, or Reassign when every selected order already has a
+                  closer — not both in one selection.
+                </p>
+              )}
+              {selectedStatuses.length > 1 && (
+                <p className="text-xs text-app-fg-muted italic">
+                  Select orders with same status for bulk transition.
+                </p>
+              )}
+            </div>
+          )}
           {/* Bulk result summary */}
           {bulkResult && (
             <div className="mt-3 p-3 rounded-lg bg-app-elevated border border-app-border">

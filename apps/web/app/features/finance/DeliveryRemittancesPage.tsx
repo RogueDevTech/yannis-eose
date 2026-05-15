@@ -744,20 +744,63 @@ export function DeliveryRemittancesPage({
                 </span>
               ),
             }}
+            renderMobileCard={(r) => {
+              const status =
+                r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.status);
+              return (
+                <div className="space-y-1.5">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-app-fg truncate">
+                        {r.locationName
+                          ? r.locationProviderName
+                            ? `${r.locationName} — ${r.locationProviderName}`
+                            : r.locationName
+                          : '—'}
+                      </p>
+                      <p className="text-xs text-app-fg-muted truncate">
+                        {r.orderCount} order{r.orderCount === 1 ? '' : 's'} ·{' '}
+                        {r.sentByName?.trim() || userMap[r.sentBy] || `${r.sentBy.slice(0, 8)}…`}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <NairaPrice
+                        amount={Number(r.outcomeAmount ?? 0)}
+                        className="text-sm font-semibold text-app-fg tabular-nums"
+                      />
+                      <p className="text-[11px] text-app-fg-muted">
+                        {new Date(r.sentAt).toLocaleDateString('en-NG', {
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <StatusBadge status={status} label={STATUS_LABEL[status]} />
+                    <CompactTableActionButton
+                      to={`/admin/finance/delivery-remittances/${r.id}`}
+                      state={remittanceDetailLinkState}
+                    >
+                      {(r.outcomeStatus ?? r.status) === 'SENT' ? 'Review' : 'View'}
+                    </CompactTableActionButton>
+                  </div>
+                </div>
+              );
+            }}
           />
         </>
       )}
 
       {viewTab === 'eligible' && (
-        <div className="card p-4 space-y-4">
+        <div className="space-y-3">
           {eligibleTotal > eligibleOrders.length ? (
             <p className="text-xs text-warning-600 dark:text-warning-400">
-              Showing {eligibleOrders.length} of {eligibleTotal} matching orders — use search, location, or pages to find
-              more.
+              Showing {eligibleOrders.length} of {eligibleTotal} matching orders — refine search or page.
             </p>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <form
               className="min-w-0"
               onSubmit={(e) => {
@@ -793,25 +836,19 @@ export function DeliveryRemittancesPage({
             />
           </div>
 
-          <div className="flex flex-col gap-3 rounded-lg border border-app-border bg-app-hover px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-sm text-app-fg-muted">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-app-hover px-2.5 py-2 sm:px-3">
+            <div className="text-xs text-app-fg-muted sm:text-sm">
               <span className="font-medium text-app-fg">{eligibleSelectedIds.size}</span> selected
-              {eligibleOrders.length > 0 ? (
-                <>
-                  {' '}
-                  · <span className="font-medium text-app-fg">{eligibleOrders.length}</span> on this page
-                </>
-              ) : null}
               {eligibleTotal > 0 ? (
                 <>
                   {' '}
-                  · <span className="font-medium text-app-fg">{eligibleTotal}</span> matching filters
+                  · <span className="font-medium text-app-fg">{eligibleTotal}</span> total
                 </>
               ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm font-semibold text-app-fg">
-                Selected total: <NairaPrice amount={eligibleSelectedTotal} />
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <span className="text-xs font-semibold text-app-fg sm:text-sm">
+                <NairaPrice amount={eligibleSelectedTotal} />
               </span>
               {canCreateRemittance && (
                 <Button
@@ -835,7 +872,7 @@ export function DeliveryRemittancesPage({
                           : undefined
                   }
                 >
-                  Confirm remittance
+                  Confirm
                 </Button>
               )}
             </div>
@@ -848,109 +885,106 @@ export function DeliveryRemittancesPage({
             </p>
           )}
 
-          <div className="overflow-x-auto rounded-lg border border-app-border">
-            <CompactTable<EligibleOrder>
-              caption="Delivered orders awaiting remittance"
-              withCard={false}
-              className="min-w-[980px] [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
-              columns={eligibleColumns}
-              rows={eligibleOrders}
-              rowKey={(o) => o.id}
-              loading={isLoaderRefetchBusy}
-              loadingVariant="overlay"
-              selection={{
-                selectedIds: eligibleSelectedIds,
-                onToggle: onEligibleToggle,
-                onToggleAll: onEligibleToggleAll,
-                getRowId: (o) => o.id,
-              }}
-              emptyTitle={
-                eligibleTotal === 0
-                  ? 'No delivered orders awaiting remittance'
-                  : 'No orders match the current filter'
-              }
-              emptyDescription={
-                eligibleTotal === 0
-                  ? 'When riders or CS mark orders delivered, they appear here until Finance records cash against them.'
-                  : hasEligibleFilters
-                    ? 'Try clearing search or the location filter.'
-                    : 'Adjust filters or date range in the header.'
-              }
-              pagination={{
-                page: eligiblePage,
-                totalPages: eligibleTotalPages,
-                pageParam: 'eligiblePage',
-                showWhenSinglePage: true,
-                summary: (
-                  <span className="text-app-fg-muted">
-                    {eligibleTotal === 0
-                      ? `0 orders · ${eligiblePageSize} per page`
-                      : `Showing ${(eligiblePage - 1) * eligiblePageSize + 1}–${Math.min(eligiblePage * eligiblePageSize, eligibleTotal)} of ${eligibleTotal} · ${eligiblePageSize} per page`}
-                  </span>
-                ),
-              }}
-              renderMobileCard={(o, _i, { rowSelection }) => (
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-2 border-b border-app-border/80 pb-2">
-                    {rowSelection}
-                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                      <TableActionButton
-                        variant="primary"
-                        disabled={!o.invoice}
-                        title={o.invoice ? 'View' : 'No invoice yet'}
-                        onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
-                      >
-                        View
-                      </TableActionButton>
-                      <TableActionButton
-                        variant="neutral"
-                        disabled={!o.invoice}
-                        title={o.invoice ? 'Download' : 'No invoice yet'}
-                        onClick={() => {
-                          if (o.invoice) void generateInvoicePdf(o.invoice);
-                        }}
-                      >
-                        Download
-                      </TableActionButton>
-                    </div>
+          <CompactTable<EligibleOrder>
+            caption="Delivered orders awaiting remittance"
+            className="[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-[1] [&_thead]:bg-app-hover"
+            columns={eligibleColumns}
+            rows={eligibleOrders}
+            rowKey={(o) => o.id}
+            loading={isLoaderRefetchBusy}
+            loadingVariant="overlay"
+            selection={{
+              selectedIds: eligibleSelectedIds,
+              onToggle: onEligibleToggle,
+              onToggleAll: onEligibleToggleAll,
+              getRowId: (o) => o.id,
+            }}
+            emptyTitle={
+              eligibleTotal === 0
+                ? 'No delivered orders awaiting remittance'
+                : 'No orders match the current filter'
+            }
+            emptyDescription={
+              eligibleTotal === 0
+                ? 'When riders or CS mark orders delivered, they appear here until Finance records cash against them.'
+                : hasEligibleFilters
+                  ? 'Try clearing search or the location filter.'
+                  : 'Adjust filters or date range in the header.'
+            }
+            pagination={{
+              page: eligiblePage,
+              totalPages: eligibleTotalPages,
+              pageParam: 'eligiblePage',
+              showWhenSinglePage: true,
+              summary: (
+                <span className="text-app-fg-muted">
+                  {eligibleTotal === 0
+                    ? `0 orders · ${eligiblePageSize} per page`
+                    : `Showing ${(eligiblePage - 1) * eligiblePageSize + 1}–${Math.min(eligiblePage * eligiblePageSize, eligibleTotal)} of ${eligibleTotal} · ${eligiblePageSize} per page`}
+                </span>
+              ),
+            }}
+            renderMobileCard={(o, _i, { rowSelection }) => (
+              <div className="space-y-1.5">
+                <div className="flex items-start gap-2">
+                  {rowSelection}
+                  <button
+                    type="button"
+                    onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
+                    disabled={!o.invoice}
+                    className="min-w-0 flex-1 text-left disabled:cursor-default"
+                  >
+                    <p className="font-mono text-sm font-medium text-brand-600 dark:text-brand-400 truncate">
+                      {o.invoice?.referenceFormatted ?? 'No invoice'}
+                    </p>
+                    <p className="text-xs text-app-fg-muted truncate">
+                      {o.invoice?.recipientInfo?.name ?? o.customerName}
+                    </p>
+                  </button>
+                  <div className="shrink-0 text-right">
+                    {o.invoice?.totalAmount != null || o.totalAmount != null ? (
+                      <NairaPrice
+                        amount={Number(o.invoice?.totalAmount ?? o.totalAmount)}
+                        className="text-sm font-semibold text-app-fg tabular-nums"
+                      />
+                    ) : (
+                      <span className="text-sm text-app-fg-muted">—</span>
+                    )}
                   </div>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-mono text-sm font-medium text-app-fg">
-                        {o.invoice?.referenceFormatted ?? 'No invoice'}
-                      </p>
-                      <p className="text-sm text-app-fg-muted truncate">
-                        {o.invoice?.recipientInfo?.name ?? o.customerName}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      {o.invoice?.totalAmount != null || o.totalAmount != null ? (
-                        <NairaPrice
-                          amount={Number(o.invoice?.totalAmount ?? o.totalAmount)}
-                          className="font-medium text-app-fg"
-                        />
-                      ) : (
-                        '—'
-                      )}
-                    </div>
-                  </div>
-                  {o.invoice ? (
-                    <div className="flex items-center gap-2">
-                      <StatusBadge status={o.invoice.status} />
-                    </div>
-                  ) : null}
-                  <p className="text-xs text-app-fg-muted">
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[11px] text-app-fg-muted">
+                  <span className="truncate">
                     {o.logisticsLocationName
                       ? o.logisticsLocationProviderName
                         ? `${o.logisticsLocationName} — ${o.logisticsLocationProviderName}`
                         : o.logisticsLocationName
                       : '—'}
-                  </p>
-                  <p className="text-xs text-app-fg-muted">Delivered {formatDeliveredAt(o.deliveredAt)}</p>
+                  </span>
+                  <span className="shrink-0">{formatDeliveredAt(o.deliveredAt)}</span>
                 </div>
-              )}
-            />
-          </div>
+                <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                  <TableActionButton
+                    variant="primary"
+                    disabled={!o.invoice}
+                    title={o.invoice ? 'View invoice' : 'No invoice yet'}
+                    onClick={() => o.invoice && setEligibleInvoicePreview(o.invoice)}
+                  >
+                    View invoice
+                  </TableActionButton>
+                  <TableActionButton
+                    variant="neutral"
+                    disabled={!o.invoice}
+                    title={o.invoice ? 'Download' : 'No invoice yet'}
+                    onClick={() => {
+                      if (o.invoice) void generateInvoicePdf(o.invoice);
+                    }}
+                  >
+                    Download
+                  </TableActionButton>
+                </div>
+              </div>
+            )}
+          />
         </div>
       )}
     </div>

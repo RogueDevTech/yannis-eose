@@ -51,10 +51,41 @@ export class CartService {
       customerPhone?: string;
       productId: string;
       offerLabel?: string;
+      // Progressive form-field capture (migration 0142). Optional — Edge sends
+      // whatever the customer has typed at debounce time; we merge field-by-field
+      // so a later partial save never wipes an earlier value.
+      customerEmail?: string;
+      customerAddress?: string;
+      deliveryAddress?: string;
+      deliveryState?: string;
+      deliveryNotes?: string;
+      customerGender?: string;
+      preferredDeliveryDate?: string;
+      paymentMethod?: string;
+      quantity?: number;
+      customFieldValues?: Record<string, unknown>;
     },
     actorId?: string | null,
   ) {
     const trimmedPhone = input.customerPhone?.trim() || null;
+    // Pick only fields that arrived in this payload — never overwrite an earlier
+    // captured value with `null` on a partial save. Keys map 1:1 to schema columns.
+    const trim = (v: string | undefined) => (typeof v === 'string' ? v.trim() || undefined : undefined);
+    const progressive = {
+      customerEmail: trim(input.customerEmail),
+      customerAddress: trim(input.customerAddress),
+      deliveryAddress: trim(input.deliveryAddress),
+      deliveryState: trim(input.deliveryState),
+      deliveryNotes: trim(input.deliveryNotes),
+      customerGender: trim(input.customerGender),
+      preferredDeliveryDate: trim(input.preferredDeliveryDate),
+      paymentMethod: trim(input.paymentMethod),
+      quantity: typeof input.quantity === 'number' ? input.quantity : undefined,
+      customFieldValues:
+        input.customFieldValues && Object.keys(input.customFieldValues).length > 0
+          ? input.customFieldValues
+          : undefined,
+    } as const;
     const run = async (db: CartDbOrTx) => {
       // Upsert key: campaign_id + phone_hash — one active PENDING cart per person per campaign.
       const existing = await db
@@ -83,6 +114,19 @@ export class CartService {
             // builds, partial form retries) — only overwrite when caller actually
             // sent something usable.
             customerPhone: trimmedPhone ?? existingRow.customerPhone,
+            // Progressive merge: only overwrite a column when this payload carries a
+            // value. `??` keeps the prior captured value intact when the field is
+            // missing from the current debounce.
+            customerEmail: progressive.customerEmail ?? existingRow.customerEmail,
+            customerAddress: progressive.customerAddress ?? existingRow.customerAddress,
+            deliveryAddress: progressive.deliveryAddress ?? existingRow.deliveryAddress,
+            deliveryState: progressive.deliveryState ?? existingRow.deliveryState,
+            deliveryNotes: progressive.deliveryNotes ?? existingRow.deliveryNotes,
+            customerGender: progressive.customerGender ?? existingRow.customerGender,
+            preferredDeliveryDate: progressive.preferredDeliveryDate ?? existingRow.preferredDeliveryDate,
+            paymentMethod: progressive.paymentMethod ?? existingRow.paymentMethod,
+            quantity: progressive.quantity ?? existingRow.quantity,
+            customFieldValues: progressive.customFieldValues ?? existingRow.customFieldValues,
             updatedAt: now,
           })
           .where(eq(schema.cartAbandonments.id, existingRow.id));
@@ -100,6 +144,16 @@ export class CartService {
           productId: input.productId,
           offerLabel: input.offerLabel ?? null,
           status: 'PENDING',
+          customerEmail: progressive.customerEmail ?? null,
+          customerAddress: progressive.customerAddress ?? null,
+          deliveryAddress: progressive.deliveryAddress ?? null,
+          deliveryState: progressive.deliveryState ?? null,
+          deliveryNotes: progressive.deliveryNotes ?? null,
+          customerGender: progressive.customerGender ?? null,
+          preferredDeliveryDate: progressive.preferredDeliveryDate ?? null,
+          paymentMethod: progressive.paymentMethod ?? null,
+          quantity: progressive.quantity ?? null,
+          customFieldValues: progressive.customFieldValues ?? null,
         })
         .returning({ id: schema.cartAbandonments.id });
 
@@ -300,18 +354,36 @@ export class CartService {
   /**
    * List ABANDONED carts for CS dashboard — persists until cleared via {@link deleteAbandoned}.
    * Paginated; `page` is clamped to the last page when out of range (e.g. after deletes).
+   *
+   * When `includeRawPhone` is true (caller has `cart.delete` permission), the raw phone
+   * is returned alongside the masked display so the abandoned-cart detail modal can render
+   * dialable contact details without a second per-card reveal round-trip. The reveal endpoint
+   * stays as the audited fallback for cases where the list payload is stale.
    */
-  async listAbandoned(opts: { page?: number; limit?: number } = {}): Promise<{
+  async listAbandoned(opts: { page?: number; limit?: number; includeRawPhone?: boolean } = {}): Promise<{
     items: Array<{
       id: string;
       customerName: string;
       customerPhoneDisplay: string;
+      customerPhone: string | null;
       productId: string;
       productName: string | null;
       campaignId: string;
       campaignName: string | null;
       offerLabel: string | null;
       updatedAt: Date;
+      // Progressive form-field capture (migration 0142). Surfaced inline so the
+      // detail modal pre-fills every value the customer typed — no second fetch.
+      customerEmail: string | null;
+      customerAddress: string | null;
+      deliveryAddress: string | null;
+      deliveryState: string | null;
+      deliveryNotes: string | null;
+      customerGender: string | null;
+      preferredDeliveryDate: string | null;
+      paymentMethod: string | null;
+      quantity: number | null;
+      customFieldValues: Record<string, unknown> | null;
     }>;
     total: number;
     page: number;
@@ -340,6 +412,16 @@ export class CartService {
         campaignName: schema.campaigns.name,
         offerLabel: schema.cartAbandonments.offerLabel,
         updatedAt: schema.cartAbandonments.updatedAt,
+        customerEmail: schema.cartAbandonments.customerEmail,
+        customerAddress: schema.cartAbandonments.customerAddress,
+        deliveryAddress: schema.cartAbandonments.deliveryAddress,
+        deliveryState: schema.cartAbandonments.deliveryState,
+        deliveryNotes: schema.cartAbandonments.deliveryNotes,
+        customerGender: schema.cartAbandonments.customerGender,
+        preferredDeliveryDate: schema.cartAbandonments.preferredDeliveryDate,
+        paymentMethod: schema.cartAbandonments.paymentMethod,
+        quantity: schema.cartAbandonments.quantity,
+        customFieldValues: schema.cartAbandonments.customFieldValues,
       })
       .from(schema.cartAbandonments)
       .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
@@ -354,12 +436,23 @@ export class CartService {
         id: r.id,
         customerName: r.customerName,
         customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash),
+        customerPhone: opts.includeRawPhone ? r.customerPhone ?? null : null,
         productId: r.productId,
         productName: r.productName ?? null,
         campaignId: r.campaignId,
         campaignName: r.campaignName ?? null,
         offerLabel: r.offerLabel ?? null,
         updatedAt: r.updatedAt ?? new Date(),
+        customerEmail: r.customerEmail ?? null,
+        customerAddress: r.customerAddress ?? null,
+        deliveryAddress: r.deliveryAddress ?? null,
+        deliveryState: r.deliveryState ?? null,
+        deliveryNotes: r.deliveryNotes ?? null,
+        customerGender: r.customerGender ?? null,
+        preferredDeliveryDate: r.preferredDeliveryDate ?? null,
+        paymentMethod: r.paymentMethod ?? null,
+        quantity: r.quantity ?? null,
+        customFieldValues: (r.customFieldValues as Record<string, unknown> | null) ?? null,
       })),
       total,
       page,

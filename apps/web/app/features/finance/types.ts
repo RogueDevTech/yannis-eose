@@ -49,8 +49,21 @@ export interface FinanceOverviewPulse {
   pendingRemittanceAmount: number;
   pendingRemittanceBatchCount: number;
   disputedRemittanceBatchCount: number;
+  totalRemitted: number;
+  totalRemittedCount: number;
+  receivedAmount: number;
+  receivedCount: number;
   payrollPendingFinanceCount: number;
   approvalsPendingCount: number;
+}
+
+export interface RemittanceBreakdownRow {
+  productId?: string;
+  locationId?: string;
+  productName?: string;
+  locationName?: string;
+  totalAmount: string;
+  orderCount: number;
 }
 
 export interface ApprovalRequest {
@@ -85,6 +98,16 @@ export interface BudgetWithUtilization extends Budget {
   isActive: boolean;
 }
 
+/** Disbursement (marketing funding) totals by status. */
+export interface FundingSummary {
+  totalSent: string;
+  totalCompleted: string;
+  totalDisputed: string;
+  sentCount: number;
+  completedCount: number;
+  disputedCount: number;
+}
+
 /** `/admin/finance/overview` loader shape */
 export interface FinanceOverviewLoaderData {
   profit: ProfitReport;
@@ -104,4 +127,10 @@ export interface FinanceOverviewLoaderData {
   /** Picklists for the filter bar. Empty arrays when the user can't filter. */
   branches?: Array<{ id: string; name: string }>;
   mediaBuyers?: Array<{ id: string; name: string }>;
+  /** Marketing funding totals — money disbursed to HoM for ad spend. */
+  fundingSummary?: FundingSummary;
+  /** Delivered/remitted orders breakdown by product. */
+  byProduct?: RemittanceBreakdownRow[];
+  /** Delivered/remitted orders breakdown by logistics location. */
+  byLocation?: RemittanceBreakdownRow[];
 }

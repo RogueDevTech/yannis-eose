@@ -58,7 +58,8 @@ export function setMarketingService(service: MarketingService) {
   marketingServiceInstance = service;
 }
 
-function getMarketingService(): MarketingService {
+/** Exported for cross-router lookups (e.g. finance `overviewPageBundle`). */
+export function getMarketingService(): MarketingService {
   if (!marketingServiceInstance) {
     throw new Error('MarketingService not initialized. Call setMarketingService() first.');
   }
@@ -354,6 +355,7 @@ export const marketingRouter = router({
           excludeSelfAsRequester,
           targetUserId,
           includeLegacyNullTarget,
+          requesterRole: input.requesterRole,
           callerId: ctx.user.id,
           startDate: input.startDate,
           endDate: input.endDate,
@@ -1299,10 +1301,16 @@ export const marketingRouter = router({
       // Mirror the standalone `listFundingRequests`/`fundingRequestStatusCounts`
       // scoping for non-admin callers (target = caller). Finance / Admin land
       // here so usually `isAdminClass` is true, but we keep the gate honest.
+      //
+      // `requesterRole: 'HEAD_OF_MARKETING'` is the key scope for this page:
+      // Finance disburses to Heads of Marketing only — Media Buyer funding
+      // requests are the HoM's to manage, not Finance's, so they must not
+      // appear on the Disbursements pending tab or in its status counts.
       const isAdminClass = isAdminLevel(ctx.user);
       const requestsInput = {
         page: input.requestsPage,
         limit: input.requestsLimit,
+        requesterRole: 'HEAD_OF_MARKETING' as const,
         ...(isAdminClass ? {} : { targetUserId: ctx.user.id }),
       };
 
@@ -1313,7 +1321,10 @@ export const marketingRouter = router({
           getMarketingService().getFundingSummary(branchId),
           getMarketingService().listFundingRequests(requestsInput, branchId),
           getMarketingService().fundingRequestStatusCounts(
-            isAdminClass ? {} : { targetUserId: ctx.user.id },
+            {
+              requesterRole: 'HEAD_OF_MARKETING',
+              ...(isAdminClass ? {} : { targetUserId: ctx.user.id }),
+            },
             ctx.user,
             branchId,
           ),

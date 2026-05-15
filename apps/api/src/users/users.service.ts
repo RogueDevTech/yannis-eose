@@ -1353,14 +1353,18 @@ export class UsersService {
     }
 
     const effectiveRole = input.role ?? beforeRow.role;
-    if (effectiveRole !== 'SUPER_ADMIN' && nextBranchIds.length === 0) {
+    // Only branch-eligible roles must carry a branch. Company-wide roles
+    // (Stock Manager, Finance, HR, org-wide Heads, etc.) are not branch-scoped —
+    // mirrors the `roleNeedsBranch` gate in `createStaff`.
+    const roleNeedsBranch = BRANCH_ELIGIBLE_ROLES.has(effectiveRole);
+    if (roleNeedsBranch && nextBranchIds.length === 0) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message: 'At least one branch is required.',
       });
     }
     if (
-      effectiveRole !== 'SUPER_ADMIN' &&
+      roleNeedsBranch &&
       (input.branchIds !== undefined || input.primaryBranchId !== undefined) &&
       !nextPrimaryBranchId
     ) {

@@ -10,12 +10,21 @@ import { TRPCError } from '@trpc/server';
 import { DRIZZLE } from '../database/database.module';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isBranchTeamsSchemaMissingError } from '../common/db/branch-teams-schema';
+import { CacheService } from '../common/cache/cache.service';
 
 export type BranchTeamDepartment = 'CS' | 'MARKETING';
 
+/** Redis key prefix for the per-(user, branch) team-supervisor flag cache. */
+const SUPERVISOR_FLAGS_KEY_PREFIX = 'cache:branchTeams:supervisorFlags:';
+/** TTL matches the user bundle cache — both feed the per-request session build. */
+const SUPERVISOR_FLAGS_TTL_SECONDS = 60;
+
 @Injectable()
 export class BranchTeamsService {
-  constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    private readonly cache: CacheService,
+  ) {}
 
   /** Read paths only — mutations must surface errors when tables are missing. */
   private async safeBranchTeamsRead<T>(fallback: T, fn: () => Promise<T>): Promise<T> {
@@ -410,6 +419,10 @@ export class BranchTeamsService {
           ),
         );
     });
+    // Drop the per-branch supervisor-flag cache unconditionally: the branch-
+    // scoped flag can flip even when the denormalised `users.is_team_supervisor`
+    // column does not (e.g. still a supervisor on another branch).
+    await this.invalidateSupervisorFlags(userId);
   }
 
   async addTeamMember(teamId: string, userId: string, isSupervisor: boolean, _actor: SessionUser) {
@@ -601,6 +614,9 @@ export class BranchTeamsService {
         await this.db.insert(schema.branchDepartmentMembers).values({ branchDepartmentId, userId });
       }
     });
+    // Moving a user to the teamless department roster removes their team
+    // memberships above — invalidate in case they were a supervisor.
+    await this.invalidateSupervisorFlags(userId);
   }
 
   async removeDepartmentMember(branchDepartmentId: string, userId: string) {
@@ -873,26 +889,6 @@ export class BranchTeamsService {
   }
 
   /**
-   * Sets {@link SessionUser.isMarketingTeamSupervisorOnActiveBranch} from branch-team graph;
-   * omit/false when no active branch or actor is not a supervisor on the active branch.
-   * Note: gated on supervisor STATUS, not supervisee count — a supervisor of an empty team
-   * still gets the flag so they can reach the surfaces needed to onboard members.
-   */
-  async attachMarketingSupervisorSessionFlag(user: SessionUser): Promise<SessionUser> {
-    const bid = user.currentBranchId;
-    if (!bid) {
-      const { isMarketingTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
-      return rest;
-    }
-    const ok = await this.isMarketingSupervisorOnBranch(user.id, bid);
-    if (!ok) {
-      const { isMarketingTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
-      return rest;
-    }
-    return { ...user, isMarketingTeamSupervisorOnActiveBranch: true };
-  }
-
-  /**
    * Symmetric to {@link isMarketingSupervisorOnBranch} for the CS lane.
    * True when the actor supervises at least one CS team on this branch,
    * regardless of whether that team currently has supervisees — same
@@ -921,45 +917,64 @@ export class BranchTeamsService {
   }
 
   /**
-   * Symmetric to {@link attachMarketingSupervisorSessionFlag} for the CS lane.
-   * Sets {@link SessionUser.isCsTeamSupervisorOnActiveBranch}; drops the field
-   * when no active branch or actor is not a CS supervisor on the active branch.
+   * Redis-cached per-(user, branch) team-supervisor flags for both lanes.
+   *
+   * This feeds {@link attachTeamSupervisorSessionFlags}, which runs on EVERY
+   * authenticated request (login / mirror / `/auth/me` / tRPC middleware).
+   * Without the cache that was 2 Postgres round-trips per request — expensive
+   * on a remote DB. Keyed by `(userId, branchId)` because the flags are
+   * branch-scoped: a user can supervise a team on one branch but not another.
+   *
+   * TTL matches the user bundle cache (60s). Invalidated explicitly by
+   * {@link invalidateSupervisorFlags}, called from the `syncUserSupervisorFlag`
+   * chokepoint that every team-membership mutation already funnels through.
    */
-  async attachCsSupervisorSessionFlag(user: SessionUser): Promise<SessionUser> {
-    const bid = user.currentBranchId;
-    if (!bid) {
-      const { isCsTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
-      return rest;
-    }
-    const ok = await this.isCsSupervisorOnBranch(user.id, bid);
-    if (!ok) {
-      const { isCsTeamSupervisorOnActiveBranch: _drop, ...rest } = user;
-      return rest;
-    }
-    return { ...user, isCsTeamSupervisorOnActiveBranch: true };
+  async getSupervisorFlagsForBranch(
+    userId: string,
+    branchId: string,
+  ): Promise<{ marketing: boolean; cs: boolean }> {
+    const key = `${SUPERVISOR_FLAGS_KEY_PREFIX}${userId}:${branchId}`;
+    return this.cache.getOrSet(key, SUPERVISOR_FLAGS_TTL_SECONDS, async () => {
+      const [marketing, cs] = await Promise.all([
+        this.isMarketingSupervisorOnBranch(userId, branchId),
+        this.isCsSupervisorOnBranch(userId, branchId),
+      ]);
+      return { marketing, cs };
+    });
   }
 
   /**
-   * One-shot helper that attaches BOTH lane flags in parallel. Use this from
-   * session-build paths (login / mirror / `/auth/me` / tRPC middleware) so a
-   * future third lane (e.g. logistics) only needs to be added in one place
-   * rather than across half a dozen call sites.
+   * Drop every cached supervisor-flag entry for a user (all branches), so a
+   * promote / demote / move / team-delete is reflected on their next request.
+   */
+  async invalidateSupervisorFlags(userId: string): Promise<void> {
+    if (!userId) return;
+    await this.cache.delPattern(`${SUPERVISOR_FLAGS_KEY_PREFIX}${userId}:*`);
+  }
+
+  /**
+   * Attaches BOTH per-branch supervisor lane flags onto the session user. Use
+   * this from session-build paths (login / mirror / `/auth/me` / tRPC
+   * middleware). The underlying lookup is Redis-cached, so on a warm cache this
+   * adds no Postgres round-trip. Global / admin sessions (no active branch)
+   * short-circuit with both flags dropped.
    */
   async attachTeamSupervisorSessionFlags(user: SessionUser): Promise<SessionUser> {
-    // Cheap two-query fan-out — both helpers short-circuit when there's no
-    // active branch, so this is a no-op for global / admin sessions.
-    const [marketing, cs] = await Promise.all([
-      this.attachMarketingSupervisorSessionFlag(user),
-      this.attachCsSupervisorSessionFlag(user),
-    ]);
-    // Each helper returns a fresh user object with one field added or
-    // dropped. Compose by taking the marketing result as the base then
-    // overlaying the CS flag (or its absence) from the CS result.
+    const branchId = user.currentBranchId;
+    if (!branchId) {
+      const {
+        isMarketingTeamSupervisorOnActiveBranch: _drop1,
+        isCsTeamSupervisorOnActiveBranch: _drop2,
+        ...rest
+      } = user;
+      return rest;
+    }
+    const { marketing, cs } = await this.getSupervisorFlagsForBranch(user.id, branchId);
+    // Consumers check `=== true`, so `undefined` is equivalent to "absent".
     return {
-      ...marketing,
-      ...(cs.isCsTeamSupervisorOnActiveBranch === true
-        ? { isCsTeamSupervisorOnActiveBranch: true }
-        : { isCsTeamSupervisorOnActiveBranch: undefined }),
+      ...user,
+      isMarketingTeamSupervisorOnActiveBranch: marketing ? true : undefined,
+      isCsTeamSupervisorOnActiveBranch: cs ? true : undefined,
     } as SessionUser;
   }
 

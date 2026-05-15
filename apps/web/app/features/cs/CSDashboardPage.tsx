@@ -12,7 +12,6 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { Spinner } from '~/components/ui/spinner';
-import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { DeferredError, DeferredSection } from '~/components/ui/deferred-section';
 import {
@@ -39,6 +38,7 @@ import {
   LiveActivityDetailModal,
   DetailRow,
 } from '~/components/ui/live-activity-card';
+import { AbandonedCartDetailModal } from './AbandonedCartDetailModal';
 const CreateOfflineOrderModal = lazy(() =>
   import('~/features/orders/CreateOfflineOrderModal').then((m) => ({ default: m.CreateOfflineOrderModal })),
 );
@@ -689,7 +689,6 @@ function CSDashboardPageLoaded({
 
   const fetcher = useFetcher();
   const revalidator = useRevalidator();
-  const isRouteLoaderBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
   const abandonedPageFromUrl = useMemo(() => {
     const n = parseInt(searchParams.get('abandonedPage') ?? '1', 10);
@@ -697,7 +696,7 @@ function CSDashboardPageLoaded({
   }, [searchParams]);
   const abandonedPageFromUrlRef = useRef(abandonedPageFromUrl);
   abandonedPageFromUrlRef.current = abandonedPageFromUrl;
-  const [hotSwapSearchPending, startHotSwapSearchTransition] = useTransition();
+  const [, startHotSwapSearchTransition] = useTransition();
   const claimFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const cartsFetcher = useFetcher<{
     activityItems?: LiveActivityItem[];
@@ -830,6 +829,16 @@ function CSDashboardPageLoaded({
   /** URL-driven so socket `revalidate()` keeps loading the same closer's orders (see usePageRefreshOnEvent). */
   const hotSwapFrom =
     searchParams.get('hotSwapFrom')?.trim() || searchParams.get('from')?.trim() || '';
+  /** Tracks the closer the user just picked — updates immediately (outside transition) so
+   *  stale cards are replaced by the skeleton the instant the dropdown changes. */
+  const [pendingHotSwapFrom, setPendingHotSwapFrom] = useState(hotSwapFrom);
+  const prevHotSwapFromRef = useRef(hotSwapFrom);
+  if (prevHotSwapFromRef.current !== hotSwapFrom) {
+    prevHotSwapFromRef.current = hotSwapFrom;
+    if (hotSwapFrom !== pendingHotSwapFrom) {
+      setPendingHotSwapFrom(hotSwapFrom);
+    }
+  }
   const [hotSwapTo, setHotSwapTo] = useState('');
   const [hotSwapOrderIds, setHotSwapOrderIds] = useState<string[]>([]);
   /** Reassign order modal: order + current assignee so we can pick new agent */
@@ -850,6 +859,8 @@ function CSDashboardPageLoaded({
   const [cancelReason, setCancelReason] = useState('Customer not picking');
   /** Selected live activity item for detail modal */
   const [selectedLiveCart, setSelectedLiveCart] = useState<LiveActivityItem | null>(null);
+  /** Selected abandoned cart for the dedicated abandoned-cart modal (unmasked phone reveal). */
+  const [selectedAbandonedCart, setSelectedAbandonedCart] = useState<PendingCart | null>(null);
   /** Selected active (CS_ENGAGED) order for detail modal */
   const [selectedActiveOrder, setSelectedActiveOrder] = useState<CSOrder | null>(null);
   /** Selected unassigned queue order for detail modal */
@@ -953,6 +964,46 @@ function CSDashboardPageLoaded({
   }, [selectedQueueOrder]);
   /** Multi-select for bulk-assign on the Unassigned Queue tab. */
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
+  /** Multi-select for bulk actions on the Cart abandonment tab. */
+  const [selectedAbandonedIds, setSelectedAbandonedIds] = useState<Set<string>>(new Set());
+  /** Multi-select for bulk dismiss on the Possible duplicates tab. */
+  const [selectedDuplicateIds, setSelectedDuplicateIds] = useState<Set<string>>(new Set());
+  const bulkDismissDuplicatesFetcher = useFetcher<{
+    success?: boolean;
+    dismissed?: number;
+    failed?: number;
+    total?: number;
+    error?: string;
+  }>();
+  const [bulkDismissDuplicatesConfirmOpen, setBulkDismissDuplicatesConfirmOpen] = useState(false);
+
+  const toggleDuplicateSelection = (orderId: string) => {
+    setSelectedDuplicateIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+  const clearDuplicateSelection = () => setSelectedDuplicateIds(new Set());
+  const bulkDeleteCartsFetcher = useFetcher<{
+    ok: boolean;
+    deleted?: number;
+    failed?: number;
+    total?: number;
+    error?: string;
+  }>();
+  const [bulkDeleteCartsConfirmOpen, setBulkDeleteCartsConfirmOpen] = useState(false);
+
+  const toggleAbandonedSelection = (cartId: string) => {
+    setSelectedAbandonedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(cartId)) next.delete(cartId);
+      else next.add(cartId);
+      return next;
+    });
+  };
+  const clearAbandonedSelection = () => setSelectedAbandonedIds(new Set());
   /** Selected closers inside the Unassigned "Assign" modal (assignable only). */
   const [bulkAssignAgentIds, setBulkAssignAgentIds] = useState<Set<string>>(() => new Set());
   const [assignCloserModalOpen, setAssignCloserModalOpen] = useState(false);
@@ -1015,7 +1066,10 @@ function CSDashboardPageLoaded({
   const [viewAllAgentsOpen, setViewAllAgentsOpen] = useState(false);
   const [viewAllPage, setViewAllPage] = useState(1);
   /** Prefill Create Offline Order modal when opening from Cart Abandonment */
-  const [createOfflinePrefill, setCreateOfflinePrefill] = useState<{ customerName: string } | null>(null);
+  const [createOfflinePrefill, setCreateOfflinePrefill] = useState<{
+    customerName: string;
+    cartPrefill?: import('~/features/orders/CreateOfflineOrderModal').CartPrefill;
+  } | null>(null);
   /** Delete abandoned cart confirmation modal */
   const [deleteCartConfirm, setDeleteCartConfirm] = useState<PendingCart | null>(null);
   /** Merge / dismiss duplicate confirmation modals */
@@ -1047,29 +1101,6 @@ function CSDashboardPageLoaded({
     abandonedPagination.total === 0 ? 0 : Math.ceil(abandonedPagination.total / abandonedPagination.limit);
   const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const { toast } = useToast();
-  /**
-   * Reveal-and-call fetcher for dropped-off carts. Server returns the raw
-   * phone for ABANDONED rows; the click handler wraps it in a `tel:` link
-   * and pops the OS dialer / WhatsApp Web. Phone is never written to the
-   * card or DOM — only injected into the navigation URL on click.
-   */
-  const revealCartPhoneFetcher = useFetcher<{
-    ok: boolean;
-    phone?: string;
-    isDialable?: boolean;
-    error?: string;
-  }>();
-  const [revealingCartId, setRevealingCartId] = useState<string | null>(null);
-  const revealAbandonedCartPhone = useCallback((cartId: string) => {
-    setRevealingCartId(cartId);
-    const fd = new FormData();
-    fd.set('intent', 'revealAbandonedPhone');
-    fd.set('cartId', cartId);
-    revealCartPhoneFetcher.submit(fd, {
-      method: 'post',
-      action: '/admin/cs/queue/carts',
-    });
-  }, [revealCartPhoneFetcher]);
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
   const unassignedQueueScrollRef = useRef<HTMLDivElement>(null);
@@ -1192,6 +1223,16 @@ function CSDashboardPageLoaded({
     successMessage: 'Cart deleted',
     skipErrorToast: deleteCartConfirm != null,
   });
+  useFetcherToast(bulkDeleteCartsFetcher.data, {
+    successMessage: bulkDeleteCartsFetcher.data?.deleted
+      ? `${bulkDeleteCartsFetcher.data.deleted} cart(s) cleared`
+      : 'Carts cleared',
+  });
+  useFetcherToast(bulkDismissDuplicatesFetcher.data, {
+    successMessage: bulkDismissDuplicatesFetcher.data?.dismissed
+      ? `${bulkDismissDuplicatesFetcher.data.dismissed} duplicate(s) dismissed`
+      : 'Duplicates dismissed',
+  });
   useFetcherToast(bulkAssignFetcher.data, {
     successMessage: 'Order(s) assigned to closer',
     skipErrorToast: assignCloserModalOpen,
@@ -1205,29 +1246,25 @@ function CSDashboardPageLoaded({
     }
   }, [deleteCartFetcher.state, deleteCartFetcher.data]);
 
-  // When the reveal call returns, open `tel:` (and a copy fallback) so the
-  // dropped-off customer is one tap away. Phone never lands in the DOM.
+  // Bulk delete carts — close confirm, clear selection, refresh
   useEffect(() => {
-    if (revealCartPhoneFetcher.state !== 'idle' || !revealCartPhoneFetcher.data) return;
-    const data = revealCartPhoneFetcher.data;
-    if (!data.ok) {
-      toast.error('Could not reveal phone', data.error ?? 'Try again in a moment.');
-      setRevealingCartId(null);
-      return;
+    if (bulkDeleteCartsFetcher.state !== 'idle' || !bulkDeleteCartsFetcher.data) return;
+    if (bulkDeleteCartsFetcher.data.ok || (bulkDeleteCartsFetcher.data.deleted ?? 0) > 0) {
+      setBulkDeleteCartsConfirmOpen(false);
+      clearAbandonedSelection();
+      cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
     }
-    if (!data.isDialable || !data.phone) {
-      toast.error(
-        "Phone wasn't captured for this cart",
-        'This dropped-off entry was created before phone capture was enabled, so we can\'t reach the customer. Use Clear to remove it.',
-      );
-      setRevealingCartId(null);
-      return;
+  }, [bulkDeleteCartsFetcher.state, bulkDeleteCartsFetcher.data]);
+
+  // Bulk dismiss duplicates — close confirm, clear selection, force loader revalidation
+  useEffect(() => {
+    if (bulkDismissDuplicatesFetcher.state !== 'idle' || !bulkDismissDuplicatesFetcher.data) return;
+    if (bulkDismissDuplicatesFetcher.data.success || (bulkDismissDuplicatesFetcher.data.dismissed ?? 0) > 0) {
+      setBulkDismissDuplicatesConfirmOpen(false);
+      clearDuplicateSelection();
+      revalidator.revalidate();
     }
-    if (typeof window !== 'undefined') {
-      window.location.href = `tel:${data.phone}`;
-    }
-    setRevealingCartId(null);
-  }, [revealCartPhoneFetcher.state, revealCartPhoneFetcher.data, toast]);
+  }, [bulkDismissDuplicatesFetcher.state, bulkDismissDuplicatesFetcher.data, revalidator]);
 
   // cart:updated socket event → reload carts fetcher directly (main loader revalidation won't refresh fetcher data)
   useSocketEvent('cart:updated', () => {
@@ -1323,10 +1360,13 @@ function CSDashboardPageLoaded({
   }, [reassignOrder, cancelConfirmOrder]);
   useCloseOnFetcherSuccess(fetcher, handleQueueFetcherSuccess);
 
-  // Hot Swap selection clear — only on bulkReassign success.
+  // Hot Swap selection clear + reset target + revalidate (so the From-closer
+  // card count drops to reflect the swap, and the To-dropdown is fresh for the next swap).
   const handleBulkReassignSuccess = useCallback(() => {
     setHotSwapOrderIds([]);
-  }, []);
+    setHotSwapTo('');
+    revalidator.revalidate();
+  }, [revalidator]);
   useCloseOnFetcherSuccess(fetcher, handleBulkReassignSuccess, { intent: 'bulkReassign' });
 
   // Close duplicate-action confirm modals on success.
@@ -1457,13 +1497,16 @@ function CSDashboardPageLoaded({
     [workloads],
   );
 
+  /** Use pendingHotSwapFrom so the UI reacts immediately when the dropdown changes,
+   *  even before the URL-driven transition commits. */
+  const activeHotSwapFrom = pendingHotSwapFrom || hotSwapFrom;
+
   const effectiveHotSwapPayload =
-    hotSwapFrom && hotSwapOrdersPayload?.forAgentId === hotSwapFrom ? hotSwapOrdersPayload : null;
+    activeHotSwapFrom && hotSwapOrdersPayload?.forAgentId === activeHotSwapFrom ? hotSwapOrdersPayload : null;
 
   const hotSwapListLoading =
-    Boolean(hotSwapFrom) &&
-    hotSwapOrdersPayload?.forAgentId !== hotSwapFrom &&
-    (isRouteLoaderBusy || hotSwapSearchPending);
+    Boolean(activeHotSwapFrom) &&
+    hotSwapOrdersPayload?.forAgentId !== activeHotSwapFrom;
 
   const hotSwapSourceOrders = effectiveHotSwapPayload?.orders ?? [];
   const hotSwapSourceTotal = effectiveHotSwapPayload?.total ?? 0;
@@ -1531,6 +1574,7 @@ function CSDashboardPageLoaded({
                   onClose={() => { onCreateOfflineOpenChange(false); setCreateOfflinePrefill(null); }}
                   onSuccess={() => { onCreateOfflineOpenChange(false); setCreateOfflinePrefill(null); }}
                   initialCustomerName={createOfflinePrefill?.customerName}
+                  cartPrefill={createOfflinePrefill?.cartPrefill ?? null}
                   products={products}
                   branchId={csMutationBranchPayload(unassignedOrders).branchId}
                 />
@@ -1746,6 +1790,37 @@ function CSDashboardPageLoaded({
       {/* Live activity detail modal */}
       <LiveActivityDetailModal item={selectedLiveCart} onClose={() => setSelectedLiveCart(null)} />
 
+      {/* Abandoned cart detail modal — reveals raw phone (audited) for recovery */}
+      <AbandonedCartDetailModal
+        cart={selectedAbandonedCart}
+        canReveal={canDeleteCart}
+        onClose={() => setSelectedAbandonedCart(null)}
+        onClear={canDeleteCart ? (c) => { setSelectedAbandonedCart(null); setDeleteCartConfirm(c); } : undefined}
+        onAssign={canCreateOffline ? (c, revealedPhone) => {
+          setSelectedAbandonedCart(null);
+          setCreateOfflinePrefill({
+            customerName: c.customerName,
+            cartPrefill: {
+              cartId: c.id,
+              customerName: c.customerName,
+              customerPhone: revealedPhone ?? undefined,
+              customerAddress: c.customerAddress ?? undefined,
+              deliveryAddress: c.deliveryAddress ?? undefined,
+              deliveryState: c.deliveryState ?? undefined,
+              deliveryNotes: c.deliveryNotes ?? undefined,
+              customerGender: c.customerGender ?? undefined,
+              preferredDeliveryDate: c.preferredDeliveryDate ?? undefined,
+              customerEmail: c.customerEmail ?? undefined,
+              paymentMethod: c.paymentMethod ?? undefined,
+              productId: c.productId ?? undefined,
+              offerLabel: c.offerLabel ?? undefined,
+              quantity: c.quantity ?? undefined,
+            },
+          });
+          onCreateOfflineOpenChange(true);
+        } : undefined}
+      />
+
       {/* Active order detail modal */}
       <ActiveOrderDetailModal
         order={selectedActiveOrder}
@@ -1863,7 +1938,7 @@ function CSDashboardPageLoaded({
               : []),
             {
               value: 'duplicates',
-              label: 'Duplicates',
+              label: 'Possible duplicates',
               badge: (
                 <DeferredSection resolve={flaggedDuplicates} fallback={<CSTabCountBadgeSkeleton />}>
                   {(pairs: DuplicatePair[]) =>
@@ -2308,7 +2383,7 @@ function CSDashboardPageLoaded({
       {activeTab === 'hotswap' && (
         <Suspense fallback={<CSHotSwapTabSkeleton />}>
           <CSDashboardHotSwapTabPanel
-            hotSwapFrom={hotSwapFrom}
+            hotSwapFrom={activeHotSwapFrom}
             hotSwapTo={hotSwapTo}
             hotSwapOrderIds={hotSwapOrderIds}
             hotSwapListLoading={hotSwapListLoading}
@@ -2319,8 +2394,9 @@ function CSDashboardPageLoaded({
             onClearSelection={() => setHotSwapOrderIds([])}
             onReassign={handleHotSwap}
             onFromCloserChange={(v) => {
+              setPendingHotSwapFrom(v);
+              setHotSwapOrderIds([]);
               startHotSwapSearchTransition(() => {
-                setHotSwapOrderIds([]);
                 const next = new URLSearchParams(searchParams);
                 next.delete('from');
                 if (v) {
@@ -2444,6 +2520,14 @@ function CSDashboardPageLoaded({
                 fetcherIdle={fetcher.state === 'idle'}
                 onMerge={setMergeDuplicateConfirm}
                 onDismiss={setDismissDuplicateConfirm}
+                selectedIds={selectedDuplicateIds}
+                onToggle={toggleDuplicateSelection}
+                onPickFirst={(count) =>
+                  setSelectedDuplicateIds(new Set(pairs.slice(0, count).map((p) => p.duplicate.id)))
+                }
+                onClearSelection={clearDuplicateSelection}
+                onBulkDismiss={() => setBulkDismissDuplicatesConfirmOpen(true)}
+                bulkDismissBusy={bulkDismissDuplicatesFetcher.state !== 'idle'}
               />
             </Suspense>
           )}
@@ -2473,7 +2557,6 @@ function CSDashboardPageLoaded({
                     <div className="h-2.5 rounded bg-app-hover animate-pulse w-1/2" />
                     <div className="flex gap-2 pt-1">
                       <div className="h-3 w-8 rounded bg-app-hover animate-pulse" />
-                      <div className="h-3 w-10 rounded bg-app-hover animate-pulse" />
                       <div className="h-3 w-8 rounded bg-app-hover animate-pulse" />
                     </div>
                   </div>
@@ -2488,6 +2571,34 @@ function CSDashboardPageLoaded({
             </div>
           ) : (
             <div>
+              {canDeleteCart && abandonedCartsList.length > 0 && (
+                <div className="mb-2 rounded-lg border border-app-border bg-app-elevated px-3 py-2 -mx-1 overflow-x-auto scrollbar-hide">
+                  <div className="flex min-w-max items-center gap-2 px-1">
+                    <SmartPick
+                      total={abandonedCartsList.length}
+                      selectedCount={selectedAbandonedIds.size}
+                      onPick={(count) =>
+                        setSelectedAbandonedIds(
+                          new Set(abandonedCartsList.slice(0, count).map((c) => c.id)),
+                        )
+                      }
+                      onClear={clearAbandonedSelection}
+                      itemNoun="carts"
+                      compactMobile
+                      className="shrink-0"
+                    />
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      disabled={selectedAbandonedIds.size === 0 || bulkDeleteCartsFetcher.state !== 'idle'}
+                      onClick={() => setBulkDeleteCartsConfirmOpen(true)}
+                    >
+                      Clear{selectedAbandonedIds.size > 0 ? ` (${selectedAbandonedIds.size})` : ''}
+                    </Button>
+                  </div>
+                </div>
+              )}
               <StripToolbar
                 title="Cart abandonment"
                 description={`Dropped sessions stay here until cleared. Backlog: ${abandonedPagination.total}.`}
@@ -2500,17 +2611,33 @@ function CSDashboardPageLoaded({
                 ref={abandonedScrollRef}
                 className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
               >
-                {abandonedCartsList.map((c: PendingCart) => (
+                {abandonedCartsList.map((c: PendingCart) => {
+                  const isSelected = selectedAbandonedIds.has(c.id);
+                  return (
                   <div
                     key={c.id}
-                    className="group relative shrink-0 w-48 rounded-xl border border-app-border bg-app-elevated transition-all duration-200 hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700"
+                    className={`group relative shrink-0 w-48 rounded-xl border bg-app-elevated transition-all duration-200 hover:shadow-md ${
+                      isSelected
+                        ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
+                        : 'border-app-border hover:border-brand-300 dark:hover:border-brand-700'
+                    }`}
                   >
                     <span className="absolute top-2 right-2 flex h-2 w-2 pointer-events-none">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-app-fg-muted/40 opacity-60" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-app-fg-muted/70" />
                     </span>
 
-                    <div className="px-2.5 py-2 pr-5">
+                    {canDeleteCart && (
+                      <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={() => toggleAbandonedSelection(c.id)}
+                          aria-label={`Select cart for ${c.customerName}`}
+                        />
+                      </span>
+                    )}
+
+                    <div className={`px-2.5 py-2 pr-5 ${canDeleteCart ? 'pl-7' : ''}`}>
                       <div className="flex items-baseline justify-between gap-2 mb-1">
                         <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
                           {c.customerName}
@@ -2537,51 +2664,11 @@ function CSDashboardPageLoaded({
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          onClick={() =>
-                            setSelectedLiveCart({
-                              id: c.id,
-                              customerName: c.customerName,
-                              customerPhoneDisplay: c.customerPhoneDisplay,
-                              productName: c.productName,
-                              offerLabel: c.offerLabel,
-                              cartStatus: 'ABANDONED',
-                              orderStatus: null,
-                              linkedOrderId: null,
-                              totalAmount: null,
-                              updatedAt: c.updatedAt,
-                            })
-                          }
+                          onClick={() => setSelectedAbandonedCart(c)}
                           className="text-[11px] font-medium text-brand-700 dark:text-brand-300 hover:underline"
                         >
                           View
                         </button>
-                        {canDeleteCart ? (
-                          <button
-                            type="button"
-                            disabled={
-                              revealCartPhoneFetcher.state !== 'idle' && revealingCartId === c.id
-                            }
-                            onClick={() => revealAbandonedCartPhone(c.id)}
-                            className="text-[11px] font-medium text-success-600 dark:text-success-400 hover:underline disabled:opacity-50"
-                          >
-                            {revealCartPhoneFetcher.state !== 'idle' && revealingCartId === c.id
-                              ? 'Calling…'
-                              : 'Call'}
-                          </button>
-                        ) : null}
-                        {canCreateOffline ? (
-                          <button
-                            type="button"
-                            disabled={deleteCartFetcher.state !== 'idle'}
-                            onClick={() => {
-                              setCreateOfflinePrefill({ customerName: c.customerName });
-                              onCreateOfflineOpenChange(true);
-                            }}
-                            className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline disabled:opacity-50"
-                          >
-                            Offline
-                          </button>
-                        ) : null}
                         {canDeleteCart ? (
                           <button
                             type="button"
@@ -2594,7 +2681,8 @@ function CSDashboardPageLoaded({
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               {abandonedTotalPages >= 1 ? (
                 <div className="mt-4 flex justify-center border-t border-app-border pt-4">
@@ -2643,6 +2731,76 @@ function CSDashboardPageLoaded({
               {deleteCartFetcher.state !== 'idle' ? 'Deleting…' : 'Delete'}
             </Button>
           </deleteCartFetcher.Form>
+        </Modal>
+      )}
+
+      {/* ── Bulk dismiss duplicates confirmation ─── */}
+      {bulkDismissDuplicatesConfirmOpen && (
+        <Modal open onClose={() => setBulkDismissDuplicatesConfirmOpen(false)} maxWidth="max-w-sm" contentClassName="p-6">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-app-fg">
+                Dismiss {selectedDuplicateIds.size} flag{selectedDuplicateIds.size === 1 ? '' : 's'}?
+              </h3>
+              <p className="text-sm text-app-fg-muted mt-1">
+                Selected orders will keep their data but the duplicate flag will be cleared. This can't be undone.
+              </p>
+            </div>
+          </div>
+          <bulkDismissDuplicatesFetcher.Form method="post" action="/admin/cs/queue" className="flex items-center justify-end gap-2">
+            <input type="hidden" name="intent" value="bulkDismissDuplicates" />
+            <input type="hidden" name="orderIds" value={Array.from(selectedDuplicateIds).join(',')} />
+            <Button type="button" variant="secondary" size="sm" onClick={() => setBulkDismissDuplicatesConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="danger"
+              size="sm"
+              disabled={bulkDismissDuplicatesFetcher.state !== 'idle'}
+            >
+              {bulkDismissDuplicatesFetcher.state !== 'idle' ? 'Dismissing…' : 'Dismiss all'}
+            </Button>
+          </bulkDismissDuplicatesFetcher.Form>
+        </Modal>
+      )}
+
+      {/* ── Bulk clear abandoned carts confirmation ─── */}
+      {bulkDeleteCartsConfirmOpen && (
+        <Modal open onClose={() => setBulkDeleteCartsConfirmOpen(false)} maxWidth="max-w-sm" contentClassName="p-6">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-app-fg">Clear {selectedAbandonedIds.size} abandoned cart{selectedAbandonedIds.size === 1 ? '' : 's'}?</h3>
+              <p className="text-sm text-app-fg-muted mt-1">
+                Selected carts will be permanently removed. This cannot be undone.
+              </p>
+            </div>
+          </div>
+          <bulkDeleteCartsFetcher.Form method="post" action="/admin/cs/queue/carts" className="flex items-center justify-end gap-2">
+            <input type="hidden" name="intent" value="deleteAbandonedMany" />
+            <input type="hidden" name="cartIds" value={Array.from(selectedAbandonedIds).join(',')} />
+            <Button type="button" variant="secondary" size="sm" onClick={() => setBulkDeleteCartsConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="danger"
+              size="sm"
+              disabled={bulkDeleteCartsFetcher.state !== 'idle'}
+            >
+              {bulkDeleteCartsFetcher.state !== 'idle' ? 'Clearing…' : 'Clear all'}
+            </Button>
+          </bulkDeleteCartsFetcher.Form>
         </Modal>
       )}
 

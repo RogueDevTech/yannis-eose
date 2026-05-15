@@ -27,6 +27,38 @@ export const stockTransferSchema = z.object({
 
 export type StockTransferInput = z.infer<typeof stockTransferSchema>;
 
+/**
+ * Multi-product transfer: one source → one destination, N product lines, all
+ * created atomically in a single transaction. Each line still becomes its own
+ * `stock_transfers` row with an independent approve / verify lifecycle (a 3PL
+ * receives per product). Duplicate productIds are rejected — merge quantities
+ * in the UI instead.
+ */
+export const stockTransferBatchSchema = z
+  .object({
+    fromLocationId: z.string().uuid(),
+    toLocationId: z.string().uuid(),
+    lines: z
+      .array(
+        z.object({
+          productId: z.string().uuid(),
+          quantity: z.number().int().min(1),
+        }),
+      )
+      .min(1)
+      .max(50),
+  })
+  .refine((v) => v.fromLocationId !== v.toLocationId, {
+    message: 'Source and destination must differ',
+    path: ['toLocationId'],
+  })
+  .refine((v) => new Set(v.lines.map((l) => l.productId)).size === v.lines.length, {
+    message: 'Each product can only appear once per transfer',
+    path: ['lines'],
+  });
+
+export type StockTransferBatchInput = z.infer<typeof stockTransferBatchSchema>;
+
 // ============================================
 // Verify Transfer — 3PL confirms receipt
 // ============================================
@@ -263,6 +295,14 @@ export const createWarehouseSchema = z.object({
   coordinates: z.string().trim().max(100).optional().or(z.literal('')),
 });
 export type CreateWarehouseInput = z.infer<typeof createWarehouseSchema>;
+
+export const updateWarehouseSchema = z.object({
+  warehouseId: z.string().uuid(),
+  name: z.string().trim().min(2, 'Name must be at least 2 characters').max(160).optional(),
+  address: z.string().trim().min(2, 'Address is required').max(500).optional(),
+  coordinates: z.string().trim().max(100).optional().or(z.literal('')),
+});
+export type UpdateWarehouseInput = z.infer<typeof updateWarehouseSchema>;
 
 export const listWarehousesSchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional(),

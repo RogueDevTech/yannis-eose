@@ -139,6 +139,7 @@ export type {
 export {
   stockIntakeSchema,
   stockTransferSchema,
+  stockTransferBatchSchema,
   verifyTransferSchema,
   approveTransferSchema,
   rejectTransferSchema,
@@ -156,12 +157,14 @@ export {
   listShipmentsSchema,
   getShipmentSchema,
   createWarehouseSchema,
+  updateWarehouseSchema,
   listWarehousesSchema,
 } from './inventory';
 
 export type {
   StockIntakeInput,
   StockTransferInput,
+  StockTransferBatchInput,
   VerifyTransferInput,
   ApproveTransferInput,
   RejectTransferInput,
@@ -179,6 +182,7 @@ export type {
   ListShipmentsInput,
   GetShipmentInput,
   CreateWarehouseInput,
+  UpdateWarehouseInput,
   ListWarehousesInput,
 } from './inventory';
 

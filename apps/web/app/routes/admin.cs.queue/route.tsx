@@ -501,6 +501,32 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'bulkDismissDuplicates') {
+    const raw = formData.get('orderIds')?.toString() ?? '';
+    const orderIds = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (orderIds.length === 0) {
+      return json({ error: 'No duplicates selected' }, { status: 400 });
+    }
+    const branchId = branchIdFromForm(formData);
+    const results = await Promise.all(
+      orderIds.map((orderId) =>
+        apiRequest<unknown>('/trpc/orders.dismissDuplicate', {
+          method: 'POST',
+          cookie,
+          body: { orderId, ...(branchId ? { branchId } : {}) },
+        }),
+      ),
+    );
+    const failed = results.filter((r) => !r.ok).length;
+    return json({
+      success: failed === 0,
+      dismissed: orderIds.length - failed,
+      failed,
+      total: orderIds.length,
+      error: failed > 0 ? `${failed} of ${orderIds.length} duplicates could not be dismissed` : undefined,
+    });
+  }
+
   if (intent === 'createOffline') {
     await requirePermission(request, 'cs.teamOverview');
     const customerName = formData.get('customerName')?.toString()?.trim() ?? '';
@@ -533,6 +559,7 @@ export async function action({ request }: ActionFunctionArgs) {
       body: {
         customerName,
         customerPhone,
+        cartId: formData.get('cartId')?.toString()?.trim() || undefined,
         customerAddress: formData.get('customerAddress')?.toString()?.trim() || undefined,
         deliveryAddress: formData.get('deliveryAddress')?.toString()?.trim() || undefined,
         deliveryNotes: formData.get('deliveryNotes')?.toString()?.trim() || undefined,

@@ -184,7 +184,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     requestsPage = requestsTotalPages;
     const retryRes = await apiRequest<unknown>(
       `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(
-        JSON.stringify({ page: requestsPage, limit: TAB_PAGE_LIMIT }),
+        JSON.stringify({
+          page: requestsPage,
+          limit: TAB_PAGE_LIMIT,
+          // Keep the overshoot-retry consistent with the bundle: Finance
+          // Disbursements only lists Head of Marketing funding requests.
+          requesterRole: 'HEAD_OF_MARKETING',
+        }),
       )}`,
       { method: 'GET', cookie },
     );

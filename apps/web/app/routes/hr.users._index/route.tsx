@@ -4,6 +4,8 @@ import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, requireStaffAccountsAccess } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
+import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { UsersListPage } from '~/features/users/UsersListPage';
 import type { User } from '~/features/users/types';
 import { BRANCH_ELIGIBLE_IMPORT_ROLES } from '~/features/users/users-import-shared';
@@ -119,8 +121,12 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await requireStaffAccountsAccess(request);
+  const user = await requireStaffAccountsAccess(request);
   const cookie = getSessionCookie(request);
+
+  // Staff-accounts export carries sensitive payout/bank fields — gated on `hr.export`.
+  const actorPerms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
+  const canExport = isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('hr.export'));
 
   const url = new URL(request.url);
   const statusParam = url.searchParams.get('status') || undefined;
@@ -229,6 +235,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       searchParam,
       perPage,
       pageSizeOptions,
+      canExport,
     },
     usersPromise,
   });
@@ -250,6 +257,7 @@ export default function UsersRoute() {
           searchParam={usersShell.searchParam}
           pageSize={usersShell.perPage}
           pageSizeOptions={usersShell.pageSizeOptions}
+          canExport={usersShell.canExport}
         />
       }
       loaderShell={{ usersShell }}
@@ -263,6 +271,7 @@ export default function UsersRoute() {
           usersPromise={roster}
           pageSize={usersShell.perPage}
           pageSizeOptions={usersShell.pageSizeOptions}
+          canExport={usersShell.canExport}
         />
       )}
     </CachedAwait>

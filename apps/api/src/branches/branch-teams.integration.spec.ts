@@ -8,6 +8,7 @@ import { db as schema } from '@yannis/shared';
 import { getPgClient, getDb, closeConnections } from '../test/setup-integration';
 import { createTestUser, createTestBranch, insertTestBranchTeam } from '../test/factories/order.factory';
 import { BranchTeamsService } from './branch-teams.service';
+import { createFakeCacheService } from '../test/fake-cache';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
@@ -41,7 +42,7 @@ describe.skipIf(SKIP_IF_NO_DB)('BranchTeamsService — supervision mirror helper
       { teamId: team!.id, userId: agent.id, isSupervisor: false },
     ]);
 
-    const svc = new BranchTeamsService(db as any);
+    const svc = new BranchTeamsService(db as any, createFakeCacheService());
     const ok = await svc.actorCanMirrorViaSupervision(
       { id: sup.id, currentBranchId: branch.id },
       { id: agent.id, role: 'CS_CLOSER' },
@@ -57,7 +58,7 @@ describe.skipIf(SKIP_IF_NO_DB)('BranchTeamsService — supervision mirror helper
       { userId: a.id, branchId: branch.id, isPrimary: true },
       { userId: b.id, branchId: branch.id, isPrimary: true },
     ]);
-    const svc = new BranchTeamsService(db as any);
+    const svc = new BranchTeamsService(db as any, createFakeCacheService());
     const ok = await svc.actorCanMirrorViaSupervision(
       { id: a.id, currentBranchId: branch.id },
       { id: b.id, role: 'CS_CLOSER' },
@@ -79,7 +80,7 @@ describe.skipIf(SKIP_IF_NO_DB)('BranchTeamsService — supervision mirror helper
       { teamId: team!.id, userId: buyer.id, isSupervisor: false },
     ]);
 
-    const svc = new BranchTeamsService(db as any);
+    const svc = new BranchTeamsService(db as any, createFakeCacheService());
     const ok = await svc.actorCanMirrorViaSupervision(
       { id: sup.id, currentBranchId: null },
       { id: buyer.id, role: 'MEDIA_BUYER' },

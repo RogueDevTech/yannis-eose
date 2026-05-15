@@ -1,4 +1,4 @@
-import { uuid, pgTable, text } from 'drizzle-orm/pg-core';
+import { date, integer, jsonb, uuid, pgTable, text } from 'drizzle-orm/pg-core';
 import { cartStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { campaigns } from './marketing';
@@ -28,6 +28,23 @@ export const cartAbandonments = pgTable('cart_abandonments', {
   offerLabel: text('offer_label'),
   status: cartStatusEnum('status').default('PENDING').notNull(),
   convertedOrderId: uuid('converted_order_id').references(() => orders.id),
+  /**
+   * Progressive form-field capture (migration 0142). Edge Worker writes these
+   * on the same debounced `cart.save` cycle as name+phone so a dropped cart
+   * holds every value the customer typed. Hydrates the recovery modal so CS
+   * doesn't re-type and preserves MB attribution when the cart converts.
+   */
+  customerEmail: text('customer_email'),
+  customerAddress: text('customer_address'),
+  deliveryAddress: text('delivery_address'),
+  deliveryState: text('delivery_state'),
+  deliveryNotes: text('delivery_notes'),
+  customerGender: text('customer_gender'),
+  preferredDeliveryDate: date('preferred_delivery_date'),
+  paymentMethod: text('payment_method'),
+  quantity: integer('quantity'),
+  /** Form-builder custom fields — keys/values defined by the campaign's form schema. */
+  customFieldValues: jsonb('custom_field_values'),
   ...temporalColumns,
   ...timestampColumns,
 });

@@ -785,6 +785,7 @@ export function OrderDetailPage({
   allocatableLocationsDeferred,
   logisticsDispatchTemplates = [],
   invoice,
+  itemOffers = [],
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
   const revealFetcher = useFetcher();
@@ -888,7 +889,7 @@ export function OrderDetailPage({
     CALLBACK_DELAY_MAX_MINUTES / callbackCustomUnitMultiplier(scheduleCustomUnit),
   );
   const [adjustItemsModalOpen, setAdjustItemsModalOpen] = useState(false);
-  const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number }>>([]);
+  const [editedItems, setEditedItems] = useState<Array<{ productId: string; productName?: string | null; quantity: number; unitPrice: number; offerLabel: string | null }>>([]);
   const [priceApprovalReason, setPriceApprovalReason] = useState('');
   const [callDebugLog, setCallDebugLog] = useState<string[]>([]);
   const [allocateModalOpen, setAllocateModalOpen] = useState(false);
@@ -1183,6 +1184,13 @@ export function OrderDetailPage({
     userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch;
   const viewerIsCsTeamSupervisor = order.viewerIsCsTeamSupervisor === true;
   const canEditLinePrices = order.viewerCanEditOrderLinePrices === true;
+  // Campaign-scoped offer tiers keyed by product — feeds the Adjust order items
+  // offer picker so a discounted bundle can be applied in one selection.
+  const offersByProduct = useMemo(() => {
+    const m = new Map<string, Array<{ label: string; quantity: number; unitPrice: number }>>();
+    for (const entry of itemOffers) m.set(entry.productId, entry.offers);
+    return m;
+  }, [itemOffers]);
   // CS closer can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
@@ -1954,6 +1962,7 @@ export function OrderDetailPage({
                           productName: item.productName ?? null,
                           quantity: item.quantity,
                           unitPrice: Number(item.unitPrice),
+                          offerLabel: item.offerLabel ?? null,
                         })),
                       );
                       setAdjustItemsModalOpen(true);
@@ -2112,6 +2121,7 @@ export function OrderDetailPage({
                           productName: item.productName ?? null,
                           quantity: item.quantity,
                           unitPrice: Number(item.unitPrice),
+                          offerLabel: item.offerLabel ?? null,
                         })),
                       );
                       setAdjustItemsModalOpen(true);
@@ -3328,47 +3338,111 @@ export function OrderDetailPage({
               <ModalFetcherInlineError message={priceRequestSurface.errorMatchingIntent('requestOrderLinePriceChange')} />
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto px-6 space-y-4">
-              {editedItems.map((item, index) => (
-                <div
-                  key={`${item.productId}-${index}`}
-                  className="rounded-lg border border-app-border p-3 space-y-2"
-                >
-                  <p className="font-medium text-app-fg text-sm line-clamp-2">
-                    {item.productName ?? item.productId.slice(0, 8) + '...'}
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-app-fg-muted mb-1">Quantity</label>
-                      <NumberInput
-                        min={1}
-                        fallbackValue={1}
-                        value={item.quantity}
-                        onValueChange={(v) =>
+              {editedItems.map((item, index) => {
+                const productOffers = offersByProduct.get(item.productId) ?? [];
+                const offerLocked = item.offerLabel != null;
+                const offerSelectOptions = [
+                  { value: '__custom__', label: 'Custom — set quantity & price' },
+                  ...productOffers.map((o) => ({
+                    value: o.label,
+                    label: `${o.label} · ${o.quantity} × ₦${o.unitPrice.toLocaleString()} = ₦${(
+                      o.quantity * o.unitPrice
+                    ).toLocaleString()}`,
+                  })),
+                ];
+                // Preserve a saved offer label even if it is no longer an active tier.
+                if (item.offerLabel && !productOffers.some((o) => o.label === item.offerLabel)) {
+                  offerSelectOptions.push({
+                    value: item.offerLabel,
+                    label: `${item.offerLabel} (saved)`,
+                  });
+                }
+                return (
+                  <div
+                    key={`${item.productId}-${index}`}
+                    className="rounded-lg border border-app-border p-3 space-y-2"
+                  >
+                    <p className="font-medium text-app-fg text-sm line-clamp-2">
+                      {item.productName ?? item.productId.slice(0, 8) + '...'}
+                    </p>
+                    {productOffers.length > 0 && (
+                      <FormSelect
+                        label="Offer"
+                        controlSize="sm"
+                        wrapperClassName="max-w-xs"
+                        options={offerSelectOptions}
+                        value={item.offerLabel ?? '__custom__'}
+                        onChange={(e) => {
+                          const value = e.target.value;
                           setEditedItems((prev) =>
-                            prev.map((p, i) => (i === index ? { ...p, quantity: v } : p)),
-                          )
-                        }
-                        aria-label={`Quantity for ${item.productName ?? 'item'}`}
+                            prev.map((p, i) => {
+                              if (i !== index) return p;
+                              if (value === '__custom__') return { ...p, offerLabel: null };
+                              const picked = productOffers.find((o) => o.label === value);
+                              if (!picked) return { ...p, offerLabel: value };
+                              return {
+                                ...p,
+                                quantity: picked.quantity,
+                                unitPrice: picked.unitPrice,
+                                offerLabel: picked.label,
+                              };
+                            }),
+                          );
+                        }}
+                        aria-label={`Offer for ${item.productName ?? 'item'}`}
                       />
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-app-fg-muted mb-1">Quantity</label>
+                        <NumberInput
+                          min={1}
+                          fallbackValue={1}
+                          value={item.quantity}
+                          disabled={offerLocked}
+                          onValueChange={(v) =>
+                            setEditedItems((prev) =>
+                              prev.map((p, i) => (i === index ? { ...p, quantity: v } : p)),
+                            )
+                          }
+                          aria-label={`Quantity for ${item.productName ?? 'item'}`}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-app-fg-muted mb-1">Unit price (&#8358;)</label>
+                        <NumberInput
+                          coerce="decimal"
+                          min={0}
+                          fallbackValue={0}
+                          value={item.unitPrice}
+                          onValueChange={(v) =>
+                            setEditedItems((prev) =>
+                              prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
+                            )
+                          }
+                          aria-label={`Unit price for ${item.productName ?? 'item'}`}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs text-app-fg-muted mb-1">Unit price (&#8358;)</label>
-                      <NumberInput
-                        coerce="decimal"
-                        min={0}
-                        fallbackValue={0}
-                        value={item.unitPrice}
-                        onValueChange={(v) =>
-                          setEditedItems((prev) =>
-                            prev.map((p, i) => (i === index ? { ...p, unitPrice: v } : p)),
-                          )
-                        }
-                        aria-label={`Unit price for ${item.productName ?? 'item'}`}
-                      />
-                    </div>
+                    {offerLocked ? (
+                      <p className="text-xs text-app-fg-muted">
+                        Quantity is locked to the selected offer. Lower the unit price to apply a
+                        discount, or choose <span className="font-medium">Custom</span> to change the
+                        quantity too.
+                      </p>
+                    ) : null}
+                    <p className="text-xs text-app-fg-muted">
+                      Line total:{' '}
+                      <span className="font-medium text-app-fg">
+                        &#8358;
+                        {(item.quantity * item.unitPrice).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                        })}
+                      </span>
+                    </p>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             {!canEditLinePrices && priceDriftProposing && (
               <div className="px-6 pb-2 space-y-2">
@@ -3420,10 +3494,11 @@ export function OrderDetailPage({
                     loading={priceRequestFetcher.state === 'submitting'}
                     loadingText="Submitting…"
                     onClick={() => {
-                      const payload = editedItems.map(({ productId, quantity, unitPrice }) => ({
+                      const payload = editedItems.map(({ productId, quantity, unitPrice, offerLabel }) => ({
                         productId,
                         quantity,
                         unitPrice: Math.round(unitPrice * 100) / 100,
+                        ...(offerLabel ? { offerLabel } : {}),
                       }));
                       const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
                       const fd: Record<string, string> = {
@@ -3455,10 +3530,11 @@ export function OrderDetailPage({
                     loading={adjustItemsFetcher.state === 'submitting'}
                     loadingText="Saving..."
                     onClick={() => {
-                      const payload = editedItems.map(({ productId, quantity, unitPrice }) => ({
+                      const payload = editedItems.map(({ productId, quantity, unitPrice, offerLabel }) => ({
                         productId,
                         quantity,
                         unitPrice: Math.round(unitPrice * 100) / 100,
+                        ...(offerLabel ? { offerLabel } : {}),
                       }));
                       const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
                       ensureBranchForAction({

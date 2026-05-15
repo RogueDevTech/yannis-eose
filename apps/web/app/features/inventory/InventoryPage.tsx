@@ -8,7 +8,7 @@ import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { PageHeader } from '~/components/ui/page-header';
@@ -40,6 +40,7 @@ import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type {
   InventoryLevel, InventoryStreamData, ProductOption, LocationOption,
   Transfer, ReturnedOrder, Reconciliation, LocationWithLock, LowStockAlertsResult, ShipmentFilterOption,
+  LocationLowStockThreshold,
 } from './types';
 import { REASON_LABELS } from './types';
 import { LowStockAlertsDeferredFallback, ReconciliationTableDeferredFallback } from './InventoryDeferredFallbacks';
@@ -77,7 +78,6 @@ export function InventoryPage(props: InventoryStreamData) {
     levelsSortDir: serverSortDir = 'desc',
     displayLocations = [] as LocationOption[],
     movements: _movements,
-    totalMovements,
     products,
     locations,
     canIntake = false,
@@ -86,6 +86,7 @@ export function InventoryPage(props: InventoryStreamData) {
     canExport = false,
     transfers, returnedOrders, reconciliations, locationsWithLock,
     lowStockThreshold = 10, canEditLowStock = false, lowStockAlerts,
+    locationThresholds = [] as LocationLowStockThreshold[],
     shipmentOptions = [] as ShipmentFilterOption[],
     levelsLoadError = null,
     movementsLoadError = null,
@@ -244,20 +245,67 @@ export function InventoryPage(props: InventoryStreamData) {
   const [showExportModal, setShowExportModal] = useState(false);
   const [draftThreshold, setDraftThreshold] = useState<number>(lowStockThreshold);
   useEffect(() => { setDraftThreshold(lowStockThreshold); }, [lowStockThreshold]);
-  const thresholdFetcher = useFetcher<{ success?: boolean; error?: string }>();
-  const thresholdSurface = useFetcherActionSurface(thresholdFetcher);
+  // (Org-wide + per-location thresholds are bulk-saved via bulkThresholdFetcher below.)
+  // Global-threshold submit reloads the route; the modal stays open so the
+  // admin can also tweak per-location overrides in the same session.
+
+  // Per-location threshold drafts — always editable, bulk-saved.
+  // Map of locationId → draft value (number = override, '' = inherit org-wide).
+  const [locationDrafts, setLocationDrafts] = useState<Map<string, number | ''>>(new Map());
+  // Seed drafts when locationThresholds arrive or modal opens.
   useEffect(() => {
-    if (thresholdFetcher.data?.success) {
+    if (showThresholdModal && locationThresholds.length > 0) {
+      setLocationDrafts(
+        new Map(locationThresholds.map((l) => [l.id, l.lowStockThreshold ?? ''])),
+      );
+    }
+  }, [showThresholdModal, locationThresholds]);
+  const updateLocationDraft = (id: string, value: number | '') => {
+    setLocationDrafts((prev) => new Map(prev).set(id, value));
+  };
+
+  // Bulk save fetcher — org-wide + all changed locations in one submit.
+  const bulkThresholdFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const bulkThresholdSurface = useFetcherActionSurface(bulkThresholdFetcher);
+  useEffect(() => {
+    if (bulkThresholdFetcher.state === 'idle' && bulkThresholdFetcher.data?.success) {
       setShowThresholdModal(false);
     }
-  }, [thresholdFetcher.data]);
+  }, [bulkThresholdFetcher.state, bulkThresholdFetcher.data]);
+
+  // Compute which locations changed vs their server value.
+  const locationChanges = locationThresholds
+    .filter((loc) => {
+      const draft = locationDrafts.get(loc.id);
+      if (draft === undefined) return false;
+      const serverVal = loc.lowStockThreshold; // number | null
+      if (draft === '' && serverVal == null) return false; // both inherit — no change
+      if (draft === '' && serverVal != null) return true; // clearing override
+      if (typeof draft === 'number' && draft !== serverVal) return true;
+      return false;
+    })
+    .map((loc) => {
+      const draft = locationDrafts.get(loc.id);
+      return { locationId: loc.id, threshold: draft === '' ? null : (draft as number) };
+    });
+
+  const globalChanged = draftThreshold !== lowStockThreshold;
+  const hasAnyChange = globalChanged || locationChanges.length > 0;
+
+  function handleBulkSave() {
+    const fd = new FormData();
+    fd.set('intent', 'bulkSaveThresholds');
+    fd.set('globalThreshold', String(draftThreshold));
+    fd.set('locationChanges', JSON.stringify(locationChanges));
+    bulkThresholdFetcher.submit(fd, { method: 'post' });
+  }
 
   useFetcherToast(adjustFetcher.data, {
     successMessage: 'Stock adjusted',
     skipErrorToast: !!(editingLevel && adjustDirection),
   });
-  useFetcherToast(thresholdFetcher.data, {
-    successMessage: 'Low-stock threshold updated',
+  useFetcherToast(bulkThresholdFetcher.data, {
+    successMessage: 'All thresholds saved',
     skipErrorToast: showThresholdModal,
   });
 
@@ -292,7 +340,15 @@ export function InventoryPage(props: InventoryStreamData) {
         return (
           <span className="inline-flex items-center gap-2 min-w-0">
             <span className="text-app-fg-muted truncate">{parts.name}</span>
-            {parts.tag ? (
+            {parts.providerKind === 'WAREHOUSE' ? (
+              // "Our warehouse" — circle-only tag (text dropped per CEO ask);
+              // `title` keeps the meaning on hover.
+              <span
+                className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
+                title="Our warehouse"
+                aria-label="Our warehouse"
+              />
+            ) : parts.tag ? (
               <span
                 className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(parts.providerKind)}`}
               >
@@ -671,75 +727,186 @@ export function InventoryPage(props: InventoryStreamData) {
         </Modal>
       )}
 
-      {/* Low-stock threshold modal — admin-only */}
+      {/* Low-stock threshold modal — admin-only.
+       *  Two tiers: org-wide default (top) + per-location overrides (table).
+       *  A location row with NULL `lowStockThreshold` inherits the org-wide value;
+       *  any number set in its row wins for that location only. */}
       {canEditLowStock && showThresholdModal && (
         <Modal
           open
           onClose={() => setShowThresholdModal(false)}
-          maxWidth="max-w-sm"
-          contentClassName="p-6 space-y-4 bg-app-elevated"
+          maxWidth="max-w-2xl"
+          contentClassName="p-6 space-y-5 bg-app-elevated"
         >
           <div>
-            <h3 className="text-lg font-semibold text-app-fg">Low-stock alert threshold</h3>
+            <h3 className="text-lg font-semibold text-app-fg">Low-stock alerts</h3>
             <p className="text-sm text-app-fg-muted mt-1">
-              When a product's available stock at any location drops below this number, SuperAdmins, Admins, and Stock Managers get an in-app + push notification. Rate-limited to one alert per location per 6 hours.
+              SuperAdmins, Admins, and Stock Managers get notified when available stock at
+              any location drops below its threshold. Rate-limited to one alert per location
+              per 6 hours.
             </p>
           </div>
-          <ModalFetcherInlineError message={thresholdSurface.errorMatchingIntent('updateLowStockThreshold')} />
-          <thresholdFetcher.Form method="post" className="space-y-4">
-            <input type="hidden" name="intent" value="updateLowStockThreshold" />
-            <div className="flex items-center gap-3">
+
+          <ModalFetcherInlineError message={bulkThresholdSurface.rawError} />
+
+          {/* Org-wide default */}
+          <section className="space-y-2">
+            <h4 className="text-sm font-semibold text-app-fg">Org-wide default</h4>
+            <div className="flex items-center gap-2">
               <NumberInput
                 id="low-stock-threshold-input"
-                name="lowStockThreshold"
                 min={1}
                 max={10000}
                 fallbackValue={1}
                 value={draftThreshold}
                 onValueChange={setDraftThreshold}
-                wrapperClassName="w-32"
+                wrapperClassName="w-28"
               />
               <span className="text-xs text-app-fg-muted">units</span>
+              {globalChanged && (
+                <span className="text-xs text-brand-600 dark:text-brand-400 font-medium">Changed</span>
+              )}
             </div>
-            <p className="text-xs text-app-fg-muted">
-              Saved: <strong>{lowStockThreshold} units</strong>
-            </p>
-            <div className="flex gap-2 justify-end pt-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowThresholdModal(false)}>
+          </section>
+
+          {/* Per-location overrides — all inputs always editable */}
+          <section className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <h4 className="text-sm font-semibold text-app-fg">Per-location overrides</h4>
+              <span className="text-xs text-app-fg-muted">
+                Leave blank to inherit default. {locationChanges.length > 0 && (
+                  <span className="text-brand-600 dark:text-brand-400 font-medium">
+                    {locationChanges.length} changed
+                  </span>
+                )}
+              </span>
+            </div>
+            {locationThresholds.length === 0 ? (
+              <EmptyState
+                variant="card"
+                title="No active locations yet"
+                description="Add a 3PL or warehouse first, then come back to set per-location alerts."
+              />
+            ) : (
+              <div className="max-h-80 overflow-y-auto rounded-md border border-app-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-app-elevated text-xs uppercase tracking-wide text-app-fg-muted">
+                    <tr>
+                      <th className="text-left font-medium px-3 py-2">Location</th>
+                      <th className="text-right font-medium px-3 py-2 w-32">Threshold</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {locationThresholds.map((loc) => {
+                      const draft = locationDrafts.get(loc.id);
+                      const serverVal = loc.lowStockThreshold; // number | null
+                      // Display value: override if set, otherwise the current global draft.
+                      const displayVal = typeof draft === 'number' ? draft : draftThreshold;
+                      const isInheriting = draft === '' || draft === undefined;
+                      // Changed = different from what the server has.
+                      const changed =
+                        (isInheriting && serverVal != null) ||
+                        (typeof draft === 'number' && draft !== serverVal);
+                      return (
+                        <tr
+                          key={loc.id}
+                          className="border-t border-app-border align-middle"
+                        >
+                          <td className="px-3 py-1.5 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-medium text-app-fg truncate text-xs">{loc.name}</span>
+                              {loc.providerKind === 'WAREHOUSE' ? (
+                                <span
+                                  className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
+                                  title="Our warehouse"
+                                  aria-label="Our warehouse"
+                                />
+                              ) : loc.providerName ? (
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(loc.providerKind)}`}
+                                >
+                                  {loc.providerName}
+                                </span>
+                              ) : null}
+                              {changed && (
+                                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" title="Changed" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <NumberInput
+                                id={`loc-threshold-${loc.id}`}
+                                min={1}
+                                max={10000}
+                                fallbackValue={draftThreshold}
+                                value={displayVal}
+                                onValueChange={(v) => {
+                                  // If the user types the same value as the global default,
+                                  // treat it as "inherit" (no override stored).
+                                  updateLocationDraft(loc.id, v === draftThreshold ? '' : v);
+                                }}
+                                wrapperClassName="w-24 inline-block"
+                              />
+                              {isInheriting && (
+                                <span className="text-[10px] text-app-fg-muted whitespace-nowrap" title="Using org-wide default">
+                                  default
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <div className="flex items-center justify-between gap-3 pt-2 border-t border-app-border">
+            <span className="text-xs text-app-fg-muted">
+              {hasAnyChange
+                ? `${(globalChanged ? 1 : 0) + locationChanges.length} change${(globalChanged ? 1 : 0) + locationChanges.length > 1 ? 's' : ''} to save`
+                : 'No changes'}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowThresholdModal(false)}
+              >
                 Cancel
               </Button>
               <Button
-                type="submit"
+                type="button"
                 variant="primary"
                 size="sm"
-                disabled={draftThreshold === lowStockThreshold || thresholdFetcher.state === 'submitting'}
-                loading={thresholdFetcher.state === 'submitting'}
-                loadingText="Saving..."
+                disabled={!hasAnyChange || bulkThresholdFetcher.state !== 'idle'}
+                loading={bulkThresholdFetcher.state !== 'idle'}
+                loadingText="Saving…"
+                onClick={handleBulkSave}
               >
-                Save threshold
+                Save all
               </Button>
             </div>
-          </thresholdFetcher.Form>
+          </div>
         </Modal>
       )}
 
       {/* Overview stats — stock posture for the current filtered result set. */}
-      <DeferredSection resolve={totalMovements} fallback={<OverviewStatStripSkeleton count={4} />}>
-        {(count) => (
-          <OverviewStatStrip
-            items={[
-              { label: 'Total Stock', value: totalStock.toLocaleString(), valueClassName: 'text-app-fg' },
-              { label: 'Reserved', value: totalReserved.toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
-              {
-                label: 'Available',
-                value: (totalStock - totalReserved).toLocaleString(),
-                valueClassName: 'text-success-600 dark:text-success-400',
-              },
-              { label: 'Movements', value: (typeof count === 'number' ? count : Number(count)).toLocaleString(), valueClassName: 'text-app-fg' },
-            ]}
-          />
-        )}
-      </DeferredSection>
+      <OverviewStatStrip
+        items={[
+          { label: 'Total Stock', value: totalStock.toLocaleString(), valueClassName: 'text-app-fg' },
+          { label: 'Reserved', value: totalReserved.toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400' },
+          {
+            label: 'Available',
+            value: (totalStock - totalReserved).toLocaleString(),
+            valueClassName: 'text-success-600 dark:text-success-400',
+          },
+        ]}
+      />
 
       {activeTab === 'levels' && lowStockAlerts && (
         <DeferredSection resolve={lowStockAlerts} fallback={<LowStockAlertsDeferredFallback />}>
@@ -755,22 +922,15 @@ export function InventoryPage(props: InventoryStreamData) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                   </svg>
                   <p className="text-sm font-medium text-warning-800 dark:text-warning-200 min-w-0">
-                    {a.items.length} {a.items.length === 1 ? 'product is' : 'products are'} below the{' '}
-                    <span className="tabular-nums">{a.threshold}</span>-unit alert threshold
+                    {a.items.length} {a.items.length === 1 ? 'item' : 'items'} below the{' '}
+                    <span className="tabular-nums">{a.threshold}</span>-unit threshold or with no stock
                   </p>
                 </div>
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-                  {preview.map((item) => (
-                    <div
-                      key={item.levelId}
-                      className="rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 min-w-0 shadow-sm"
-                    >
-                      <Link
-                        to={`/admin/inventory/${item.levelId}`}
-                        prefetch="intent"
-                        className="block hover:opacity-90 transition-opacity"
-                        title={`${item.productName} — ${item.locationName}`}
-                      >
+                  {preview.map((item) => {
+                    const isEmpty = !item.productId;
+                    const cardContent = (
+                      <>
                         <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
                         <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
                         <p
@@ -780,11 +940,32 @@ export function InventoryPage(props: InventoryStreamData) {
                               : 'text-warning-800 dark:text-warning-200'
                           }`}
                         >
-                          {item.availableCount} avail
+                          {isEmpty ? '0 stock' : `${item.availableCount} avail`}
                         </p>
-                      </Link>
-                    </div>
-                  ))}
+                      </>
+                    );
+                    return (
+                      <div
+                        key={item.levelId}
+                        className="rounded-md border border-warning-200/90 dark:border-warning-800/80 bg-app-elevated/90 dark:bg-warning-950/25 px-2.5 py-2 min-w-0 shadow-sm"
+                      >
+                        {isEmpty ? (
+                          <div title={`${item.locationName} — no stock received yet`}>
+                            {cardContent}
+                          </div>
+                        ) : (
+                          <Link
+                            to={`/admin/inventory/${item.levelId}`}
+                            prefetch="intent"
+                            className="block hover:opacity-90 transition-opacity"
+                            title={`${item.productName} — ${item.locationName}`}
+                          >
+                            {cardContent}
+                          </Link>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 {extra > 0 && (
                   <button
@@ -850,17 +1031,28 @@ export function InventoryPage(props: InventoryStreamData) {
                 ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
                   value: l.id,
                   label: l.name,
-                  ...((l.providerName ?? (l.providerKind === 'WAREHOUSE' ? 'Our warehouse' : null))
+                  ...(l.providerKind === 'WAREHOUSE'
                     ? {
+                        // "Our warehouse" — circle-only tag (text dropped per CEO ask).
                         leading: (
                           <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
-                          >
-                            {l.providerName ?? 'Our warehouse'}
-                          </span>
+                            className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
+                            title="Our warehouse"
+                            aria-label="Our warehouse"
+                          />
                         ),
                       }
-                    : {}),
+                    : l.providerName
+                      ? {
+                          leading: (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
+                            >
+                              {l.providerName}
+                            </span>
+                          ),
+                        }
+                      : {}),
                 })),
               ]}
             />

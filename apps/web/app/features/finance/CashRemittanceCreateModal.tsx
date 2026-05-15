@@ -220,10 +220,11 @@ export function CashRemittanceCreateModal({
             </ul>
           )}
           <Textarea
+            label="Notes (optional)"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            placeholder="Optional notes (e.g. cash dropped off by John, reconciled to bank deposit)"
+            placeholder="e.g. dropped off by John"
             maxLength={1000}
           />
         </div>

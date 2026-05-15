@@ -27,6 +27,7 @@ import type {
   ShipmentRow,
   WarehouseRowLite,
   LowStockAlertsResult,
+  LocationLowStockThreshold,
 } from '~/features/inventory/types';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import { InventoryOverviewLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
@@ -125,7 +126,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   type BundleData = {
     levels: {
       levels: InventoryLevel[];
-      totals?: { totalStock: number; totalReserved: number };
+      totals?: { totalStock: number; totalReserved: number; totalDelivered: number };
       pagination: { total: number; totalPages: number };
     };
     movements: { movements: StockMovement[]; pagination: { total: number } };
@@ -144,6 +145,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }>;
     systemSettings: Array<{ key: string; value: unknown }>;
     lowStockAlerts: LowStockAlertsResult;
+    locationThresholds: {
+      globalThreshold: number;
+      locations: LocationLowStockThreshold[];
+    };
     shipments: { rows: ShipmentRow[]; pagination: { total: number } } | null;
     warehouses: {
       warehouses: Array<{
@@ -233,6 +238,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const lowStockAlertsData: LowStockAlertsResult =
     bundle?.lowStockAlerts ?? { threshold: lowStockThreshold, items: [] };
 
+  const locationThresholds: LocationLowStockThreshold[] =
+    bundle?.locationThresholds?.locations ?? [];
+
   const shipmentOptions: ShipmentFilterOption[] = (bundle?.shipments?.rows ?? []).map((shipment) => ({
     id: shipment.id,
     label:
@@ -252,12 +260,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const extras = {
     lowStockThreshold,
     lowStockAlerts: lowStockAlertsData,
+    locationThresholds,
     warehouses,
   };
 
   return {
     levels: levelsData?.levels ?? [],
-    levelsTotals: levelsData?.totals ?? { totalStock: 0, totalReserved: 0 },
+    levelsTotals: levelsData?.totals ?? { totalStock: 0, totalReserved: 0, totalDelivered: 0 },
     totalLevels: levelsData?.pagination?.total ?? 0,
     levelsPage: page,
     levelsTotalPages: levelsData?.pagination?.totalPages ?? 1,
@@ -293,6 +302,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canEditLowStock: isAdminLevel(user),
     lowStockThreshold: extras.lowStockThreshold,
     lowStockAlerts: Promise.resolve(extras.lowStockAlerts),
+    locationThresholds: extras.locationThresholds,
     shipmentOptions,
     warehouses: extras.warehouses,
     levelsLoadError,
@@ -353,6 +363,81 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     if (!res.ok) {
       return json({ error: extractApiErrorMessage(res.data, 'Failed to update threshold') }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'updateLocationLowStockThreshold') {
+    const locationId = formData.get('locationId')?.toString() ?? '';
+    if (!locationId) {
+      return json({ error: 'Missing location' }, { status: 400 });
+    }
+    // Empty / "inherit" clears the override and falls back to the org-wide threshold.
+    const raw = (formData.get('lowStockThreshold')?.toString() ?? '').trim();
+    let threshold: number | null = null;
+    if (raw !== '' && raw.toLowerCase() !== 'inherit') {
+      const parsed = parseInt(raw, 10);
+      if (!Number.isFinite(parsed) || parsed < 1 || parsed > 10000) {
+        return json({ error: 'Threshold must be between 1 and 10000' }, { status: 400 });
+      }
+      threshold = parsed;
+    }
+    const res = await apiRequest<unknown>('/trpc/inventory.setLocationLowStockThreshold', {
+      method: 'POST',
+      cookie,
+      body: { locationId, threshold },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to update location threshold') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, locationId, threshold });
+  }
+
+  // Bulk save: org-wide default + all changed per-location thresholds in one submit.
+  if (intent === 'bulkSaveThresholds') {
+    const errors: string[] = [];
+
+    // 1. Org-wide default (always included).
+    const globalRaw = formData.get('globalThreshold')?.toString() ?? '';
+    const globalThreshold = parseInt(globalRaw, 10);
+    if (Number.isFinite(globalThreshold) && globalThreshold >= 1 && globalThreshold <= 10000) {
+      const res = await apiRequest<unknown>('/trpc/settings.updateSystemSetting', {
+        method: 'POST',
+        cookie,
+        body: { key: 'INVENTORY_LOW_STOCK_CONFIG', value: { threshold: globalThreshold } },
+      });
+      if (!res.ok) {
+        errors.push(extractApiErrorMessage(res.data, 'Failed to update org-wide threshold'));
+      }
+    }
+
+    // 2. Per-location overrides — JSON array of { locationId, threshold }.
+    const changesRaw = formData.get('locationChanges')?.toString() ?? '[]';
+    let changes: Array<{ locationId: string; threshold: number | null }> = [];
+    try { changes = JSON.parse(changesRaw); } catch { /* ignore */ }
+
+    // Fan out in parallel — each is a separate tRPC call.
+    const results = await Promise.allSettled(
+      changes.map(({ locationId, threshold }) =>
+        apiRequest<unknown>('/trpc/inventory.setLocationLowStockThreshold', {
+          method: 'POST',
+          cookie,
+          body: { locationId, threshold },
+        }),
+      ),
+    );
+    const failCount = results.filter(
+      (r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok),
+    ).length;
+    if (failCount > 0) {
+      errors.push(`${failCount} location threshold${failCount > 1 ? 's' : ''} failed to save`);
+    }
+
+    if (errors.length > 0) {
+      return json({ error: errors.join('. ') }, { status: 500 });
     }
     return json({ success: true });
   }

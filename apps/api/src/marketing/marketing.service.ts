@@ -716,26 +716,47 @@ export class MarketingService {
   }
 
   /** All-status order count for a media buyer on a single UTC calendar day (branch-scoped when `branchId` is set). */
-  private async countOrdersForMediaBuyerOnUtcDay(params: {
-    mediaBuyerId: string;
-    spendDateYmd: string;
+  /**
+   * Count orders per (mediaBuyerId, UTC-day) for many pairs in a single grouped
+   * query — replaces N separate COUNT round-trips. Returns a map keyed
+   * `${spendDateYmd}::${mediaBuyerId}`; a pair with no orders is simply absent
+   * (callers default to 0). The query range spans min..max requested day, so it
+   * may aggregate a few buyer×day combos that weren't asked for — harmless,
+   * those keys just aren't looked up.
+   */
+  private async countOrdersForMediaBuyersOnUtcDays(params: {
+    pairs: Array<{ mediaBuyerId: string; spendDateYmd: string }>;
     branchId?: string | null;
-  }): Promise<number> {
-    const dayStart = new Date(`${params.spendDateYmd}T00:00:00.000Z`);
-    const dayEnd = new Date(`${params.spendDateYmd}T23:59:59.999Z`);
+  }): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    const pairs = params.pairs.filter((p) => p.mediaBuyerId && p.spendDateYmd);
+    if (pairs.length === 0) return result;
+
+    const mediaBuyerIds = [...new Set(pairs.map((p) => p.mediaBuyerId))];
+    const sortedDays = [...pairs.map((p) => p.spendDateYmd)].sort();
+    const rangeStart = new Date(`${sortedDays[0]}T00:00:00.000Z`);
+    const rangeEnd = new Date(`${sortedDays[sortedDays.length - 1]}T23:59:59.999Z`);
+
+    const dayExpr = sql<string>`to_char(${schema.orders.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`;
     const conditions: SQL[] = [
-      eq(schema.orders.mediaBuyerId, params.mediaBuyerId),
-      gte(schema.orders.createdAt, dayStart),
-      lte(schema.orders.createdAt, dayEnd),
+      inArray(schema.orders.mediaBuyerId, mediaBuyerIds),
+      gte(schema.orders.createdAt, rangeStart),
+      lte(schema.orders.createdAt, rangeEnd),
     ];
     if (params.branchId) {
       conditions.push(eq(schema.orders.branchId, params.branchId));
     }
-    const [row] = await this.db
-      .select({ c: count() })
+
+    const rows = await this.db
+      .select({ mediaBuyerId: schema.orders.mediaBuyerId, day: dayExpr, c: count() })
       .from(schema.orders)
-      .where(and(...conditions));
-    return Number(row?.c ?? 0);
+      .where(and(...conditions))
+      .groupBy(schema.orders.mediaBuyerId, dayExpr);
+
+    for (const row of rows) {
+      result.set(`${row.day}::${row.mediaBuyerId}`, Number(row.c ?? 0));
+    }
+    return result;
   }
 
   /**
@@ -1102,6 +1123,19 @@ export class MarketingService {
       // Default visibility for non-approvers (and non-supervisors): own requests only.
       conditions.push(eq(schema.marketingFundingRequests.requesterId, user.id));
     }
+    if (input.requesterRole) {
+      // Mirror listFundingRequests — subquery keeps it join-free so the count
+      // query stays a plain aggregate over marketing_funding_requests.
+      conditions.push(
+        inArray(
+          schema.marketingFundingRequests.requesterId,
+          this.db
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(eq(schema.users.role, input.requesterRole)),
+        ),
+      );
+    }
     // Migration 0106 — caller-supplied targetUserId (their inbox); legacy NULL-target
     // rows are included so pre-migration broadcasts remain visible to their historical
     // audience.
@@ -1148,13 +1182,13 @@ export class MarketingService {
     branchId?: string | null,
     opts?: { restrictToReceiverIds?: string[] },
   ) {
+    const emptyFundingSummary = {
+      totalSent: '0', totalCompleted: '0', totalDisputed: '0',
+      sentCount: 0, completedCount: 0, disputedCount: 0,
+    };
     const branchUserIds = await this.getBranchUserIds(branchId);
     if (branchUserIds && branchUserIds.length === 0) {
-      return {
-        totalSent: '0',
-        totalCompleted: '0',
-        totalDisputed: '0',
-      };
+      return emptyFundingSummary;
     }
 
     const restrict = opts?.restrictToReceiverIds;
@@ -1162,11 +1196,7 @@ export class MarketingService {
     if (branchUserIds && restrict?.length) {
       const intersect = branchUserIds.filter((id) => restrict.includes(id));
       if (intersect.length === 0) {
-        return {
-          totalSent: '0',
-          totalCompleted: '0',
-          totalDisputed: '0',
-        };
+        return emptyFundingSummary;
       }
       receiverScope = inArray(schema.marketingFunding.receiverId, intersect);
     } else if (branchUserIds) {
@@ -1175,25 +1205,26 @@ export class MarketingService {
       receiverScope = inArray(schema.marketingFunding.receiverId, restrict);
     }
 
-    const totalSent = await this.db
-      .select({ total: sum(schema.marketingFunding.amount) })
+    const rows = await this.db
+      .select({
+        totalSent: sql<string>`COALESCE(SUM(CASE WHEN ${schema.marketingFunding.status} = 'SENT' THEN ${schema.marketingFunding.amount} ELSE 0 END), 0)::text`,
+        totalCompleted: sql<string>`COALESCE(SUM(CASE WHEN ${schema.marketingFunding.status} = 'COMPLETED' THEN ${schema.marketingFunding.amount} ELSE 0 END), 0)::text`,
+        totalDisputed: sql<string>`COALESCE(SUM(CASE WHEN ${schema.marketingFunding.status} = 'DISPUTED' THEN ${schema.marketingFunding.amount} ELSE 0 END), 0)::text`,
+        sentCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.marketingFunding.status} = 'SENT')::int`,
+        completedCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.marketingFunding.status} = 'COMPLETED')::int`,
+        disputedCount: sql<number>`COUNT(*) FILTER (WHERE ${schema.marketingFunding.status} = 'DISPUTED')::int`,
+      })
       .from(schema.marketingFunding)
-      .where(and(eq(schema.marketingFunding.status, 'SENT'), receiverScope));
+      .where(receiverScope);
 
-    const totalCompleted = await this.db
-      .select({ total: sum(schema.marketingFunding.amount) })
-      .from(schema.marketingFunding)
-      .where(and(eq(schema.marketingFunding.status, 'COMPLETED'), receiverScope));
-
-    const totalDisputed = await this.db
-      .select({ total: sum(schema.marketingFunding.amount) })
-      .from(schema.marketingFunding)
-      .where(and(eq(schema.marketingFunding.status, 'DISPUTED'), receiverScope));
-
+    const r = rows[0];
     return {
-      totalSent: totalSent[0]?.total ?? '0',
-      totalCompleted: totalCompleted[0]?.total ?? '0',
-      totalDisputed: totalDisputed[0]?.total ?? '0',
+      totalSent: r?.totalSent ?? '0',
+      totalCompleted: r?.totalCompleted ?? '0',
+      totalDisputed: r?.totalDisputed ?? '0',
+      sentCount: r?.sentCount ?? 0,
+      completedCount: r?.completedCount ?? 0,
+      disputedCount: r?.disputedCount ?? 0,
     };
   }
 
@@ -1543,9 +1574,12 @@ export class MarketingService {
       branchId: string | null;
     }>
   > {
+    // A normal Media Buyer requests funding from their team supervisor or Head
+    // of Marketing — never directly from a Finance Officer. Finance disburses
+    // to HoMs only; the HoM then funds their Media Buyers.
     const allowedRoles: Array<'FINANCE_OFFICER' | 'HEAD_OF_MARKETING' | 'MEDIA_BUYER'> =
       requesterRole === 'MEDIA_BUYER'
-        ? ['FINANCE_OFFICER', 'HEAD_OF_MARKETING', 'MEDIA_BUYER']
+        ? ['HEAD_OF_MARKETING', 'MEDIA_BUYER']
         : ['FINANCE_OFFICER'];
 
     // Resolve the requester's marketing supervisors on this branch. When
@@ -1578,8 +1612,9 @@ export class MarketingService {
 
     return rows
       .filter((r) => {
-        // Finance is org-wide and always valid.
-        if (r.role === 'FINANCE_OFFICER') return true;
+        // Finance is a valid recipient for HoM requesters only — a normal
+        // Media Buyer cannot request funding directly from Finance.
+        if (r.role === 'FINANCE_OFFICER') return requesterRole !== 'MEDIA_BUYER';
         if (requesterRole !== 'MEDIA_BUYER') return false;
         // Marketing-team supervisor on this branch — the new preferred path.
         if (r.role === 'MEDIA_BUYER') return supervisorIdsSet.has(r.id);
@@ -1637,8 +1672,9 @@ export class MarketingService {
 
     // ── Validate the target recipient (CEO directive 2026-05-03 / migration 0106) ──
     // Allowed targets per requester role:
-    //   MB → HEAD_OF_MARKETING in the same branch, or any FINANCE_OFFICER / Finance hat (org-wide)
-    //   HoM → any FINANCE_OFFICER / Finance hat (org-wide)
+    //   MB → their marketing-team supervisor, or HEAD_OF_MARKETING in the same
+    //        branch. A normal Media Buyer can NOT request from Finance directly.
+    //   HoM → any FINANCE_OFFICER (org-wide)
     // When `targetUserId` is omitted we fall back to the legacy broadcast flow
     // (HoM-by-role for MB; Finance + SuperAdmin for HoM) — keeps older clients
     // working until they ship the new dropdown.
@@ -1672,11 +1708,16 @@ export class MarketingService {
           branchId,
         );
       }
-      if (!targetIsFinance && !(requesterIsMb && (targetIsHoM || targetIsSupervisor))) {
+      // Finance is a valid target for HoM requesters only; a normal Media Buyer
+      // must route through their supervisor / Head of Marketing.
+      const financeTargetAllowed = targetIsFinance && !requesterIsMb;
+      const mbMarketingTargetAllowed =
+        requesterIsMb && (targetIsHoM || targetIsSupervisor);
+      if (!financeTargetAllowed && !mbMarketingTargetAllowed) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: requesterIsMb
-            ? 'Funding requests must be sent to your team supervisor, Head of Marketing, or a Finance Officer'
+            ? 'Funding requests must be sent to your team supervisor or Head of Marketing'
             : 'Funding requests must be sent to a Finance Officer',
         });
       }
@@ -1774,6 +1815,9 @@ export class MarketingService {
       /** When true, also include legacy NULL-target rows in the result set. Used by the
        *  inbox view so pre-migration broadcasts remain visible to their historical audience. */
       includeLegacyNullTarget?: boolean;
+      /** Restrict to requests whose requester holds this role (Finance Disbursements
+       *  page pins this to HEAD_OF_MARKETING). */
+      requesterRole?: 'HEAD_OF_MARKETING' | 'MEDIA_BUYER';
       startDate?: string;
       endDate?: string;
       status?: 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -1788,6 +1832,19 @@ export class MarketingService {
       conditions.push(eq(schema.marketingFundingRequests.requesterId, input.requesterId));
     } else if (input.excludeSelfAsRequester && input.callerId) {
       conditions.push(ne(schema.marketingFundingRequests.requesterId, input.callerId));
+    }
+    if (input.requesterRole) {
+      // Subquery keeps this a single condition that works uniformly across the
+      // rows query and the count query (neither needs an extra join).
+      conditions.push(
+        inArray(
+          schema.marketingFundingRequests.requesterId,
+          this.db
+            .select({ id: schema.users.id })
+            .from(schema.users)
+            .where(eq(schema.users.role, input.requesterRole)),
+        ),
+      );
     }
     if (input.targetUserId) {
       conditions.push(
@@ -3169,24 +3226,15 @@ export class MarketingService {
       branchId,
     );
 
-    const overallKey = (spendDay: string, mediaBuyerId: string) => `${spendDay}::${mediaBuyerId}`;
-    const uniqueOverallKeys = [
-      ...new Set(pageGroupRows.map((g) => overallKey(g.spendDay, g.mediaBuyerId))),
-    ];
-    const overallCounts = new Map<string, number>();
-    await Promise.all(
-      uniqueOverallKeys.map(async (key) => {
-        const sep = key.indexOf('::');
-        const spendDay = sep === -1 ? key : key.slice(0, sep);
-        const mediaBuyerId = sep === -1 ? '' : key.slice(sep + 2);
-        const c = await this.countOrdersForMediaBuyerOnUtcDay({
-          mediaBuyerId,
-          spendDateYmd: spendDay,
-          branchId,
-        });
-        overallCounts.set(key, c);
-      }),
-    );
+    // One grouped query for every (mediaBuyerId, UTC-day) pair on the page
+    // instead of N COUNT round-trips. Keyed `${spendDay}::${mediaBuyerId}`.
+    const overallCounts = await this.countOrdersForMediaBuyersOnUtcDays({
+      pairs: pageGroupRows.map((g) => ({
+        mediaBuyerId: g.mediaBuyerId,
+        spendDateYmd: g.spendDay,
+      })),
+      branchId,
+    });
 
     const groups = pageGroupRows.map((g) => {
       let rolledStatus: 'PENDING' | 'APPROVED' | 'REJECTED' | 'MIXED';
@@ -4795,19 +4843,24 @@ export class MarketingService {
         }
       }
 
-      for (const productId of orderedProductIds) {
-        const pRows = await this.db
-          .select({
-            id: schema.products.id,
-            name: schema.products.name,
-            baseSalePrice: schema.products.baseSalePrice,
-            galleryImageUrls: schema.products.galleryImageUrls,
-          })
-          .from(schema.products)
-          .where(eq(schema.products.id, productId))
-          .limit(1);
+      // Batch-load every product in one query instead of one SELECT per id —
+      // the loop below still walks `orderedProductIds` so output order is kept.
+      const productRows =
+        orderedProductIds.length > 0
+          ? await this.db
+              .select({
+                id: schema.products.id,
+                name: schema.products.name,
+                baseSalePrice: schema.products.baseSalePrice,
+                galleryImageUrls: schema.products.galleryImageUrls,
+              })
+              .from(schema.products)
+              .where(inArray(schema.products.id, orderedProductIds))
+          : [];
+      const productById = new Map(productRows.map((p) => [p.id, p]));
 
-        const p = pRows[0];
+      for (const productId of orderedProductIds) {
+        const p = productById.get(productId);
         if (!p) {
           continue;
         }

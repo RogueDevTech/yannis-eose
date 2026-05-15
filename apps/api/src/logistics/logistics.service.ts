@@ -203,6 +203,7 @@ export class LogisticsService {
           address: input.address,
           coordinates: input.coordinates ?? null,
           whatsappGroupLink: input.whatsappGroupLink ?? null,
+          lowStockThreshold: input.lowStockThreshold ?? null,
         })
         .returning();
 
@@ -222,6 +223,7 @@ export class LogisticsService {
       if (input.coordinates !== undefined) updateFields['coordinates'] = input.coordinates;
       if (input.status !== undefined) updateFields['status'] = input.status;
       if (input.whatsappGroupLink !== undefined) updateFields['whatsappGroupLink'] = input.whatsappGroupLink;
+      if (input.lowStockThreshold !== undefined) updateFields['lowStockThreshold'] = input.lowStockThreshold;
 
       const rows = await tx
         .update(schema.logisticsLocations)
@@ -251,18 +253,30 @@ export class LogisticsService {
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
     const offset = (input.page - 1) * input.limit;
 
+    // Subquery: total available stock per location (stock - reserved).
+    const stockSub = this.db
+      .select({
+        locationId: schema.inventoryLevels.locationId,
+        totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount} - ${schema.inventoryLevels.reservedCount}), 0)`.as('total_stock'),
+      })
+      .from(schema.inventoryLevels)
+      .groupBy(schema.inventoryLevels.locationId)
+      .as('stock_sub');
+
     const [rows, totalRows] = await Promise.all([
       this.db
         .select({
           location: schema.logisticsLocations,
           providerName: schema.logisticsProviders.name,
           providerKind: schema.logisticsProviders.kind,
+          totalStock: sql<number>`COALESCE(${stockSub.totalStock}, 0)`.mapWith(Number),
         })
         .from(schema.logisticsLocations)
         .leftJoin(
           schema.logisticsProviders,
           eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
         )
+        .leftJoin(stockSub, eq(stockSub.locationId, schema.logisticsLocations.id))
         .where(whereClause)
         .orderBy(desc(schema.logisticsLocations.createdAt))
         .limit(input.limit)
@@ -283,6 +297,7 @@ export class LogisticsService {
       ...row.location,
       providerName: row.providerName ?? null,
       providerKind: row.providerKind ?? 'THIRD_PARTY',
+      totalStock: row.totalStock ?? 0,
     }));
 
     return {
@@ -433,6 +448,52 @@ export class LogisticsService {
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to create warehouse',
         });
+      }
+      return location;
+    });
+  }
+
+  async updateWarehouse(
+    input: { warehouseId: string; name?: string; address?: string; coordinates?: string },
+    actorId: string,
+  ) {
+    // Confirm the target is an internal WAREHOUSE-kind site — this path must never
+    // edit a 3PL partner location (those are managed under Logistics → Partners).
+    const [existing] = await this.db
+      .select({ id: schema.logisticsLocations.id })
+      .from(schema.logisticsLocations)
+      .innerJoin(
+        schema.logisticsProviders,
+        eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+      )
+      .where(
+        and(
+          eq(schema.logisticsLocations.id, input.warehouseId),
+          eq(schema.logisticsProviders.kind, 'WAREHOUSE'),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Warehouse not found' });
+    }
+
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name !== undefined) updateFields['name'] = input.name.trim();
+      if (input.address !== undefined) updateFields['address'] = input.address.trim();
+      if (input.coordinates !== undefined) {
+        updateFields['coordinates'] = input.coordinates.trim() || null;
+      }
+
+      const rows = await tx
+        .update(schema.logisticsLocations)
+        .set(updateFields)
+        .where(eq(schema.logisticsLocations.id, input.warehouseId))
+        .returning();
+
+      const location = rows[0];
+      if (!location) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Warehouse not found' });
       }
       return location;
     });
@@ -1742,6 +1803,60 @@ export class LogisticsService {
       .catch(() => {});
 
     return { success: true };
+  }
+
+  /**
+   * Breakdown of delivered + remitted orders by product.
+   * Optional branchId scopes to a single branch.
+   */
+  async deliveredOrdersByProduct(branchId?: string) {
+    const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
+    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+
+    const rows = await this.db
+      .select({
+        productId: schema.orderItems.productId,
+        productName: schema.products.name,
+        totalAmount: sql<string>`COALESCE(SUM(${schema.orderItems.unitPrice} * ${schema.orderItems.quantity}), 0)::text`,
+        orderCount: sql<number>`COUNT(DISTINCT ${schema.orders.id})::int`,
+      })
+      .from(schema.orders)
+      .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, schema.orders.id))
+      .innerJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
+      .where(and(...conditions))
+      .groupBy(schema.orderItems.productId, schema.products.name)
+      .orderBy(sql`SUM(${schema.orderItems.unitPrice} * ${schema.orderItems.quantity}) DESC`)
+      .limit(10);
+
+    return rows;
+  }
+
+  /**
+   * Breakdown of delivered + remitted orders by logistics location.
+   * Optional branchId scopes to a single branch.
+   */
+  async deliveredOrdersByLocation(branchId?: string) {
+    const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
+    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+
+    const rows = await this.db
+      .select({
+        locationId: schema.orders.logisticsLocationId,
+        locationName: schema.logisticsLocations.name,
+        totalAmount: sql<string>`COALESCE(SUM(${schema.orders.totalAmount}), 0)::text`,
+        orderCount: sql<number>`COUNT(*)::int`,
+      })
+      .from(schema.orders)
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.orders.logisticsLocationId),
+      )
+      .where(and(...conditions))
+      .groupBy(schema.orders.logisticsLocationId, schema.logisticsLocations.name)
+      .orderBy(sql`SUM(${schema.orders.totalAmount}) DESC`)
+      .limit(10);
+
+    return rows;
   }
 
   /**

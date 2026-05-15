@@ -3652,3 +3652,147 @@ Out of scope for v1. Capture as a follow-up so we don't forget the trade-off.
 - [ ] README.md tech-stack section mentions the tier model.
 
 **Phase 21 build order:** 21.1 (new layout + allowlist, additive) → 21.2 (bucket policies + lifecycle, applied to new prefixes only) → 21.3 (backfill script, run dry on staging first) → 21.4 (cutover + cleanup, 30-day soak) → 21.5 (docs). All five are required for go-to-prod; do not skip 21.4 — leaving legacy keys live forever defeats the lifecycle-rule cost savings.
+
+---
+
+## Phase 22: Round-Trip Latency Reduction ("App is slow" follow-up)
+
+> **Goal:** Cut per-request wall time by reducing the number of sequential Postgres round-trips, not by adding more cache layers or a bigger pool. Target: every page feels instant; no interactive request issues more DB round-trips than it semantically needs.
+> **Target benchmarks:** unchanged from Phase 16 — ≤ 500ms P95 dashboard reads, ≤ 200ms cached reads.
+
+**Why:** Phase 16's Redis read-through cache, tuned postgres-js pool, and 12 PageBundle procedures are already in place (see `.claude/docs/server-caching-pool.md`), yet users still report "the app is slow." A backend audit (2026-05-14) found the remaining latency is **round-trip count**, not architecture. The dev/prod Postgres is **remote** (Aiven) — every separate query pays real network RTT (~10–50ms), so sequential queries inside one request compound. RLS policies were audited and are cheap (`current_setting()` comparisons evaluated once per query); history-table read indexes are already in place. The slowness is concentrated in: (1) per-request DB queries that bypass the Redis user bundle, (2) hot read endpoints with no cache, (3) a few unindexed hot tables, (4) N+1 loops in services, (5) sequential awaits that should be parallel.
+
+**Audit reference:** findings from parallel backend audits — DB/schema agent + API hot-path agent, 2026-05-14. Line numbers below are from that audit and should be re-confirmed before editing (the codebase moves fast).
+
+---
+
+### Task 22.1 — Eliminate per-request Postgres round-trips 🔴
+`[x]` Status: Complete
+**Dependencies:** None
+**Done:** The per-branch supervisor flags can't live in the userId-keyed `UserBundle` (they depend on `currentBranchId`), so `BranchTeamsService` now has a Redis-cached `getSupervisorFlagsForBranch(userId, branchId)` (key `cache:branchTeams:supervisorFlags:{userId}:{branchId}`, 60s TTL). `attachTeamSupervisorSessionFlags` reads from it — no Postgres round-trip on a warm cache. `invalidateSupervisorFlags(userId)` is called from the `syncUserSupervisorFlag` chokepoint (covers add/remove/promote/demote/bulk/deleteTeam) plus `addDepartmentMember`. Removed the now-unused `attachMarketingSupervisorSessionFlag` / `attachCsSupervisorSessionFlag`. `CacheModule` added to `BranchesModule`; test helper `apps/api/src/test/fake-cache.ts` added for the 3 integration specs that construct the service directly.
+**Why:** Highest leverage in the whole phase — this fires on *every single tRPC request*. `TrpcMiddleware.resolveSession` already resolves the user bundle from Redis (`UserBundleCacheService`, 60s TTL), but then calls `branchTeams.attachTeamSupervisorSessionFlags` ([apps/api/src/branches/branch-teams.service.ts:~948-964](apps/api/src/branches/branch-teams.service.ts)) which fires **2 Postgres queries per request** for any non-global user (marketing supervisor flag + CS supervisor flag). That's 2 remote RTTs added to every request, defeating the point of the Redis bundle.
+
+**Implementation Steps:**
+1. Move `isMarketingTeamSupervisor` / `isCsTeamSupervisorOnActiveBranch` computation into `UserBundleCacheService` so the flags are part of the cached 60s bundle (Redis-only on the hot path).
+2. Ensure the bundle's existing invalidation triggers also cover team-membership / `users.is_team_supervisor` writes (see [[project_team_supervisor_flag]] — migration 0139 denormalised this onto `users`, which may make the 2 queries unnecessary entirely; confirm whether the flag can just be read off the already-cached user row).
+3. Remove the per-request `attachTeamSupervisorSessionFlags` DB calls; keep a fallback direct read only for the cache-not-initialised path.
+4. (Optional) Throttle `touchSession`'s per-request Redis write to once per N seconds.
+
+**Acceptance Criteria:**
+- [ ] No Postgres query issued by session/middleware resolution on a warm-cache request (verify via query log / `pg_stat_statements`).
+- [ ] Team-supervisor flags still correct immediately after a membership change (invalidation works).
+- [ ] `SupervisorBadge` still renders correctly on header / user-detail / Staff Accounts.
+
+---
+
+### Task 22.2 — Cache hot uncached reads 🔴
+`[x]` Status: Complete
+**Dependencies:** None
+**Done:** `notifications.list` turned out to already be cached (audit was stale). `getUnreadCount` now cached under `cache:notif:{userId}:unreadCount` (15s) — shares the `cache:notif:{userId}:*` namespace so the existing `create`/`markAsRead`/`markAllAsRead` invalidations already cover it. `getAutomationRules` cached under `cache:notif:automationRules:{branchId}` (5 min) with a new `invalidateAutomationRulesCache()` called from create/update/toggle/delete. `orders.list` caches page 1 only, keyed by `hashInput({userId, branchId, effectiveInput, opts})` under `cache:orders:aggregates:list:*` — covered by every existing `invalidateOrdersAggregatesCache()` call; authz runs before the cache lookup so a hit can't bypass a permission check.
+**Why:** Several high-frequency read endpoints have no `CacheService.getOrSet` wrapper and no PageBundle, so they hit Postgres every time. Phase 16 Task 16.1 named these but they were never wired.
+
+**Implementation Steps:**
+1. **`notifications.unreadCount`** ([apps/api/src/trpc/routers/notifications.router.ts:~71](apps/api/src/trpc/routers/notifications.router.ts)) — the notification bell hits this on *every page load*; highest-frequency uncached endpoint in the app. Wrap in `getOrSet`, key `cache:notif:unread:{userId}`, TTL 15–30s, invalidate on notification insert + markRead.
+2. **`notifications.list`** ([notifications.router.ts:~62](apps/api/src/trpc/routers/notifications.router.ts)) and **`notifications.getAutomationRules`** ([:~205](apps/api/src/trpc/routers/notifications.router.ts)) — read-mostly, cache with the same invalidation family.
+3. **`orders.list`** ([apps/api/src/trpc/routers/orders.router.ts:~446](apps/api/src/trpc/routers/orders.router.ts)) — hottest CS/marketing read; only its aggregates (`statusCounts`) are cached today. Cache at least page 1 per filter-hash, TTL 30s, invalidate on order create / status change. Reuse the input-hash pattern from existing cached list endpoints.
+4. Each new wrapper MUST ship with a matching `invalidateXxxCache()` helper called from every relevant mutation (per `.claude/docs/server-caching-pool.md` "Do NOT" rules).
+
+**Acceptance Criteria:**
+- [ ] `notifications.unreadCount` served from Redis on repeat calls (`db = 0ms` in timing log).
+- [ ] `orders.list` page 1 cache-hits within TTL; a new/transitioned order invalidates it in the same request.
+- [ ] No stale unread count after marking a notification read.
+
+---
+
+### Task 22.3 — Index gaps on hot tables 🔴
+`[x]` Status: Complete
+**Dependencies:** None — additive, zero-risk, do this first
+**Done:** Migration `packages/shared/drizzle/0142_phase22_hot_path_indexes.sql` adds `idx_inventory_levels_product_location`, `idx_campaigns_branch_id` (partial), `idx_campaigns_media_buyer_id`. `stock_batches.location_id` (no such column — global catalog table) and `user_branches` (already has `(user_id, branch_id)` unique index) were dropped from scope — the audit was off on those.
+**Why:** A few high-traffic tables have unindexed columns that every order transition / branch-scoped list filters or joins on. On a remote DB each one is a seq scan + RTT. All index DDL goes in a new SQL migration (schema files in `packages/shared/src/db/schema/` define no indexes — all indexing is raw SQL in `packages/shared/drizzle/`).
+
+**Implementation Steps:**
+1. New migration `packages/shared/drizzle/0141_phase22_hot_path_indexes.sql` (confirm next number):
+   - `inventory_levels` has **zero indexes** — hit on every order transition stock gate (`assertLocationCanFulfill`, `reserveForAllocate`). Add `CREATE INDEX idx_inventory_levels_product_location ON inventory_levels (product_id, location_id)`. If `(product_id, location_id)` is logically unique, make it `UNIQUE` instead.
+   - `stock_batches` — only the FIFO partial index exists; FK `location_id` unindexed. Add `CREATE INDEX idx_stock_batches_location_id ON stock_batches (location_id)`.
+   - `campaigns` — `branch_id` (used by RLS `yannis_branch_matches` on every campaign query) and `media_buyer_id` unindexed. Add `CREATE INDEX idx_campaigns_branch_id ON campaigns (branch_id) WHERE branch_id IS NOT NULL` and `idx_campaigns_media_buyer_id ON campaigns (media_buyer_id)`.
+   - Verify `user_branches (user_id, branch_id)` is indexed (backs the `branches_member` RLS `EXISTS` subquery) — add if missing.
+2. This is an index-only migration — **no `*_history` table sync needed** (indexes aren't versioned data).
+3. `EXPLAIN ANALYZE` a representative order-transition query and a branch-scoped campaign list before/after to confirm index usage.
+
+**Acceptance Criteria:**
+- [ ] Migration runs clean on boot (`MigrationRunnerService`).
+- [ ] `EXPLAIN ANALYZE` shows index scans (not seq scans) on `inventory_levels`, `stock_batches`, `campaigns` for the hot queries.
+- [ ] No regression in write latency on those tables (indexes are light).
+
+---
+
+### Task 22.4 — Kill N+1 loops in services 🟡
+`[~]` Status: Partial — interactive-path N+1s done; batch/admin-path N+1s deferred
+**Dependencies:** None
+**Done (interactive paths — these affect per-request latency):**
+- Marketing offer-group resolver (`marketing.service.ts`) — replaced the per-product `SELECT WHERE id = ?` loop with one `inArray` batch + in-memory `Map`; output order preserved by still walking `orderedProductIds`.
+- Marketing day-count (`marketing.service.ts`) — replaced the `Promise.all` of N `countOrdersForMediaBuyerOnUtcDay` COUNT round-trips with one grouped query (`countOrdersForMediaBuyersOnUtcDays`, `GROUP BY media_buyer_id, day`). Old single-pair helper removed.
+
+**Deferred (batch / admin operations — NOT per-request hot paths, so they do not cause the "app is slow" symptom; rewriting them touches dispatch / stock / money math — Pillars 1/3/4 — and per this task's own note needs dedicated test coverage first):**
+- `distributeUnassignedOrders` (`orders.service.ts`) — occasional Head-of-CS/SuperAdmin manual fallback. `assignOrderToBestAvailableAgent` re-reads workloads per order *by design* (load-balancing sees the prior assignment's committed `pendingCount`); a correct batch needs in-memory workload simulation. Revenue-critical dispatch (Pillar 1).
+- Inventory allocation loops (`inventory.service.ts` `reserveForAllocateWithMovements` & siblings) — the loop is `O(line items per order)` (small, bounded), not `O(orders)`; inside a `withActor` transaction doing stock math (Pillar 3). Marginal reward, real risk.
+- Payroll/commission compute (`hr.service.ts` `generatePayouts`) — monthly admin batch; `O(staff)` × ~7 queries. Money math (Pillars 3/4). Batching needs care (the `or(assignedCsId, mediaBuyerId)` attribution means an order counts for two group keys) + tests.
+**Why:** Several service methods `await` a query inside a `.map()`/`for` loop — on a remote DB each iteration is a separate RTT, turning a backlog into seconds of wall time.
+
+**Implementation Steps:**
+1. **`distributeUnassignedOrders`** ([apps/api/src/orders/orders.service.ts:~4938-4942](apps/api/src/orders/orders.service.ts)) — loops every UNPROCESSED order calling `assignOrderToBestAvailableAgent(id)` (a multi-query routine) serially. Batch-load candidate agents + workloads once, assign in memory, bulk-update.
+2. **Inventory allocation loops** ([apps/api/src/inventory/inventory.service.ts:~2305-2530](apps/api/src/inventory/inventory.service.ts)) — `reserveForAllocateWithMovements` and siblings loop `byProduct` doing a SELECT then a per-`level` UPDATE inside the open transaction. Batch the level reads with `inArray`; collapse per-level updates into one `UPDATE ... FROM (values)` or `CASE` statement.
+3. **Payroll / commission compute** ([apps/api/src/hr/hr.service.ts:~192-195](apps/api/src/hr/hr.service.ts) and [apps/api/src/hr/payroll-batch.service.ts:~365-368,~451-452](apps/api/src/hr/payroll-batch.service.ts)) — N+1 over staff (`deliveredRows` / `computePayoutForMember` per member). Replace with one grouped query aggregating delivered/commission rows for all staff.
+4. **Marketing offer-group resolver** ([apps/api/src/marketing/marketing.service.ts:~4798-4809](apps/api/src/marketing/marketing.service.ts)) — per-product `SELECT ... WHERE id = ?` in a loop. Replace with single `inArray(products.id, orderedProductIds)` + in-memory map.
+5. **Marketing day-count** ([marketing.service.ts:~3177-3189](apps/api/src/marketing/marketing.service.ts)) — `Promise.all` over keys each doing `countOrdersForMediaBuyerOnUtcDay`; collapse into one `GROUP BY spend_day, media_buyer_id` query.
+
+**Acceptance Criteria:**
+- [ ] Each listed method issues a bounded, constant number of queries regardless of input size (verify via query log).
+- [ ] `distributeUnassignedOrders` on a 100-order backlog completes in a single-digit query count.
+- [ ] No behavioural change — assignment / allocation / payroll outputs identical to before (cover with the existing tests or add one).
+
+---
+
+### Task 22.5 — Parallelize sequential awaits & trim over-fetching 🟡
+`[~]` Status: Partial — parallelization done; SELECT* trim skipped (risky + already cached)
+**Dependencies:** None
+**Done:**
+- `notifyOrderLinePriceChangeApprovers` + `notifyOrderDeletionApprovers` (`orders.service.ts`) — the three independent recipient lookups (admins / branch heads / HoLogistics) now run in one `Promise.all` wave instead of three sequential round-trips. Output identical (a `Set` dedupes, ordering irrelevant).
+- `loadOrderDetailPayload` (`orders.service.ts`) — `orderItems` and `callLogs` (both keyed only on `orderId`) folded into the existing name-resolution `Promise.all`, so the cache-miss path is `order → 1 parallel wave` instead of `order → items → calls → wave` (3 sequential round-trips collapsed to 1).
+**Skipped — over-fetching SELECT* trims:** `loadOrderDetailPayload`'s `order` row is `SELECT *` and spread into the return; an explicit projection of a 30+ column temporal table is error-prone, the UI genuinely needs `custom_fields`, and the whole payload is already Redis-cached by `getById`. The parallelization above is the real latency win; rewriting the projection is disproportionate risk for a cached path.
+**Why:** Independent queries `await`ed one-after-another serialise their RTTs; bare `SELECT *` on temporal tables drags JSON + `valid_period` columns over the wire for no reason.
+
+**Implementation Steps:**
+1. **Notify-approver lookups** ([apps/api/src/orders/orders.service.ts:~386-422,~455-481](apps/api/src/orders/orders.service.ts)) — `notifyOrderLinePriceApprovers` / `notifyOrderDeletionApprovers` do 3 independent `users` lookups (admins → heads → HoLogistics) sequentially. `Promise.all` them, or collapse into one query with an OR'd role/branch predicate.
+2. **`loadOrderDetailPayload`** ([orders.service.ts:~1510-1546](apps/api/src/orders/orders.service.ts)) — order row → `orderItems` → `callLogs` are 3 sequential awaits before the existing parallel wave at ~1563. `orderItems` and `callLogs` are both keyed only on `orderId` and mutually independent — fold them into the existing `Promise.all`. (Cache-hit path is fine; this fixes the cache-miss path.)
+3. **Over-fetching** — ~29 bare `.select()` (SELECT *) in `orders.service.ts`, ~25 in `inventory.service.ts`, ~15 in `logistics.service.ts`. Prioritise read-path methods on system-versioned tables: give `loadOrderDetailPayload`'s order select an explicit column projection (drop `customFields` JSON + `valid_period` unless needed); same for the duplicate-merge selects (~5875-5889). Audit list methods for missing `LIMIT`.
+
+**Acceptance Criteria:**
+- [ ] Notify-approver paths issue their user lookups in parallel (1 RTT wave, not 3).
+- [ ] `loadOrderDetailPayload` cache-miss path issues `orderItems` + `callLogs` in the same parallel wave as the rest.
+- [ ] Hot read selects project explicit columns; no unbounded list reads remain in the touched methods.
+
+---
+
+### Task 22.6 — Bound the audit global COUNT 🟢
+`[ ]` Status: Not done — premise already mitigated; full migration deferred as disproportionate
+**Dependencies:** None
+**Finding on inspection:** the audit's "unbounded / uncostly COUNT" claim was **stale**. `getGlobalAuditLog` in `audit.service.ts` already wraps the 28-table COUNT UNION in `CacheService.getOrSet` with a 30s TTL, keyed by every filter + viewer scope. So it runs at most once per 30s per filter view (amortised across all admins on that view), not per request. The only residual cost is one COUNT on a cache miss / first load.
+**Why deferred:** eliminating the COUNT entirely via `limit+1` → `hasMore` is cross-cutting and UX-changing for a cached, non-hot-path reporting screen: it changes `getGlobalAuditLog`'s return contract (`{rows, total}` → `{rows, hasMore}`), the `admin.analytics.audit` route + `AuditStreamData` + loading shell, `AuditPage`'s `totalPages` math **and** its "N entries found" copy (which would become a misleading estimate), and the shared `<Pagination>` component (no unknown-total mode — requires `totalPages`). That blast radius is disproportionate to "one COUNT per 30s on a reporting page." Revisit if/when audit history volume makes even the 30s-amortised COUNT a measured problem — at which point add an unknown-total / next-prev mode to `<Pagination>` first.
+**Why:** `getGlobalAuditLog` runs a separate `COUNT(*)` UNION across ~28 `*_history` tables with no LIMIT ([apps/api/src/audit/audit.service.ts:~513-529](apps/api/src/audit/audit.service.ts)) — unbounded aggregation that the code comment itself calls "the single most expensive" part of the audit page.
+
+**Implementation Steps:**
+1. Drop the exact total count for the global audit log. Fetch `limit + 1` rows and derive a `hasMore` boolean instead of a precise `total` / `totalPages`.
+2. Update the audit-trail UI pagination to use `hasMore` (next/prev) rather than a total page count — or show an estimated count if the UI strictly needs a number.
+3. Per-record history (`getRecordHistory`, `WHERE id = $1`) is already fine — leave it.
+
+**Acceptance Criteria:**
+- [ ] Global audit log page no longer issues the 28-table COUNT UNION.
+- [ ] Pagination still works (next/prev or estimated count).
+- [ ] Audit export unaffected.
+
+---
+
+**Phase 22 build order:** 22.3 (indexes — additive, zero-risk, ship first) → 22.1 (per-request round-trips — every request) → 22.2 (cache hot reads — every page load) → 22.4 (N+1 loops) → 22.5 (parallelize + over-fetch) → 22.6 (audit count). 22.3 → 22.2 are the highest leverage and lowest risk; 22.4/22.5 touch core service logic so they need test coverage. Do not treat this as "make the pool bigger" — `db ≈ total` in the timing logs means the *query* is slow, not the pool (see `.claude/docs/server-caching-pool.md`).
+
+**Implementation outcome (2026-05-14):** 22.3 / 22.1 / 22.2 fully done (the high-leverage per-request paths). 22.4 / 22.5 partially done — the interactive-path wins (marketing N+1s, notify-approver + order-detail parallelization) shipped; the batch/admin-path N+1s (`distributeUnassignedOrders`, inventory allocation, payroll) and the cached-payload SELECT* trim were deferred with rationale: they're not per-request hot paths and rewriting them touches dispatch/stock/money math (Pillars 1/3/4) which needs dedicated test coverage. 22.6 not done — the COUNT was found already 30s-Redis-cached, so the premise was largely stale; a full `hasMore` migration is disproportionate cross-cutting UX work. API `tsc --noEmit` clean. The deferred items are tracked in each task's notes above and are the natural Phase 22.b follow-up once test scaffolding for dispatch/payroll exists.
