@@ -15,8 +15,5 @@ bucket_cors_origins = [
   "https://dev-office.hqyannis.com",
 ]
 
-# Two-stage cert provisioning (Let's Encrypt HTTP-01 needs DNS pointing at
-# the VM first). First apply leaves this `false`; once Cloudflare A records
-# resolve to the VM's external IP, flip to `true` and re-apply.
-# provision_tls_certificate = false
-# tls_contact_email         = "ops@example.com"
+# Reverse proxy + TLS are provisioned by Ansible after Terraform apply.
+# See `infrastructure/ansible/README.md` for the two-stage flow.

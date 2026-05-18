@@ -42,8 +42,5 @@ ssh_source_ranges   = [
 # IP ranges. Lock down via Cloudflare WAF, not VPC firewall.
 # web_source_ranges = ["0.0.0.0/0"]
 
-# Two-stage cert provisioning. Leave false on the first prod apply, point
-# Cloudflare A records (`office`, `api-office`) at the VM's external IP,
-# then flip to true and re-apply.
-provision_tls_certificate = false
-tls_contact_email         = "ops@hqyannis.com"
+# Reverse proxy + TLS are provisioned by Ansible after Terraform apply.
+# See `infrastructure/ansible/README.md` for the two-stage flow.

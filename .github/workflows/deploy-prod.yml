@@ -1,12 +1,21 @@
-name: Deploy to Dev
+name: Deploy to Prod
+
+# Mirror of deploy-dev.yml — same shape, different trigger branch, different
+# GitHub Environment, different image tags. The `environment: prod` line on
+# each deploy job is the gate for adding required reviewers in the GitHub
+# Settings → Environments UI; configure that there, not here.
 
 on:
   push:
-    branches: [dev]
+    branches: [main]
+  # Allow manual triggers from the Actions tab for re-deploys without a new commit.
+  workflow_dispatch:
 
 concurrency:
-  group: deploy-dev-${{ github.ref }}
-  cancel-in-progress: true
+  group: deploy-prod-${{ github.ref }}
+  # Do NOT cancel in-flight prod deploys — let ordered deploys finish so we
+  # never leave half-applied state on the VM.
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: "20"
@@ -44,23 +53,19 @@ jobs:
         run: pnpm turbo build
 
   deploy-gcp:
-    name: Deploy to Dev (GCP)
+    name: Deploy to Prod (GCP)
     runs-on: ubuntu-latest
     needs: build
-    # Runs unless DEPLOY_PLATFORM is explicitly 'aws' (i.e. runs for 'gcp', '', unset, or anything else).
     if: ${{ vars.DEPLOY_PLATFORM != 'aws' }}
-    environment: dev
-    # Required for Workload Identity Federation — GitHub mints the OIDC token
-    # that GCP exchanges for short-lived SA credentials. Without `id-token:
-    # write` the auth step gets a 403 from sts.googleapis.com.
+    environment: prod
     permissions:
       contents: read
       id-token: write
     env:
       GCP_REGION: ${{ secrets.GCP_REGION || 'europe-west2' }}
       GCP_ZONE: ${{ secrets.GCP_ZONE || 'europe-west2-a' }}
-      GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.GCP_ARTIFACT_REPOSITORY_ID || 'dev-yannis-eose' }}
-      GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.GCP_RUNTIME_ENV_SECRET_NAME || 'dev-yannis-runtime-env' }}
+      GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.GCP_ARTIFACT_REPOSITORY_ID || 'prod-yannis-eose' }}
+      GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.GCP_RUNTIME_ENV_SECRET_NAME || 'prod-yannis-runtime-env' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,20 +88,20 @@ jobs:
       - name: Build & push API image
         env:
           IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
-          IMAGE_TAG: dev-${{ github.sha }}
+          IMAGE_TAG: prod-${{ github.sha }}
         run: |
-          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:dev-latest .
+          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:prod-latest .
           docker push $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG
-          docker push $IMAGE_REGISTRY/yannis-eose-api:dev-latest
+          docker push $IMAGE_REGISTRY/yannis-eose-api:prod-latest
 
       - name: Build & push Web image
         env:
           IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
-          IMAGE_TAG: dev-${{ github.sha }}
+          IMAGE_TAG: prod-${{ github.sha }}
         run: |
-          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:dev-latest .
+          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:prod-latest .
           docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
-          docker push $IMAGE_REGISTRY/yannis-eose-web:dev-latest
+          docker push $IMAGE_REGISTRY/yannis-eose-web:prod-latest
 
       - name: Prepare VM deploy directory
         run: |
@@ -120,23 +125,24 @@ jobs:
             --zone "${{ env.GCP_ZONE }}" \
             --project "${{ secrets.GCP_PROJECT_ID }}"
 
+      # Note: the shared scripts have `-dev` in their names but are env-agnostic —
+      # they parameterize via env vars below. Don't rename them; just feed prod values.
       - name: Deploy on GCE VM
         run: |
           gcloud compute ssh "${{ secrets.GCP_VM_NAME }}" \
             --zone "${{ env.GCP_ZONE }}" \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --command "cd /opt/yannis-eose && chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-gcp-dev.sh ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' GCP_REGION='${{ env.GCP_REGION }}' GCP_PROJECT_ID='${{ secrets.GCP_PROJECT_ID }}' ARTIFACT_REPOSITORY_ID='${{ env.GCP_ARTIFACT_REPOSITORY_ID }}' RUNTIME_ENV_SECRET_NAME='${{ env.GCP_RUNTIME_ENV_SECRET_NAME }}' IMAGE_TAG='dev-latest' ./deploy-dev.sh"
+            --command "cd /opt/yannis-eose && chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-gcp-dev.sh ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' GCP_REGION='${{ env.GCP_REGION }}' GCP_PROJECT_ID='${{ secrets.GCP_PROJECT_ID }}' ARTIFACT_REPOSITORY_ID='${{ env.GCP_ARTIFACT_REPOSITORY_ID }}' RUNTIME_ENV_SECRET_NAME='${{ env.GCP_RUNTIME_ENV_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh"
 
   deploy-aws:
-    name: Deploy to Dev (AWS)
+    name: Deploy to Prod (AWS)
     runs-on: ubuntu-latest
     needs: build
-    # Runs unless DEPLOY_PLATFORM is explicitly 'gcp' (i.e. runs for 'aws', '', unset, or anything else).
     if: ${{ vars.DEPLOY_PLATFORM != 'gcp' }}
-    environment: dev
+    environment: prod
     env:
       AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}
-      AWS_RUNTIME_SECRET_NAME: ${{ secrets.AWS_RUNTIME_SECRET_NAME || 'dev-yannis-runtime-env' }}
+      AWS_RUNTIME_SECRET_NAME: ${{ secrets.AWS_RUNTIME_SECRET_NAME || 'prod-yannis-runtime-env' }}
       AWS_VM_SSH_USER: ${{ secrets.EC2_SSH_USER || 'ubuntu' }}
     steps:
       - uses: actions/checkout@v4
@@ -165,20 +171,20 @@ jobs:
       - name: Build & push API image
         env:
           IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-          IMAGE_TAG: dev-${{ github.sha }}
+          IMAGE_TAG: prod-${{ github.sha }}
         run: |
-          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:dev-latest .
+          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:prod-latest .
           docker push $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG
-          docker push $IMAGE_REGISTRY/yannis-eose-api:dev-latest
+          docker push $IMAGE_REGISTRY/yannis-eose-api:prod-latest
 
       - name: Build & push Web image
         env:
           IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
-          IMAGE_TAG: dev-${{ github.sha }}
+          IMAGE_TAG: prod-${{ github.sha }}
         run: |
-          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:dev-latest .
+          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:prod-latest .
           docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
-          docker push $IMAGE_REGISTRY/yannis-eose-web:dev-latest
+          docker push $IMAGE_REGISTRY/yannis-eose-web:prod-latest
 
       - name: Copy deploy assets to EC2
         env:
@@ -213,17 +219,13 @@ jobs:
           script: |
             cd /opt/yannis-eose
             chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-aws-dev.sh ./refresh-env.sh ./refresh-env-aws.sh ./run-migrations.sh
-            DEPLOY_PLATFORM='aws' AWS_REGION='${{ env.AWS_REGION }}' AWS_ACCOUNT_ID='${{ secrets.AWS_ACCOUNT_ID }}' SECRET_NAME='${{ env.AWS_RUNTIME_SECRET_NAME }}' IMAGE_TAG='dev-latest' ./deploy-dev.sh
+            DEPLOY_PLATFORM='aws' AWS_REGION='${{ env.AWS_REGION }}' AWS_ACCOUNT_ID='${{ secrets.AWS_ACCOUNT_ID }}' SECRET_NAME='${{ env.AWS_RUNTIME_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh
 
   deploy-edge-worker:
-    name: Deploy Edge Worker (gcp-dev)
+    name: Deploy Edge Worker (production)
     runs-on: ubuntu-latest
     needs: build
-    # The hqyannis.com edge worker is shared by AWS and GCP dev paths — the
-    # AWS dev API is on a different domain entirely (roguedevtech.com), so
-    # in practice the gcp-dev worker is the only one this workflow touches.
-    # Skipped if the changeset doesn't include worker or shared code.
-    environment: dev
+    environment: prod
     steps:
       - uses: actions/checkout@v4
         with:
@@ -252,8 +254,8 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Deploy worker (gcp-dev env)
+      - name: Deploy worker (production env)
         if: steps.changes.outputs.changed == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm --filter @yannis/edge-worker exec wrangler deploy --env gcp-dev
+        run: pnpm --filter @yannis/edge-worker exec wrangler deploy --env production

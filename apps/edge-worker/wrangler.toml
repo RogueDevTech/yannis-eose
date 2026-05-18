@@ -7,13 +7,12 @@ compatibility_flags = ["nodejs_compat"]
 # The form lives at `yannis-form.roguedevtech.com`; this worker handles every
 # request to that hostname and posts orders to the AWS-hosted API. GCP dev /
 # prod live on hqyannis.com under a different Cloudflare account (see the
-# `[env.*]` blocks below).
+# `[env.*]` blocks below, which DO pin `account_id`).
 #
-# `account_id` locks this default config to the roguedevtech.com Cloudflare
-# account — so even if your shell is authed with the hqyannis.com token,
-# `wrangler deploy` (no --env) will refuse to publish here unless the
-# token matches. Replace once and forget.
-account_id = "REPLACE-WITH-ROGUEDEVTECH-ACCOUNT-ID"
+# `account_id` is intentionally NOT pinned here. Wrangler falls back to
+# whichever account the active CLOUDFLARE_API_TOKEN is scoped to — which
+# in CI is the roguedevtech.com account. To re-add the lock, paste the real
+# account ID into a new `account_id = "…"` line (find via `wrangler whoami`).
 routes = [
   { pattern = "yannis-form.roguedevtech.com/*", zone_name = "roguedevtech.com" },
 ]
