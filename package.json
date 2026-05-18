@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "db:seed-permissions": "pnpm --filter @yannis/shared run db:seed-permissions",
+    "db:migrate:app": "pnpm --filter @yannis/shared run db:migrate:app",
+    "db:dedupe-products": "pnpm --filter @yannis/shared run db:dedupe-products",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",

@@ -1,0 +1,86 @@
+# ==============================================================================
+# Bootstrap: frontend HTTPS only (use until api-yannis.roguedevtech.com cert exists).
+# API is served over HTTP on port 80 for this host. Swap back to nginx.conf
+# after: certbot certonly --webroot -w /var/www/certbot -d api-yannis.roguedevtech.com
+# ==============================================================================
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream api {
+        server api:4444;
+    }
+    upstream web {
+        server web:3000;
+    }
+
+    # HTTP: frontend → redirect to HTTPS; API → proxy (no API cert yet)
+    server {
+        listen 80;
+        server_name yannis.roguedevtech.com api-yannis.roguedevtech.com;
+
+        location /.well-known/acme-challenge/ {
+            root /var/www/certbot;
+            try_files $uri =404;
+        }
+
+        # API (api-yannis.roguedevtech.com) over HTTP until cert exists
+        location /trpc {
+            proxy_pass http://api;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+        location /health {
+            proxy_pass http://api;
+            proxy_set_header Host $host;
+        }
+        location /api {
+            proxy_pass http://api;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Frontend host → HTTPS; API host → serve above locations
+        location / {
+            if ($host = "yannis.roguedevtech.com") {
+                return 301 https://$host$request_uri;
+            }
+            proxy_pass http://api;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+
+    server {
+        listen 443 ssl;
+        server_name yannis.roguedevtech.com;
+
+        ssl_certificate     /etc/letsencrypt/live/yannis.roguedevtech.com/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/yannis.roguedevtech.com/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers off;
+        ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+
+        location / {
+            proxy_pass http://web;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+        }
+    }
+}

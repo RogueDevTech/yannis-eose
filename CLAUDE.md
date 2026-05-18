@@ -2,277 +2,332 @@
 
 ## Identity & Context
 
-You are a senior software engineer building **Yannis EOSE** (Enterprise Operations & Sales Engine) — a high-integrity ERP and sales platform for a performance marketing company. This is NOT a generic CRM. This is a **revenue protection system** that replaces a legacy tool called "Sniper" which failed under scale.
+You are a senior software engineer building **Yannis EOSE** (Enterprise Operations & Sales Engine) — a high-integrity ERP and sales platform for a performance marketing company. This is a **revenue protection system** that replaces a legacy tool called "Sniper" which failed under scale. Every decision must honor what users loved (smooth UX, granular data, automations) and fix what broke (concurrency, audit trails, stock audits, financials).
 
-The client loved Sniper's smooth UX rhythm, granular data visibility, and automations. They left because it couldn't handle concurrent users, had no audit trail, couldn't do stock audits, and had messy financials. **Every decision you make must honor what they loved and fix what broke.**
+**Detailed module specs are in `.claude/docs/`** — read those files when working on a specific module.
 
 ---
 
 ## The 4 Non-Negotiable Pillars
 
-Every line of code you write must serve at least one of these pillars. If your implementation weakens any pillar, stop and redesign.
-
 ### Pillar 1: Revenue Insurance (Zero-Downtime)
-Sales forms must NEVER go offline. Even if the primary API server crashes, even if AWS has a regional outage, even if Cloudflare blinks — the system must capture orders. This is achieved through Edge-first submission (Cloudflare Workers), circuit breaker patterns (failover to QStash/Durable Objects), and PWA offline sync for field agents. Zero lost sales is the standard.
+Sales forms NEVER go offline. Edge-first submission (Cloudflare Workers), circuit breaker (QStash/Durable Objects), PWA offline sync. Zero lost sales.
 
 ### Pillar 2: Lead Fortress (Anti-Theft)
-Customer phone numbers and PII are the company's most valuable asset. Phone numbers are NEVER exposed in the browser DOM, network tab, console logs, or API responses to unauthorized roles. All customer communication happens through VOIP bridges (Twilio/MessageBird WebRTC). Agents click "Call" and the system connects them — they never see, copy, or export the raw number. If you are building any feature that touches customer contact data, mask it by default and require an audited access event to reveal it.
+Customer phone numbers NEVER exposed in browser DOM, network tab, console, or API responses to unauthorized roles. All comms via VOIP bridges. Agents never see raw numbers.
 
 ### Pillar 3: Financial Truth (Landed COGS)
-Profit is not revenue minus a guess. Every product has a layered cost structure: Factory Cost + Freight/Duty (Landing Cost) + 3PL Handling Fee + Final-Mile Delivery Fee. Ad Spend is tracked per Media Buyer per product per day. Commission is calculated per delivered order. The CEO must see **real net cash profit** at any time, not estimates. Use FIFO (First-In, First-Out) batch costing for inventory — if Batch A costs $5/unit and Batch B costs $7/unit, the system sells Batch A first and calculates margin accordingly.
+True profit = Revenue - (Factory + Freight/Duty + 3PL Fee + Delivery Fee + Ad Spend + Commission). FIFO batch costing. CEO sees **real net cash profit**.
 
 ### Pillar 4: Absolute Accountability (Temporal Audit)
-Every single mutation to any record — creation, update, status change, deletion — must be permanently logged with: the actor (user ID), the action, the old value, the new value, and a precise timestamp. This is implemented at the database level using PostgreSQL 18 System-Versioned Temporal Tables. No application-level audit log that can drift or be bypassed. Every transaction must execute `SET LOCAL yannis.current_user_id = '<uuid>'` before any write operation. No user, including SuperAdmin, can delete or modify an audit entry. The audit trail is permanent and immutable.
+Every mutation logged at the **database level** via PostgreSQL 18 System-Versioned Temporal Tables. Actor + action + old/new values + timestamp. Immutable. `SET LOCAL yannis.current_user_id` before every write.
 
 ---
 
-## Tech Stack (Locked — Do Not Deviate)
+## Tech Stack (Locked)
 
-| Layer | Technology | Why |
-|---|---|---|
-| Frontend | Remix (React) + Tailwind CSS | Server-side Loaders/Actions, nested routing for CRM UX, automatic revalidation on mutation |
-| PWA | Service Workers + Web Push | Offline sync for riders, background notifications for CS agents, always-on call alerts |
-| Backend API | NestJS (Node.js) + TypeScript 5.x | Opinionated structure (Modules/Services/Controllers), Dependency Injection, decorator-based — agents can follow strict patterns without hallucinating file placement |
-| Type Contract | tRPC (internal), OpenAPI/Swagger (external) | tRPC shares types between NestJS and Remix with zero generation step. Swagger is auto-generated from tRPC routers via trpc-openapi for future external consumers |
-| Database | PostgreSQL 18 | Native temporal constraints (WITHOUT OVERLAPS), System-Versioned tables, UUIDv7 (timestamp-ordered), async I/O |
-| ORM | Drizzle ORM | TypeScript-first, 1:1 SQL mapping, zero magic, inferred types that change based on select/include — no reflection or decorators |
-| Cache/Sessions | Redis | Hybrid session management (instant revocation), sliding window deduplication cache, CS dispatch queue |
-| Real-time | Socket.io (WebSockets) | Live dashboard updates, incoming call notifications, order status push |
-| Edge/CDN | Cloudflare Workers | Sales form hosting, circuit breaker failover, DDoS protection |
-| Queue/Buffer | Upstash QStash or Cloudflare Durable Objects | Order buffering during API downtime, retry logic |
-| VOIP | Twilio Voice API / MessageBird (WebRTC) | Click-to-call, call recording, AI transcription, caller ID branding |
-| File Storage | Cloudflare R2 or AWS S3 | Receipts, ad spend screenshots, invoice PDFs, call recordings |
+| Layer | Technology |
+|---|---|
+| Frontend | Remix (React) + Tailwind CSS |
+| PWA | Service Workers + Web Push |
+| Backend | NestJS + TypeScript 5.x |
+| Type Contract | tRPC (internal), OpenAPI (external) |
+| Database | PostgreSQL 18 (temporal, UUIDv7) |
+| ORM | Drizzle ORM |
+| Cache/Sessions | Redis |
+| Real-time | Socket.io |
+| Edge/CDN | Cloudflare Workers |
+| Queue | Upstash QStash / CF Durable Objects |
+| VOIP | Twilio / MessageBird (WebRTC) |
+| Storage | Provider-selectable object storage (GCS / S3) |
 
 ---
 
-## Architecture: Decoupled Monorepo
+## Architecture
 
-The frontend (Remix) and backend (NestJS) are **separate applications** in a single monorepo (TurboRepo with pnpm). They communicate exclusively via tRPC. They share types through a `packages/shared` workspace package containing Drizzle schemas, Zod validators, and tRPC router types.
+Decoupled monorepo (TurboRepo + pnpm). Frontend (Remix) and backend (NestJS) communicate via tRPC. Shared types in `packages/shared`.
 
 ```
 yannis-eose/
-├── apps/
-│   ├── web/                  # Remix PWA (all dashboards + 3PL rider views)
-│   │   └── app/routes/
-│   │       ├── admin/        # SuperAdmin module
-│   │       ├── auth/         # Login/auth
-│   │       ├── cs/           # Customer Service module
-│   │       ├── finance/      # Finance module
-│   │       ├── hr/           # HR & Payroll module
-│   │       ├── logistics/    # Logistics module
-│   │       ├── marketing/    # Marketing module
-│   │       └── rider/        # 3PL Rider views (mobile-optimized PWA routes)
-│   ├── api/                  # NestJS backend (business logic, tRPC routers)
-│   └── edge-worker/          # Cloudflare Worker (form submission + circuit breaker)
-├── packages/
-│   ├── shared/               # Drizzle schema, Zod validators, tRPC types, enums
-│   ├── ui/                   # Shared Tailwind components
-│   └── config/               # ESLint, TypeScript, Tailwind configs
-└── turbo.json
+├── apps/web/          # Remix PWA (65+ routes)
+├── apps/api/          # NestJS (22 modules, 19 tRPC routers)
+├── apps/edge-worker/  # Cloudflare Worker (form + circuit breaker)
+├── packages/shared/   # Drizzle schema, Zod validators, enums
+├── packages/ui/       # Shared Tailwind components
+└── packages/config/   # ESLint, TS, Tailwind configs
 ```
 
-**Note on 3PL Riders:** The rider dashboard is NOT a separate app. It lives inside `apps/web` as a route group (`/rider/`), with mobile-optimized layouts and PWA offline sync capabilities. This keeps deployment simple (single Vercel deployment) while still providing a dedicated mobile experience.
+Rider dashboard lives in `apps/web` at `/rider/` (not a separate app). Local development does not require Docker — Postgres 18 + Redis can be reached via remote connection strings in `.env`.
 
-**Note on local dev databases:** Postgres 18 and Redis are accessed via cloud/remote connection strings configured in `.env` files. No Docker setup is required.
+### Deployment Standard (Locked)
 
-**Why separate API?** The project could grow. A mobile app may need the same API. Third-party logistics companies may need webhook access. External partners may need Swagger docs. Keeping the API independent ensures flexibility without rewriting.
+- **Dev deploy is provider-selectable via adapters.** `DEPLOY_PLATFORM=aws` or `DEPLOY_PLATFORM=gcp` deploys to that provider only. When `DEPLOY_PLATFORM` is **unset or empty**, both providers deploy in parallel.
+- **Shared runtime contract is the source of truth.** Both providers must satisfy the same single-VM Dockerized `web` + `api` shape, health checks, migration flow, and runtime env contract.
+- **Redis stays external** for dev deploys. Do **not** reintroduce VM-local Redis unless explicitly approved.
+- **Ingress is Cloudflare DNS + Cloudflare Tunnel.** Do **not** add nginx back onto the VM for the normalized dev baseline.
+- **Edge worker remains on Cloudflare.**
+- **Object storage is provider-selectable via adapters** (`gcs` / `s3`). New asset keys must stay **environment-prefixed** and **resource-scoped** (for example `dev/marketing/screenshots/...`, `dev/finance/receipts/...`, `dev/logistics/delivery-proof/...`, `dev/hr/onboarding-docs/...`, `dev/products/...`).
+- **New dev infrastructure uses `dev-*` naming** inside the selected provider so the same Terraform shape can be mirrored later for prod.
+- **Provider adapters must not drift from the shared contract.** Keep provider differences isolated to infra, deploy scripts, and object-storage adapters.
+
+Local dev still does **not** require Docker — Postgres 18 + Redis can be reached via remote connection strings in `.env`.
 
 ---
 
 ## Database Principles
 
-### UUIDv7 Everywhere
-All primary keys use UUIDv7 (timestamp-ordered). This improves B-tree index performance and gives a free creation timestamp embedded in every ID. Never use auto-incrementing integers or UUIDv4.
+### Runbook
+- **SQL migrations** auto-run on API boot (`MigrationRunnerService`). Failure aborts startup.
+- **RBAC permission catalog** auto-seeds on boot (`PermissionSeedService`).
+- **Permission backfill** (one-shot): `pnpm --filter @yannis/api run run-permission-backfill:standalone -- --force`
+- After catalog changes: `pnpm --filter @yannis/shared db:seed-permissions` then backfill.
 
-### Temporal Tables (System-Versioned)
-Every table that stores business data (orders, inventory, products, users, funding, ad_spend) must use PostgreSQL 18 system-versioned temporal logic. Every row has a `valid_period` (tstzrange) that records when that version of the row was true. When a row is updated, the old version is preserved with its time range. You can query the state of any record at any point in history.
+### Core Rules
+- **UUIDv7** for all PKs. Never auto-increment or UUIDv4.
+- **Native `uuid` columns** — identifiers are NEVER `text`. Use Drizzle `uuid('col')` / `uuidv7Pk()`.
+- **Temporal Tables** — every business-data table is system-versioned with `valid_period` tstzrange.
+- **RLS** — permissions enforced at DB level. Media Buyers see own orders only. CS see assigned only.
+- **Actor Injection** — every write uses `withActor(this.db, actor, async (tx) => { ... })` from `apps/api/src/common/db/with-actor.ts`. Never bare `pgClient.set_config` — it runs outside the tx and the setting dies before the write. See `.claude/docs/module-cs-edge-marketing.md` for the full rationale.
+- **Numeric columns** — use `sql\`${value}::numeric\`` for Drizzle inserts. Never `String()` or `.toFixed(2)`.
+- **History table sync** — when altering a main table, sync `*_history` in the same migration.
 
-### Row-Level Security (RLS)
-Permissions are enforced at the database level, not just the application level. Even if the API has a bug, the database will block unauthorized access. Media Buyers can only see their own orders. CS agents can only see orders assigned to them. Finance can see all orders but only edit financial fields. Third-Party Logistics partners can only see orders allocated to their location.
-
-### The Actor Injection Pattern
-Every NestJS service method that performs a write operation must:
-1. Begin a transaction
-2. Execute `SET LOCAL yannis.current_user_id = '<authenticated_user_uuid>'`
-3. Perform the write
-4. Commit
-
-This ensures the PostgreSQL trigger that manages the temporal audit trail knows WHO made the change. Never skip this step. Never hardcode a user ID.
+### Server Caching + Pool
+See `.claude/docs/server-caching-pool.md` for full details. Key rules:
+- Redis read-through cache via `CacheService.getOrSet()`. Every cache wrapper needs a matching `invalidateXxxCache()`.
+- Do NOT commit `READ_THROUGH_CACHE_ENABLED=false` to any deployable env.
+- Postgres pool: `max: 30`, `idle_timeout: 300s`, `max_lifetime: 1800s`, eager warmup. Do not regress.
+- Page bundles consolidate 4-14 HTTP calls into 1. Do NOT revert to N parallel `apiRequest()` calls.
 
 ---
 
-## The Order Lifecycle (The Most Critical State Machine)
-
-This is the heartbeat of the entire system. Every module connects to this flow. Get this wrong and everything breaks.
+## The Order Lifecycle
 
 ```
-UNPROCESSED → CS_ENGAGED → CONFIRMED → ALLOCATED → DISPATCHED → IN_TRANSIT → DELIVERED → COMPLETED
-                                                                                    |
-                                                                              PARTIALLY_DELIVERED
-                                                                                    |
-                                                                               RETURNED
-                                                                                    |
-                                                                           RESTOCKED / WRITTEN_OFF
+UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED → REMITTED
+       |            |              |
+       |            |              PARTIALLY_DELIVERED / RETURNED → RESTOCKED / WRITTEN_OFF
+       |            CANCELLED
+       CANCELLED
 ```
 
-### State Transition Rules (Enforce as Hard Constraints)
+**Hard rules:** No state skipping. Every transition needs an authenticated actor. Every transition logged in temporal audit. UI disables invalid transitions.
 
-| From | To | Trigger | Gate (Must Pass) | Side Effect |
+**Key transitions:**
+- `CS_ENGAGED → CONFIRMED`: requires qualifying call (VOIP ≥15s or manual call log). Admin/BranchAdmin/HoCS override.
+- `CONFIRMED → AGENT_ASSIGNED`: 3PL location must have stock. Stock: Reserved → Allocated.
+- `AGENT_ASSIGNED/DISPATCHED/IN_TRANSIT → DELIVERED`: Stock deducted, commission triggered. deliveryNote/deliveryProofUrl both optional.
+- `DELIVERED → REMITTED`: accountant only (via cash remittance flow). CS NEVER marks REMITTED.
+
+---
+
+## Permission-first RBAC (locked)
+
+- `SUPER_ADMIN` is the ONLY `permissionProcedure` bypass. `ADMIN` goes through standard permission checks (has `ALL_PERMISSION_CODES` via snapshot).
+- Effective perms = template ∪ role_permissions ∪ user overrides.
+- After catalog changes: `pnpm --filter @yannis/shared db:seed-permissions`
+- Use `isAdminLevel(user)` — never inline `role === 'SUPER_ADMIN'`. Backend: `apps/api/src/common/authz.ts`. Frontend: `apps/web/app/lib/rbac.ts`.
+- Use `hasFinanceAccess(user)` — never `role === 'FINANCE_OFFICER'` alone. Covers Finance hat.
+
+### Exports — two-key gated
+Export codes: `orders.export`, `inventory.export`, `marketing.export`, `finance.export`, `hr.export`, `audit.export`. Server: `ensureExportPermission(user, readPerm, exportPerm)`. Frontend: `canExport` flag in loader. Never gate on inline role checks. MB/CS_CLOSER are opt-in only.
+
+### RBAC Role Matrix
+
+| Role | Scope | COGS? | Full Phone? | Finance? |
 |---|---|---|---|---|
-| — | UNPROCESSED | Edge form submission | Dedup check (phone+product, 6hr window) | None — stock not touched yet |
-| UNPROCESSED | CS_ENGAGED | CS agent clicks Call | Agent must have capacity (pending < max) | Order locked to agent for 15 min |
-| CS_ENGAGED | CONFIRMED | CS clicks Confirm | VOIP call_duration > 15 seconds | Stock: Available → Reserved |
-| CS_ENGAGED | CANCELLED | CS clicks Cancel | Mandatory reason note (min 10 chars) | None — stock was never reserved |
-| CONFIRMED | ALLOCATED | Logistics assigns to 3PL | 3PL location must have available stock | Stock: Reserved → Allocated_to_3PL |
-| ALLOCATED | DISPATCHED | 3PL rider picks up | Rider must be assigned | Stock: Allocated → In_Transit |
-| DISPATCHED | IN_TRANSIT | Rider confirms departure | GPS ping logged | Delivery timer starts |
-| IN_TRANSIT | DELIVERED | Rider confirms delivery | OTP or signature capture | Stock: Deducted. Commission: Triggered. Revenue: Recognized |
-| IN_TRANSIT | PARTIALLY_DELIVERED | Rider marks partial | Must specify delivered qty vs returned qty | Split: delivered portion completes, returned portion enters return flow |
-| IN_TRANSIT | RETURNED | Rider marks rejected | Mandatory return reason | Return flow begins |
-| RETURNED | RESTOCKED | 3PL marks sellable | Quality check by 3PL manager | Stock: +1 at 3PL local inventory |
-| RETURNED | WRITTEN_OFF | 3PL marks damaged | Mandatory damage note | Logged as Operational Loss in Finance |
+| SuperAdmin | All branches | Yes | Audit only | Yes |
+| Admin | All branches | Yes | Audit only | Yes |
+| Branch Admin | Own branch | No | No | Branch |
+| Head of Marketing | Marketing (org-wide) | No | No | No |
+| Media Buyer | Own campaigns/orders | No | No | No |
+| Head of CS | CS team (org-wide) | No | No | No |
+| CS Closer | Own assigned orders | No | Masked | No |
+| Finance Officer | All financial data | Yes | No | Yes |
+| Head of Logistics | All logistics (org-wide) | No | No | No |
+| Logistics/3PL/Stock Mgr | Location-scoped | No | No | No |
+| 3PL Rider | Own deliveries | No | Masked | No |
+| HR Manager | Staff payouts/commission | No | No | No |
 
-**Hard rules:**
-- Orders CANNOT skip states. UNPROCESSED cannot jump to DISPATCHED.
-- Every state transition requires an authenticated actor (no system auto-progression without a named user, except UNPROCESSED which is created by the Edge Worker).
-- Every state transition is permanently logged in the temporal audit trail.
-- The UI must disable state-change buttons that violate the allowed transitions.
+SuperAdmin-only: manage admin-level users, kill admin sessions, transfer SuperAdmin, `/auth/setup`.
+Heads are org-wide, multiple holders allowed (CEO 2026-05-03). Finance hat is singleton.
 
 ---
 
-## Module-Specific Agent Instructions
+## Multi-Branch Architecture
 
-### When Building the Edge Sales Module
-- The form is hosted on a Cloudflare Worker, NOT on the Remix server
-- Implement idempotency: hash fingerprint + phone + timestamp to prevent double-submissions
-- Implement the circuit breaker: if NestJS API latency > 2000ms or returns 5xx, buffer the order in QStash
-- Implement the inventory budget cap: query Redis for (pending + confirmed) count per product. If >= (total_stock - 10% buffer), return a Sold Out response to the form
-- The form supports 3 deployment modes: Shadow DOM snippet, iframe, and hosted URL
-- Media Buyers select from pre-approved Offer Templates (configured by Stock Manager). They CANNOT set prices or modify product details
-
-### When Building the CS Module
-- Phone numbers in API responses must be masked: 0803****1234. The full number is NEVER sent to the frontend
-- The Call button sends a call_token to the VOIP provider, which connects the two parties. The frontend never receives the raw number
-- Implement weighted dispatch: new orders go to the CS agent with the lowest active_pending_count, not round-robin by total history
-- The Confirm and No Answer buttons must be DISABLED in the UI until the system receives a VOIP webhook confirming call_duration > 15 seconds for that specific order
-- Head of CS can Hot Swap — select orders from one agent and mass-reassign to another
-- When CS updates an order (address change, quantity change, upsell), the system creates a VERSION SNAPSHOT, not an in-place edit. The original data is preserved in the temporal table. The order history timeline shows every change with the agent's name and timestamp
-
-### When Building the Inventory Module
-- Inventory is tracked by LOCATION (Main Warehouse, 3PL Location A, 3PL Location B, etc.)
-- Use FIFO batch costing: each stock intake is a separate batch with its own landed cost
-- Stock states per unit: AVAILABLE, RESERVED, ALLOCATED_TO_3PL, IN_TRANSIT, DELIVERED, RETURNED, WRITTEN_OFF
-- The Virtual Buffer means the Sales Module sees 10% less stock than actually exists, preventing overselling during high-traffic bursts
-- Ghost Stock prevention: if a 3PL physical count does not match the digital record, the Dispatch button for that location is LOCKED until a Stock Reconciliation form is submitted with mandatory reason codes (Damaged, Lost, Expired, Theft)
-
-### When Building the Third-Party Logistics Module
-- Third-Party Logistics partners get their OWN login and simplified dashboard (not the full internal UI)
-- Dual-Entry Transfer: when Main Warehouse sends 100 units, those units are IN_TRANSIT — NOT available at the 3PL until the 3PL manager clicks Verify and Receive and inputs the actual received quantity
-- If received qty < sent qty, the system auto-generates a Shrinkage Alert to the CEO and Head of Logistics
-- Local Restock: when a return is marked Sellable by the 3PL, the unit goes directly back into that 3PL local available stock (no return-freight to main warehouse)
-- Rider views live inside `apps/web` at the `/rider/` route group — NOT a separate app. Mobile-optimized layouts with PWA offline sync
-- Rider Offline Sync: the rider PWA routes store delivery confirmations (with GPS + timestamp) in IndexedDB and syncs when back online. Use last-write-wins with GPS verification to prevent fraudulent timestamping
-
-### When Building the Marketing Module
-- Funding Ledger: HoM creates a funding record with amount + receipt image upload. Status starts as SENT. Media Buyer receives a PWA push notification and must click Mark Received (status becomes COMPLETED) or Not Received (status becomes DISPUTED, triggers alert to CEO)
-- Ad Spend Logging: Media Buyers log daily spend per product with a MANDATORY Ads Manager screenshot. No screenshot = no log entry accepted
-- CPA = Total Ad Spend / Total Orders Created (all statuses)
-- True ROAS = Total Revenue from DELIVERED orders only / Total Ad Spend
-- If a Media Buyer logged spend vs actual leads exceeds a configurable threshold, auto-alert the Head of Marketing (High CPA Warning)
-
-### When Building the Finance Module
-- The True Profit formula: Revenue - (Landed COGS + Ad Spend + 3PL Fee + Delivery Fee + Commission)
-- Column-Level Security: cost_price, landed_cost, and margin fields are STRIPPED from API responses unless the authenticated user has SuperAdmin or FinanceHead role. Use a NestJS interceptor for this — not frontend hiding
-- Invoices use sequential reference numbers (INV-2026-0001). Auto-generated. No manual override
-- Budget tracking: Finance Officers set budget limits per department/campaign. Requests exceeding remaining budget trigger a warning (approval still possible but requires explicit override with reason)
-
-### When Building the HR and Payroll Module
-- Settlement Window is CONFIGURABLE by HR: Weekly, Bi-weekly, or Monthly
-- Commissions are calculated based on DELIVERED_AT timestamp, NOT CREATED_AT. A January order delivered in February is paid in the February cycle
-- Clawback Engine: if a delivered order is later returned, the system creates a PENDING_DEDUCTION for both the Media Buyer AND the CS agent. This is subtracted from their next payout as a negative line item
-- Add-on Earnings: HR can add manual bonuses (Special Service, Extra Shift, Performance Bonus). Each add-on requires Admin approval and appears as a DISTINCT line item in the staff payout breakdown — not lumped into base pay
-- Commission rules are stored as JSONB in a commission_plans table. The structure supports: base salary thresholds (if orders >= X, base = Y), performance multipliers (if delivery_rate > Z%, bonus = W per extra order), and category tags for different staff roles
-- Every staff member (CS, Media Buyer, Logistics, etc.) can have their own pay structure. The system is flexible enough that rules can be changed at any time by HR without developer intervention
+- Every write sets `SET LOCAL yannis.current_user_id` AND `SET LOCAL yannis.current_branch_id`.
+- Branch-scoped tables: orders, campaigns, marketing_funding, ad_spend_logs, inventory_levels, commission_plans, payout_records, logistics_locations, message_templates, outbound_messages, order_timeline_events.
+- Products/stock_batches are NOT branch-scoped (global catalog).
+- SuperAdmin/Finance/org-wide Heads: `currentBranchId = NULL` → see all branches.
+- `withActorAndBranch(this.db, actor, ...)` for branch-scoped writes.
 
 ---
 
-## RBAC Role Matrix
+## UI Component Reuse (Non-Negotiable)
 
-| Role | Dashboard Scope | Can See COGS? | Can See Full Phone? | Can Approve Finance? | Can Edit Commission Rules? |
-|---|---|---|---|---|---|
-| SuperAdmin | Everything | Yes | Via audit log only | Yes | Yes |
-| Head of Marketing | Marketing + Media Buyer performance | No | No | No | No |
-| Media Buyer | Own campaigns, own orders, own payouts | No | No | No | No |
-| Head of CS | CS team performance, all CS orders | No | No | No | No |
-| CS Agent | Own assigned orders only | No | No (masked + VOIP) | No | No |
-| Finance Officer | All financial data, all orders (read) | Yes | No | Yes (not own requests) | No |
-| Head of Logistics | All logistics, all 3PL locations | No | No | No | No |
-| Logistics Manager | Assigned location orders | No | No | No | No |
-| 3PL Manager | Own location orders + stock only | No | No | No | No |
-| 3PL Rider | Own assigned deliveries only | No | No (masked) | No | No |
-| Warehouse Manager | Inventory, stock movements, procurement | No | No | No | No |
-| HR Manager | All staff payouts, commission configs | No | No | No | Yes |
+If a pattern appears in 2+ places, it must be a shared component in `apps/web/app/components/ui/`.
+
+| Need | Component |
+|---|---|
+| Text input | `<TextInput />` |
+| Multiline | `<Textarea />` |
+| Dropdown | `<FormSelect />` / `<SearchableSelect />` |
+| Amount | `<AmountInput />` |
+| Search | `<SearchInput />` |
+| Form wrapper | `<FormField />` |
+| Radio/Checkbox | `<RadioGroup />` / `<Checkbox />` |
+| Button | `<Button />` |
+| Modal | `<Modal />` / `<ConfirmActionModal />` |
+| Tabs | `<Tabs />` |
+| Page header | `<PageHeader />` / `<PageHeaderMobileTools />` |
+| Filter toolbar | `<ToolbarFiltersCollapsible />` |
+| Cards | `<Card />` / `<StatCard />` |
+| P&L rows | `<StatRow />` / `<StatRowGroup />` |
+| Tables | `<CompactTable />` (with `loading loadingVariant="overlay"` for refetch) |
+| Table refetch overlay | `<TableLoadingOverlay />` + `useLoaderRefetchBusy()` |
+| Row actions mobile | `<TableRowActionsSheet />` |
+| Empty state | `<EmptyState />` |
+| Pagination | `<Pagination />` |
+| Status badge | `<StatusBadge />` (records) / `<OrderStatusBadge />` / `<CountPill />` (bucket counts only) |
+| Role chip | `<RoleBadge role={role} />` — never hand-roll badge-info |
+| Order ID | `<OrderIdBadge />` |
+| Price | `<NairaPrice />` |
+| Filter pills | `<FilterPills />` |
+| Key/value | `<DescriptionList />` |
+| Breadcrumb | `<Breadcrumb />` |
+| Collapsible | `<Collapsible />` / `<Accordion />` |
+| Toast | `<ToastProvider />` + `useToast()` |
+| File upload | `<FileUpload />` |
+| Date filter | `<DateFilterBar />` (always wrap in pill chrome div) |
+| Actions menu | `<ActionDropdown />` |
+| Table action button | `<TableActionButton variant="primary\|neutral\|danger" />` |
+| Loading | `<Spinner />` |
+| Page loading | `<NavProgressBar />` (layout-mounted, never per-page) |
+
+### TableActionButton Rules
+- `primary`: main action (View, Edit, Approve). **Solo button = always primary.**
+- `neutral`: secondary action paired with primary.
+- `danger`: destructive (Remove, Delete, Cancel, Reject).
+- Never use `<Button size="sm">` in tables — inflates row height.
+
+### Admin Mobile Optimization Standard
+- Default to **mobile-first** cleanup for admin surfaces: shorten copy, reduce chrome, and keep dense views readable on small screens.
+- Prefer concise page descriptions with no filler punctuation or multi-clause explanations. One short sentence is the default.
+- Use `<PageHeader />` with `mobileInlineActions` and collapse mobile actions with `<PageHeaderMobileTools />` instead of hand-rolling mobile button rows.
+- Prefer `<PageRefreshButton iconOnly />` on mobile and keep full refresh buttons for desktop only when needed.
+- Group date filters, search helpers, and secondary actions inside the same header-tools pattern so the top of the page stays compact.
+- Remove redundant inner section headings above tables or lists when the page header, tabs, or overview stats already provide the context.
+- On mobile, give primary identifiers more space: names, titles, and key statuses should win over badges, pills, or secondary metrics.
+- Reduce mobile padding on leaderboard cards, action rows, and summary blocks when it improves scanability, but do not sacrifice tap targets.
+- If horizontal scrolling is necessary for strips or dense controls, make the whole card area scrollable rather than only the inner content.
+- Keep collapsible leaderboard/card behavior mobile-only when desktop has room to show the full content by default.
+- Mirror visible header and copy changes in loading shells, deferred fallbacks, and skeletons.
+- Reuse shared UI primitives already standardized here: `<PageHeader />`, `<PageHeaderMobileTools />`, `<ToolbarFiltersCollapsible />`, `<OverviewStatStrip />`, `<CompactTable />`, `<EmptyState />`, `<NumberInput />`, and other shared inputs before introducing custom mobile variants.
 
 ---
 
-## Code Quality Standards
+## Modal + Optimistic UI Pattern (Non-Negotiable)
 
-### TypeScript Strictness
-- `strict: true` in all tsconfig files
-- No `any` type. Ever. Use `unknown` and narrow with Zod validation
-- All API inputs validated with Zod schemas (defined in packages/shared)
-- All API outputs typed through tRPC inference
+Flow: submit → modal stays open → server `{success: true}` → modal closes + synthetic row appears → loader revalidates → real row replaces synthetic.
 
-### File Naming and Structure
-- Domain-Driven Design: each module (orders, inventory, logistics, marketing, finance, hr) has its own folder with routes/, services/, schemas/, and validators/
-- NestJS: one module per domain. Services contain business logic. Controllers are thin (just call services and return)
-- Remix: one route file per page. Loaders fetch data. Actions handle mutations. Components render UI. No business logic in components
+**5 hooks (use these, never hand-roll):**
+1. `useOptimisticListMerge<T>(fetcher, build)` — optimistic ADD (awaitSuccess: true default)
+2. `useOptimisticListPatches<T>(fetcher, build)` + `applyOptimisticPatches()` + `isOptimisticPatched()` — optimistic EDIT
+3. `useCloseOnFetcherSuccess(fetcher, onSuccess)` — edge-trigger close on `data.success === true`
+4. `useFetcherToast(fetcher.data, ...)` — toast on same tick
+5. Visual: `opacity-60` + disabled actions on in-flight rows. `isOptimisticId()` for adds, `isOptimisticPatched()` for edits.
 
-### Error Handling
-- All database operations wrapped in try/catch with meaningful error messages
-- All tRPC procedures use Zod input validation — invalid requests fail at the schema level before hitting business logic
-- Edge Worker implements graceful degradation — never show a user a 500 error. Buffer the order and show "Order received, processing shortly"
+**Reference:** `apps/web/app/features/logistics/LogisticsPage.tsx`
 
-### Testing Requirements
-- Every state transition in the Order Lifecycle must have an integration test
-- Every permission boundary (RLS) must have a test proving unauthorized access is blocked
-- Every edge case documented in the PRD must have a corresponding test case
+**Critical DON'Ts:** Never close modal in onSubmit. Never wait for `fetcher.state === 'idle'`. Never use `useEffect([actionSuccess])` for close. Never skip `__optimistic` prefix on ADD rows. Never add it on EDIT rows.
 
 ---
 
-## What NOT To Do
+## Frontend Data Loading
 
-- Do NOT use localStorage or sessionStorage for anything security-sensitive. Sessions live in Redis
-- Do NOT expose raw phone numbers in any API response, log, or error message — ever
-- Do NOT use auto-incrementing IDs — use UUIDv7
-- Do NOT skip the actor injection (SET LOCAL yannis.current_user_id) on any write operation
-- Do NOT allow state skipping in the order lifecycle — enforce the state machine
-- Do NOT use TypeORM — use Drizzle. TypeORM reflection-based types are unreliable for this level of data integrity
-- Do NOT hardcode commission rules — they must be dynamic JSONB configs editable by HR
-- Do NOT build a separate mobile app or a separate rider app — use PWA route groups within `apps/web` with offline sync
-- Do NOT store files locally — use Cloudflare R2 or S3 for all uploads (receipts, screenshots, invoices)
-- Do NOT implement the audit trail at the application level — it must be at the PostgreSQL trigger level using temporal tables
+- **Deferred shells**: `defer({ shell, pageData })` + `<Suspense fallback={<LoadingShell />}><Await>`. Never blank spinner.
+- **No waterfalls**: `Promise.all` for independent fetches.
+- **Paginate**: `<CompactTable />` + `<Pagination />` with URL-driven page/limit.
+- **Client cache**: `<CachedAwait>` + `cachedClientLoader` for read-mostly lists. Do NOT cache: live socket pages, detail pages with mutations, forms/wizards, rider PWA.
+- **NavProgressBar** covers cross-route progress. Never add global route-transition overlay.
 
 ---
 
-## Performance Benchmarks (Target)
+## Critical Do NOT Rules
+
+### Database & Backend
+- Never use `text` for PKs/FKs — use `uuid`
+- Never skip actor injection on writes — use `withActor()` / `withActorAndBranch()`
+- Never use bare `pgClient.set_config` — always inside the drizzle transaction
+- Never use TypeORM — use Drizzle
+- Never alter a table without syncing its `*_history` table
+- Never create business table without `branch_id` (except products, stock_batches)
+- Never `await` notification fan-out on hot paths — use `enqueueCreate*`
+
+### Order Lifecycle
+- Never skip states in order lifecycle
+- Never let CS mark REMITTED — accountant only
+- Never let CS closers transfer orders — HoCS/SuperAdmin only via Hot Swap
+- Never bypass order↔inventory gates (assertGlobalAvailability → assertLocationCanFulfill → reserveForAllocate → completeDelivery)
+- Never deduct source stock on PENDING transfer — only on approveTransfer
+
+### Security & PII
+- Never expose raw customer phone numbers in any response/log
+- Never use localStorage/sessionStorage for security-sensitive data
+- Never send raw phones via SMS/WhatsApp — platform bridge only
+- Never fire push without inserting in-app notification row first
+
+### RBAC
+- Never inline `role === 'SUPER_ADMIN'` — use `isAdminLevel(user)`
+- Never inline `role === 'FINANCE_OFFICER'` — use `hasFinanceAccess(user)`
+- Never gate exports on role checks — use per-domain export permission codes
+- Never generalize the Finance hat to other roles
+
+### UI
+- Never use `<Button size="sm">` in table action columns — use `<TableActionButton>`
+- Never close Modal on bare backdrop onClick (iOS phantom click issue) — mousedown+mouseup check
+- Never hand-roll optimistic UI — use the shared hooks
+- Never render roles with `badge-info` — use `<RoleBadge>`
+- Never use `<CountPill>` for single-record state — use `<StatusBadge>`
+
+### Mirror Mode
+- blockMutationsWhileMirroring middleware blocks all tRPC mutations
+- Client: check `data-mirror="1"` before any side-effect (notifications, socket, etc.)
+- Never delete mirror_sessions rows — permanent audit trail
+
+### Caching
+- Never commit `READ_THROUGH_CACHE_ENABLED=false` to deployable env
+- Never add cache wrapper without invalidation helper
+- Never revert PageBundle back to N parallel apiRequest calls
+- Never regress Postgres pool config (max:30, idle:300s, warmup)
+
+### Cross-branch CS routing & branch departments (2026-05)
+
+- **Attribution vs servicing:** `orders.branch_id` remains the funnel / media-buyer branch. CS routing rules (`cs_order_routing_rules` / `cs_order_routing_rule_targets`) pin **servicing** capacity with `servicing_branch_id` per target; optional `team_id` narrows to a CS squad on that branch, or null for the whole-branch CS_CLOSER pool there.
+- **`orders.list` (CS_CLOSER):** assigned-queue views use `(orders.branch_id = session branch OR orders.assigned_cs_id = viewer)` so orders attributed to another branch still appear when assigned to the closer.
+- **Branch org model:** `branch_departments` holds the fixed Marketing + CS bucket per branch; `branch_department_members` is the **teamless** department roster; `branch_teams` rows are optional squads (`branch_department_id` FK). UI: branch detail tab **Departments · squads** (`admin.branches.$branchId`).
+
+---
+
+## Performance Targets
 
 | Metric | Target |
 |---|---|
 | Edge Form Load | < 400ms |
-| VOIP Connection Latency | < 1.5 seconds |
-| Dashboard Data Refresh (Socket.io) | < 60 seconds staleness |
-| Customer Profile Search (CS) | < 3 seconds |
-| Profit/Loss Report Generation | < 3 seconds for 100k records (use Materialized Views) |
-| Order State Transition (API) | < 500ms |
-| Offline Sync (Rider PWA) | Auto-sync within 30 seconds of network recovery |
+| Order State Transition | < 500ms |
+| Admin landing (`/admin`) | < 200ms |
+| CEO Overview (`/admin/ceo`) | < 2s cold, < 500ms cached |
+| P&L Report (100k records) | < 3s (materialized views) |
+
+Dashboard split: `/admin` = lightweight quickOverview. `/admin/ceo` = full Executive Overview with MVs (15-min refresh cron).
 
 ---
 
 ## When In Doubt
 
-1. Check the PRD.md for the exact requirement
-2. Check the TASK.md for the current sprint priority
-3. If the PRD does not cover it, ask — do not assume
-4. If you are choosing between fast but fragile and slower but auditable — always choose auditable
-5. Every feature you build should answer: "If the CEO asks who did this and when, can the system answer in under 3 seconds?"
+1. Check `prd.md` for the requirement
+2. Check `task.md` for sprint priority
+3. Check `.claude/docs/` for module-specific specs
+4. If choosing fast-but-fragile vs slower-but-auditable — always choose auditable
+5. "If the CEO asks who did this and when, can the system answer in 3 seconds?"
+6. After changing order lifecycle, inventory, CS gates, or RBAC — update this file in the same PR

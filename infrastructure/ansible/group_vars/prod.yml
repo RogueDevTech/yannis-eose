@@ -1,0 +1,18 @@
+---
+# Prod environment variables — Yannis EOSE GCP prod VM.
+# Mirror of dev.yml with prod hostnames + a fresh TLS contact.
+
+env_name: prod
+
+web_hostname: office.hqyannis.com
+api_hostname: api-office.hqyannis.com
+
+web_upstream_port: 3000
+api_upstream_port: 4444
+
+tls_contact_email: ops@hqyannis.com
+# Leave false on the first prod run if Cloudflare DNS isn't pointed at the
+# prod VM IP yet. Flip to true and re-run the playbook once DNS resolves.
+provision_tls_certificate: false
+
+client_max_body_size: 50m

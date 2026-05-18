@@ -1,0 +1,20 @@
+---
+# Dev environment variables — Yannis EOSE GCP dev VM.
+# Hostnames must match the Cloudflare DNS records pointing at the VM IP.
+
+env_name: dev
+
+web_hostname: dev-office.hqyannis.com
+api_hostname: dev-api-office.hqyannis.com
+
+web_upstream_port: 3000
+api_upstream_port: 4444
+
+# TLS / Let's Encrypt
+tls_contact_email: evercoresystemsltd@gmail.com
+# Flip to `true` only after BOTH Cloudflare DNS records resolve to the VM
+# IP (the HTTP-01 challenge needs port 80 reachable on those hostnames).
+provision_tls_certificate: true
+
+# Max client request body — file uploads, large form payloads.
+client_max_body_size: 50m

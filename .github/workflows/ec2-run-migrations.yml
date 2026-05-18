@@ -1,0 +1,126 @@
+# Manual migration-only job on the selected dev VM: pulls the latest API image and runs
+# infrastructure/deploy/run-migrations.sh over SSH.
+name: Dev — run database migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment (must define GCP_* secrets)
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+      gcp_region:
+        description: GCP region for Artifact Registry
+        required: false
+        default: europe-west2
+        type: string
+      aws_region:
+        description: AWS region for ECR
+        required: false
+        default: eu-north-1
+        type: string
+
+concurrency:
+  group: dev-migrations-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate-gcp:
+    name: Pull API image + run migrations on GCE VM
+    runs-on: ubuntu-latest
+    # Runs unless DEPLOY_PLATFORM is explicitly 'aws'.
+    if: ${{ vars.DEPLOY_PLATFORM != 'aws' }}
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Copy migration assets to VM
+        env:
+          GCP_REGION: ${{ github.event.inputs.gcp_region || secrets.GCP_REGION || 'europe-west2' }}
+          GCP_ZONE: ${{ secrets.GCP_ZONE || 'europe-west2-a' }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_VM_NAME: ${{ secrets.GCP_VM_NAME }}
+          GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.GCP_ARTIFACT_REPOSITORY_ID || 'dev-yannis-eose' }}
+          GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.GCP_RUNTIME_ENV_SECRET_NAME || 'dev-yannis-runtime-env' }}
+        run: |
+          gcloud compute scp \
+            infrastructure/deploy/docker-compose.runtime.yml \
+            infrastructure/deploy/refresh-env.sh \
+            infrastructure/deploy/refresh-env-gcp.sh \
+            infrastructure/deploy/run-migrations.sh \
+            "$GCP_VM_NAME:/opt/yannis-eose/" \
+            --zone "$GCP_ZONE" \
+            --project "$GCP_PROJECT_ID"
+
+      - name: Run migrations on GCE VM
+        env:
+          GCP_REGION: ${{ github.event.inputs.gcp_region || secrets.GCP_REGION || 'europe-west2' }}
+          GCP_ZONE: ${{ secrets.GCP_ZONE || 'europe-west2-a' }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_VM_NAME: ${{ secrets.GCP_VM_NAME }}
+          GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.GCP_ARTIFACT_REPOSITORY_ID || 'dev-yannis-eose' }}
+          GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.GCP_RUNTIME_ENV_SECRET_NAME || 'dev-yannis-runtime-env' }}
+        run: |
+          gcloud compute ssh "$GCP_VM_NAME" \
+            --zone "$GCP_ZONE" \
+            --project "$GCP_PROJECT_ID" \
+            --command "cd /opt/yannis-eose && chmod +x ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' RUNTIME_ENV_SECRET_NAME='$GCP_RUNTIME_ENV_SECRET_NAME' ./refresh-env.sh && gcloud auth configure-docker '${GCP_REGION}-docker.pkg.dev' --quiet && COMPOSE_FILES='docker-compose.runtime.yml' IMAGE_REGISTRY='${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GCP_ARTIFACT_REPOSITORY_ID}' IMAGE_TAG='dev-latest' ./run-migrations.sh"
+
+  migrate-aws:
+    name: Pull API image + run migrations on EC2
+    runs-on: ubuntu-latest
+    # Runs unless DEPLOY_PLATFORM is explicitly 'gcp'.
+    if: ${{ vars.DEPLOY_PLATFORM != 'gcp' }}
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    env:
+      AWS_REGION: ${{ github.event.inputs.aws_region || secrets.AWS_REGION || 'eu-north-1' }}
+      AWS_RUNTIME_SECRET_NAME: ${{ secrets.AWS_RUNTIME_SECRET_NAME || 'dev-yannis-runtime-env' }}
+      AWS_VM_SSH_USER: ${{ secrets.EC2_SSH_USER || 'ubuntu' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Copy migration assets to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/deploy_key \
+            infrastructure/deploy/docker-compose.runtime.yml \
+            infrastructure/deploy/refresh-env.sh \
+            infrastructure/deploy/refresh-env-aws.sh \
+            infrastructure/deploy/run-migrations.sh \
+            "${{ env.AWS_VM_SSH_USER }}"@"$EC2_HOST":/opt/yannis-eose/
+
+      - name: Run migrations on EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ env.AWS_VM_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            cd /opt/yannis-eose
+            chmod +x ./refresh-env.sh ./refresh-env-aws.sh ./run-migrations.sh
+            DEPLOY_PLATFORM='aws' SECRET_NAME='${{ env.AWS_RUNTIME_SECRET_NAME }}' AWS_REGION='${{ env.AWS_REGION }}' ./refresh-env.sh
+            aws ecr get-login-password --region '${{ env.AWS_REGION }}' | docker login --username AWS --password-stdin '${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com'
+            COMPOSE_FILES='docker-compose.runtime.yml' IMAGE_REGISTRY='${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com' IMAGE_TAG='dev-latest' ./run-migrations.sh

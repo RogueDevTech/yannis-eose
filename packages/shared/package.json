@@ -2,25 +2,60 @@
   "name": "@yannis/shared",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
     "./db": "./src/db/index.ts",
     "./validators": "./src/validators/index.ts",
     "./enums": "./src/enums/index.ts",
-    "./trpc": "./src/trpc/index.ts"
+    "./trpc": "./src/trpc/index.ts",
+    "./migrations": "./src/migrations/run-sql-migrations.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:migrate:app": "tsx src/migrations/cli.ts",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx src/db/seed.ts --",
+    "db:seed:boost": "tsx src/db/seed-boost.ts",
+    "db:seed:delivery-remittance-disputed": "tsx src/db/seed-delivery-remittance-disputed.ts",
+    "db:seed-permissions": "tsx scripts/seed-permissions.ts",
+    "db:seed-message-templates": "tsx scripts/seed-message-templates.ts",
+    "db:audit-permission-coverage": "tsx scripts/audit-permission-coverage.ts",
+    "db:baseline": "tsx scripts/baseline-migrations.ts",
+    "db:dedupe-products": "tsx scripts/dedupe-products.ts",
+    "db:dedupe-products:loose": "tsx scripts/dedupe-products.ts --loose",
+    "simulate:orders": "tsx test-script/order-simulate.ts",
+    "simulate:cs": "tsx test-script/cs-simulation.ts",
+    "simulate:logistics": "tsx test-script/logistics-simulation.ts",
+    "simulate:3pl": "tsx test-script/3pl-simulation.ts",
+    "simulate:all": "tsx test-script/order-simulate.ts && tsx test-script/cs-simulation.ts && tsx test-script/logistics-simulation.ts && tsx test-script/3pl-simulation.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.38.3",
+    "postgres": "^3.4.8",
+    "tsx": "^4.21.0",
+    "uuidv7": "^1.2.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@faker-js/faker": "^9.9.0",
+    "@types/bcrypt": "^6.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "@vitest/coverage-v8": "^2.1.0",
     "@yannis/config": "workspace:*",
+    "bcrypt": "^6.0.0",
+    "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.2",
-    "typescript": "^5.7.3"
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.0"
   }
 }

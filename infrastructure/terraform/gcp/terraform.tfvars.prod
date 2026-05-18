@@ -1,0 +1,49 @@
+# Production tfvars — Yannis EOSE prod on GCP.
+#
+# Applied against a SEPARATE state file from dev so the dev apply can never
+# touch prod resources. See README "Production apply" section for the
+# `-state` + `-var-file` flags.
+#
+# NOTE: this account currently has a single GCP project, so prod reuses it.
+# All prod resources are `prod-yannis-eose-*` and never collide with the
+# dev-prefixed resources already in the same project. Move prod to its own
+# GCP project before the legacy "Sniper" cutover when the user opens one.
+
+project_id          = "project-26c432ec-b4f1-4e21-a6a"
+region              = "europe-west2"
+zone                = "europe-west2-a"
+environment         = "prod"
+
+# Match dev sizing — dev runs ~20% CPU / storage headroom on e2-small, so
+# prod starts there too. Resize on stop later if real traffic needs more.
+machine_type        = "e2-small"
+vm_boot_disk_size_gb = 20
+vm_admin_user       = "deployer"
+
+# Operator SSH key (matches the key on the dev box). Replace with a
+# prod-only operator key once one is minted.
+ssh_public_key      = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCxXbIKMg5kttEoA0NWDDP6e0QDtjgWWJgpDfVjzoda/AJvBejrjXuHv30LmEF8JDisBYygFhas2x/V4R6KfaULTNqIuJauIJib23YFqUXGqL572gA0wdT8QayOc7B8vsgzc0L+xCvLfz/5nfi039A8sEadsTlsv3Gwc7oNsGVOzmEZRlZjENzd7lbRSdDQXvo0sXyogl27lRlneapffs/o9dcH6cfkJPtp1MqLqViO0AK0qikWZCeN6h0MvC516zBtrBsgdXraPNCJZU9twmY7vrcFt8UkbIqMj4Nl77g9GgrNYfLY3dVbGckj+u3Ecj0w2IBTNm0f9ghOznmuDyZhIXwbSzLZ58Kc1FrnEaWcoafA4BrFj5lul2PDz12qxCU4rbkls+EsY7YbGTxt15EraIme3Go42WunUjN3RjyNLQrrn/KfrkPIjbrKt4/5NsUoiCT63XDIkljID8lAuXg7A0MnovvLqIjfVIHf05F79ry+lgB58CdPXsYqUGtifTJ+LH+ZZnos9I4OpjA1OPBNrwO87VmU2I0SjtiDm61oy4im2pRZlsZb57Le30LRILiw48wz4pY4yTL09n5gJctDercHclT87/IM/0R/IUGh1ljbeYyBglYcR+St7tSZySLeyKGCgoaYL5b/BTcStxypIiu5CyhS9o5tlo+u3AJSvw== Apple@MacBook-Pro-2.local"
+
+public_web_hostname = "office.hqyannis.com"
+public_api_hostname = "api-office.hqyannis.com"
+
+# CORS for the public asset bucket — must include every origin that uploads
+# directly via signed URL.
+bucket_cors_origins = [
+  "https://office.hqyannis.com",
+]
+
+# SSH open during initial provisioning so the GitHub Actions runner can land
+# the deploy. Lock to operator NAT / VPN egress IPs after first deploy:
+#   ssh_source_ranges = ["YOUR_OPERATOR_IP/32"]
+ssh_source_ranges   = [
+  "0.0.0.0/0",
+]
+
+# Web ingress (80/443) must stay open — Cloudflare-proxied requests and
+# Let's Encrypt HTTP-01 challenges originate from changing IP ranges. Lock
+# down via Cloudflare WAF rules, not VPC firewall.
+# web_source_ranges = ["0.0.0.0/0"]
+
+# Reverse proxy + TLS are provisioned by Ansible after Terraform apply.
+# See `infrastructure/ansible/README.md` for the two-stage flow.

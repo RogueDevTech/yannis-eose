@@ -1,0 +1,156 @@
+import { defer, json } from '@remix-run/node';
+import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
+import { Suspense } from 'react';
+import { Await, useLoaderData } from '@remix-run/react';
+import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
+import { RemitPage } from '~/features/remittances/RemitPage';
+import type {
+  RemittanceRecord,
+  DeliveryRemittanceRecord,
+  DeliveryRemittanceEligibleOrder,
+} from '~/features/remittances/RemitPage';
+import { TplRemitLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
+
+export const meta: MetaFunction = () => [
+  { title: 'Remit to warehouse — Yannis EOSE' },
+];
+
+export async function loader({ request }: LoaderFunctionArgs) {
+  const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.remit' });
+  const cookie = getSessionCookie(request);
+
+  const pageData = (async () => {
+    const [remittancesRes, productsRes, locationsRes, deliveryRemittancesRes, eligibleOrdersRes] = await Promise.all([
+      apiRequest<unknown>('/trpc/logistics.listRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/products.options?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/logistics.locationOptions?input=' + encodeURIComponent(JSON.stringify({ status: 'ACTIVE' })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/logistics.listDeliveryRemittances?input=' + encodeURIComponent(JSON.stringify({ page: 1, limit: 20 })), { method: 'GET', cookie }),
+      apiRequest<unknown>('/trpc/logistics.listDeliveryRemittanceEligibleOrders?input=' + encodeURIComponent(JSON.stringify({})), { method: 'GET', cookie }),
+    ]);
+
+    const remittancesData = remittancesRes.ok
+      ? (remittancesRes.data as { result?: { data?: { records: RemittanceRecord[] } } })?.result?.data
+      : null;
+    const productsData = productsRes.ok
+      ? (productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data
+      : null;
+    const locationsData = locationsRes.ok
+      ? (locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> } })?.result?.data
+      : null;
+    const deliveryRemittancesData = deliveryRemittancesRes.ok
+      ? (deliveryRemittancesRes.data as { result?: { data?: { records: DeliveryRemittanceRecord[] } } })?.result?.data
+      : null;
+    const eligibleOrdersPayload = eligibleOrdersRes.ok
+      ? (eligibleOrdersRes.data as { result?: { data?: { orders: DeliveryRemittanceEligibleOrder[] } } })?.result
+          ?.data
+      : null;
+
+    return {
+      remittances: remittancesData?.records ?? [],
+      products: productsData ?? [],
+      locations: (locationsData ?? []).map((l) => ({
+        id: l.id,
+        name: l.name,
+        providerName: l.providerName ?? null,
+      })),
+      userLocationId: user.logisticsLocationId ?? null,
+      deliveryRemittances: deliveryRemittancesData?.records ?? [],
+      eligibleOrders: eligibleOrdersPayload?.orders ?? [],
+    };
+  })();
+
+  return defer({ pageData });
+}
+
+export async function action({ request }: ActionFunctionArgs) {
+  const cookie = getSessionCookie(request);
+  const formData = await request.formData();
+  const intent = formData.get('intent')?.toString();
+
+  if (intent === 'createRemittance') {
+    await requirePermission(request, 'logistics.remit');
+    const productId = formData.get('productId')?.toString();
+    const toLocationId = formData.get('toLocationId')?.toString();
+    const quantitySent = parseInt(formData.get('quantitySent')?.toString() ?? '0', 10);
+    const receiptUrl = formData.get('receiptUrl')?.toString();
+
+    if (!productId || !toLocationId || quantitySent < 1) {
+      return json({ error: 'Product, destination location, and quantity are required' }, { status: 400 });
+    }
+    if (!receiptUrl || !receiptUrl.startsWith('http')) {
+      return json({ error: 'Please upload a receipt image before submitting' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/logistics.createRemittance', {
+      method: 'POST',
+      cookie,
+      body: {
+        productId,
+        toLocationId,
+        quantitySent,
+        receiptUrl,
+      },
+    });
+
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to submit remittance');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'createDeliveryRemittance') {
+    await requirePermission(request, 'logistics.remit');
+    const orderIdsJson = formData.get('orderIds')?.toString();
+    const receiptUrlsJson = formData.get('receiptUrls')?.toString();
+    let orderIds: string[] = [];
+    let receiptUrls: string[] = [];
+    try {
+      if (orderIdsJson) orderIds = JSON.parse(orderIdsJson) as string[];
+      if (receiptUrlsJson) receiptUrls = JSON.parse(receiptUrlsJson) as string[];
+    } catch {
+      return json({ error: 'Invalid form data' }, { status: 400 });
+    }
+    if (orderIds.length === 0) {
+      return json({ error: 'Select at least one delivered order' }, { status: 400 });
+    }
+    if (receiptUrls.length === 0) {
+      return json({ error: 'Upload at least one payment receipt' }, { status: 400 });
+    }
+
+    const res = await apiRequest<unknown>('/trpc/logistics.createDeliveryRemittance', {
+      method: 'POST',
+      cookie,
+      body: { orderIds, receiptUrls },
+    });
+
+    if (!res.ok) {
+      const err = extractApiErrorMessage(res.data, 'Failed to submit delivery remittance');
+      return json({ error: err }, { status: safeStatus(res.status) });
+    }
+    return json({ success: true });
+  }
+
+  return json({ error: 'Unknown action' }, { status: 400 });
+}
+
+export default function TplRemitRoute() {
+  const { pageData } = useLoaderData<typeof loader>();
+  return (
+    <Suspense fallback={<TplRemitLoadingShell />}>
+      <Await resolve={pageData}>
+        {(data) => (
+          <RemitPage
+            remittances={data.remittances}
+            products={data.products}
+            locations={data.locations}
+            userLocationId={data.userLocationId}
+            deliveryRemittances={data.deliveryRemittances}
+            eligibleOrders={data.eligibleOrders}
+          />
+        )}
+      </Await>
+    </Suspense>
+  );
+}

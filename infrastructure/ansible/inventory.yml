@@ -1,0 +1,36 @@
+---
+# Inventory for Yannis EOSE VMs.
+#
+# Each group corresponds to a deploy environment. Group vars live in
+# `group_vars/<env>.yml` and override per-host variables.
+#
+# Usage:
+#   ansible-playbook -i infrastructure/ansible/inventory.yml \
+#     infrastructure/ansible/playbook.yml --limit dev
+#
+# Add prod hosts under the `prod` group once the prod VM is created by
+# Terraform with `terraform.tfvars.prod`. The `ansible_host` value should
+# be the VM's external IP from the `vm_public_ip` Terraform output.
+
+all:
+  children:
+    dev:
+      hosts:
+        dev-yannis-eose-vm:
+          ansible_host: 34.142.110.199
+    prod:
+      hosts:
+        prod-yannis-eose-vm:
+          ansible_host: 34.105.183.13
+  vars:
+    # Default SSH config — override per-host or per-group if needed.
+    # gcloud pushed our SSH key into project metadata under the local Mac
+    # username (`Apple`). The browser-SSH user `evercoresystemsltd` also
+    # exists on the VM but has no key configured for Ansible.
+    ansible_user: Apple
+    ansible_python_interpreter: /usr/bin/python3
+    # gcloud manages this key when you `gcloud compute ssh` into a VM. It's
+    # the path of least resistance for GCP VMs and matches what already
+    # works in the user's terminal. Override with `--private-key` on the CLI
+    # if you use a different key.
+    ansible_ssh_private_key_file: ~/.ssh/google_compute_engine

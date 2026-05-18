@@ -1,0 +1,266 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: deploy-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Loud diagnostic — same repo also runs deploy-prod.yml, so the dev
+      # banner exists to make it impossible to confuse the two in the Actions
+      # log.
+      - name: Show target environment
+        run: |
+          echo "::notice title=DEV DEPLOY::Target environment is DEV (branch ${{ github.ref_name }}, sha ${{ github.sha }})"
+
+      # Diagnostic — surfaces the resolved value of vars.DEPLOY_PLATFORM.
+      # 'gcp' or 'aws' = deploy to that provider only.
+      # Anything else (empty, unset, '.', etc.) = deploy to BOTH in parallel.
+      - name: Show resolved deploy platform
+        run: |
+          PLATFORM="${{ vars.DEPLOY_PLATFORM }}"
+          echo "vars.DEPLOY_PLATFORM = '${PLATFORM}'"
+          case "$PLATFORM" in
+            gcp) echo "::notice::Deploying to GCP only." ;;
+            aws) echo "::notice::Deploying to AWS only." ;;
+            *)   echo "::notice::DEPLOY_PLATFORM is not 'aws' or 'gcp' — deploying to BOTH." ;;
+          esac
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm turbo build
+
+  deploy-gcp:
+    name: Deploy to Dev (GCP)
+    runs-on: ubuntu-latest
+    needs: build
+    # Runs unless DEPLOY_PLATFORM is explicitly 'aws' (i.e. runs for 'gcp', '', unset, or anything else).
+    if: ${{ vars.DEPLOY_PLATFORM != 'aws' }}
+    environment: dev
+    # Required for Workload Identity Federation — GitHub mints the OIDC token
+    # that GCP exchanges for short-lived SA credentials. Without `id-token:
+    # write` the auth step gets a 403 from sts.googleapis.com.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_REGION: ${{ secrets.GCP_REGION || 'europe-west2' }}
+      GCP_ZONE: ${{ secrets.GCP_ZONE || 'europe-west2-a' }}
+      GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.GCP_ARTIFACT_REPOSITORY_ID || 'dev-yannis-eose' }}
+      GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.GCP_RUNTIME_ENV_SECRET_NAME || 'dev-yannis-runtime-env' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show resolved deploy platform (environment scope)
+        run: 'echo "vars.DEPLOY_PLATFORM = ''${{ vars.DEPLOY_PLATFORM }}''"'
+
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Artifact Registry auth
+        run: |
+          gcloud auth configure-docker "${{ env.GCP_REGION }}-docker.pkg.dev" --quiet
+
+      - name: Build & push API image
+        env:
+          IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
+          IMAGE_TAG: dev-${{ github.sha }}
+        run: |
+          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-api:dev-latest
+
+      - name: Build & push Web image
+        env:
+          IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
+          IMAGE_TAG: dev-${{ github.sha }}
+        run: |
+          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-web:dev-latest
+
+      - name: Prepare VM deploy directory
+        run: |
+          gcloud compute ssh "${{ secrets.GCP_VM_NAME }}" \
+            --zone "${{ env.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --command "sudo mkdir -p /opt/yannis-eose && sudo chown \$USER:\$USER /opt/yannis-eose"
+
+      - name: Copy deploy assets to VM
+        run: |
+          gcloud compute scp \
+            infrastructure/deploy/docker-compose.runtime.yml \
+            infrastructure/deploy/docker-compose.runtime.tunnel.yml \
+            infrastructure/deploy/deploy-dev.sh \
+            infrastructure/deploy/deploy-runtime.sh \
+            infrastructure/deploy/deploy-gcp-dev.sh \
+            infrastructure/deploy/refresh-env.sh \
+            infrastructure/deploy/refresh-env-gcp.sh \
+            infrastructure/deploy/run-migrations.sh \
+            "${{ secrets.GCP_VM_NAME }}:/opt/yannis-eose/" \
+            --zone "${{ env.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Deploy on GCE VM
+        run: |
+          gcloud compute ssh "${{ secrets.GCP_VM_NAME }}" \
+            --zone "${{ env.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --command "cd /opt/yannis-eose && chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-gcp-dev.sh ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' GCP_REGION='${{ env.GCP_REGION }}' GCP_PROJECT_ID='${{ secrets.GCP_PROJECT_ID }}' ARTIFACT_REPOSITORY_ID='${{ env.GCP_ARTIFACT_REPOSITORY_ID }}' RUNTIME_ENV_SECRET_NAME='${{ env.GCP_RUNTIME_ENV_SECRET_NAME }}' IMAGE_TAG='dev-latest' ./deploy-dev.sh"
+
+  deploy-aws:
+    name: Deploy to Dev (AWS)
+    runs-on: ubuntu-latest
+    needs: build
+    # Runs unless DEPLOY_PLATFORM is explicitly 'gcp' (i.e. runs for 'aws', '', unset, or anything else).
+    if: ${{ vars.DEPLOY_PLATFORM != 'gcp' }}
+    environment: dev
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}
+      AWS_RUNTIME_SECRET_NAME: ${{ secrets.AWS_RUNTIME_SECRET_NAME || 'dev-yannis-runtime-env' }}
+      AWS_VM_SSH_USER: ${{ secrets.EC2_SSH_USER || 'ubuntu' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show resolved deploy platform (environment scope)
+        run: 'echo "vars.DEPLOY_PLATFORM = ''${{ vars.DEPLOY_PLATFORM }}''"'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Ensure ECR repositories exist
+        run: |
+          for repo in yannis-eose-api yannis-eose-web; do
+            aws ecr describe-repositories --repository-names "$repo" --region "${{ env.AWS_REGION }}" 2>/dev/null || \
+            aws ecr create-repository --repository-name "$repo" --region "${{ env.AWS_REGION }}"
+          done
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region "${{ env.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+
+      - name: Build & push API image
+        env:
+          IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_TAG: dev-${{ github.sha }}
+        run: |
+          docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-api:dev-latest
+
+      - name: Build & push Web image
+        env:
+          IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_TAG: dev-${{ github.sha }}
+        run: |
+          docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:dev-latest .
+          docker push $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG
+          docker push $IMAGE_REGISTRY/yannis-eose-web:dev-latest
+
+      - name: Copy deploy assets to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "$EC2_HOST" ]; then echo "::error::Secret EC2_HOST is not set."; exit 1; fi
+          if [ -z "$EC2_SSH_KEY" ]; then echo "::error::Secret EC2_SSH_KEY is not set."; exit 1; fi
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key "${{ env.AWS_VM_SSH_USER }}"@"$EC2_HOST" "sudo mkdir -p /opt/yannis-eose && sudo chown ${{ env.AWS_VM_SSH_USER }}:${{ env.AWS_VM_SSH_USER }} /opt/yannis-eose"
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i ~/.ssh/deploy_key \
+            infrastructure/deploy/docker-compose.runtime.yml \
+            infrastructure/deploy/docker-compose.runtime.tunnel.yml \
+            infrastructure/deploy/deploy-dev.sh \
+            infrastructure/deploy/deploy-runtime.sh \
+            infrastructure/deploy/deploy-aws-dev.sh \
+            infrastructure/deploy/refresh-env.sh \
+            infrastructure/deploy/refresh-env-aws.sh \
+            infrastructure/deploy/run-migrations.sh \
+            "${{ env.AWS_VM_SSH_USER }}"@"$EC2_HOST":/opt/yannis-eose/
+
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ env.AWS_VM_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            cd /opt/yannis-eose
+            chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-aws-dev.sh ./refresh-env.sh ./refresh-env-aws.sh ./run-migrations.sh
+            DEPLOY_PLATFORM='aws' AWS_REGION='${{ env.AWS_REGION }}' AWS_ACCOUNT_ID='${{ secrets.AWS_ACCOUNT_ID }}' SECRET_NAME='${{ env.AWS_RUNTIME_SECRET_NAME }}' IMAGE_TAG='dev-latest' ./deploy-dev.sh
+
+  deploy-edge-worker:
+    name: Deploy Edge Worker (gcp-dev)
+    runs-on: ubuntu-latest
+    needs: build
+    # The hqyannis.com edge worker is shared by AWS and GCP dev paths — the
+    # AWS dev API is on a different domain entirely (roguedevtech.com), so
+    # in practice the gcp-dev worker is the only one this workflow touches.
+    # Skipped if the changeset doesn't include worker or shared code.
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if worker code changed
+        id: changes
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -Eq '^(apps/edge-worker/|packages/shared/)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Worker / shared types unchanged — skipping deploy."
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.changes.outputs.changed == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.changed == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install deps
+        if: steps.changes.outputs.changed == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy worker (gcp-dev env)
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_HQYANNIS }}
+        run: pnpm --filter @yannis/edge-worker exec wrangler deploy --env gcp-dev

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Pre-push hook — runs unit tests before allowing a push.
+# Install: git config core.hooksPath .githooks
+# Skip:    git push --no-verify
+
+set -e
+
+echo "🧪 Running unit tests before push..."
+
+# Run unit tests for api and shared packages
+if ! pnpm turbo test --filter=@yannis/api --filter=@yannis/shared; then
+  echo ""
+  echo "❌ Tests failed. Push blocked."
+  echo "   Fix the failing tests or use 'git push --no-verify' to skip."
+  exit 1
+fi
+
+echo "✅ All tests passed. Pushing..."

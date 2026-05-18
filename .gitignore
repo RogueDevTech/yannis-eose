@@ -12,6 +12,7 @@ build/
 .env
 .env.local
 .env.*.local
+*-secrets-manager.json
 
 # IDE
 .idea/
@@ -19,6 +20,14 @@ build/
 *.swp
 *.swo
 *~
+apps/web/build
+apps/api/dist
+apps/api/node_modules
+apps/web/node_modules
+packages/shared/node_modules
+packages/config/node_modules
+packages/ui/node_modules
+
 
 # OS
 .DS_Store
@@ -35,3 +44,8 @@ coverage/
 # Cloudflare
 .wrangler/
 .dev.vars
+
+# Terraform local state and plugin cache
+**/.terraform/
+*.tfstate
+*.tfstate.*

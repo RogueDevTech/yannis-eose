@@ -1,0 +1,15 @@
+export const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: 'Super Admin',
+  ADMIN: 'Admin',
+  HEAD_OF_MARKETING: 'Head of Marketing',
+  MEDIA_BUYER: 'Media Buyer',
+  HEAD_OF_CS: 'Head of CS',
+  CS_CLOSER: 'CS Closer',
+  FINANCE_OFFICER: 'Finance Officer',
+  HEAD_OF_LOGISTICS: 'Head of Logistics',
+  LOGISTICS_MANAGER: 'Logistics Manager',
+  TPL_MANAGER: '3PL Manager',
+  TPL_RIDER: '3PL Rider',
+  STOCK_MANAGER: 'Stock Manager',
+  HR_MANAGER: 'HR Manager',
+};

@@ -1,10 +1,12 @@
 # PRD.md — Yannis EOSE: Complete Product Requirements Document
 
 **Project:** Yannis EOSE (Enterprise Operations & Sales Engine)
-**Version:** 1.0
+**Version:** 2.0
 **Date:** March 2026
-**Status:** Architecture Locked — Ready for Development
+**Status:** 100% Complete — Production-Ready (Infrastructure tasks 6.1 Multi-CDN and 6.3 Load Testing remain; all application features including Phase 14 Push Notification Center, Per-User App Theme, and Feature Batch 2 are complete)
 **Audience:** AI Coding Agent / Senior Engineers
+
+> **Implementation Note (March 2026):** All 7 core modules are fully built with backend services, tRPC routers, and frontend dashboards. VOIP is implemented with a 3-tier feature flag (disabled/mock/real Twilio). All 4 pillars are satisfied. Phase 14 Push Notification Center (lock-screen push, broadcast, automation rules, delivery log) is complete. Per-user app theme (6 themes, server-synced, before-paint boot script) is complete. See `task.md` for detailed completion status per task.
 
 ---
 
@@ -93,9 +95,9 @@ The system is divided into **7 interlocking functional modules** plus a **univer
 
 **Media Buyer** — Plans and executes media campaigns. Creates sales forms from approved Offer Templates. Logs daily ad spend with mandatory screenshots. Views own orders, own campaigns, own payouts. Cannot set prices or see cost data.
 
-**Head of CS** — Manages the customer service team. Views all CS agent performance metrics. Can Hot Swap (mass-reassign) orders between agents. Views SLA breach reports.
+**Head of CS** — Manages the customer service team. Views all CS closer performance metrics. Can Hot Swap (mass-reassign) orders between agents. Views SLA breach reports.
 
-**CS Agent** — First line of contact for order confirmation. Receives auto-dispatched orders. Calls customers via VOIP bridge. Confirms, cancels, or updates orders. Can only see orders assigned to them. Never sees full phone numbers.
+**CS Closer** — First line of contact for order confirmation. Receives auto-dispatched orders. Calls customers via VOIP bridge. Confirms, cancels, or updates orders. Can only see orders assigned to them. Never sees full phone numbers.
 
 **Finance Officer** — Reviews and approves all financial requests (media spend, procurement, logistics reimbursements). Manages invoices. Views all cost data. Cannot approve their own requests.
 
@@ -109,23 +111,152 @@ The system is divided into **7 interlocking functional modules** plus a **univer
 
 **HR Manager** — Configures commission rules. Manages settlement windows. Adds manual earnings adjustments. Views all staff payouts.
 
+**Branch Admin** — Manages users, settings, and reporting within their assigned branch only. Cannot access other branches, create new branches, or modify global commission structures. Sits between SuperAdmin and the module heads in the role hierarchy.
+
 ### 5.2 Permission Matrix
 
-| Capability | SuperAdmin | HoM | Media Buyer | Head CS | CS Agent | Finance | Head Logistics | Warehouse Mgr | 3PL Manager | 3PL Rider | HR Manager |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| View all orders | Yes | No | Own only | CS orders | Assigned only | Yes (read) | Yes | No | Own location | Own assigned | No |
-| See cost_price / margin | Yes | No | No | No | No | Yes | No | No | No | No | No |
-| See full phone number | Audit only | No | No | No | No (VOIP) | No | No | No | No (masked) | No | No |
-| Approve financial requests | Yes | No | No | No | No | Yes (not own) | No | No | No | No | No |
-| Edit commission rules | Yes | No | No | No | No | No | No | No | No | No | Yes |
-| Manage users | Yes | No | No | No | No | No | No | No | No | No | No |
-| View global audit trail | Yes | No | No | No | No | No | No | No | No | No | No |
-| Reassign CS orders | Yes | No | No | Yes | No | No | No | No | No | No | No |
-| Transfer stock to 3PL | Yes | No | No | No | No | No | Yes | Yes | No | No | No |
-| Verify received stock | No | No | No | No | No | No | No | No | Yes | No | No |
-| Mark delivery status | No | No | No | No | No | No | No | No | No | Yes | No |
-| Create funding record | No | Yes | No | No | No | No | No | No | No | No | No |
-| Log ad spend | No | No | Yes | No | No | No | No | No | No | No | No |
+| Capability | SuperAdmin | Branch Admin | HoM | Media Buyer | Head CS | CS Closer | Finance | Head Logistics | Warehouse Mgr | 3PL Manager | 3PL Rider | HR Manager |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| View all orders | Yes | Branch only | No | Own only | CS orders | Assigned only | Yes (read) | Yes | No | Own location | Own assigned | No |
+| See cost_price / margin | Yes | No | No | No | No | No | Yes | No | No | No | No | No |
+| See full phone number | Audit only | No | No | No | No | No (VOIP) | No | No | No | No (masked) | No | No |
+| Approve financial requests | Yes | Branch only | No | No | No | No | Yes (not own) | No | No | No | No | No |
+| Edit commission rules | Yes | No | No | No | No | No | No | No | No | No | No | Yes |
+| Manage users | Yes | Branch only | No | No | No | No | No | No | No | No | No | No |
+| View global audit trail | Yes | Branch only | No | No | No | No | No | No | No | No | No | No |
+| Reassign CS orders | Yes | Branch only | No | No | Yes | No | No | No | No | No | No | No |
+| Transfer stock to 3PL | Yes | No | No | No | No | No | No | Yes | Yes | No | No | No |
+| Verify received stock | No | No | No | No | No | No | No | No | No | Yes | No | No |
+| Mark delivery status | No | No | No | No | No | No | No | No | No | No | Yes | No |
+| Create funding record | No | No | Yes | No | No | No | No | No | No | No | No | No |
+| Log ad spend | No | No | No | Yes | No | No | No | No | No | No | No | No |
+| Use Mirror View | No | No | No | No | Yes | No | No | No | No | No | No | No |
+| Manage message templates | Yes | Branch only | No | No | Yes | No | No | No | No | No | No | No |
+| Configure dispatch mode | Yes | Branch only | No | No | Yes | No | No | No | No | No | No | No |
+
+### 5.3 Permission-first RBAC (locked — April 2026)
+
+**Purpose:** The matrix in §5.2 remains the *product* intent. **Runtime enforcement** is **permission-first**: access is driven by **effective permission codes** (+ explicit scope flags where applicable), not by role labels alone. **Custom role templates** may grant any permission; the legacy `users.role` enum is a **label / compatibility** field for HR and reporting, not the sole authority gate.
+
+**Non-negotiables**
+
+- **`SUPER_ADMIN`** is the only principal that may receive **unconditional** tRPC `permissionProcedure` bypass. Do **not** reintroduce **`ADMIN`** (or other roles) as a blanket bypass beside `SUPER_ADMIN`.
+- **Effective permissions (non–SuperAdmin)** = **SYSTEM/CUSTOM role template** ∪ **legacy `role_permissions` for `users.role`** ∪ **`user_permissions` grants** − **revokes**.
+- **System role templates** (`role_templates.kind = SYSTEM`, `locked = true` for protected presets) stay aligned with the seeded catalog; migration `0093` backfills templates from `role_permissions`.
+- **Finance field stripping** uses `hasFinanceAccess()` (primary role, Finance hat, **or** `finance.costView`) — not “admin-class” shortcut.
+- **Mirror Mode** and **global audit** gates use **permissions + scope** (see `apps/api/src/common/authz.ts`); do not expand mirror targets without a product decision.
+
+**Operational commands**
+
+- After changing permission definitions or `ROLE_PERMISSIONS` in seed: `pnpm --filter @yannis/shared db:seed-permissions`
+- Static string coverage of `permissionProcedure('…')` codes: `pnpm --filter @yannis/shared db:audit-permission-coverage`
+
+**Canonical implementation files (do not drift)**
+
+| Concern | Location |
+|--------|----------|
+| Effective permissions + sensitive permission list | `apps/api/src/permissions/permissions.service.ts` |
+| tRPC middleware / session merge | `apps/api/src/trpc/trpc.middleware.ts`, `apps/api/src/trpc/trpc.ts` |
+| Scope, mirror, branch visibility | `apps/api/src/common/authz.ts` |
+| Finance strip | `apps/api/src/common/utils/strip-finance-fields.ts` |
+| Schema | `packages/shared/src/db/schema/rbac.ts`, `packages/shared/src/db/schema/users.ts` |
+| Migration (templates + user scope columns) | `packages/shared/drizzle/0093_permission_first_role_templates.sql` |
+| Seed + SYSTEM template reconciliation | `packages/shared/scripts/seed-permissions.ts` |
+| Role template CRUD | `apps/api/src/permissions/role-templates.service.ts`, `apps/api/src/trpc/routers/role-templates.router.ts` |
+| Permission catalog API | `apps/api/src/trpc/routers/permissions.router.ts` |
+| Staff create / template + scope | `apps/api/src/users/users.service.ts`, `apps/web/app/features/users/UserCreatePage.tsx`, `apps/web/app/routes/hr.users.new/route.tsx` |
+| Role templates admin UI | `apps/web/app/features/settings/RoleTemplatesPage.tsx`, `apps/web/app/routes/admin.settings.role-templates/route.tsx` |
+| Sidebar / nav capability patterns | `apps/web/app/components/layout/dashboard-layout.tsx`, `apps/web/app/lib/rbac.ts` |
+
+**Locked agent context (Cursor):** `.cursor/rules/permission-first-rbac.mdc` (`alwaysApply: true`). **Companion docs:** `CLAUDE.md` (Permission-first RBAC pointer), `task.md` (Locked: Permission-first RBAC).
+
+---
+
+## 5a. Multi-Branch Architecture
+
+### 5a.1 Purpose
+The platform supports a single master account operating across multiple independent branches. Each branch has its own CS team, its own orders, its own campaigns, its own reporting, and its own settings. A SuperAdmin or designated cross-branch role sees the full picture across all branches. This architecture is designed to be flexible — spinning up a new branch requires no code changes.
+
+### 5a.2 The Branch Model
+
+**A branch is a hard tenant boundary**, not just a filter. All business data is scoped to a branch via a `branch_id` column enforced at the PostgreSQL Row-Level Security (RLS) level.
+
+**`branches` table:**
+| Column | Type | Description |
+|---|---|---|
+| `id` | UUIDv7 PK | Branch identifier |
+| `name` | text | Display name (e.g., "Lagos Branch", "Abuja Branch") |
+| `code` | text (unique) | Short code for reference (e.g., "LGS", "ABJ") |
+| `status` | enum | ACTIVE, INACTIVE |
+| `settings` | JSONB | Branch-level overrides (commission defaults, dispatch mode, claim_cap, etc.) |
+| `created_at` | timestamp | Creation timestamp |
+
+**`user_branches` join table:**
+| Column | Type | Description |
+|---|---|---|
+| `user_id` | FK → users.id | User |
+| `branch_id` | FK → branches.id | Branch |
+| `role_in_branch` | userRoleEnum (nullable) | If set, overrides the user's global role for this branch |
+| `is_primary` | boolean | Which branch is the user's default on login |
+
+A user can belong to multiple branches. If they do, they see a **Branch Switcher** in the sidebar and their active session carries a `current_branch_id`.
+
+### 5a.3 Tables That Carry `branch_id`
+
+The following tables gain a `branch_id` column. Every RLS policy on these tables filters by the active session's `branch_id`:
+
+| Table | Branch Scope Meaning |
+|---|---|
+| `orders` | Order belongs to the branch where it was created |
+| `campaigns` | Campaign runs under a specific branch |
+| `marketing_funding` | Funding record tied to a branch's budget |
+| `ad_spend_logs` | Ad spend tracked per branch |
+| `inventory_levels` | Stock availability per branch location |
+| `commission_plans` | Commission rules per branch (override global) |
+| `payout_records` | Staff payouts scoped to branch |
+| `logistics_locations` | A 3PL location serves a specific branch |
+| `users` | User has a `primary_branch_id` (most common branch) |
+| `message_templates` | CS message templates per branch |
+
+**Products and `stock_batches` do NOT carry `branch_id`.** The product catalog is global. Stock is tracked per branch via `inventory_levels.branch_id`.
+
+### 5a.4 Actor Injection — Branch Context
+
+The actor injection pattern is extended. Every write transaction now sets two session variables:
+
+```sql
+SET LOCAL yannis.current_user_id = '<user_uuid>';
+SET LOCAL yannis.current_branch_id = '<branch_uuid>';
+```
+
+RLS policies read `current_setting('yannis.current_branch_id', true)` to filter rows. The `*_history` tables also record `branch_id` on every row version for full cross-branch audit.
+
+**SuperAdmin and global Finance roles bypass branch RLS entirely** — they see all data across all branches without needing to switch.
+
+### 5a.5 New Role: Branch Admin
+
+**Branch Admin** — A new role between SuperAdmin and the module heads. Can manage users, view reports, and configure settings **within their assigned branch only**. Cannot access other branches, cannot create new branches, and cannot modify global commission structures.
+
+### 5a.6 Branch Switcher UI
+
+If a user belongs to more than one branch, a branch selector appears in the sidebar header. Selecting a branch:
+1. Updates `current_branch_id` in their Redis session
+2. Refreshes the dashboard with branch-scoped data
+3. All subsequent API calls carry the new branch context
+
+The currently active branch is always clearly displayed in the UI.
+
+### 5a.7 Cross-Branch Reporting
+
+| Role | Cross-Branch Access |
+|---|---|
+| SuperAdmin | Full — sees all branches simultaneously or filtered by branch |
+| Global Finance Officer | Aggregated P&L across branches with per-branch breakdown |
+| CEO Dashboard | All branches aggregated + branch comparison cards |
+| Branch Admin | Own branch only |
+| All other roles | Own branch only |
+
+The CEO executive dashboard shows branch-level KPI breakdowns as separate cards alongside the global totals.
 
 ---
 
@@ -167,7 +298,7 @@ Customer fills form → POST to Cloudflare Worker (Edge)
 
 ### 6.4 Edge Cases
 
-**Ghost Orders (Double Submit):** Customer clicks Submit 5 times. The Edge Worker hashes `phone_number + product_id` and checks Redis. Second through fifth submissions are flagged as `POTENTIAL_DUPLICATE` and stored separately. CS agent sees a warning: "Another order from this customer exists (created 3m ago)" and can merge or dismiss.
+**Ghost Orders (Double Submit):** Customer clicks Submit 5 times. The Edge Worker hashes `phone_number + product_id` and checks Redis. Second through fifth submissions are flagged as `POTENTIAL_DUPLICATE` and stored separately. CS closer sees a warning: "Another order from this customer exists (created 3m ago)" and can merge or dismiss.
 
 **API Downtime:** If the primary NestJS API is completely unreachable, the Cloudflare Worker buffers orders in QStash. A "Healer" cron job checks the queue every 60 seconds. As soon as the API is back, it drains the queue into Postgres. The customer never sees an error — they always get "Order received!"
 
@@ -184,23 +315,42 @@ Customer fills form → POST to Cloudflare Worker (Edge)
 ### 7.1 Purpose
 Securely confirm orders through outbound calls while protecting customer PII from internal theft. Distribute workload fairly across agents.
 
-### 7.2 The Weighted Dispatch System
+### 7.2 The Dispatch System (Three Modes)
 
-When a new order enters the system with status `UNPROCESSED`, it must be automatically assigned to a CS agent.
+The Head of CS configures the active dispatch mode via system settings. There are three modes:
 
-**Algorithm:**
-1. Query all CS agents with status `ACTIVE` (currently on duty — managed by Head of CS)
-2. For each active agent, count their `UNPROCESSED` + `CS_ENGAGED` orders (active pending workload)
-3. Assign the new order to the agent with the **lowest active pending count**
-4. If two agents are tied, assign to the one who has been idle longest (last_action_timestamp)
-5. Head of CS can manually set agent capacity limits (e.g., max 15 pending orders per agent)
+---
 
-**The order is now visible in that agent's personal queue.**
+**Mode 1: Load-Balanced (Default)**
+When a new order enters with status `UNPROCESSED`, it is automatically pushed to an agent:
+1. Query all CS closers with status `ACTIVE`
+2. Count each agent's `UNPROCESSED` + `CS_ENGAGED` orders (active pending workload)
+3. Assign to the agent with the **lowest active pending count**
+4. If tied, assign to the one idle longest (`last_action_timestamp`)
+5. Head of CS can set per-agent capacity limits (e.g., max 15 pending)
+
+---
+
+**Mode 2: Performance-Based**
+Same auto-push as Mode 1, but the assignment algorithm prioritises agents with higher delivery rate and confirmation rate this month before falling back to pending count as a tiebreaker.
+
+---
+
+**Mode 3: Claim Mode (Open Queue)**
+Orders are NOT auto-assigned. They sit in a live **Claim Queue** visible to all available CS reps simultaneously via Socket.io.
+
+- A rep sees the queue and clicks **"Claim"** on an order they want
+- The server atomically locks the order (Redis SETNX or Postgres row lock) — only one rep wins the claim race
+- **Claim Cap:** A rep cannot claim a new order if they already have ≥ `claim_cap` unconfirmed orders. Default cap = 2. Configurable by Head of CS globally or per-agent.
+- If a rep is at cap, the Claim button is disabled with tooltip: "Confirm your pending orders before claiming more"
+- `claim_cap` is a system setting editable by Head of CS
+
+**The order is now visible in the claiming agent's personal queue regardless of mode.**
 
 ### 7.3 The Call Flow (VOIP Privacy Bridge)
 
 ```
-CS Agent sees order in queue (phone: 0803****1234)
+CS Closer sees order in queue (phone: 0803****1234)
     → Agent clicks "Call Customer" button
     → System logs ACCESS_EVENT in audit trail (agent_id, order_id, timestamp)
     → System sends call_token to VOIP provider (Twilio/MessageBird)
@@ -219,7 +369,7 @@ CS Agent sees order in queue (phone: 0803****1234)
 
 ### 7.4 Status Update Rules (The Status Lock)
 
-After a call, the CS agent needs to update the order status. These transitions have hard gates:
+After a call, the CS closer needs to update the order status. These transitions have hard gates:
 
 | Action | UI State | Gate |
 |---|---|---|
@@ -232,13 +382,15 @@ After a call, the CS agent needs to update the order status. These transitions h
 
 During the confirmation call, the customer may change their mind:
 
-**Address Change:** CS agent updates the delivery address. The system creates a version snapshot — the original address is preserved in the temporal table. The order history timeline shows: "Address changed from [old] to [new] by Agent Amaka at 10:25 AM."
+**Address Change:** CS closer updates the delivery address. The system creates a version snapshot — the original address is preserved in the temporal table. The order history timeline shows: "Address changed from [old] to [new] by Agent Amaka at 10:25 AM."
 
-**Quantity Change / Upsell:** CS agent can add or remove products. The system recalculates the total and updates inventory reservation accordingly. If adding products, system checks stock availability in real-time. If stock is insufficient, the UI shows a warning.
+**Quantity Change / Upsell:** CS closer can add or remove products. The system recalculates the total and updates inventory reservation accordingly. If adding products, system checks stock availability in real-time. If stock is insufficient, the UI shows a warning.
 
-**Delivery Scheduling:** CS agent records the customer's preferred delivery time and any special instructions.
+**Delivery Scheduling:** CS closer records the customer's preferred delivery time and any special instructions.
 
-### 7.6 Hot Swap (Manual Reassignment)
+### 7.6 Hot Swap (Management Reassignment Only)
+
+**Order reassignment is a management action only.** CS closers CANNOT initiate order transfers between themselves. Only Head of CS and SuperAdmin can reassign orders.
 
 The Head of CS has a management dashboard showing all agents and their current workloads.
 
@@ -246,7 +398,7 @@ The Head of CS has a management dashboard showing all agents and their current w
 **Bulk Reassignment:** Head of CS can select multiple orders from Agent A (or select all) and reassign them to Agent B in one action.
 **Auto-Reassignment Trigger:** If an agent has been inactive for > 10 minutes (no actions logged), the system flags them. Head of CS receives a notification suggesting reassignment.
 
-Every reassignment is logged in the audit trail: "Order #XYZ transferred from Agent A to Agent B by Head of CS (Reason: Agent A Offline)."
+Every reassignment is logged in the audit trail: "Order #XYZ reassigned from Agent A to Agent B by Head of CS (Reason: Agent A Offline)."
 
 ### 7.7 Edge Cases
 
@@ -254,9 +406,56 @@ Every reassignment is logged in the audit trail: "Order #XYZ transferred from Ag
 
 **Agent Fakes "No Answer":** The Status Lock prevents marking "No Answer" unless the VOIP log confirms a call attempt was actually made. If the VOIP log shows call_duration = 0 and call_status = no_answer, the system allows it (phone actually rang but nobody picked up). If there is NO call log at all, the button stays disabled.
 
-**Customer Calls Back:** The VOIP system recognizes the incoming number and routes the call to the specific CS agent last assigned to that customer's order. A browser notification popup appears: "Incoming Call: Order #502 — Customer Adaeze." Agent clicks "Answer" and the WebRTC connection starts.
+**Customer Calls Back:** The VOIP system recognizes the incoming number and routes the call to the specific CS closer last assigned to that customer's order. A browser notification popup appears: "Incoming Call: Order #502 — Customer Adaeze." Agent clicks "Answer" and the WebRTC connection starts.
 
 **PWA Incoming Calls:** Because the dashboard is a PWA, agents receive Web Push notifications for incoming calls even if the browser is minimized or the phone screen is off.
+
+### 7.8 CS Communication Panel
+
+Every order detail page has a unified **Communication Panel** with three channels. The CS rep never sees the raw phone number — all communications are routed through the platform's bridge.
+
+**Channel 1 — Call (VOIP)**
+Existing VOIP implementation. Click "Call" → platform initiates WebRTC connection. Covered in Section 7.3.
+
+**Channel 2 — SMS**
+CS rep types a short message or selects a template and clicks Send. The platform sends the SMS to the customer's number via the messaging bridge (Twilio SMS). The rep never sees the number. The send is logged as a timeline event on the order.
+
+**Channel 3 — WhatsApp (Template Messages)**
+One-click template dispatch. Templates are pre-configured by Head of CS or SuperAdmin with dynamic placeholders:
+- `{{customer_name}}` — pulled from order
+- `{{product_name}}` — pulled from order items
+- `{{order_id}}` — the order reference
+- `{{delivery_address}}` — from the order
+- `{{estimated_date}}` — manually set or from system
+
+The rep selects a template → placeholders are auto-filled from order data → rep reviews rendered message → clicks Send. No typing required. The message is dispatched via the platform's WhatsApp bridge. Logged as a timeline event.
+
+**Template Management:**
+Head of CS or SuperAdmin can create, edit, and archive message templates. Templates are branch-scoped. Each template specifies: name, channel (SMS/WHATSAPP), body text with placeholders, and status (ACTIVE/ARCHIVED).
+
+**`message_templates` table:** `id`, `name`, `channel`, `body`, `created_by`, `branch_id`, `status`
+**`outbound_messages` table:** `id`, `order_id`, `agent_id`, `channel`, `template_id`, `rendered_body`, `status` (SENT/FAILED), `sent_at`
+
+All sent messages appear in the order's Communication History tab and in the Order Lifecycle Timeline.
+
+### 7.9 Supervisor Mirror View
+
+The Head of CS can see exactly what any CS rep under them is currently looking at — the same interface, same order, in real time. This is a live monitoring capability built on Socket.io state broadcasting.
+
+**How it works:**
+1. When a CS rep navigates to any page or opens any panel, their UI state is broadcast to the server via Socket.io: `{ agentId, currentRoute, currentOrderId, currentPanel, lastActionAt }`
+2. The server stores the last known state per agent and relays it to any supervisor watching that agent's room
+3. Head of CS sees a **Team Live View** panel in the CS dashboard — each active rep shown as a card: "Amaka — Viewing Order #1042 (On Call)" / "Chidi — Idle since 10:32"
+4. Clicking a rep card opens **Mirror View** — a read-only replica of the order detail page that rep is currently on, receiving live state updates
+
+**Constraints:**
+- Mirror View is strictly **read-only**. The supervisor cannot take any actions through it.
+- The CS rep sees a subtle **"Being Observed" indicator** (a coloured dot or notification banner) when a supervisor has their mirror open. Transparency is required — reps must always know when they are being watched.
+- Only Head of CS and SuperAdmin can use Mirror View.
+
+**Socket.io events:**
+- `agent:state_update` — broadcast from rep client to server on every route/panel change
+- `supervisor:watching` — server sends to rep when a supervisor opens their mirror, triggering the observation indicator
 
 ---
 
@@ -275,6 +474,8 @@ Each product has:
 - `cost_price` (factory cost — HIDDEN from all roles except SuperAdmin and Finance Head)
 - `min_threshold` (minimum stock level before triggering restock alert)
 - `category`, `tags`, `status` (active/archived)
+
+**Product Creation with Initial Stock:** When creating a new product, the Stock/Product Manager can optionally add initial stock quantity and select a location (e.g. Main Warehouse). This creates the product and a FIFO batch in one step, using the product's cost price as factory cost (landing cost = 0). Restocking is done separately via Inventory → Stock Intake.
 
 ### 8.3 FIFO Batch Costing
 
@@ -404,7 +605,7 @@ When an order is `CONFIRMED` by CS, the Logistics Manager allocates it to a Thir
 - Must capture: OTP confirmation or recipient signature
 - GPS coordinates logged
 - Stock: DELIVERED (final — deducted from inventory)
-- Commission triggered for Media Buyer and CS Agent
+- Commission triggered for Media Buyer and CS Closer
 - Revenue recognized in Finance
 
 **Partial Delivery:**
@@ -530,7 +731,7 @@ Costs:
   + Internal Fulfillment Cost (warehouse → 3PL transfer, amortized per unit)
   + Delivery Fee (quoted by Third-Party Logistics for this specific order)
   + Ad Spend (proportional: total_ad_spend / total_orders for this campaign)
-  + Commission (Media Buyer commission + CS Agent commission for this order)
+  + Commission (Media Buyer commission + CS Closer commission for this order)
 
 True Net Profit = Revenue - Total Costs
 ```
@@ -642,7 +843,7 @@ The settlement period is CONFIGURABLE by HR: Weekly, Bi-weekly, or Monthly.
 
 If an order that was already counted in a previous payout is later returned:
 
-1. System creates a `PENDING_DEDUCTION` record linked to the original order and the affected staff members (Media Buyer AND CS Agent)
+1. System creates a `PENDING_DEDUCTION` record linked to the original order and the affected staff members (Media Buyer AND CS Closer)
 2. The deduction appears in the next settlement period as a negative line item
 3. Payout calculation: `SUM(current_period_earnings) - SUM(pending_deductions) = final_payout`
 
@@ -707,7 +908,7 @@ The audit trail is NOT a separate application-level log table. It is built into 
 | Field update | Address changed | Editor ID, old value, new value, timestamp |
 | Status change | Order CONFIRMED → ALLOCATED | Actor ID, old status, new status, timestamp |
 | Financial action | Spend request approved | Approver ID, amount, decision reason, timestamp |
-| Access event | CS agent clicked "Call" (phone number accessed) | Agent ID, order ID, data accessed, timestamp |
+| Access event | CS closer clicked "Call" (phone number accessed) | Agent ID, order ID, data accessed, timestamp |
 | Login/logout | User authenticated | User ID, IP address, device info, timestamp |
 | Permission change | User role updated | Admin ID who made change, old role, new role |
 | Failed access | Unauthorized data request blocked by RLS | User ID, attempted action, blocked resource |
@@ -725,6 +926,87 @@ The audit trail is NOT a separate application-level log table. It is built into 
 **Bulk Operations:** If a Head of CS reassigns 50 orders at once, the audit trail creates 50 individual entries (one per order), all with the same actor and timestamp but different record IDs.
 
 **System-Generated Events:** Automated triggers (SLA breaches, stock alerts, clawback generation) are logged with actor = `SYSTEM` and include the trigger rule that caused them.
+
+---
+
+## 13a. Module 9: Order Lifecycle Timeline
+
+### 13a.1 Purpose
+The raw database audit trail records every field-level mutation. The Order Lifecycle Timeline is a separate, **human-readable, per-order narrative** that tells the story of an order from submission to delivery in plain language. Every event has a named person and an exact timestamp — never "yesterday", never an email address.
+
+This timeline is distinct from the temporal history tables. It is purpose-built for operational visibility and is the primary UI element on every order detail page across all roles.
+
+### 13a.2 The Timeline Event Table
+
+**`order_timeline_events` table:**
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | UUIDv7 PK | Event identifier |
+| `order_id` | FK → orders.id | Which order this event belongs to |
+| `event_type` | timelineEventTypeEnum | See full list below |
+| `actor_id` | FK → users.id (nullable) | User who triggered this event (null for system/edge events) |
+| `actor_name` | text | Denormalized full name at time of event (for fast rendering, survives user renames) |
+| `description` | text | Human-readable sentence: "Order confirmed by Amaka Obi" |
+| `metadata` | JSONB | Contextual extras: old/new values, quantities, durations, GPS coords, template names |
+| `branch_id` | FK → branches.id | Branch context |
+| `created_at` | timestamptz | Exact event timestamp (server time, not client) |
+
+**Every state transition service method must write a `order_timeline_events` row in the same database transaction.** The event writer is never called separately — it is atomic with the mutation.
+
+### 13a.3 Full Event Type Enum (`timelineEventTypeEnum`)
+
+| Event Type | Triggered By | Description Template |
+|---|---|---|
+| `ORDER_RECEIVED` | Edge Worker / Offline creation | "Order received via [source] at [timestamp]" |
+| `ORDER_AUTO_ASSIGNED` | Dispatch algorithm | "Auto-assigned to [agent name] by system" |
+| `ORDER_MANUALLY_ASSIGNED` | HoCS / SuperAdmin | "Assigned to [agent name] by [actor name]" |
+| `ORDER_REASSIGNED` | HoCS / SuperAdmin Hot Swap | "Reassigned from [old agent] to [new agent] by [actor name] — Reason: [reason]" |
+| `ORDER_CLAIMED` | CS Closer (Claim Mode) | "Claimed by [agent name]" |
+| `ORDER_VIEWED` | CS Closer opens order | "Opened by [agent name]" |
+| `CALL_INITIATED` | CS Closer | "Call initiated by [agent name]" |
+| `CALL_COMPLETED` | VOIP webhook | "Call completed — Duration: [X]m [Y]s" |
+| `CALL_NO_ANSWER` | VOIP webhook | "No answer — logged by [agent name]" |
+| `CALL_FAILED` | VOIP webhook | "Call failed — [reason]" |
+| `MANUAL_CALL_LOGGED` | CS Closer (VOIP off) | "Manual call logged by [agent name]" |
+| `SMS_SENT` | CS Closer | "SMS sent by [agent name] — Template: [template name]" |
+| `WHATSAPP_SENT` | CS Closer | "WhatsApp sent by [agent name] — Template: [template name]" |
+| `ORDER_CONFIRMED` | CS Closer | "Order confirmed by [agent name]" |
+| `ORDER_CANCELLED` | CS Closer / HoCS | "Order cancelled by [actor name] — Reason: [reason]" |
+| `ADDRESS_UPDATED` | CS Closer | "Delivery address updated by [agent name] — From: [old] → To: [new]" |
+| `QUANTITY_UPDATED` | CS Closer | "Quantity updated by [agent name] — [old] → [new] units" |
+| `CALLBACK_SCHEDULED` | CS Closer | "Callback scheduled for [date/time] by [agent name]" |
+| `ORDER_ALLOCATED` | Logistics Manager | "Allocated to [3PL name] / [location] by [actor name]" |
+| `ORDER_DISPATCHED` | 3PL Manager / Rider | "Dispatched with rider [rider name]" |
+| `ORDER_IN_TRANSIT` | Rider | "In transit — Rider [rider name] confirmed departure (GPS logged)" |
+| `ORDER_DELIVERED` | Rider | "Delivered by [rider name] — OTP/GPS verified" |
+| `ORDER_PARTIALLY_DELIVERED` | Rider | "Partially delivered by [rider name] — [X] delivered, [Y] returned" |
+| `ORDER_RETURNED` | Rider | "Returned by [rider name] — Reason: [reason]" |
+| `ORDER_RESTOCKED` | 3PL Manager | "Return assessed as sellable — restocked at [location] by [actor name]" |
+| `ORDER_WRITTEN_OFF` | 3PL Manager | "Return assessed as damaged — written off by [actor name] — Note: [note]" |
+| `SUPERVISOR_WATCHING` | HoCS Mirror View open | "Order being observed by [supervisor name]" |
+
+### 13a.4 UI: Order Timeline Component
+
+The **Order Timeline** is a vertical timeline component rendered on the order detail page for all roles. It is a shared component (`~/components/ui/order-timeline.tsx`) with role-filtered event visibility.
+
+**Visual design:**
+- Vertical line with event nodes
+- Each node: event type icon, description sentence, actor name (bold), exact timestamp (e.g., "14 Mar 2026, 10:32:07 WAT")
+- Color-coded by category: green (positive/delivery), amber (in-progress), red (cancellation/return), blue (communication), grey (system)
+- Most recent event at the top
+
+**Role visibility matrix:**
+
+| Event Category | CS Closer | HoCS | Logistics | Finance | 3PL | SuperAdmin |
+|---|---|---|---|---|---|---|
+| Order receipt & assignment | Own orders only | All | No | No | No | All |
+| CS actions (calls, confirm, cancel) | Own orders only | All | No | No | No | All |
+| Communications (SMS/WhatsApp) | Own orders only | All | No | No | No | All |
+| Logistics events (allocate, dispatch, transit) | Yes (read) | Yes | All | No | Own location | All |
+| Delivery events | Yes (read) | Yes | All | Yes | Own location | All |
+| Financial events | No | No | No | All | No | All |
+| Supervisor watching | No | Yes | No | No | No | All |
 
 ---
 
@@ -746,7 +1028,7 @@ First screen every user sees. Role-personalized, real-time, actionable.
 - Queue health: unassigned orders, SLA timers, escalation count
 - Hot Swap interface for order reassignment
 
-**CS Agent Dashboard:**
+**CS Closer Dashboard:**
 - Personal queue: pending calls, engaged orders, confirmed orders
 - Call button and order detail panel (nested routing — sidebar stays static)
 - Performance stats: today's calls, confirmation rate
@@ -819,6 +1101,94 @@ All dashboards update via Socket.io WebSocket connections. When any relevant eve
 - Web Push notifications for: incoming calls, new order assignments, funding alerts, SLA breaches
 - Background sync for: delivery confirmations, call logs
 
+#### Web Push Delivery Behaviour (Lock Screen / Asleep)
+
+Web Push is designed to deliver to locked or sleeping devices — this is the primary use case for CS incoming call alerts and rider dispatch notifications.
+
+**Android (Chrome PWA — "Add to Home Screen"):**
+- If the user has granted notification permission and the PWA is installed with an active service worker, Web Push arrives at the lock screen and in the notification tray exactly like a native app.
+- Delivery can be delayed by: battery optimization (Doze mode), Do Not Disturb, or Data Saver. These are OS-level, not app-level, limitations.
+
+**iOS (Safari Web Push — iOS 16.4+):**
+- Web Push is supported for home-screen web apps only (not arbitrary Safari tabs).
+- Once installed and permission granted, lock-screen and background push delivery works.
+- iOS is stricter: the app MUST be added to the Home Screen via Safari's "Add to Home Screen" prompt. The onboarding flow must surface this prompt explicitly.
+
+**Implementation requirements:**
+- The `subscribeToPush()` call (already wired in DashboardLayout) must be preceded by a clear user-facing permission prompt explaining why notifications are needed (call alerts, order assignments).
+- For iOS: display an "Install to Home Screen" banner/modal if `window.navigator.standalone === false` and the device is iOS. This is required for push to work at all on iOS.
+- The NestJS `notifications` module must complete the server-side send path: receive push subscription objects, store in DB per user, and call the Web Push API (e.g. `web-push` npm package with VAPID keys) to send real payloads — not just trigger client-side events.
+- Every push payload must include: `title`, `body`, `icon`, `badge`, `data.url` (deep link), and `tag` (for deduplication/replacement).
+- Service worker `push` event handler must show a notification even when the app is closed or screen is off.
+- Service worker `notificationclick` handler must open or focus the correct route (e.g. order detail, CS dashboard) using `data.url`.
+
+**Platform limitations to document in Runbook:**
+- Android aggressive OEM battery killers (Xiaomi MIUI, Realme, Samsung One UI with aggressive background restrictions) may delay or suppress push. Users on affected devices should whitelist the app in battery settings.
+- iOS push requires iOS 16.4+. Older devices will not receive push at all.
+- Push requires the backend VAPID send path to be fully operational. Mock mode (client-side only) does not deliver to locked/sleeping devices.
+
+---
+
+### 15.5 Push Notification Center
+
+A dedicated management hub at `/admin/notifications` covering three capabilities: automatic mirroring, manual broadcast, and automation rules — with full delivery visibility per user.
+
+#### 15.5.1 Mirror In-App → Push
+Every in-app notification that is saved to the `notifications` table also triggers a Web Push to the recipient's registered devices. No separate trigger — the `notifications.service.ts` calls `sendPush(userId, payload)` immediately after the DB insert.
+
+#### 15.5.2 Broadcast Push
+Admins and role heads can compose and send a push message from `/admin/notifications/broadcast`:
+- **Target options**: Specific user (search by name/email) | Role group | Everyone
+- **Scope by role**:
+  - SuperAdmin / Branch Admin → everyone
+  - Head of CS → CS Closers only
+  - Head of Marketing → Media Buyers only
+  - Head of Logistics → Riders + Logistics Managers only
+- **Message**: Title + Body (plain text, max 120 chars body)
+- **Preview** before send
+- Broadcast creates one `push_broadcast` record and N `push_delivery_log` rows (one per recipient subscription)
+
+#### 15.5.3 Automation Rules
+Configurable rules stored in a `push_automation_rules` table. Each rule has:
+- **Trigger type**: `CRON` (time-based) or `EVENT` (system event e.g. agent_inactive, order_stuck, sla_breach)
+- **Cron expression** (if CRON): human-readable builder in UI (e.g. "Every Monday at 9am")
+- **Event key** (if EVENT): maps to a named system event
+- **Target**: Role group or specific user
+- **Message template**: Title + Body with placeholders (`{{user_name}}`, `{{order_count}}`, `{{product_name}}`, etc.)
+- **Active toggle**: on/off without deleting the rule
+- Evaluated by NestJS `@nestjs/schedule` for cron rules; event-based rules are triggered inline when the event fires
+
+CRUD UI on `/admin/notifications/automations`. Accessible by SuperAdmin and role heads (scoped to their team).
+
+#### 15.5.4 Push Delivery Log
+Every push attempt — whether from mirror, broadcast, or automation — writes a row to `push_delivery_log`:
+
+| Field | Description |
+|---|---|
+| `id` | UUIDv7 |
+| `user_id` | Recipient |
+| `broadcast_id` | FK to `push_broadcasts` if applicable |
+| `automation_rule_id` | FK to `push_automation_rules` if applicable |
+| `title` | Snapshot of title sent |
+| `body` | Snapshot of body sent |
+| `trigger_type` | `MIRROR` \| `BROADCAST` \| `AUTOMATION` |
+| `status` | `SENT` \| `FAILED` \| `SHOWN` \| `CLICKED` |
+| `failure_reason` | Error message if FAILED |
+| `sent_at` | Timestamp |
+| `shown_at` | Set when SW pings back after `showNotification()` |
+| `clicked_at` | Set when SW pings back after `notificationclick` |
+
+**Status progression:** `SENT` → `SHOWN` (SW ping-back) → `CLICKED` (SW ping-back on tap). `FAILED` is terminal and resendable.
+
+**Visibility page** (`/admin/notifications/log`):
+- Table of all push delivery records
+- Filter by: status, trigger type, date range, target user/role
+- Per-broadcast aggregate header: Sent · Shown · Clicked · Failed counts
+- **Resend** button on any `FAILED` or `SENT` row older than 30 minutes
+- **Bulk Resend** — select multiple failed rows and resend in one action
+
+**SW ping-back endpoint:** `POST /api/push/ack` — accepts `{ logId, event: 'shown' | 'clicked' }`. Updates `push_delivery_log` status and timestamp. No auth required (called from service worker context), but validates `logId` exists.
+
 ---
 
 ## 16. Database Schema Overview
@@ -827,7 +1197,7 @@ All dashboards update via Socket.io WebSocket connections. When any relevant eve
 
 | Table | Key Fields | Temporal? | RLS? |
 |---|---|---|---|
-| users | id, name, email, role, status, capacity | Yes | Yes (role-based) |
+| users | id, name, email, role, status, capacity, app_theme | Yes | Yes (role-based) |
 | products | id, name, sku, base_sale_price, cost_price, min_threshold | Yes | Yes (cost fields restricted) |
 | inventory_levels | id, product_id, location_id, stock_count, reserved_count, batch_id | Yes | Yes (location-based) |
 | stock_batches | id, product_id, factory_cost, landing_cost, quantity, received_at | Yes | Yes (finance only for costs) |
@@ -844,8 +1214,17 @@ All dashboards update via Socket.io WebSocket connections. When any relevant eve
 | commission_plans | id, role, rules (JSONB), effective_from, effective_to | Yes | Yes |
 | payout_records | id, staff_id, period_start, period_end, base_salary, performance_bonus, add_ons, deductions, total_payout | Yes | Yes |
 | earnings_adjustments | id, staff_id, amount, category, reason, approved_by, period_id | Yes | Yes |
-| campaigns | id, media_buyer_id, name, product_ids, offer_template_id, form_config, deployment_type | Yes | Yes |
+| campaigns | id, media_buyer_id, name, product_ids, offer_template_id, form_config, deployment_type, branch_id | Yes | Yes |
 | offer_templates | id, product_id, name, price, variants, created_by (Stock Manager) | Yes | Yes |
+| branches | id, name, code, status, settings (JSONB), created_at | Yes | No (SuperAdmin only) |
+| user_branches | user_id, branch_id, role_in_branch, is_primary | No | Yes |
+| order_timeline_events | id, order_id, event_type, actor_id, actor_name, description, metadata (JSONB), branch_id, created_at | No | Yes |
+| message_templates | id, name, channel, body, created_by, branch_id, status | Yes | Yes |
+| outbound_messages | id, order_id, agent_id, channel, template_id, rendered_body, status, sent_at | No | Yes |
+| push_subscriptions | id, user_id, endpoint, auth, p256dh, created_at | No | Yes (own only) |
+| push_broadcasts | id, created_by, target_type, target_role, target_user_id, title, body, sent_at, branch_id | No | Yes |
+| push_automation_rules | id, name, trigger_type, cron_expr, event_key, target_type, target_role, title_template, body_template, is_active, branch_id | Yes | Yes |
+| push_delivery_log | id, user_id, broadcast_id, automation_rule_id, title, body, trigger_type, status, failure_reason, sent_at, shown_at, clicked_at | No | Yes |
 
 ### 16.2 Key Relationships
 
@@ -867,7 +1246,7 @@ All internal communication uses tRPC. Each module has its own tRPC router:
 
 ```
 trpc/
-├── orders.router.ts          # CRUD, state transitions, assignment
+├── orders.router.ts          # CRUD, state transitions, assignment, timeline
 ├── inventory.router.ts       # Stock levels, movements, batch management
 ├── logistics.router.ts       # Transfers, allocations, delivery updates
 ├── marketing.router.ts       # Funding, ad spend, campaign management
@@ -876,7 +1255,9 @@ trpc/
 ├── users.router.ts           # Auth, RBAC, user management
 ├── audit.router.ts           # Temporal queries, history views (read-only)
 ├── dashboard.router.ts       # Aggregated KPIs per role
-└── notifications.router.ts   # Push notification management
+├── notifications.router.ts   # Push notification management
+├── branches.router.ts        # Branch management, user-branch assignments
+└── messaging.router.ts       # Message templates, send SMS/WhatsApp, message history
 ```
 
 All routers are also exposed as REST endpoints via `trpc-openapi` for external consumers, auto-generating Swagger documentation.
@@ -903,5 +1284,12 @@ All routers are also exposed as REST endpoints via `trpc-openapi` for external c
 | WebRTC | Web Real-Time Communication — browser-based voice/video protocol |
 | Settlement Window | The time period over which commissions are calculated (weekly/bi-weekly/monthly) |
 | Clawback | Deduction from future earnings to reverse a previously paid commission |
+| Branch | An independent operational unit within the master account with its own team, orders, and reporting |
+| Branch Admin | Role that manages users and settings within a single branch |
+| Claim Mode | Dispatch mode where CS reps compete to claim orders from an open pool rather than receiving auto-assignments |
+| Claim Cap | Maximum number of unconfirmed orders a CS rep can hold in Claim Mode before being blocked from claiming more |
+| Mirror View | Supervisor capability to see exactly what a CS rep is currently viewing in real time (read-only) |
+| Order Lifecycle Timeline | Human-readable, per-order narrative of every event with named actors and exact timestamps |
+| Message Template | Pre-configured SMS or WhatsApp message with dynamic placeholders auto-filled from order data |
 | Shrinkage | Inventory loss between warehouse and Third-Party Logistics (damaged, lost, stolen) |
 | Virtual Buffer | 10% stock reserve hidden from the sales module to prevent overselling |

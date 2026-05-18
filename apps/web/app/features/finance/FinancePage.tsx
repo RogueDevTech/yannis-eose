@@ -1,0 +1,137 @@
+import { useMemo, useState } from 'react';
+import { useSearchParams } from '@remix-run/react';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { SearchableSelect } from '~/components/ui/searchable-select';
+import { FormField } from '~/components/ui/form-field';
+import { Tabs } from '~/components/ui/tabs';
+import { FinanceCashRemittanceSection, FinancePayrollSection, FinanceDisbursementSection } from './finance-overview-pulse';
+import type { FinanceOverviewLoaderData } from './types';
+
+type FinanceTab = 'remittance' | 'disbursements' | 'payroll';
+
+export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
+  const { pulse, filters, branches = [], fundingSummary, byProduct = [], byLocation = [] } = data;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<FinanceTab>('remittance');
+
+  const setFilter = (key: 'branchId', value: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (!value) next.delete(key);
+        else next.set(key, value);
+        next.delete('page');
+        return next;
+      },
+      { preventScrollReset: true },
+    );
+  };
+
+  const branchOptions = useMemo(
+    () => [
+      { value: '', label: 'All branches' },
+      ...branches.map((b) => ({ value: b.id, label: b.name })),
+    ],
+    [branches],
+  );
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Finance"
+        mobileInlineActions
+        description="Cash remittance, disbursements, and payroll."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Finance tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Finance toolbar and date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    startTime={filters.startTime ?? ''}
+                    endTime={filters.endTime ?? ''}
+                    periodAllTime={filters.periodAllTime ?? false}
+                  />
+                </div>
+              </>
+            }
+            sheet={() => (
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  startTime={filters.startTime ?? ''}
+                  endTime={filters.endTime ?? ''}
+                  periodAllTime={filters.periodAllTime ?? false}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            )}
+          />
+        }
+      />
+
+      {branches.length > 0 && (
+        <div className="card !p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField label="Branch" htmlFor="finance-overview-branch">
+            <SearchableSelect
+              id="finance-overview-branch"
+              value={filters.branchId ?? ''}
+              onChange={(v) => setFilter('branchId', v)}
+              options={branchOptions}
+              placeholder="All branches"
+              searchPlaceholder="Search branches..."
+            />
+          </FormField>
+          {filters.branchId && (
+            <p className="sm:col-span-2 text-xs text-app-fg-muted">
+              Branch filter applied.{' '}
+              <button
+                type="button"
+                className="text-brand-600 dark:text-brand-400 hover:underline"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete('branchId');
+                  setSearchParams(next, { preventScrollReset: true });
+                }}
+              >
+                Clear
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+
+      <Tabs
+        variant="underline"
+        value={activeTab}
+        onChange={(v) => setActiveTab(v as FinanceTab)}
+        tabs={[
+          { value: 'remittance', label: 'Cash remittance' },
+          { value: 'disbursements', label: 'Disbursements' },
+          { value: 'payroll', label: 'Payroll' },
+        ]}
+      />
+
+      {activeTab === 'remittance' && (
+        <FinanceCashRemittanceSection pulse={pulse} byProduct={byProduct} byLocation={byLocation} />
+      )}
+
+      {activeTab === 'disbursements' && fundingSummary && (
+        <FinanceDisbursementSection summary={fundingSummary} />
+      )}
+
+      {activeTab === 'payroll' && (
+        <FinancePayrollSection pulse={pulse} />
+      )}
+    </div>
+  );
+}

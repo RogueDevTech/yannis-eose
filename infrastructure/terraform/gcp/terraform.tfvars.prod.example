@@ -1,0 +1,46 @@
+# Production tfvars — Yannis EOSE prod on GCP.
+#
+# Hostnames (Cloudflare-fronted):
+#   web    → office.hqyannis.com
+#   api    → api-office.hqyannis.com
+#   form   → form.hqyannis.com  (Cloudflare Worker — see apps/edge-worker)
+#   bucket → backed by GCS, served from storage.googleapis.com or fronted by
+#            cdn.hqyannis.com once Phase 21 CDN is wired
+#
+# Apply against a separate state file from dev so the dev apply can never
+# touch prod resources. See README "Production apply" section for the
+# `-state` + `-var-file` flags.
+
+project_id          = "REPLACE-WITH-PROD-GCP-PROJECT-ID"
+region              = "europe-west2"
+zone                = "europe-west2-a"
+environment         = "prod"
+# A larger machine for prod — the current e2-small is fine for dev but the
+# API has been hitting 70%+ CPU under modest load. Revisit after Phase 22
+# latency work lands.
+machine_type        = "e2-standard-2"
+vm_admin_user       = "deployer"
+ssh_public_key      = "ssh-ed25519 AAAA... REPLACE WITH PROD SSH KEY"
+
+public_web_hostname = "office.hqyannis.com"
+public_api_hostname = "api-office.hqyannis.com"
+
+# CORS for the public asset bucket — must include every origin that uploads
+# directly via signed URL. Today the only such origin is the web app.
+bucket_cors_origins = [
+  "https://office.hqyannis.com",
+]
+
+# Lock SSH to known operator IPs in prod — `0.0.0.0/0` is fine for dev but
+# unacceptable for prod. Replace with your office NAT / VPN egress.
+ssh_source_ranges   = [
+  "REPLACE-WITH-OPERATOR-IP/32",
+]
+
+# Web ingress (80/443) must stay open to the world — Cloudflare-proxied
+# requests + Let's Encrypt HTTP-01 challenges both originate from changing
+# IP ranges. Lock down via Cloudflare WAF, not VPC firewall.
+# web_source_ranges = ["0.0.0.0/0"]
+
+# Reverse proxy + TLS are provisioned by Ansible after Terraform apply.
+# See `infrastructure/ansible/README.md` for the two-stage flow.

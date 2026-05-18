@@ -1,3 +1,571 @@
+/* Inter font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --sidebar-width: 260px;
+    --sidebar-collapsed-width: 72px;
+    --header-height: 56px;
+    --bottom-nav-height: 4.5rem;
+    /* Default until data-app-theme is set (SSR / first line) */
+    --app-canvas: 248 250 252;
+    --app-elevated: 255 255 255;
+    --app-border: 226 232 240;
+    --app-border-strong: 203 213 225;
+    --app-fg: 15 23 42;
+    --app-fg-muted: 100 116 139;
+    --app-hover: 241 245 249;
+    --app-logo-strip-bg: 255 255 255;
+    --app-logo-strip-border: 226 232 240;
+  }
+
+  [data-app-theme='light'] {
+    --app-canvas: 248 250 252;
+    --app-elevated: 255 255 255;
+    --app-border: 226 232 240;
+    --app-border-strong: 203 213 225;
+    --app-fg: 15 23 42;
+    --app-fg-muted: 100 116 139;
+    --app-hover: 241 245 249;
+    --app-logo-strip-bg: 255 255 255;
+    --app-logo-strip-border: 226 232 240;
+  }
+
+  [data-app-theme='soft'] {
+    /* Calm: low-contrast layers, warm linen, borders that almost disappear */
+    --app-canvas: 241 237 229;
+    --app-elevated: 246 243 236;
+    --app-border: 232 228 219;
+    --app-border-strong: 216 211 201;
+    --app-fg: 54 50 45;
+    --app-fg-muted: 130 123 112;
+    --app-hover: 236 232 224;
+    --app-logo-strip-bg: 246 243 236;
+    --app-logo-strip-border: 232 228 219;
+  }
+
+  [data-app-theme='dark'] {
+    --app-canvas: 2 6 23;
+    --app-elevated: 15 23 42;
+    --app-border: 51 65 85;
+    --app-border-strong: 71 85 105;
+    --app-fg: 241 245 249;
+    --app-fg-muted: 148 163 184;
+    --app-hover: 30 41 59;
+    --app-logo-strip-bg: 15 23 42;
+    --app-logo-strip-border: 51 65 85;
+  }
+
+  /* Blue-gray dark (GitHub Dim–style) — uses html.dark like [data-app-theme='dark'] */
+  [data-app-theme='dim'] {
+    --app-canvas: 34 39 46;
+    --app-elevated: 45 51 59;
+    --app-border: 68 76 86;
+    --app-border-strong: 99 110 123;
+    --app-fg: 205 217 229;
+    --app-fg-muted: 139 148 158;
+    --app-hover: 55 62 71;
+    --app-logo-strip-bg: 45 51 59;
+    --app-logo-strip-border: 68 76 86;
+  }
+
+  /* OLED-style: near-black canvas, neutral zinc surfaces — uses html.dark like dark/dim */
+  [data-app-theme='ink'] {
+    --app-canvas: 8 8 10;
+    --app-elevated: 20 20 23;
+    --app-border: 48 48 54;
+    --app-border-strong: 63 63 70;
+    --app-fg: 245 245 245;
+    --app-fg-muted: 161 161 170;
+    --app-hover: 39 39 42;
+    --app-logo-strip-bg: 20 20 23;
+    --app-logo-strip-border: 48 48 54;
+  }
+
+  html {
+    @apply antialiased;
+    font-size: 14px;
+  }
+
+  body {
+    @apply font-sans bg-app-canvas text-app-fg;
+  }
+
+  /*
+   * Native <select> popovers (especially WebKit): options can inherit muted `color`
+   * from a themed parent and render as pale grey on white — unreadable. OS lists are
+   * typically light; force a clear foreground for option rows.
+   */
+  select option {
+    color: rgb(15 23 42);
+    background-color: rgb(255 255 255);
+  }
+
+  /* Hosted form builder preview: native `<select>` respects app dark surfaces (Safari/WebKit). */
+  [data-app-theme='dark'] .form-order-preview select,
+  [data-app-theme='dim'] .form-order-preview select,
+  [data-app-theme='ink'] .form-order-preview select {
+    color-scheme: dark;
+  }
+
+  /*
+   * Native date / time / datetime-local / month / week inputs in dark themes.
+   *
+   * Two browser quirks the default styles ignore:
+   *   1. The `::-webkit-calendar-picker-indicator` icon (the small calendar/clock
+   *      glyph at the right edge of the input) is dark-on-dark by default and
+   *      effectively invisible against our dark surfaces. `filter: invert(1)`
+   *      flips it to a light glyph; `opacity` gives a subtle hover affordance.
+   *   2. `color-scheme: dark` tells the browser to render the picker POPOVER
+   *      (the calendar / clock dropdown the user opens) in its native dark
+   *      style — without it, clicking the icon flashes a glaring white
+   *      calendar over the dark modal. Chrome / Safari / Edge all honour this;
+   *      Firefox renders an OS-themed popover so it's a no-op there.
+   *
+   * Scoped to the three dark themes (dark / dim / ink). Light themes (light /
+   * soft) keep the browser default (dark icon on light input — already legible).
+   */
+  [data-app-theme='dark'] input[type='date'],
+  [data-app-theme='dark'] input[type='time'],
+  [data-app-theme='dark'] input[type='datetime-local'],
+  [data-app-theme='dark'] input[type='month'],
+  [data-app-theme='dark'] input[type='week'],
+  [data-app-theme='dim'] input[type='date'],
+  [data-app-theme='dim'] input[type='time'],
+  [data-app-theme='dim'] input[type='datetime-local'],
+  [data-app-theme='dim'] input[type='month'],
+  [data-app-theme='dim'] input[type='week'],
+  [data-app-theme='ink'] input[type='date'],
+  [data-app-theme='ink'] input[type='time'],
+  [data-app-theme='ink'] input[type='datetime-local'],
+  [data-app-theme='ink'] input[type='month'],
+  [data-app-theme='ink'] input[type='week'] {
+    color-scheme: dark;
+  }
+
+  [data-app-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='time']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='month']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dark'] input[type='week']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='date']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='time']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='month']::-webkit-calendar-picker-indicator,
+  [data-app-theme='dim'] input[type='week']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='date']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='time']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='datetime-local']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='month']::-webkit-calendar-picker-indicator,
+  [data-app-theme='ink'] input[type='week']::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    opacity: 0.65;
+    cursor: pointer;
+  }
+
+  [data-app-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='time']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='month']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dark'] input[type='week']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='date']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='time']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='month']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='dim'] input[type='week']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='date']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='time']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='datetime-local']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='month']::-webkit-calendar-picker-indicator:hover,
+  [data-app-theme='ink'] input[type='week']::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full;
+    background-color: rgb(var(--app-border-strong) / 0.85);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--app-fg-muted) / 0.45);
+  }
+
+  /* iOS/Android: avoid viewport zoom on focus when computed font-size < 16px.
+     pointer: coarse = touch-primary; !important beats utility text-sm/text-xs on same node. */
+  @media (pointer: coarse) {
+    input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='button']):not([type='submit']):not([type='reset']):not([type='file']):not([type='range']):not([type='image']),
+    textarea,
+    select {
+      font-size: 16px !important;
+    }
+  }
+}
+
+@layer components {
+  /* Card component */
+  .card {
+    @apply bg-app-elevated rounded-xl shadow-card border border-app-border p-5 text-app-fg;
+  }
+
+  .dark .card {
+    @apply shadow-none;
+  }
+
+  /* Calm theme: barely-there elevation so surfaces feel quieter */
+  [data-app-theme='soft'] .card {
+    box-shadow:
+      0 1px 2px rgb(54 50 45 / 0.03),
+      0 1px 1px rgb(54 50 45 / 0.02);
+  }
+
+  [data-app-theme='soft'] .card-hover:hover {
+    box-shadow:
+      0 2px 8px rgb(54 50 45 / 0.05),
+      0 1px 3px rgb(54 50 45 / 0.03);
+  }
+
+  .card-hover {
+    @apply card transition-shadow duration-200 hover:shadow-card-hover;
+  }
+
+  /* Badge variants */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success-50 text-success-700;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning-50 text-warning-700;
+  }
+
+  .badge-danger {
+    @apply badge bg-danger-50 text-danger-700;
+  }
+
+  .badge-info {
+    @apply badge bg-info-50 text-info-700;
+  }
+
+  .badge-brand {
+    @apply badge bg-brand-50 text-brand-700;
+  }
+
+  .dark .badge-success {
+    @apply bg-success-700/20 text-success-500;
+  }
+
+  .dark .badge-warning {
+    @apply bg-warning-700/20 text-warning-500;
+  }
+
+  .dark .badge-danger {
+    @apply bg-danger-700/20 text-danger-500;
+  }
+
+  .dark .badge-info {
+    @apply bg-info-700/20 text-info-500;
+  }
+
+  .dark .badge-brand {
+    @apply bg-brand-700/20 text-brand-400;
+  }
+
+  /* Button variants — Ghost-style rim: soft app-border + brand hover (filled variants keep a light keyed edge) */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-app-border hover:border-brand-500/40 dark:hover:border-brand-400/45;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-500 text-white hover:bg-brand-600 focus:ring-brand-500 border-white/25 hover:border-white/40 dark:border-brand-300/45 dark:hover:border-brand-200/60;
+  }
+
+  .btn-secondary {
+    @apply btn bg-app-hover text-app-fg hover:opacity-90 focus:ring-surface-400;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger-500 text-white hover:bg-danger-600 focus:ring-danger-500 border-red-950/25 hover:border-red-300/45 dark:border-red-400/35 dark:hover:border-red-200/55;
+  }
+
+  .btn-success {
+    @apply btn bg-success-500 text-white hover:bg-success-600 focus:ring-success-500 border-emerald-950/25 hover:border-emerald-300/45 dark:border-emerald-400/35 dark:hover:border-emerald-200/55;
+  }
+
+  .btn-warning {
+    @apply btn bg-warning-500 text-white hover:bg-warning-600 focus:ring-warning-500 border-orange-950/30 hover:border-orange-200/45 dark:border-orange-300/35 dark:hover:border-orange-100/55;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-app-fg-muted hover:bg-app-hover focus:ring-surface-400;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  @media (max-width: 767px) {
+    .card .btn-sm {
+      @apply min-h-10 px-4 py-2 text-sm;
+    }
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-base;
+  }
+
+  /* Input styling — on touch devices, @layer base (pointer: coarse) forces 16px min to prevent zoom.
+     Here: mouse-primary sizing (html is 14px so text-base = 1rem = 14px; sm:text-sm for compact desktop). */
+  .input {
+    @apply w-full rounded-lg border border-app-border-strong bg-app-elevated px-3 py-2 text-base sm:text-sm text-app-fg placeholder:text-app-fg-muted focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-colors duration-150;
+  }
+
+  /* Override browser autofill to match elevated surface */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus,
+  textarea:-webkit-autofill:active,
+  select:-webkit-autofill,
+  select:-webkit-autofill:hover,
+  select:-webkit-autofill:focus,
+  select:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px rgb(var(--app-elevated)) inset !important;
+    -webkit-text-fill-color: rgb(var(--app-fg)) !important;
+    caret-color: rgb(var(--app-fg));
+  }
+
+  .input-error {
+    @apply input border-danger-500 focus:border-danger-500 focus:ring-danger-500;
+  }
+
+  /* Checkbox / radio dark mode */
+  .dark input[type="checkbox"],
+  .dark input[type="radio"] {
+    background-color: rgb(30 41 59); /* surface-800 */
+    border-color: rgb(71 85 105); /* surface-600 */
+    color-scheme: dark;
+    accent-color: rgb(129 140 248); /* brand-400 for visible check in dark */
+  }
+  .dark input[type="checkbox"]:checked,
+  .dark input[type="radio"]:checked {
+    background-color: rgb(99 102 241); /* brand-500 */
+    border-color: rgb(99 102 241);
+    accent-color: rgb(99 102 241);
+  }
+  .dark input[type="checkbox"]:focus,
+  .dark input[type="radio"]:focus {
+    --tw-ring-color: rgb(99 102 241 / 0.5);
+  }
+
+  .table-header {
+    @apply border-b border-app-border bg-app-hover text-left text-xs font-semibold uppercase tracking-wider text-app-fg px-4 py-3;
+  }
+
+  .table-header-muted {
+    @apply border-b border-app-border bg-app-hover text-left text-xs font-medium text-app-fg-muted uppercase tracking-wider px-4 py-2.5;
+  }
+
+  .table-cell {
+    @apply px-4 py-3 text-sm text-app-fg whitespace-nowrap;
+  }
+
+  .table-row {
+    @apply border-b border-app-border hover:bg-app-hover/80 transition-colors duration-100;
+  }
+
+  /* HR Payroll page only — tighter row density to match the CS Orders table feel.
+     Scoped to .hr-payroll-table so it doesn't affect any other tables in the app. */
+  .hr-payroll-table .table-header {
+    @apply px-3 py-2;
+  }
+  .hr-payroll-table .table-cell {
+    @apply px-3 py-2;
+  }
+
+  /* Status dot indicators */
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block mr-2;
+  }
+}
+
+@layer utilities {
+  /* Hide native scrollbar chrome while preserving scroll behavior */
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE and legacy Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
+
+  /* Animations for dropdowns and toasts */
+  .animate-fade-in {
+    animation: fadeIn 0.15s ease-out;
+  }
+
+  .animate-slide-in-right {
+    animation: slideInRight 0.25s ease-out;
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 3s ease-in-out infinite;
+  }
+
+  /* Live indicator: yellow dot blink when idle (listening) */
+  .animate-live-blink {
+    animation: liveBlink 1.2s ease-in-out infinite;
+  }
+
+  @keyframes liveBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes slideInRight {
+    from { opacity: 0; transform: translateX(100%); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  @keyframes slideUpFromBottom {
+    from { opacity: 0; transform: translateY(100%); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .animate-slide-up-from-bottom {
+    animation: slideUpFromBottom 0.3s ease-out forwards;
+  }
+
+  /* New/updated row highlight — 3s green border/ring fade */
+  .row-new-highlight {
+    animation: rowNewHighlight 3s ease-in-out forwards;
+  }
+
+  @keyframes rowNewHighlight {
+    0% {
+      box-shadow: inset 0 0 0 2px rgb(34 197 94 / 0.95), 0 0 0 2px rgb(34 197 94 / 0.3);
+    }
+    35% {
+      box-shadow: inset 0 0 0 2px rgb(34 197 94 / 0.65), 0 0 0 2px rgb(34 197 94 / 0.2);
+    }
+    100% {
+      box-shadow: inset 0 0 0 0 rgb(34 197 94 / 0), 0 0 0 0 rgb(34 197 94 / 0);
+    }
+  }
+
+  .dark .row-new-highlight {
+    animation: rowNewHighlightDark 3s ease-in-out forwards;
+  }
+
+  @keyframes rowNewHighlightDark {
+    0% {
+      box-shadow: inset 0 0 0 2px rgb(74 222 128 / 0.95), 0 0 0 2px rgb(74 222 128 / 0.35);
+    }
+    35% {
+      box-shadow: inset 0 0 0 2px rgb(74 222 128 / 0.7), 0 0 0 2px rgb(74 222 128 / 0.22);
+    }
+    100% {
+      box-shadow: inset 0 0 0 0 rgb(74 222 128 / 0), 0 0 0 0 rgb(74 222 128 / 0);
+    }
+  }
+
+  /* New item slide-in — for cards/rows appearing for the first time */
+  .animate-slide-in-up {
+    animation: slideInUp 0.3s ease-out;
+  }
+
+  @keyframes slideInUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* NEW badge pulse — draws attention then fades */
+  .animate-new-badge {
+    animation: newBadgeFade 3s ease-in-out forwards;
+  }
+
+  @keyframes newBadgeFade {
+    0%   { opacity: 1; transform: scale(1.05); }
+    20%  { opacity: 1; transform: scale(1); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Indeterminate progress bar — used by the CEO dashboard "Regenerating report"
+     banner and any other long-running background work where we don't know the % left.
+     A coloured slug travels left-to-right repeatedly inside its track. */
+  .animate-indeterminate-progress {
+    animation: indeterminateProgress 1.4s ease-in-out infinite;
+  }
+
+  @keyframes indeterminateProgress {
+    0%   { transform: translateX(-100%); }
+    50%  { transform: translateX(150%); }
+    100% { transform: translateX(350%); }
+  }
+
+  /* Route loader variants: orbit and arc */
+  @keyframes orbit {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes arc {
+    0%, 100% { stroke-dashoffset: 47; }
+    50% { stroke-dashoffset: 12; }
+  }
+
+  .animate-orbit {
+    animation: orbit 1.2s linear infinite;
+  }
+
+  .animate-arc {
+    animation: arc 1.5s ease-in-out infinite;
+  }
+
+  /* CS orders — preferred delivery “Due today” pill (subtle scale breathe) */
+  .animate-due-today-breathe {
+    animation: dueTodayBreathe 1.65s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  @keyframes dueTodayBreathe {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.07);
+    }
+  }
+
+  /* Dismissible alert progress bar (countdown) */
+  @keyframes dismissible-alert-shrink {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+  }
+}
