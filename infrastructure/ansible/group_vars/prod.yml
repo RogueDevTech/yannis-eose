@@ -11,8 +11,10 @@ web_upstream_port: 3000
 api_upstream_port: 4444
 
 tls_contact_email: ops@hqyannis.com
-# Leave false on the first prod run if Cloudflare DNS isn't pointed at the
-# prod VM IP yet. Flip to true and re-run the playbook once DNS resolves.
-provision_tls_certificate: false
+# DNS is pointed at the prod VM IP (office + api-office, DNS-only / grey
+# cloud on Cloudflare), so certbot HTTP-01 can issue. Idempotent — leave
+# true after first successful issuance; certbot will skip re-issue while
+# the cert is valid.
+provision_tls_certificate: true
 
 client_max_body_size: 50m
