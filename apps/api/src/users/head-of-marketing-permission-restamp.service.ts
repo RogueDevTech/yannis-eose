@@ -42,20 +42,38 @@ export class HeadOfMarketingPermissionRestampService implements OnApplicationBoo
       return;
     }
 
+    // `onApplicationBootstrap` runs in parallel across providers in Nest, so
+    // the MigrationRunnerService may not have applied 0140 yet on the very
+    // first boot. Use `to_regclass()` as a non-throwing existence check: it
+    // returns NULL when the relation is missing, so we don't pollute the boot
+    // log with a scary ERROR before the next-boot retry succeeds.
     try {
-      const markerResult = (await this.db.execute(
-        sql`SELECT COUNT(*)::int AS n FROM _yannis_hom_branch_scope_applied`,
+      const probe = (await this.db.execute(
+        sql`SELECT
+              to_regclass('public._yannis_hom_branch_scope_applied') AS marker_rel,
+              CASE
+                WHEN to_regclass('public._yannis_hom_branch_scope_applied') IS NULL THEN 0
+                ELSE (SELECT COUNT(*)::int FROM _yannis_hom_branch_scope_applied)
+              END AS n`,
       )) as unknown;
-      const rows = Array.isArray(markerResult)
-        ? (markerResult as Array<{ n?: number }>)
-        : ((markerResult as { rows?: Array<{ n?: number }> })?.rows ?? []);
+      const rows = Array.isArray(probe)
+        ? (probe as Array<{ marker_rel?: string | null; n?: number }>)
+        : ((probe as { rows?: Array<{ marker_rel?: string | null; n?: number }> })?.rows ?? []);
+      const markerExists = rows[0]?.marker_rel != null;
+      if (!markerExists) {
+        // Migration 0140 hasn't run on this DB yet — next boot will pick it up.
+        this.logger.debug(
+          'HoM restamp marker table missing — migration 0140 not yet applied; skipping until next boot.',
+        );
+        return;
+      }
       const count = Number(rows[0]?.n ?? 0);
       if (count > 0) {
         return;
       }
     } catch (err) {
       this.logger.warn(
-        `HoM restamp marker check failed (run migrations?): ${err instanceof Error ? err.message : String(err)}`,
+        `HoM restamp marker probe failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return;
     }

@@ -246,6 +246,15 @@ export const listUsersSchema = z.object({
    * (`users.is_team_supervisor`). HR users list URL: `supervisorOnly=1`.
    */
   supervisorOnly: z.boolean().optional(),
+  /**
+   * When true, only users with **no** `user_branches` membership rows — i.e.
+   * the org-wide hats (SuperAdmin, Admin, Heads, HR Manager, Finance Officer).
+   * Used by the HR Users + Finance Staff Accounts branch picker to surface the
+   * "Org-wide (heads / finance / admin)" sentinel without leaking everyone
+   * else. Mutually exclusive with `branchId` — when both are set the service
+   * favours `orgWideOnly` (NOT EXISTS) and ignores the branchId filter.
+   */
+  orgWideOnly: z.boolean().optional(),
 });
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;
@@ -261,6 +270,7 @@ export const usersRosterSummarySchema = listUsersSchema.pick({
   companyWideUserList: true,
   probationOnly: true,
   supervisorOnly: true,
+  orgWideOnly: true,
 });
 
 export type ListUsersRosterSummaryInput = z.infer<typeof usersRosterSummarySchema>;

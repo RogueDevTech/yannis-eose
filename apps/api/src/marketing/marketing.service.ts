@@ -55,7 +55,8 @@ import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { isAdminLevel } from '../common/authz';
+import { isAdminLevel, canViewAllBranches } from '../common/authz';
+import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import {
   appendOrdersAggregateScopeConditions,
   type OrdersAggregateSupervisorScope,
@@ -117,26 +118,26 @@ export class MarketingService {
   }
 
   /**
-   * Strict same-branch guard for funding mutations (Pillar 4: Absolute Accountability,
-   * multi-branch isolation). `otherUserId` must be a member of `currentBranchId`.
-   * The actor must be too, except admin-class users who only need the session branch
-   * selected (they are not required to have a `user_branches` row).
+   * Same-branch guard for funding mutations (Pillar 4: Absolute Accountability,
+   * multi-branch isolation).
    *
-   * Bypass: admin-class or org-wide Head of Marketing with `currentBranchId == null` skips
-   * same-branch membership — ledger pairing is enforced by `assertLedgerTransferAllowed` after load.
+   * Branch-scoped actors (MEDIA_BUYER, CS_CLOSER, BRANCH_ADMIN, branch-only
+   * HEAD_OF_MARKETING) must be members of `currentBranchId` themselves.
    *
-   * Other actors with no active branch are rejected.
+   * Company-wide actors (SUPER_ADMIN, ADMIN, FINANCE_OFFICER + finance hat,
+   * HR_MANAGER, org-wide Heads, anyone with a `*.scope.global` permission)
+   * skip the actor-membership check — they act on any branch's data. Ledger
+   * pairing is still enforced by `assertLedgerTransferAllowed` after load.
+   *
+   * Receiver membership: when a branch is in play (`currentBranchId !== null`),
+   * the receiver must still belong to it so the ledger row stays attributable.
    */
   private async assertSameBranchOrAdmin(
-    actor: { id: string; role: string; permissions?: string[] },
+    actor: { id: string; role: string; permissions?: string[]; scopeOrgWideHead?: boolean },
     otherUserId: string,
     currentBranchId: string | null,
   ): Promise<void> {
-    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
-    const has = (code: string) =>
-      actor.role === 'SUPER_ADMIN' || perms.includes(canonicalPermissionCode(code));
-    const isOrgWide =
-      actor.role === 'SUPER_ADMIN' || has('branches.manage') || has('marketing.scope.global');
+    const isOrgWide = canViewAllBranches(actor);
 
     if (currentBranchId === null) {
       if (isOrgWide) return;
@@ -146,13 +147,14 @@ export class MarketingService {
       });
     }
 
+    const idsToCheck = isOrgWide ? [otherUserId] : [actor.id, otherUserId];
     const memberships = await this.db
       .select({ userId: schema.userBranches.userId })
       .from(schema.userBranches)
       .where(
         and(
           eq(schema.userBranches.branchId, currentBranchId),
-          inArray(schema.userBranches.userId, [actor.id, otherUserId]),
+          inArray(schema.userBranches.userId, idsToCheck),
         ),
       );
 
@@ -166,7 +168,7 @@ export class MarketingService {
     if (!memberSet.has(otherUserId)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Recipient is not a member of your active branch',
+        message: 'Recipient is not a member of the active branch',
       });
     }
   }
@@ -808,7 +810,12 @@ export class MarketingService {
 
   async createFunding(
     input: CreateFundingInput,
-    actor: { id: string; role: string },
+    actor: {
+      id: string;
+      role: string;
+      permissions?: string[];
+      scopeOrgWideHead?: boolean;
+    },
     currentBranchId: string | null,
   ) {
     // Branch isolation: receiver must be on `currentBranchId`; sender must be too unless
@@ -1109,7 +1116,13 @@ export class MarketingService {
     const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const canApproveFunding =
       user.role === 'SUPER_ADMIN' ||
-      userPerms.includes(canonicalPermissionCode('marketing.funding.approve'));
+      userPerms.includes(canonicalPermissionCode('marketing.funding.approve')) ||
+      // Finance disburses against pending funding requests via
+      // /admin/finance/disbursements — they need to see every request, not
+      // just their own, even though the catalog reserves the legacy
+      // `marketing.funding.approve` code for HoM (2026-05-05).
+      userPerms.includes(canonicalPermissionCode('finance.disburse')) ||
+      hasFinanceAccess(user);
     // Marketing-team supervisors don't hold `marketing.funding.approve` but
     // they DO act as the approver of inbox requests (CEO directive 2026-05-11).
     // Bypass the "own requests only" default so the inbox-pin from the
@@ -1922,7 +1935,12 @@ export class MarketingService {
     requestId: string,
     sentAmount: number,
     receiptUrl: string,
-    actor: { id: string; role: string },
+    actor: {
+      id: string;
+      role: string;
+      permissions?: string[];
+      scopeOrgWideHead?: boolean;
+    },
     currentBranchId: string | null,
   ) {
     const approverId = actor.id;
@@ -1955,11 +1973,13 @@ export class MarketingService {
       });
     }
 
-    // Migration 0106 — only the request's targeted recipient (or admin-class)
+    // Migration 0106 — only the request's targeted recipient (or admin / finance)
     // can approve. Legacy NULL-target rows fall back to the historical role
     // gate (already enforced via the `marketing.funding.approve` permission).
-    const isAdminClass = actor.role === 'SUPER_ADMIN' || actor.role === 'ADMIN';
-    if (existing.targetUserId && existing.targetUserId !== actor.id && !isAdminClass) {
+    // Finance bypasses too: `/admin/finance/disbursements` legitimately disburses
+    // any pending request as part of the company-wide finance flow.
+    const canBypassRecipientGate = isAdminLevel(actor) || hasFinanceAccess(actor);
+    if (existing.targetUserId && existing.targetUserId !== actor.id && !canBypassRecipientGate) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only the recipient of this funding request can approve it',
@@ -2083,10 +2103,18 @@ export class MarketingService {
   async rejectFundingRequest(
     requestId: string,
     _reason: string | undefined,
-    rejector: { id: string; role: string } | string,
+    rejector:
+      | {
+          id: string;
+          role: string;
+          permissions?: string[];
+          scopeOrgWideHead?: boolean;
+        }
+      | string,
   ) {
     const rejectorId = typeof rejector === 'string' ? rejector : rejector.id;
-    const rejectorRole = typeof rejector === 'string' ? null : rejector.role;
+    const rejectorObj =
+      typeof rejector === 'string' ? null : rejector;
     const [existing] = await this.db
       .select()
       .from(schema.marketingFundingRequests)
@@ -2100,11 +2128,14 @@ export class MarketingService {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Request is not pending' });
     }
 
-    // Migration 0106 — only the request's targeted recipient (or admin-class)
+    // Migration 0106 — only the request's targeted recipient (or admin / finance)
     // can reject. Legacy NULL-target rows skip this gate (relies on the
-    // `marketing.funding.approve` permission).
-    const isAdminClass = rejectorRole === 'SUPER_ADMIN' || rejectorRole === 'ADMIN';
-    if (existing.targetUserId && existing.targetUserId !== rejectorId && !isAdminClass) {
+    // `marketing.funding.approve` permission). Finance bypasses too —
+    // `/admin/finance/disbursements` rejects pending requests as part of the
+    // company-wide finance inbox flow.
+    const canBypassRecipientGate =
+      rejectorObj !== null && (isAdminLevel(rejectorObj) || hasFinanceAccess(rejectorObj));
+    if (existing.targetUserId && existing.targetUserId !== rejectorId && !canBypassRecipientGate) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'Only the recipient of this funding request can reject it',

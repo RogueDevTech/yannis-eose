@@ -49,6 +49,7 @@ import { getProductsService } from './products.router';
 import { getUsersService } from './users.router';
 import { getCartService } from './cart.router';
 import { isAdminLevel } from '../../common/authz';
+import { hasFinanceAccess } from '../../common/utils/strip-finance-fields';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
 import type { OrdersAggregateSupervisorScope } from '../../orders/orders.service';
 
@@ -391,10 +392,7 @@ export const marketingRouter = router({
     .meta({ branchScopedMutation: true })
     .input(rejectFundingRequestSchema.extend({ branchId: z.string().uuid().optional() }))
     .mutation(async ({ input, ctx }) => {
-      return getMarketingService().rejectFundingRequest(input.requestId, input.reason, {
-        id: ctx.user.id,
-        role: ctx.user.role,
-      });
+      return getMarketingService().rejectFundingRequest(input.requestId, input.reason, ctx.user);
     }),
 
   /**
@@ -1299,19 +1297,20 @@ export const marketingRouter = router({
       };
 
       // Mirror the standalone `listFundingRequests`/`fundingRequestStatusCounts`
-      // scoping for non-admin callers (target = caller). Finance / Admin land
-      // here so usually `isAdminClass` is true, but we keep the gate honest.
+      // scoping for non-company-wide callers (target = caller). Finance / Admin
+      // are company-wide and see every pending HoM disbursement request on this
+      // page — they are the disbursers, not the targets.
       //
       // `requesterRole: 'HEAD_OF_MARKETING'` is the key scope for this page:
       // Finance disburses to Heads of Marketing only — Media Buyer funding
       // requests are the HoM's to manage, not Finance's, so they must not
       // appear on the Disbursements pending tab or in its status counts.
-      const isAdminClass = isAdminLevel(ctx.user);
+      const seesAllRequests = isAdminLevel(ctx.user) || hasFinanceAccess(ctx.user);
       const requestsInput = {
         page: input.requestsPage,
         limit: input.requestsLimit,
         requesterRole: 'HEAD_OF_MARKETING' as const,
-        ...(isAdminClass ? {} : { targetUserId: ctx.user.id }),
+        ...(seesAllRequests ? {} : { targetUserId: ctx.user.id }),
       };
 
       const [funding, balances, summary, requests, requestsCounts, users] =
@@ -1323,7 +1322,7 @@ export const marketingRouter = router({
           getMarketingService().fundingRequestStatusCounts(
             {
               requesterRole: 'HEAD_OF_MARKETING',
-              ...(isAdminClass ? {} : { targetUserId: ctx.user.id }),
+              ...(seesAllRequests ? {} : { targetUserId: ctx.user.id }),
             },
             ctx.user,
             branchId,

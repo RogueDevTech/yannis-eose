@@ -108,6 +108,14 @@ interface LogisticsOrdersPageProps {
   dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
   /** Optional hero description under the page title */
   pageDescription?: string;
+  /**
+   * Caller-driven skeleton mode — used by the admin route's `CachedAwait`
+   * fallback path so the table body renders skeleton rows while the loader
+   * resolves. The component itself flips this on internally when
+   * `deferredSecondary` is awaiting, but the route also needs to pass it for
+   * the first-paint fallback before `pageData` arrives.
+   */
+  deferredLoading?: boolean;
 }
 
 // ── Delivery Date Helpers (above page — used by column memo) ─────────────────

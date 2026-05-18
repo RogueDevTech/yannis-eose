@@ -31,6 +31,8 @@ export default function FinanceStaffAccountsRoute() {
           statusParam={usersShell.statusParam}
           roleParam={usersShell.roleParam}
           searchParam={usersShell.searchParam}
+          branchParam={usersShell.branchParam}
+          canPickBranch={usersShell.canPickBranch}
           pageSize={usersShell.perPage}
           pageSizeOptions={usersShell.pageSizeOptions}
           canExport={usersShell.canExport}
@@ -46,6 +48,8 @@ export default function FinanceStaffAccountsRoute() {
           statusParam={usersShell.statusParam}
           roleParam={usersShell.roleParam}
           searchParam={usersShell.searchParam}
+          branchParam={usersShell.branchParam}
+          canPickBranch={usersShell.canPickBranch}
           usersPromise={roster}
           pageSize={usersShell.perPage}
           pageSizeOptions={usersShell.pageSizeOptions}

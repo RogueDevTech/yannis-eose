@@ -893,6 +893,7 @@ export class UsersService {
       | 'companyWideUserList'
       | 'probationOnly'
       | 'supervisorOnly'
+      | 'orgWideOnly'
     >,
     actor: { id: string; role: string; permissions?: string[] } | null,
     currentBranchId: string | null,
@@ -950,7 +951,22 @@ export class UsersService {
       ? input.branchId
       : (input.branchId ?? currentBranchId ?? undefined);
 
-    if (branchFilter) {
+    // Mutually exclusive: when the caller asks for org-wide hats (no branch
+    // memberships) we ignore any specific branchId — selecting both would be
+    // a contradiction. orgWideOnly is only honoured for callers that may see
+    // the company-wide roster; for branch-scoped staff it's a no-op so a
+    // hand-crafted URL can't widen their view.
+    const orgWideOnlyAllowed =
+      input.orgWideOnly === true && this.actorMayListCompanyWideUserRoster(actor);
+    if (orgWideOnlyAllowed) {
+      conditions.push(
+        sql<boolean>`NOT EXISTS (
+          SELECT 1
+          FROM user_branches ub
+          WHERE ub.user_id = ${schema.users.id}
+        )`,
+      );
+    } else if (branchFilter) {
       conditions.push(
         sql<boolean>`EXISTS (
           SELECT 1

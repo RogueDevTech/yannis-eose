@@ -8,6 +8,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type OptgroupHTMLAttributes,
+  type OptionHTMLAttributes,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -90,15 +93,19 @@ function groupsFromChildren(children: ReactNode): SelectGroup[] {
     if (!isValidElement(child)) return;
 
     if (child.type === 'optgroup') {
-      const groupLabel = String(child.props.label ?? '');
+      // React 19 typed `isValidElement` returns ReactElement<unknown>; we already
+      // narrowed by tag name, so a typed cast is the honest way to read props.
+      const groupEl = child as ReactElement<OptgroupHTMLAttributes<HTMLOptGroupElement>>;
+      const groupLabel = String(groupEl.props.label ?? '');
       const groupOptions: SelectOption[] = [];
 
-      Children.forEach(child.props.children, (optionChild) => {
+      Children.forEach(groupEl.props.children, (optionChild) => {
         if (!isValidElement(optionChild) || optionChild.type !== 'option') return;
+        const optionEl = optionChild as ReactElement<OptionHTMLAttributes<HTMLOptionElement>>;
         groupOptions.push({
-          value: String(optionChild.props.value ?? ''),
-          label: optionLabelFromChildren(optionChild.props.children),
-          disabled: Boolean(optionChild.props.disabled),
+          value: String(optionEl.props.value ?? ''),
+          label: optionLabelFromChildren(optionEl.props.children),
+          disabled: Boolean(optionEl.props.disabled),
         });
       });
 
@@ -107,10 +114,11 @@ function groupsFromChildren(children: ReactNode): SelectGroup[] {
     }
 
     if (child.type === 'option') {
+      const optionEl = child as ReactElement<OptionHTMLAttributes<HTMLOptionElement>>;
       looseOptions.push({
-        value: String(child.props.value ?? ''),
-        label: optionLabelFromChildren(child.props.children),
-        disabled: Boolean(child.props.disabled),
+        value: String(optionEl.props.value ?? ''),
+        label: optionLabelFromChildren(optionEl.props.children),
+        disabled: Boolean(optionEl.props.disabled),
       });
     }
   });
