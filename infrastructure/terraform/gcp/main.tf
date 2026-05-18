@@ -121,11 +121,28 @@ resource "google_compute_firewall" "allow_ssh" {
   target_tags   = ["${local.name_prefix}-ssh"]
 }
 
+resource "google_compute_firewall" "allow_web" {
+  count   = var.create_web_firewall_rule && var.assign_public_ip ? 1 : 0
+  name    = "${local.name_prefix}-allow-web"
+  network = var.network
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80", "443"]
+  }
+
+  source_ranges = var.web_source_ranges
+  target_tags   = ["${local.name_prefix}-web"]
+}
+
 resource "google_compute_instance" "vm" {
   name         = "${local.name_prefix}-vm"
   machine_type = var.machine_type
   zone         = var.zone
-  tags         = ["${local.name_prefix}-ssh"]
+  tags = [
+    "${local.name_prefix}-ssh",
+    "${local.name_prefix}-web",
+  ]
 
   boot_disk {
     initialize_params {
@@ -155,7 +172,13 @@ resource "google_compute_instance" "vm" {
   metadata = merge(
     {
       startup-script = templatefile("${path.module}/startup.sh.tftpl", {
-        vm_admin_user = var.vm_admin_user
+        vm_admin_user             = var.vm_admin_user
+        web_hostname              = var.public_web_hostname
+        api_hostname              = var.public_api_hostname
+        web_upstream_port         = var.web_upstream_port
+        api_upstream_port         = var.api_upstream_port
+        provision_tls_certificate = var.provision_tls_certificate
+        tls_contact_email         = var.tls_contact_email == null ? "" : var.tls_contact_email
       })
     },
     var.ssh_public_key == null ? {} : {

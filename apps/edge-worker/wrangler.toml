@@ -58,22 +58,25 @@ preview_id = "36f748275dec4c669b6fe26dca9cf8db"
 
 [env.gcp-dev]
 name = "yannis-edge-worker-gcp-dev"
-# Lives in the hqyannis.com Cloudflare account — separate from the AWS-dev
-# worker (which is in the roguedevtech.com account). Workers, KV namespaces,
-# and routes are all account-scoped; you cannot share them across accounts.
-# Replace the placeholder below with the hqyannis.com account ID:
-# Cloudflare dashboard → click any site in hqyannis.com → Account Home → ID
-# is on the right sidebar.
-account_id = "REPLACE-WITH-HQYANNIS-ACCOUNT-ID"
+# Lives in the hqyannis.com Cloudflare account (Evercoresystemsltd@gmail.com)
+# — separate from the AWS-dev worker (which is in the roguedevtech.com
+# account). Workers, KV namespaces, and routes are all account-scoped; you
+# cannot share them across accounts.
+account_id = "39591257f05cdf9729f80952c61b4aec"
 # Form is hosted at dev-form.hqyannis.com (separate from the web app at
 # dev-office.hqyannis.com so the form has no session cookies in scope).
-route = { pattern = "dev-form.hqyannis.com/*", zone_name = "hqyannis.com" }
+# Use the plural `routes = [...]` form to fully override the top-level
+# `routes` (which targets roguedevtech.com in a different CF account).
+routes = [
+  { pattern = "dev-form.hqyannis.com/*", zone_name = "hqyannis.com" },
+]
 
 [env.gcp-dev.vars]
 API_URL = "https://dev-api-office.hqyannis.com"
-# Create a NEW Turnstile site for hqyannis.com in the new account so abuse
-# counters don't bleed from the roguedevtech.com instance.
-TURNSTILE_SITE_KEY = "REPLACE-WITH-HQYANNIS-TURNSTILE-SITE-KEY"
+# Turnstile site `yannis-form-dev` in the hqyannis.com account, scoped to
+# dev-form.hqyannis.com. The matching TURNSTILE_SECRET_KEY is stored as a
+# Worker secret (see DEPLOY.md), not in this file.
+TURNSTILE_SITE_KEY = "0x4AAAAAADRynbkd8QFbdKEC"
 
 [env.gcp-dev.triggers]
 crons = ["* * * * *"]
@@ -88,19 +91,19 @@ crons = ["* * * * *"]
 # Then paste the printed IDs below.
 [[env.gcp-dev.kv_namespaces]]
 binding = "DEDUP_CACHE"
-id = "REPLACE-WITH-HQYANNIS-DEDUP-KV-ID"
+id = "851dff3f14cf450d96bc0ea97f3ece10"
 
 [[env.gcp-dev.kv_namespaces]]
 binding = "RATE_LIMIT_CACHE"
-id = "REPLACE-WITH-HQYANNIS-RATE-LIMIT-KV-ID"
+id = "cf30819e98de4f2c83544e54398d601f"
 
 [[env.gcp-dev.kv_namespaces]]
 binding = "INVENTORY_CACHE"
-id = "REPLACE-WITH-HQYANNIS-INVENTORY-KV-ID"
+id = "fe9072441efe4b83b31953a776b1c213"
 
 [[env.gcp-dev.kv_namespaces]]
 binding = "CAMPAIGN_CACHE"
-id = "REPLACE-WITH-HQYANNIS-CAMPAIGN-KV-ID"
+id = "09620716b9494f01a45a886d9a6ceb74"
 
 # ─── Production env ───────────────────────────────────────────────────────────
 # Deploy with `pnpm --filter @yannis/edge-worker exec wrangler deploy --env production`.
@@ -113,11 +116,14 @@ name = "yannis-edge-worker-prod"
 # Lives in the same hqyannis.com Cloudflare account as `gcp-dev`. KV
 # namespaces are separate from dev so prod abuse counters / dedup / rate
 # limits don't bleed between envs.
-account_id = "REPLACE-WITH-HQYANNIS-ACCOUNT-ID"
+account_id = "39591257f05cdf9729f80952c61b4aec"
 # Prod form lives at form.hqyannis.com. The route is hostname-specific (not
 # `*.hqyannis.com`) so the worker doesn't accidentally intercept requests to
 # `office.hqyannis.com` (web) or `api-office.hqyannis.com` (api).
-route = { pattern = "form.hqyannis.com/*", zone_name = "hqyannis.com" }
+# Plural `routes = [...]` to fully override the top-level routes array.
+routes = [
+  { pattern = "form.hqyannis.com/*", zone_name = "hqyannis.com" },
+]
 
 [env.production.vars]
 API_URL = "https://api-office.hqyannis.com"

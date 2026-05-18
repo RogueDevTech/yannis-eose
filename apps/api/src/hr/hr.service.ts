@@ -427,6 +427,15 @@ export class HrService {
     return summary;
   }
 
+  /** Count of users with status='ACTIVE' (all roles). CEO dashboard widget. */
+  async countActiveStaff(): Promise<number> {
+    const [row] = await this.db
+      .select({ count: count() })
+      .from(schema.users)
+      .where(eq(schema.users.status, 'ACTIVE'));
+    return row?.count ?? 0;
+  }
+
   // ============================================
   // Clawback Engine
   // ============================================

@@ -1336,9 +1336,21 @@ export class OrdersService {
       branchId: order.branchId ?? null,
     });
 
-    // Mark cart as CONVERTED if cartId was provided (same actor as order create for audit)
+    // Mark cart as CONVERTED — use cartId if available, otherwise fall back to
+    // phone+product lookup so the live activity feed shows "Order placed" even
+    // when the edge worker's cart save didn't complete before submission.
     if (cartId) {
-      await this.cartService.convert(cartId, order.id, actorId ?? undefined);
+      await this.cartService.convert(cartId, order.id, actorId ?? undefined).catch(() => {});
+    } else if (orderInput.campaignId && orderInput.customerPhoneHash && orderInput.items?.[0]?.productId) {
+      await this.cartService
+        .convertByPhoneAndProduct(
+          orderInput.campaignId,
+          orderInput.customerPhoneHash,
+          orderInput.items[0].productId,
+          order.id,
+          actorId ?? undefined,
+        )
+        .catch(() => {});
     }
 
     let authorizationUrl: string | undefined;
@@ -4352,6 +4364,116 @@ export class OrdersService {
       revenue: Number(r.revenue ?? 0),
       orderCount: r.orderCount ?? 0,
     }));
+  }
+
+  /**
+   * Lagos-timezone period boundaries (today / this week Mon-Sun / this month).
+   * Nigeria does not observe DST so the +01:00 offset is constant.
+   */
+  private static lagosPeriodBoundaries() {
+    const LAGOS_OFFSET_MS = 1 * 60 * 60 * 1000; // UTC+1
+    const lagosNow = new Date(Date.now() + LAGOS_OFFSET_MS);
+
+    const todayStart = new Date(lagosNow);
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const todayStartUtc = new Date(todayStart.getTime() - LAGOS_OFFSET_MS);
+
+    const weekStart = new Date(lagosNow);
+    const dow = weekStart.getUTCDay() || 7; // Sunday=0 → 7 so we go back to Monday
+    weekStart.setUTCDate(weekStart.getUTCDate() - dow + 1);
+    weekStart.setUTCHours(0, 0, 0, 0);
+    const weekStartUtc = new Date(weekStart.getTime() - LAGOS_OFFSET_MS);
+
+    const monthStart = new Date(lagosNow);
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const monthStartUtc = new Date(monthStart.getTime() - LAGOS_OFFSET_MS);
+
+    return { todayStartUtc, weekStartUtc, monthStartUtc };
+  }
+
+  /**
+   * Deliveries grouped by product (brand) — CEO dashboard widget.
+   * Returns delivery counts for today, this week, and this month per product/brand.
+   * Bounded to the current month for index-friendly scans.
+   */
+  async getDeliveriesByProduct(branchId?: string | null): Promise<
+    Array<{
+      productId: string;
+      productName: string;
+      brandName: string | null;
+      today: number;
+      thisWeek: number;
+      thisMonth: number;
+    }>
+  > {
+    const { todayStartUtc, weekStartUtc, monthStartUtc } = OrdersService.lagosPeriodBoundaries();
+
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(schema.orders.status, 'DELIVERED'),
+      gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
+    ];
+    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+
+    const rows = await this.db
+      .select({
+        productId: schema.orderItems.productId,
+        productName: schema.products.name,
+        brandName: schema.productCategories.brandName,
+        today: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.deliveredAt} >= ${todayStartUtc})::int`,
+        thisWeek: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.deliveredAt} >= ${weekStartUtc})::int`,
+        thisMonth: sql<number>`COUNT(*)::int`,
+      })
+      .from(schema.orderItems)
+      .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
+      .innerJoin(schema.products, eq(schema.orderItems.productId, schema.products.id))
+      .leftJoin(schema.productCategories, eq(schema.products.categoryId, schema.productCategories.id))
+      .where(and(...conditions))
+      .groupBy(schema.orderItems.productId, schema.products.name, schema.productCategories.brandName)
+      .orderBy(sql`COUNT(*) DESC`);
+
+    return rows.map((r) => ({
+      productId: r.productId,
+      productName: r.productName,
+      brandName: r.brandName ?? null,
+      today: r.today ?? 0,
+      thisWeek: r.thisWeek ?? 0,
+      thisMonth: r.thisMonth ?? 0,
+    }));
+  }
+
+  /**
+   * Revenue breakdown by day/week/month — CEO dashboard hero stat.
+   * Bounded to current month for index-friendly scans; CASE expressions
+   * compute the narrower today/week buckets within that range.
+   */
+  async getRevenueByPeriod(branchId?: string | null): Promise<{
+    today: number;
+    thisWeek: number;
+    thisMonth: number;
+  }> {
+    const { todayStartUtc, weekStartUtc, monthStartUtc } = OrdersService.lagosPeriodBoundaries();
+
+    const conditions: Parameters<typeof and>[0][] = [
+      eq(schema.orders.status, 'DELIVERED'),
+      gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
+    ];
+    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+
+    const [row] = await this.db
+      .select({
+        today: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${todayStartUtc} THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
+        thisWeek: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${weekStartUtc} THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
+        thisMonth: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric)), 0)`,
+      })
+      .from(schema.orders)
+      .where(and(...conditions));
+
+    return {
+      today: Number(row?.today ?? 0),
+      thisWeek: Number(row?.thisWeek ?? 0),
+      thisMonth: Number(row?.thisMonth ?? 0),
+    };
   }
 
   /**

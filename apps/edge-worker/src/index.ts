@@ -932,6 +932,7 @@ function getFormScript(
       // Cart abandonment: save name+phone when both filled (debounced)
       var savedCartId = null;
       var cartSaveTimeout = null;
+      var cartSaveInflight = null; // Promise of the in-flight cart save
       var CART_DEBOUNCE_MS = 600;
       function isValidNgPhone(value) {
         return NG_PHONE_RE.test((value || '').trim());
@@ -1012,13 +1013,14 @@ function getFormScript(
           }
           var cfv = readCustomFieldValues();
           if (cfv) payload.customFieldValues = cfv;
-          fetch('${workerUrl}/cart', {
+          cartSaveInflight = fetch('${workerUrl}/cart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           }).then(function(r) { return r.json(); }).then(function(d) {
             if (d.id) savedCartId = d.id;
-          }).catch(function() {});
+            cartSaveInflight = null;
+          }).catch(function() { cartSaveInflight = null; });
         }, CART_DEBOUNCE_MS);
       }
       // Trigger save on input/blur for every field the form might collect —

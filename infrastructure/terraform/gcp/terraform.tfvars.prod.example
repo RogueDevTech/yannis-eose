@@ -36,3 +36,14 @@ bucket_cors_origins = [
 ssh_source_ranges   = [
   "REPLACE-WITH-OPERATOR-IP/32",
 ]
+
+# Web ingress (80/443) must stay open to the world — Cloudflare-proxied
+# requests + Let's Encrypt HTTP-01 challenges both originate from changing
+# IP ranges. Lock down via Cloudflare WAF, not VPC firewall.
+# web_source_ranges = ["0.0.0.0/0"]
+
+# Two-stage cert provisioning. Leave false on the first prod apply, point
+# Cloudflare A records (`office`, `api-office`) at the VM's external IP,
+# then flip to true and re-apply.
+provision_tls_certificate = false
+tls_contact_email         = "ops@hqyannis.com"

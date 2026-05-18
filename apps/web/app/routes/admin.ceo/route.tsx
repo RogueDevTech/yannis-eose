@@ -88,6 +88,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
             csTeam: { agentCount: 0, pendingOrders: 0, utilization: 0 },
             payroll: { totalPaid: 0, totalPending: 0, staffCount: 0 },
             invoiceSummary: {},
+            revenueByPeriod: { today: 0, thisWeek: 0, thisMonth: 0 },
+            deliveriesByProduct: [],
+            stockPerProduct: [],
+            activeStaffCount: 0,
           };
 
     const branchBreakdown: BranchBreakdownRow[] = branchBreakdownRes.ok

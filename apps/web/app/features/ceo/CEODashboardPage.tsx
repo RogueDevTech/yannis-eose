@@ -244,6 +244,12 @@ export function CEODashboardPage({
     costBreakdown.fulfillmentCost +
     costBreakdown.operationalLoss;
 
+  // CEO-requested widgets (2026-05-18)
+  const revenueByPeriod = data?.revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0 };
+  const deliveriesByProduct = data?.deliveriesByProduct ?? [];
+  const stockPerProduct = data?.stockPerProduct ?? [];
+  const activeStaffCount = data?.activeStaffCount ?? 0;
+
   return (
     <div className="space-y-6">
       {/* Page header: title and subtitle first, then filters/actions below */}
@@ -411,10 +417,165 @@ export function CEODashboardPage({
       {!showChartView && (
         <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[20rem]">
         <>
-      {/* ── Section 1: Revenue & Profit KPIs ────────────────── */}
+      {/* ── HERO: ROAS on Ad Spend (CEO priority #1) ────────── */}
+      <div className="card bg-gradient-to-br from-brand-50 to-brand-100/50 dark:from-brand-900/30 dark:to-brand-800/20 border-brand-200 dark:border-brand-700/50">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold text-brand-600 dark:text-brand-400 uppercase tracking-wider mb-1">
+              ROAS on Ad Spend
+            </p>
+            <p className={`text-4xl sm:text-5xl font-bold tabular-nums ${
+              marketingSafe.roas >= 2
+                ? 'text-success-600 dark:text-success-400'
+                : marketingSafe.roas >= 1
+                  ? 'text-warning-600 dark:text-warning-400'
+                  : 'text-danger-600 dark:text-danger-400'
+            }`}>
+              {marketingSafe.roas.toFixed(2)}x
+            </p>
+            <p className="text-sm text-app-fg-muted mt-1">
+              Revenue / Ad Spend = {fmt(revenue)} / {fmt(marketingSafe.totalSpend)}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
+              <p className="text-[11px] font-medium text-app-fg-muted">Revenue</p>
+              <p className="text-base font-bold text-app-fg tabular-nums">{fmt(revenue)}</p>
+            </div>
+            <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
+              <p className="text-[11px] font-medium text-app-fg-muted">Ad Spend</p>
+              <p className="text-base font-bold text-danger-600 dark:text-danger-400 tabular-nums">{fmt(marketingSafe.totalSpend)}</p>
+            </div>
+            <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
+              <p className="text-[11px] font-medium text-app-fg-muted">Profit</p>
+              <p className={`text-base font-bold tabular-nums ${trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>{fmt(trueProfit)}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Revenue Generated: Day / Week / Month ─────────── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Revenue & Profit
+          Revenue Generated
+        </h2>
+        <OverviewStatStrip
+          items={[
+            { label: 'Today', value: fmt(revenueByPeriod.today), valueClassName: 'text-app-fg tabular-nums' },
+            { label: 'This Week', value: fmt(revenueByPeriod.thisWeek), valueClassName: 'text-app-fg tabular-nums' },
+            { label: 'This Month', value: fmt(revenueByPeriod.thisMonth), valueClassName: 'text-app-fg tabular-nums' },
+            { label: 'Period Total', value: fmt(revenue), valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
+          ]}
+        />
+      </div>
+
+      {/* ── Key Metrics Strip: Ad Spend, Orders, CPA, Delivery Rate, Active Staff ── */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          Key Metrics
+        </h2>
+        <OverviewStatStrip
+          items={[
+            { label: 'Ad Spend', value: fmt(marketingSafe.totalSpend), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
+            { label: 'Order Count', value: orderPipeline.total.toLocaleString(), valueClassName: 'text-app-fg tabular-nums' },
+            {
+              label: 'CPA',
+              value: fmt(marketingSafe.cpa),
+              valueClassName: marketingSafe.cpa > 0 && marketingSafe.cpa < 5000
+                ? 'text-success-600 dark:text-success-400 tabular-nums'
+                : marketingSafe.cpa > 10000
+                  ? 'text-danger-600 dark:text-danger-400 tabular-nums'
+                  : 'text-app-fg tabular-nums',
+            },
+            {
+              label: 'Delivery Rate',
+              value: pct(marketingSafe.deliveryRate),
+              valueClassName: marketingSafe.deliveryRate >= 70
+                ? 'text-success-600 dark:text-success-400 tabular-nums'
+                : marketingSafe.deliveryRate >= 50
+                  ? 'text-warning-600 dark:text-warning-400 tabular-nums'
+                  : 'text-danger-600 dark:text-danger-400 tabular-nums',
+            },
+            { label: 'Active Staff', value: activeStaffCount.toLocaleString(), valueClassName: 'text-app-fg tabular-nums' },
+          ]}
+        />
+      </div>
+
+      {/* ── Deliveries per Brand: Day / Week / Month ──────── */}
+      {deliveriesByProduct.length > 0 && (
+      <div className="card p-0">
+        <div className="px-4 py-3 border-b border-app-border">
+          <h2 className="text-sm font-semibold text-app-fg">Deliveries per Brand</h2>
+          <p className="text-xs text-app-fg-muted mt-0.5">Number of deliveries today, this week, and this month by product</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-app-border bg-app-hover/50">
+                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Product</th>
+                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Brand</th>
+                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">Today</th>
+                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">This Week</th>
+                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">This Month</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deliveriesByProduct.map((p) => (
+                <tr key={p.productId} className="border-b border-app-border last:border-b-0 hover:bg-app-hover/30">
+                  <td className="px-4 py-2 font-medium text-app-fg">{p.productName}</td>
+                  <td className="px-4 py-2 text-app-fg-muted">{p.brandName ?? '—'}</td>
+                  <td className="px-4 py-2 text-right tabular-nums font-medium text-app-fg">{p.today}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-app-fg">{p.thisWeek}</td>
+                  <td className="px-4 py-2 text-right tabular-nums text-app-fg">{p.thisMonth}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )}
+
+      {/* ── Stock Available per Product ───────────────────── */}
+      {stockPerProduct.length > 0 && (
+      <div className="card p-0">
+        <div className="px-4 py-3 border-b border-app-border">
+          <h2 className="text-sm font-semibold text-app-fg">Stock Available per Product</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-app-border bg-app-hover/50">
+                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Product</th>
+                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Brand</th>
+                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">Available</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockPerProduct.map((p) => (
+                <tr key={p.productId} className="border-b border-app-border last:border-b-0 hover:bg-app-hover/30">
+                  <td className="px-4 py-2 font-medium text-app-fg">{p.productName}</td>
+                  <td className="px-4 py-2 text-app-fg-muted">{p.brandName ?? '—'}</td>
+                  <td className={`px-4 py-2 text-right tabular-nums font-medium ${
+                    p.available <= 0
+                      ? 'text-danger-600 dark:text-danger-400'
+                      : p.available < 50
+                        ? 'text-warning-600 dark:text-warning-400'
+                        : 'text-success-600 dark:text-success-400'
+                  }`}>
+                    {p.available.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )}
+
+      {/* ── Revenue & Profit (existing detail) ────────────── */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          Revenue & Profit Detail
         </h2>
         <OverviewStatStrip
           items={[
@@ -440,7 +601,7 @@ export function CEODashboardPage({
         />
       </div>
 
-      {/* ── Section 2: Cost Breakdown + Profit Waterfall ───── */}
+      {/* ── Cost Breakdown + Profit Waterfall ───── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
           <h2 className="text-lg font-semibold text-app-fg mb-4">
