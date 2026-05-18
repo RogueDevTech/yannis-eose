@@ -409,6 +409,7 @@ export function FormFullPreview({
             label={field.kind === 'standard' ? field.label : describeFieldOrderToken(field.token)}
             canReorder={!!onFieldOrderChange}
             isDragging={draggingToken === field.token}
+            activeDraggingToken={draggingToken}
             translateY={translateY}
             dragContainerTop={dragContainerTop}
             rowTop={currentLayout?.top ?? 0}
@@ -626,6 +627,7 @@ function ReorderablePreviewField({
   label,
   canReorder,
   isDragging,
+  activeDraggingToken,
   translateY,
   dragContainerTop,
   rowTop,
@@ -642,6 +644,11 @@ function ReorderablePreviewField({
   label: string;
   canReorder: boolean;
   isDragging: boolean;
+  /** Token currently being dragged anywhere in the form, or null. Sourced from
+   *  parent React state so hit-testing during dragover does not depend on
+   *  `dataTransfer.types` (which is unreliable across browsers / synthetic
+   *  events and historically caused drops to silently no-op). */
+  activeDraggingToken: CampaignFieldOrderToken | null;
   translateY: number;
   dragContainerTop: number;
   rowTop: number;
@@ -653,11 +660,16 @@ function ReorderablePreviewField({
   onDropToken: (token: CampaignFieldOrderToken) => void;
   children: ReactNode;
 }) {
+  const isDragInProgress = canReorder && activeDraggingToken !== null;
   return (
     <div
       ref={rowRef}
+      onDragEnter={(e) => {
+        if (!isDragInProgress) return;
+        e.preventDefault();
+      }}
       onDragOver={(e) => {
-        if (!canReorder || !e.dataTransfer.types.includes(DRAG_FIELD_MIME)) return;
+        if (!isDragInProgress) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         const pointerY = e.clientY - dragContainerTop;
@@ -665,11 +677,15 @@ function ReorderablePreviewField({
         onDragHoverGap(gapIndex);
       }}
       onDrop={(e) => {
-        if (!canReorder) return;
+        if (!isDragInProgress) return;
         e.preventDefault();
-        const draggedToken = e.dataTransfer.getData(DRAG_FIELD_MIME) as CampaignFieldOrderToken;
+        // Prefer dataTransfer for cross-document drags; fall back to the
+        // parent's React state so same-document drags still resolve if
+        // the browser strips the custom MIME payload.
+        const transferred = e.dataTransfer.getData(DRAG_FIELD_MIME) as CampaignFieldOrderToken;
+        const draggedToken = transferred || (activeDraggingToken ?? '');
         if (draggedToken) {
-          onDropToken(draggedToken);
+          onDropToken(draggedToken as CampaignFieldOrderToken);
         }
       }}
       className={[
@@ -683,6 +699,9 @@ function ReorderablePreviewField({
           draggable
           onDragStart={(e) => {
             e.dataTransfer.setData(DRAG_FIELD_MIME, token);
+            // Firefox requires at least one well-known MIME type set, otherwise
+            // it refuses to start the drag silently.
+            e.dataTransfer.setData('text/plain', token);
             e.dataTransfer.effectAllowed = 'move';
             const row = e.currentTarget.parentElement as HTMLElement | null;
             if (row) {
