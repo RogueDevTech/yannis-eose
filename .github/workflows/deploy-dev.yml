@@ -18,16 +18,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Diagnostic — surfaces the resolved value of vars.DEPLOY_PLATFORM so we
-      # don't silently fall through to a wrong deploy target. If this prints
-      # `(empty)` then the variable is set as a Secret (not a Variable) or at
-      # the wrong scope. Set it under: Settings → Secrets and variables →
-      # Actions → Variables tab → New repository variable.
+      # Diagnostic — surfaces the resolved value of vars.DEPLOY_PLATFORM.
+      # Empty / unset = deploy to BOTH providers in parallel.
+      # Set to 'gcp' or 'aws' to deploy to only that provider.
       - name: Show resolved deploy platform
         run: |
           echo "vars.DEPLOY_PLATFORM = '${{ vars.DEPLOY_PLATFORM }}'"
           if [ -z "${{ vars.DEPLOY_PLATFORM }}" ]; then
-            echo "::warning::DEPLOY_PLATFORM is empty. Set it as a repository Variable (not Secret) to 'gcp' or 'aws'."
+            echo "::notice::DEPLOY_PLATFORM is empty — deploying to BOTH AWS and GCP."
+          else
+            echo "::notice::Deploying to ${{ vars.DEPLOY_PLATFORM }} only."
           fi
 
       - uses: pnpm/action-setup@v4
@@ -46,7 +46,8 @@ jobs:
     name: Deploy to Dev (GCP)
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ vars.DEPLOY_PLATFORM == 'gcp' }}
+    # Runs when DEPLOY_PLATFORM is 'gcp' OR empty/unset (both-provider mode).
+    if: ${{ vars.DEPLOY_PLATFORM == 'gcp' || vars.DEPLOY_PLATFORM == '' }}
     environment: dev
     # Required for Workload Identity Federation — GitHub mints the OIDC token
     # that GCP exchanges for short-lived SA credentials. Without `id-token:
@@ -129,11 +130,8 @@ jobs:
     name: Deploy to Dev (AWS)
     runs-on: ubuntu-latest
     needs: build
-    # Explicit-only — must equal 'aws'. The previous condition also matched
-    # the empty string, which silently routed every misconfigured repo to AWS
-    # (the most common failure mode was DEPLOY_PLATFORM set as a Secret
-    # instead of a Variable, which resolves to `''` in `vars.*`).
-    if: ${{ vars.DEPLOY_PLATFORM == 'aws' }}
+    # Runs when DEPLOY_PLATFORM is 'aws' OR empty/unset (both-provider mode).
+    if: ${{ vars.DEPLOY_PLATFORM == 'aws' || vars.DEPLOY_PLATFORM == '' }}
     environment: dev
     env:
       AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}

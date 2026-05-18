@@ -13,10 +13,9 @@ Yannis EOSE now uses a **provider-selectable deployment system** with:
 
 Supported values:
 
-- `gcp`
-- `aws`
-
-If unset, the dev workflow defaults to `aws`.
+- `gcp` — deploy to GCP only
+- `aws` — deploy to AWS only
+- **(empty / unset)** — deploy to **both** providers in parallel
 
 ## Shared Runtime Contract
 
@@ -61,9 +60,21 @@ DATABASE_URL=postgres://...
 REDIS_URL=redis://...
 SESSION_SECRET=replace-me
 SESSION_BUNDLE_SECRET=replace-me
-SESSION_COOKIE_DOMAIN=.roguedevtech.com
-CORS_ORIGIN=https://dev-yannis.roguedevtech.com
-PUBLIC_API_URL=https://api-dev-yannis.roguedevtech.com
+# Hostnames are provider-specific. GCP deploys live on the hqyannis.com
+# zone; AWS deploys stay on roguedevtech.com. Pick the matching row:
+#
+#   GCP dev:  SESSION_COOKIE_DOMAIN=.hqyannis.com
+#             CORS_ORIGIN=https://dev-office.hqyannis.com
+#             PUBLIC_API_URL=https://dev-api-office.hqyannis.com
+#   GCP prod: SESSION_COOKIE_DOMAIN=.hqyannis.com
+#             CORS_ORIGIN=https://office.hqyannis.com
+#             PUBLIC_API_URL=https://api-office.hqyannis.com
+#   AWS dev:  SESSION_COOKIE_DOMAIN=.roguedevtech.com
+#             CORS_ORIGIN=https://yannis.roguedevtech.com
+#             PUBLIC_API_URL=https://api-yannis.roguedevtech.com
+SESSION_COOKIE_DOMAIN=.hqyannis.com
+CORS_ORIGIN=https://dev-office.hqyannis.com
+PUBLIC_API_URL=https://dev-api-office.hqyannis.com
 EDGE_WORKER_URL=https://<your-edge-worker-domain>
 OBJECT_STORAGE_PROVIDER=gcs
 OBJECT_STORAGE_BUCKET=<bucket-name>

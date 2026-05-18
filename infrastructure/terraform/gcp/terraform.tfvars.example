@@ -5,8 +5,12 @@ environment         = "dev"
 machine_type        = "e2-small"
 vm_admin_user       = "deployer"
 ssh_public_key      = "ssh-ed25519 AAAA..."
-public_web_hostname = "dev-yannis.roguedevtech.com"
-public_api_hostname = "api-dev-yannis.roguedevtech.com"
+# GCP dev lives on the hqyannis.com zone. AWS dev stays on
+# roguedevtech.com via the AWS tfvars — the two providers do not share
+# DNS so a Cloudflare A-record swap is the failover knob within each zone,
+# not between zones.
+public_web_hostname = "dev-office.hqyannis.com"
+public_api_hostname = "dev-api-office.hqyannis.com"
 bucket_cors_origins = [
-  "https://dev-yannis.roguedevtech.com",
+  "https://dev-office.hqyannis.com",
 ]

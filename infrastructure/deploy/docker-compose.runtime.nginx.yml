@@ -1,0 +1,71 @@
+# =============================================================================
+# Yannis EOSE — nginx-fronted public-IP runtime overlay (provider-agnostic).
+#
+# Composes ON TOP of docker-compose.runtime.yml:
+#   docker compose \
+#     -f docker-compose.runtime.yml \
+#     -f docker-compose.runtime.nginx.yml \
+#     up -d
+#
+# What this overlay changes vs the bare runtime:
+#   • Removes the `127.0.0.1:<host>:<container>` port bindings on `api`/`web`
+#     — they're now reachable only via the internal `default` docker network
+#     (nginx hits them by service name).
+#   • Adds an `nginx` sidecar that terminates TLS on 443 using a Cloudflare
+#     Origin Certificate mounted from the host, and proxies by Host header
+#     to `web:3000` or `api:4444`.
+#   • Exposes 80 + 443 on all VM interfaces (0.0.0.0) — GCP firewall / AWS
+#     security group must open those ports.
+#
+# Ingress assumption: Cloudflare proxy is ON (orange cloud) for the public
+# hostnames. The Cloudflare Origin Cert is only trusted when the request
+# arrives via Cloudflare's edge. Direct-IP browsers will see a cert warning;
+# that's intentional — direct-IP access is not the entrypoint.
+#
+# Required env on the VM (from .env, sourced via secret manager):
+#   WEB_HOSTNAME=dev-yannis.roguedevtech.com         (or office.hqyannis.com for prod)
+#   API_HOSTNAME=api-dev-yannis.roguedevtech.com     (or api-office.hqyannis.com)
+#
+# Required files on the VM (NOT in this repo — never commit certs):
+#   /opt/yannis-eose/certs/origin.crt
+#   /opt/yannis-eose/certs/origin.key
+#   (mode 0600 on the key; 0644 on the cert)
+# =============================================================================
+
+services:
+  api:
+    # Replace the loopback-only mapping from runtime.yml with no host port —
+    # nginx reaches api via the docker network on the upstream name `api:4444`.
+    ports: !reset []
+
+  web:
+    ports: !reset []
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    environment:
+      - WEB_HOSTNAME=${WEB_HOSTNAME}
+      - API_HOSTNAME=${API_HOSTNAME}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      # nginx:alpine's entrypoint runs envsubst over /etc/nginx/templates/*.template
+      # at start, expanding ${WEB_HOSTNAME} / ${API_HOSTNAME} from env into the
+      # final /etc/nginx/conf.d/default.conf. Mounted RO so the container can't
+      # write back to the host.
+      - ../nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./certs/origin.crt:/etc/nginx/certs/origin.crt:ro
+      - ./certs/origin.key:/etc/nginx/certs/origin.key:ro
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '-', 'http://127.0.0.1/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

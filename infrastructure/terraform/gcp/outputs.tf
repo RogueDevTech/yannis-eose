@@ -99,7 +99,10 @@ output "suggested_runtime_env" {
     PUBLIC_API_URL                 = "https://${var.public_api_hostname}"
     REDIS_URL                      = "redis://<external-redis-endpoint>"
     RUNTIME_ENV_SECRET             = google_secret_manager_secret.runtime_env.secret_id
-    SESSION_COOKIE_DOMAIN          = ".roguedevtech.com"
+    # Derived from the public hostnames — for hqyannis.com hostnames the
+    # parent cookie domain is `.hqyannis.com`; for roguedevtech.com hosts
+    # it's `.roguedevtech.com`. Naive split on dot grabs the right TLD+1.
+    SESSION_COOKIE_DOMAIN          = ".${join(".", slice(split(".", var.public_web_hostname), length(split(".", var.public_web_hostname)) - 2, length(split(".", var.public_web_hostname))))}"
     DEPLOY_PLATFORM                = "gcp"
   }
   description = "Suggested runtime env keys to store in the Secret Manager .env secret."

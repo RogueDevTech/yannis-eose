@@ -534,7 +534,7 @@ export function UserCreatePage({
 
       <Form
         method="post"
-        data-branch-scoped-action="true"
+        data-branch-scoped-action={roleNeedsBranch ? 'true' : 'false'}
         className="space-y-6"
         onSubmit={(e) => {
           if (conflictingHead && !confirmedConflict) {
@@ -1129,7 +1129,7 @@ export function UserCreatePage({
                 // confirmedConflict === true.
                 requestAnimationFrame(() => {
                   if (typeof document !== 'undefined') {
-                    const form = document.querySelector<HTMLFormElement>('form[data-branch-scoped-action="true"]');
+                    const form = document.querySelector<HTMLFormElement>('form[data-branch-scoped-action]');
                     form?.requestSubmit();
                   }
                 });

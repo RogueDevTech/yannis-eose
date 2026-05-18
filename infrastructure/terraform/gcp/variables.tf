@@ -124,13 +124,13 @@ variable "bucket_cors_origins" {
 }
 
 variable "public_web_hostname" {
-  description = "Cloudflare hostname that serves the web app."
+  description = "Cloudflare hostname that serves the web app. GCP defaults target the hqyannis.com zone (dev = `dev-office.hqyannis.com`, prod = `office.hqyannis.com`); AWS deploys stay on roguedevtech.com via the AWS tfvars."
   type        = string
-  default     = "dev-yannis.roguedevtech.com"
+  default     = "dev-office.hqyannis.com"
 }
 
 variable "public_api_hostname" {
-  description = "Cloudflare hostname that serves the API."
+  description = "Cloudflare hostname that serves the API. GCP defaults to the hqyannis.com zone; AWS stays on roguedevtech.com."
   type        = string
-  default     = "api-dev-yannis.roguedevtech.com"
+  default     = "dev-api-office.hqyannis.com"
 }
