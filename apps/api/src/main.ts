@@ -29,6 +29,12 @@ import { FailoverIoAdapter } from './events/failover-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // Enable Nest's shutdown hooks so providers with OnModuleDestroy /
+  // OnApplicationShutdown (DB pool, Redis client, sockets, schedulers) tear
+  // down cleanly when the process receives SIGTERM/SIGINT. Without this,
+  // killing the process leaves the port held in TIME_WAIT and partial work
+  // mid-flight — the recurring EADDRINUSE pattern we kept hitting in dev.
+  app.enableShutdownHooks();
   // The GCP dev VM sits behind Cloudflare Tunnel, so trust proxy headers for
   // accurate client IPs in rate limits / auth logging.
   const httpAdapter = app.getHttpAdapter();
@@ -85,6 +91,36 @@ async function bootstrap() {
       '[Yannis API] SESSION_COOKIE_DOMAIN is unset — browsers will not send yannis_session to a different API host (e.g. WebSocket on api-*). Set SESSION_COOKIE_DOMAIN to your parent domain (e.g. .roguedevtech.com).',
     );
   }
+
+  // Belt-and-suspenders: in addition to Nest's enableShutdownHooks, watch for
+  // the signals ourselves so we can log a clear "shutting down" line and
+  // call app.close() if Nest hasn't already started the teardown. Idempotent
+  // — Nest's internal close() guard makes the second call a no-op.
+  const closeOnSignal = (signal: NodeJS.Signals) => {
+    console.warn(`[Yannis API] Received ${signal}, closing gracefully…`);
+    app.close().catch((err) => {
+      console.error(`[Yannis API] app.close() failed:`, err);
+    });
+  };
+  process.on('SIGTERM', closeOnSignal);
+  process.on('SIGINT', closeOnSignal);
 }
 
-void bootstrap();
+bootstrap().catch((err: unknown) => {
+  // Friendly message for the most common dev pain — a stray previous instance
+  // still holding the port. Print the actionable fix instead of a 30-line
+  // Node stack trace.
+  const port = process.env['PORT'] ?? 4444;
+  if (err && typeof err === 'object' && (err as { code?: string }).code === 'EADDRINUSE') {
+    console.error(
+      `[Yannis API] Port ${port} is already in use. Another API instance is running.\n` +
+        `[Yannis API] Find the offender:  lsof -nP -iTCP:${port} -sTCP:LISTEN\n` +
+        `[Yannis API] Kill it:            kill <pid>`,
+    );
+  } else {
+    console.error('[Yannis API] Failed to bootstrap:', err);
+  }
+  // Exit non-zero so PM2 / Cloud Run / Docker restart the container instead of
+  // silently leaving us with a hung process.
+  process.exit(1);
+});

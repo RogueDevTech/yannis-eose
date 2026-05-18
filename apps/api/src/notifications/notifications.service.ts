@@ -53,10 +53,37 @@ export class NotificationsService {
       this.logger.warn('SENDGRID_API_KEY not set — email sending disabled');
     }
 
-    const vapidPublic = process.env['VAPID_PUBLIC_KEY'];
-    const vapidPrivate = process.env['VAPID_PRIVATE_KEY'];
+    const vapidPublic = process.env['VAPID_PUBLIC_KEY']?.trim();
+    const vapidPrivate = process.env['VAPID_PRIVATE_KEY']?.trim();
     if (!vapidPublic || !vapidPrivate) {
-      this.logger.warn('VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY not set — web push disabled');
+      this.logger.warn(
+        '════════════════════════════════════════════════════════════════\n' +
+          '  WEB PUSH DISABLED — VAPID keys not set\n' +
+          '  VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY are missing from the API env.\n' +
+          '  In-app notifications still work; PWA push delivery does not.\n' +
+          '  Generate keys: `npx web-push generate-vapid-keys` (run once, share with web app).\n' +
+          '════════════════════════════════════════════════════════════════',
+      );
+    } else {
+      // Cheap format sanity check — catches typos / truncated keys at boot
+      // instead of waiting for the first sendNotification to throw. VAPID
+      // public keys are exactly 65 bytes base64url-encoded (≈87 chars);
+      // private keys are 32 bytes (≈43 chars). We only warn here so a
+      // mis-formatted key still goes through web-push's own validation in
+      // getWebPushReady() — but the warning gives operators an obvious
+      // pointer when the eager init below logs a setVapidDetails error.
+      const looksLikePublic = vapidPublic.length >= 80 && vapidPublic.length <= 100;
+      const looksLikePrivate = vapidPrivate.length >= 40 && vapidPrivate.length <= 50;
+      if (!looksLikePublic || !looksLikePrivate) {
+        this.logger.warn(
+          `VAPID keys present but length looks off (public=${vapidPublic.length}, private=${vapidPrivate.length}). ` +
+            'Expected public ~87 chars / private ~43 chars (base64url). Web-push may reject at runtime.',
+        );
+      }
+      // Eager-init so any setVapidDetails error from web-push surfaces at
+      // boot rather than on the first user's first push. Fire-and-forget —
+      // getWebPushReady() caches the promise + logs on success / failure.
+      void this.getWebPushReady();
     }
   }
 
