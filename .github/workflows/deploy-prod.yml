@@ -273,5 +273,5 @@ jobs:
       - name: Deploy worker (production env)
         if: steps.changes.outputs.changed == 'true'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_HQYANNIS }}
         run: pnpm --filter @yannis/edge-worker exec wrangler deploy --env production
