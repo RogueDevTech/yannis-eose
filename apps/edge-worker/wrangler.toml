@@ -126,23 +126,23 @@ routes = [
 
 [env.production.vars]
 API_URL = "https://api-office.hqyannis.com"
-TURNSTILE_SITE_KEY = "REPLACE-WITH-PROD-TURNSTILE-SITE-KEY"
+TURNSTILE_SITE_KEY = "0x4AAAAAADR3aHUKRmTFmXR3"
 
 [env.production.triggers]
 crons = ["* * * * *"]
 
 [[env.production.kv_namespaces]]
 binding = "DEDUP_CACHE"
-id = "REPLACE-WITH-PROD-DEDUP-KV-ID"
+id = "58fd367c161947d48cd910c44b825c40"
 
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMIT_CACHE"
-id = "REPLACE-WITH-PROD-RATE-LIMIT-KV-ID"
+id = "bf16a03807a74674b8d890d040ce1608"
 
 [[env.production.kv_namespaces]]
 binding = "INVENTORY_CACHE"
-id = "REPLACE-WITH-PROD-INVENTORY-KV-ID"
+id = "70d03085c0d9428f8661f2922251277d"
 
 [[env.production.kv_namespaces]]
 binding = "CAMPAIGN_CACHE"
-id = "REPLACE-WITH-PROD-CAMPAIGN-KV-ID"
+id = "53b4f724bb1a40d9961bdc72003a41c0"

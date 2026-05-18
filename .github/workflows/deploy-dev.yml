@@ -18,6 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Loud diagnostic — same repo also runs deploy-prod.yml, so the dev
+      # banner exists to make it impossible to confuse the two in the Actions
+      # log.
+      - name: Show target environment
+        run: |
+          echo "::notice title=DEV DEPLOY::Target environment is DEV (branch ${{ github.ref_name }}, sha ${{ github.sha }})"
+
       # Diagnostic — surfaces the resolved value of vars.DEPLOY_PLATFORM.
       # 'gcp' or 'aws' = deploy to that provider only.
       # Anything else (empty, unset, '.', etc.) = deploy to BOTH in parallel.

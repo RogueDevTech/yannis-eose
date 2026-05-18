@@ -27,6 +27,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Loud diagnostic — same repo also runs deploy-dev.yml, so the prod
+      # banner exists to make it impossible to confuse the two in the Actions
+      # log. Triggered only when ref is `main` (see `on:` block above).
+      - name: Show target environment
+        run: |
+          echo "::notice title=PROD DEPLOY::Target environment is PROD (branch ${{ github.ref_name }}, sha ${{ github.sha }})"
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "::error::Refusing to deploy prod from a non-main ref: ${{ github.ref }}"
+            exit 1
+          fi
+
       # Diagnostic — surfaces the resolved value of vars.DEPLOY_PLATFORM.
       # 'gcp' or 'aws' = deploy to that provider only.
       # Anything else (empty, unset, '.', etc.) = deploy to BOTH in parallel.
@@ -61,11 +72,14 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # All GCP secrets are `PROD_GCP_*`-prefixed so they cannot be confused with
+    # the unprefixed dev secrets that live in the same repo. The `environment:
+    # prod` line scopes these to the prod GitHub Environment.
     env:
-      GCP_REGION: ${{ secrets.GCP_REGION || 'europe-west2' }}
-      GCP_ZONE: ${{ secrets.GCP_ZONE || 'europe-west2-a' }}
-      GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.GCP_ARTIFACT_REPOSITORY_ID || 'prod-yannis-eose' }}
-      GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.GCP_RUNTIME_ENV_SECRET_NAME || 'prod-yannis-runtime-env' }}
+      PROD_GCP_REGION: ${{ secrets.PROD_GCP_REGION || 'europe-west2' }}
+      PROD_GCP_ZONE: ${{ secrets.PROD_GCP_ZONE || 'europe-west2-a' }}
+      PROD_GCP_ARTIFACT_REPOSITORY_ID: ${{ secrets.PROD_GCP_ARTIFACT_REPOSITORY_ID || 'prod-yannis-eose' }}
+      PROD_GCP_RUNTIME_ENV_SECRET_NAME: ${{ secrets.PROD_GCP_RUNTIME_ENV_SECRET_NAME || 'prod-yannis-runtime-env' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,19 +89,19 @@ jobs:
       - name: Authenticate to Google Cloud (Workload Identity Federation)
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          workload_identity_provider: ${{ secrets.PROD_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.PROD_GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Artifact Registry auth
         run: |
-          gcloud auth configure-docker "${{ env.GCP_REGION }}-docker.pkg.dev" --quiet
+          gcloud auth configure-docker "${{ env.PROD_GCP_REGION }}-docker.pkg.dev" --quiet
 
       - name: Build & push API image
         env:
-          IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
+          IMAGE_REGISTRY: ${{ env.PROD_GCP_REGION }}-docker.pkg.dev/${{ secrets.PROD_GCP_PROJECT_ID }}/${{ env.PROD_GCP_ARTIFACT_REPOSITORY_ID }}
           IMAGE_TAG: prod-${{ github.sha }}
         run: |
           docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:prod-latest .
@@ -96,7 +110,7 @@ jobs:
 
       - name: Build & push Web image
         env:
-          IMAGE_REGISTRY: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.GCP_ARTIFACT_REPOSITORY_ID }}
+          IMAGE_REGISTRY: ${{ env.PROD_GCP_REGION }}-docker.pkg.dev/${{ secrets.PROD_GCP_PROJECT_ID }}/${{ env.PROD_GCP_ARTIFACT_REPOSITORY_ID }}
           IMAGE_TAG: prod-${{ github.sha }}
         run: |
           docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:prod-latest .
@@ -105,9 +119,9 @@ jobs:
 
       - name: Prepare VM deploy directory
         run: |
-          gcloud compute ssh "${{ secrets.GCP_VM_NAME }}" \
-            --zone "${{ env.GCP_ZONE }}" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
+          gcloud compute ssh "${{ secrets.PROD_GCP_VM_NAME }}" \
+            --zone "${{ env.PROD_GCP_ZONE }}" \
+            --project "${{ secrets.PROD_GCP_PROJECT_ID }}" \
             --command "sudo mkdir -p /opt/yannis-eose && sudo chown \$USER:\$USER /opt/yannis-eose"
 
       - name: Copy deploy assets to VM
@@ -121,18 +135,18 @@ jobs:
             infrastructure/deploy/refresh-env.sh \
             infrastructure/deploy/refresh-env-gcp.sh \
             infrastructure/deploy/run-migrations.sh \
-            "${{ secrets.GCP_VM_NAME }}:/opt/yannis-eose/" \
-            --zone "${{ env.GCP_ZONE }}" \
-            --project "${{ secrets.GCP_PROJECT_ID }}"
+            "${{ secrets.PROD_GCP_VM_NAME }}:/opt/yannis-eose/" \
+            --zone "${{ env.PROD_GCP_ZONE }}" \
+            --project "${{ secrets.PROD_GCP_PROJECT_ID }}"
 
       # Note: the shared scripts have `-dev` in their names but are env-agnostic —
       # they parameterize via env vars below. Don't rename them; just feed prod values.
       - name: Deploy on GCE VM
         run: |
-          gcloud compute ssh "${{ secrets.GCP_VM_NAME }}" \
-            --zone "${{ env.GCP_ZONE }}" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --command "cd /opt/yannis-eose && chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-gcp-dev.sh ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' GCP_REGION='${{ env.GCP_REGION }}' GCP_PROJECT_ID='${{ secrets.GCP_PROJECT_ID }}' ARTIFACT_REPOSITORY_ID='${{ env.GCP_ARTIFACT_REPOSITORY_ID }}' RUNTIME_ENV_SECRET_NAME='${{ env.GCP_RUNTIME_ENV_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh"
+          gcloud compute ssh "${{ secrets.PROD_GCP_VM_NAME }}" \
+            --zone "${{ env.PROD_GCP_ZONE }}" \
+            --project "${{ secrets.PROD_GCP_PROJECT_ID }}" \
+            --command "cd /opt/yannis-eose && chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-gcp-dev.sh ./refresh-env.sh ./refresh-env-gcp.sh ./run-migrations.sh && DEPLOY_PLATFORM='gcp' GCP_REGION='${{ env.PROD_GCP_REGION }}' GCP_PROJECT_ID='${{ secrets.PROD_GCP_PROJECT_ID }}' ARTIFACT_REPOSITORY_ID='${{ env.PROD_GCP_ARTIFACT_REPOSITORY_ID }}' RUNTIME_ENV_SECRET_NAME='${{ env.PROD_GCP_RUNTIME_ENV_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh"
 
   deploy-aws:
     name: Deploy to Prod (AWS)
@@ -140,10 +154,12 @@ jobs:
     needs: build
     if: ${{ vars.DEPLOY_PLATFORM != 'gcp' }}
     environment: prod
+    # All AWS secrets are `PROD_AWS_*` / `PROD_EC2_*`-prefixed so they cannot
+    # be confused with the unprefixed dev secrets in the same repo.
     env:
-      AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}
-      AWS_RUNTIME_SECRET_NAME: ${{ secrets.AWS_RUNTIME_SECRET_NAME || 'prod-yannis-runtime-env' }}
-      AWS_VM_SSH_USER: ${{ secrets.EC2_SSH_USER || 'ubuntu' }}
+      PROD_AWS_REGION: ${{ secrets.PROD_AWS_REGION || 'eu-north-1' }}
+      PROD_AWS_RUNTIME_SECRET_NAME: ${{ secrets.PROD_AWS_RUNTIME_SECRET_NAME || 'prod-yannis-runtime-env' }}
+      PROD_AWS_VM_SSH_USER: ${{ secrets.PROD_EC2_SSH_USER || 'ubuntu' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -153,24 +169,24 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-access-key-id: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.PROD_AWS_REGION }}
 
       - name: Ensure ECR repositories exist
         run: |
           for repo in yannis-eose-api yannis-eose-web; do
-            aws ecr describe-repositories --repository-names "$repo" --region "${{ env.AWS_REGION }}" 2>/dev/null || \
-            aws ecr create-repository --repository-name "$repo" --region "${{ env.AWS_REGION }}"
+            aws ecr describe-repositories --repository-names "$repo" --region "${{ env.PROD_AWS_REGION }}" 2>/dev/null || \
+            aws ecr create-repository --repository-name "$repo" --region "${{ env.PROD_AWS_REGION }}"
           done
 
       - name: Login to ECR
         run: |
-          aws ecr get-login-password --region "${{ env.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          aws ecr get-login-password --region "${{ env.PROD_AWS_REGION }}" | docker login --username AWS --password-stdin "${{ secrets.PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.PROD_AWS_REGION }}.amazonaws.com"
 
       - name: Build & push API image
         env:
-          IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_REGISTRY: ${{ secrets.PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.PROD_AWS_REGION }}.amazonaws.com
           IMAGE_TAG: prod-${{ github.sha }}
         run: |
           docker build -f apps/api/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-api:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-api:prod-latest .
@@ -179,7 +195,7 @@ jobs:
 
       - name: Build & push Web image
         env:
-          IMAGE_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com
+          IMAGE_REGISTRY: ${{ secrets.PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.PROD_AWS_REGION }}.amazonaws.com
           IMAGE_TAG: prod-${{ github.sha }}
         run: |
           docker build -f apps/web/Dockerfile -t $IMAGE_REGISTRY/yannis-eose-web:$IMAGE_TAG -t $IMAGE_REGISTRY/yannis-eose-web:prod-latest .
@@ -188,15 +204,15 @@ jobs:
 
       - name: Copy deploy assets to EC2
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          PROD_EC2_HOST: ${{ secrets.PROD_EC2_HOST }}
+          PROD_EC2_SSH_KEY: ${{ secrets.PROD_EC2_SSH_KEY }}
         run: |
-          if [ -z "$EC2_HOST" ]; then echo "::error::Secret EC2_HOST is not set."; exit 1; fi
-          if [ -z "$EC2_SSH_KEY" ]; then echo "::error::Secret EC2_SSH_KEY is not set."; exit 1; fi
+          if [ -z "$PROD_EC2_HOST" ]; then echo "::error::Secret PROD_EC2_HOST is not set."; exit 1; fi
+          if [ -z "$PROD_EC2_SSH_KEY" ]; then echo "::error::Secret PROD_EC2_SSH_KEY is not set."; exit 1; fi
           mkdir -p ~/.ssh
-          echo "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          echo "$PROD_EC2_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key "${{ env.AWS_VM_SSH_USER }}"@"$EC2_HOST" "sudo mkdir -p /opt/yannis-eose && sudo chown ${{ env.AWS_VM_SSH_USER }}:${{ env.AWS_VM_SSH_USER }} /opt/yannis-eose"
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key "${{ env.PROD_AWS_VM_SSH_USER }}"@"$PROD_EC2_HOST" "sudo mkdir -p /opt/yannis-eose && sudo chown ${{ env.PROD_AWS_VM_SSH_USER }}:${{ env.PROD_AWS_VM_SSH_USER }} /opt/yannis-eose"
           scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -i ~/.ssh/deploy_key \
             infrastructure/deploy/docker-compose.runtime.yml \
@@ -207,19 +223,19 @@ jobs:
             infrastructure/deploy/refresh-env.sh \
             infrastructure/deploy/refresh-env-aws.sh \
             infrastructure/deploy/run-migrations.sh \
-            "${{ env.AWS_VM_SSH_USER }}"@"$EC2_HOST":/opt/yannis-eose/
+            "${{ env.PROD_AWS_VM_SSH_USER }}"@"$PROD_EC2_HOST":/opt/yannis-eose/
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ env.AWS_VM_SSH_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.PROD_EC2_HOST }}
+          username: ${{ env.PROD_AWS_VM_SSH_USER }}
+          key: ${{ secrets.PROD_EC2_SSH_KEY }}
           command_timeout: 20m
           script: |
             cd /opt/yannis-eose
             chmod +x ./deploy-dev.sh ./deploy-runtime.sh ./deploy-aws-dev.sh ./refresh-env.sh ./refresh-env-aws.sh ./run-migrations.sh
-            DEPLOY_PLATFORM='aws' AWS_REGION='${{ env.AWS_REGION }}' AWS_ACCOUNT_ID='${{ secrets.AWS_ACCOUNT_ID }}' SECRET_NAME='${{ env.AWS_RUNTIME_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh
+            DEPLOY_PLATFORM='aws' AWS_REGION='${{ env.PROD_AWS_REGION }}' AWS_ACCOUNT_ID='${{ secrets.PROD_AWS_ACCOUNT_ID }}' SECRET_NAME='${{ env.PROD_AWS_RUNTIME_SECRET_NAME }}' IMAGE_TAG='prod-latest' ./deploy-dev.sh
 
   deploy-edge-worker:
     name: Deploy Edge Worker (production)
