@@ -5,8 +5,15 @@ compatibility_flags = ["nodejs_compat"]
 
 # Default (AWS dev) env — `wrangler deploy` with no `--env` flag uses these.
 # The form lives at `yannis-form.roguedevtech.com`; this worker handles every
-# request to that hostname and posts orders to the AWS-hosted API. GCP dev
-# lives on hqyannis.com (see [env.gcp-dev] below).
+# request to that hostname and posts orders to the AWS-hosted API. GCP dev /
+# prod live on hqyannis.com under a different Cloudflare account (see the
+# `[env.*]` blocks below).
+#
+# `account_id` locks this default config to the roguedevtech.com Cloudflare
+# account — so even if your shell is authed with the hqyannis.com token,
+# `wrangler deploy` (no --env) will refuse to publish here unless the
+# token matches. Replace once and forget.
+account_id = "REPLACE-WITH-ROGUEDEVTECH-ACCOUNT-ID"
 routes = [
   { pattern = "yannis-form.roguedevtech.com/*", zone_name = "roguedevtech.com" },
 ]
@@ -51,32 +58,49 @@ preview_id = "36f748275dec4c669b6fe26dca9cf8db"
 
 [env.gcp-dev]
 name = "yannis-edge-worker-gcp-dev"
+# Lives in the hqyannis.com Cloudflare account — separate from the AWS-dev
+# worker (which is in the roguedevtech.com account). Workers, KV namespaces,
+# and routes are all account-scoped; you cannot share them across accounts.
+# Replace the placeholder below with the hqyannis.com account ID:
+# Cloudflare dashboard → click any site in hqyannis.com → Account Home → ID
+# is on the right sidebar.
+account_id = "REPLACE-WITH-HQYANNIS-ACCOUNT-ID"
 # Form is hosted at dev-form.hqyannis.com (separate from the web app at
 # dev-office.hqyannis.com so the form has no session cookies in scope).
 route = { pattern = "dev-form.hqyannis.com/*", zone_name = "hqyannis.com" }
 
 [env.gcp-dev.vars]
 API_URL = "https://dev-api-office.hqyannis.com"
-TURNSTILE_SITE_KEY = "0x4AAAAAACwS5uc-71js3fAy"
+# Create a NEW Turnstile site for hqyannis.com in the new account so abuse
+# counters don't bleed from the roguedevtech.com instance.
+TURNSTILE_SITE_KEY = "REPLACE-WITH-HQYANNIS-TURNSTILE-SITE-KEY"
 
 [env.gcp-dev.triggers]
 crons = ["* * * * *"]
 
+# KV namespaces — MUST be created in the hqyannis.com account. The AWS dev
+# IDs above are in the roguedevtech.com account and will fail to bind here.
+# Create with (after wrangler is authed to the new account):
+#   wrangler kv namespace create DEDUP_CACHE        --env gcp-dev
+#   wrangler kv namespace create RATE_LIMIT_CACHE   --env gcp-dev
+#   wrangler kv namespace create INVENTORY_CACHE    --env gcp-dev
+#   wrangler kv namespace create CAMPAIGN_CACHE     --env gcp-dev
+# Then paste the printed IDs below.
 [[env.gcp-dev.kv_namespaces]]
 binding = "DEDUP_CACHE"
-id = "dd6aa2365f7a44c5b0d3b4825bdb8749"
+id = "REPLACE-WITH-HQYANNIS-DEDUP-KV-ID"
 
 [[env.gcp-dev.kv_namespaces]]
 binding = "RATE_LIMIT_CACHE"
-id = "b68391c82d004c40a9f3dfd61fd49866"
+id = "REPLACE-WITH-HQYANNIS-RATE-LIMIT-KV-ID"
 
 [[env.gcp-dev.kv_namespaces]]
 binding = "INVENTORY_CACHE"
-id = "7ef0945b3f044e0280db399fdcc2cdb7"
+id = "REPLACE-WITH-HQYANNIS-INVENTORY-KV-ID"
 
 [[env.gcp-dev.kv_namespaces]]
 binding = "CAMPAIGN_CACHE"
-id = "7a4c4ff13803430fa1173674e88ff5b0"
+id = "REPLACE-WITH-HQYANNIS-CAMPAIGN-KV-ID"
 
 # ─── Production env ───────────────────────────────────────────────────────────
 # Deploy with `pnpm --filter @yannis/edge-worker exec wrangler deploy --env production`.
@@ -86,6 +110,10 @@ id = "7a4c4ff13803430fa1173674e88ff5b0"
 
 [env.production]
 name = "yannis-edge-worker-prod"
+# Lives in the same hqyannis.com Cloudflare account as `gcp-dev`. KV
+# namespaces are separate from dev so prod abuse counters / dedup / rate
+# limits don't bleed between envs.
+account_id = "REPLACE-WITH-HQYANNIS-ACCOUNT-ID"
 # Prod form lives at form.hqyannis.com. The route is hostname-specific (not
 # `*.hqyannis.com`) so the worker doesn't accidentally intercept requests to
 # `office.hqyannis.com` (web) or `api-office.hqyannis.com` (api).
