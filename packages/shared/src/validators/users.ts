@@ -123,7 +123,7 @@ export const createStaffSchema = z.object({
   compensation: userCompensationSchema.optional(),
 
   // Branch assignment
-  branchIds: z.array(z.string().uuid()).min(1, 'Select at least one branch').optional(),
+  branchIds: z.array(z.string().uuid()).optional(),
   primaryBranchId: z.string().uuid().optional(),
 
   // Contact — Nigerian phone: 0XXXXXXXXXX or +234XXXXXXXXXX.
@@ -193,7 +193,7 @@ export const updateStaffSchema = z.object({
   visibleOrderStatuses: z.array(visibleOrderStatusSchema).nullable().optional(),
   restrictProductAccess: z.boolean().optional(),
   productIds: z.array(z.string().uuid()).optional(),
-  branchIds: z.array(z.string().uuid()).min(1).optional(),
+  branchIds: z.array(z.string().uuid()).optional(),
   primaryBranchId: z.string().uuid().optional(),
 });
 

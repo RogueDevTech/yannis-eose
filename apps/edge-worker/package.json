@@ -7,6 +7,10 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy --dry-run",
     "deploy": "wrangler deploy",
+    "deploy:gcp-dev": "wrangler deploy --env gcp-dev",
+    "deploy:prod": "wrangler deploy --env production",
+    "tail:gcp-dev": "wrangler tail --env gcp-dev",
+    "tail:prod": "wrangler tail --env production",
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.ts\""
   },
