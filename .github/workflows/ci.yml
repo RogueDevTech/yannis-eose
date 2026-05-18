@@ -108,13 +108,25 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Deploy to Cloudflare
+      - name: Deploy to Cloudflare — AWS dev (roguedevtech.com account)
         if: steps.changes.outputs.changed == 'true'
         env:
+          # Token scoped to the roguedevtech.com Cloudflare account. Targets
+          # the top-level wrangler.toml config (worker `yannis-edge-worker`
+          # at `yannis-form.roguedevtech.com/*`).
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        # `--env=""` explicitly targets the top-level config (AWS-dev /
-        # roguedevtech.com). Without it wrangler logs a warning about
-        # multiple envs being defined. GCP-dev + production deploys would
-        # go through their own workflow steps with `--env gcp-dev` /
-        # `--env production` and a different CLOUDFLARE_API_TOKEN.
         run: pnpm --filter @yannis/edge-worker exec wrangler deploy --env=""
+
+      - name: Deploy to Cloudflare — GCP dev (hqyannis.com account)
+        # Skipped silently when the hqyannis token isn't set yet — lets the
+        # AWS deploy continue working even before the GCP CF account is
+        # provisioned. Once the secret exists, the GCP-dev worker auto-deploys
+        # alongside the AWS one on every relevant push.
+        if: steps.changes.outputs.changed == 'true' && env.CLOUDFLARE_API_TOKEN_HQYANNIS != ''
+        env:
+          # Token scoped to the hqyannis.com Cloudflare account. Targets the
+          # `[env.gcp-dev]` block (worker `yannis-edge-worker-gcp-dev` at
+          # `dev-form.hqyannis.com/*`).
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_HQYANNIS }}
+          CLOUDFLARE_API_TOKEN_HQYANNIS: ${{ secrets.CLOUDFLARE_API_TOKEN_HQYANNIS }}
+        run: pnpm --filter @yannis/edge-worker exec wrangler deploy --env gcp-dev
