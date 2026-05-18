@@ -62,6 +62,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Show resolved deploy platform (environment scope)
+        run: 'echo "vars.DEPLOY_PLATFORM = ''${{ vars.DEPLOY_PLATFORM }}''"'
+
       - name: Authenticate to Google Cloud (Workload Identity Federation)
         uses: google-github-actions/auth@v2
         with:
@@ -138,6 +141,9 @@ jobs:
       AWS_VM_SSH_USER: ${{ secrets.EC2_SSH_USER || 'ubuntu' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show resolved deploy platform (environment scope)
+        run: 'echo "vars.DEPLOY_PLATFORM = ''${{ vars.DEPLOY_PLATFORM }}''"'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
