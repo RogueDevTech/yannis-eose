@@ -11,6 +11,8 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
+import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Button } from '~/components/ui/button';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -67,6 +69,14 @@ interface UsersListPageProps {
   roleParam?: string;
   /** Trimmed search string applied server-side (`users.list`), mirrored from the URL. */
   searchParam?: string;
+  /**
+   * Branch filter value from the URL. UUID for a specific branch, the literal
+   * `__ORG_WIDE__` for staff with no branch memberships (Heads / HR / Finance /
+   * Admin), or `ALL` (default).
+   */
+  branchParam?: string;
+  /** Admin-class only — gates whether the branch picker renders at all. */
+  canPickBranch?: boolean;
   usersBasePath?: string;
   /** Finance roster: name + payment contact only — no HR stats, role grid, or invite actions. */
   variant?: 'default' | 'staffAccounts';
@@ -93,6 +103,8 @@ export function UsersListPage({
   statusParam = 'ALL',
   roleParam = 'ALL',
   searchParam = '',
+  branchParam: _branchParamFromShell = 'ALL',
+  canPickBranch = false,
   usersBasePath = '/hr/users',
   variant = 'default',
   canExport = false,
@@ -257,6 +269,37 @@ export function UsersListPage({
     );
   };
 
+  /**
+   * Branch picker (admin-class only). Sentinel `__ORG_WIDE__` filters to staff
+   * with no branch memberships (Heads / HR / Finance / Admin) — without it
+   * those rows would silently disappear once any specific branch is chosen.
+   */
+  const branchesCatalog = useBranchesCatalog();
+  const currentBranchParam = searchParams.has('branchId')
+    ? searchParams.get('branchId') || 'ALL'
+    : 'ALL';
+  const branchPickerVisible = canPickBranch && branchesCatalog.length > 0;
+  const branchPickerOptions = useMemo(
+    () => [
+      { value: 'ALL', label: 'All branches' },
+      ...branchesCatalog.map((b) => ({ value: b.id, label: b.name })),
+      { value: '__ORG_WIDE__', label: 'Org-wide (heads / finance / admin)' },
+    ],
+    [branchesCatalog],
+  );
+  const handleBranchChange = (value: string) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === 'ALL') next.delete('branchId');
+        else next.set('branchId', value);
+        next.set('page', '1');
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   const goToPage = (nextPage: number) => {
     const clamped = Math.min(Math.max(1, nextPage), safeTotalPages);
     setSearchParams(
@@ -276,8 +319,9 @@ export function UsersListPage({
     if ((searchParams.get('search') ?? '').trim().length > 0) n += 1;
     if (searchParams.get('probationOnly') === '1') n += 1;
     if (searchParams.get('supervisorOnly') === '1') n += 1;
+    if (currentBranchParam !== 'ALL') n += 1;
     return n;
-  }, [currentStatusParam, currentRoleParam, searchParams]);
+  }, [currentStatusParam, currentRoleParam, searchParams, currentBranchParam]);
 
   const probationOnly = searchParams.get('probationOnly') === '1';
   const handleProbationOnlyToggle = (next: boolean) => {
@@ -654,6 +698,17 @@ export function UsersListPage({
                   options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                   wrapperClassName="w-full min-w-0 sm:w-48"
                 />
+                {branchPickerVisible ? (
+                  <SearchableSelect
+                    id="users-staff-branch-filter"
+                    value={currentBranchParam}
+                    onChange={handleBranchChange}
+                    options={branchPickerOptions}
+                    placeholder="All branches"
+                    searchPlaceholder="Search branches…"
+                    wrapperClassName="w-full min-w-0 sm:w-52"
+                  />
+                ) : null}
               </>
             }
             sheetFilterBody={
@@ -683,6 +738,20 @@ export function UsersListPage({
                     wrapperClassName="w-full"
                   />
                 </div>
+                {branchPickerVisible ? (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Branch</span>
+                    <SearchableSelect
+                      id="users-staff-branch-filter-sheet"
+                      value={currentBranchParam}
+                      onChange={handleBranchChange}
+                      options={branchPickerOptions}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches…"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                ) : null}
               </>
             }
           />
@@ -767,6 +836,17 @@ export function UsersListPage({
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
                     wrapperClassName="w-full min-w-0 sm:w-48"
                   />
+                  {branchPickerVisible ? (
+                    <SearchableSelect
+                      id="users-hr-branch-filter"
+                      value={currentBranchParam}
+                      onChange={handleBranchChange}
+                      options={branchPickerOptions}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches…"
+                      wrapperClassName="w-full min-w-0 sm:w-52"
+                    />
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => handleProbationOnlyToggle(!probationOnly)}
@@ -818,6 +898,20 @@ export function UsersListPage({
                       wrapperClassName="w-full"
                     />
                   </div>
+                  {branchPickerVisible ? (
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-medium text-app-fg-muted">Branch</span>
+                      <SearchableSelect
+                        id="users-hr-branch-filter-sheet"
+                        value={currentBranchParam}
+                        onChange={handleBranchChange}
+                        options={branchPickerOptions}
+                        placeholder="All branches"
+                        searchPlaceholder="Search branches…"
+                        wrapperClassName="w-full"
+                      />
+                    </div>
+                  ) : null}
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
