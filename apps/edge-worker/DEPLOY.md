@@ -129,3 +129,48 @@ Wrangler keeps the last 10 deployments per worker:
 pnpm exec wrangler deployments list --name yannis-edge-worker-gcp-dev
 pnpm exec wrangler rollback --name yannis-edge-worker-gcp-dev --message "rollback to <id>"
 ```
+
+---
+
+## CI/CD — auto-deploy on merge
+
+[`.github/workflows/deploy-dev.yml`](../../.github/workflows/deploy-dev.yml) and [`.github/workflows/deploy-prod.yml`](../../.github/workflows/deploy-prod.yml) both contain a `deploy-edge-worker` job that runs `wrangler deploy --env {gcp-dev,production}` on push to `dev` / `main`. The job is gated by a `git diff` check on `apps/edge-worker/**` and `packages/shared/**`, so worker-irrelevant commits skip the deploy.
+
+### One-time CI setup (per Cloudflare account)
+
+The OAuth token from `wrangler login` is user-bound and can't be used in CI. You need a scoped **API token**:
+
+1. Cloudflare dashboard → top-right user menu → **My Profile** → **API Tokens** → **Create Token**.
+2. Use the **"Edit Cloudflare Workers"** template.
+3. Under **Account Resources** → restrict to the `Evercoresystemsltd@gmail.com's Account` (hqyannis.com account).
+4. Under **Zone Resources** → restrict to `hqyannis.com`.
+5. (Optional) set an expiry date and a TTL alarm in your calendar.
+6. Save → copy the token (shown once).
+
+Required token scopes (the template covers these — verify they're present):
+
+- Account → Workers Scripts → **Edit**
+- Account → Workers KV Storage → **Edit**
+- Account → Account Settings → **Read**
+- Zone → Workers Routes → **Edit**
+- Zone → Zone → **Read**
+
+### Add the token to GitHub
+
+Repo → **Settings** → **Secrets and variables** → **Actions** → **Environments**:
+
+- For the `dev` environment: add secret `CLOUDFLARE_API_TOKEN` = `<paste token>`.
+- For the `prod` environment: add the same secret (or a separate token scoped to prod-only if you want stricter blast-radius isolation).
+
+That's it — the next push to `dev` (or `main`) that touches `apps/edge-worker/**` will deploy automatically.
+
+### Verifying CI is wired up
+
+Trigger a no-op worker change:
+
+```bash
+# from a feature branch off dev
+echo "// touch $(date +%s)" >> apps/edge-worker/src/index.ts
+git commit -am "chore(worker): trigger CI" && git push
+# merge to dev → watch the "Deploy Edge Worker (gcp-dev)" job in Actions
+```

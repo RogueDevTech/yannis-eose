@@ -1,0 +1,144 @@
+---
+# Yannis EOSE VM bootstrap — nginx reverse proxy + Let's Encrypt TLS.
+#
+# This playbook is the post-Terraform configuration step. Terraform creates
+# the VM, opens firewall ports, and installs Docker via the startup script.
+# Ansible installs nginx + certbot, renders the two server blocks, and
+# optionally provisions TLS certs.
+#
+# Idempotency model:
+#   - Package installs are idempotent (apt module checks state).
+#   - nginx config rendering is marker-guarded at
+#     /var/lib/yannis-eose/nginx-bootstrapped so re-running the playbook
+#     does NOT clobber the in-place SSL edits certbot makes to the same
+#     server blocks. To re-render after a hostname/upstream change:
+#       ansible <env> -i ... -m file -a 'path=/var/lib/yannis-eose/nginx-bootstrapped state=absent' --become
+#     then re-run the playbook.
+#
+# Usage:
+#   ansible-playbook -i infrastructure/ansible/inventory.yml \
+#     infrastructure/ansible/playbook.yml --limit dev
+#   ansible-playbook -i infrastructure/ansible/inventory.yml \
+#     infrastructure/ansible/playbook.yml --limit prod
+
+- name: Bootstrap reverse proxy on Yannis EOSE VM
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    # --- Packages -----------------------------------------------------------
+    - name: Install nginx, certbot, and the nginx plugin
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Ensure nginx is enabled and running
+      ansible.builtin.systemd:
+        name: nginx
+        enabled: true
+        state: started
+
+    # --- Marker -------------------------------------------------------------
+    - name: Ensure marker directory exists
+      ansible.builtin.file:
+        path: /var/lib/yannis-eose
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Check whether nginx bootstrap has already run
+      ansible.builtin.stat:
+        path: /var/lib/yannis-eose/nginx-bootstrapped
+      register: nginx_marker
+
+    # --- nginx config (skipped if marker present) ---------------------------
+    - name: Remove default site (only on first bootstrap)
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      when: not nginx_marker.stat.exists
+
+    - name: Render web server block
+      ansible.builtin.template:
+        src: nginx-site.conf.j2
+        dest: "/etc/nginx/sites-available/{{ web_hostname }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        server_name: "{{ web_hostname }}"
+        upstream_port: "{{ web_upstream_port }}"
+      when: not nginx_marker.stat.exists
+
+    - name: Enable web server block
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ web_hostname }}"
+        dest: "/etc/nginx/sites-enabled/{{ web_hostname }}"
+        state: link
+      when: not nginx_marker.stat.exists
+
+    - name: Render API server block
+      ansible.builtin.template:
+        src: nginx-site.conf.j2
+        dest: "/etc/nginx/sites-available/{{ api_hostname }}"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        server_name: "{{ api_hostname }}"
+        upstream_port: "{{ api_upstream_port }}"
+      when: not nginx_marker.stat.exists
+
+    - name: Enable API server block
+      ansible.builtin.file:
+        src: "/etc/nginx/sites-available/{{ api_hostname }}"
+        dest: "/etc/nginx/sites-enabled/{{ api_hostname }}"
+        state: link
+      when: not nginx_marker.stat.exists
+
+    - name: Validate nginx config
+      ansible.builtin.command: nginx -t
+      changed_when: false
+      when: not nginx_marker.stat.exists
+
+    - name: Reload nginx
+      ansible.builtin.systemd:
+        name: nginx
+        state: reloaded
+      when: not nginx_marker.stat.exists
+
+    # --- TLS (Let's Encrypt) ------------------------------------------------
+    - name: Check whether TLS cert already exists for web hostname
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ web_hostname }}/fullchain.pem"
+      register: tls_cert
+
+    - name: Run certbot to issue / install Let's Encrypt certificate
+      ansible.builtin.command: >
+        certbot --nginx
+        -d {{ web_hostname }}
+        -d {{ api_hostname }}
+        --redirect --agree-tos --non-interactive
+        -m {{ tls_contact_email }}
+      register: certbot_result
+      changed_when: "'Successfully received certificate' in certbot_result.stdout or 'Successfully deployed certificate' in certbot_result.stdout"
+      when:
+        - provision_tls_certificate | bool
+        - not tls_cert.stat.exists
+
+    # --- Marker (last step so failures don't lock out future runs) ----------
+    - name: Touch bootstrap marker
+      ansible.builtin.file:
+        path: /var/lib/yannis-eose/nginx-bootstrapped
+        state: touch
+        owner: root
+        group: root
+        mode: "0644"
+      when: not nginx_marker.stat.exists

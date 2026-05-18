@@ -1,0 +1,32 @@
+---
+# Inventory for Yannis EOSE VMs.
+#
+# Each group corresponds to a deploy environment. Group vars live in
+# `group_vars/<env>.yml` and override per-host variables.
+#
+# Usage:
+#   ansible-playbook -i infrastructure/ansible/inventory.yml \
+#     infrastructure/ansible/playbook.yml --limit dev
+#
+# Add prod hosts under the `prod` group once the prod VM is created by
+# Terraform with `terraform.tfvars.prod`. The `ansible_host` value should
+# be the VM's external IP from the `vm_public_ip` Terraform output.
+
+all:
+  children:
+    dev:
+      hosts:
+        dev-yannis-eose-vm:
+          ansible_host: 34.142.110.199
+    prod:
+      hosts:
+        prod-yannis-eose-vm:
+          ansible_host: REPLACE-WITH-PROD-VM-IP
+  vars:
+    # Default SSH config — override per-host or per-group if needed.
+    ansible_user: evercoresystemsltd
+    ansible_python_interpreter: /usr/bin/python3
+    # Set to your local SSH key that matches the one Terraform installed on
+    # the VM. Override with `--private-key` on the CLI if you'd rather not
+    # commit a path here.
+    # ansible_ssh_private_key_file: ~/.ssh/id_ed25519

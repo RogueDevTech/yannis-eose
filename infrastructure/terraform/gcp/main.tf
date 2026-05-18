@@ -172,13 +172,7 @@ resource "google_compute_instance" "vm" {
   metadata = merge(
     {
       startup-script = templatefile("${path.module}/startup.sh.tftpl", {
-        vm_admin_user             = var.vm_admin_user
-        web_hostname              = var.public_web_hostname
-        api_hostname              = var.public_api_hostname
-        web_upstream_port         = var.web_upstream_port
-        api_upstream_port         = var.api_upstream_port
-        provision_tls_certificate = var.provision_tls_certificate
-        tls_contact_email         = var.tls_contact_email == null ? "" : var.tls_contact_email
+        vm_admin_user = var.vm_admin_user
       })
     },
     var.ssh_public_key == null ? {} : {

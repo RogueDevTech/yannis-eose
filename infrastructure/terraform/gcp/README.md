@@ -2,12 +2,14 @@
 
 This stack provisions the `dev-*` GCP baseline for Yannis EOSE:
 
-- a single `e2-small` GCE VM (Docker + nginx + certbot installed on first boot)
+- a single `e2-small` GCE VM (Docker installed via startup script)
 - Artifact Registry for `api` and `web` images
 - a public GCS bucket for stable asset URLs
 - a Secret Manager secret that stores the runtime `.env`
 - a VM service account with access to Artifact Registry, Secret Manager, and the asset bucket
 - VPC firewall rules opening `tcp:22` (SSH) and `tcp:80,443` (web)
+
+> Reverse proxy (nginx + Let's Encrypt) is **not** done here. Run [`infrastructure/ansible`](../../ansible/) after `terraform apply` to install and configure nginx + certbot on the VM. Clean split: Terraform creates the infra, Ansible configures the OS.
 
 It is the `gcp` adapter for the shared Terraform contract documented in
 [`infrastructure/terraform/README.md`](/Users/Apple/Desktop/PROJECTS/ROGUE-DEVTECH/yannis-eose/infrastructure/terraform/README.md).
@@ -32,28 +34,14 @@ terraform init
 terraform apply
 ```
 
-### Two-stage TLS provisioning (Let's Encrypt)
-
-Certbot's HTTP-01 challenge needs DNS to resolve to the VM's external IP **before** it runs, otherwise the validation request times out. So provisioning is split in two:
-
-1. **First apply (HTTP only)** — leave `provision_tls_certificate = false`. Terraform creates the VM, opens 80/443, installs nginx + certbot, and renders HTTP-only server blocks for both hostnames. Note the `vm_public_ip` output.
-2. **Update Cloudflare DNS** — point the two `A` records at the IP from step 1 (`Proxy: DNS only` for the cert issuance; can be re-enabled afterward if you want Cloudflare in front).
-3. **Second apply (issue certs)** — set `provision_tls_certificate = true` and `tls_contact_email = "ops@example.com"` in `terraform.tfvars`, then re-`terraform apply`. The startup script's marker file means the cert step only fires on a fresh VM. For existing VMs, SSH in and run:
+Then run Ansible to install nginx + provision certs:
 
 ```bash
-sudo certbot --nginx \
-  -d <web_hostname> -d <api_hostname> \
-  --redirect --agree-tos --non-interactive \
-  -m <tls_contact_email>
+cd ../../ansible
+ansible-playbook playbook.yml --limit dev
 ```
 
-Certbot edits the two server blocks in place to add `listen 443 ssl` + an HTTP→HTTPS redirect, and `certbot.timer` is enabled automatically for renewal.
-
-To re-bootstrap nginx on an existing VM (e.g. after a hostname change):
-
-```bash
-sudo rm /var/lib/yannis-eose/nginx-bootstrapped && sudo reboot
-```
+See [infrastructure/ansible/README.md](../../ansible/README.md) for the two-stage TLS flow (HTTP first → DNS update → flip `provision_tls_certificate` and re-run).
 
 ## Apply (prod)
 
@@ -183,5 +171,5 @@ from Secret Manager, logs into Artifact Registry, runs migrations, and starts th
 
 - The bucket is public-read by default because the current app stores durable asset URLs.
 - Redis is external by design for this dev setup.
-- nginx + certbot are installed by the startup script and proxy to localhost-bound containers. Cloudflare Tunnel is no longer used for this baseline.
-- Reverse-proxy bootstrap is marker-guarded at `/var/lib/yannis-eose/nginx-bootstrapped` so reboots don't clobber certbot's SSL edits.
+- nginx + certbot are installed and configured by [Ansible](../../ansible/), not Terraform. Cloudflare Tunnel is no longer used for this baseline.
+- Reverse-proxy bootstrap is marker-guarded at `/var/lib/yannis-eose/nginx-bootstrapped` (managed by the Ansible playbook) so re-runs don't clobber certbot's SSL edits.

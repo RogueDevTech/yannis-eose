@@ -87,29 +87,9 @@ variable "web_source_ranges" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "web_upstream_port" {
-  description = "Host port the `web` container binds to on the VM (must match the runtime compose port mapping)."
-  type        = number
-  default     = 3000
-}
-
-variable "api_upstream_port" {
-  description = "Host port the `api` container binds to on the VM (must match the runtime compose port mapping)."
-  type        = number
-  default     = 4444
-}
-
-variable "provision_tls_certificate" {
-  description = "Run certbot in the VM startup script to issue a Let's Encrypt cert for the public hostnames. DNS for both hostnames must already point at the VM's external IP before flipping this to true (otherwise the HTTP-01 challenge fails)."
-  type        = bool
-  default     = false
-}
-
-variable "tls_contact_email" {
-  description = "Email address used for the Let's Encrypt account. Required when provision_tls_certificate is true."
-  type        = string
-  default     = null
-}
+# Reverse-proxy + TLS knobs live in `infrastructure/ansible/group_vars/`
+# (web_upstream_port, api_upstream_port, provision_tls_certificate,
+# tls_contact_email). Terraform only owns the infra layer here.
 
 variable "network" {
   description = "VPC network name for the VM."
