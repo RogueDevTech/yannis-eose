@@ -36,6 +36,12 @@ jobs:
     needs: build
     if: ${{ vars.DEPLOY_PLATFORM == 'gcp' }}
     environment: dev
+    # Required for Workload Identity Federation — GitHub mints the OIDC token
+    # that GCP exchanges for short-lived SA credentials. Without `id-token:
+    # write` the auth step gets a 403 from sts.googleapis.com.
+    permissions:
+      contents: read
+      id-token: write
     env:
       GCP_REGION: ${{ secrets.GCP_REGION || 'europe-west2' }}
       GCP_ZONE: ${{ secrets.GCP_ZONE || 'europe-west2-a' }}
@@ -44,10 +50,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
