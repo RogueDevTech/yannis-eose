@@ -21,7 +21,7 @@ all:
     prod:
       hosts:
         prod-yannis-eose-vm:
-          ansible_host: REPLACE-WITH-PROD-VM-IP
+          ansible_host: 34.105.183.13
   vars:
     # Default SSH config — override per-host or per-group if needed.
     # gcloud pushed our SSH key into project metadata under the local Mac

@@ -2,7 +2,7 @@ import { useLoaderData, useRouteLoaderData } from '@remix-run/react';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { defer } from '@remix-run/node';
 import { apiRequest, getSessionCookie, getCurrentUser, DEFERRED_LOADER_TIMEOUT_MS, defaultThisMonthRange } from '~/lib/api.server';
-import { isAdminLevel } from '~/lib/rbac';
+import { isAdminLevel, isSuperAdminOnly } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { CachedAwait } from '~/components/ui/cached-await';
@@ -10,6 +10,8 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
 import { AdminQuickDashboardLoadingShell, DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
 import { AdminQuickDashboard, type QuickOverviewData } from '~/features/dashboard/AdminQuickDashboard';
+import { SuperAdminDashboard } from '~/features/dashboard/SuperAdminDashboard';
+import type { CEODashboardData } from '~/features/ceo/types';
 import type { DashboardData, OrdersAndCounts } from '~/features/dashboard/types';
 
 const defaultQuickOverview: QuickOverviewData = {
@@ -44,9 +46,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const assignedCsParam = role === 'CS_CLOSER' && user?.id ? { assignedCsId: user.id } : {};
   const ordersCountsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
 
-  // Admin-class landing: lightweight path. The heavy Executive Overview with profit
-  // aggregation, time series, charts, and leaderboards now lives at /admin/ceo. Landing on
-  // /admin hits ONE tRPC call (dashboard.quickOverview) and renders in <200ms.
+  // SuperAdmin: full CEO metrics directly on /admin (CEO directive 2026-05-18).
+  // Uses ceoOverview which includes ROAS, revenue by period, deliveries by product,
+  // stock per product, ad spend, CPA, delivery rate, active staff — all in one call.
+  if (role && isSuperAdminOnly({ role })) {
+    const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
+    const ceoInput = JSON.stringify({ startDate, endDate });
+    const pageData = apiRequest<{ result?: { data?: CEODashboardData } }>(
+      `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(ceoInput)}`,
+      deferredOpt,
+    ).then((res) => res.ok && res.data?.result?.data ? res.data.result.data : null)
+     .catch(() => null);
+
+    return defer({ variant: 'super_admin' as const, filters, pageData });
+  }
+
+  // Admin (non-SuperAdmin): lightweight quick overview.
   if (role && isAdminLevel({ role })) {
     const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
     const pageData = apiRequest<{ result?: { data?: QuickOverviewData } }>(
@@ -118,6 +133,26 @@ export default function AdminDashboard() {
   usePageRefreshOnEvent(['order:new', 'order:status_changed']);
 
   const adminRole = role ?? 'ADMIN';
+
+  if (loaderData.variant === 'super_admin') {
+    return (
+      <CachedAwait<CEODashboardData | null>
+        resolve={loaderData.pageData as Promise<CEODashboardData | null>}
+        fallback={<AdminQuickDashboardLoadingShell userName={userName} role={adminRole} />}
+        loaderShell={{ variant: loaderData.variant, filters: loaderData.filters }}
+        deferredKey="pageData"
+        errorElement={() => <DeferredError />}
+      >
+        {(data) => (
+          <SuperAdminDashboard
+            data={data}
+            userName={userName}
+            filters={loaderData.filters}
+          />
+        )}
+      </CachedAwait>
+    );
+  }
 
   return (
     <CachedAwait<QuickOverviewData | OrdersAndCounts>
