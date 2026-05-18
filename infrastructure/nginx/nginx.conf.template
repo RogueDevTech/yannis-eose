@@ -1,0 +1,145 @@
+# =============================================================================
+# Yannis EOSE — nginx reverse proxy (provider-agnostic dev + prod)
+#
+# Listens on 443 with a Cloudflare Origin Certificate (free 15-year cert issued
+# by Cloudflare's CA, trusted only when the request comes through Cloudflare's
+# proxy). Cloudflare's proxy MUST be enabled on the public hostname (orange
+# cloud in the DNS dashboard) or browsers won't trust this cert.
+#
+# Why this shape:
+#   - One cert pair valid for `*.<root-domain>` works on every VM at once.
+#   - DNS failover between AWS and GCP becomes a single A-record flip — no
+#     cert re-issuance, no certbot bootstrap, no HTTP-01 challenge plumbing.
+#   - Cloudflare's edge handles TLS to the browser + DDoS + caching for free.
+#
+# Template substitution: this file is mounted at
+# `/etc/nginx/templates/default.conf.template` inside the nginx container.
+# The standard nginx image's entrypoint runs `envsubst` over it on start,
+# expanding `${WEB_HOSTNAME}` and `${API_HOSTNAME}` from the container env.
+# =============================================================================
+
+upstream api {
+    server api:4444;
+}
+upstream web {
+    server web:3000;
+}
+
+# `Connection: upgrade` ONLY when the client request sets it (WebSocket
+# handshakes); plain HTTP requests get `Connection: close`. Mixing the two
+# upstream-side causes 502 on POSTs through Remix's `*.data?index` endpoints
+# (silent login failure), discovered the hard way pre-migration.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# Larger proxy buffers — login response sets two cookies (`yannis_session` +
+# `yannis_bundle`), and the bundle is a HMAC-signed JWT carrying the user's
+# 100+ permission codes for admin-class. Default 4k buffers overflow → 502.
+proxy_buffer_size       16k;
+proxy_buffers           8 16k;
+proxy_busy_buffers_size 32k;
+
+# -----------------------------------------------------------------------------
+# Port 80 — Cloudflare proxy reaches the origin on 443; 80 only exists to
+# redirect any direct-IP probes to HTTPS. No ACME / Let's Encrypt challenges
+# needed because TLS is handled by the Cloudflare Origin Cert below.
+# -----------------------------------------------------------------------------
+server {
+    listen 80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+# -----------------------------------------------------------------------------
+# Web — https://${WEB_HOSTNAME}
+# -----------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    server_name ${WEB_HOSTNAME};
+
+    ssl_certificate     /etc/nginx/certs/origin.crt;
+    ssl_certificate_key /etc/nginx/certs/origin.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+
+    location / {
+        proxy_pass http://web;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+
+# -----------------------------------------------------------------------------
+# API — https://${API_HOSTNAME}
+# -----------------------------------------------------------------------------
+server {
+    listen 443 ssl;
+    server_name ${API_HOSTNAME};
+
+    ssl_certificate     /etc/nginx/certs/origin.crt;
+    ssl_certificate_key /etc/nginx/certs/origin.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+
+    # tRPC — supports both queries (GET) and mutations (POST) over HTTP/1.1.
+    # Upgrade headers passed through so future tRPC subscriptions / SSE work.
+    location /trpc {
+        proxy_pass http://api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Socket.io — WebSocket upgrade + long-lived connections. The 86400s
+    # timeouts match a full-day session so an idle browser tab doesn't get
+    # bumped off the realtime stream.
+    location /socket.io/ {
+        proxy_pass http://api;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    location /health {
+        proxy_pass http://api;
+        proxy_set_header Host $host;
+    }
+    location /auth {
+        proxy_pass http://api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location /api {
+        proxy_pass http://api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

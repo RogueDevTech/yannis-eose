@@ -11,10 +11,11 @@ This is the `gcp` adapter for the shared multi-cloud dev deploy contract:
 
 ## Hostnames
 
-- Web: `dev-yannis.roguedevtech.com`
-- API: `api-dev-yannis.roguedevtech.com`
+- Web: `dev-office.hqyannis.com`
+- API: `dev-api-office.hqyannis.com`
+- Form (edge worker): `dev-form.hqyannis.com` — deploy with `pnpm --filter @yannis/edge-worker exec wrangler deploy --env gcp-dev`
 
-Cloudflare can still handle DNS and TLS, but the app deploy itself only starts `web` and `api`. The VM does **not** run nginx.
+GCP deploys live on the `hqyannis.com` Cloudflare zone (dev + prod). AWS deploys remain on `roguedevtech.com` — the two providers do not share DNS. The app deploy itself only starts `web` and `api`; an optional nginx sidecar can be layered via `docker-compose.runtime.nginx.yml` when direct-IP HTTPS termination is needed (see `infrastructure/nginx/nginx.conf.template`).
 
 ## Runtime stack on the VM
 
@@ -43,9 +44,9 @@ DATABASE_URL=postgres://...
 REDIS_URL=redis://...
 SESSION_SECRET=replace-me
 SESSION_BUNDLE_SECRET=replace-me
-SESSION_COOKIE_DOMAIN=.roguedevtech.com
-CORS_ORIGIN=https://dev-yannis.roguedevtech.com
-PUBLIC_API_URL=https://api-dev-yannis.roguedevtech.com
+SESSION_COOKIE_DOMAIN=.hqyannis.com
+CORS_ORIGIN=https://dev-office.hqyannis.com
+PUBLIC_API_URL=https://dev-api-office.hqyannis.com
 EDGE_WORKER_URL=https://<your-edge-worker-domain>
 GCP_PROJECT_ID=<your-gcp-project-id>
 OBJECT_STORAGE_PROVIDER=gcs

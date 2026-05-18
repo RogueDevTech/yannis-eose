@@ -3,6 +3,14 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Default (AWS dev) env — `wrangler deploy` with no `--env` flag uses these.
+# The form lives at `yannis-form.roguedevtech.com`; this worker handles every
+# request to that hostname and posts orders to the AWS-hosted API. GCP dev
+# lives on hqyannis.com (see [env.gcp-dev] below).
+routes = [
+  { pattern = "yannis-form.roguedevtech.com/*", zone_name = "roguedevtech.com" },
+]
+
 [vars]
 API_URL = "https://api-yannis.roguedevtech.com"
 TURNSTILE_SITE_KEY = "0x4AAAAAACwS5uc-71js3fAy"
@@ -34,3 +42,74 @@ preview_id = "4a79f1f5fe2541369c5d6c95a581f591"
 binding = "CAMPAIGN_CACHE"
 id = "7a4c4ff13803430fa1173674e88ff5b0"
 preview_id = "36f748275dec4c669b6fe26dca9cf8db"
+
+# ─── GCP dev env (hqyannis.com zone) ──────────────────────────────────────────
+# Deploy with `pnpm --filter @yannis/edge-worker exec wrangler deploy --env gcp-dev`.
+# Points form submissions at the GCP-hosted dev API. KV namespaces can be
+# shared with the AWS dev worker since this is a dev env — change to fresh
+# IDs if you want bleed-free counters between providers.
+
+[env.gcp-dev]
+name = "yannis-edge-worker-gcp-dev"
+# Form is hosted at dev-form.hqyannis.com (separate from the web app at
+# dev-office.hqyannis.com so the form has no session cookies in scope).
+route = { pattern = "dev-form.hqyannis.com/*", zone_name = "hqyannis.com" }
+
+[env.gcp-dev.vars]
+API_URL = "https://dev-api-office.hqyannis.com"
+TURNSTILE_SITE_KEY = "0x4AAAAAACwS5uc-71js3fAy"
+
+[env.gcp-dev.triggers]
+crons = ["* * * * *"]
+
+[[env.gcp-dev.kv_namespaces]]
+binding = "DEDUP_CACHE"
+id = "dd6aa2365f7a44c5b0d3b4825bdb8749"
+
+[[env.gcp-dev.kv_namespaces]]
+binding = "RATE_LIMIT_CACHE"
+id = "b68391c82d004c40a9f3dfd61fd49866"
+
+[[env.gcp-dev.kv_namespaces]]
+binding = "INVENTORY_CACHE"
+id = "7ef0945b3f044e0280db399fdcc2cdb7"
+
+[[env.gcp-dev.kv_namespaces]]
+binding = "CAMPAIGN_CACHE"
+id = "7a4c4ff13803430fa1173674e88ff5b0"
+
+# ─── Production env ───────────────────────────────────────────────────────────
+# Deploy with `pnpm --filter @yannis/edge-worker exec wrangler deploy --env production`.
+# Same worker code, different bindings — KV IDs must be created in the prod
+# Cloudflare account and pasted here. TURNSTILE_SITE_KEY should be a prod
+# Turnstile site (separate from dev) so abuse counters don't bleed across envs.
+
+[env.production]
+name = "yannis-edge-worker-prod"
+# Prod form lives at form.hqyannis.com. The route is hostname-specific (not
+# `*.hqyannis.com`) so the worker doesn't accidentally intercept requests to
+# `office.hqyannis.com` (web) or `api-office.hqyannis.com` (api).
+route = { pattern = "form.hqyannis.com/*", zone_name = "hqyannis.com" }
+
+[env.production.vars]
+API_URL = "https://api-office.hqyannis.com"
+TURNSTILE_SITE_KEY = "REPLACE-WITH-PROD-TURNSTILE-SITE-KEY"
+
+[env.production.triggers]
+crons = ["* * * * *"]
+
+[[env.production.kv_namespaces]]
+binding = "DEDUP_CACHE"
+id = "REPLACE-WITH-PROD-DEDUP-KV-ID"
+
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_CACHE"
+id = "REPLACE-WITH-PROD-RATE-LIMIT-KV-ID"
+
+[[env.production.kv_namespaces]]
+binding = "INVENTORY_CACHE"
+id = "REPLACE-WITH-PROD-INVENTORY-KV-ID"
+
+[[env.production.kv_namespaces]]
+binding = "CAMPAIGN_CACHE"
+id = "REPLACE-WITH-PROD-CAMPAIGN-KV-ID"

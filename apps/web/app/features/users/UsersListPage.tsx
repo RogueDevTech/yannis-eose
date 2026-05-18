@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams, useFetcher, useNavigate } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { ActionDropdown } from '~/components/ui/action-dropdown';
-import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -175,18 +174,14 @@ export function UsersListPage({
   /** Staff-accounts export modal (client-side CSV/PDF/XLSX of the current page). */
   const [showExportModal, setShowExportModal] = useState(false);
   const navigate = useNavigate();
-  const { requiresBranchSelection, ensureBranchForAction } = useBranchScopeActionGuard();
-  /** Mirrors `<BranchScopedLink>` behaviour from inside an ActionDropdown
-   *  item: pop the branch-picker modal first when the active user is an
-   *  org-wide head viewing "All branches", otherwise navigate immediately. */
+  /** Navigate straight to the create form — the form itself gates branch
+   *  selection dynamically based on the chosen role (`data-branch-scoped-action`
+   *  flips to "true" only for branch-eligible roles), so we don't block
+   *  navigation upfront. Org-wide roles like Finance Officer skip branch
+   *  selection entirely. */
   const goToAddUser = useCallback(() => {
-    const target = `${usersBasePath}/new`;
-    if (requiresBranchSelection) {
-      ensureBranchForAction({ actionLabel: 'creating a user', nextHref: target });
-      return;
-    }
-    navigate(target);
-  }, [requiresBranchSelection, ensureBranchForAction, navigate, usersBasePath]);
+    navigate(`${usersBasePath}/new`);
+  }, [navigate, usersBasePath]);
 
   useEffect(() => {
     setDraftSearch(searchFromUrl);

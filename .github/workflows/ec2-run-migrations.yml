@@ -31,7 +31,8 @@ jobs:
   migrate-gcp:
     name: Pull API image + run migrations on GCE VM
     runs-on: ubuntu-latest
-    if: ${{ vars.DEPLOY_PLATFORM == 'gcp' }}
+    # Runs when DEPLOY_PLATFORM is 'gcp' OR empty/unset (both-provider mode).
+    if: ${{ vars.DEPLOY_PLATFORM == 'gcp' || vars.DEPLOY_PLATFORM == '' }}
     environment: ${{ github.event.inputs.environment || 'dev' }}
     steps:
       - name: Authenticate to Google Cloud
@@ -77,6 +78,7 @@ jobs:
   migrate-aws:
     name: Pull API image + run migrations on EC2
     runs-on: ubuntu-latest
+    # Runs when DEPLOY_PLATFORM is 'aws' OR empty/unset (both-provider mode).
     if: ${{ vars.DEPLOY_PLATFORM == 'aws' || vars.DEPLOY_PLATFORM == '' }}
     environment: ${{ github.event.inputs.environment || 'dev' }}
     env:

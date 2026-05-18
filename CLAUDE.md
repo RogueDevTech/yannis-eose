@@ -61,7 +61,7 @@ Rider dashboard lives in `apps/web` at `/rider/` (not a separate app). Local dev
 
 ### Deployment Standard (Locked)
 
-- **Dev deploy is provider-selectable via adapters.** The active adapter is chosen by deploy config such as `DEPLOY_PLATFORM=aws|gcp`.
+- **Dev deploy is provider-selectable via adapters.** `DEPLOY_PLATFORM=aws` or `DEPLOY_PLATFORM=gcp` deploys to that provider only. When `DEPLOY_PLATFORM` is **unset or empty**, both providers deploy in parallel.
 - **Shared runtime contract is the source of truth.** Both providers must satisfy the same single-VM Dockerized `web` + `api` shape, health checks, migration flow, and runtime env contract.
 - **Redis stays external** for dev deploys. Do **not** reintroduce VM-local Redis unless explicitly approved.
 - **Ingress is Cloudflare DNS + Cloudflare Tunnel.** Do **not** add nginx back onto the VM for the normalized dev baseline.
