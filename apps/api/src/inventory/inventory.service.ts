@@ -2168,6 +2168,36 @@ export class InventoryService {
   }
 
   /**
+   * Stock available per product — CEO dashboard widget.
+   * SUM(stock_count - reserved_count) across all locations, grouped by product.
+   * Joins product name and brand name via product_categories.
+   */
+  async getStockPerProduct(): Promise<
+    Array<{ productId: string; productName: string; brandName: string | null; available: number }>
+  > {
+    const rows = await this.db
+      .select({
+        productId: schema.inventoryLevels.productId,
+        productName: schema.products.name,
+        brandName: schema.productCategories.brandName,
+        totalStock: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)::int`,
+        totalReserved: sql<number>`COALESCE(SUM(${schema.inventoryLevels.reservedCount}), 0)::int`,
+      })
+      .from(schema.inventoryLevels)
+      .innerJoin(schema.products, eq(schema.inventoryLevels.productId, schema.products.id))
+      .leftJoin(schema.productCategories, eq(schema.products.categoryId, schema.productCategories.id))
+      .groupBy(schema.inventoryLevels.productId, schema.products.name, schema.productCategories.brandName)
+      .orderBy(schema.products.name);
+
+    return rows.map((r) => ({
+      productId: r.productId,
+      productName: r.productName,
+      brandName: r.brandName ?? null,
+      available: r.totalStock - r.totalReserved,
+    }));
+  }
+
+  /**
    * Get products that are below their minimum threshold.
    * TODO: re-implement once min_threshold is stored elsewhere (e.g. inventory settings).
    */

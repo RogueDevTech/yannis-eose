@@ -58,6 +58,10 @@ async function _ceoOverviewFetch(params: {
     marketingMetrics,
     payoutSummary,
     csWorkloads,
+    revenueByPeriod,
+    deliveriesByProduct,
+    stockPerProduct,
+    activeStaffCount,
   ] = await Promise.all([
     financeService!.getFastProfitReport(startDate, endDate).catch(() => null),
     hasDateRange ? ordersService!.getStatusCounts(undefined, startDate, endDate, undefined, undefined, branchId).catch(logErr('statusCounts')) : Promise.resolve(undefined),
@@ -65,6 +69,10 @@ async function _ceoOverviewFetch(params: {
     marketingService!.getPerformanceMetrics(undefined, hasDateRange ? 'this_month' : 'all_time', startDate, endDate, branchId).catch(logErr('marketingMetrics')),
     hrService!.getPayoutSummary().catch(logErr('payoutSummary')),
     ordersService!.getCSCloserWorkloads(branchId).catch(logErr('csWorkloads')),
+    ordersService!.getRevenueByPeriod(branchId).catch(logErr('revenueByPeriod')),
+    ordersService!.getDeliveriesByProduct(branchId).catch(logErr('deliveriesByProduct')),
+    inventoryService!.getStockPerProduct().catch(logErr('stockPerProduct')),
+    hrService!.countActiveStaff().catch(logErr('activeStaffCount')),
   ]);
 
   let profitReport: {
@@ -190,6 +198,11 @@ async function _ceoOverviewFetch(params: {
       staffCount: safePayoutSummary.staffCount ?? 0,
     },
     invoiceSummary: invoiceSummary ?? {},
+    // CEO-requested widgets (2026-05-18)
+    revenueByPeriod: revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0 },
+    deliveriesByProduct: deliveriesByProduct ?? [],
+    stockPerProduct: stockPerProduct ?? [],
+    activeStaffCount: (activeStaffCount as number | undefined) ?? 0,
   };
 }
 

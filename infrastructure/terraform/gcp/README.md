@@ -2,11 +2,12 @@
 
 This stack provisions the `dev-*` GCP baseline for Yannis EOSE:
 
-- a single `e2-small` GCE VM
+- a single `e2-small` GCE VM (Docker + nginx + certbot installed on first boot)
 - Artifact Registry for `api` and `web` images
 - a public GCS bucket for stable asset URLs
 - a Secret Manager secret that stores the runtime `.env`
 - a VM service account with access to Artifact Registry, Secret Manager, and the asset bucket
+- VPC firewall rules opening `tcp:22` (SSH) and `tcp:80,443` (web)
 
 It is the `gcp` adapter for the shared Terraform contract documented in
 [`infrastructure/terraform/README.md`](/Users/Apple/Desktop/PROJECTS/ROGUE-DEVTECH/yannis-eose/infrastructure/terraform/README.md).
@@ -14,11 +15,13 @@ It is the `gcp` adapter for the shared Terraform contract documented in
 ## What Terraform creates
 
 - `dev-yannis-eose-vm`
+- `dev-yannis-eose-allow-ssh` firewall rule
+- `dev-yannis-eose-allow-web` firewall rule (80/443)
 - `dev-yannis-eose` Artifact Registry repository
 - `dev-yannis-runtime-env` Secret Manager secret
 - `dev-*` public asset bucket
 
-Cloudflare DNS/Tunnel resources are intentionally **not** created here. Hostname routing and any optional tunnel setup are managed outside this Terraform stack.
+Cloudflare DNS records are **not** created here — you point the `dev-office` / `dev-api-office` A records at the VM's external IP manually (or via a separate Cloudflare Terraform stack). The VM uses an nginx reverse proxy bound to 127.0.0.1 upstreams (web:3000, api:4444) provisioned by the startup script, so direct DNS A → VM IP is the supported topology. Cloudflare Tunnel is no longer used for the normalized dev baseline.
 
 ## Apply (dev)
 
@@ -27,6 +30,29 @@ cd infrastructure/terraform/gcp
 cp terraform.tfvars.example terraform.tfvars
 terraform init
 terraform apply
+```
+
+### Two-stage TLS provisioning (Let's Encrypt)
+
+Certbot's HTTP-01 challenge needs DNS to resolve to the VM's external IP **before** it runs, otherwise the validation request times out. So provisioning is split in two:
+
+1. **First apply (HTTP only)** — leave `provision_tls_certificate = false`. Terraform creates the VM, opens 80/443, installs nginx + certbot, and renders HTTP-only server blocks for both hostnames. Note the `vm_public_ip` output.
+2. **Update Cloudflare DNS** — point the two `A` records at the IP from step 1 (`Proxy: DNS only` for the cert issuance; can be re-enabled afterward if you want Cloudflare in front).
+3. **Second apply (issue certs)** — set `provision_tls_certificate = true` and `tls_contact_email = "ops@example.com"` in `terraform.tfvars`, then re-`terraform apply`. The startup script's marker file means the cert step only fires on a fresh VM. For existing VMs, SSH in and run:
+
+```bash
+sudo certbot --nginx \
+  -d <web_hostname> -d <api_hostname> \
+  --redirect --agree-tos --non-interactive \
+  -m <tls_contact_email>
+```
+
+Certbot edits the two server blocks in place to add `listen 443 ssl` + an HTTP→HTTPS redirect, and `certbot.timer` is enabled automatically for renewal.
+
+To re-bootstrap nginx on an existing VM (e.g. after a hostname change):
+
+```bash
+sudo rm /var/lib/yannis-eose/nginx-bootstrapped && sudo reboot
 ```
 
 ## Apply (prod)
@@ -93,17 +119,14 @@ rm prod.env
 
 ### Prod DNS records
 
-In Cloudflare (`hqyannis.com` zone), once the prod VM is up:
+In Cloudflare (`hqyannis.com` zone), after the first apply (HTTP-only) and before the second apply that issues the cert:
 
 | Type | Name | Target | Proxy |
 |---|---|---|---|
-| A | `office` | `<prod-vm-external-ip>` | Proxied |
-| A | `api-office` | `<prod-vm-external-ip>` | Proxied |
+| A | `office` | `<prod-vm-external-ip>` | DNS only |
+| A | `api-office` | `<prod-vm-external-ip>` | DNS only |
 
-Or use Cloudflare Tunnel if the prod VM doesn't get a public IP — same
-hostnames, but the Tunnel route map points the two names at
-`http://web:3000` and `http://api:4444` respectively. See
-[infrastructure/deploy/docker-compose.runtime.tunnel.yml](../../deploy/docker-compose.runtime.tunnel.yml).
+Once Let's Encrypt has issued the cert (second apply with `provision_tls_certificate = true`), you can flip Proxy to **Proxied** if you want Cloudflare CDN/WAF in front. Keep `web_source_ranges = ["0.0.0.0/0"]` even when proxied — Cloudflare's egress IPs change, lock down via Cloudflare WAF rules instead of VPC firewall.
 
 ### Edge worker
 
@@ -147,9 +170,11 @@ OBJECT_STORAGE_PUBLIC_BASE_URL=https://storage.googleapis.com/<terraform object_
 ASSET_ENV_PREFIX=dev
 ```
 
-3. In Cloudflare or your preferred ingress layer, route:
-   - `dev-office.hqyannis.com` -> `http://web:3000`
-   - `dev-api-office.hqyannis.com` -> `http://api:4444`
+3. In Cloudflare, create `A` records for the two hostnames pointing at `vm_public_ip`:
+   - `dev-office.hqyannis.com` → `<vm_public_ip>` (DNS only during initial cert issuance)
+   - `dev-api-office.hqyannis.com` → `<vm_public_ip>` (DNS only during initial cert issuance)
+
+   nginx on the VM (provisioned by the startup script) handles the Host-header routing → `127.0.0.1:3000` (web) and `127.0.0.1:4444` (api).
 
 The deploy workflow copies the shared runtime compose/scripts plus the GCP wrapper to `/opt/yannis-eose`, refreshes `.env`
 from Secret Manager, logs into Artifact Registry, runs migrations, and starts the stack.
@@ -158,4 +183,5 @@ from Secret Manager, logs into Artifact Registry, runs migrations, and starts th
 
 - The bucket is public-read by default because the current app stores durable asset URLs.
 - Redis is external by design for this dev setup.
-- nginx is intentionally excluded from the VM runtime.
+- nginx + certbot are installed by the startup script and proxy to localhost-bound containers. Cloudflare Tunnel is no longer used for this baseline.
+- Reverse-proxy bootstrap is marker-guarded at `/var/lib/yannis-eose/nginx-bootstrapped` so reboots don't clobber certbot's SSL edits.

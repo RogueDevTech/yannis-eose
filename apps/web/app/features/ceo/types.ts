@@ -55,6 +55,24 @@ export interface CEODashboardData {
   // Invoices
   invoiceSummary: Record<string, unknown>;
 
+  // CEO-requested widgets (2026-05-18)
+  revenueByPeriod: { today: number; thisWeek: number; thisMonth: number };
+  deliveriesByProduct: Array<{
+    productId: string;
+    productName: string;
+    brandName: string | null;
+    today: number;
+    thisWeek: number;
+    thisMonth: number;
+  }>;
+  stockPerProduct: Array<{
+    productId: string;
+    productName: string;
+    brandName: string | null;
+    available: number;
+  }>;
+  activeStaffCount: number;
+
   /** Daily buckets for Revenue & orders over time chart (Phase 2). */
   timeSeries?: { date: string; revenue: number; orderCount: number; createdCount?: number }[];
 
