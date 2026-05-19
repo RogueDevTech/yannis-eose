@@ -1142,13 +1142,12 @@ export class OrdersService {
     });
 
     // Cross-funnel attempt detection (Pillar 2 / attribution truth):
-    // If an order with the same phone+product already exists in the last 24h via a
-    // DIFFERENT Media Buyer, do NOT create a new order. Record the attempt in
-    // cross_funnel_attempts so the second MB can see their funnel got traction —
-    // but the original MB keeps attribution. CS never sees this row; it does not
-    // count in any order metric. Only applies to edge-form submissions with a
-    // mediaBuyerId. Direct API callers (admin/CS offline entry) skip this path.
-    // Window is shared with `detectDuplicates` — change in one place.
+    // Records when a different MB's funnel already captured this phone+product
+    // within 24h — but NEVER blocks order creation. The cross_funnel_attempts
+    // row is informational only; blocking was causing false positives that
+    // silently dropped legitimate orders (2026-05-19 incident: detectDuplicates
+    // returned stale/phantom matches, every submission for the campaign was
+    // rejected as cross-funnel). Orders still get duplicate-flagged below.
     if (orderSource === 'edge-form' && orderInput.mediaBuyerId && orderInput.customerPhoneHash) {
       const productIds = orderInput.items.map((i) => i.productId);
       const existing = await this.detectDuplicates(orderInput.customerPhoneHash, productIds);
@@ -1156,6 +1155,8 @@ export class OrdersService {
         (o) => o.mediaBuyerId && o.mediaBuyerId !== orderInput.mediaBuyerId,
       );
       if (crossMbWinner) {
+        // Record for analytics — but do NOT return early. Let the order be
+        // created so CS can see it; the duplicate-flag below will still tag it.
         await this.db.insert(schema.crossFunnelAttempts).values(
           productIds.map((productId) => ({
             customerPhoneHash: orderInput.customerPhoneHash,
@@ -1167,8 +1168,9 @@ export class OrdersService {
             originalOrderId: crossMbWinner.id,
             originalMediaBuyerId: crossMbWinner.mediaBuyerId,
           })),
-        );
-        return { crossFunnelAttempt: true };
+        ).catch((err) => {
+          this.logger.warn({ err, phoneHash: orderInput.customerPhoneHash }, 'cross-funnel attempt insert failed — continuing with order creation');
+        });
       }
     }
     // Two-tier duplicate flagging:

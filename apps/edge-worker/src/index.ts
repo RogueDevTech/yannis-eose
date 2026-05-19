@@ -13,6 +13,14 @@ import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX, normalizeCampaignFieldOrder } from '@
 
 export interface Env {
   API_URL: string;
+  /**
+   * Absolute origin the rendered form HTML and embed.js script should fetch
+   * back at for `/cart` and `/submit`. Set this in `.dev.vars` to
+   * `http://localhost:8787` so local previews don't accidentally POST to the
+   * production worker. Leave unset in deployed envs — the worker falls back
+   * to the request's Host header, which is correct on every CF route.
+   */
+  PUBLIC_WORKER_URL?: string;
   QSTASH_URL: string;
   QSTASH_TOKEN: string;
   EDGE_API_KEY: string;
@@ -288,18 +296,35 @@ async function hashPhone(phone: string): Promise<string> {
 }
 
 /**
- * KV dedup key. Scoped by `mediaBuyerId` so that the SAME MB submitting the
- * same phone+product twice within the window is short-circuited at the edge
- * (no API call), but a DIFFERENT MB submitting the same phone+product is NOT
- * blocked here — that case must fall through to the API so a cross-funnel
+ * KV dedup key. Hashes a *cart fingerprint* (sorted items × quantity × offer)
+ * with phone + mediaBuyerId so that only EXACT repeats of the same cart from
+ * the same MB are short-circuited at the edge (genuine double-tap protection).
+ * Any change to items, quantities, or offer yields a different key and the
+ * submission flows through — so a real customer placing a different order
+ * within the dedup window is never silently dropped.
+ *
+ * Scoped by `mediaBuyerId` so a DIFFERENT MB submitting the same phone+cart is
+ * NOT blocked here — that case must fall through to the API so a cross-funnel
  * attempt row can be recorded for attribution truth (Pillar 2 / per-MB
  * visibility). When mediaBuyerId is missing (legacy embeds, manual posts) we
- * fall back to the older unscoped key to preserve old behavior.
+ * fall back to an unscoped key.
  */
-async function dedupKey(phone: string, productId: string, mediaBuyerId?: string): Promise<string> {
+async function dedupKey(
+  phone: string,
+  items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
+  mediaBuyerId?: string,
+): Promise<string> {
   const encoder = new TextEncoder();
   const suffix = mediaBuyerId ? `:${mediaBuyerId}` : '';
-  const data = encoder.encode(`dedup:${phone}:${productId}${suffix}`);
+  const itemsSig = [...items]
+    .map((i) => {
+      const qty = Math.max(1, Math.floor(Number(i.quantity ?? 1) || 1));
+      const offer = i.offerLabel ?? '';
+      return `${i.productId}x${qty}@${offer}`;
+    })
+    .sort()
+    .join('|');
+  const data = encoder.encode(`dedup:${phone}:${itemsSig}${suffix}`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -456,34 +481,27 @@ async function checkRateLimit(ip: string, env: Env): Promise<RateLimitResult> {
 
 async function checkDedup(
   phone: string,
-  productIds: string[],
+  items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
   env: Env,
   mediaBuyerId?: string,
-): Promise<string | null> {
-  if (!env.DEDUP_CACHE) return null; // KV not bound (local dev)
-  for (const productId of productIds) {
-    const key = await dedupKey(phone, productId, mediaBuyerId);
-    const existing = await env.DEDUP_CACHE.get(key);
-    if (existing) {
-      return productId;
-    }
-  }
-  return null;
+): Promise<boolean> {
+  if (!env.DEDUP_CACHE) return false; // KV not bound (local dev)
+  const key = await dedupKey(phone, items, mediaBuyerId);
+  const existing = await env.DEDUP_CACHE.get(key);
+  return existing !== null;
 }
 
 async function markDedup(
   phone: string,
-  productIds: string[],
+  items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
   env: Env,
   mediaBuyerId?: string,
 ): Promise<void> {
   if (!env.DEDUP_CACHE) return; // KV not bound (local dev)
-  for (const productId of productIds) {
-    const key = await dedupKey(phone, productId, mediaBuyerId);
-    await env.DEDUP_CACHE.put(key, new Date().toISOString(), {
-      expirationTtl: DEDUP_WINDOW_SECONDS,
-    });
-  }
+  const key = await dedupKey(phone, items, mediaBuyerId);
+  await env.DEDUP_CACHE.put(key, new Date().toISOString(), {
+    expirationTtl: DEDUP_WINDOW_SECONDS,
+  });
 }
 
 // ── Inventory Budget Cap ───────────────────────────────────────
@@ -829,9 +847,14 @@ function getFormScript(
   campaignId: string,
   products: CampaignConfig['products'],
   mediaBuyerId?: string,
-  _formMode: 'hosted' | 'embedded' | 'iframe' | 'fallback' = 'hosted',
+  formMode: 'hosted' | 'embedded' | 'iframe' | 'fallback' = 'hosted',
 ): string {
   const mediaBuyerIdJson = mediaBuyerId ? `'${mediaBuyerId}'` : 'undefined';
+  // hosted / iframe / fallback are served BY the worker, so `/cart` and
+  // `/submit` resolve to the same origin (= the worker) automatically. Only
+  // embed.js runs inside a third-party page where relative paths would hit
+  // the host site, so it needs the absolute worker URL.
+  const endpointBase = formMode === 'embedded' ? workerUrl : '';
   return `
     (function() {
       var form = document.getElementById('yannisOrderForm');
@@ -846,6 +869,9 @@ function getFormScript(
 
       function resetForAnotherOrder() {
         if (!form) return;
+        // Re-enable cart saves for the new order and clear stale cart ID.
+        cartSaveDisabled = false;
+        savedCartId = null;
         form.reset();
         selectedOffer = null;
         selectedProduct = singleProductId || null;
@@ -1019,7 +1045,7 @@ function getFormScript(
       function syncPending() {
         getPending().then(function(orders) {
           orders.forEach(function(order) {
-            fetch('${workerUrl}/submit', {
+            fetch('${endpointBase}/submit', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(order.data)
@@ -1040,11 +1066,13 @@ function getFormScript(
       var savedCartId = null;
       var cartSaveTimeout = null;
       var cartSaveInflight = null; // Promise of the in-flight cart save
+      var cartSaveDisabled = false; // kill switch — set after successful submit
       var CART_DEBOUNCE_MS = 600;
       function isValidNgPhone(value) {
         return NG_PHONE_RE.test((value || '').trim());
       }
       function maybeSaveCart() {
+        if (cartSaveDisabled) return;
         if (!selectedProduct || !selectedOffer) return;
         var nameEl = form.querySelector('#customerName') || form.querySelector('[name="customerName"]');
         var phoneEl = form.querySelector('#customerPhone') || form.querySelector('[name="customerPhone"]');
@@ -1120,7 +1148,7 @@ function getFormScript(
           }
           var cfv = readCustomFieldValues();
           if (cfv) payload.customFieldValues = cfv;
-          cartSaveInflight = fetch('${workerUrl}/cart', {
+          cartSaveInflight = fetch('${endpointBase}/cart', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1210,6 +1238,8 @@ function getFormScript(
 
       form.addEventListener('submit', function(e) {
         e.preventDefault();
+        // Cancel any pending debounced cart save — we're about to submit.
+        clearTimeout(cartSaveTimeout);
         btn.disabled = true;
         btn.textContent = 'Submitting...';
         msg.className = 'msg hidden';
@@ -1329,7 +1359,7 @@ function getFormScript(
         }
 
         function submitOrder(data) {
-          return fetch('${workerUrl}/submit', {
+          return fetch('${endpointBase}/submit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -1340,6 +1370,10 @@ function getFormScript(
 
         submitOrder(orderData).then(function(result) {
           if (result.ok) {
+            // Kill cart saves — order is submitted, any further input/blur events
+            // (including form.reset()) must NOT create or update cart rows.
+            cartSaveDisabled = true;
+            clearTimeout(cartSaveTimeout);
             // Edge gave up waiting for the API (timeout) but the order may already exist — avoid scary error + repeat submits.
             if (result.data.pendingConfirmation) {
               btn.disabled = true;
@@ -1821,7 +1855,15 @@ function renderFallbackForm(campaignId: string, workerUrl: string): Response {
 </html>`;
   return new Response(html, {
     status: 200,
-    headers: { 'Content-Type': 'text/html;charset=utf-8', ...CORS_HEADERS },
+    headers: {
+      'Content-Type': 'text/html;charset=utf-8',
+      // No HTML cache + debug header — local dev was getting stale form HTML
+      // pointing at the production worker. Worker re-renders on every hit and
+      // exposes the resolved workerUrl so you can verify in the network tab.
+      'Cache-Control': 'no-store, must-revalidate',
+      'X-Yannis-Worker-Url': workerUrl,
+      ...CORS_HEADERS,
+    },
   });
 }
 
@@ -1850,7 +1892,12 @@ function renderHostedForm(config: CampaignConfig, workerUrl: string): Response {
 </html>`;
   return new Response(html, {
     status: 200,
-    headers: { 'Content-Type': 'text/html;charset=utf-8', ...CORS_HEADERS },
+    headers: {
+      'Content-Type': 'text/html;charset=utf-8',
+      'Cache-Control': 'no-store, must-revalidate',
+      'X-Yannis-Worker-Url': workerUrl,
+      ...CORS_HEADERS,
+    },
   });
 }
 
@@ -1884,6 +1931,7 @@ function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response 
     headers: {
       'Content-Type': 'application/javascript;charset=utf-8',
       'Cache-Control': 'public, max-age=300',
+      'X-Yannis-Worker-Url': workerUrl,
       ...CORS_HEADERS,
     },
   });
@@ -1921,7 +1969,12 @@ function renderIframeForm(config: CampaignConfig, workerUrl: string): Response {
 </html>`;
   return new Response(html, {
     status: 200,
-    headers: { 'Content-Type': 'text/html;charset=utf-8', ...CORS_HEADERS },
+    headers: {
+      'Content-Type': 'text/html;charset=utf-8',
+      'Cache-Control': 'no-store, must-revalidate',
+      'X-Yannis-Worker-Url': workerUrl,
+      ...CORS_HEADERS,
+    },
   });
 }
 
@@ -1942,6 +1995,28 @@ async function isApiHealthy(env: Env): Promise<boolean> {
 }
 
 // ── Main Handler ───────────────────────────────────────────────
+
+/**
+ * Resolve the absolute URL the browser used to reach this worker, for use as
+ * `workerUrl` in form HTML / embed.js so `/cart` and `/submit` go back to the
+ * same origin the page was served from.
+ *
+ * Priority:
+ *   1. `env.PUBLIC_WORKER_URL` — explicit override. Set this in `.dev.vars`
+ *      to `http://localhost:8787` so local previews never POST to production
+ *      regardless of how `wrangler dev` rewrites Host / request.url.
+ *   2. `Host` header — the hostname the browser actually navigated to.
+ *      Reliable on every Cloudflare route in deployed envs.
+ *   3. `url.host` — final fallback.
+ */
+function resolveWorkerUrl(request: Request, url: URL, env: Env): string {
+  const override = env.PUBLIC_WORKER_URL?.trim();
+  if (override) return override.replace(/\/+$/, '');
+  const host = request.headers.get('Host')?.trim() || url.host;
+  const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?$/i.test(host);
+  const protocol = isLocal ? 'http:' : url.protocol;
+  return `${protocol}//${host}`;
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -1969,7 +2044,7 @@ export default {
       if (!campaignId) {
         return corsResponse({ error: 'Campaign ID is required' }, 400);
       }
-      const workerUrl = `${url.protocol}//${url.host}`;
+      const workerUrl = resolveWorkerUrl(request, url, env);
       const config = await getCampaignConfig(campaignId, env);
       if (!config) {
         return renderFallbackForm(campaignId, workerUrl);
@@ -1983,7 +2058,7 @@ export default {
       if (!campaignId) {
         return corsResponse({ error: 'Campaign ID is required' }, 400);
       }
-      const workerUrl = `${url.protocol}//${url.host}`;
+      const workerUrl = resolveWorkerUrl(request, url, env);
       const config = await getCampaignConfig(campaignId, env);
       if (!config) {
         return renderFallbackForm(campaignId, workerUrl);
@@ -2000,7 +2075,7 @@ export default {
           headers: { 'Content-Type': 'application/javascript', ...CORS_HEADERS },
         });
       }
-      const workerUrl = `${url.protocol}//${url.host}`;
+      const workerUrl = resolveWorkerUrl(request, url, env);
       const config = await getCampaignConfig(campaignId, env);
       if (!config) {
         return new Response('// Error: campaign not found', {
@@ -2236,14 +2311,16 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     // No-op: let the request through. Honeypot + rate-limit hard cap handle abuse.
   }
 
-  // 4. Dedup check (phone + product + mediaBuyerId within 6hr window).
-  //    Per-MB scoping: same MB resubmits → short-circuit at edge (no API call).
-  //    Different MB → KV miss here, API will record a cross_funnel_attempt row
-  //    so the second MB can see their funnel got traction without creating a
-  //    duplicate order or polluting CS/metrics.
+  // 4. Dedup check (cart fingerprint + mediaBuyerId within 6hr window).
+  //    Per-MB scoping: same MB resubmitting the EXACT same cart (items, qty,
+  //    offer) → short-circuit at edge (no API call) — genuine double-tap.
+  //    Any change to items/qty/offer = different fingerprint = NOT blocked, so
+  //    a real customer placing a different order within 6h flows through.
+  //    Different MB → KV miss here, API records a cross_funnel_attempt row
+  //    for attribution truth without creating a duplicate order.
   const productIds = data.items.map((item) => item.productId);
-  const dupProduct = await checkDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
-  if (dupProduct) {
+  const isDuplicateSubmit = await checkDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
+  if (isDuplicateSubmit) {
     return corsResponse(
       {
         success: true,
@@ -2307,7 +2384,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     // Mark dedup so this same MB can't re-submit within the window.
     // Cross-funnel attempts also mark dedup so the form doesn't keep posting
     // through to the API on every retry.
-    await markDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
+    await markDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
 
     if (crossFunnelAttempt) {
       // Original MB already won attribution — surface the same "already submitted"
@@ -2349,7 +2426,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
 
     if (buffered) {
       // Mark dedup even for buffered orders
-      await markDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
+      await markDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
 
       return corsResponse({
         success: true,
@@ -2361,7 +2438,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     // 9b. QStash also failed — last-ditch Redis buffer (drained by healer cron).
     const redisBuffered = await bufferToRedis(orderPayload, env);
     if (redisBuffered) {
-      await markDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
+      await markDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
       return corsResponse({
         success: true,
         message: 'Order received, processing shortly',
