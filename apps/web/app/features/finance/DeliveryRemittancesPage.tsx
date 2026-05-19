@@ -150,7 +150,7 @@ export function DeliveryRemittancesPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigation = useNavigation();
-  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
+  const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const { totalPages, page, pageSize } = pagination;
   const {
     totalPages: eligibleTotalPages,
@@ -198,6 +198,7 @@ export function DeliveryRemittancesPage({
 
   const setViewTab = useCallback(
     (tab: 'remittances' | 'eligible') => {
+      primeSamePathRefetch();
       setSearchParams(
         (p) => {
           const next = new URLSearchParams(p);
@@ -209,10 +210,11 @@ export function DeliveryRemittancesPage({
         { replace: true },
       );
     },
-    [setSearchParams],
+    [primeSamePathRefetch, setSearchParams],
   );
 
   const handleLocationChange = (locationId: string) => {
+    primeSamePathRefetch();
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
@@ -225,6 +227,7 @@ export function DeliveryRemittancesPage({
 
   const handleEligibleSearchChange = (value: string) => {
     const trimmed = value.trim();
+    primeSamePathRefetch();
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('eligiblePage', '1');
@@ -235,6 +238,7 @@ export function DeliveryRemittancesPage({
   };
 
   const handleSentByChange = (userId: string) => {
+    primeSamePathRefetch();
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
@@ -245,6 +249,10 @@ export function DeliveryRemittancesPage({
   };
 
   const handleStatusChange = (status: string) => {
+    // Paint the table overlay on the SAME frame as the click — without this,
+    // `isLoaderRefetchBusy` only goes true once Remix has scheduled the
+    // navigation, which can look unresponsive on fast networks.
+    primeSamePathRefetch();
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
