@@ -335,7 +335,7 @@ export function Header({
                       />
                     )}
                     {mergedUnreadCount > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold bg-danger-500 text-white rounded-full">
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-micro font-bold bg-danger-500 text-white rounded-full">
                         {mergedUnreadCount > 99 ? '99+' : mergedUnreadCount}
                       </span>
                     )}
@@ -425,11 +425,11 @@ export function Header({
                                             </p>
                                           )}
                                           <div className="flex items-center gap-2 mt-1">
-                                            <p className="text-[11px] text-app-fg-muted">
+                                            <p className="text-mini text-app-fg-muted">
                                               {timeAgo(n.createdAt)}
                                             </p>
                                             {link && (
-                                              <span className="text-[11px] text-brand-500 dark:text-brand-400">
+                                              <span className="text-mini text-brand-500 dark:text-brand-400">
                                                 View →
                                               </span>
                                             )}
@@ -653,7 +653,7 @@ export function Header({
               {branches && branches.length > 0 && (
                 <div className="border-b border-app-border py-2">
                   <div className="px-5 pt-1 pb-1">
-                    <p className="text-[10px] uppercase tracking-wider font-semibold text-app-fg-muted">
+                    <p className="text-micro uppercase tracking-wider font-semibold text-app-fg-muted">
                       Branch
                     </p>
                   </div>
@@ -693,7 +693,7 @@ export function Header({
                           } ${isMobileBranchSwitching ? 'opacity-60 cursor-not-allowed' : ''}`}
                         >
                           <span className="truncate">{branch.name}</span>
-                          <span className="flex items-center gap-1.5 text-[10px]">
+                          <span className="flex items-center gap-1.5 text-micro">
                             <span className="font-mono text-app-fg-muted">{branch.code}</span>
                             {branch.id === (currentBranchId ?? null) && (
                               <svg className="w-3.5 h-3.5 flex-shrink-0 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -704,7 +704,7 @@ export function Header({
                         </button>
                       ))}
                       {isMobileBranchSwitching && (
-                        <p className="px-5 pt-1 text-[11px] text-app-fg-muted">
+                        <p className="px-5 pt-1 text-mini text-app-fg-muted">
                           Switching branch...
                         </p>
                       )}
@@ -716,7 +716,7 @@ export function Header({
                           {mobileCurrentBranch?.name ?? 'Branch'}
                         </span>
                         {mobileCurrentBranch?.code && (
-                          <span className="text-[10px] font-mono text-app-fg-muted">
+                          <span className="text-micro font-mono text-app-fg-muted">
                             {mobileCurrentBranch.code}
                           </span>
                         )}
@@ -833,7 +833,7 @@ function HeaderBranchSwitcher({
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
         </svg>
         <span className="text-xs font-semibold text-app-fg">{display.name}</span>
-        <span className="text-[10px] text-app-fg-muted font-mono bg-app-hover px-1 rounded">
+        <span className="text-micro text-app-fg-muted font-mono bg-app-hover px-1 rounded">
           {display.code}
         </span>
       </div>
@@ -866,7 +866,7 @@ function HeaderBranchSwitcher({
           {triggerLabel}
         </span>
         {triggerCode && (
-          <span className="text-[10px] text-app-fg-muted font-mono bg-app-hover px-1 rounded">
+          <span className="text-micro text-app-fg-muted font-mono bg-app-hover px-1 rounded">
             {triggerCode}
           </span>
         )}
@@ -890,7 +890,7 @@ function HeaderBranchSwitcher({
 
       {open && (
         <div className="absolute top-full left-0 mt-1.5 min-w-[220px] bg-app-elevated border border-app-border rounded-lg shadow-lg z-50 py-1 overflow-hidden animate-fade-in">
-          <p className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-app-fg-muted">
+          <p className="px-3 pt-1.5 pb-1 text-micro font-semibold uppercase tracking-wider text-app-fg-muted">
             Switch Branch
           </p>
 
@@ -912,7 +912,7 @@ function HeaderBranchSwitcher({
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-app-fg">All Branches</p>
-                <p className="text-[10px] text-app-fg-muted">Global view — no branch filter</p>
+                <p className="text-micro text-app-fg-muted">Global view — no branch filter</p>
               </div>
               {isAllBranches && (
                 <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -935,7 +935,7 @@ function HeaderBranchSwitcher({
                 branch.id === currentBranchId ? 'bg-brand-50 dark:bg-brand-900/20' : ''
               }`}
             >
-              <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold flex-shrink-0 ${
+              <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-micro font-bold flex-shrink-0 ${
                 branch.id === currentBranchId
                   ? 'bg-brand-600 text-white'
                   : 'bg-app-hover text-app-fg-muted'
@@ -944,7 +944,7 @@ function HeaderBranchSwitcher({
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-app-fg truncate">{branch.name}</p>
-                <p className="text-[10px] text-app-fg-muted">{branch.code}</p>
+                <p className="text-micro text-app-fg-muted">{branch.code}</p>
               </div>
               {branch.id === currentBranchId && (
                 <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>

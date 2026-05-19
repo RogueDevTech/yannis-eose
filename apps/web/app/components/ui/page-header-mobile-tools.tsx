@@ -30,6 +30,15 @@ export interface PageHeaderMobileToolsProps {
    * (e.g. before opening another modal).
    */
   sheet: ReactNode | PageHeaderMobileToolsSheetRender;
+  /**
+   * Optional filter controls. When provided, the mobile sheet renders them under
+   * a small "Filters" header above the action controls — letting a page collapse
+   * its separate filter sheet into this one sheet. Pair with
+   * `ToolbarFiltersCollapsible` `hideMobileSheet` so filters aren't duplicated.
+   */
+  filters?: ReactNode | PageHeaderMobileToolsSheetRender;
+  /** Active filter count — shows a dot on the kebab trigger when &gt; 0. */
+  filtersBadgeCount?: number;
   /** Sheet heading (also used for `aria-labelledby`). */
   sheetTitle: string;
   sheetSubtitle?: ReactNode;
@@ -55,6 +64,8 @@ export interface PageHeaderMobileToolsProps {
 export function PageHeaderMobileTools({
   desktop,
   sheet,
+  filters,
+  filtersBadgeCount = 0,
   sheetTitle,
   sheetSubtitle,
   triggerAriaLabel,
@@ -68,6 +79,9 @@ export function PageHeaderMobileTools({
   const closeSheet = useCallback(() => setOpen(false), []);
 
   const sheetContent = typeof sheet === 'function' ? sheet({ closeSheet }) : sheet;
+  const filtersContent =
+    typeof filters === 'function' ? filters({ closeSheet }) : filters;
+  const hasFilters = filtersContent != null && filtersContent !== false;
 
   return (
     <>
@@ -79,13 +93,20 @@ export function PageHeaderMobileTools({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-9 w-9 shrink-0 p-0 text-app-fg-muted hover:text-app-fg"
+          // Grey-filled chrome to mirror PageRefreshButton (CEO 2026-05-19).
+          className="relative h-9 w-9 shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 p-0 text-app-fg-muted hover:bg-surface-200 hover:text-brand-600 dark:hover:bg-surface-700"
           aria-label={triggerAriaLabel}
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen(true)}
         >
           <KebabVerticalIcon />
+          {hasFilters && filtersBadgeCount > 0 ? (
+            <span
+              className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-brand-500 ring-2 ring-app-elevated"
+              aria-hidden
+            />
+          ) : null}
         </Button>
         <Modal
           open={open}
@@ -106,10 +127,20 @@ export function PageHeaderMobileTools({
               sheetBodyMaxHeightClassName,
             ].join(' ')}
           >
-            {sheetContent}
+            {/* Filters + actions flow as one balanced column — no divider
+                between the groups (CEO 2026-05-19). The outer `gap-3` keeps
+                every row evenly spaced. */}
+            {hasFilters ? (
+              <>
+                {filtersContent}
+                {sheetContent}
+              </>
+            ) : (
+              sheetContent
+            )}
           </div>
           <div className="border-t border-app-border p-3 pt-2">
-            <Button type="button" variant="secondary" className="w-full" onClick={() => setOpen(false)}>
+            <Button type="button" variant="primary" className="w-full" onClick={() => setOpen(false)}>
               {sheetCloseLabel}
             </Button>
           </div>

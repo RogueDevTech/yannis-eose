@@ -1097,7 +1097,7 @@ export function DisbursementsPage({
           </div>
 
           <TableLoadingOverlay show={isFilterLoading}>
-            <div className="card p-0 overflow-hidden rounded-xl">
+            <div className="list-panel rounded-xl">
               <CompactTable<DisbursementRecord>
                 withCard={false}
                 columns={fundingLedgerColumns}
@@ -1148,7 +1148,7 @@ export function DisbursementsPage({
       {mainTab === 'requests' && (
         <>
               <TableLoadingOverlay show={isFilterLoading}>
-                <div className="card p-0 overflow-hidden rounded-xl">
+                <div className="list-panel rounded-xl">
                   <div className="border-b border-app-border px-4 py-3">
                     <h2 className="text-sm font-semibold text-app-fg">Funding requests</h2>
                     <p className="mt-0.5 text-xs text-app-fg-muted">
@@ -1259,7 +1259,7 @@ export function DisbursementsPage({
           </div>
 
           <TableLoadingOverlay show={isFilterLoading}>
-            <div className="card p-0 overflow-hidden rounded-xl">
+            <div className="list-panel rounded-xl">
               <div className="border-b border-app-border px-4 py-3">
                 <h2 className="text-sm font-semibold text-app-fg">Recipient balances</h2>
                 <p className="mt-0.5 text-xs text-app-fg-muted">Funding received (confirmed) minus approved ad spend</p>
@@ -1496,7 +1496,7 @@ function CountPill({
         ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
         : 'bg-app-hover text-app-fg-muted';
   return (
-    <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-[10px] font-semibold tabular-nums ${toneClasses}`}>
+    <span className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-micro font-semibold tabular-nums ${toneClasses}`}>
       {children}
     </span>
   );

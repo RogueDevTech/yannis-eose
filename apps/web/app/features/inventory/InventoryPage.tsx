@@ -98,7 +98,7 @@ function LowStockAlertStrip({ items }: { items: LowStockAlertItem[] }) {
           const cardContent = (
             <>
               <p className="text-xs font-semibold text-app-fg leading-snug line-clamp-2">{item.productName}</p>
-              <p className="text-[11px] text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
+              <p className="text-mini text-app-fg-muted mt-0.5 line-clamp-1">{item.locationName}</p>
               <p
                 className={`text-xs font-bold tabular-nums mt-1.5 ${
                   item.availableCount <= 0
@@ -439,7 +439,7 @@ export function InventoryPage(props: InventoryStreamData) {
           <span className={`font-medium ${isEmpty ? 'text-app-fg-muted italic' : 'text-app-fg'}`}>
             {productName(level.productId)}
             {isOptimistic && (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted italic">Saving…</span>
+              <span className="ml-2 text-micro uppercase tracking-wide text-app-fg-muted italic">Saving…</span>
             )}
           </span>
         );
@@ -463,7 +463,7 @@ export function InventoryPage(props: InventoryStreamData) {
               />
             ) : parts.tag ? (
               <span
-                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(parts.providerKind)}`}
+                className={`inline-flex items-center rounded-full border px-2 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(parts.providerKind)}`}
               >
                 {parts.tag}
               </span>
@@ -949,7 +949,7 @@ export function InventoryPage(props: InventoryStreamData) {
                                 />
                               ) : loc.providerName ? (
                                 <span
-                                  className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(loc.providerKind)}`}
+                                  className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(loc.providerKind)}`}
                                 >
                                   {loc.providerName}
                                 </span>
@@ -963,10 +963,10 @@ export function InventoryPage(props: InventoryStreamData) {
                             {(() => {
                               const names = productsAtLocation.get(loc.id);
                               if (!names || names.length === 0) {
-                                return <span className="text-[10px] text-app-fg-muted italic">No stock</span>;
+                                return <span className="text-micro text-app-fg-muted italic">No stock</span>;
                               }
                               return (
-                                <span className="text-[10px] text-app-fg-muted truncate block max-w-[12rem]" title={names.join(', ')}>
+                                <span className="text-micro text-app-fg-muted truncate block max-w-[12rem]" title={names.join(', ')}>
                                   {names.join(', ')}
                                 </span>
                               );
@@ -988,7 +988,7 @@ export function InventoryPage(props: InventoryStreamData) {
                                 wrapperClassName="w-24 inline-block"
                               />
                               {isInheriting && (
-                                <span className="text-[10px] text-app-fg-muted whitespace-nowrap" title="Using org-wide default">
+                                <span className="text-micro text-app-fg-muted whitespace-nowrap" title="Using org-wide default">
                                   default
                                 </span>
                               )}
@@ -1144,7 +1144,7 @@ export function InventoryPage(props: InventoryStreamData) {
                       ? {
                           leading: (
                             <span
-                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
+                              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
                             >
                               {l.providerName}
                             </span>
@@ -1572,7 +1572,7 @@ function ReturnsTab({
       )}
 
       {/* Returns table */}
-      <div className="card p-0">
+      <div className="list-panel">
         <CompactTable<ReturnedOrder>
           caption="Returned orders"
           columns={returnsColumns}
@@ -1844,7 +1844,7 @@ function ReconciliationTab({
         {(resolved) => {
           const rows = resolved as Reconciliation[];
           return (
-            <div className="card p-0">
+            <div className="list-panel">
               <CompactTable<Reconciliation>
                 caption="Stock reconciliations"
                 columns={reconciliationColumns}

@@ -186,7 +186,7 @@ export function FileUpload({
                 />
               </svg>
               <span className="text-sm text-app-fg-muted truncate">
-                Choose file <span className="text-[11px]">· max {maxSizeMB}MB</span>
+                Choose file <span className="text-mini">· max {maxSizeMB}MB</span>
               </span>
             </>
           ) : (
@@ -207,7 +207,7 @@ export function FileUpload({
               <p className={`${size === 'sm' ? 'text-xs' : 'text-sm'} text-app-fg-muted`}>
                 Click or drag file to upload
               </p>
-              <p className={`${size === 'sm' ? 'text-[10px] mt-0.5' : 'text-xs mt-1'} text-app-fg-muted`}>
+              <p className={`${size === 'sm' ? 'text-micro mt-0.5' : 'text-xs mt-1'} text-app-fg-muted`}>
                 Max {maxSizeMB}MB
               </p>
             </>
@@ -244,7 +244,7 @@ export function FileUpload({
             >
               {fileName}
             </span>
-            <span className={`text-app-fg-muted ml-auto ${variant === 'minimal' ? 'text-[10px]' : 'text-xs'}`}>
+            <span className={`text-app-fg-muted ml-auto ${variant === 'minimal' ? 'text-micro' : 'text-xs'}`}>
               {fileSize}
             </span>
           </div>
@@ -277,7 +277,7 @@ export function FileUpload({
               <p className={`font-medium text-app-fg truncate ${variant === 'minimal' ? 'text-xs' : 'text-sm'}`}>
                 {fileName}
               </p>
-              <p className={`text-app-fg-muted ${variant === 'minimal' ? 'text-[10px]' : 'text-xs'}`}>{fileSize}</p>
+              <p className={`text-app-fg-muted ${variant === 'minimal' ? 'text-micro' : 'text-xs'}`}>{fileSize}</p>
             </div>
             <button
               type="button"

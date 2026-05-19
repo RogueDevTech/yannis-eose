@@ -21,10 +21,15 @@ export const userRoleSchema = z.enum([
 ]);
 
 /**
- * Roles that are branch-scoped and therefore must carry at least one branch.
- * Every other non-SuperAdmin role (Stock Manager, Finance, HR, org-wide Heads,
- * TPL, etc.) is company-wide and is not assigned to branches.
- * Migration 0136 — CEO directive 2026-05-10.
+ * Roles that MAY be branch-scoped. When a member of one of these roles is
+ * assigned to a branch, their data visibility (orders, staff, payroll, etc.)
+ * is filtered to that branch — when unassigned, they stay org-wide. Every
+ * other non-SuperAdmin role (Stock Manager, Finance, org-wide Heads, TPL,
+ * etc.) is company-wide and is not assigned to branches.
+ *
+ * Migration 0136 — CEO directive 2026-05-10 (original branch list).
+ * HR_MANAGER added per CEO 2026-05-19 — HR keeps existing permissions but
+ * sees only their branch's staff when a branch is assigned.
  */
 export const BRANCH_ELIGIBLE_ROLES = new Set([
   'MEDIA_BUYER',
@@ -32,6 +37,7 @@ export const BRANCH_ELIGIBLE_ROLES = new Set([
   'CS_CLOSER',
   'HEAD_OF_CS',
   'BRANCH_ADMIN',
+  'HR_MANAGER',
 ]);
 
 // ============================================

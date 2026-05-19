@@ -251,7 +251,7 @@ export function CashRemittanceCreateModal({
                   Mark Received now
                 </span>
                 <span
-                  className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                  className={`text-micro font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${
                     markReceivedNow
                       ? 'bg-brand-600 text-white'
                       : 'bg-app-hover text-app-fg-muted'

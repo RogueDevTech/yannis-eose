@@ -6,6 +6,7 @@ import {
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { shellPulsePlaceholderRows, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 
 const AUDIT_SHELL_COLS: CompactTableColumn<{ id: string }>[] = [
@@ -41,17 +42,39 @@ export function AuditLoadingShell({
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Audit trail"
+        mobileInlineActions
         description="Immutable record of changes across the platform."
-        actions={<PageRefreshButton />}
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Audit trail tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Audit toolbar and date range"
+            desktop={
+              <>
+                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                  />
+                </div>
+                <PageRefreshButton />
+              </>
+            }
+            sheet={() => (
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            )}
+          />
+        }
       />
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-          <DateFilterBar
-            startDate={filters.startDate}
-            endDate={filters.endDate}
-            periodAllTime={filters.periodAllTime}
-          />
-        </div>
         <div className="h-10 w-40 rounded-md bg-app-hover animate-pulse" aria-hidden />
         <div className="h-10 w-40 rounded-md bg-app-hover animate-pulse" aria-hidden />
       </div>

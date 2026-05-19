@@ -359,7 +359,7 @@ export class HrService {
     return payout;
   }
 
-  async listPayouts(input: ListPayoutsInput) {
+  async listPayouts(input: ListPayoutsInput, viewer?: SessionUser) {
     const conditions = [];
     if (input.staffId) {
       conditions.push(eq(schema.payoutRecords.staffId, input.staffId));
@@ -372,6 +372,17 @@ export class HrService {
     }
     if (input.periodEnd) {
       conditions.push(lte(schema.payoutRecords.periodEnd, new Date(input.periodEnd)));
+    }
+
+    // HR_MANAGER scoped to a branch (CEO 2026-05-19) sees only payouts whose
+    // parent payroll batch belongs to their branch. SuperAdmin / unassigned
+    // HR / Finance keep the org-wide view.
+    if (viewer?.role === 'HR_MANAGER' && viewer.currentBranchId) {
+      const branchBatches = this.db
+        .select({ id: schema.payrollBatches.id })
+        .from(schema.payrollBatches)
+        .where(eq(schema.payrollBatches.branchId, viewer.currentBranchId));
+      conditions.push(inArray(schema.payoutRecords.batchId, branchBatches));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

@@ -104,7 +104,7 @@ export function ChipInput({
           />
         </div>
       </div>
-      {hint ? <p className="text-[11px] text-app-fg-muted">{hint}</p> : null}
+      {hint ? <p className="text-mini text-app-fg-muted">{hint}</p> : null}
     </div>
   );
 }

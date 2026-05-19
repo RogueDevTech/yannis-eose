@@ -284,7 +284,7 @@ export function NotificationsAutomationsPanel({ rules }: NotificationsAutomation
         </button>
       </div>
 
-      <div className="card p-0">
+      <div className="list-panel">
         {rules.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-app-fg-muted">
             <svg className="mb-3 h-10 w-10" fill="none" viewBox="0 0 24 24" strokeWidth={1.2} stroke="currentColor">

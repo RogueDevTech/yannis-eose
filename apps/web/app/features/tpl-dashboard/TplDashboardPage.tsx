@@ -1,5 +1,7 @@
 import { Link } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { formatNaira } from '~/lib/format-amount';
@@ -31,25 +33,40 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-xl font-bold text-app-fg">
-            {getGreeting()}, {firstName}
-          </h1>
-          <p className="text-sm text-app-fg-muted font-medium mt-1">
-            Your location's stock and deliveries.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <DateFilterBar
-            startDate={data.filters.startDate}
-            endDate={data.filters.endDate}
-            periodAllTime={data.filters.periodAllTime}
+      <PageHeader
+        title={`${getGreeting()}, ${firstName}`}
+        mobileInlineActions
+        description="Your location's stock and deliveries."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Dashboard tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="TPL dashboard date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar
+                    startDate={data.filters.startDate}
+                    endDate={data.filters.endDate}
+                    periodAllTime={data.filters.periodAllTime}
+                  />
+                </div>
+              </>
+            }
+            sheet={() => (
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={data.filters.startDate}
+                  endDate={data.filters.endDate}
+                  periodAllTime={data.filters.periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            )}
           />
-        </div>
-      </div>
+        }
+      />
 
       {/* KPI Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

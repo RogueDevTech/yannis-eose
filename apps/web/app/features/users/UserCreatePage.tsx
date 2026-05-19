@@ -42,10 +42,10 @@ const COMPANY_WIDE_OPTIONAL_SQUAD_ROLES = new Set([
 /**
  * Roles that belong in the branching system. Mirrors the backend's
  * `BRANCH_ELIGIBLE_ROLES` set in `branches.router.ts::assignUser` (CEO directive
- * 2026-05-10): only Marketing, CS, and Branch Admin live in branches. Every
- * other role is org-wide — Finance, Stock Manager, HR, Logistics (which has
- * its own location-scoping via `logistics_locations`), Admin, etc. — and the
- * Branch Memberships section hides for them entirely.
+ * 2026-05-10): Marketing, CS, Branch Admin, and HR (added 2026-05-19) live in
+ * branches. Every other role is org-wide — Finance, Stock Manager, Logistics
+ * (which has its own location-scoping via `logistics_locations`), Admin, etc.
+ * — and the Branch Memberships section hides for them entirely.
  *
  * Keep this list in lockstep with the backend; if the two diverge a tampered
  * client could submit branches the server rejects, or a legitimate role would
@@ -57,6 +57,7 @@ const BRANCH_ELIGIBLE_ROLES = new Set([
   'CS_CLOSER',
   'HEAD_OF_CS',
   'BRANCH_ADMIN',
+  'HR_MANAGER',
 ]);
 
 // ─── Constants ──────────────────────────────────────────

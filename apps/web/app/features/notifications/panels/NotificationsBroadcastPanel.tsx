@@ -101,14 +101,14 @@ function avatarColor(name: string): string {
 function PushBadge({ active }: { active: boolean }) {
   if (active) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success-100 px-1.5 py-0.5 text-[10px] font-medium text-success-700 dark:bg-success-900/30 dark:text-success-400">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success-100 px-1.5 py-0.5 text-micro font-medium text-success-700 dark:bg-success-900/30 dark:text-success-400">
         <span className="h-1.5 w-1.5 rounded-full bg-success-500" />
         Push on
       </span>
     );
   }
   return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg-muted">
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-app-hover px-1.5 py-0.5 text-micro font-medium text-app-fg-muted">
       <span className="h-1.5 w-1.5 rounded-full bg-app-fg-muted/40" />
       Not connected
     </span>
@@ -738,7 +738,7 @@ function NotificationPreview({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-2xl border border-app-border bg-app-hover/80 p-3">
       <div className="mb-2 flex items-center justify-between px-1">
-        <span className="text-[10px] font-medium text-app-fg-muted">9:41</span>
+        <span className="text-micro font-medium text-app-fg-muted">9:41</span>
         <div className="flex items-center gap-1 text-app-fg-muted">
           <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path d="M1.5 8.353c6.075-5.804 15.426-5.804 21.5 0l-1.835 1.836a12.75 12.75 0 00-17.83 0L1.5 8.353z" />
@@ -754,10 +754,10 @@ function NotificationPreview({ title, body }: { title: string; body: string }) {
       <div className="rounded-xl border border-app-border bg-app-elevated px-3 py-2.5 shadow-card dark:shadow-none">
         <div className="mb-1.5 flex items-center gap-1.5">
           <div className="flex h-4 w-4 items-center justify-center rounded-sm bg-brand-500">
-            <span className="text-[8px] font-bold text-white">Y</span>
+            <span className="text-2xs font-bold text-white">Y</span>
           </div>
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted">Yannis EOSE</span>
-          <span className="ml-auto text-[10px] text-app-fg-muted">now</span>
+          <span className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted">Yannis EOSE</span>
+          <span className="ml-auto text-micro text-app-fg-muted">now</span>
         </div>
         <p className="text-sm font-semibold leading-snug text-app-fg">
           {title || <span className="text-app-fg-muted">Notification title</span>}

@@ -919,10 +919,11 @@ export class PayrollBatchService {
     const conditions = [] as ReturnType<typeof and>[] | unknown[];
 
     // Viewer scoping. Cross-branch view is granted to SuperAdmin and anyone holding hr.write
-    // (admin via ALL_PERMISSION_CODES, HR_MANAGER via SYSTEM template).
+    // (admin via ALL_PERMISSION_CODES, HR_MANAGER via SYSTEM template). HR_MANAGER assigned
+    // to a branch (CEO 2026-05-19) loses cross-branch — they see only their branch's batches.
     const cross =
       viewer.role === 'SUPER_ADMIN' ||
-      (viewer.permissions ?? []).includes('hr.write');
+      ((viewer.permissions ?? []).includes('hr.write') && viewer.currentBranchId == null);
     const orgWideHeadNullSession =
       isOrgWideDepartmentHead(viewer) && viewer.currentBranchId == null;
 
@@ -1005,11 +1006,18 @@ export class PayrollBatchService {
 
     // Permission check: same scoping as list
     const allowedAsHead = await this.canPrepareDept(viewer, batch.branchId, batch.department as PayrollDepartment);
+    // HR_MANAGER assigned to a branch (CEO 2026-05-19) sees only that branch.
+    const hrBranchScopeOk =
+      viewer.role !== 'HR_MANAGER' ||
+      viewer.currentBranchId == null ||
+      batch.branchId === viewer.currentBranchId;
     const allowed =
-      viewer.role === 'SUPER_ADMIN' ||
-      canReviewBatch(viewer) ||
-      canProcessBatch(viewer) ||
-      allowedAsHead;
+      hrBranchScopeOk && (
+        viewer.role === 'SUPER_ADMIN' ||
+        canReviewBatch(viewer) ||
+        canProcessBatch(viewer) ||
+        allowedAsHead
+      );
     if (!allowed) {
       throw new TRPCError({ code: 'FORBIDDEN', message: 'Not allowed to view this batch.' });
     }

@@ -116,7 +116,7 @@ export function FinanceProductContributionTable({ rows }: { rows: ProductProfitB
   }
 
   return (
-    <div className="card overflow-hidden">
+    <div className="list-panel">
       <div className="px-4 py-3 border-b border-app-border">
         <h2 className="text-sm font-semibold text-app-fg">Product contribution</h2>
         <p className="text-xs text-app-fg-muted mt-0.5">

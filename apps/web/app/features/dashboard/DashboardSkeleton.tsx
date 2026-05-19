@@ -1,9 +1,140 @@
 import { Link } from '@remix-run/react';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { StatValuePulse } from '~/components/ui/deferred-skeletons';
 import { isSuperAdminOnly } from '~/lib/rbac';
+
+function dashboardGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/**
+ * Loading shell for the Super-Admin executive dashboard (`SuperAdminDashboard`).
+ * Mirrors that layout exactly — ROAS hero, Revenue Generated, Key Metrics,
+ * Quick Navigation — so there's no flash of the *quick* dashboard layout
+ * while `dashboard.ceoOverview` resolves. CEO 2026-05-19: the prior fallback
+ * (`AdminQuickDashboardLoadingShell`) was the wrong shell for this variant.
+ */
+export function SuperAdminDashboardLoadingShell({
+  userName,
+  filters,
+}: {
+  userName: string;
+  filters?: { startDate: string; endDate: string; periodAllTime?: boolean };
+}) {
+  const firstName = userName?.split(' ')[0] ?? 'Admin';
+
+  return (
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
+      <PageHeader
+        title={`${dashboardGreeting()}, ${firstName}`}
+        mobileInlineActions
+        description="Executive dashboard — key business metrics at a glance."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Dashboard tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Dashboard date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false}
+                  />
+                </div>
+              </>
+            }
+            sheet={() => (
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters?.startDate ?? ''}
+                  endDate={filters?.endDate ?? ''}
+                  periodAllTime={filters?.periodAllTime ?? false}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            )}
+          />
+        }
+      />
+
+      {/* ROAS hero */}
+      <div className="card">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-1">
+              ROAS on Ad Spend
+            </p>
+            <p className="text-4xl sm:text-5xl font-bold tabular-nums">
+              <StatValuePulse className="inline-block min-w-[5rem]" />
+            </p>
+            <p className="text-sm text-app-fg-muted mt-1">Revenue / Ad Spend</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full sm:w-auto">
+            {['Revenue', 'Ad Spend', 'Profit'].map((label) => (
+              <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
+                <p className="text-mini font-medium text-app-fg-muted">{label}</p>
+                <p className="mt-1">
+                  <StatValuePulse />
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Revenue Generated */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          Revenue Generated
+        </h2>
+        <div className="card px-4 py-2">
+          {['Today', 'This Week', 'This Month'].map((label) => (
+            <div key={label} className="flex items-center justify-between py-2">
+              <span className="text-sm text-app-fg-muted">{label}</span>
+              <StatValuePulse />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Key Metrics */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          Key Metrics
+        </h2>
+        <div className="card p-3 grid grid-cols-2 md:grid-cols-5 gap-2">
+          {['Ad Spend', 'Order Count', 'CPA', 'Delivery Rate', 'Active Staff'].map((label) => (
+            <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
+              <p className="text-mini font-medium text-app-fg-muted">{label}</p>
+              <p className="mt-1">
+                <StatValuePulse />
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Quick Navigation */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {['CS Queue', 'Logistics', 'Marketing', 'Finance'].map((label) => (
+          <div key={label} className="card text-center py-4">
+            <span className="text-sm font-medium text-app-fg">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Admin quick-overview skeleton — mirrors AdminQuickDashboard layout exactly.

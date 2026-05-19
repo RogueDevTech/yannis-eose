@@ -12,7 +12,6 @@
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
-import { Button } from '~/components/ui/button';
 
 interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'size'> {
   onChange?: (value: string) => void;
@@ -22,14 +21,19 @@ interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEleme
   clearable?: boolean;
   /** Visual height — distinct from native HTML `input size` */
   controlSize?: 'sm' | 'md' | 'lg';
-  /** Applied to the outer flex row when `withSubmitButton`, else to the inner input wrapper */
+  /** Applied to the input wrapper. */
   wrapperClassName?: string;
   /**
-   * Renders a trailing "Search" submit button. Parent must wrap in `<form onSubmit>`.
-   * Omit inside dropdowns / live client filters — use `withSubmitButton={false}` (default).
+   * Renders a trailing submit button **inside the input** as a small arrow
+   * icon (right edge). Parent must wrap in `<form onSubmit>`. The old behavior
+   * was a full-width stacked "Search" button below the input on mobile —
+   * replaced 2026-05-19 per CEO mobile-density directive. Omit inside
+   * dropdowns / live client filters — use `withSubmitButton={false}` (default).
    */
   withSubmitButton?: boolean;
+  /** Accessible label for the submit icon button (defaults to "Search"). */
   submitButtonLabel?: string;
+  /** @deprecated kept for backwards compatibility — no longer used. */
   submitButtonClassName?: string;
 }
 
@@ -95,8 +99,17 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
 
     const hasValue = String(displayValue ?? '').length > 0;
 
-    const inputBlock = (
-      <div className={['relative', withSubmitButton ? 'min-w-0 w-full flex-1' : wrapperClassName].filter(Boolean).join(' ')}>
+    // Right-side button accounting: how many in-input buttons sit on the right
+    // edge, so we can reserve enough padding-right on the input itself.
+    const showClear = clearable && hasValue;
+    const rightButtonCount = (withSubmitButton ? 1 : 0) + (showClear ? 1 : 0);
+    const rightPaddingClass =
+      rightButtonCount === 2 ? 'pr-14' : rightButtonCount === 1 ? 'pr-8' : '';
+    // When both submit + clear are visible, slide clear to the LEFT of submit.
+    const clearRightOffset = withSubmitButton ? 'right-8' : 'right-2.5';
+
+    return (
+      <div className={['relative', wrapperClassName].filter(Boolean).join(' ')}>
         <span
           className={[
             'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
@@ -123,7 +136,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
             'bg-app-canvas text-app-fg placeholder:text-app-fg-muted',
             'border-app-border focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none',
             sizeClasses[controlSize],
-            clearable && hasValue ? 'pr-7' : '',
+            rightPaddingClass,
             className,
           ]
             .filter(Boolean)
@@ -131,43 +144,37 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
           {...rest}
         />
 
-        {clearable && hasValue && (
+        {showClear && (
           <button
             type="button"
             onClick={handleClear}
             aria-label="Clear search"
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-app-fg-muted hover:text-app-fg transition-colors"
+            className={`absolute ${clearRightOffset} top-1/2 -translate-y-1/2 text-app-fg-muted hover:text-app-fg transition-colors`}
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
             </svg>
           </button>
         )}
-      </div>
-    );
 
-    if (!withSubmitButton) {
-      return inputBlock;
-    }
-
-    return (
-      <div
-        className={[
-          'flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center',
-          wrapperClassName,
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        {inputBlock}
-        <Button
-          type="submit"
-          variant="secondary"
-          size="sm"
-          className={['w-full shrink-0 sm:w-auto', submitButtonClassName].filter(Boolean).join(' ')}
-        >
-          {submitButtonLabel}
-        </Button>
+        {withSubmitButton && (
+          <button
+            type="submit"
+            aria-label={submitButtonLabel}
+            title={submitButtonLabel}
+            className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/50 ${
+              hasValue
+                ? 'bg-brand-500 text-white hover:bg-brand-600'
+                : 'bg-app-hover text-app-fg-muted hover:bg-app-border'
+            }`}
+          >
+            {/* Arrow-right "go" — iOS-style search submit. Compact, universally
+                read as "execute the current input". */}
+            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 10h12M11 5l5 5-5 5" />
+            </svg>
+          </button>
+        )}
       </div>
     );
   },

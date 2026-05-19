@@ -112,7 +112,7 @@ export function TemplatePermissionsViewPanel({ catalog, grantedCodes }: Template
                   trigger={
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[11px] uppercase tracking-wide text-app-fg-muted font-semibold">
+                        <p className="text-mini uppercase tracking-wide text-app-fg-muted font-semibold">
                           {formatPermissionGroup(groupKey)}
                         </p>
                         <p className="text-xs text-app-fg-muted">{rows.length} permission{rows.length === 1 ? '' : 's'}</p>
@@ -131,9 +131,9 @@ export function TemplatePermissionsViewPanel({ catalog, grantedCodes }: Template
                       >
                         <div className="min-w-0">
                           <span className="block text-sm font-medium text-app-fg">{formatPermissionCode(perm.code)}</span>
-                          <span className="block font-mono text-[11px] text-app-fg-muted mt-0.5 break-all">{perm.code}</span>
+                          <span className="block font-mono text-mini text-app-fg-muted mt-0.5 break-all">{perm.code}</span>
                           {orphan ? (
-                            <span className="mt-1 block text-[11px] text-warning-600 dark:text-warning-400">
+                            <span className="mt-1 block text-mini text-warning-600 dark:text-warning-400">
                               Not in current catalog (still granted on template)
                             </span>
                           ) : null}

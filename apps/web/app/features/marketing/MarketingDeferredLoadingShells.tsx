@@ -362,7 +362,7 @@ export function MarketingFundingLoadingShell({
 
       <OverviewStatStrip items={statItems} />
 
-      <div className="card scroll-mt-4 overflow-hidden p-0" id="funding-ledger">
+      <div className="list-panel scroll-mt-4" id="funding-ledger">
         {canDistribute ? (
           <div className="px-4 pt-2">
             <Tabs
@@ -656,7 +656,7 @@ export function MarketingAdSpendLoadingShell({
         ]}
       />
 
-      <div className="card scroll-mt-4 overflow-hidden p-0">
+      <div className="list-panel scroll-mt-4">
         <div className="border-b border-app-border px-4 py-3">
           <Tabs value={selectedStatus} onChange={handleStatusChange} tabs={AD_SPEND_STATUS_TAB_OPTIONS} />
         </div>
@@ -908,6 +908,7 @@ export function MarketingTeamLoadingShell({
       <div>
         <ToolbarFiltersCollapsible
           className="mb-4 !border-0 px-0 py-0"
+          hideMobileSheet
           badgeCount={badgeCount}
           sheetSubtitle={<span>Sort options apply immediately</span>}
           searchRow={
@@ -1004,7 +1005,7 @@ export function MarketingTeamLoadingShell({
         </div>
 
         <div className="hidden md:block">
-          <div className="card overflow-x-auto p-0">
+          <div className="list-panel overflow-x-auto">
             <CompactTable<{ userId: string }>
               withCard={false}
               columns={teamCols}
@@ -1592,7 +1593,7 @@ export function MarketingOrdersLoadingShell({
         ]}
       />
 
-      <div className="card p-0 overflow-hidden">
+      <div className="list-panel">
         <ToolbarFiltersCollapsible
           className="!border-0"
           badgeCount={ordersToolbarFilterBadge}

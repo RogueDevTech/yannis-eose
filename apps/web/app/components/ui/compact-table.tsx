@@ -365,7 +365,7 @@ export function CompactTable<T>({
   );
 
   const emptyWrapped = withCard ? (
-    <div className={['card p-0 overflow-hidden', className].filter(Boolean).join(' ')}>{emptyInner}</div>
+    <div className={['list-panel', className].filter(Boolean).join(' ')}>{emptyInner}</div>
   ) : (
     <div className={className}>{emptyInner}</div>
   );
@@ -418,7 +418,7 @@ export function CompactTable<T>({
   }
 
   const mobileCards = (
-    <div className="space-y-3 bg-app-canvas px-3 py-3 md:hidden">
+    <div className="space-y-3 bg-app-canvas py-3 md:hidden">
       {rows.map((row, i) => {
         const rowExtra = rowClassName?.(row, i) ?? '';
         const rowSelection = selection ? renderSelectionCell(row, i) : null;
@@ -503,7 +503,7 @@ export function CompactTable<T>({
                         .filter(Boolean)
                         .join(' ')}
                     >
-                      <dt className="m-0 min-w-0 overflow-hidden pt-0.5 text-left text-[11px] font-semibold uppercase leading-snug tracking-wide text-app-fg-muted whitespace-nowrap text-ellipsis [&_svg]:inline [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:shrink-0">
+                      <dt className="m-0 min-w-0 overflow-hidden pt-0.5 text-left text-mini font-semibold uppercase leading-snug tracking-wide text-app-fg-muted whitespace-nowrap text-ellipsis [&_svg]:inline [&_svg]:h-3.5 [&_svg]:w-3.5 [&_svg]:shrink-0">
                         {labelForMobile}
                       </dt>
                       <dd
@@ -627,8 +627,11 @@ export function CompactTable<T>({
     </>
   );
 
+  // `withCard` chrome is desktop-only — on mobile each row already renders as
+  // its own elevated card, so a wrapping card would just double the chrome
+  // and waste width (CEO mobile-density directive 2026-05-19).
   const wrapped = withCard ? (
-    <div className={['card p-0 overflow-hidden', className].filter(Boolean).join(' ')}>{body}</div>
+    <div className={['list-panel', className].filter(Boolean).join(' ')}>{body}</div>
   ) : (
     <div className={className}>{body}</div>
   );

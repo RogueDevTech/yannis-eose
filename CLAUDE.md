@@ -64,8 +64,10 @@ Rider dashboard lives in `apps/web` at `/rider/` (not a separate app). Local dev
 - **Dev deploy is provider-selectable via adapters.** `DEPLOY_PLATFORM=aws` or `DEPLOY_PLATFORM=gcp` deploys to that provider only. When `DEPLOY_PLATFORM` is **unset or empty**, both providers deploy in parallel.
 - **Shared runtime contract is the source of truth.** Both providers must satisfy the same single-VM Dockerized `web` + `api` shape, health checks, migration flow, and runtime env contract.
 - **Redis stays external** for dev deploys. Do **not** reintroduce VM-local Redis unless explicitly approved.
-- **Ingress is Cloudflare DNS + Cloudflare Tunnel.** Do **not** add nginx back onto the VM for the normalized dev baseline.
-- **Edge worker remains on Cloudflare.**
+- **Ingress is Cloudflare Proxy (orange cloud) → nginx on the VM → web:3000 / api:4444.** Cloudflare DNS proxies, nginx terminates the second TLS leg with Let's Encrypt certs, certbot renews via HTTP-01 on port 80 (CF passes :80 through). No Cloudflare Tunnel involved.
+- **Cloudflare SSL mode is `Full (strict)` zone-wide.** Anything looser is a downgrade — browser sees HTTPS but CF→VM goes plaintext (Flexible) or accepts a self-signed origin (Full).
+- **nginx must trust Cloudflare's edge IPs** via `/etc/nginx/conf.d/cloudflare-real-ip.conf` (Ansible-managed) — sets `set_real_ip_from <CF-ranges>` + `real_ip_header CF-Connecting-IP`. Without it, every CF-proxied request looks like it came from a CF edge IP → rate limiter, audit logs, and fraud signals all break.
+- **Edge worker remains on Cloudflare** at `form.hqyannis.com` (prod) / `dev-form.hqyannis.com` (dev).
 - **Object storage is provider-selectable via adapters** (`gcs` / `s3`). New asset keys must stay **environment-prefixed** and **resource-scoped** (for example `dev/marketing/screenshots/...`, `dev/finance/receipts/...`, `dev/logistics/delivery-proof/...`, `dev/hr/onboarding-docs/...`, `dev/products/...`).
 - **New dev infrastructure uses `dev-*` naming** inside the selected provider so the same Terraform shape can be mirrored later for prod.
 - **Provider adapters must not drift from the shared contract.** Keep provider differences isolated to infra, deploy scripts, and object-storage adapters.
@@ -276,6 +278,37 @@ Flow: submit → modal stays open → server `{success: true}` → modal closes 
 - Never use localStorage/sessionStorage for security-sensitive data
 - Never send raw phones via SMS/WhatsApp — platform bridge only
 - Never fire push without inserting in-app notification row first
+
+### Secret Hygiene & Dev/Prod Isolation (Locked)
+**Hard isolation between dev and prod is mandatory** — sharing any of the below between envs caused a confirmed auth-bleed bug (logged in as a dev SuperAdmin against prod). Per env, unique values for:
+- `REDIS_URL` — sessions, cache, rate-limit counters, Socket.io adapter all share one keyspace
+- `SESSION_SECRET` + `SESSION_BUNDLE_SECRET` — HMAC signature validates cross-env if shared
+- `DATABASE_URL` — obvious, but worth stating
+- `EDGE_API_KEY` — API↔worker inventory-update auth; shared key = privilege escalation across envs
+
+`SESSION_COOKIE_DOMAIN=.hqyannis.com` is only safe **once the four above are isolated** — otherwise the parent-domain cookie carries dev sessions into prod via shared Redis.
+
+**Secret storage map** — wrangler secrets and GCP Secret Manager are separate stores; nothing reads both:
+| Secret | Used by | Lives in |
+|---|---|---|
+| `REDIS_URL`, `SESSION_*`, `DATABASE_URL`, `VAPID_*`, `SENDGRID_API_KEY`, etc. | NestJS API container | GCP Secret Manager `prod-yannis-runtime-env` (refresh-env script reads on boot) |
+| `QSTASH_URL`, `QSTASH_TOKEN`, `TURNSTILE_SECRET_KEY` | Cloudflare edge worker only | `wrangler secret put ... --env production` |
+| `EDGE_API_KEY` | API (sends header) + worker (verifies) | **Both** — same value in GCP Secret Manager AND wrangler secrets |
+
+### Edge Worker Safety Net (QStash) — Required on Prod
+- `QSTASH_URL` + `QSTASH_TOKEN` **MUST** be set as wrangler secrets on the prod edge worker. Without them, `bufferToQStash()` silently returns false and PayOnDelivery orders are LOST during any API outage (this is Pillar 1's last line of defense — see `apps/edge-worker/src/index.ts:626-650`).
+- PayOnline orders are **not** buffered — payment flows can't be naively replayed. Edge worker tells the user to retry on API 5xx.
+- Verify after any worker secret rotation:
+  ```
+  pnpm --filter @yannis/edge-worker exec wrangler secret list --env production
+  ```
+- Tokens accidentally pasted into chats/logs MUST be rotated in the Upstash console + re-pushed via `wrangler secret put`.
+
+### First SuperAdmin Bootstrap (`/auth/setup`)
+- Fresh prod DB has no users. First visitor to `/auth` lands on the setup flow (loader probes `/auth/setup-status`) and can mint the first SUPER_ADMIN.
+- After that, `/auth/setup` is a no-op — additional SuperAdmins must be promoted by an existing SuperAdmin from the admin UI.
+- **Do not lose the first SuperAdmin credentials before adding a second.** No back-channel recovery.
+- After first SuperAdmin exists, restart the API once so `MessageTemplateSeedService` picks up the new actor and seeds default templates.
 
 ### RBAC
 - Never inline `role === 'SUPER_ADMIN'` — use `isAdminLevel(user)`

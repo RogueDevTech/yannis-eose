@@ -237,7 +237,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
         ]}
       />
 
-      <div className="card p-0 overflow-hidden flex flex-col">
+      <div className="list-panel flex flex-col">
         <div className="px-4 pt-3 pb-0 border-b border-app-border shrink-0">
           <Tabs
             value={status}
@@ -282,7 +282,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
           side-by-side per HR/Finance feedback: two tables side-by-side ate the
           screen and the right pane was empty on first load. */}
       {selectedBatch ? (
-        <div className="card p-0 overflow-hidden flex flex-col">
+        <div className="list-panel flex flex-col">
           <div className="px-4 py-3 border-b border-app-border shrink-0 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-semibold text-app-fg">Payout lines</h2>

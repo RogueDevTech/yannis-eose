@@ -157,7 +157,7 @@ export function BranchDetailLoadingShell({
             <div className="grid grid-cols-3 gap-2 mb-4">
               {['Members', 'Teams', 'Supervisors'].map((label) => (
                 <div key={label} className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                  <p className="text-micro uppercase tracking-wide text-app-fg-muted">
                     {label}
                   </p>
                   <div className="mt-1 h-6 w-8 rounded bg-app-hover animate-pulse" aria-hidden />

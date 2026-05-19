@@ -21,22 +21,40 @@ export function TplDashboardLoadingShell({
 }) {
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
-      <div className="space-y-4">
-        <div>
-          <div className="h-8 w-64 max-w-full rounded-md bg-app-hover animate-pulse" aria-hidden />
-          <div className="mt-2 h-4 w-72 max-w-full rounded bg-app-hover/80 animate-pulse" aria-hidden />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <PageRefreshButton />
-          <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-            <DateFilterBar
-              startDate={filters.startDate}
-              endDate={filters.endDate}
-              periodAllTime={filters.periodAllTime}
-            />
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        title={<span className="inline-block h-7 w-56 max-w-full rounded-md bg-app-hover animate-pulse align-middle" aria-hidden />}
+        mobileInlineActions
+        description="Your location's stock and deliveries."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Dashboard tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="TPL dashboard date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime}
+                  />
+                </div>
+              </>
+            }
+            sheet={() => (
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={filters.startDate}
+                  endDate={filters.endDate}
+                  periodAllTime={filters.periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            )}
+          />
+        }
+      />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Agent assigned" value="" loading accent="brand" />
         <StatCard label="In Transit" value="" loading accent="brand" />

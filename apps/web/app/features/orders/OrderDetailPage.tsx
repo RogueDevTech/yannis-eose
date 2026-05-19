@@ -3231,11 +3231,11 @@ export function OrderDetailPage({
                   </summary>
                   <div className="p-3 border-t border-app-border bg-app-hover">
                     <p className="text-xs font-medium text-app-fg-muted mb-1">Last response</p>
-                    <pre className="p-2 text-[11px] text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-32 overflow-y-auto font-mono bg-app-hover rounded mb-2">
+                    <pre className="p-2 text-mini text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-32 overflow-y-auto font-mono bg-app-hover rounded mb-2">
                       {fetcher.data != null ? JSON.stringify(fetcher.data, null, 2) : '—'}
                     </pre>
                     <p className="text-xs font-medium text-app-fg-muted mb-1">Latest call</p>
-                    <pre className="p-2 text-[11px] text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-24 overflow-y-auto font-mono bg-app-hover rounded mb-2">
+                    <pre className="p-2 text-mini text-app-fg-muted whitespace-pre-wrap break-all overflow-x-auto max-h-24 overflow-y-auto font-mono bg-app-hover rounded mb-2">
                       {order.callLogs[0] != null
                         ? JSON.stringify(
                             {
@@ -3252,7 +3252,7 @@ export function OrderDetailPage({
                     {callDebugLog.length > 0 && (
                       <>
                         <p className="text-xs font-medium text-app-fg-muted mb-1">Event log</p>
-                        <ul className="list-disc list-inside text-[11px] text-app-fg-muted space-y-0.5">
+                        <ul className="list-disc list-inside text-mini text-app-fg-muted space-y-0.5">
                           {callDebugLog.map((line, i) => (
                             <li key={i}>{line}</li>
                           ))}

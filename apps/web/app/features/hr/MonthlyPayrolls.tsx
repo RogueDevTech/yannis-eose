@@ -791,7 +791,7 @@ function BatchTimeline({ batch }: { batch: PayrollBatch }) {
                 {s.label}
               </p>
               {s.at && (
-                <p className="text-[10px] text-app-fg-muted truncate">
+                <p className="text-micro text-app-fg-muted truncate">
                   {new Date(s.at).toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })}
                 </p>
               )}

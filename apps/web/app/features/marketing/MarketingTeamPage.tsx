@@ -326,8 +326,20 @@ export function MarketingTeamPage({
         actions={
           <PageHeaderMobileTools
             sheetTitle="Team analysis tools"
-            sheetSubtitle={<span>Date range and export</span>}
+            sheetSubtitle={<span>Date range, sort and export</span>}
             triggerAriaLabel="Team analysis toolbar and date range"
+            filtersBadgeCount={teamToolbarFilterBadge}
+            filters={
+              <SortMenu
+                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                onChange={(next) =>
+                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                }
+                defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
+                options={TEAM_SORT_MENU_OPTIONS}
+                className="w-full justify-center"
+              />
+            }
             desktop={
               <>
                 <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -435,16 +447,18 @@ export function MarketingTeamPage({
       <div>
         <ToolbarFiltersCollapsible
           className="mb-4 !border-0 px-0 py-0"
+          hideMobileSheet
           badgeCount={teamToolbarFilterBadge}
           sheetSubtitle={<span>Sort options apply immediately</span>}
           searchRow={
-            <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+            <form onSubmit={handleSearchSubmit} className="flex w-full min-w-0 gap-2 md:flex-1">
               <SearchInput
                 value={searchQuery}
                 onChange={(v) => setSearchQuery(v)}
                 placeholder="Search by name or role…"
                 withSubmitButton
-                wrapperClassName="min-w-0 flex-1"
+                wrapperClassName="w-full min-w-0 flex-1"
+                className="bg-white dark:bg-app-elevated"
                 name="q"
                 autoComplete="off"
               />

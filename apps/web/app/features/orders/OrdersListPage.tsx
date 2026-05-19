@@ -76,7 +76,7 @@ import {
 function DueTodayTag() {
   return (
     <span
-      className="inline-flex shrink-0 items-center rounded-full border border-success-300/80 bg-success-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success-800 shadow-sm animate-due-today-breathe dark:border-success-600/50 dark:bg-success-900/35 dark:text-success-100"
+      className="inline-flex shrink-0 items-center rounded-full border border-success-300/80 bg-success-100 px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-success-800 shadow-sm animate-due-today-breathe dark:border-success-600/50 dark:bg-success-900/35 dark:text-success-100"
       title="Preferred delivery date is today (Africa/Lagos calendar)"
     >
       Due today
@@ -87,7 +87,7 @@ function DueTodayTag() {
 function OverdueTag() {
   return (
     <span
-      className="inline-flex shrink-0 items-center rounded-full border border-danger-300/80 bg-danger-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger-800 shadow-sm dark:border-danger-600/50 dark:bg-danger-900/35 dark:text-danger-100"
+      className="inline-flex shrink-0 items-center rounded-full border border-danger-300/80 bg-danger-100 px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-800 shadow-sm dark:border-danger-600/50 dark:bg-danger-900/35 dark:text-danger-100"
       title="Preferred delivery date has passed and the order is still undelivered"
     >
       Overdue
@@ -98,7 +98,7 @@ function OverdueTag() {
 function CallbackDueTag() {
   return (
     <span
-      className="inline-flex shrink-0 items-center rounded-full border border-warning-300/80 bg-warning-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-800 shadow-sm dark:border-warning-600/50 dark:bg-warning-900/35 dark:text-warning-100"
+      className="inline-flex shrink-0 items-center rounded-full border border-warning-300/80 bg-warning-100 px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-800 shadow-sm dark:border-warning-600/50 dark:bg-warning-900/35 dark:text-warning-100"
       title="Scheduled callback time has arrived"
     >
       Callback due
@@ -890,11 +890,127 @@ function OrdersListPageImpl({
         mobileInlineActions
         description={isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
-          <>
-            <PageHeaderMobileTools
+          <PageHeaderMobileTools
               sheetTitle="CS orders tools"
               sheetSubtitle={<span>Chart, offline order, and export</span>}
               triggerAriaLabel="CS orders toolbar"
+              filtersBadgeCount={ordersListToolbarFilterBadge}
+              filters={
+                <>
+                  {scheduleFilterFields ? (
+                    <div className="space-y-1.5 pb-2 border-b border-app-border mb-3">{scheduleFilterFields}</div>
+                  ) : null}
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                    <FormSelect
+                      value={selectedStatus}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setSelectedStatus(v);
+                        setSelectedIds(new Set());
+                        setBulkResult(null);
+                        setSearchParams((p) => {
+                          const next = new URLSearchParams(p);
+                          next.set('page', '1');
+                          if (v === FROM_CART_STATUS_VALUE) {
+                            next.delete('status');
+                            next.set('fromCart', '1');
+                          } else {
+                            next.delete('fromCart');
+                            if (v === 'ALL') next.delete('status');
+                            else next.set('status', v);
+                          }
+                          return next;
+                        });
+                      }}
+                      options={statusOptions}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                  {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-medium text-app-fg-muted">Closer</span>
+                      {deferredLoading && !(csClosersForFilter?.length) ? (
+                        <div className="h-9 w-full rounded-md bg-app-hover animate-pulse" aria-hidden />
+                      ) : (
+                        <SearchableSelect
+                          id="orders-filter-closer-sheet"
+                          value={searchParams.get('csCloserId') || 'ALL'}
+                          onChange={(v) => {
+                            setSelectedIds(new Set());
+                            setBulkResult(null);
+                            setSearchParams((p) => {
+                              const next = new URLSearchParams(p);
+                              next.set('page', '1');
+                              if (v && v !== 'ALL') next.set('csCloserId', v);
+                              else next.delete('csCloserId');
+                              return next;
+                            });
+                          }}
+                          options={csCloserOptions}
+                          wrapperClassName="w-full"
+                          placeholder="All closers"
+                          searchPlaceholder="Search closers..."
+                        />
+                      )}
+                    </div>
+                  ) : null}
+                  {(productsForFilter?.length ?? 0) > 0 ? (
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                      <SearchableSelect
+                        id="orders-filter-product-sheet"
+                        value={productFilter || 'ALL'}
+                        onChange={(v) => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('productId', v);
+                            else next.delete('productId');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'ALL', label: 'All products' },
+                          ...(productsForFilter ?? []).map((p) => ({ value: p.id, label: p.name })),
+                        ]}
+                        wrapperClassName="w-full"
+                        placeholder="All products"
+                        searchPlaceholder="Search products..."
+                      />
+                    </div>
+                  ) : null}
+                  {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-medium text-app-fg-muted">Form</span>
+                      <SearchableSelect
+                        id="orders-filter-form-sheet"
+                        value={campaignFilter || 'ALL'}
+                        onChange={(v) => {
+                          setSelectedIds(new Set());
+                          setBulkResult(null);
+                          setSearchParams((p) => {
+                            const next = new URLSearchParams(p);
+                            next.set('page', '1');
+                            if (v && v !== 'ALL') next.set('campaignId', v);
+                            else next.delete('campaignId');
+                            return next;
+                          });
+                        }}
+                        options={[
+                          { value: 'ALL', label: 'All forms' },
+                          ...(campaignsForFilter ?? []).map((c) => ({ value: c.id, label: c.name })),
+                        ]}
+                        wrapperClassName="w-full"
+                        placeholder="All forms"
+                        searchPlaceholder="Search forms..."
+                      />
+                    </div>
+                  ) : null}
+                </>
+              }
               mobileLeading={
                 liveEvents != null && liveEvents.length > 0 ? (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
@@ -920,6 +1036,15 @@ function OrdersListPageImpl({
                     Generate report
                   </Button>
                 )}
+                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    startTime={filters?.startTime ?? ''}
+                    endTime={filters?.endTime ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false}
+                  />
+                </div>
               </>
             }
             sheet={({ closeSheet }) => (
@@ -962,19 +1087,19 @@ function OrdersListPageImpl({
                     Generate report
                   </Button>
                 )}
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={filters?.startDate ?? ''}
+                    endDate={filters?.endDate ?? ''}
+                    startTime={filters?.startTime ?? ''}
+                    endTime={filters?.endTime ?? ''}
+                    periodAllTime={filters?.periodAllTime ?? false}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
               </>
             )}
             />
-            <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-              <DateFilterBar
-                startDate={filters?.startDate ?? ''}
-                endDate={filters?.endDate ?? ''}
-                startTime={filters?.startTime ?? ''}
-                endTime={filters?.endTime ?? ''}
-                periodAllTime={filters?.periodAllTime ?? false}
-              />
-            </div>
-          </>
         }
       />
 
@@ -1016,7 +1141,7 @@ function OrdersListPageImpl({
                   Today&apos;s duty: {myWorkload.todayClosesCount ?? 0} / {myWorkload.capacity}
                   <span className="text-app-fg-muted/80"> (Lagos)</span>
                 </p>
-                <p className="text-[11px] text-app-fg-muted mt-0.5">Pipeline backlog: {myWorkload.pendingCount}</p>
+                <p className="text-mini text-app-fg-muted mt-0.5">Pipeline backlog: {myWorkload.pendingCount}</p>
               </div>
             </div>
             {(() => {
@@ -1216,9 +1341,10 @@ function OrdersListPageImpl({
         defaultColumns={showCSCloserColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
       />
 
-      <div className="card p-0 overflow-hidden">
+      <div className="list-panel">
         <ToolbarFiltersCollapsible
           className="!border-0"
+          hideMobileSheet
           badgeCount={ordersListToolbarFilterBadge}
           sheetSubtitle={<span>Status and closer apply immediately</span>}
           searchRow={
@@ -1351,122 +1477,7 @@ function OrdersListPageImpl({
             </div>
           }
           desktopInlineFilters={scheduleFilterFields}
-          sheetFilterBody={
-            <>
-              {scheduleFilterFields ? (
-                <div className="space-y-1.5 pb-2 border-b border-app-border mb-3">{scheduleFilterFields}</div>
-              ) : null}
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                <FormSelect
-                  value={selectedStatus}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSelectedStatus(v);
-                    setSelectedIds(new Set());
-                    setBulkResult(null);
-                    setSearchParams((p) => {
-                      const next = new URLSearchParams(p);
-                      next.set('page', '1');
-                      if (v === FROM_CART_STATUS_VALUE) {
-                        next.delete('status');
-                        next.set('fromCart', '1');
-                      } else {
-                        next.delete('fromCart');
-                        if (v === 'ALL') next.delete('status');
-                        else next.set('status', v);
-                      }
-                      return next;
-                    });
-                  }}
-                  options={statusOptions}
-                  wrapperClassName="w-full"
-                />
-              </div>
-              {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Closer</span>
-                  {deferredLoading && !(csClosersForFilter?.length) ? (
-                    <div className="h-9 w-full rounded-md bg-app-hover animate-pulse" aria-hidden />
-                  ) : (
-                    <SearchableSelect
-                      id="orders-filter-closer-sheet"
-                      value={searchParams.get('csCloserId') || 'ALL'}
-                      onChange={(v) => {
-                        setSelectedIds(new Set());
-                        setBulkResult(null);
-                        setSearchParams((p) => {
-                          const next = new URLSearchParams(p);
-                          next.set('page', '1');
-                          if (v && v !== 'ALL') next.set('csCloserId', v);
-                          else next.delete('csCloserId');
-                          return next;
-                        });
-                      }}
-                      options={csCloserOptions}
-                      wrapperClassName="w-full"
-                      placeholder="All closers"
-                      searchPlaceholder="Search closers..."
-                    />
-                  )}
-                </div>
-              ) : null}
-              {(productsForFilter?.length ?? 0) > 0 ? (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                  <SearchableSelect
-                    id="orders-filter-product-sheet"
-                    value={productFilter || 'ALL'}
-                    onChange={(v) => {
-                      setSelectedIds(new Set());
-                      setBulkResult(null);
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('productId', v);
-                        else next.delete('productId');
-                        return next;
-                      });
-                    }}
-                    options={[
-                      { value: 'ALL', label: 'All products' },
-                      ...(productsForFilter ?? []).map((p) => ({ value: p.id, label: p.name })),
-                    ]}
-                    wrapperClassName="w-full"
-                    placeholder="All products"
-                    searchPlaceholder="Search products..."
-                  />
-                </div>
-              ) : null}
-              {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Form</span>
-                  <SearchableSelect
-                    id="orders-filter-form-sheet"
-                    value={campaignFilter || 'ALL'}
-                    onChange={(v) => {
-                      setSelectedIds(new Set());
-                      setBulkResult(null);
-                      setSearchParams((p) => {
-                        const next = new URLSearchParams(p);
-                        next.set('page', '1');
-                        if (v && v !== 'ALL') next.set('campaignId', v);
-                        else next.delete('campaignId');
-                        return next;
-                      });
-                    }}
-                    options={[
-                      { value: 'ALL', label: 'All forms' },
-                      ...(campaignsForFilter ?? []).map((c) => ({ value: c.id, label: c.name })),
-                    ]}
-                    wrapperClassName="w-full"
-                    placeholder="All forms"
-                    searchPlaceholder="Search forms..."
-                  />
-                </div>
-              ) : null}
-            </>
-          }
+          sheetFilterBody={null}
         />
       </div>
 
@@ -1666,7 +1677,7 @@ function OrdersListPageImpl({
         )
       ) : (
       <TableLoadingOverlay show={isLoaderRefetchBusy}>
-        <div className="card p-0">
+        <div className="list-panel">
           <CompactTable<Order>
             withCard={false}
             columns={ordersListColumns}

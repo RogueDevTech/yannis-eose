@@ -192,7 +192,7 @@ export function TplLayout({
                   />
                 </svg>
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold rounded-full bg-danger-500 text-white">
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center px-1 text-micro font-bold rounded-full bg-danger-500 text-white">
                     {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}

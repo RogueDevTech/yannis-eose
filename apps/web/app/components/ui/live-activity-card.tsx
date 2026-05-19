@@ -101,24 +101,24 @@ export function LiveActivityCard({
           <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
             {item.customerName}
           </p>
-          <NairaPrice amount={item.totalAmount} className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums" />
+          <NairaPrice amount={item.totalAmount} className="text-mini font-bold text-app-fg shrink-0 tabular-nums" />
         </div>
 
         {/* Row 2: product pill + status pill */}
         <div className="flex items-center gap-1.5 mb-1 min-w-0">
-          <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-hover text-app-fg-muted">
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-micro font-medium bg-app-hover text-app-fg-muted">
             <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
             </svg>
             <span className="truncate min-w-0">{item.productName ?? '—'}</span>
           </span>
-          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 ${cfg.badgeColor}`}>
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide shrink-0 ${cfg.badgeColor}`}>
             {cfg.label}
           </span>
         </div>
 
         {/* Row 3: timestamp */}
-        <div className="text-[10px] font-medium text-app-fg-muted truncate">
+        <div className="text-micro font-medium text-app-fg-muted truncate">
           {new Date(item.updatedAt).toLocaleString('en-NG', {
             month: 'short', day: 'numeric',
             hour: '2-digit', minute: '2-digit',
@@ -128,7 +128,7 @@ export function LiveActivityCard({
         {/* NEW / UPDATED flash */}
         {(isNew || isUpdated) && (
           <div className="mt-1.5 flex items-center gap-1">
-            <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-[9px] font-bold bg-success-500 text-white">
+            <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-2xs font-bold bg-success-500 text-white">
               {isNew ? 'JUST NOW' : 'UPDATED'}
             </span>
           </div>
@@ -179,7 +179,7 @@ export function LiveActivityDetailModal({ item, onClose }: { item: LiveActivityI
                   <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${cfg.dotColor}`} />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted">Current status</p>
+                  <p className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted">Current status</p>
                   <p className={`text-sm font-bold leading-tight ${cfg.textColor}`}>{cfg.label}</p>
                 </div>
               </div>
@@ -292,7 +292,7 @@ export function DetailRow({ label, value, icon }: { label: string; value: React.
     <div className="flex items-center gap-3 px-4 py-3">
       {icon ? <span className="shrink-0 text-app-fg-muted">{icon}</span> : <span className="shrink-0 w-4" aria-hidden />}
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted">{label}</p>
+        <p className="text-micro uppercase tracking-wider font-medium text-app-fg-muted">{label}</p>
         <div className="text-sm font-medium text-app-fg truncate mt-0.5">{value}</div>
       </div>
     </div>

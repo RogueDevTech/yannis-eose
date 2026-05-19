@@ -332,7 +332,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           <>
             <span className="font-medium text-app-fg">{p.name}</span>
             {isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id) ? (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">Saving…</span>
+              <span className="ml-2 text-micro uppercase tracking-wide text-app-fg-muted">Saving…</span>
             ) : null}
           </>
         ),
@@ -389,7 +389,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           <>
             <span className="font-medium text-app-fg">{l.name}</span>
             {isOptimisticId(l.id) ? (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">Saving…</span>
+              <span className="ml-2 text-micro uppercase tracking-wide text-app-fg-muted">Saving…</span>
             ) : null}
           </>
         ),

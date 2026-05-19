@@ -779,6 +779,69 @@ export function MarketingAdSpendPage({
             sheetTitle="Ads Expense tools"
             sheetSubtitle={<span>Date range and new expense entry</span>}
             triggerAriaLabel="Date, add expense, and more"
+            filtersBadgeCount={adSpendToolbarFilterBadge}
+            filters={
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">View</span>
+                  <ExpenseViewToggle value={expenseListView} onChange={setExpenseListView} fullWidth />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                  <SearchableSelect
+                    id="marketing-adspend-product-filter-sheet"
+                    value={selectedProductId}
+                    onChange={handleAdSpendProductChange}
+                    options={[
+                      { value: 'ALL', label: 'All products' },
+                      ...products.map((p: Product) => ({ value: p.id, label: p.name })),
+                    ]}
+                    wrapperClassName="w-full"
+                    searchPlaceholder="Search products..."
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Campaign</span>
+                  {picklistsLoading ? (
+                    <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
+                  ) : (
+                    <SearchableSelect
+                      id="marketing-adspend-campaign-filter-sheet"
+                      value={selectedCampaignId}
+                      onChange={handleAdSpendCampaignChange}
+                      options={[
+                        { value: 'ALL', label: 'All campaigns' },
+                        ...campaigns
+                          .filter((c: Campaign) => c.status === 'ACTIVE')
+                          .map((c: Campaign) => ({ value: c.id, label: c.name })),
+                      ]}
+                      wrapperClassName="w-full"
+                      searchPlaceholder="Search campaigns..."
+                    />
+                  )}
+                </div>
+                {viewMode !== 'media_buyer' && (picklistsLoading || mediaBuyersForFilter.length > 0) ? (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                    {picklistsLoading ? (
+                      <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
+                    ) : (
+                      <SearchableSelect
+                        id="marketing-adspend-media-buyer-filter-sheet"
+                        value={selectedMediaBuyerId}
+                        onChange={handleAdSpendMediaBuyerChange}
+                        options={[
+                          { value: 'ALL', label: 'All media buyers' },
+                          ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                        ]}
+                        wrapperClassName="w-full"
+                        searchPlaceholder="Search media buyers..."
+                      />
+                    )}
+                  </div>
+                ) : null}
+              </>
+            }
             desktop={
               <>
                 <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -1150,7 +1213,7 @@ export function MarketingAdSpendPage({
 
       {/* Phase 17: Daily groups accordion (default) + per-line table —
           chosen via the segmented view-mode control. Same filters apply. */}
-      <div className="card p-0">
+      <div className="list-panel">
         <div className="border-b border-app-border px-4 py-3">
           <Tabs
             value={selectedStatus}
@@ -1174,6 +1237,7 @@ export function MarketingAdSpendPage({
           />
         </div>
         <ToolbarFiltersCollapsible
+          hideMobileSheet
           badgeCount={adSpendToolbarFilterBadge}
           sheetSubtitle={<span>Product, campaign, and buyer filters apply immediately</span>}
           searchRow={
@@ -1243,68 +1307,7 @@ export function MarketingAdSpendPage({
               <ExpenseViewToggle value={expenseListView} onChange={setExpenseListView} />
             </>
           }
-          sheetFilterBody={
-            <>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">View</span>
-                <ExpenseViewToggle value={expenseListView} onChange={setExpenseListView} fullWidth />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                <SearchableSelect
-                  id="marketing-adspend-product-filter-sheet"
-                  value={selectedProductId}
-                  onChange={handleAdSpendProductChange}
-                  options={[
-                    { value: 'ALL', label: 'All products' },
-                    ...products.map((p: Product) => ({ value: p.id, label: p.name })),
-                  ]}
-                  wrapperClassName="w-full"
-                  searchPlaceholder="Search products..."
-                />
-              </div>
-              <div className="space-y-1.5">
-                <span className="text-xs font-medium text-app-fg-muted">Campaign</span>
-                {picklistsLoading ? (
-                  <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
-                ) : (
-                  <SearchableSelect
-                    id="marketing-adspend-campaign-filter-sheet"
-                    value={selectedCampaignId}
-                    onChange={handleAdSpendCampaignChange}
-                    options={[
-                      { value: 'ALL', label: 'All campaigns' },
-                      ...campaigns
-                        .filter((c: Campaign) => c.status === 'ACTIVE')
-                        .map((c: Campaign) => ({ value: c.id, label: c.name })),
-                    ]}
-                    wrapperClassName="w-full"
-                    searchPlaceholder="Search campaigns..."
-                  />
-                )}
-              </div>
-              {viewMode !== 'media_buyer' && (picklistsLoading || mediaBuyersForFilter.length > 0) ? (
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
-                  {picklistsLoading ? (
-                    <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
-                  ) : (
-                    <SearchableSelect
-                      id="marketing-adspend-media-buyer-filter-sheet"
-                      value={selectedMediaBuyerId}
-                      onChange={handleAdSpendMediaBuyerChange}
-                      options={[
-                        { value: 'ALL', label: 'All media buyers' },
-                        ...mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
-                      ]}
-                      wrapperClassName="w-full"
-                      searchPlaceholder="Search media buyers..."
-                    />
-                  )}
-                </div>
-              ) : null}
-            </>
-          }
+          sheetFilterBody={null}
         />
         <TableLoadingOverlay show={isFilterLoading}>
           {expenseListView === 'daily' ? (

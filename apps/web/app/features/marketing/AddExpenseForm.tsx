@@ -386,7 +386,7 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
       {/* Grand totals across all forms. */}
       <div className="rounded-md bg-app-hover px-3 py-2 grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4">
         <div className="flex flex-col">
-          <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
+          <span className="text-mini uppercase tracking-wide text-app-fg-muted">
             Total spend ({grandTotalLines} ad{grandTotalLines === 1 ? '' : 's'} · {forms.length} form{forms.length === 1 ? '' : 's'})
           </span>
           <span className="text-base font-semibold tabular-nums">
@@ -394,13 +394,13 @@ export function AddExpenseForm({ picklistsPromise }: AddExpenseFormProps) {
           </span>
         </div>
         <div className="flex flex-col">
-          <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
+          <span className="text-mini uppercase tracking-wide text-app-fg-muted">
             Total orders (split)
           </span>
           <span className="text-base font-semibold tabular-nums">{grandTotalSplit}</span>
         </div>
         <div className="flex flex-col">
-          <span className="text-[11px] uppercase tracking-wide text-app-fg-muted">
+          <span className="text-mini uppercase tracking-wide text-app-fg-muted">
             Blended CPA
           </span>
           <span className="text-base font-semibold tabular-nums">
@@ -634,28 +634,28 @@ function FormSectionCard({
         <table className="min-w-full border-separate border-spacing-y-1 px-3 sm:px-0">
           <thead>
             <tr className="text-left">
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted w-10">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted w-10">
                 #
               </th>
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted min-w-[200px]">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[200px]">
                 Product*
               </th>
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted min-w-[120px]">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[120px]">
                 Amount (₦)*
               </th>
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px]">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px]">
                 Orders*
               </th>
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted min-w-[130px]">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[130px]">
                 Platform*
               </th>
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted min-w-[180px]">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[180px]">
                 Ad URL*
               </th>
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted min-w-[160px]">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[160px]">
                 Screenshot
               </th>
-              <th className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px] text-right">
+              <th className="px-1.5 pb-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted min-w-[90px] text-right">
                 CPA
               </th>
               <th className="px-1.5 pb-1 w-10" aria-label="Remove" />
