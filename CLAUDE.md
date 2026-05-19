@@ -323,6 +323,67 @@ Dashboard split: `/admin` = lightweight quickOverview. `/admin/ceo` = full Execu
 
 ---
 
+## Performance Optimization (Playbook)
+
+The dominant cost in this stack is **round-trip latency**, not query speed. Aiven Postgres + GCP VM (`europe-west2`) + Nigerian operators = ~50ms user→VM RTT and ~5–15ms VM→Aiven per query. A page that fires N sequential DB calls feels slow even when every query is fast.
+
+**Optimization order is non-negotiable: measure → collapse round-trips → cache → optimize queries.** Never skip steps. Profiling first is what separates "the app feels faster" from "we shipped complexity for no measurable win."
+
+### Measure first (always)
+
+Before any "make it faster" PR:
+1. Chrome DevTools → Network tab → sort by Time. The slowest call is the bottleneck.
+2. Performance tab → record a load. Long tasks: network (red), scripting (yellow), rendering (purple).
+3. Lighthouse score on the complained-about page. Capture the number before/after.
+
+Paste the slow URL + slowest request into the PR description. No "feels faster" — only numbers.
+
+### Layer 1 — Edge / CDN (do this first, cheapest win)
+
+- **Cloudflare proxy (orange cloud) is REQUIRED for `office.hqyannis.com` and `api-office.hqyannis.com`** in prod. Gives Brotli, HTTP/3, and a Lagos PoP for the TLS terminator. Cloudflare SSL mode must be **Full (strict)**.
+- Static asset paths (`/assets/*`, `/build/*`) must return `cf-cache-status: HIT` after first load. Add a Page Rule if not.
+- Consider **Argo Smart Routing** ($5/mo) for Africa→EU traffic — typically 20–30% API latency win.
+- Edge worker (`form.hqyannis.com`) is already on Cloudflare — keep it there.
+
+### Layer 2 — Round-trip collapse (the real lever)
+
+- **Page bundles are mandatory** for admin pages with >3 data needs. ONE tRPC call returning all sections beats N parallel `apiRequest()` calls. Never regress a PageBundle back to N calls — this is a documented "Critical Do NOT".
+- **`defer({ shell, pageData })` for non-critical sections** — stream skeletons immediately, fill in async. Every admin route should use it.
+- **`clientLoader` + `CachedAwait` for read-mostly lists** — skips the server roundtrip entirely on cache hit (memory: `feedback_client_loader_pattern.md`).
+- **Batch DB lookups** inside a single API request — use `IN (...)` queries or dataloader-style batching, never N+1 loops.
+
+### Layer 3 — Caching (verify these are healthy)
+
+- **Redis read-through cache** via `CacheService.getOrSet()`. Target hit rate >80% on read paths. Every wrapper needs a matching `invalidateXxxCache()`.
+- **`READ_THROUGH_CACHE_ENABLED=true`** in every deployable env (never `false`).
+- **Materialized views** for CEO Overview / P&L. The 15-min refresh cron MUST be running — verify with `SELECT * FROM cron.job;`. Dead cron = MVs go stale and `/admin/ceo` falls back to live aggregates → multi-second loads.
+- **Session bundle cookie** — short-TTL signed snapshot avoids `/auth/me` round-trip on every page.
+
+### Layer 4 — Pool & query (last resort)
+
+- Postgres pool: `max: 30`, `idle_timeout: 300s`, `max_lifetime: 1800s`, eager warmup. Do not regress.
+- **PgBouncer** in front of Aiven (Phase 16) — pooled connection reuse cuts handshake cost.
+- Slow query? Check `pg_stat_statements`. Add an index only if the query is hot AND a plan inspection shows a seq scan on a large table.
+- Never add an index "just in case" — every index slows writes and bloats the table.
+
+### Roadmap reference
+
+- **Phase 22 (Round-Trip Latency Reduction)** — already queued for exactly this complaint. Build order: 22.3 → 22.1 → 22.2 → 22.4 → 22.5 → 22.6.
+- **Phase 16 (Performance & Scalability)** — Redis layer audit, PgBouncer, async push via QStash, mat-view audit, k6 load test. Target: 2000+ req/min. Build order: 16.2 → 16.1 → 16.4 → 16.3 → 16.5.
+
+### Critical Do NOTs (performance)
+
+- Never optimize without a profile + number to beat
+- Never revert a PageBundle to N parallel `apiRequest()` calls
+- Never disable `READ_THROUGH_CACHE_ENABLED` in a deployable env
+- Never add a cache wrapper without an invalidation helper
+- Never `await` notification fan-out, push send, or analytics writes on a hot path — use `enqueue*` (fire-and-forget into QStash/Redis)
+- Never block paint on optional data — defer everything that isn't critical-path
+- Never add an index without confirming the query plan needs it
+- Never trust "feels faster" — ship with before/after Lighthouse numbers
+
+---
+
 ## When In Doubt
 
 1. Check `prd.md` for the requirement
