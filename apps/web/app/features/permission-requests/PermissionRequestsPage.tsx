@@ -179,7 +179,7 @@ export function PermissionRequestsPage({
           value: t.value,
           label: t.label,
           badge: (
-            <span className="tabular-nums rounded-full bg-app-hover px-1.5 py-px text-[0.6875rem] font-semibold leading-tight text-app-fg-muted">
+            <span className="tabular-nums rounded-full bg-app-hover px-1.5 py-px text-micro font-semibold leading-tight text-app-fg-muted">
               {n}
             </span>
           ),
@@ -291,7 +291,7 @@ export function PermissionRequestsPage({
 
       <Tabs value={activeStatus} onChange={handleStatusChange} tabs={statusTabItems} />
 
-      <div className="card p-0 flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] overflow-y-auto overscroll-contain min-h-0">
+      <div className="list-panel flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] overflow-y-auto overscroll-contain min-h-0">
         <CompactTable<PermissionRequest>
           withCard={false}
           className="min-h-0 min-w-0"

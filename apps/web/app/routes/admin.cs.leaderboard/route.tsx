@@ -73,7 +73,6 @@ export default function CSLeaderboardRoute() {
     <CachedAwait resolve={pageData} fallback={
         <CSLeaderboardLoadingShell
           filters={csLeaderboardShell.filters}
-          leaderboardPeriod={csLeaderboardShell.leaderboardPeriod}
         />
       }
         loaderShell={{ csLeaderboardShell }}

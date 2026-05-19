@@ -115,7 +115,7 @@ export const hrRouter = router({
           });
         }
       }
-      return getHrService().listPayouts(input);
+      return getHrService().listPayouts(input, actor);
     }),
 
   payoutSummary: permissionProcedure('hr.read')

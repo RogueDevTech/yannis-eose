@@ -4,9 +4,11 @@ import { useToast } from '~/components/ui/toast';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, Area, XAxis, YAxis, CartesianGrid, Line, ComposedChart, BarChart, Bar } from 'recharts';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
+import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import { Spinner } from '~/components/ui/spinner';
 import { OrdersChartViewShellSkeleton } from '~/components/ui/deferred-skeletons';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -104,12 +106,12 @@ export function CEODashboardPage({
         header: 'Branch',
         render: (branch) => (
           <div className="flex items-center gap-2">
-            <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-primary-100 text-[10px] font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
+            <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-primary-100 text-micro font-bold text-primary-700 dark:bg-primary-900/40 dark:text-primary-300">
               {branch.branchCode.slice(0, 2)}
             </span>
             <div>
               <p className="font-medium text-app-fg">{branch.branchName}</p>
-              <p className="text-[10px] text-app-fg-muted">{branch.branchCode}</p>
+              <p className="text-micro text-app-fg-muted">{branch.branchCode}</p>
             </div>
           </div>
         ),
@@ -244,10 +246,10 @@ export function CEODashboardPage({
     costBreakdown.fulfillmentCost +
     costBreakdown.operationalLoss;
 
-  // CEO-requested widgets (2026-05-18)
+  // CEO-requested widgets (2026-05-18). Deliveries-per-Brand and
+  // Stock-Available-per-Product were removed from this view on 2026-05-19;
+  // backend still returns them but the dashboard no longer renders them.
   const revenueByPeriod = data?.revenueByPeriod ?? { today: 0, thisWeek: 0, thisMonth: 0 };
-  const deliveriesByProduct = data?.deliveriesByProduct ?? [];
-  const stockPerProduct = data?.stockPerProduct ?? [];
   const activeStaffCount = data?.activeStaffCount ?? 0;
 
   return (
@@ -255,46 +257,100 @@ export function CEODashboardPage({
       {/* Page header: title and subtitle first, then filters/actions below */}
       <PageHeader
         title="Executive Overview"
+        mobileInlineActions
         description="Real-time business intelligence across all departments."
         actions={
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowChartView((v) => !v)}
-              className="btn-secondary btn-sm"
-            >
-              {showChartView ? 'View as data' : 'View data in chart'}
-            </button>
-            {/* Refresh — recomputes the finance materialized views (revenue, profit, ad spend,
-                commission rollups). The page never auto-refreshes. */}
-            <refreshFetcher.Form method="post" className="inline-flex">
-              <input type="hidden" name="intent" value="refreshExecutiveData" />
-              <button
-                type="submit"
-                disabled={isRefreshing}
-                className="btn-secondary btn-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
-                title="Recompute revenue, profit, ad spend, and commission rollups from live data"
-              >
-                {isRefreshing ? (
-                  <>
-                    <Spinner size="sm" />
-                    Refreshing…
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-                    </svg>
-                    Refresh data
-                  </>
+          <PageHeaderMobileTools
+            sheetTitle="Executive overview tools"
+            sheetSubtitle={<span>Date range, chart toggle &amp; refresh</span>}
+            triggerAriaLabel="Executive overview toolbar"
+            desktop={
+              <>
+                <button
+                  type="button"
+                  onClick={() => setShowChartView((v) => !v)}
+                  className="btn-secondary btn-sm"
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </button>
+                {/* Refresh — recomputes the finance materialized views (revenue, profit, ad spend,
+                    commission rollups). The page never auto-refreshes. */}
+                <refreshFetcher.Form method="post" className="inline-flex">
+                  <input type="hidden" name="intent" value="refreshExecutiveData" />
+                  <button
+                    type="submit"
+                    disabled={isRefreshing}
+                    className="btn-secondary btn-sm inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+                    title="Recompute revenue, profit, ad spend, and commission rollups from live data"
+                  >
+                    {isRefreshing ? (
+                      <>
+                        <Spinner size="sm" />
+                        Refreshing…
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                        </svg>
+                        Refresh data
+                      </>
+                    )}
+                  </button>
+                </refreshFetcher.Form>
+                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                  <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} />
+                </div>
+                {showBackToDashboard && (
+                  <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
                 )}
-              </button>
-            </refreshFetcher.Form>
-            <DateFilterBar startDate={filters.startDate} endDate={filters.endDate} periodAllTime={filters.periodAllTime ?? false} />
-            {showBackToDashboard && (
-              <Link to="/admin" className="btn-secondary btn-sm">Back to Dashboard</Link>
+              </>
+            }
+            sheet={({ closeSheet }) => (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    closeSheet();
+                    setShowChartView((v) => !v);
+                  }}
+                  className="btn-secondary btn-sm w-full justify-center"
+                >
+                  {showChartView ? 'View as data' : 'View data in chart'}
+                </button>
+                <refreshFetcher.Form method="post" className="block">
+                  <input type="hidden" name="intent" value="refreshExecutiveData" />
+                  <button
+                    type="submit"
+                    disabled={isRefreshing}
+                    className="btn-secondary btn-sm w-full justify-center inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isRefreshing ? (
+                      <>
+                        <Spinner size="sm" />
+                        Refreshing…
+                      </>
+                    ) : (
+                      'Refresh data'
+                    )}
+                  </button>
+                </refreshFetcher.Form>
+                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                  <DateFilterBar
+                    startDate={filters.startDate}
+                    endDate={filters.endDate}
+                    periodAllTime={filters.periodAllTime ?? false}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                {showBackToDashboard && (
+                  <Link to="/admin" className="btn-secondary btn-sm w-full justify-center">
+                    Back to Dashboard
+                  </Link>
+                )}
+              </div>
             )}
-          </div>
+          />
         }
       />
 
@@ -439,138 +495,71 @@ export function CEODashboardPage({
           </div>
           <div className="flex flex-wrap gap-3">
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
-              <p className="text-[11px] font-medium text-app-fg-muted">Revenue</p>
+              <p className="text-mini font-medium text-app-fg-muted">Revenue</p>
               <p className="text-base font-bold text-app-fg tabular-nums">{fmt(revenue)}</p>
             </div>
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
-              <p className="text-[11px] font-medium text-app-fg-muted">Ad Spend</p>
+              <p className="text-mini font-medium text-app-fg-muted">Ad Spend</p>
               <p className="text-base font-bold text-danger-600 dark:text-danger-400 tabular-nums">{fmt(marketingSafe.totalSpend)}</p>
             </div>
             <div className="rounded-lg bg-app-elevated px-4 py-2.5 text-center min-w-[5.5rem]">
-              <p className="text-[11px] font-medium text-app-fg-muted">Profit</p>
+              <p className="text-mini font-medium text-app-fg-muted">Profit</p>
               <p className={`text-base font-bold tabular-nums ${trueProfit >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>{fmt(trueProfit)}</p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── Revenue Generated: Day / Week / Month ─────────── */}
+      {/* ── Revenue Generated: Day / Week / Month — stacked column ── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Revenue Generated
         </h2>
-        <OverviewStatStrip
-          items={[
-            { label: 'Today', value: fmt(revenueByPeriod.today), valueClassName: 'text-app-fg tabular-nums' },
-            { label: 'This Week', value: fmt(revenueByPeriod.thisWeek), valueClassName: 'text-app-fg tabular-nums' },
-            { label: 'This Month', value: fmt(revenueByPeriod.thisMonth), valueClassName: 'text-app-fg tabular-nums' },
-            { label: 'Period Total', value: fmt(revenue), valueClassName: 'text-brand-600 dark:text-brand-400 tabular-nums' },
-          ]}
-        />
+        <div className="card px-4 py-2">
+          <StatRowGroup divided>
+            <StatRow label="Today" value={fmt(revenueByPeriod.today)} />
+            <StatRow label="This Week" value={fmt(revenueByPeriod.thisWeek)} />
+            <StatRow label="This Month" value={fmt(revenueByPeriod.thisMonth)} />
+            <StatRow label="Period Total" value={fmt(revenue)} variant="highlight" />
+          </StatRowGroup>
+        </div>
       </div>
 
-      {/* ── Key Metrics Strip: Ad Spend, Orders, CPA, Delivery Rate, Active Staff ── */}
+      {/* ── Key Metrics: stacked column ── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
           Key Metrics
         </h2>
-        <OverviewStatStrip
-          items={[
-            { label: 'Ad Spend', value: fmt(marketingSafe.totalSpend), valueClassName: 'text-danger-600 dark:text-danger-400 tabular-nums' },
-            { label: 'Order Count', value: orderPipeline.total.toLocaleString(), valueClassName: 'text-app-fg tabular-nums' },
-            {
-              label: 'CPA',
-              value: fmt(marketingSafe.cpa),
-              valueClassName: marketingSafe.cpa > 0 && marketingSafe.cpa < 5000
-                ? 'text-success-600 dark:text-success-400 tabular-nums'
-                : marketingSafe.cpa > 10000
-                  ? 'text-danger-600 dark:text-danger-400 tabular-nums'
-                  : 'text-app-fg tabular-nums',
-            },
-            {
-              label: 'Delivery Rate',
-              value: pct(marketingSafe.deliveryRate),
-              valueClassName: marketingSafe.deliveryRate >= 70
-                ? 'text-success-600 dark:text-success-400 tabular-nums'
-                : marketingSafe.deliveryRate >= 50
-                  ? 'text-warning-600 dark:text-warning-400 tabular-nums'
-                  : 'text-danger-600 dark:text-danger-400 tabular-nums',
-            },
-            { label: 'Active Staff', value: activeStaffCount.toLocaleString(), valueClassName: 'text-app-fg tabular-nums' },
-          ]}
-        />
-      </div>
-
-      {/* ── Deliveries per Brand: Day / Week / Month ──────── */}
-      {deliveriesByProduct.length > 0 && (
-      <div className="card p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h2 className="text-sm font-semibold text-app-fg">Deliveries per Brand</h2>
-          <p className="text-xs text-app-fg-muted mt-0.5">Number of deliveries today, this week, and this month by product</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-app-border bg-app-hover/50">
-                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Product</th>
-                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Brand</th>
-                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">Today</th>
-                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">This Week</th>
-                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">This Month</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deliveriesByProduct.map((p) => (
-                <tr key={p.productId} className="border-b border-app-border last:border-b-0 hover:bg-app-hover/30">
-                  <td className="px-4 py-2 font-medium text-app-fg">{p.productName}</td>
-                  <td className="px-4 py-2 text-app-fg-muted">{p.brandName ?? '—'}</td>
-                  <td className="px-4 py-2 text-right tabular-nums font-medium text-app-fg">{p.today}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-app-fg">{p.thisWeek}</td>
-                  <td className="px-4 py-2 text-right tabular-nums text-app-fg">{p.thisMonth}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="card px-4 py-2">
+          <StatRowGroup divided>
+            <StatRow label="Ad Spend" value={fmt(marketingSafe.totalSpend)} variant="deduction" />
+            <StatRow label="Order Count" value={orderPipeline.total.toLocaleString()} />
+            <StatRow
+              label="CPA"
+              value={fmt(marketingSafe.cpa)}
+              variant={
+                marketingSafe.cpa > 0 && marketingSafe.cpa < 5000
+                  ? 'highlight'
+                  : marketingSafe.cpa > 10000
+                    ? 'deduction'
+                    : 'default'
+              }
+            />
+            <StatRow
+              label="Delivery Rate"
+              value={pct(marketingSafe.deliveryRate)}
+              variant={
+                marketingSafe.deliveryRate >= 70
+                  ? 'highlight'
+                  : marketingSafe.deliveryRate >= 50
+                    ? 'default'
+                    : 'deduction'
+              }
+            />
+            <StatRow label="Active Staff" value={activeStaffCount.toLocaleString()} />
+          </StatRowGroup>
         </div>
       </div>
-      )}
-
-      {/* ── Stock Available per Product ───────────────────── */}
-      {stockPerProduct.length > 0 && (
-      <div className="card p-0">
-        <div className="px-4 py-3 border-b border-app-border">
-          <h2 className="text-sm font-semibold text-app-fg">Stock Available per Product</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-app-border bg-app-hover/50">
-                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Product</th>
-                <th className="text-left px-4 py-2 font-medium text-app-fg-muted">Brand</th>
-                <th className="text-right px-4 py-2 font-medium text-app-fg-muted">Available</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stockPerProduct.map((p) => (
-                <tr key={p.productId} className="border-b border-app-border last:border-b-0 hover:bg-app-hover/30">
-                  <td className="px-4 py-2 font-medium text-app-fg">{p.productName}</td>
-                  <td className="px-4 py-2 text-app-fg-muted">{p.brandName ?? '—'}</td>
-                  <td className={`px-4 py-2 text-right tabular-nums font-medium ${
-                    p.available <= 0
-                      ? 'text-danger-600 dark:text-danger-400'
-                      : p.available < 50
-                        ? 'text-warning-600 dark:text-warning-400'
-                        : 'text-success-600 dark:text-success-400'
-                  }`}>
-                    {p.available.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      )}
 
       {/* ── Revenue & Profit (existing detail) ────────────── */}
       <div>

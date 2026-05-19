@@ -236,6 +236,48 @@ export const dashboardRouter = router({
     }),
 
   /**
+   * CEO Executive Overview — single-call bundle (overview + branch breakdown).
+   *
+   * Collapses what used to be two parallel HTTP calls (ceoOverview +
+   * ceoBranchBreakdown) into one round-trip — saves ~50-60ms Nigeria→EU network
+   * latency per cold load. The two aggregations still run in parallel
+   * server-side. Cached 60s under the `cache:ceo:` prefix so
+   * `refreshExecutiveData`'s `delPattern('cache:ceo:*')` invalidates it too.
+   */
+  ceoOverviewBundle: permissionProcedure('ceo.overview')
+    .input(
+      z.object({
+        startDate: z.string().date().optional(),
+        endDate: z.string().date().optional(),
+      }).optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      if (!ordersService || !financeService || !marketingService || !hrService || !inventoryService) {
+        throw new Error('Dashboard services not initialized');
+      }
+
+      const startDate = input?.startDate;
+      const endDate = input?.endDate;
+      const branchId = ctx.currentBranchId;
+      const ordersSvc = ordersService;
+
+      const fetchBundle = async () => {
+        const [overview, branchBreakdown] = await Promise.all([
+          _ceoOverviewFetch({ startDate, endDate, branchId }),
+          ordersSvc.getBranchBreakdown(startDate, endDate),
+        ]);
+        return { overview, branchBreakdown };
+      };
+
+      if (cacheService) {
+        const cacheKey = `cache:ceo:bundle:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate })}`;
+        return cacheService.getOrSet(cacheKey, 60, fetchBundle);
+      }
+
+      return fetchBundle();
+    }),
+
+  /**
    * User-triggered refresh of the finance materialized views that back the Executive
    * Overview. The page never auto-refreshes — when the CEO/admin wants fresher numbers
    * they click "Refresh data" and we run REFRESH MATERIALIZED VIEW CONCURRENTLY across
@@ -325,21 +367,6 @@ export const dashboardRouter = router({
         (a, b) => a.date.localeCompare(b.date),
       );
       return merged;
-    }),
-
-  /**
-   * CEO Branch Breakdown — per-branch order counts and revenue for SuperAdmin cross-branch view.
-   */
-  ceoBranchBreakdown: permissionProcedure('ceo.overview')
-    .input(
-      z.object({
-        startDate: z.string().date().optional(),
-        endDate: z.string().date().optional(),
-      }).optional(),
-    )
-    .query(async ({ input }) => {
-      if (!ordersService) throw new Error('Dashboard services not initialized');
-      return ordersService.getBranchBreakdown(input?.startDate, input?.endDate);
     }),
 
   /**

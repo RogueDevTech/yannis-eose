@@ -517,6 +517,69 @@ export function TransfersPage({
   const saveTransferSubmitLabel =
     transfersPageVariant === 'logistics' ? 'Submit transfer request' : 'Save transfer';
 
+  // Filter controls — rendered inline on desktop and inside the mobile
+  // PageHeaderMobileTools kebab on small screens (CEO 2026-05-19: filters
+  // grouped into the single action icon, not a separate mobile control).
+  const transferFiltersBody = (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Tabs value={uiStatusFilter} onChange={handleStatusTabChange} tabs={statusTabItems} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <FormSelect
+          id="transfer-filter-from"
+          label="From location"
+          value={fromLocationFilter}
+          onChange={(e) => updateFilter('fromLocationId', e.target.value)}
+          options={[
+            { value: '', label: 'All locations' },
+            ...locations.map((l: Location) => ({
+              value: l.id,
+              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+            })),
+          ]}
+          controlSize="sm"
+        />
+        <FormSelect
+          id="transfer-filter-to"
+          label="To location"
+          value={toLocationFilter}
+          onChange={(e) => updateFilter('toLocationId', e.target.value)}
+          options={[
+            { value: '', label: 'All locations' },
+            ...locations.map((l: Location) => ({
+              value: l.id,
+              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+            })),
+          ]}
+          controlSize="sm"
+        />
+        <FormSelect
+          id="transfer-filter-product"
+          label="Product"
+          value={productFilter}
+          onChange={(e) => updateFilter('productId', e.target.value)}
+          options={[
+            { value: '', label: formDataLoading ? 'Loading products…' : 'All products' },
+            ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
+          ]}
+          controlSize="sm"
+          disabled={formDataLoading && resolvedProducts.length === 0}
+        />
+      </div>
+      {hasFilters && (
+        <div className="flex items-center justify-between pt-1">
+          <p className="text-xs text-app-fg-muted">
+            {filteredTransfers.length} of {transfers.length} transfer{transfers.length === 1 ? '' : 's'}
+          </p>
+          <Button type="button" variant="secondary" size="sm" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -528,6 +591,8 @@ export function TransfersPage({
             sheetTitle={`${pageTitle} — tools`}
             sheetSubtitle={<span>Date range and new transfer</span>}
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
+            filters={transferFiltersBody}
+            filtersBadgeCount={hasFilters ? 1 : 0}
             desktop={
               <>
                 <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -621,68 +686,9 @@ export function TransfersPage({
       />
 
       {/* Filters — status pills + from/to/product dropdowns. URL-synced so filters persist
-          across refreshes and can be deep-linked. */}
-      <div className="card p-3 sm:p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Tabs
-            value={uiStatusFilter}
-            onChange={handleStatusTabChange}
-            tabs={statusTabItems}
-          />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <FormSelect
-            id="transfer-filter-from"
-            label="From location"
-            value={fromLocationFilter}
-            onChange={(e) => updateFilter('fromLocationId', e.target.value)}
-            options={[
-              { value: '', label: 'All locations' },
-              ...locations.map((l: Location) => ({
-                value: l.id,
-                label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
-              })),
-            ]}
-            controlSize="sm"
-          />
-          <FormSelect
-            id="transfer-filter-to"
-            label="To location"
-            value={toLocationFilter}
-            onChange={(e) => updateFilter('toLocationId', e.target.value)}
-            options={[
-              { value: '', label: 'All locations' },
-              ...locations.map((l: Location) => ({
-                value: l.id,
-                label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
-              })),
-            ]}
-            controlSize="sm"
-          />
-          <FormSelect
-            id="transfer-filter-product"
-            label="Product"
-            value={productFilter}
-            onChange={(e) => updateFilter('productId', e.target.value)}
-            options={[
-              { value: '', label: formDataLoading ? 'Loading products…' : 'All products' },
-              ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
-            ]}
-            controlSize="sm"
-            disabled={formDataLoading && resolvedProducts.length === 0}
-          />
-        </div>
-        {hasFilters && (
-          <div className="flex items-center justify-between pt-1">
-            <p className="text-xs text-app-fg-muted">
-              {filteredTransfers.length} of {transfers.length} transfer{transfers.length === 1 ? '' : 's'}
-            </p>
-            <Button type="button" variant="secondary" size="sm" onClick={clearFilters}>
-              Clear filters
-            </Button>
-          </div>
-        )}
-      </div>
+          across refreshes and can be deep-linked. Desktop-only here; on mobile the same
+          controls render inside the PageHeaderMobileTools kebab (see `filters` prop). */}
+      <div className="hidden md:block card p-3 sm:p-4">{transferFiltersBody}</div>
 
       {canInitiate && (
         <Modal
@@ -949,15 +955,14 @@ export function TransfersPage({
         </Modal>
       )}
 
-      <div className="card p-4 sm:p-6">
-        {formDataLoading && resolvedProducts.length === 0 ? (
-          <div className="card !p-4">
-            <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-              <Spinner className="w-4 h-4" />
-              <span>Loading products…</span>
-            </div>
+      {formDataLoading && resolvedProducts.length === 0 ? (
+        <div className="card !p-4">
+          <div className="flex items-center gap-2 text-sm text-app-fg-muted">
+            <Spinner className="w-4 h-4" />
+            <span>Loading products…</span>
           </div>
-        ) : (
+        </div>
+      ) : (
           (() => {
             const productName = (id: string) =>
               resolvedProducts.find((p: Product) => p.id === id)?.name ?? id.slice(0, 8) + '...';
@@ -975,7 +980,7 @@ export function TransfersPage({
                     <span className="font-medium text-app-fg">
                       {productName(t.productId)}
                       {midFlight ? (
-                        <span className="ml-2 text-[10px] uppercase tracking-wide text-app-fg-muted">
+                        <span className="ml-2 text-micro uppercase tracking-wide text-app-fg-muted">
                           Saving…
                         </span>
                       ) : null}
@@ -1137,8 +1142,7 @@ export function TransfersPage({
               />
             );
           })()
-        )}
-      </div>
+      )}
 
       <Modal open={!!viewTransfer} onClose={dismissTransferModal} maxWidth="max-w-lg" aria-labelledby="transfer-detail-title">
         {viewTransfer && (
@@ -1323,7 +1327,7 @@ export function TransfersPage({
               placeholder="Why is this transfer being cancelled?"
               maxLength={500}
             />
-            <p className="text-[11px] text-app-fg-muted">
+            <p className="text-mini text-app-fg-muted">
               {cancelReason.trim().length}/10 characters minimum
             </p>
           </div>
@@ -1375,7 +1379,7 @@ export function TransfersPage({
               placeholder="Why is this transfer being rejected?"
               maxLength={500}
             />
-            <p className="text-[11px] text-app-fg-muted">
+            <p className="text-mini text-app-fg-muted">
               {rejectReason.trim().length}/10 characters minimum
             </p>
           </div>

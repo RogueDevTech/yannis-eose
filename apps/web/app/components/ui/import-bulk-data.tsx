@@ -441,10 +441,10 @@ export function ImportBulkData<
         {referenceContent ? (
           <div className="space-y-2 pt-1">
             <div className="flex items-baseline justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+              <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                 Expected columns
               </p>
-              <p className="text-[10px] text-app-fg-muted">
+              <p className="text-micro text-app-fg-muted">
                 Header names are case-insensitive ·{' '}
                 <span className="text-danger-500">*</span> required
               </p>
@@ -639,7 +639,7 @@ export function ImportBulkData<
           <>
             <div className="px-5 pt-5 pb-4 border-b border-app-border flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1.5">
-                <p className="text-[10px] uppercase tracking-wider text-app-fg-muted font-semibold">
+                <p className="text-micro uppercase tracking-wider text-app-fg-muted font-semibold">
                   Row {errorDetail.rowNumber}
                 </p>
                 <h3
@@ -663,7 +663,7 @@ export function ImportBulkData<
             </div>
             <div className="px-5 py-4 space-y-4 max-h-[min(60dvh,28rem)] overflow-y-auto">
               <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                   Current value
                 </p>
                 <code className="block font-mono text-xs rounded-md bg-app-hover text-app-fg px-2.5 py-2 break-all">
@@ -673,7 +673,7 @@ export function ImportBulkData<
                 </code>
               </div>
               <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                   {errorDetail.errors.length === 1
                     ? 'Issue'
                     : `${errorDetail.errors.length} issues`}
@@ -837,7 +837,7 @@ function CellErrorInfoButton({
       aria-label={`Show ${fieldLabel} error details for row ${rowNumber}`}
       title={`Show ${fieldLabel} error details`}
     >
-      <span className="font-serif text-[12px] font-bold leading-none italic">i</span>
+      <span className="font-serif text-base font-bold leading-none italic">i</span>
     </button>
   );
 }

@@ -180,12 +180,12 @@ export function CSDashboardHotSwapTabPanel({
                                 {order.customerName}
                               </p>
                               {order.totalAmount ? (
-                                <NairaPrice amount={order.totalAmount} className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums" />
+                                <NairaPrice amount={order.totalAmount} className="text-mini font-bold text-app-fg shrink-0 tabular-nums" />
                               ) : null}
                             </div>
                             <div className="flex items-center gap-1.5 mb-1 min-w-0">
                               <OrderStatusBadge status={order.status} />
-                              <span className="text-[10px] font-medium text-app-fg-muted truncate">
+                              <span className="text-micro font-medium text-app-fg-muted truncate">
                                 {new Date(order.createdAt).toLocaleString('en-NG', {
                                   month: 'short',
                                   day: 'numeric',
@@ -198,14 +198,14 @@ export function CSDashboardHotSwapTabPanel({
                               id={order.id}
                               length={8}
                               ellipsis=""
-                              textClassName="text-[10px] text-app-fg-muted"
+                              textClassName="text-micro text-app-fg-muted"
                               className="inline-flex"
                             />
                             <div className="mt-1.5">
                               <Link
                                 to={`/admin/orders/${order.id}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                                className="text-mini font-medium text-brand-600 dark:text-brand-400 hover:underline"
                               >
                                 View
                               </Link>

@@ -1499,12 +1499,12 @@ function VoipProviderPicker({
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-medium text-app-fg">{p.displayName}</p>
                   {isActive && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-900/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 dark:bg-brand-900/40 px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300">
                       Active
                     </span>
                   )}
                   {!p.configured && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-warning-100 dark:bg-warning-900/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-700 dark:text-warning-400">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warning-100 dark:bg-warning-900/30 px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:text-warning-400">
                       Not configured
                     </span>
                   )}

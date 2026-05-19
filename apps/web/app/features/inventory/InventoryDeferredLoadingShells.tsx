@@ -458,7 +458,7 @@ export function InventoryOverviewLoadingShell() {
         ) : null}
       </div>
 
-      <div className="card p-0 overflow-hidden">
+      <div className="list-panel">
         <CompactTable<{ id: string }>
           withCard={false}
           columns={inventoryLevelsShellColumns()}
@@ -568,7 +568,7 @@ export function WarehouseShipmentsLoadingShell() {
           />
         }
       />
-      <div className="card p-0 overflow-x-auto">
+      <div className="list-panel overflow-x-auto">
         <div className="h-10 w-full max-w-sm m-3 rounded bg-app-hover animate-pulse" aria-hidden />
         <CompactTable<{ id: string }>
           withCard={false}
@@ -873,7 +873,7 @@ export function ShipmentDetailLoadingShell() {
         {SHIPMENT_TIMELINE_STEPS.map((label, idx) => (
           <span key={label} className="flex items-center gap-2">
             <span
-              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-app-hover px-2 text-[10px] font-semibold text-app-fg-muted"
+              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-app-hover px-2 text-micro font-semibold text-app-fg-muted"
               aria-hidden
             >
               {idx + 1}

@@ -155,7 +155,7 @@ export function SortMenu({
             {groupedOptions.map(([group, items], gi) => (
               <div key={group || `_${gi}`} className="space-y-1.5">
                 {group ? (
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                  <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                     {group}
                   </p>
                 ) : null}
@@ -209,7 +209,7 @@ export function SortMenu({
 
           <div className="border-t border-app-border px-5 py-4 space-y-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted mb-1.5">
+              <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted mb-1.5">
                 Direction
               </p>
               <div className="grid grid-cols-2 gap-2">

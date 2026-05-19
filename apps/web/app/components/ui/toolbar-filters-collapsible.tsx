@@ -20,6 +20,12 @@ export interface ToolbarFiltersCollapsibleProps {
   desktopInlineFilters: ReactNode;
   /** Stacked controls inside the mobile sheet (full-width selects, etc.). */
   sheetFilterBody: ReactNode;
+  /**
+   * Suppress the mobile **Filters** trigger + bottom sheet. Use when the page has
+   * moved `sheetFilterBody` into `PageHeaderMobileTools` `filters` so there is one
+   * combined mobile sheet. Search row + desktop inline filters still render.
+   */
+  hideMobileSheet?: boolean;
   sheetTitle?: string;
   sheetSubtitle?: ReactNode;
   /** Shown next to “Filters” when &gt; 0. */
@@ -59,6 +65,7 @@ export function ToolbarFiltersCollapsible({
   searchRow,
   desktopInlineFilters,
   sheetFilterBody,
+  hideMobileSheet = false,
   sheetTitle = 'Filters',
   sheetSubtitle,
   badgeCount = 0,
@@ -76,23 +83,25 @@ export function ToolbarFiltersCollapsible({
     <>
       <div className={['border-b border-app-border px-4 py-3', className].filter(Boolean).join(' ')}>
         <div className={rowClasses(bp)}>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            className={['w-full shrink-0 justify-center gap-2', hideFiltersBtn(bp)].join(' ')}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            onClick={() => setOpen(true)}
-          >
-            <ToolbarFiltersFunnelIcon />
-            <span>{filtersButtonLabel}</span>
-            {badgeCount > 0 ? (
-              <span className="rounded-full bg-brand-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:text-brand-300">
-                {badgeCount}
-              </span>
-            ) : null}
-          </Button>
+          {hideMobileSheet ? null : (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className={['w-full shrink-0 justify-center gap-2', hideFiltersBtn(bp)].join(' ')}
+              aria-haspopup="dialog"
+              aria-expanded={open}
+              onClick={() => setOpen(true)}
+            >
+              <ToolbarFiltersFunnelIcon />
+              <span>{filtersButtonLabel}</span>
+              {badgeCount > 0 ? (
+                <span className="rounded-full bg-brand-500/15 px-1.5 py-0.5 text-micro font-semibold text-brand-700 dark:text-brand-300">
+                  {badgeCount}
+                </span>
+              ) : null}
+            </Button>
+          )}
 
           {searchRow != null && searchRow !== false ? (
             <div className="min-w-0 flex-1">{searchRow}</div>
@@ -102,30 +111,32 @@ export function ToolbarFiltersCollapsible({
         </div>
       </div>
 
-      <Modal
-        open={open}
-        onClose={() => setOpen(false)}
-        maxWidth="max-w-full"
-        aria-labelledby={titleId}
-        contentClassName="p-0"
-      >
-        <div className="border-b border-app-border px-4 py-3">
-          <h2 id={titleId} className="text-base font-semibold text-app-fg">
-            {sheetTitle}
-          </h2>
-          {sheetSubtitle ? <div className="mt-0.5 text-xs text-app-fg-muted">{sheetSubtitle}</div> : null}
-        </div>
-        <div
-          className={['flex flex-col gap-4 overflow-y-auto p-4', sheetBodyMaxHeightClassName].join(' ')}
+      {hideMobileSheet ? null : (
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          maxWidth="max-w-full"
+          aria-labelledby={titleId}
+          contentClassName="p-0"
         >
-          {sheetFilterBody}
-        </div>
-        <div className="border-t border-app-border p-3 pt-2">
-          <Button type="button" variant="secondary" className="w-full" onClick={() => setOpen(false)}>
-            {sheetDoneLabel}
-          </Button>
-        </div>
-      </Modal>
+          <div className="border-b border-app-border px-4 py-3">
+            <h2 id={titleId} className="text-base font-semibold text-app-fg">
+              {sheetTitle}
+            </h2>
+            {sheetSubtitle ? <div className="mt-0.5 text-xs text-app-fg-muted">{sheetSubtitle}</div> : null}
+          </div>
+          <div
+            className={['flex flex-col gap-4 overflow-y-auto p-4', sheetBodyMaxHeightClassName].join(' ')}
+          >
+            {sheetFilterBody}
+          </div>
+          <div className="border-t border-app-border p-3 pt-2">
+            <Button type="button" variant="primary" className="w-full" onClick={() => setOpen(false)}>
+              {sheetDoneLabel}
+            </Button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

@@ -1,6 +1,7 @@
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Collapsible } from '~/components/ui/collapsible';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -45,18 +46,36 @@ export function MarketingLeaderboardPage({
     <div className="space-y-6">
       <PageHeader
         title="Marketing Leaderboard"
+        mobileInlineActions
         description="Compare media buyer performance."
         actions={
-          <>
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-              <DateFilterBar
-                startDate={dateFilters.startDate}
-                endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-            </div>
-            <PageRefreshButton />
-          </>
+          <PageHeaderMobileTools
+            sheetTitle="Leaderboard tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="Marketing leaderboard date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                  />
+                </div>
+              </>
+            }
+            sheet={() => (
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={dateFilters.startDate}
+                  endDate={dateFilters.endDate}
+                  periodAllTime={dateFilters.periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            )}
+          />
         }
       />
 

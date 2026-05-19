@@ -304,7 +304,7 @@ export function ProductsListPage({
 
   return (
     <div className="space-y-4">
-      <div className="card p-0 overflow-hidden">
+      <div className="list-panel">
         <ToolbarFiltersCollapsible
           className="!border-0"
           badgeCount={productsToolbarFilterBadge}

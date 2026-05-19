@@ -358,6 +358,106 @@ export function MarketingOrdersPage({
                 <PageRefreshButton />
               </>
             }
+            filtersBadgeCount={ordersToolbarFilterBadge}
+            filters={
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                  <FormSelect
+                    value={selectedStatus}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+                <Suspense fallback={null}>
+                  <Await resolve={secondary}>
+                    {(ins) => {
+                      const mediaBuyerFilterOptions = [
+                        { value: 'ALL', label: 'All media buyers' },
+                        ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
+                      ];
+                      return (
+                        <>
+                          {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
+                            <div className="space-y-1.5">
+                              <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
+                              <SearchableSelect
+                                id="marketing-orders-filter-buyer-sheet"
+                                value={searchParams.get('mediaBuyerId') || 'ALL'}
+                                onChange={(v) => {
+                                  setSearchParams((p) => {
+                                    const next = new URLSearchParams(p);
+                                    next.set('page', '1');
+                                    if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                                    else next.delete('mediaBuyerId');
+                                    return next;
+                                  });
+                                }}
+                                options={mediaBuyerFilterOptions}
+                                wrapperClassName="w-full"
+                                placeholder="All media buyers"
+                                searchPlaceholder="Search buyers…"
+                              />
+                            </div>
+                          ) : null}
+                          {ins.productsForFilter.length > 0 ? (
+                            <div className="space-y-1.5">
+                              <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                              <SearchableSelect
+                                id="marketing-orders-filter-product-sheet"
+                                value={searchParams.get('productId') || 'ALL'}
+                                onChange={(v) => {
+                                  setSearchParams((p) => {
+                                    const next = new URLSearchParams(p);
+                                    next.set('page', '1');
+                                    if (v && v !== 'ALL') next.set('productId', v);
+                                    else next.delete('productId');
+                                    return next;
+                                  });
+                                }}
+                                options={[
+                                  { value: 'ALL', label: 'All products' },
+                                  ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                                ]}
+                                wrapperClassName="w-full"
+                                placeholder="All products"
+                                searchPlaceholder="Search products…"
+                              />
+                            </div>
+                          ) : null}
+                          {ins.campaignsForFilter.length > 0 ? (
+                            <div className="space-y-1.5">
+                              <span className="text-xs font-medium text-app-fg-muted">Form</span>
+                              <SearchableSelect
+                                id="marketing-orders-filter-form-sheet"
+                                value={searchParams.get('campaignId') || 'ALL'}
+                                onChange={(v) => {
+                                  setSearchParams((p) => {
+                                    const next = new URLSearchParams(p);
+                                    next.set('page', '1');
+                                    if (v && v !== 'ALL') next.set('campaignId', v);
+                                    else next.delete('campaignId');
+                                    return next;
+                                  });
+                                }}
+                                options={[
+                                  { value: 'ALL', label: 'All forms' },
+                                  ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                                ]}
+                                wrapperClassName="w-full"
+                                placeholder="All forms"
+                                searchPlaceholder="Search forms…"
+                              />
+                            </div>
+                          ) : null}
+                        </>
+                      );
+                    }}
+                  </Await>
+                </Suspense>
+              </>
+            }
             sheet={({ closeSheet }) => (
               <>
                 <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
@@ -426,6 +526,7 @@ export function MarketingOrdersPage({
             />
 
             <ToolbarFiltersCollapsible
+              hideMobileSheet
               badgeCount={ordersToolbarFilterBadge}
               sheetSubtitle={<span>Status and media buyer apply immediately</span>}
               searchRow={
@@ -455,25 +556,7 @@ export function MarketingOrdersPage({
                   ) : null}
                 </>
               }
-              sheetFilterBody={
-                <>
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                    <FormSelect
-                      value={selectedStatus}
-                      onChange={(e) => handleStatusChange(e.target.value)}
-                      options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
-                      wrapperClassName="w-full"
-                    />
-                  </div>
-                  {showMediaBuyerColumn ? (
-                    <div className="space-y-1.5">
-                      <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
-                      <div className="h-10 w-full rounded-md border border-app-border bg-app-hover/90 animate-pulse" aria-hidden />
-                    </div>
-                  ) : null}
-                </>
-              }
+              sheetFilterBody={null}
             />
           </>
         }
@@ -561,6 +644,7 @@ export function MarketingOrdersPage({
                 />
 
                 <ToolbarFiltersCollapsible
+                  hideMobileSheet
                   badgeCount={ordersToolbarFilterBadge}
                   sheetSubtitle={<span>Status and media buyer apply immediately</span>}
                   searchRow={
@@ -647,91 +731,7 @@ export function MarketingOrdersPage({
                       ) : null}
                     </>
                   }
-                  sheetFilterBody={
-                    <>
-                      <div className="space-y-1.5">
-                        <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                        <FormSelect
-                          value={selectedStatus}
-                          onChange={(e) => handleStatusChange(e.target.value)}
-                          options={statusOptions}
-                          wrapperClassName="w-full"
-                        />
-                      </div>
-                      {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
-                          <SearchableSelect
-                            id="marketing-orders-filter-buyer-sheet"
-                            value={searchParams.get('mediaBuyerId') || 'ALL'}
-                            onChange={(v) => {
-                              setSearchParams((p) => {
-                                const next = new URLSearchParams(p);
-                                next.set('page', '1');
-                                if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                                else next.delete('mediaBuyerId');
-                                return next;
-                              });
-                            }}
-                            options={mediaBuyerFilterOptions}
-                            wrapperClassName="w-full"
-                            placeholder="All media buyers"
-                            searchPlaceholder="Search buyers…"
-                          />
-                        </div>
-                      ) : null}
-                      {ins.productsForFilter.length > 0 ? (
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                          <SearchableSelect
-                            id="marketing-orders-filter-product-sheet"
-                            value={searchParams.get('productId') || 'ALL'}
-                            onChange={(v) => {
-                              setSearchParams((p) => {
-                                const next = new URLSearchParams(p);
-                                next.set('page', '1');
-                                if (v && v !== 'ALL') next.set('productId', v);
-                                else next.delete('productId');
-                                return next;
-                              });
-                            }}
-                            options={[
-                              { value: 'ALL', label: 'All products' },
-                              ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                            ]}
-                            wrapperClassName="w-full"
-                            placeholder="All products"
-                            searchPlaceholder="Search products…"
-                          />
-                        </div>
-                      ) : null}
-                      {ins.campaignsForFilter.length > 0 ? (
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-medium text-app-fg-muted">Form</span>
-                          <SearchableSelect
-                            id="marketing-orders-filter-form-sheet"
-                            value={searchParams.get('campaignId') || 'ALL'}
-                            onChange={(v) => {
-                              setSearchParams((p) => {
-                                const next = new URLSearchParams(p);
-                                next.set('page', '1');
-                                if (v && v !== 'ALL') next.set('campaignId', v);
-                                else next.delete('campaignId');
-                                return next;
-                              });
-                            }}
-                            options={[
-                              { value: 'ALL', label: 'All forms' },
-                              ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                            ]}
-                            wrapperClassName="w-full"
-                            placeholder="All forms"
-                            searchPlaceholder="Search forms…"
-                          />
-                        </div>
-                      ) : null}
-                    </>
-                  }
+                  sheetFilterBody={null}
                 />
               </>
             );
@@ -761,7 +761,7 @@ export function MarketingOrdersPage({
         )
       ) : (
       <>
-      <div className="card scroll-mt-4 overflow-hidden p-0">
+      <div className="list-panel scroll-mt-4">
         <CompactTable<Order>
           withCard={false}
           columns={marketingOrderColumns}

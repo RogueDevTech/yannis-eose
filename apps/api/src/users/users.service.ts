@@ -53,6 +53,9 @@ const BRANCH_ELIGIBLE_ROLES = new Set([
   'CS_CLOSER',
   'HEAD_OF_CS',
   'BRANCH_ADMIN',
+  // HR_MANAGER added 2026-05-19: HR keeps current permissions but data
+  // visibility (staff, payroll, onboarding) is scoped to assigned branch.
+  'HR_MANAGER',
 ]);
 
 @Injectable()
@@ -860,13 +863,19 @@ export class UsersService {
   /**
    * Same actor gate as Remix `requireStaffAccountsAccess` — company-wide staff roster (`/hr/users`).
    * Used to honor `companyWideUserList` without widening `users.list` for arbitrary `users.read` callers.
+   *
+   * HR_MANAGER is org-wide ONLY when unassigned to a branch (CEO 2026-05-19);
+   * when an HR member has a `currentBranchId`, this returns false so the
+   * roster filter narrows to that branch — same pattern as HoCS / HoM.
    */
   private actorMayListCompanyWideUserRoster(
     actor: { id: string; role: string; permissions?: string[] } | null,
+    currentBranchId: string | null = null,
   ): boolean {
     if (!actor) return false;
     if (actor.role === 'SUPER_ADMIN' || isAdminLevelRole(actor.role)) return true;
-    if (actor.role === 'HR_MANAGER' || actor.role === 'FINANCE_OFFICER') return true;
+    if (actor.role === 'HR_MANAGER') return currentBranchId === null;
+    if (actor.role === 'FINANCE_OFFICER') return true;
     const perms = new Set((actor.permissions ?? []).map((p) => canonicalPermissionCode(p)));
     return (
       perms.has(canonicalPermissionCode('users.staff.view')) ||
@@ -946,7 +955,7 @@ export class UsersService {
     const skipBranchScope =
       (input.userIds && input.userIds.length > 0) ||
       (input.allBranches === true && canViewAllBranches) ||
-      (input.companyWideUserList === true && this.actorMayListCompanyWideUserRoster(actor));
+      (input.companyWideUserList === true && this.actorMayListCompanyWideUserRoster(actor, currentBranchId));
     const branchFilter = skipBranchScope
       ? input.branchId
       : (input.branchId ?? currentBranchId ?? undefined);
@@ -957,7 +966,7 @@ export class UsersService {
     // the company-wide roster; for branch-scoped staff it's a no-op so a
     // hand-crafted URL can't widen their view.
     const orgWideOnlyAllowed =
-      input.orgWideOnly === true && this.actorMayListCompanyWideUserRoster(actor);
+      input.orgWideOnly === true && this.actorMayListCompanyWideUserRoster(actor, currentBranchId);
     if (orgWideOnlyAllowed) {
       conditions.push(
         sql<boolean>`NOT EXISTS (

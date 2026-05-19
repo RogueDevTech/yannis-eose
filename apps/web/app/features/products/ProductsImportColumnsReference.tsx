@@ -132,7 +132,7 @@ export function ProductsImportColumnsReference({
             onClick={() => setDetailColumn(c)}
             className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-hover/30 px-2 py-1 text-app-fg-muted hover:bg-brand-50 hover:border-brand-200 hover:text-brand-700 dark:hover:bg-brand-900/25 dark:hover:border-brand-700 dark:hover:text-brand-300 transition-colors"
           >
-            <code className="font-mono text-[11px] font-medium text-app-fg" title={c.label}>
+            <code className="font-mono text-mini font-medium text-app-fg" title={c.label}>
               {c.label}
               {c.required ? (
                 <span className="ml-0.5 text-danger-500" aria-hidden="true">
@@ -162,14 +162,14 @@ export function ProductsImportColumnsReference({
                   className="text-base font-semibold text-app-fg leading-snug"
                 >
                   <span className="text-app-fg-muted font-normal">Spreadsheet column · </span>
-                  <span className="text-[15px] font-semibold text-app-fg">{detailColumn.label}</span>
+                  <span className="text-xl font-semibold text-app-fg">{detailColumn.label}</span>
                 </h3>
                 {detailColumn.required ? (
-                  <span className="inline-flex text-[10px] uppercase tracking-wider rounded-md bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-2 py-0.5 font-semibold">
+                  <span className="inline-flex text-micro uppercase tracking-wider rounded-md bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-2 py-0.5 font-semibold">
                     Required in every row
                   </span>
                 ) : (
-                  <span className="inline-flex text-[10px] uppercase tracking-wider rounded-md bg-app-hover text-app-fg-muted px-2 py-0.5 font-semibold">
+                  <span className="inline-flex text-micro uppercase tracking-wider rounded-md bg-app-hover text-app-fg-muted px-2 py-0.5 font-semibold">
                     Optional
                   </span>
                 )}
@@ -194,7 +194,7 @@ export function ProductsImportColumnsReference({
             <div className="px-5 py-4 space-y-4 max-h-[min(60dvh,28rem)] overflow-y-auto">
               <p className="text-sm text-app-fg leading-relaxed">{detailColumn.description}</p>
               <div className="rounded-md border border-app-border bg-app-hover/40 px-3 py-2 space-y-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                <p className="text-micro font-semibold uppercase tracking-wider text-app-fg-muted">
                   Header names — case &amp; spacing don&apos;t matter
                 </p>
                 <p className="text-xs text-app-fg-muted">
@@ -205,7 +205,7 @@ export function ProductsImportColumnsReference({
                   {[detailColumn.label, detailColumn.header, ...detailColumn.alsoAccepts].map(
                     (alias) => (
                       <li key={alias}>
-                        <code className="font-mono text-[11px] rounded bg-app-elevated border border-app-border px-1.5 py-0.5 text-app-fg">
+                        <code className="font-mono text-mini rounded bg-app-elevated border border-app-border px-1.5 py-0.5 text-app-fg">
                           {alias}
                         </code>
                       </li>
@@ -215,10 +215,10 @@ export function ProductsImportColumnsReference({
               </div>
               {detailExamples.length > 0 ? (
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                  <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                     Example values
                     {detailColumn.header === 'category' && categories.length > 0 ? (
-                      <span className="ml-1.5 text-[10px] font-normal normal-case tracking-normal text-app-fg-muted">
+                      <span className="ml-1.5 text-micro font-normal normal-case tracking-normal text-app-fg-muted">
                         — pulled from your catalogue
                       </span>
                     ) : null}

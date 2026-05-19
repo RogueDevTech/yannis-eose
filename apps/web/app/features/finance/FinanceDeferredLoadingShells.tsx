@@ -516,7 +516,7 @@ export function FinanceDisbursementsLoadingShell({
         </div>
       ) : null}
 
-      <div className="card p-0 overflow-hidden">
+      <div className="list-panel">
         <CompactTable<{ id: string }>
           withCard={false}
           columns={disbursementsShellColumns()}
@@ -782,9 +782,10 @@ export function DeliveryRemittancesLoadingShell({
 
       {viewTab === 'remittances' ? (
         <>
-          <div className="card p-0 overflow-hidden">
+          <div className="list-panel">
             <ToolbarFiltersCollapsible
               className="!border-0"
+              hideMobileSheet
               badgeCount={remittanceToolbarBadge}
               sheetSubtitle={<span>Location and sent-by apply immediately</span>}
               desktopInlineFilters={

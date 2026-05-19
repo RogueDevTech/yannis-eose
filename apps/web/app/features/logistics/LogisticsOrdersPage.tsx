@@ -671,27 +671,47 @@ function LogisticsOrdersPageImpl({
           mobileInlineActions
           description={pageDescription}
           actions={
-            <>
-              <PageHeaderMobileTools
-                sheetTitle="Logistics orders tools"
-                sheetSubtitle={<span>Chart toggle</span>}
-                triggerAriaLabel="Logistics orders toolbar"
-                desktop={
-                  <>
-                    <PageRefreshButton />
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      onClick={() => setShowChartView((v) => !v)}
-                    >
-                      {showChartView ? 'View as data' : 'View data in chart'}
-                    </button>
-                  </>
-                }
-                sheet={({ closeSheet }) => (
+            <PageHeaderMobileTools
+              sheetTitle="Actions"
+              triggerAriaLabel="Logistics orders tools"
+              filtersBadgeCount={logisticsOrdersToolbarFilterBadge}
+              desktop={
+                <>
+                  <PageRefreshButton />
                   <button
                     type="button"
-                    className="btn-secondary btn-sm w-full justify-center"
+                    className="btn-secondary btn-sm"
+                    onClick={() => setShowChartView((v) => !v)}
+                  >
+                    {showChartView ? 'View as data' : 'View data in chart'}
+                  </button>
+                  <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                    <DateFilterBar
+                      startDate={filters.startDate}
+                      endDate={filters.endDate}
+                      periodAllTime={filters.periodAllTime}
+                    />
+                  </div>
+                </>
+              }
+              filters={
+                <FormSelect
+                  value={selectedStatus}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
+                    value: status,
+                    label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
+                  }))}
+                  controlSize="lg"
+                  className="!bg-app-hover text-center"
+                  wrapperClassName="w-full"
+                />
+              }
+              sheet={({ closeSheet }) => (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="flex h-10 w-full items-center justify-center rounded-md border border-app-border bg-app-hover text-sm font-medium text-app-fg transition-colors hover:bg-app-border"
                     onClick={() => {
                       closeSheet();
                       setShowChartView((v) => !v);
@@ -699,16 +719,17 @@ function LogisticsOrdersPageImpl({
                   >
                     {showChartView ? 'View as data' : 'View data in chart'}
                   </button>
-                )}
-              />
-              <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                />
-              </div>
-            </>
+                  <div className="flex h-10 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                    <DateFilterBar
+                      startDate={filters.startDate}
+                      endDate={filters.endDate}
+                      periodAllTime={filters.periodAllTime}
+                      triggerLayout="blockCenter"
+                    />
+                  </div>
+                </div>
+              )}
+            />
           }
         />
       </div>
@@ -718,7 +739,7 @@ function LogisticsOrdersPageImpl({
           tileClassName="min-w-[6rem]"
           items={[
             { label: 'Total Orders', value: <StatValuePulse className="min-w-[3rem]" /> },
-            { label: 'Awaiting logistics assignment', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Awaiting assignment', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Agent assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Dispatched', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -730,7 +751,7 @@ function LogisticsOrdersPageImpl({
           tileClassName="min-w-[6rem]"
           items={[
             { label: 'Total Orders', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
-            { label: 'Awaiting logistics assignment', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Awaiting assignment', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
             { label: 'Agent assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
             { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400' },
             { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
@@ -882,12 +903,11 @@ function LogisticsOrdersPageImpl({
         </div>
       )}
 
-      <div className="card p-0 overflow-hidden">
-        <ToolbarFiltersCollapsible
-          className="!border-0"
-          badgeCount={logisticsOrdersToolbarFilterBadge}
-          sheetSubtitle={<span>Status applies immediately</span>}
-          searchRow={
+      <ToolbarFiltersCollapsible
+        className="!border-0 !p-0 !bg-transparent"
+        hideMobileSheet
+        badgeCount={logisticsOrdersToolbarFilterBadge}
+        searchRow={
             <div className="flex w-full min-w-0 flex-col gap-2 md:flex-row md:flex-nowrap md:items-center md:gap-3 md:flex-1">
               <form
                 method="get"
@@ -911,6 +931,7 @@ function LogisticsOrdersPageImpl({
                   onChange={(val) => setSearchQuery(val)}
                   withSubmitButton
                   wrapperClassName="w-full md:flex-1"
+                  className="bg-white dark:bg-app-elevated"
                 />
               </form>
               <div className="hidden shrink-0 items-center gap-3 md:flex">
@@ -927,22 +948,8 @@ function LogisticsOrdersPageImpl({
             </div>
           }
           desktopInlineFilters={null}
-          sheetFilterBody={
-            <div className="space-y-1.5">
-              <span className="text-xs font-medium text-app-fg-muted">Status</span>
-              <FormSelect
-                value={selectedStatus}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                options={LOGISTICS_STATUS_OPTIONS.map((status) => ({
-                  value: status,
-                  label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
-                }))}
-                wrapperClassName="w-full"
-              />
-            </div>
-          }
+          sheetFilterBody={null}
         />
-      </div>
 
       {showChartView ? (
         deferredLoading ? (
@@ -964,7 +971,10 @@ function LogisticsOrdersPageImpl({
         )
       ) : (
       <TableLoadingOverlay show={isFilterLoading}>
-        <div className="card p-0">
+        {/* Card chrome is desktop-only — on mobile each order renders as its
+            own elevated card, so an outer card would just double the chrome
+            and waste horizontal space. */}
+        <div className="md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card dark:md:shadow-none md:overflow-hidden">
           <CompactTable<LogisticsOrderRow>
             withCard={false}
             columns={logisticsOrderColumns}

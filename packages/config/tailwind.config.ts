@@ -109,15 +109,25 @@ const config: TailwindConfig = {
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
+      // Type scale — all rem. The app sets the root <html> font-size per the
+      // user font-scale setting (see apps/web/app/lib/font-scale.ts); at the
+      // DEFAULT scale the root is 14px, so the px column below is the rendered
+      // size at that default. Large / Extra-large scales multiply everything
+      // proportionally. Prefer these tokens over arbitrary `text-[Npx]` —
+      // arbitrary px is absolute and does NOT respond to the font-scale knob.
       fontSize: {
-        '2xs': ['0.625rem', { lineHeight: '0.875rem' }],
-        // Compact font scale: base 14px
-        'xs': ['0.75rem', { lineHeight: '1rem' }],
-        'sm': ['0.8125rem', { lineHeight: '1.25rem' }],
-        'base': ['0.875rem', { lineHeight: '1.375rem' }],  // 14px
-        'lg': ['1rem', { lineHeight: '1.5rem' }],           // 16px
-        'xl': ['1.125rem', { lineHeight: '1.75rem' }],      // 18px
-        '2xl': ['1.5rem', { lineHeight: '2rem' }],          // 24px
+        '2xs': ['0.625rem', { lineHeight: '0.875rem' }],    // ~8.75px @ 14px root
+        // micro / mini exist so the (very common) 10px and 11px micro-copy
+        // sizes are rem-based and scale with the font-scale setting, instead
+        // of being hardcoded `text-[10px]` / `text-[11px]`.
+        'micro': ['0.7143rem', { lineHeight: '1rem' }],     // 10px @ 14px root
+        'mini': ['0.7857rem', { lineHeight: '1rem' }],      // 11px @ 14px root
+        'xs': ['0.75rem', { lineHeight: '1rem' }],          // ~10.5px @ 14px root
+        'sm': ['0.8125rem', { lineHeight: '1.25rem' }],     // ~11.4px @ 14px root
+        'base': ['0.875rem', { lineHeight: '1.375rem' }],   // ~12.25px @ 14px root
+        'lg': ['1rem', { lineHeight: '1.5rem' }],           // 14px @ 14px root
+        'xl': ['1.125rem', { lineHeight: '1.75rem' }],      // ~15.75px @ 14px root
+        '2xl': ['1.5rem', { lineHeight: '2rem' }],          // 21px @ 14px root
       },
       borderRadius: {
         '4xl': '2rem',

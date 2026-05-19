@@ -58,7 +58,7 @@ export function PermissionRequestsLoadingShell({ activeStatus }: { activeStatus:
         }
       />
       <Tabs value={safe} onChange={() => {}} tabs={[...STATUS_TABS]} />
-      <div className="card p-0 flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] overflow-hidden min-h-[12rem]">
+      <div className="list-panel flex flex-col max-h-[min(70vh,24rem)] md:max-h-[min(60vh,22rem)] min-h-[12rem]">
         <CompactTable<{ id: string }>
           withCard={false}
           columns={PERM_REQ_SHELL_COLS}

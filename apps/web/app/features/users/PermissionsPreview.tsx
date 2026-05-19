@@ -212,7 +212,7 @@ export function PermissionsPreview({
               key={groupKey}
               className="flex flex-col gap-1.5 border-b border-app-border/50 pb-3 last:border-0 last:pb-0 sm:flex-row sm:items-baseline sm:gap-4"
             >
-              <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted sm:min-w-[9.5rem]">
+              <p className="shrink-0 text-mini font-semibold uppercase tracking-wide text-app-fg-muted sm:min-w-[9.5rem]">
                 {formatPermissionGroup(groupKey)}{' '}
                 <span className="text-app-fg-muted/70">({codes.length})</span>
               </p>
@@ -221,7 +221,7 @@ export function PermissionsPreview({
                   <span
                     key={code}
                     title={code}
-                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[12px] font-medium bg-app-hover text-app-fg ring-1 ring-app-border"
+                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-base font-medium bg-app-hover text-app-fg ring-1 ring-app-border"
                   >
                     {formatPermissionCode(code)}
                   </span>
@@ -231,7 +231,7 @@ export function PermissionsPreview({
           ))}
           {orphanRevokesOnly.length > 0 ? (
             <div className="flex flex-col gap-1.5 border-t border-app-border/50 pt-3 sm:flex-row sm:items-baseline sm:gap-4">
-              <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted sm:min-w-[9.5rem]">
+              <p className="shrink-0 text-mini font-semibold uppercase tracking-wide text-app-fg-muted sm:min-w-[9.5rem]">
                 Revoked <span className="text-app-fg-muted/70">({orphanRevokesOnly.length})</span>
               </p>
               <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
@@ -239,7 +239,7 @@ export function PermissionsPreview({
                   <span
                     key={code}
                     title={`${code} — explicitly revoked`}
-                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[12px] font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/20"
+                    className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-base font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/20"
                   >
                     {formatPermissionCode(code)}
                   </span>
@@ -300,10 +300,10 @@ export function PermissionsPreview({
               className="flex flex-col gap-1.5 border-b border-app-border/50 pb-3 last:border-0 last:pb-0 sm:flex-row sm:items-baseline sm:gap-4"
             >
               <div className="flex shrink-0 items-baseline gap-2 sm:min-w-[10rem]">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted">
+                <h3 className="text-mini font-semibold uppercase tracking-wide text-app-fg-muted">
                   {formatPermissionGroup(groupKey)}
                 </h3>
-                <span className="text-[11px] text-app-fg-muted tabular-nums">
+                <span className="text-mini text-app-fg-muted tabular-nums">
                   {grantedRows.length}
                   {revokedRows.length > 0 ? (
                     <span className="ml-1 text-danger-600 dark:text-danger-400">−{revokedRows.length}</span>
@@ -319,8 +319,8 @@ export function PermissionsPreview({
                       title={`${perm.code}${perm.description ? ` — ${perm.description}` : ''}`}
                       className={
                         state === 'explicitGrant'
-                          ? 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium bg-brand-50 text-brand-700 ring-1 ring-brand-500/30 dark:bg-brand-900/30 dark:text-brand-200'
-                          : 'inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium bg-app-hover/70 text-app-fg-muted ring-1 ring-app-border/60 transition-colors hover:text-app-fg hover:ring-app-border'
+                          ? 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-mini font-medium bg-brand-50 text-brand-700 ring-1 ring-brand-500/30 dark:bg-brand-900/30 dark:text-brand-200'
+                          : 'inline-flex items-center rounded px-1.5 py-0.5 text-mini font-medium bg-app-hover/70 text-app-fg-muted ring-1 ring-app-border/60 transition-colors hover:text-app-fg hover:ring-app-border'
                       }
                     >
                       {state === 'explicitGrant' && (
@@ -334,7 +334,7 @@ export function PermissionsPreview({
                   <span
                     key={perm.code}
                     title={`${perm.code} — explicitly revoked from this user`}
-                    className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/30"
+                    className="inline-flex items-center rounded px-1.5 py-0.5 text-mini font-medium text-danger-600 dark:text-danger-400 line-through ring-1 ring-danger-500/30"
                   >
                     {stripGroupPrefix(perm.code)}
                   </span>

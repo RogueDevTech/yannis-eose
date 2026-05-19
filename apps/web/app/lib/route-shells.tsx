@@ -555,11 +555,9 @@ const entries: ShellEntry[] = [
         startDate = '';
         endDate = '';
       }
-      const leaderboardPeriod: 'this_month' | 'all_time' = periodAllTime ? 'all_time' : 'this_month';
       return (
         <CSLeaderboardLoadingShell
           filters={{ startDate, endDate, periodAllTime }}
-          leaderboardPeriod={leaderboardPeriod}
         />
       );
     },

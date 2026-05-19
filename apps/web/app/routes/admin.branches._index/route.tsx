@@ -199,7 +199,7 @@ function BranchManagementContent({ branches }: { branches: Branch[] }) {
             </div>
 
             <div className="relative z-10 text-sm text-app-fg-muted mb-4 flex-1 pointer-events-none">
-              <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-[11px] font-semibold text-app-fg-muted">
+              <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-mini font-semibold text-app-fg-muted">
                 {branch.code}
               </span>
               <span className="mx-1.5">·</span>

@@ -527,9 +527,53 @@ export function UsersListPage({
           <PageHeaderMobileTools
             sheetTitle={staffAccounts ? 'Staff accounts' : 'Users tools'}
             sheetSubtitle={
-              <span>{staffAccounts ? 'Refresh and export' : 'Refresh and add user'}</span>
+              <span>{staffAccounts ? 'Filters, refresh and export' : 'Filters, refresh and add user'}</span>
             }
             triggerAriaLabel={staffAccounts ? 'Staff accounts toolbar' : 'Users toolbar'}
+            filtersBadgeCount={filtersToolbarBadge}
+            filters={
+              <>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                  <FormSelect
+                    value={currentStatusParam}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    options={[
+                      { value: 'ALL', label: 'All Status' },
+                      { value: 'PENDING', label: 'Pending' },
+                      { value: 'ACTIVE', label: 'Active' },
+                      { value: 'INACTIVE', label: 'Inactive' },
+                      { value: 'ARCHIVED', label: 'Archived' },
+                      { value: 'DEACTIVATED', label: 'Deactivated' },
+                    ]}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="text-xs font-medium text-app-fg-muted">Role</span>
+                  <FormSelect
+                    value={currentRoleParam}
+                    onChange={(e) => handleRoleChange(e.target.value)}
+                    options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                    wrapperClassName="w-full"
+                  />
+                </div>
+                {branchPickerVisible ? (
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Branch</span>
+                    <SearchableSelect
+                      id="users-branch-filter-kebab"
+                      value={currentBranchParam}
+                      onChange={handleBranchChange}
+                      options={branchPickerOptions}
+                      placeholder="All branches"
+                      searchPlaceholder="Search branches…"
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                ) : null}
+              </>
+            }
             desktop={
               <>
                 <PageRefreshButton />
@@ -664,9 +708,10 @@ export function UsersListPage({
       )}
 
       {staffAccounts ? (
-        <div className="card p-0 overflow-hidden flex flex-col">
+        <div className="list-panel flex flex-col">
           <ToolbarFiltersCollapsible
             className="!border-0"
+            hideMobileSheet
             badgeCount={filtersToolbarBadge}
             sheetSubtitle={
               <span>Search runs on the full roster server-side. Status and role reload the list.</span>
@@ -802,9 +847,10 @@ export function UsersListPage({
         </div>
       ) : (
         <>
-          <div className="card p-0 overflow-hidden">
+          <div className="list-panel">
             <ToolbarFiltersCollapsible
               className="!border-0"
+              hideMobileSheet
               badgeCount={filtersToolbarBadge}
               sheetSubtitle={
                 <span>Search runs on the full roster server-side. Status and role reload the list.</span>

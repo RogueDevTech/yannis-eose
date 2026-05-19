@@ -19,10 +19,13 @@ export function PageRefreshButton({
   const { revalidate, state } = useRevalidator();
   const isLoading = state === 'loading';
 
+  // Match the kebab's chrome (CEO 2026-05-19) — grey fill + soft `app-border`
+  // rim with a brand hover edge. Mirrors `.btn` so refresh and the mobile
+  // tools trigger render identically on the same row.
   const mergedClassName = [
     iconOnly
-      ? 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-app-border bg-transparent p-0 text-app-fg-muted transition-colors duration-150 hover:border-brand-500/40 hover:bg-surface-100 hover:text-brand-600 focus:outline-none focus:ring-2 focus:ring-surface-400 focus:ring-offset-2 dark:hover:border-brand-400/45 dark:hover:bg-surface-800 disabled:cursor-not-allowed disabled:opacity-50'
-      : 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-app-fg-muted hover:text-brand-600 hover:bg-surface-100 dark:hover:bg-surface-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+      ? 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-app-border bg-surface-100 dark:bg-surface-800 p-0 text-app-fg-muted transition-colors duration-150 hover:border-brand-500/40 hover:bg-surface-200 hover:text-brand-600 focus:outline-none focus:ring-2 focus:ring-surface-400 focus:ring-offset-2 dark:hover:border-brand-400/45 dark:hover:bg-surface-700 disabled:cursor-not-allowed disabled:opacity-50'
+      : 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 border-app-border bg-surface-100 dark:bg-surface-800 text-xs font-medium text-app-fg-muted hover:border-brand-500/40 hover:bg-surface-200 hover:text-brand-600 dark:hover:border-brand-400/45 dark:hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
     className,
   ]
     .filter(Boolean)

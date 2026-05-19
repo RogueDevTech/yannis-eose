@@ -702,15 +702,16 @@ export const branchesRouter = router({
       const db = getDb();
       const notifications = getBranchesNotificationsService();
 
-      // CEO directive 2026-05-10: only Marketing, CS, and Branch Admin roles
-      // belong in the branching system. Block server-side so a tampered
-      // request can't bypass the UI's role filter.
+      // CEO directive 2026-05-10: only Marketing, CS, Branch Admin, and HR
+      // (added 2026-05-19) belong in the branching system. Block server-side
+      // so a tampered request can't bypass the UI's role filter.
       const BRANCH_ELIGIBLE_ROLES = new Set([
         'MEDIA_BUYER',
         'HEAD_OF_MARKETING',
         'CS_CLOSER',
         'HEAD_OF_CS',
         'BRANCH_ADMIN',
+        'HR_MANAGER',
       ]);
       const userRow = await db
         .select({ role: schema.users.role })

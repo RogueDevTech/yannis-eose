@@ -156,7 +156,7 @@ export function PermissionCheckboxPicker({
                             />
                           </label>
                           <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-wide text-app-fg-muted font-semibold">
+                            <p className="text-mini uppercase tracking-wide text-app-fg-muted font-semibold">
                               {formatPermissionGroup(groupKey)}
                             </p>
                             <p className="text-xs text-app-fg-muted">
@@ -164,7 +164,7 @@ export function PermissionCheckboxPicker({
                             </p>
                           </div>
                         </div>
-                        <span className="shrink-0 text-[11px] rounded px-2 py-0.5 border border-app-border text-app-fg-muted">
+                        <span className="shrink-0 text-mini rounded px-2 py-0.5 border border-app-border text-app-fg-muted">
                           {mixed ? 'Mixed' : allSelected ? 'All' : 'None'}
                         </span>
                       </div>
@@ -185,7 +185,7 @@ export function PermissionCheckboxPicker({
                             />
                             <span className="min-w-0">
                               <span className="block text-sm font-medium text-app-fg">{formatPermissionCode(perm.code)}</span>
-                              <span className="block font-mono text-[11px] text-app-fg-muted mt-0.5 break-all">{perm.code}</span>
+                              <span className="block font-mono text-mini text-app-fg-muted mt-0.5 break-all">{perm.code}</span>
                             </span>
                           </label>
                           <button

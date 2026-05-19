@@ -66,34 +66,34 @@ function renderMediaBuyerLeaderboardCard(buyer: LeaderboardEntry, className = ''
       <div className="px-2.5 py-2 pr-5">
         <div className="flex items-center gap-2 mb-1">
           <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-            <span className="text-[11px] font-bold text-brand-600 dark:text-brand-400">{initials}</span>
+            <span className="text-mini font-bold text-brand-600 dark:text-brand-400">{initials}</span>
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold text-app-fg truncate">{buyer.name}</p>
-            <p className="text-[10px] text-app-fg-muted truncate">
+            <p className="text-micro text-app-fg-muted truncate">
               {buyer.totalOrders} order{buyer.totalOrders !== 1 ? 's' : ''} · {buyer.deliveredOrders} delivered
             </p>
           </div>
-          <span className={`text-[11px] font-bold shrink-0 tabular-nums ${roasTextColor}`}>
+          <span className={`text-mini font-bold shrink-0 tabular-nums ${roasTextColor}`}>
             {buyer.trueRoas.toFixed(2)}x
           </span>
         </div>
 
         <div className="flex items-center gap-1.5 mb-1 min-w-0">
-          <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-hover text-app-fg-muted">
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-micro font-medium bg-app-hover text-app-fg-muted">
             <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span className="truncate min-w-0">CPA {formatNaira(Math.round(buyer.cpa))}</span>
           </span>
           {isHighCpa ? (
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide shrink-0 bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400">
               High CPA
             </span>
           ) : null}
         </div>
 
-        <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-medium text-app-fg-muted">
+        <div className="mb-1 flex items-center justify-between gap-2 text-micro font-medium text-app-fg-muted">
           <span>Conf {Math.round(buyer.confirmationRate)}%</span>
           <span>Del {Math.round(buyer.deliveryRate)}%</span>
         </div>
@@ -106,7 +106,7 @@ function renderMediaBuyerLeaderboardCard(buyer: LeaderboardEntry, className = ''
 
         {isNew && (
           <div className="mt-1.5 flex items-center gap-1">
-            <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-[9px] font-bold bg-success-500 text-white">
+            <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-2xs font-bold bg-success-500 text-white">
               JUST NOW
             </span>
           </div>
@@ -423,12 +423,12 @@ export function MarketingOverviewPage({
                   <h2 className="text-lg font-semibold text-app-fg flex items-center gap-2">
                     Live activity
                     {newCartIds.size > 0 && (
-                      <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+                      <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-micro font-bold bg-success-500 text-white">
                         {newCartIds.size} new
                       </span>
                     )}
                     {cartsFetcher.state === 'loading' && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-app-fg-muted font-normal">
+                      <span className="inline-flex items-center gap-1 text-mini text-app-fg-muted font-normal">
                         <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
@@ -592,7 +592,7 @@ export function MarketingOverviewPage({
               <h2 className="text-lg font-semibold text-app-fg flex items-center gap-2">
                 Live orders
                 {liveOrdersPage === 1 && highlightedIds.size > 0 && (
-                  <span className="animate-new-badge inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+                  <span className="animate-new-badge inline-flex items-center px-2 py-0.5 rounded-full text-micro font-bold bg-success-500 text-white">
                     {highlightedIds.size} updated
                   </span>
                 )}
@@ -689,26 +689,26 @@ export function MarketingOverviewPage({
                             <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
                               {order.customerName}
                             </p>
-                            <span className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums">
+                            <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
                               {order.totalAmount ? formatNaira(Number(order.totalAmount)) : '—'}
                             </span>
                           </div>
 
                           {/* Row 2: media buyer pill + status pill */}
                           <div className="flex items-center gap-1.5 mb-1 min-w-0">
-                            <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-app-hover text-app-fg-muted">
+                            <span className="inline-flex min-w-0 max-w-full items-center gap-1 px-1.5 py-0.5 rounded text-micro font-medium bg-app-hover text-app-fg-muted">
                               <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                               </svg>
                               <span className="truncate min-w-0">{order.mediaBuyerName ?? 'No MB'}</span>
                             </span>
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 ${statusBadge}`}>
+                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide shrink-0 ${statusBadge}`}>
                               {formatStatus(order.status)}
                             </span>
                           </div>
 
                           {/* Row 3: timestamp */}
-                          <div className="text-[10px] font-medium text-app-fg-muted truncate">
+                          <div className="text-micro font-medium text-app-fg-muted truncate">
                             {new Date(order.createdAt).toLocaleString('en-NG', {
                               month: 'short', day: 'numeric',
                               hour: '2-digit', minute: '2-digit',
@@ -718,7 +718,7 @@ export function MarketingOverviewPage({
                           {/* LIVE flash — compact */}
                           {isHighlighted && (
                             <div className="mt-1.5 flex items-center gap-1">
-                              <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-[9px] font-bold bg-success-500 text-white">
+                              <span className="animate-new-badge inline-flex items-center px-1 py-0 rounded-full text-2xs font-bold bg-success-500 text-white">
                                 JUST NOW
                               </span>
                             </div>
@@ -730,7 +730,7 @@ export function MarketingOverviewPage({
                 </div>
 
                 {localOrders.length > rows.length ? (
-                  <p className="text-[11px] text-app-fg-muted mt-2">
+                  <p className="text-mini text-app-fg-muted mt-2">
                     Showing the {rows.length} most recent · {localOrders.length - rows.length} more in the full
                     table.
                   </p>

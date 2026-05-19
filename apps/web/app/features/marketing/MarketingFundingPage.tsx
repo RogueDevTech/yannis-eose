@@ -764,7 +764,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
       )}
 
       {/* ─── Ledger: primary tabs (received | distribute) ─ */}
-      <div className="card p-0" id="funding-ledger">
+      <div className="list-panel" id="funding-ledger">
         {canDistribute && (
           <div className="px-4 pt-2">
             <Tabs
@@ -1286,7 +1286,7 @@ function CountPill({ active, children }: { active: boolean; children: ReactNode 
   return (
     <span
       className={[
-        'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+        'rounded-full px-1.5 py-0.5 text-micro font-semibold',
         active ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300' : 'bg-app-hover text-app-fg-muted',
       ].join(' ')}
     >
@@ -1583,7 +1583,7 @@ function UnifiedDistributingTable({
           const fromRequestChip =
             entry.entryType === 'transfer' && entry.sourceFundingRequestId ? (
               <span
-                className="ml-1.5 inline-flex items-center gap-1 rounded-md bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg-muted normal-case"
+                className="ml-1.5 inline-flex items-center gap-1 rounded-md bg-app-hover px-1.5 py-0.5 text-micro font-medium text-app-fg-muted normal-case"
                 title={
                   entry.sourceRequesterName
                     ? `Created from a request by ${entry.sourceRequesterName}`
@@ -1906,7 +1906,7 @@ function UnifiedReceivedTable({
           const fromRequestChip =
             isTransfer && entry.sourceFundingRequestId ? (
               <span
-                className="ml-1.5 inline-flex items-center gap-1 rounded-md bg-app-hover px-1.5 py-0.5 text-[10px] font-medium text-app-fg-muted normal-case"
+                className="ml-1.5 inline-flex items-center gap-1 rounded-md bg-app-hover px-1.5 py-0.5 text-micro font-medium text-app-fg-muted normal-case"
                 title={
                   entry.sourceRequesterName
                     ? `Created from a request by ${entry.sourceRequesterName}`

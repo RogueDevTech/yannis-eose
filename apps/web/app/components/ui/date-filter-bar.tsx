@@ -398,7 +398,7 @@ export function DateFilterBar({
                       />
                     </div>
                   </div>
-                  <p className="text-[11px] text-app-fg-muted">
+                  <p className="text-mini text-app-fg-muted">
                     Time is optional. Leave blank for whole-day filters; pages that read time narrow to the exact window.
                   </p>
                 </div>

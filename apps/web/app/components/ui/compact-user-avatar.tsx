@@ -14,7 +14,7 @@ export interface CompactUserAvatarProps {
   name: string;
   /** Tailwind size pair — defaults to `'w-6 h-6'` (matches the Closer cards). */
   sizeClassName?: string;
-  /** Tailwind text-size — defaults to `'text-[10px]'`. */
+  /** Tailwind text-size — defaults to `'text-micro'`. */
   textClassName?: string;
   /** Optional extra classes for the wrapper. */
   className?: string;
@@ -23,7 +23,7 @@ export interface CompactUserAvatarProps {
 export function CompactUserAvatar({
   name,
   sizeClassName = 'w-6 h-6',
-  textClassName = 'text-[10px]',
+  textClassName = 'text-micro',
   className = '',
 }: CompactUserAvatarProps) {
   const initials =

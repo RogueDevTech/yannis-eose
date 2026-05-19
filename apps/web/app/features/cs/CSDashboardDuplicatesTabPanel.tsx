@@ -131,19 +131,19 @@ export function CSDashboardDuplicatesTabPanel({
                         {pair.duplicate.customerName}
                       </p>
                       {pair.duplicate.totalAmount ? (
-                        <span className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums">
+                        <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
                           ₦{Number(pair.duplicate.totalAmount).toLocaleString('en-NG')}
                         </span>
                       ) : null}
                     </div>
-                    <p className="text-[10px] font-mono text-app-fg-muted truncate mb-1">
+                    <p className="text-micro font-mono text-app-fg-muted truncate mb-1">
                       {pair.duplicate.customerPhoneDisplay ?? '—'}
                     </p>
                     <div className="flex items-center gap-1.5 mb-1 min-w-0">
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 ${pillTone}`}>
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide shrink-0 ${pillTone}`}>
                         {pillLabel}
                       </span>
-                      <span className="text-[10px] font-medium text-app-fg-muted truncate">
+                      <span className="text-micro font-medium text-app-fg-muted truncate">
                         {new Date(pair.duplicate.createdAt).toLocaleString('en-NG', {
                           month: 'short',
                           day: 'numeric',
@@ -153,19 +153,19 @@ export function CSDashboardDuplicatesTabPanel({
                       </span>
                     </div>
                     {pair.original ? (
-                      <div className="text-[10px] text-app-fg-muted mb-1.5 truncate">
+                      <div className="text-micro text-app-fg-muted mb-1.5 truncate">
                         Orig:{' '}
                         <OrderIdBadge
                           id={pair.original.id}
                           length={8}
                           ellipsis=""
                           linkTo={`/admin/orders/${pair.original.id}`}
-                          textClassName="text-[10px] text-brand-500 hover:text-brand-600"
+                          textClassName="text-micro text-brand-500 hover:text-brand-600"
                           className="inline-flex"
                         />
                       </div>
                     ) : (
-                      <p className="text-[10px] text-warning-700 dark:text-warning-400 mb-1.5">
+                      <p className="text-micro text-warning-700 dark:text-warning-400 mb-1.5">
                         Original missing
                       </p>
                     )}
@@ -174,7 +174,7 @@ export function CSDashboardDuplicatesTabPanel({
                       <button
                         type="button"
                         onClick={() => onView(pair)}
-                        className="text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+                        className="text-mini font-semibold text-brand-600 dark:text-brand-400 hover:underline"
                       >
                         View →
                       </button>

@@ -69,7 +69,7 @@ export function MediaBuyerBalanceCard({
         <div className="px-2.5 py-2">
           <div className="flex items-center gap-2 mb-1.5">
             <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-              <span className="text-[11px] font-bold text-brand-600 dark:text-brand-400">{initials}</span>
+              <span className="text-mini font-bold text-brand-600 dark:text-brand-400">{initials}</span>
             </div>
             <div className="min-w-0 flex-1">
               <Link
@@ -79,11 +79,11 @@ export function MediaBuyerBalanceCard({
               >
                 {row.name}
               </Link>
-              <p className="text-[10px] text-app-fg-muted truncate">Media Buyer</p>
+              <p className="text-micro text-app-fg-muted truncate">Media Buyer</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px] leading-4">
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-micro leading-4">
             <div className="min-w-0">
               <div className="text-app-fg-muted">Balance</div>
               <div className="font-semibold text-brand-600 dark:text-brand-400 truncate">

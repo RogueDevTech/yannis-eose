@@ -1356,7 +1356,7 @@ export function AuditPage({
 
       {/* Audit log table — rows render immediately, actor names stream in */}
       <TableLoadingOverlay show={isFilterLoading}>
-      <div className="card p-0">
+      <div className="list-panel">
         {/* Desktop table */}
         <div className="hidden md:block">
           <CompactTable<AuditEntry>

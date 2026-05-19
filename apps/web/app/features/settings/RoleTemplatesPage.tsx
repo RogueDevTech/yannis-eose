@@ -235,7 +235,7 @@ export function RoleTemplatesPage({
           <span className="block text-sm font-medium text-app-fg">
             {formatPermissionCode(p.code)}
           </span>
-          <span className="block font-mono text-[11px] text-app-fg-muted break-all">
+          <span className="block font-mono text-mini text-app-fg-muted break-all">
             {p.code}
           </span>
         </div>

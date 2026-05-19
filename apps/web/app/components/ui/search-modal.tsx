@@ -185,7 +185,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
         {loading && (
           <div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
         )}
-        <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] text-app-fg-muted bg-app-hover border border-app-border rounded font-mono">
+        <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-micro text-app-fg-muted bg-app-hover border border-app-border rounded font-mono">
           ESC
         </kbd>
       </div>
@@ -208,7 +208,7 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
                         : 'hover:bg-app-hover'
                     }`}
                   >
-                    <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded ${meta?.color ?? ''}`}>
+                    <span className={`inline-flex items-center px-1.5 py-0.5 text-micro font-medium rounded ${meta?.color ?? ''}`}>
                       {meta?.label ?? result.type}
                     </span>
                     <div className="flex-1 min-w-0">
@@ -248,17 +248,17 @@ export function SearchModal({ isOpen, onClose }: SearchModalProps) {
           </div>
 
           {/* Footer */}
-          <div className="px-4 py-2 border-t border-app-border shrink-0 flex items-center gap-4 text-[11px] text-app-fg-muted pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="px-4 py-2 border-t border-app-border shrink-0 flex items-center gap-4 text-mini text-app-fg-muted pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 bg-app-hover border border-app-border rounded font-mono text-[10px]">↑↓</kbd>
+              <kbd className="px-1 py-0.5 bg-app-hover border border-app-border rounded font-mono text-micro">↑↓</kbd>
               Navigate
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 bg-app-hover border border-app-border rounded font-mono text-[10px]">↵</kbd>
+              <kbd className="px-1 py-0.5 bg-app-hover border border-app-border rounded font-mono text-micro">↵</kbd>
               Select
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="px-1 py-0.5 bg-app-hover border border-app-border rounded font-mono text-[10px]">esc</kbd>
+              <kbd className="px-1 py-0.5 bg-app-hover border border-app-border rounded font-mono text-micro">esc</kbd>
               Close
             </span>
           </div>

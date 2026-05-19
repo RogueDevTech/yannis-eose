@@ -130,7 +130,7 @@ export function BottomNavMoreModal({
                 <li key={group.group ?? `_g_${gi}`}>
                   {group.group && (
                     <div className="px-4 pt-4 pb-1 first:pt-1">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                      <span className="text-micro font-semibold uppercase tracking-wider text-app-fg-muted">
                         {group.group}
                       </span>
                     </div>
@@ -264,7 +264,7 @@ export function BottomNav({
               <span className="w-6 h-6 flex items-center justify-center flex-shrink-0 [&>svg]:w-5 [&>svg]:h-5">
                 {item.icon}
               </span>
-              <span className="text-[10px] font-medium truncate max-w-full text-center leading-tight">{item.label}</span>
+              <span className="text-micro font-medium truncate max-w-full text-center leading-tight">{item.label}</span>
             </NavLink>
           );
         })}

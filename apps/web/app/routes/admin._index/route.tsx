@@ -8,7 +8,11 @@ import { DeferredError } from '~/components/ui/deferred-section';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { DashboardPage } from '~/features/dashboard/DashboardPage';
-import { AdminQuickDashboardLoadingShell, DashboardSkeleton } from '~/features/dashboard/DashboardSkeleton';
+import {
+  AdminQuickDashboardLoadingShell,
+  DashboardSkeleton,
+  SuperAdminDashboardLoadingShell,
+} from '~/features/dashboard/DashboardSkeleton';
 import { AdminQuickDashboard, type QuickOverviewData } from '~/features/dashboard/AdminQuickDashboard';
 import { SuperAdminDashboard } from '~/features/dashboard/SuperAdminDashboard';
 import type { CEODashboardData } from '~/features/ceo/types';
@@ -138,7 +142,9 @@ export default function AdminDashboard() {
     return (
       <CachedAwait<CEODashboardData | null>
         resolve={loaderData.pageData as Promise<CEODashboardData | null>}
-        fallback={<AdminQuickDashboardLoadingShell userName={userName} role={adminRole} />}
+        fallback={
+          <SuperAdminDashboardLoadingShell userName={userName} filters={loaderData.filters} />
+        }
         loaderShell={{ variant: loaderData.variant, filters: loaderData.filters }}
         deferredKey="pageData"
         errorElement={() => <DeferredError />}

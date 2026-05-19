@@ -83,7 +83,7 @@ export function DescriptionList({
             <dt
               className={
                 dense
-                  ? 'text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted'
+                  ? 'text-micro font-semibold uppercase tracking-wide text-app-fg-muted'
                   : 'text-xs font-medium text-app-fg-muted'
               }
             >

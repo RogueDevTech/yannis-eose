@@ -29,7 +29,7 @@ function branchPillClassName(branch: UserBranchBadgeItem, compactSize: boolean):
     branch.isPrimary
       ? 'bg-brand-50 dark:bg-brand-900/20 border-brand-200 dark:border-brand-700 text-brand-700 dark:text-brand-300'
       : 'bg-app-hover border-app-border text-app-fg-muted';
-  const size = compactSize ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-0.5 text-xs';
+  const size = compactSize ? 'px-2 py-0.5 text-micro' : 'px-2.5 py-0.5 text-xs';
   return `inline-flex items-center gap-1 rounded-full border ${tone} ${size} font-medium whitespace-nowrap`;
 }
 
@@ -114,13 +114,13 @@ function CompactBranchBadgeRow({
               width: panelPos.width,
             }}
           >
-            <ul className="m-0 list-none space-y-1 pr-1 text-[11px] leading-snug text-app-fg">
+            <ul className="m-0 list-none space-y-1 pr-1 text-mini leading-snug text-app-fg">
               {listForPills.map((b) => (
                 <li key={`${b.branchId}-${b.branchCode}`}>
                   <span className="font-medium">{b.branchName}</span>
                   <span className="font-mono text-app-fg-muted"> {b.branchCode}</span>
                   {b.isPrimary ? (
-                    <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
+                    <span className="ml-1 text-micro font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-400">
                       Primary
                     </span>
                   ) : null}
@@ -173,7 +173,7 @@ export function UserBranchBadges({
 }) {
   if (!branches || branches.length === 0) {
     return (
-      <span className={compact ? 'text-[11px] text-app-fg-muted' : 'text-xs text-app-fg-muted'}>
+      <span className={compact ? 'text-mini text-app-fg-muted' : 'text-xs text-app-fg-muted'}>
         No branch
       </span>
     );
