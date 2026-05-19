@@ -860,10 +860,12 @@ function CSDashboardPageLoaded({
   } | null>(null);
   /** Reason typed/picked in the cancel modal — required, min 10 chars before Submit enables. */
   const [cancelReason, setCancelReason] = useState('Customer not picking');
-  /** Selected live activity item for detail modal */
+  /** Selected live activity item for detail modal (order-stage items only) */
   const [selectedLiveCart, setSelectedLiveCart] = useState<LiveActivityItem | null>(null);
-  /** Selected abandoned cart for the dedicated abandoned-cart modal (unmasked phone reveal). */
+  /** Selected cart for the cart detail modal (browsing + abandoned — rich fields, phone, actions). */
   const [selectedAbandonedCart, setSelectedAbandonedCart] = useState<PendingCart | null>(null);
+  /** Tracks whether the opened cart modal is for a PENDING (browsing) or ABANDONED cart. */
+  const [selectedCartStatus, setSelectedCartStatus] = useState<'PENDING' | 'ABANDONED'>('ABANDONED');
   /** Selected active (CS_ENGAGED) order for detail modal */
   const [selectedActiveOrder, setSelectedActiveOrder] = useState<CSOrder | null>(null);
   /** Selected unassigned queue order for detail modal */
@@ -1119,6 +1121,23 @@ function CSDashboardPageLoaded({
     limit: ABANDONED_CARTS_PAGE_SIZE,
   };
   const serverAbandonedCartsList = liveActivityData.abandonedCarts ?? [];
+
+  /** Route live activity card clicks: browsing/abandoned → rich cart modal, order stages → order modal. */
+  const handleLiveActivityOpen = useCallback((item: LiveActivityItem) => {
+    if (item.cartStatus === 'PENDING' || item.cartStatus === 'ABANDONED') {
+      // Look up full PendingCart from loaded data (pendingCarts covers PENDING, abandonedCarts covers ABANDONED)
+      const full =
+        (liveActivityData.pendingCarts ?? []).find((c) => c.id === item.id) ??
+        (liveActivityData.abandonedCarts ?? []).find((c) => c.id === item.id);
+      if (full) {
+        setSelectedCartStatus(item.cartStatus);
+        setSelectedAbandonedCart(full);
+        return;
+      }
+    }
+    // Order-stage items → generic live activity detail modal
+    setSelectedLiveCart(item);
+  }, [liveActivityData.pendingCarts, liveActivityData.abandonedCarts]);
   // Optimistic overlay: hide rows currently being deleted so the UI updates
   // the instant the user clicks "Clear all", not after the refetch returns.
   const abandonedCartsList = useMemo(() => {
@@ -1730,7 +1749,7 @@ function CSDashboardPageLoaded({
                           item={item}
                           isNew={newCartIds.has(item.id)}
                           isUpdated={updatedCartIds.has(item.id)}
-                          onOpen={setSelectedLiveCart}
+                          onOpen={handleLiveActivityOpen}
                         />
                       </div>
                     ))}
@@ -1786,7 +1805,7 @@ function CSDashboardPageLoaded({
                                   item={item}
                                   isNew={newCartIds.has(item.id)}
                                   isUpdated={updatedCartIds.has(item.id)}
-                                  onOpen={(i) => { setViewAllActivityOpen(false); setSelectedLiveCart(i); }}
+                                  onOpen={(i) => { setViewAllActivityOpen(false); handleLiveActivityOpen(i); }}
                                 />
                               ))}
                             </div>
@@ -1839,6 +1858,7 @@ function CSDashboardPageLoaded({
         cart={selectedAbandonedCart}
         canReveal={canDeleteCart}
         canRecover={canDeleteCart}
+        cartStatus={selectedCartStatus}
         onClose={() => setSelectedAbandonedCart(null)}
         onClear={canDeleteCart ? (c) => { setSelectedAbandonedCart(null); setDeleteCartConfirm(c); } : undefined}
       />
@@ -2665,7 +2685,7 @@ function CSDashboardPageLoaded({
                       <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
-                          onClick={() => setSelectedAbandonedCart(c)}
+                          onClick={() => { setSelectedCartStatus('ABANDONED'); setSelectedAbandonedCart(c); }}
                           className="text-[11px] font-medium text-brand-700 dark:text-brand-300 hover:underline"
                         >
                           View
