@@ -17,7 +17,6 @@ import { Button } from '~/components/ui/button';
 import { usePushSubscription } from '~/hooks/usePushSubscription';
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
-import { SlowConnectionToast } from '~/components/ui/slow-connection-toast';
 import { getFullLoaderEntry } from '~/lib/loader-cache';
 import { getShellForPath } from '~/lib/route-shells';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
@@ -1018,7 +1017,6 @@ function DashboardLayoutInner({
         </div>
       )}
       <NavProgressBar />
-      <SlowConnectionToast />
       <Sidebar
         groups={navGroups}
         collapsed={collapsed}
