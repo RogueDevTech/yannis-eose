@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { ABANDONED_CARTS_PAGE_SIZE, type AbandonedCartPagination } from '~/features/cs/types';
 
 type ActivityItem = {
@@ -150,8 +151,10 @@ export async function action({ request }: ActionFunctionArgs) {
       { method: 'POST', cookie, body: { cartId } },
     );
     if (!res.ok) {
-      const errMsg = (res.data as { error?: { message?: string } })?.error?.message ?? 'Failed to recover cart';
-      return json({ success: false, error: errMsg }, { status: 500 });
+      return json(
+        { success: false, error: extractApiErrorMessage(res.data, 'Failed to recover cart') },
+        { status: 500 },
+      );
     }
     const orderId = res.data?.result?.data?.id;
     return json({ success: true, orderId });

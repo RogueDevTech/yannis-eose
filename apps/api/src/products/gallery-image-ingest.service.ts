@@ -40,9 +40,10 @@ import {
 export class GalleryImageIngestService {
   private readonly logger = new Logger(GalleryImageIngestService.name);
 
-  /** Per-image safety caps. Match the existing presigned-URL endpoint. */
+  /** Per-image safety caps. Matches the platform-wide 2 MB image cap
+   *  enforced by the presigned-URL endpoint (CEO directive). */
   private readonly FETCH_TIMEOUT_MS = 15_000;
-  private readonly MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+  private readonly MAX_BYTES = 2 * 1024 * 1024; // 2 MB
   private readonly ALLOWED_MIME_PREFIX = 'image/';
 
   constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>) {}

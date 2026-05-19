@@ -461,7 +461,6 @@ function LogisticsOrdersPageImpl({
                   <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
                   <SearchableSelect
                     id={`logistics-row-allocate-${order.id}`}
-                    required
                     value={rowAllocateLocationByOrder[order.id] ?? ''}
                     onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
                     placeholder="Location"
@@ -485,7 +484,6 @@ function LogisticsOrdersPageImpl({
                   <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
                   <SearchableSelect
                     id={`logistics-row-dispatch-${order.id}`}
-                    required
                     value={rowDispatchRiderByOrder[order.id] ?? ''}
                     onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
                     disabled={
@@ -615,7 +613,6 @@ function LogisticsOrdersPageImpl({
               <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
               <SearchableSelect
                 id={`logistics-mobile-allocate-${order.id}`}
-                required
                 value={rowAllocateLocationByOrder[order.id] ?? ''}
                 onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
                 placeholder="Location"
@@ -639,7 +636,6 @@ function LogisticsOrdersPageImpl({
               <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
               <SearchableSelect
                 id={`logistics-mobile-dispatch-${order.id}`}
-                required
                 value={rowDispatchRiderByOrder[order.id] ?? ''}
                 onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
                 placeholder="Rider"
@@ -1229,7 +1225,6 @@ function EditDeliveryDateModal({
               onUpload={setReceiptUrl}
               accept="image/*,.pdf"
               label="Upload receipt"
-              required
             />
           </div>
         </div>

@@ -19,6 +19,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Tabs } from '~/components/ui/tabs';
+import { FilterPills } from '~/components/ui/filter-pills';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import { FormSelect } from '~/components/ui/form-select';
@@ -149,7 +150,7 @@ export function DeliveryRemittancesPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigation = useNavigation();
-  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
+  const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   const { totalPages, page, pageSize } = pagination;
   const {
     totalPages: eligibleTotalPages,
@@ -184,8 +185,20 @@ export function DeliveryRemittancesPage({
     return p.get('tab') === 'remittances' ? 'remittances' : 'eligible';
   }, [tabSearch]);
 
+  /**
+   * Same trick as `viewTab` — read the status pill value from the *pending*
+   * URL during loader revalidation, so the pill snaps to the clicked value
+   * on the same React tick instead of waiting for the server response.
+   * CEO directive: no sluggish UI feedback.
+   */
+  const pendingStatus = useMemo(() => {
+    const p = new URLSearchParams(tabSearch);
+    return p.get('status') ?? '';
+  }, [tabSearch]);
+
   const setViewTab = useCallback(
     (tab: 'remittances' | 'eligible') => {
+      primeSamePathRefetch();
       setSearchParams(
         (p) => {
           const next = new URLSearchParams(p);
@@ -197,10 +210,11 @@ export function DeliveryRemittancesPage({
         { replace: true },
       );
     },
-    [setSearchParams],
+    [primeSamePathRefetch, setSearchParams],
   );
 
   const handleLocationChange = (locationId: string) => {
+    primeSamePathRefetch();
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
@@ -213,6 +227,7 @@ export function DeliveryRemittancesPage({
 
   const handleEligibleSearchChange = (value: string) => {
     const trimmed = value.trim();
+    primeSamePathRefetch();
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('eligiblePage', '1');
@@ -223,11 +238,26 @@ export function DeliveryRemittancesPage({
   };
 
   const handleSentByChange = (userId: string) => {
+    primeSamePathRefetch();
     setSearchParams((p) => {
       const next = new URLSearchParams(p);
       next.set('page', '1');
       if (!userId) next.delete('sentBy');
       else next.set('sentBy', userId);
+      return next;
+    });
+  };
+
+  const handleStatusChange = (status: string) => {
+    // Paint the table overlay on the SAME frame as the click — without this,
+    // `isLoaderRefetchBusy` only goes true once Remix has scheduled the
+    // navigation, which can look unresponsive on fast networks.
+    primeSamePathRefetch();
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (!status) next.delete('status');
+      else next.set('status', status);
       return next;
     });
   };
@@ -637,7 +667,7 @@ export function DeliveryRemittancesPage({
                 </span>
               ) : null,
           },
-          { value: 'remittances', label: `Confirmed remittances (${pagination.total})` },
+          { value: 'remittances', label: `Remitted (${Number(summary.totalCount)})` },
         ]}
       />
 
@@ -718,6 +748,21 @@ export function DeliveryRemittancesPage({
               }
             />
           </div>
+
+          {/* Status filter pills — narrow the Remitted list to a single
+              lifecycle stage. Counts come from the summary (status-agnostic),
+              so they don't reshuffle as the user clicks between pills. */}
+          <FilterPills
+            size="sm"
+            value={pendingStatus}
+            onChange={handleStatusChange}
+            options={[
+              { value: '', label: 'All', count: Number(summary.totalCount) },
+              { value: 'SENT', label: 'Pending', count: Number(summary.pendingCount), dotColor: 'bg-warning-500' },
+              { value: 'RECEIVED', label: 'Received', count: Number(summary.receivedCount), dotColor: 'bg-success-500' },
+              { value: 'DISPUTED', label: 'Disputed', count: Number(summary.disputedCount), dotColor: 'bg-danger-500' },
+            ]}
+          />
 
           <CompactTable<DeliveryRemittanceListItem>
             columns={remittanceColumns}

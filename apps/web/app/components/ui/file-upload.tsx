@@ -7,6 +7,8 @@ interface FileUploadProps {
   folder: AssetFolder;
   onUpload: (url: string) => void;
   accept?: string;
+  /** Hard cap on file size. Platform default is 2 MB (CEO directive) — do
+   *  not override upward unless you have a specific business reason. */
   maxSizeMB?: number;
   label?: string;
   /**
@@ -31,7 +33,7 @@ export function FileUpload({
   folder,
   onUpload,
   accept = 'image/*',
-  maxSizeMB = 10,
+  maxSizeMB = 2,
   label,
   name,
   required,

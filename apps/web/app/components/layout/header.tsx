@@ -227,10 +227,12 @@ export function Header({
     >
       {/* Left: mobile menu + logo (mobile). Desktop: no flex-grow so branch + actions stay one cluster. */}
       <div className="flex items-center gap-3 flex-1 min-w-0 max-w-lg lg:flex-none lg:max-w-none">
-        {/* Mobile hamburger — before logo */}
+        {/* Mobile hamburger — before logo. Sized to match the bell + avatar
+            so the entire mobile top bar reads as one row of equal-weight
+            chrome (CEO consistency directive). */}
         <button
           onClick={onMobileMenuToggle}
-          className="lg:hidden p-1.5 rounded-lg text-app-fg hover:bg-app-hover transition-colors"
+          className="lg:hidden inline-flex h-9 w-9 items-center justify-center rounded-lg text-app-fg hover:bg-app-hover transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
@@ -314,7 +316,8 @@ export function Header({
                   <button
                     ref={notifTriggerRef}
                     onClick={() => setNotifOpen(!notifOpen)}
-                    className="relative p-1.5 rounded-lg text-app-fg hover:bg-app-hover transition-colors"
+                    className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-app-fg hover:bg-app-hover transition-colors"
+                    aria-label="Notifications"
                   >
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path
@@ -540,7 +543,8 @@ export function Header({
             <button
               type="button"
               onClick={() => setMobileUserMenuOpen(true)}
-              className="md:hidden flex items-center gap-2 pl-2 border-l border-app-border hover:opacity-80 transition-opacity"
+              className="md:hidden inline-flex h-9 w-9 items-center justify-center rounded-lg hover:bg-app-hover transition-colors"
+              aria-label="Account menu"
             >
               <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center">
                 <span className="text-xs font-semibold text-white">

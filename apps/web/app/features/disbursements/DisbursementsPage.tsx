@@ -275,7 +275,7 @@ function CreateDisbursementModal({
       return;
     }
     const fd = new FormData(formEl);
-    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     fetcher.submit(fd, { method: 'post' });
   };
 
@@ -313,7 +313,6 @@ function CreateDisbursementModal({
           <SearchableSelect
             id="disbursement-create-receiver"
             label="Recipient"
-            required
             value={receiverId}
             onChange={setReceiverId}
             placeholder="Select recipient..."
@@ -338,7 +337,6 @@ function CreateDisbursementModal({
               folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Payment receipt"
-              required
               onUpload={(url) => setReceiptUrl(url)}
               onUploadStateChange={setUploadState}
             />
@@ -477,7 +475,7 @@ export function DisbursementsPage({
       return;
     }
     const fd = new FormData(formEl);
-    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     fd.set('amount', String(parsed.data.amount));
     requestActionFetcher.submit(fd, { method: 'post' });
   };
@@ -1414,7 +1412,6 @@ export function DisbursementsPage({
               </label>
               <AmountInput
                 name="amount"
-                required
                 defaultValue={String(approvingRequestRow.amount)}
                 className="input w-full"
               />
@@ -1423,7 +1420,6 @@ export function DisbursementsPage({
               folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Receipt image"
-              required
               onUpload={(url) => setApproveRequestReceiptUrl(url)}
               onUploadStateChange={setApproveRequestUploadState}
             />

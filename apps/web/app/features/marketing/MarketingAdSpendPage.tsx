@@ -471,7 +471,7 @@ export function MarketingAdSpendPage({
       return;
     }
     const fd = new FormData(e.currentTarget);
-    fd.set('screenshotUrl', parsed.data.screenshotUrl);
+    fd.set('screenshotUrl', parsed.data.screenshotUrl ?? '');
     fd.set('spendAmount', spendRaw);
     fd.set('platform', parsed.data.platform);
     if (parsed.data.platformCustomLabel) {
@@ -502,7 +502,7 @@ export function MarketingAdSpendPage({
     }
     const fd = new FormData(e.currentTarget);
     fd.set('adSpendId', parsed.data.adSpendId);
-    fd.set('screenshotUrl', parsed.data.screenshotUrl);
+    fd.set('screenshotUrl', parsed.data.screenshotUrl ?? '');
     fd.set('spendAmount', spendRaw);
     fd.set('spendDate', parsed.data.spendDate);
     fd.set('campaignId', editFormCampaignId);
@@ -894,7 +894,6 @@ export function MarketingAdSpendPage({
                 id="marketing-adspend-create-campaign"
                 label="Campaign"
                 placeholder="Select campaign..."
-                required
                 value={formCampaignId}
                 onChange={setFormCampaignId}
                 searchPlaceholder="Search campaigns..."
@@ -908,7 +907,6 @@ export function MarketingAdSpendPage({
                 id="marketing-adspend-create-product"
                 label="Product"
                 placeholder={products.length === 0 && secondaryLoading ? 'Loading products…' : 'Select product...'}
-                required
                 value={formProductId}
                 onChange={setFormProductId}
                 disabled={products.length === 0 && secondaryLoading}
@@ -920,7 +918,6 @@ export function MarketingAdSpendPage({
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Spend Amount ({'\u20A6'})</label>
               <AmountInput
                 name="spendAmount"
-                required
                 placeholder="e.g. 15,000.00"
                 className="input"
                 value={formSpendAmount}
@@ -932,7 +929,6 @@ export function MarketingAdSpendPage({
                 label="Spend Date"
                 name="spendDate"
                 type="date"
-                required
                 value={formSpendDate}
                 onChange={(e) => setFormSpendDate(e.target.value)}
               />
@@ -959,7 +955,6 @@ export function MarketingAdSpendPage({
                   onChange={(e) => setFormPlatformCustomLabel(e.target.value)}
                   placeholder="e.g. Snapchat, Taboola"
                   maxLength={80}
-                  required
                 />
               </div>
             )}
@@ -968,7 +963,6 @@ export function MarketingAdSpendPage({
                 folder={ASSET_FOLDERS.SCREENSHOTS}
                 name="screenshotUrl"
                 label="Ads Manager Screenshot"
-                required
                 onUpload={(url) => setAdSpendScreenshotUrl(url)}
                 onUploadStateChange={setAdSpendFileUploadState}
               />
@@ -1080,7 +1074,6 @@ export function MarketingAdSpendPage({
                   id="marketing-adspend-edit-campaign"
                   label="Campaign"
                   placeholder="Select campaign..."
-                  required
                   value={editFormCampaignId}
                   onChange={setEditFormCampaignId}
                   searchPlaceholder="Search campaigns..."
@@ -1094,7 +1087,6 @@ export function MarketingAdSpendPage({
                   id="marketing-adspend-edit-product"
                   label="Product"
                   placeholder={products.length === 0 && secondaryLoading ? 'Loading products…' : 'Select product...'}
-                  required
                   value={editFormProductId}
                   onChange={setEditFormProductId}
                   disabled={products.length === 0 && secondaryLoading}
@@ -1106,7 +1098,6 @@ export function MarketingAdSpendPage({
                 <label className="block text-sm font-medium text-app-fg-muted mb-1">Spend Amount ({'\u20A6'})</label>
                 <AmountInput
                   name="spendAmount"
-                  required
                   placeholder="e.g. 15,000.00"
                   className="input"
                   value={editFormSpendAmount}
@@ -1118,7 +1109,6 @@ export function MarketingAdSpendPage({
                   label="Spend Date"
                   name="spendDate"
                   type="date"
-                  required
                   value={editFormSpendDate}
                   onChange={(e) => setEditFormSpendDate(e.target.value)}
                 />
@@ -1127,7 +1117,6 @@ export function MarketingAdSpendPage({
                 <FileUpload
                   folder={ASSET_FOLDERS.SCREENSHOTS}
                   label="Ads Manager Screenshot"
-                  required
                   onUpload={(url) => setEditScreenshotUrl(url)}
                   onUploadStateChange={setEditFileUploadState}
                 />

@@ -48,9 +48,12 @@ export async function createSignedAssetUpload(args: {
   });
 
   if (config.provider === 'gcs') {
-    const storage = new Storage({
-      projectId: config.projectId || undefined,
-    });
+    // Inside Docker on GCE the metadata server isn't reachable by default,
+    // so ADC fails. Support an inline service-account key via env var.
+    const keyJson = process.env['GCS_SERVICE_ACCOUNT_KEY_JSON']?.trim();
+    const storage = keyJson
+      ? new Storage({ projectId: config.projectId || undefined, credentials: JSON.parse(keyJson) })
+      : new Storage({ projectId: config.projectId || undefined });
     const [uploadUrl] = await storage.bucket(config.bucket).file(key).getSignedUrl({
       version: 'v4',
       action: 'write',

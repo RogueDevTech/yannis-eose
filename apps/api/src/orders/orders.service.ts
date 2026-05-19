@@ -1598,11 +1598,26 @@ export class OrdersService {
 
     // 2. Build order input from cart + CS overrides.
     const phoneHash = this.hashPhone(cart.customerPhone);
-    const items = overrides.items && overrides.items.length > 0
-      ? overrides.items
-      : cart.productId
-        ? [{ productId: cart.productId, quantity: cart.quantity ?? 1, unitPrice: 0, offerLabel: cart.offerLabel ?? undefined }]
-        : [];
+    let items: Array<{ productId: string; quantity: number; unitPrice: number; offerLabel?: string }>;
+    if (overrides.items && overrides.items.length > 0) {
+      items = overrides.items;
+    } else if (cart.productId) {
+      // No CS override — synthesize from the cart. We MUST resolve the real tier price,
+      // otherwise create() rejects it: orderSource='edge-form' runs
+      // `assertEdgeFormLineItemsAllowlisted`, which compares item.unitPrice against the
+      // campaign's allowlisted tiers; a placeholder 0 never matches and the recovery fails
+      // with "Offer selection does not match this form."
+      const quantity = cart.quantity ?? 1;
+      const unitPrice = await this.resolveCartTierPrice({
+        campaignId: cart.campaignId,
+        productId: cart.productId,
+        offerLabel: cart.offerLabel,
+        quantity,
+      });
+      items = [{ productId: cart.productId, quantity, unitPrice, offerLabel: cart.offerLabel ?? undefined }];
+    } else {
+      items = [];
+    }
     if (items.length === 0) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'At least one item is required' });
     }
@@ -1641,6 +1656,102 @@ export class OrdersService {
   /** SHA-256 hash of phone for offline order creation (server-side only). */
   private hashPhone(phone: string): string {
     return createHash('sha256').update(phone.trim()).digest('hex');
+  }
+
+  /**
+   * Cart recovery: pull the tier price for (campaign, product, offerLabel, quantity).
+   * Mirrors the source-of-truth lookup in `assertEdgeFormLineItemsAllowlisted` so the
+   * synthesized line items pass the same allowlist gate.
+   *
+   * Lookup order matches the gate: campaign offer_group → product offer_templates →
+   * product.offers JSON → product.baseSalePrice. If nothing matches the label/qty,
+   * falls back to product.baseSalePrice (the cart predates the current tier list).
+   */
+  private async resolveCartTierPrice(params: {
+    campaignId: string;
+    productId: string;
+    offerLabel: string | null | undefined;
+    quantity: number;
+  }): Promise<number> {
+    const { campaignId, productId, offerLabel, quantity } = params;
+    const labelTrim = (offerLabel ?? '').trim();
+
+    const [camp] = await this.db
+      .select({
+        offerGroupId: schema.campaigns.offerGroupId,
+        formConfig: schema.campaigns.formConfig,
+      })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.id, campaignId))
+      .limit(1);
+
+    if (camp?.offerGroupId) {
+      const rows = await this.db
+        .select({
+          label: schema.offerGroupItems.label,
+          price: schema.offerGroupItems.price,
+          quantity: schema.offerGroupItems.quantity,
+        })
+        .from(schema.offerGroupItems)
+        .where(
+          and(
+            eq(schema.offerGroupItems.offerGroupId, camp.offerGroupId),
+            eq(schema.offerGroupItems.productId, productId),
+            eq(schema.offerGroupItems.status, 'ACTIVE'),
+          ),
+        );
+      const match = rows.find(
+        (r) =>
+          (r.quantity ?? 1) === quantity &&
+          (labelTrim ? r.label.trim() === labelTrim : true),
+      ) ?? rows[0];
+      if (match) return Number(match.price);
+    }
+
+    const selectedIds = (camp?.formConfig as { selectedOfferTemplateIds?: string[] } | null | undefined)
+      ?.selectedOfferTemplateIds;
+    const tmplConds = [
+      eq(schema.offerTemplates.productId, productId),
+      eq(schema.offerTemplates.status, 'ACTIVE'),
+    ];
+    if (selectedIds?.length) {
+      tmplConds.push(inArray(schema.offerTemplates.id, selectedIds));
+    }
+    const templates = await this.db
+      .select({
+        name: schema.offerTemplates.name,
+        price: schema.offerTemplates.price,
+        quantity: schema.offerTemplates.quantity,
+      })
+      .from(schema.offerTemplates)
+      .where(and(...tmplConds));
+    const tmplMatch =
+      templates.find(
+        (t) =>
+          (t.quantity ?? 1) === quantity &&
+          (labelTrim ? t.name.trim() === labelTrim : true),
+      ) ?? templates[0];
+    if (tmplMatch) return Number(tmplMatch.price);
+
+    const [product] = await this.db
+      .select({ baseSalePrice: schema.products.baseSalePrice, offers: schema.products.offers })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId))
+      .limit(1);
+    const embedded = product?.offers as
+      | Array<{ label?: string; qty?: number; price?: string | number }>
+      | null
+      | undefined;
+    if (Array.isArray(embedded)) {
+      const embMatch =
+        embedded.find(
+          (o) =>
+            (typeof o.qty === 'number' ? o.qty : 1) === quantity &&
+            (labelTrim ? String(o.label ?? '').trim() === labelTrim : true),
+        ) ?? embedded[0];
+      if (embMatch?.price != null) return Number(embMatch.price);
+    }
+    return Number(product?.baseSalePrice ?? 0);
   }
 
   /**

@@ -193,7 +193,6 @@ export function CashRemittanceCreateModal({
             onUpload={(url) => setReceiptUrls((prev) => [...prev, url])}
             onUploadStateChange={(s) => setUploadState(s)}
             label="Upload receipt(s)"
-            required
           />
           {receiptUrls.length > 0 && (
             <ul className="text-xs text-app-fg-muted space-y-1">
@@ -229,24 +228,55 @@ export function CashRemittanceCreateModal({
           />
         </div>
 
-        <div className="rounded-lg border border-app-border bg-app-elevated p-3">
-          <label className="flex items-start gap-2 cursor-pointer">
+        <label
+          className={`block rounded-lg border p-3 cursor-pointer transition-colors ${
+            markReceivedNow
+              ? 'border-brand-500 ring-1 ring-brand-500/30 bg-brand-50 dark:bg-brand-900/15'
+              : 'border-app-border bg-app-elevated hover:border-brand-300 dark:hover:border-brand-700'
+          }`}
+        >
+          <div className="flex items-start gap-3">
             <Checkbox
               checked={markReceivedNow}
               onChange={(e) => setMarkReceivedNow(e.target.checked)}
+              // Override default 16px / app-elevated bg — the card behind this
+              // checkbox is also app-elevated (or brand-tinted when on), which
+              // made the unchecked box vanish. Bigger size + thicker border +
+              // app-bg fill restores visibility in both states.
+              className="!w-5 !h-5 !border-2 !bg-app-bg mt-0.5 shrink-0"
             />
-            <div>
-              <span className="text-sm font-medium text-app-fg">
-                Mark this remittance Received now
-              </span>
-              <p className="text-xs text-app-fg-muted mt-0.5">
-                Cash already in hand. Submitting will mark the remittance received AND flip every
-                selected order from <span className="font-semibold">DELIVERED</span> to{' '}
-                <span className="font-semibold">REMITTED</span> in the same step.
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-app-fg">
+                  Mark Received now
+                </span>
+                <span
+                  className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                    markReceivedNow
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-app-hover text-app-fg-muted'
+                  }`}
+                >
+                  {markReceivedNow ? 'On' : 'Off'}
+                </span>
+              </div>
+              <p className="text-xs text-app-fg-muted mt-1">
+                {markReceivedNow ? (
+                  <>
+                    Batch will be created <span className="font-semibold text-success-700 dark:text-success-400">AND</span>{' '}
+                    immediately Received. Orders flip{' '}
+                    <span className="font-semibold">DELIVERED → REMITTED</span> in the same step.
+                  </>
+                ) : (
+                  <>
+                    Batch will be created as <span className="font-semibold">Pending</span> — Finance reviews and marks
+                    Received later. Toggle on only if cash is already in hand.
+                  </>
+                )}
               </p>
             </div>
-          </label>
-        </div>
+          </div>
+        </label>
 
         {error && (
           <div className="rounded-md bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700/50 px-3 py-2">

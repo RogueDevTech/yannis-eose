@@ -976,7 +976,7 @@ export class LogisticsService {
           toLocationId: input.toLocationId,
           productId: input.productId,
           quantitySent: input.quantitySent,
-          receiptUrl: input.receiptUrl,
+          receiptUrl: input.receiptUrl ?? '',
           status: 'SENT',
           sentBy: actor.id,
         })
@@ -2501,6 +2501,12 @@ export class LogisticsService {
       deliveryRate: number;
       delinquencyRate: number;
       statusBreakdown: { status: string; count: number; pct: number }[];
+      /** Sum of order totals on this provider's RECEIVED batches in the period. */
+      remittedAmount: string;
+      /** Sum of order totals on this provider's still-SENT (Pending) batches in the period. */
+      pendingRemittanceAmount: string;
+      /** Sum of order totals on this provider's DISPUTED batches in the period. */
+      disputedRemittanceAmount: string;
     }>
   > {
     // Default to month-to-date when no range supplied — matches marketing page UX.
@@ -2573,6 +2579,46 @@ export class LogisticsService {
       })
       .from(schema.logisticsProviders);
 
+    // ── Pass 4: per-provider remittance amounts ────────────────────────────
+    // Same period filter as orders (allocated_at) so the cell aligns with the
+    // Assigned/Delivered columns: "of the orders this provider got in this
+    // period, how much cash has come back through Finance".
+    const remittanceConditions: SQL[] = [];
+    if (effectiveStart) remittanceConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
+    if (effectiveEnd) remittanceConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
+    if (branchId) remittanceConditions.push(eq(schema.orders.branchId, branchId));
+
+    const remittanceRows = await this.db
+      .select({
+        providerId: schema.logisticsLocations.providerId,
+        remittedAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'RECEIVED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        pendingRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'SENT' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+        disputedRemittanceAmount: sql<string>`COALESCE(SUM(CASE WHEN ${schema.deliveryRemittances.status} = 'DISPUTED' THEN ${schema.orders.totalAmount} ELSE 0 END), 0)::text`,
+      })
+      .from(schema.deliveryRemittances)
+      .innerJoin(
+        schema.deliveryRemittanceOrders,
+        eq(schema.deliveryRemittanceOrders.deliveryRemittanceId, schema.deliveryRemittances.id),
+      )
+      .innerJoin(schema.orders, eq(schema.orders.id, schema.deliveryRemittanceOrders.orderId))
+      .innerJoin(
+        schema.logisticsLocations,
+        eq(schema.logisticsLocations.id, schema.deliveryRemittances.logisticsLocationId),
+      )
+      .where(remittanceConditions.length > 0 ? and(...remittanceConditions) : undefined)
+      .groupBy(schema.logisticsLocations.providerId);
+
+    const remittanceByProvider = new Map<string, { received: string; pending: string; disputed: string }>();
+    for (const r of remittanceRows) {
+      if (r.providerId) {
+        remittanceByProvider.set(r.providerId, {
+          received: r.remittedAmount,
+          pending: r.pendingRemittanceAmount,
+          disputed: r.disputedRemittanceAmount,
+        });
+      }
+    }
+
     // ── Build rollup ───────────────────────────────────────────────────────
     const result = providers.map((p) => {
       const counts = statusCountsByProvider.get(p.id) ?? new Map<string, number>();
@@ -2635,6 +2681,7 @@ export class LogisticsService {
         });
       }
 
+      const remit = remittanceByProvider.get(p.id);
       return {
         providerId: p.id,
         providerName: p.name,
@@ -2652,6 +2699,9 @@ export class LogisticsService {
         deliveryRate,
         delinquencyRate,
         statusBreakdown,
+        remittedAmount: remit?.received ?? '0',
+        pendingRemittanceAmount: remit?.pending ?? '0',
+        disputedRemittanceAmount: remit?.disputed ?? '0',
       };
     });
 
