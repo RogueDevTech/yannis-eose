@@ -177,7 +177,6 @@ export interface CSActivityItem {
 /** Tab keys for Live Activities (/admin/cs/queue). */
 export const CS_QUEUE_TAB_VALUES = [
   'queue',
-  'duplicates',
   'abandoned',
   'callbacks',
   'hotswap',

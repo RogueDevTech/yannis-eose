@@ -1932,21 +1932,6 @@ function CSDashboardPageLoaded({
                 ]
               : []),
             {
-              value: 'duplicates',
-              label: 'Possible duplicates',
-              badge: (
-                <DeferredSection resolve={flaggedDuplicates} fallback={<CSTabCountBadgeSkeleton />}>
-                  {(pairs: DuplicatePair[]) =>
-                    pairs.length > 0 ? (
-                      <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400 text-[10px] font-bold">
-                        {pairs.length}
-                      </span>
-                    ) : null
-                  }
-                </DeferredSection>
-              ),
-            },
-            {
               value: 'abandoned',
               label: 'Cart abandonment',
               badge:
@@ -2504,28 +2489,6 @@ function CSDashboardPageLoaded({
                 workloads={workloads}
                 selectedIds={selectedCallbackIds}
                 onToggle={toggleCallbackSelection}
-              />
-            </Suspense>
-          )}
-        </DeferredSection>
-      )}
-
-      {/* ── Duplicates Tab ──────────────────────────── */}
-      {activeTab === 'duplicates' && (
-        <DeferredSection resolve={flaggedDuplicates} fallback={<CSDuplicatesTabDeferredFallback />}>
-          {(pairs: DuplicatePair[]) => (
-            <Suspense fallback={<CSDuplicatesTabDeferredFallback />}>
-              <CSDashboardDuplicatesTabPanel
-                pairs={pairs}
-                onView={setCompareDuplicatePair}
-                selectedIds={selectedDuplicateIds}
-                onToggle={toggleDuplicateSelection}
-                onPickFirst={(count) =>
-                  setSelectedDuplicateIds(new Set(pairs.slice(0, count).map((p) => p.duplicate.id)))
-                }
-                onClearSelection={clearDuplicateSelection}
-                onBulkDismiss={() => setBulkDismissDuplicatesConfirmOpen(true)}
-                bulkDismissBusy={bulkDismissDuplicatesFetcher.state !== 'idle'}
               />
             </Suspense>
           )}

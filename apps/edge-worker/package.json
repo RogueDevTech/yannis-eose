@@ -15,6 +15,7 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
+    "@upstash/redis": "^1.34.3",
     "@yannis/shared": "workspace:*"
   },
   "devDependencies": {
