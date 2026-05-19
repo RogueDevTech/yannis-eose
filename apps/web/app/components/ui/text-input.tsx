@@ -13,6 +13,12 @@ interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
   leftIcon?: React.ReactNode;
   /** Icon node rendered on the right side */
   rightIcon?: React.ReactNode;
+  /**
+   * Interactive node rendered on the right side (e.g. show/hide password button).
+   * Unlike `rightIcon`, this is pointer-events-enabled and won't bake in
+   * `pointer-events-none`. Mutually exclusive with `rightIcon`.
+   */
+  rightAction?: React.ReactNode;
   /** Text/node rendered as a fixed left addon (e.g. "https://") */
   leftAddon?: React.ReactNode;
   /** Text/node rendered as a fixed right addon (e.g. ".com") */
@@ -51,6 +57,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       error,
       leftIcon,
       rightIcon,
+      rightAction,
       leftAddon,
       rightAddon,
       controlSize = 'md',
@@ -73,7 +80,7 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       leftAddon ? 'rounded-l-none' : '',
       rightAddon ? 'rounded-r-none' : '',
       leftIcon ? iconPaddingClasses[controlSize].left : '',
-      rightIcon ? iconPaddingClasses[controlSize].right : '',
+      rightIcon || rightAction ? iconPaddingClasses[controlSize].right : '',
       sizeClasses[controlSize],
       className,
     ]
@@ -122,6 +129,12 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
                   .join(' ')}
               >
                 {rightIcon}
+              </span>
+            )}
+
+            {rightAction && !rightIcon && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center text-app-fg-muted">
+                {rightAction}
               </span>
             )}
           </div>

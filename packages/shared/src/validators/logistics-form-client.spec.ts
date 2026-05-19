@@ -12,14 +12,14 @@ describe('createRemittanceSchema', () => {
     expect(r.success).toBe(true);
   });
 
-  it('rejects missing receipt URL', () => {
+  it('accepts empty receipt URL (optional per CEO 2026-05 directive)', () => {
     const r = createRemittanceSchema.safeParse({
       productId: '550e8400-e29b-41d4-a716-446655440001',
       toLocationId: '550e8400-e29b-41d4-a716-446655440002',
       quantitySent: 5,
       receiptUrl: '',
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
   });
 });
 

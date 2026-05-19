@@ -18,6 +18,7 @@ import {
 import type { LogisticsProviderRow } from './team-types';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { NairaPrice } from '~/components/ui/naira-price';
 
 export interface LogisticsTeamPageProps {
   providers: LogisticsProviderRow[];
@@ -166,7 +167,7 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
       <div className="min-w-0 mb-3">
         <div className="font-medium text-app-fg truncate">{row.providerName}</div>
         <div className="text-xs text-app-fg-muted">
-          {row.locationCount} location{row.locationCount === 1 ? '' : 's'} · {row.status}
+          {row.locationCount} location{row.locationCount === 1 ? '' : 's'}
         </div>
       </div>
 
@@ -183,6 +184,27 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
           <div className="text-app-fg-muted">Returned</div>
           <div className="font-semibold tabular-nums">{row.returned}</div>
         </div>
+      </div>
+
+      <div className="text-xs mb-3">
+        <div className="text-app-fg-muted">Remitted</div>
+        <div className="font-semibold tabular-nums text-app-fg">
+          <NairaPrice amount={row.remittedAmount} zeroAsDash />
+        </div>
+        {(Number(row.pendingRemittanceAmount) > 0 || Number(row.disputedRemittanceAmount) > 0) && (
+          <div className="flex flex-wrap gap-1 mt-1 text-[10px]">
+            {Number(row.pendingRemittanceAmount) > 0 && (
+              <span className="px-1 py-0.5 rounded bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
+                Pending <NairaPrice amount={row.pendingRemittanceAmount} />
+              </span>
+            )}
+            {Number(row.disputedRemittanceAmount) > 0 && (
+              <span className="px-1 py-0.5 rounded bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400">
+                Disputed <NairaPrice amount={row.disputedRemittanceAmount} />
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-xs mb-3">
@@ -290,10 +312,7 @@ export function LogisticsTeamPage({
         key: 'provider',
         header: 'Provider',
         render: (p) => (
-          <div className="min-w-0">
-            <div className="font-medium text-app-fg truncate">{p.providerName}</div>
-            <div className="text-xs text-app-fg-muted">{p.status}</div>
-          </div>
+          <div className="font-medium text-app-fg truncate min-w-0">{p.providerName}</div>
         ),
       },
       {
@@ -345,6 +364,43 @@ export function LogisticsTeamPage({
         render: (p) => p.returned,
       },
       {
+        key: 'remitted',
+        header: 'Remitted',
+        align: 'right',
+        nowrap: true,
+        render: (p) => {
+          const pending = Number(p.pendingRemittanceAmount) || 0;
+          const disputed = Number(p.disputedRemittanceAmount) || 0;
+          return (
+            <div className="flex flex-col items-end gap-0.5">
+              <span className="text-sm font-medium text-app-fg tabular-nums">
+                <NairaPrice amount={p.remittedAmount} zeroAsDash />
+              </span>
+              {(pending > 0 || disputed > 0) && (
+                <div className="flex items-center gap-1 text-[10px] tabular-nums">
+                  {pending > 0 && (
+                    <span
+                      className="px-1 py-0.5 rounded bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400"
+                      title="Pending Finance review"
+                    >
+                      Pending <NairaPrice amount={p.pendingRemittanceAmount} />
+                    </span>
+                  )}
+                  {disputed > 0 && (
+                    <span
+                      className="px-1 py-0.5 rounded bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400"
+                      title="Disputed by Finance"
+                    >
+                      Disputed <NairaPrice amount={p.disputedRemittanceAmount} />
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        },
+      },
+      {
         key: 'statusMix',
         header: (
           <span title={STATUS_SPLIT_HELP} className="cursor-help border-b border-dotted border-app-fg-muted/60">
@@ -371,14 +427,14 @@ export function LogisticsTeamPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Logistics Team Analysis"
+        title="Logistics Agent Analysis"
         mobileInlineActions
         description="View provider delivery performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Logistics team tools"
+            sheetTitle="Logistics agent tools"
             sheetSubtitle={<span>Date range</span>}
-            triggerAriaLabel="Logistics team toolbar and date range"
+            triggerAriaLabel="Logistics agent toolbar and date range"
             desktop={
               <>
                 <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">

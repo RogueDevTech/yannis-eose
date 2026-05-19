@@ -7,7 +7,10 @@ import { getCurrentUser } from '~/lib/api.server';
 import { createSignedAssetUpload } from '~/lib/object-storage.server';
 
 const ALLOWED_FOLDERS = new Set<AssetFolder>(Object.values(ASSET_FOLDERS));
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+// Platform-wide cap (CEO directive): 2 MB on every uploaded image. The
+// client-side `FileUpload` component pre-validates the same number, but this
+// is the authoritative limit — a hand-crafted POST cannot bypass it.
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
 
 interface UploadUrlRequest {
   folder?: AssetFolder;

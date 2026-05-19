@@ -31,7 +31,7 @@ describe('createAdSpendLogFormSchema', () => {
     expect(r.success).toBe(false);
   });
 
-  it('rejects empty screenshot URL', () => {
+  it('accepts empty screenshot URL (optional per CEO 2026-05 directive)', () => {
     const r = createAdSpendLogFormSchema.safeParse({
       campaignId: '550e8400-e29b-41d4-a716-446655440001',
       productId: '550e8400-e29b-41d4-a716-446655440002',
@@ -39,7 +39,7 @@ describe('createAdSpendLogFormSchema', () => {
       spendDate: '2026-04-27',
       screenshotUrl: '',
     });
-    expect(r.success).toBe(false);
+    expect(r.success).toBe(true);
   });
 
   it('requires platformCustomLabel when platform is OTHER', () => {
@@ -155,13 +155,13 @@ describe('createAdSpendBatchSchema', () => {
 });
 
 describe('createFundingSchema', () => {
-  it('requires receipt URL', () => {
-    const bad = createFundingSchema.safeParse({
+  it('accepts empty receipt URL (optional per CEO 2026-05 directive)', () => {
+    const empty = createFundingSchema.safeParse({
       receiverId: '550e8400-e29b-41d4-a716-446655440003',
       amount: '5000',
       receiptUrl: '',
     });
-    expect(bad.success).toBe(false);
+    expect(empty.success).toBe(true);
     const ok = createFundingSchema.safeParse({
       receiverId: '550e8400-e29b-41d4-a716-446655440003',
       amount: '5000',

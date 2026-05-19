@@ -5,6 +5,17 @@ import {
   ORDERABLE_STANDARD_FIELD_KEYS,
 } from '../marketing/form-field-order';
 
+/**
+ * Optional asset URL — accepts blank, http(s), and rejects everything else.
+ * Treats empty string as `undefined` so downstream code can do a single
+ * truthy check. Used for receipts, screenshots, ad URLs — every image field
+ * is optional per the platform-wide directive (CEO 2026-05).
+ */
+const optionalAssetUrl = z
+  .union([z.literal(''), z.string().url()])
+  .optional()
+  .transform((v) => (v ? v : undefined));
+
 // ============================================
 // Marketing Funding Validators
 // ============================================
@@ -12,7 +23,7 @@ import {
 export const createFundingSchema = z.object({
   receiverId: z.string().uuid(),
   amount: z.coerce.number().min(0).multipleOf(0.01),
-  receiptUrl: z.string().url().min(1),
+  receiptUrl: optionalAssetUrl,
   paymentMethod: z.string().max(100).optional(),
   notes: z.string().max(500).optional(),
 });
@@ -106,7 +117,7 @@ export const approveFundingRequestSchema = z.object({
   requestId: z.string().uuid(),
   /** Amount actually sent (must be ≤ requested amount; server enforces cap). */
   amount: z.coerce.number().positive().multipleOf(0.01),
-  receiptUrl: z.string().url().min(1),
+  receiptUrl: optionalAssetUrl,
 });
 export type ApproveFundingRequestInput = z.infer<typeof approveFundingRequestSchema>;
 
@@ -130,17 +141,13 @@ const platformCustomLabelSchema = z
   .optional()
   .transform((v) => (typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined));
 
-/** Optional URL — accepts blank, http(s), and rejects everything else. */
-const adUrlSchema = z
-  .union([z.literal(''), z.string().url()])
-  .optional()
-  .transform((v) => (v ? v : undefined));
+const adUrlSchema = optionalAssetUrl;
 
 const createAdSpendObjectSchema = z.object({
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),
   spendAmount: z.coerce.number().min(0).multipleOf(0.01),
-  screenshotUrl: z.string().url().min(1),
+  screenshotUrl: optionalAssetUrl,
   spendDate: z.string().date(),
   notes: z.string().max(500).optional(),
   platform: adPlatformSchema.default('FACEBOOK'),
@@ -303,7 +310,7 @@ export type RejectAdSpendInput = z.infer<typeof rejectAdSpendSchema>;
 export const updateAdSpendSchema = z.object({
   adSpendId: z.string().uuid(),
   spendAmount: z.coerce.number().min(0).multipleOf(0.01),
-  screenshotUrl: z.string().url().min(1),
+  screenshotUrl: optionalAssetUrl,
   spendDate: z.string().date(),
   productId: z.string().uuid().optional(),
   campaignId: z.string().uuid().optional(),

@@ -776,7 +776,7 @@ export function DeliveryRemittancesLoadingShell({
         onChange={(v) => setViewTab(v as 'remittances' | 'eligible')}
         tabs={[
           { value: 'eligible', label: 'Awaiting remittance' },
-          { value: 'remittances', label: 'Confirmed remittances' },
+          { value: 'remittances', label: 'Remitted' },
         ]}
       />
 
@@ -838,6 +838,16 @@ export function DeliveryRemittancesLoadingShell({
                 </>
               }
             />
+          </div>
+          {/* Pills skeleton — keeps the layout aligned with the loaded state,
+              which renders <FilterPills /> for All/Pending/Received/Disputed. */}
+          <div className="flex gap-1.5">
+            {['All', 'Pending', 'Received', 'Disputed'].map((label) => (
+              <div
+                key={label}
+                className="h-7 w-20 rounded-full border border-app-border bg-app-hover/40 animate-pulse"
+              />
+            ))}
           </div>
           <CompactTable<{ id: string }>
             caption="Cash remittance batches"
