@@ -76,6 +76,10 @@ API_URL = "https://dev-api-office.hqyannis.com"
 # dev-form.hqyannis.com. The matching TURNSTILE_SECRET_KEY is stored as a
 # Worker secret (see DEPLOY.md), not in this file.
 TURNSTILE_SITE_KEY = "0x4AAAAAADRynbkd8QFbdKEC"
+# Upstash Redis REST endpoint — last-ditch buffer when API + QStash both
+# fail. URL is non-sensitive (just an HTTPS endpoint); the matching
+# UPSTASH_REDIS_REST_TOKEN is stored as a Worker secret (see DEPLOY.md).
+UPSTASH_REDIS_REST_URL = "https://concrete-drum-130060.upstash.io"
 
 [env.gcp-dev.triggers]
 crons = ["* * * * *"]
