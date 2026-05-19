@@ -114,6 +114,19 @@
         state: reloaded
       when: not nginx_marker.stat.exists
 
+    # --- Cloudflare real-IP (always re-applied; idempotent by content) -----
+    # Dropped into /etc/nginx/conf.d/ so it loads into the http {} context and
+    # applies to every server block — no need to edit per-vhost configs (which
+    # certbot has modified in-place after first issuance).
+    - name: Install Cloudflare real-IP config
+      ansible.builtin.copy:
+        src: cloudflare-real-ip.conf
+        dest: /etc/nginx/conf.d/cloudflare-real-ip.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload nginx
+
     # --- TLS (Let's Encrypt) ------------------------------------------------
     - name: Check whether TLS cert already exists for web hostname
       ansible.builtin.stat:
@@ -142,3 +155,16 @@
         group: root
         mode: "0644"
       when: not nginx_marker.stat.exists
+
+  handlers:
+    # Validate-then-reload pattern: `nginx -t` aborts the handler chain if
+    # the config is invalid, so a typo can't take the site down on reload.
+    - name: Reload nginx
+      block:
+        - name: Validate nginx config before reload
+          ansible.builtin.command: nginx -t
+          changed_when: false
+        - name: Reload nginx service
+          ansible.builtin.systemd:
+            name: nginx
+            state: reloaded

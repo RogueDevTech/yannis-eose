@@ -1,3 +1,4 @@
+import { Redis } from '@upstash/redis/cloudflare';
 import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX, normalizeCampaignFieldOrder } from '@yannis/shared';
 
 /**
@@ -5,8 +6,9 @@ import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX, normalizeCampaignFieldOrder } from '@
  *
  * Handles sales form submissions at the Cloudflare Edge.
  * Implements: rate limiting, dedup, inventory budget cap,
- * circuit breaker with QStash failover, phone hashing,
- * campaign config loading, embed modes, and offline IndexedDB fallback.
+ * circuit breaker with QStash failover, Upstash Redis defense-in-depth
+ * (drained by per-minute cron), phone hashing, campaign config loading,
+ * embed modes, and offline IndexedDB fallback.
  */
 
 export interface Env {
@@ -16,10 +18,36 @@ export interface Env {
   EDGE_API_KEY: string;
   TURNSTILE_SITE_KEY: string;
   TURNSTILE_SECRET_KEY: string;
+  // Upstash Redis REST endpoint — used ONLY as a last-resort buffer when both
+  // the API and QStash are unreachable. Drained back to the API by the
+  // healer cron. Optional: if either is unset, Redis fallback is skipped.
+  UPSTASH_REDIS_REST_URL?: string;
+  UPSTASH_REDIS_REST_TOKEN?: string;
   DEDUP_CACHE: KVNamespace;
   RATE_LIMIT_CACHE: KVNamespace;
   INVENTORY_CACHE: KVNamespace;
   CAMPAIGN_CACHE: KVNamespace;
+}
+
+// Redis queue config — single source of truth for keys + retry policy.
+const REDIS_PENDING_KEY = 'edge:orders:pending';
+const REDIS_DEAD_LETTER_KEY = 'edge:orders:dead-letter';
+const REDIS_MAX_ATTEMPTS = 6;          // ~6 minutes of retries at 1-per-minute cron
+const REDIS_DRAIN_BATCH_SIZE = 20;     // max orders processed per cron tick (CPU budget)
+
+function getRedis(env: Env): Redis | null {
+  if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN) return null;
+  return new Redis({
+    url: env.UPSTASH_REDIS_REST_URL,
+    token: env.UPSTASH_REDIS_REST_TOKEN,
+  });
+}
+
+interface QueuedOrder {
+  payload: unknown;          // the OrderCreatePayload — kept loose to avoid coupling here
+  attempts: number;
+  firstQueuedAt: string;
+  lastAttemptAt: string | null;
 }
 
 // ── Types ──────────────────────────────────────────────────────
@@ -647,6 +675,85 @@ async function bufferToQStash(
   } catch {
     return false;
   }
+}
+
+// ── Redis Failover (last-resort defense-in-depth) ───────────────
+// Fires only when BOTH the direct API call AND QStash fail. Orders sit on a
+// Redis list until the per-minute healer cron drains them back to the API.
+
+async function bufferToRedis(payload: OrderCreatePayload, env: Env): Promise<boolean> {
+  const redis = getRedis(env);
+  if (!redis) return false;
+
+  const queued: QueuedOrder = {
+    payload,
+    attempts: 0,
+    firstQueuedAt: new Date().toISOString(),
+    lastAttemptAt: null,
+  };
+
+  try {
+    await redis.rpush(REDIS_PENDING_KEY, JSON.stringify(queued));
+    return true;
+  } catch (err) {
+    console.error('[redis-failover] rpush failed:', err);
+    return false;
+  }
+}
+
+// Drain up to REDIS_DRAIN_BATCH_SIZE pending orders back to the API. Called
+// from the healer cron when the API has been observed healthy. Each order
+// gets up to REDIS_MAX_ATTEMPTS retries before being moved to a dead-letter
+// list for manual replay. Order semantics: FIFO within attempts, but a
+// retried order goes to the tail so it doesn't block fresh ones.
+async function drainRedisQueue(env: Env): Promise<{ drained: number; requeued: number; deadLettered: number }> {
+  const redis = getRedis(env);
+  if (!redis) return { drained: 0, requeued: 0, deadLettered: 0 };
+
+  let drained = 0;
+  let requeued = 0;
+  let deadLettered = 0;
+
+  for (let i = 0; i < REDIS_DRAIN_BATCH_SIZE; i += 1) {
+    const raw = (await redis.lpop(REDIS_PENDING_KEY)) as string | null;
+    if (!raw) break;
+
+    let queued: QueuedOrder;
+    try {
+      // Upstash REST returns parsed JSON when the stored value is JSON-shaped.
+      queued = typeof raw === 'string' ? JSON.parse(raw) : (raw as QueuedOrder);
+    } catch {
+      // Corrupt entry — dead-letter and move on rather than block the queue.
+      await redis.rpush(REDIS_DEAD_LETTER_KEY, raw);
+      deadLettered += 1;
+      continue;
+    }
+
+    queued.attempts += 1;
+    queued.lastAttemptAt = new Date().toISOString();
+
+    const apiResult = await forwardToApi(queued.payload as OrderCreatePayload, env);
+
+    if (apiResult.ok) {
+      drained += 1;
+      continue;
+    }
+
+    if (queued.attempts >= REDIS_MAX_ATTEMPTS) {
+      await redis.rpush(REDIS_DEAD_LETTER_KEY, JSON.stringify(queued));
+      deadLettered += 1;
+      console.error(
+        `[redis-drain] dead-lettered after ${queued.attempts} attempts (first queued ${queued.firstQueuedAt})`,
+      );
+      continue;
+    }
+
+    // Push back to the tail with incremented attempts so fresh orders aren't blocked.
+    await redis.rpush(REDIS_PENDING_KEY, JSON.stringify(queued));
+    requeued += 1;
+  }
+
+  return { drained, requeued, deadLettered };
 }
 
 // ── Form Styles (shared across all form modes) ─────────────────
@@ -1924,18 +2031,32 @@ export default {
 
   /**
    * Healer cron — runs every 60 seconds.
-   * When the API is healthy, this job does nothing meaningful.
-   * The primary purpose is to provide a heartbeat check and log
-   * API health status. QStash handles its own retries internally,
-   * so there's no manual buffer draining needed.
+   *
+   * Responsibilities:
+   *   1. Heartbeat — check API health, log status.
+   *   2. Drain — when the API is healthy AND Upstash Redis is configured,
+   *      pull buffered orders off `edge:orders:pending` and replay them.
+   *      Failed replays go back to the tail with an incremented attempts
+   *      counter; after REDIS_MAX_ATTEMPTS they move to
+   *      `edge:orders:dead-letter` for manual replay.
+   *
+   * QStash handles its own retries internally — the cron does not touch it.
    */
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const healthy = await isApiHealthy(env);
     if (!healthy) {
-      console.log('[healer] API is unhealthy — QStash will continue retrying buffered orders');
+      console.log('[healer] API is unhealthy — buffers will continue holding orders');
       return;
     }
-    console.log('[healer] API is healthy — all systems nominal');
+
+    const result = await drainRedisQueue(env);
+    if (result.drained || result.requeued || result.deadLettered) {
+      console.log(
+        `[healer] drained=${result.drained} requeued=${result.requeued} deadLettered=${result.deadLettered}`,
+      );
+    } else {
+      console.log('[healer] API healthy, no pending orders to drain');
+    }
   },
 };
 
@@ -2237,7 +2358,19 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
       });
     }
 
-    // QStash also failed — last resort.
+    // 9b. QStash also failed — last-ditch Redis buffer (drained by healer cron).
+    const redisBuffered = await bufferToRedis(orderPayload, env);
+    if (redisBuffered) {
+      await markDedup(data.customerPhone, productIds, env, data.mediaBuyerId);
+      return corsResponse({
+        success: true,
+        message: 'Order received, processing shortly',
+        buffered: true,
+        bufferedVia: 'redis',
+      });
+    }
+
+    // All three buffers failed.
     // If we aborted waiting for the API, the request may still have completed server-side
     // (common cause of "order exists in CS but form shows an error").
     const timedOut = (apiResult.data as { timedOut?: boolean })?.timedOut === true;
