@@ -381,14 +381,14 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
             <div className="min-w-0 space-y-2">
               <h3 id={detailTitleId} className="text-base font-semibold text-app-fg leading-snug">
                 <span className="text-app-fg-muted font-normal">Spreadsheet column · </span>
-                <span className="text-[15px] font-semibold text-app-fg">{detailColumn.label}</span>
+                <span className="text-xl font-semibold text-app-fg">{detailColumn.label}</span>
               </h3>
               {detailColumn.required ? (
-                <span className="inline-flex text-[10px] uppercase tracking-wider rounded-md bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-2 py-0.5 font-semibold">
+                <span className="inline-flex text-micro uppercase tracking-wider rounded-md bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-2 py-0.5 font-semibold">
                   Required in every row
                 </span>
               ) : (
-                <span className="inline-flex text-[10px] uppercase tracking-wider rounded-md bg-app-hover text-app-fg-muted px-2 py-0.5 font-semibold">
+                <span className="inline-flex text-micro uppercase tracking-wider rounded-md bg-app-hover text-app-fg-muted px-2 py-0.5 font-semibold">
                   Optional
                 </span>
               )}
@@ -415,7 +415,7 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
           >
             <p className="text-sm text-app-fg leading-relaxed">{detailColumn.description}</p>
             <div className="rounded-md border border-app-border bg-app-hover/40 px-3 py-2 space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-app-fg-muted">
+              <p className="text-micro font-semibold uppercase tracking-wider text-app-fg-muted">
                 Header names — case &amp; spacing don&apos;t matter
               </p>
               <p className="text-xs text-app-fg-muted">
@@ -425,7 +425,7 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
               <ul className="flex flex-wrap gap-1">
                 {[detailColumn.label, detailColumn.header, ...detailColumn.alsoAccepts].map((alias) => (
                   <li key={alias}>
-                    <code className="font-mono text-[11px] rounded bg-app-elevated border border-app-border px-1.5 py-0.5 text-app-fg">
+                    <code className="font-mono text-mini rounded bg-app-elevated border border-app-border px-1.5 py-0.5 text-app-fg">
                       {alias}
                     </code>
                   </li>
@@ -434,7 +434,7 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
             </div>
             {detailColumn.referenceGuide && detailColumn.referenceGuide.length > 0 ? (
               <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                   Full list — spreadsheet cell may use either column
                 </p>
                 <ul className="flex flex-col gap-2">
@@ -453,12 +453,12 @@ function ColumnsReferenceGrid({ branches }: { branches: BranchInfo[] }) {
             ) : null}
             {detailExamples.length > 0 ? (
               <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                   Example values
                   {(detailColumn.header === 'primary_branch' ||
                     detailColumn.header === 'additional_branches') &&
                   branches.length > 0 ? (
-                    <span className="ml-1.5 text-[10px] font-normal normal-case tracking-normal text-app-fg-muted">
+                    <span className="ml-1.5 text-micro font-normal normal-case tracking-normal text-app-fg-muted">
                       — pulled from your branches
                     </span>
                   ) : null}
@@ -800,10 +800,10 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
 
           <div>
             <div className="flex items-baseline justify-between gap-2 mb-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+              <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                 Expected columns
               </p>
-              <p className="text-[10px] text-app-fg-muted">
+              <p className="text-micro text-app-fg-muted">
                 Header names are case-insensitive
               </p>
             </div>

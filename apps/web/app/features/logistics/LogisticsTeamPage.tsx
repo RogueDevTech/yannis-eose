@@ -192,7 +192,7 @@ function ProviderCard({ row, detailTo }: { row: LogisticsProviderRow; detailTo: 
           <NairaPrice amount={row.remittedAmount} zeroAsDash />
         </div>
         {(Number(row.pendingRemittanceAmount) > 0 || Number(row.disputedRemittanceAmount) > 0) && (
-          <div className="flex flex-wrap gap-1 mt-1 text-[10px]">
+          <div className="flex flex-wrap gap-1 mt-1 text-micro">
             {Number(row.pendingRemittanceAmount) > 0 && (
               <span className="px-1 py-0.5 rounded bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
                 Pending <NairaPrice amount={row.pendingRemittanceAmount} />
@@ -377,7 +377,7 @@ export function LogisticsTeamPage({
                 <NairaPrice amount={p.remittedAmount} zeroAsDash />
               </span>
               {(pending > 0 || disputed > 0) && (
-                <div className="flex items-center gap-1 text-[10px] tabular-nums">
+                <div className="flex items-center gap-1 text-micro tabular-nums">
                   {pending > 0 && (
                     <span
                       className="px-1 py-0.5 rounded bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400"
@@ -433,8 +433,20 @@ export function LogisticsTeamPage({
         actions={
           <PageHeaderMobileTools
             sheetTitle="Logistics agent tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetSubtitle={<span>Sort and date range</span>}
             triggerAriaLabel="Logistics agent toolbar and date range"
+            filtersBadgeCount={logisticsTeamToolbarFilterBadge}
+            filters={
+              <SortMenu
+                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                onChange={(next) =>
+                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                }
+                defaultValue={{ sortBy: 'deliveryRate', sortDir: 'desc' }}
+                options={SORT_MENU_OPTIONS}
+                className="w-full justify-center"
+              />
+            }
             desktop={
               <>
                 <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -500,6 +512,7 @@ export function LogisticsTeamPage({
       <div>
         <ToolbarFiltersCollapsible
           className="mb-4 !border-0 px-0 py-0"
+          hideMobileSheet
           badgeCount={logisticsTeamToolbarFilterBadge}
           sheetSubtitle={<span>Sort options apply immediately</span>}
           searchRow={

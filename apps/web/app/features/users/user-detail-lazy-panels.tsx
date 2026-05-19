@@ -102,7 +102,7 @@ export function UserDetailActivityTabContent({ entries }: { entries: UserAuditEn
                 <div className="w-1.5 h-1.5 rounded-full bg-brand-500 mt-1.5 flex-shrink-0" />
                 <div className="min-w-0 flex-1">
                   <p className="text-app-fg truncate">{formatActivityDescription(entry)}</p>
-                  <p className="text-app-fg-muted text-[11px] mt-0.5">
+                  <p className="text-app-fg-muted text-mini mt-0.5">
                     {new Date(entry.createdAt).toLocaleDateString('en-NG', {
                       month: 'short',
                       day: 'numeric',
@@ -116,7 +116,7 @@ export function UserDetailActivityTabContent({ entries }: { entries: UserAuditEn
           </div>
           {totalPages > 1 && (
             <div className="pt-2 border-t border-app-border flex items-center justify-between">
-              <p className="text-[11px] text-app-fg-muted">
+              <p className="text-mini text-app-fg-muted">
                 Showing {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, entries.length)} of {entries.length}
               </p>
               <Pagination page={safePage} totalPages={totalPages} onPageChange={setPage} />

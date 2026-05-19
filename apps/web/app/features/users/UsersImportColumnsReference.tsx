@@ -148,7 +148,7 @@ export function UsersImportColumnsReference({ branches }: { branches: BranchInfo
             onClick={() => setDetailColumn(c)}
             className="inline-flex items-center gap-1 rounded-md border border-app-border bg-app-hover/30 px-2 py-1 text-app-fg-muted hover:bg-brand-50 hover:border-brand-200 hover:text-brand-700 dark:hover:bg-brand-900/25 dark:hover:border-brand-700 dark:hover:text-brand-300 transition-colors"
           >
-            <code className="font-mono text-[11px] font-medium text-app-fg" title={c.header}>
+            <code className="font-mono text-mini font-medium text-app-fg" title={c.header}>
               {c.header}
               {c.required ? (
                 <span className="ml-0.5 text-danger-500" aria-hidden="true">*</span>
@@ -172,16 +172,16 @@ export function UsersImportColumnsReference({ branches }: { branches: BranchInfo
             <div className="min-w-0 space-y-2">
               <h3 id={detailTitleId} className="text-base font-semibold text-app-fg leading-snug">
                 <span className="text-app-fg-muted font-normal">Spreadsheet column · </span>
-                <code className="font-mono text-[15px] font-semibold text-app-fg">
+                <code className="font-mono text-xl font-semibold text-app-fg">
                   {detailColumn.header}
                 </code>
               </h3>
               {detailColumn.required ? (
-                <span className="inline-flex text-[10px] uppercase tracking-wider rounded-md bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-2 py-0.5 font-semibold">
+                <span className="inline-flex text-micro uppercase tracking-wider rounded-md bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300 px-2 py-0.5 font-semibold">
                   Required in every row
                 </span>
               ) : (
-                <span className="inline-flex text-[10px] uppercase tracking-wider rounded-md bg-app-hover text-app-fg-muted px-2 py-0.5 font-semibold">
+                <span className="inline-flex text-micro uppercase tracking-wider rounded-md bg-app-hover text-app-fg-muted px-2 py-0.5 font-semibold">
                   Optional
                 </span>
               )}
@@ -215,7 +215,7 @@ export function UsersImportColumnsReference({ branches }: { branches: BranchInfo
             <p className="text-sm text-app-fg leading-relaxed">{detailColumn.description}</p>
             {detailColumn.referenceGuide && detailColumn.referenceGuide.length > 0 ? (
               <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                   Full list — spreadsheet cell may use either column
                 </p>
                 <ul className="flex flex-col gap-2">
@@ -236,12 +236,12 @@ export function UsersImportColumnsReference({ branches }: { branches: BranchInfo
             ) : null}
             {detailExamples.length > 0 ? (
               <div className="space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-app-fg-muted">
+                <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
                   Example values
                   {(detailColumn.header === 'primary_branch' ||
                     detailColumn.header === 'additional_branches') &&
                   branches.length > 0 ? (
-                    <span className="ml-1.5 text-[10px] font-normal normal-case tracking-normal text-app-fg-muted">
+                    <span className="ml-1.5 text-micro font-normal normal-case tracking-normal text-app-fg-muted">
                       — pulled from your branches
                     </span>
                   ) : null}

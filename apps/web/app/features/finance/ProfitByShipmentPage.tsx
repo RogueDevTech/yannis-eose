@@ -118,7 +118,7 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
         render: (l) => (
           <span className="tabular-nums text-app-fg-muted">
             {l.receivedQuantity}
-            <span className="text-[10px] ml-1 text-app-fg-muted/70">/ {l.expectedQuantity} exp</span>
+            <span className="text-micro ml-1 text-app-fg-muted/70">/ {l.expectedQuantity} exp</span>
           </span>
         ),
       },
@@ -155,7 +155,7 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
         render: (l) => (
           <span className="tabular-nums text-app-fg-muted">
             {l.unitsSold}
-            <span className="text-[10px] ml-1 text-app-fg-muted/70">{l.unitsRemaining} left</span>
+            <span className="text-micro ml-1 text-app-fg-muted/70">{l.unitsRemaining} left</span>
           </span>
         ),
       },

@@ -441,7 +441,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
             <span key={step} className="flex items-center gap-2">
               <span
                 className={[
-                  'inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-[10px] font-semibold',
+                  'inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-micro font-semibold',
                   reached
                     ? isCurrent
                       ? 'bg-brand-500 text-white'
@@ -459,7 +459,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
           );
         })}
         {status === 'CANCELLED' ? (
-          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-danger-100 px-2 py-1 text-[10px] font-semibold text-danger-700 dark:bg-danger-900/30 dark:text-danger-300">
+          <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-danger-100 px-2 py-1 text-micro font-semibold text-danger-700 dark:bg-danger-900/30 dark:text-danger-300">
             Cancelled
           </span>
         ) : null}

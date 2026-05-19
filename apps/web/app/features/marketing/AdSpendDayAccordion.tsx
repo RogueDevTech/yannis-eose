@@ -473,7 +473,7 @@ export function AdSpendDayAccordion({
                           {formatDate(g.spendDate)}
                         </span>
                         {relativeLabel && (
-                          <span className="text-[11px] uppercase tracking-wider text-app-fg-muted/80 font-medium shrink-0">
+                          <span className="text-mini uppercase tracking-wider text-app-fg-muted/80 font-medium shrink-0">
                             {relativeLabel}
                           </span>
                         )}

@@ -83,7 +83,7 @@ function CSTeamCompactStat({
       <span className={['block text-sm font-semibold leading-none', valueClassName].filter(Boolean).join(' ')}>
         {value}
       </span>
-      <span className="mt-1 block text-[10px] font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+      <span className="mt-1 block text-micro font-medium uppercase tracking-[0.14em] text-app-fg-muted">
         {label}
       </span>
     </div>
@@ -117,12 +117,12 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-app-fg">{member.name}</p>
-              <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+              <p className="truncate text-mini font-medium uppercase tracking-[0.14em] text-app-fg-muted">
                 {roleLabel}
               </p>
             </div>
             {isAgent && member.isIdle && (
-              <span className="shrink-0 rounded-full bg-warning-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning-700 dark:text-warning-300">
+              <span className="shrink-0 rounded-full bg-warning-500/10 px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-warning-700 dark:text-warning-300">
                 Idle
               </span>
             )}
@@ -145,7 +145,7 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
             <CSTeamCompactStat label={member.isIdle ? 'Status' : 'Active'} value={activityValue} valueClassName={activityToneClass} />
           </div>
           <div className="space-y-1">
-            <div className="flex items-center justify-between text-[11px] font-medium text-app-fg-muted">
+            <div className="flex items-center justify-between text-mini font-medium text-app-fg-muted">
               <span>Lagos duty</span>
               <span className={dutyToneClass}>{Math.round(progressPct)}%</span>
             </div>
@@ -400,8 +400,31 @@ export function CSTeamPage({
           dateFilters ? (
             <PageHeaderMobileTools
               sheetTitle="CS team tools"
-              sheetSubtitle={<span>Date range and export</span>}
+              sheetSubtitle={<span>Filters, date range and export</span>}
               triggerAriaLabel="CS team toolbar and date range"
+              filtersBadgeCount={filtersBadgeCount}
+              filters={
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Activity</span>
+                    <FormSelect
+                      value={activityFilter}
+                      onChange={(event) => mergeListParams({ activity: event.target.value, page: 1 })}
+                      options={CS_ACTIVITY_OPTIONS}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Backlog</span>
+                    <FormSelect
+                      value={backlogFilter}
+                      onChange={(event) => mergeListParams({ backlog: event.target.value, page: 1 })}
+                      options={CS_BACKLOG_OPTIONS}
+                      wrapperClassName="w-full"
+                    />
+                  </div>
+                </>
+              }
               desktop={
                 <>
                   <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -496,6 +519,7 @@ export function CSTeamPage({
       <div>
         <ToolbarFiltersCollapsible
           className="mb-4 !border-0 px-0 py-0"
+          hideMobileSheet
           badgeCount={filtersBadgeCount}
           sheetSubtitle={<span>Filter closers by live activity and backlog</span>}
           searchRow={
@@ -580,7 +604,7 @@ export function CSTeamPage({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="card p-0">
+          <div className="list-panel">
             <CompactTable
               withCard={false}
               columns={teamColumns}

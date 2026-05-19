@@ -172,7 +172,7 @@ export function NotificationsPage({
                       {n.body && (
                         <p className="text-xs text-app-fg-muted mt-0.5 line-clamp-2">{n.body}</p>
                       )}
-                      <p className="text-[11px] text-app-fg-muted mt-1">
+                      <p className="text-mini text-app-fg-muted mt-1">
                         {formatNotificationTime(n.createdAt)}
                       </p>
                     </div>

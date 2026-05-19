@@ -447,7 +447,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
                       return normalizedGroups.map((group, groupIndex) => (
                         <div key={`${group.label || 'ungrouped'}-${groupIndex}`} className="min-w-0">
                           {group.label ? (
-                            <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted">
+                            <p className="px-2 pb-1 pt-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted">
                               {group.label}
                             </p>
                           ) : null}

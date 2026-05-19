@@ -4521,6 +4521,11 @@ export class OrdersService {
     }>
   > {
     const { todayStartUtc, weekStartUtc, monthStartUtc } = OrdersService.lagosPeriodBoundaries();
+    // Pre-serialise to ISO strings — raw `sql\`\`` templates don't carry the
+    // column-type hint that `gte()` / `lte()` do, so postgres-js can't bind a
+    // Date instance and throws "Received an instance of Date".
+    const todayIso = todayStartUtc.toISOString();
+    const weekIso = weekStartUtc.toISOString();
 
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.status, 'DELIVERED'),
@@ -4533,8 +4538,8 @@ export class OrdersService {
         productId: schema.orderItems.productId,
         productName: schema.products.name,
         brandName: schema.productCategories.brandName,
-        today: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.deliveredAt} >= ${todayStartUtc})::int`,
-        thisWeek: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.deliveredAt} >= ${weekStartUtc})::int`,
+        today: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.deliveredAt} >= ${todayIso}::timestamptz)::int`,
+        thisWeek: sql<number>`COUNT(*) FILTER (WHERE ${schema.orders.deliveredAt} >= ${weekIso}::timestamptz)::int`,
         thisMonth: sql<number>`COUNT(*)::int`,
       })
       .from(schema.orderItems)
@@ -4566,6 +4571,11 @@ export class OrdersService {
     thisMonth: number;
   }> {
     const { todayStartUtc, weekStartUtc, monthStartUtc } = OrdersService.lagosPeriodBoundaries();
+    // See note in getDeliveriesByProduct — Date interpolation into raw `sql\`\``
+    // breaks the postgres-js parameter binder; ISO string + ::timestamptz cast
+    // is the safe path.
+    const todayIso = todayStartUtc.toISOString();
+    const weekIso = weekStartUtc.toISOString();
 
     const conditions: Parameters<typeof and>[0][] = [
       eq(schema.orders.status, 'DELIVERED'),
@@ -4575,8 +4585,8 @@ export class OrdersService {
 
     const [row] = await this.db
       .select({
-        today: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${todayStartUtc} THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
-        thisWeek: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${weekStartUtc} THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
+        today: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${todayIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
+        thisWeek: sql<string>`COALESCE(SUM(CASE WHEN ${schema.orders.deliveredAt} >= ${weekIso}::timestamptz THEN CAST(${schema.orders.totalAmount} AS numeric) ELSE 0 END), 0)`,
         thisMonth: sql<string>`COALESCE(SUM(CAST(${schema.orders.totalAmount} AS numeric)), 0)`,
       })
       .from(schema.orders)

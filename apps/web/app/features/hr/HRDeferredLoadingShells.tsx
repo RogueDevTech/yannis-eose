@@ -552,7 +552,7 @@ export function StaffOnboardingDocsLoadingShell() {
           { label: 'Approved', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
-      <div className="card p-0 overflow-hidden">
+      <div className="list-panel">
         <div className="p-3 border-b border-app-border flex gap-2">
           <div className="h-9 flex-1 rounded-md bg-app-hover animate-pulse" aria-hidden />
           <div className="h-9 w-24 rounded-md bg-app-hover animate-pulse" aria-hidden />

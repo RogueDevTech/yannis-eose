@@ -54,7 +54,7 @@ export function CountPill({
   if (hideZero && count === 0) return null;
 
   const baseChrome =
-    'inline-flex items-center gap-1.5 pl-1.5 pr-1 py-0.5 rounded-full border text-[11px] font-medium tabular-nums';
+    'inline-flex items-center gap-1.5 pl-1.5 pr-1 py-0.5 rounded-full border text-mini font-medium tabular-nums';
   const chromeIdle = 'border-app-border bg-app-elevated text-app-fg';
   const chromeActive =
     'border-brand-400 bg-brand-50 text-app-fg dark:border-brand-700 dark:bg-brand-900/30';
@@ -68,7 +68,7 @@ export function CountPill({
       <span>{label}</span>
       <span
         className={[
-          'ml-0.5 inline-flex min-w-[1rem] items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums',
+          'ml-0.5 inline-flex min-w-[1rem] items-center justify-center rounded-full px-1.5 text-micro font-semibold tabular-nums',
           active
             ? 'bg-brand-100 text-brand-700 dark:bg-brand-800/60 dark:text-brand-200'
             : 'bg-app-hover text-app-fg-muted',

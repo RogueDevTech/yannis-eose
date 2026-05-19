@@ -6,6 +6,14 @@ import {
 } from '~/lib/invoice-pdf';
 import { formatNaira } from '~/lib/format-amount';
 
+/*
+ * NOTE: this component intentionally uses absolute `text-[Npx]` sizes and a
+ * fixed Helvetica family. It is an on-screen mirror of the jsPDF-generated
+ * invoice — sizes must match the PDF 1:1 and must NOT scale with the user
+ * font-scale setting (rem would desync the preview from the printed doc).
+ * Do not "fix" the `text-[8px]` / `text-[18px]` / `text-[24px]` here.
+ */
+
 function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
   const taxRate = Number(invoice.taxRate ?? 0);
   const subtotal = invoice.lineItems.reduce(
@@ -38,12 +46,12 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
 
         {/* Reference */}
         <div className="mt-3">
-          <p className="text-[11px] font-bold leading-tight">{invoice.referenceFormatted}</p>
+          <p className="text-mini font-bold leading-tight">{invoice.referenceFormatted}</p>
         </div>
 
         {/* Dates — PDF labels "Date:" / "Due:" */}
         <div
-          className="mt-2 space-y-1 text-[9px] leading-snug"
+          className="mt-2 space-y-1 text-2xs leading-snug"
           style={{ color: 'rgb(100, 100, 100)' }}
         >
           <p>Date: {dateStr(invoice.createdAt)}</p>
@@ -53,30 +61,30 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
         {/* BILL TO */}
         <div className="mt-6">
           <p
-            className="text-[9px] font-bold uppercase tracking-normal"
+            className="text-2xs font-bold uppercase tracking-normal"
             style={{ color: 'rgb(100, 100, 100)' }}
           >
             BILL TO
           </p>
-          <p className="mt-1 text-[10px] font-normal leading-snug text-black">
+          <p className="mt-1 text-micro font-normal leading-snug text-black">
             {invoice.recipientInfo.name?.trim() || '—'}
           </p>
           {invoice.recipientInfo.address ? (
-            <p className="mt-1 text-[9px] leading-snug text-black whitespace-pre-wrap">
+            <p className="mt-1 text-2xs leading-snug text-black whitespace-pre-wrap">
               {invoice.recipientInfo.address}
             </p>
           ) : null}
           {invoice.recipientInfo.email ? (
-            <p className="mt-1 text-[9px] leading-snug text-black">{invoice.recipientInfo.email}</p>
+            <p className="mt-1 text-2xs leading-snug text-black">{invoice.recipientInfo.email}</p>
           ) : null}
           {invoice.recipientInfo.phone ? (
-            <p className="mt-1 text-[9px] leading-snug text-black">{invoice.recipientInfo.phone}</p>
+            <p className="mt-1 text-2xs leading-snug text-black">{invoice.recipientInfo.phone}</p>
           ) : null}
         </div>
 
         {/* Line items table — PDF grey header #f5f5f5, labels Description / Qty / Unit Price / Amount */}
         <div className="mt-5 overflow-x-auto">
-          <table className="w-full table-fixed border-collapse text-[9px]">
+          <table className="w-full table-fixed border-collapse text-2xs">
             <thead>
               <tr style={{ backgroundColor: 'rgb(245, 245, 245)' }}>
                 <th
@@ -135,7 +143,7 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
         <div className="mt-2 flex justify-end">
           <div className="w-20 border-t border-neutral-300" aria-hidden />
         </div>
-        <div className="mt-1.5 flex flex-col items-end gap-1.5 text-[9px]">
+        <div className="mt-1.5 flex flex-col items-end gap-1.5 text-2xs">
           <div className="flex w-[200px] max-w-full justify-between gap-4">
             <span className="text-black">Subtotal:</span>
             <span className="tabular-nums text-right text-black">
@@ -150,7 +158,7 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
               </span>
             </div>
           ) : null}
-          <div className="flex w-[200px] max-w-full justify-between gap-4 text-[11px] font-bold">
+          <div className="flex w-[200px] max-w-full justify-between gap-4 text-mini font-bold">
             <span className="text-black">TOTAL:</span>
             <span className="tabular-nums text-right text-black">
               {formatNaira(Number(invoice.totalAmount), {

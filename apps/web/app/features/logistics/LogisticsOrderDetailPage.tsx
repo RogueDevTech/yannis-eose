@@ -347,11 +347,11 @@ function StatusPipeline({ status, order }: { status: string; order: OrderDetail 
                     <div className={`absolute inset-0 w-3 h-3 rounded-full ${dotClass} opacity-30 animate-ping`} style={{ animationDuration: '3s', animationIterationCount: isCurrent ? 'infinite' : '0' }} />
                   )}
                 </div>
-                <span className={`text-[10px] mt-1 text-center leading-tight whitespace-nowrap ${textClass}`}>
+                <span className={`text-micro mt-1 text-center leading-tight whitespace-nowrap ${textClass}`}>
                   {label}
                 </span>
                 {ts && (isPast || isCurrent) && (
-                  <span className="text-[9px] text-app-fg-muted tabular-nums">
+                  <span className="text-2xs text-app-fg-muted tabular-nums">
                     {formatDateShort(ts)}
                   </span>
                 )}
@@ -416,7 +416,7 @@ function InfoRow({ icon, label, value, valueClass, mono }: {
     <div className="flex items-start gap-2.5 py-1.5">
       {icon && <span className="text-app-fg-muted mt-0.5 flex-shrink-0">{icon}</span>}
       <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-wider text-app-fg-muted font-medium">{label}</p>
+        <p className="text-mini uppercase tracking-wider text-app-fg-muted font-medium">{label}</p>
         <p className={`text-sm ${mono ? 'font-mono' : ''} ${valueClass ?? 'text-app-fg'}`}>
           {value}
         </p>
@@ -479,16 +479,16 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
                     </span>
                     {statusChange && (
                       <span className="ml-2">
-                        <OrderStatusBadge status={String(statusChange.newValue)} className="text-[10px]" expanded />
+                        <OrderStatusBadge status={String(statusChange.newValue)} className="text-micro" expanded />
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] text-app-fg-muted tabular-nums flex-shrink-0">
+                  <span className="text-mini text-app-fg-muted tabular-nums flex-shrink-0">
                     {timeAgo(entry.validFrom)}
                   </span>
                 </div>
                 {entry.changedBy && (
-                  <p className="text-[11px] text-app-fg-muted mt-0.5">
+                  <p className="text-mini text-app-fg-muted mt-0.5">
                     by {entry.changedBy}
                   </p>
                 )}
@@ -507,7 +507,7 @@ function HistoryTimeline({ history }: { history: HistoryEntry[] }) {
                       <span className="text-emerald-600 dark:text-emerald-400">{formatValue(d.newValue)}</span>
                     </div>
                   ))}
-                  <p className="text-[10px] text-app-fg-muted pt-1 border-t border-app-border tabular-nums">
+                  <p className="text-micro text-app-fg-muted pt-1 border-t border-app-border tabular-nums">
                     {formatDate(entry.validFrom)}
                   </p>
                 </div>
@@ -659,7 +659,7 @@ export function LogisticsOrderDetailPage({
             <div className="hidden md:flex md:flex-wrap md:items-center md:gap-2">
               <PageRefreshButton />
               {isOverdue && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                   <ClockIcon /> OVERDUE
                 </span>
               )}
@@ -667,7 +667,7 @@ export function LogisticsOrderDetailPage({
             </div>
             <div className="flex items-center gap-2 md:hidden">
               {isOverdue && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                   <ClockIcon /> OVERDUE
                 </span>
               )}
@@ -868,25 +868,25 @@ export function LogisticsOrderDetailPage({
               <div className="grid grid-cols-2 gap-2">
                 {order.allocatedAt && (
                   <div className="text-center py-1.5 bg-app-hover rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Agent assigned</p>
+                    <p className="text-micro uppercase tracking-wider text-app-fg-muted">Agent assigned</p>
                     <p className="text-xs font-medium text-app-fg-muted tabular-nums">{formatDateShort(order.allocatedAt)}</p>
                   </div>
                 )}
                 {order.dispatchedAt && (
                   <div className="text-center py-1.5 bg-app-hover rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Dispatched</p>
+                    <p className="text-micro uppercase tracking-wider text-app-fg-muted">Dispatched</p>
                     <p className="text-xs font-medium text-app-fg-muted tabular-nums">{formatDateShort(order.dispatchedAt)}</p>
                   </div>
                 )}
                 {order.deliveredAt && (
                   <div className="text-center py-1.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Delivered</p>
+                    <p className="text-micro uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Delivered</p>
                     <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300 tabular-nums">{formatDateShort(order.deliveredAt)}</p>
                   </div>
                 )}
                 {order.confirmedAt && (
                   <div className="text-center py-1.5 bg-app-hover rounded-lg">
-                    <p className="text-[10px] uppercase tracking-wider text-app-fg-muted">Confirmed</p>
+                    <p className="text-micro uppercase tracking-wider text-app-fg-muted">Confirmed</p>
                     <p className="text-xs font-medium text-app-fg-muted tabular-nums">{formatDateShort(order.confirmedAt)}</p>
                   </div>
                 )}
@@ -939,7 +939,7 @@ export function LogisticsOrderDetailPage({
 
       {/* ── TAB: Items ──────────────────────────────────────────── */}
       {activeTab === 'items' && (
-        <div className="card overflow-hidden">
+        <div className="list-panel">
           {order.orderItems && order.orderItems.length > 0 ? (
             <CompactTable<LogisticsOrderLineItem>
               withCard={false}
@@ -989,7 +989,7 @@ export function LogisticsOrderDetailPage({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-app-fg">Assign for delivery</h3>
-                  <p className="text-[11px] text-app-fg-muted">Pick a 3PL hub — order becomes agent assigned for dispatch</p>
+                  <p className="text-mini text-app-fg-muted">Pick a 3PL hub — order becomes agent assigned for dispatch</p>
                 </div>
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
@@ -1038,7 +1038,7 @@ export function LogisticsOrderDetailPage({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-app-fg">Reassign to another location</h3>
-                  <p className="text-[11px] text-app-fg-muted">
+                  <p className="text-mini text-app-fg-muted">
                     Switch delivery assignment to a different 3PL. Reservation at the current location is released; the
                     new one must have stock.
                   </p>
@@ -1100,7 +1100,7 @@ export function LogisticsOrderDetailPage({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-app-fg">Dispatch to Rider</h3>
-                  <p className="text-[11px] text-app-fg-muted">Assign a rider for pickup and delivery</p>
+                  <p className="text-mini text-app-fg-muted">Assign a rider for pickup and delivery</p>
                 </div>
               </div>
               <fetcher.Form method="post" className="flex flex-wrap items-end gap-3">
@@ -1135,7 +1135,7 @@ export function LogisticsOrderDetailPage({
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-app-fg">Mark In Transit</h3>
-                  <p className="text-[11px] text-app-fg-muted">Confirm rider has departed with order</p>
+                  <p className="text-mini text-app-fg-muted">Confirm rider has departed with order</p>
                 </div>
               </div>
               <fetcher.Form method="post">
@@ -1160,7 +1160,7 @@ export function LogisticsOrderDetailPage({
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-app-fg">Mark Delivered</h3>
-                      <p className="text-[11px] text-app-fg-muted">Full delivery confirmed by rider</p>
+                      <p className="text-mini text-app-fg-muted">Full delivery confirmed by rider</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">
@@ -1217,7 +1217,7 @@ export function LogisticsOrderDetailPage({
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-app-fg">Partial Delivery</h3>
-                      <p className="text-[11px] text-app-fg-muted">Only some items delivered, rest returned</p>
+                      <p className="text-mini text-app-fg-muted">Only some items delivered, rest returned</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">
@@ -1300,7 +1300,7 @@ export function LogisticsOrderDetailPage({
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-app-fg">Mark Returned</h3>
-                      <p className="text-[11px] text-app-fg-muted">Customer rejected delivery</p>
+                      <p className="text-mini text-app-fg-muted">Customer rejected delivery</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">
@@ -1337,7 +1337,7 @@ export function LogisticsOrderDetailPage({
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-app-fg">Restock</h3>
-                      <p className="text-[11px] text-app-fg-muted">Item sellable — return to local stock</p>
+                      <p className="text-mini text-app-fg-muted">Item sellable — return to local stock</p>
                     </div>
                   </div>
                   <fetcher.Form method="post">
@@ -1359,7 +1359,7 @@ export function LogisticsOrderDetailPage({
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-app-fg">Write Off</h3>
-                      <p className="text-[11px] text-app-fg-muted">Item damaged — log as operational loss</p>
+                      <p className="text-mini text-app-fg-muted">Item damaged — log as operational loss</p>
                     </div>
                   </div>
                   <fetcher.Form method="post" className="space-y-3">

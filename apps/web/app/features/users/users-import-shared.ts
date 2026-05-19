@@ -12,13 +12,15 @@ export interface BranchInfo {
   status: string;
 }
 
-/** Mirrors the backend branching rule: only Marketing, CS, and Branch Admin live in `user_branches`. */
+/** Mirrors the backend branching rule: Marketing, CS, Branch Admin, and HR
+ *  (added 2026-05-19) live in `user_branches`. */
 export const BRANCH_ELIGIBLE_IMPORT_ROLES = new Set([
   'MEDIA_BUYER',
   'HEAD_OF_MARKETING',
   'CS_CLOSER',
   'HEAD_OF_CS',
   'BRANCH_ADMIN',
+  'HR_MANAGER',
 ]);
 
 /**

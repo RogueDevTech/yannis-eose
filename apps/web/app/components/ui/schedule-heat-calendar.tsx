@@ -131,7 +131,7 @@ export function ScheduleHeatCalendar({
           </div>
         ) : null}
       </div>
-      <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium uppercase tracking-wide text-app-fg-muted sm:text-xs">
+      <div className="grid grid-cols-7 gap-1 text-center text-micro font-medium uppercase tracking-wide text-app-fg-muted sm:text-xs">
         {WEEKDAYS.map((w) => (
           <div key={w} className="py-1">
             {w}
@@ -181,7 +181,7 @@ export function ScheduleHeatCalendar({
             >
               <span className="tabular-nums text-app-fg">{cell.day}</span>
               {total > 0 ? (
-                <span className="tabular-nums text-[9px] font-normal text-app-fg-muted sm:text-[10px]" aria-hidden>
+                <span className="tabular-nums text-2xs font-normal text-app-fg-muted sm:text-micro" aria-hidden>
                   {total}
                 </span>
               ) : null}

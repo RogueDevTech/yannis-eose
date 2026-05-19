@@ -435,7 +435,7 @@ export function DeliveryRemittanceDetailPage({
                   <p className="text-sm font-medium text-app-fg truncate" title={o.customerName}>
                     {o.customerName}
                   </p>
-                  <OrderIdBadge id={o.id} ellipsis="" textClassName="font-mono text-[11px] text-app-fg-muted" />
+                  <OrderIdBadge id={o.id} ellipsis="" textClassName="font-mono text-mini text-app-fg-muted" />
                 </div>
                 <div className="shrink-0 text-right">
                   {o.totalAmount != null ? (
@@ -446,7 +446,7 @@ export function DeliveryRemittanceDetailPage({
                   ) : (
                     <span className="text-sm text-app-fg-muted">—</span>
                   )}
-                  <p className="text-[11px] text-app-fg-muted">
+                  <p className="text-mini text-app-fg-muted">
                     {o.deliveredAt
                       ? new Date(o.deliveredAt).toLocaleDateString('en-NG', {
                           month: 'short',

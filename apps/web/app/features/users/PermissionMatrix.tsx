@@ -37,7 +37,7 @@ function OverviewChip({
       title={ariaTitle}
       className={`inline-flex flex-col gap-0 rounded-lg border px-2 py-1 sm:flex-row sm:items-baseline sm:gap-1.5 ${shell}`}
     >
-      <span className="text-[10px] uppercase tracking-wide text-app-fg-muted font-medium leading-none">{label}</span>
+      <span className="text-micro uppercase tracking-wide text-app-fg-muted font-medium leading-none">{label}</span>
       <span className={valueClass}>{value}</span>
     </span>
   );
@@ -213,7 +213,7 @@ export function PermissionMatrix({
             <span className="sr-only">Expand or collapse the permission matrix.</span>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <h2 className="text-base font-semibold text-app-fg">Permissions</h2>
-              <span className="inline-flex items-center rounded-full border border-brand-500/40 bg-brand-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700 dark:text-brand-300">
+              <span className="inline-flex items-center rounded-full border border-brand-500/40 bg-brand-500/15 px-2 py-0.5 text-micro font-bold uppercase tracking-wide text-brand-700 dark:text-brand-300">
                 Click or tap to expand
               </span>
             </div>
@@ -247,7 +247,7 @@ export function PermissionMatrix({
               <OverviewChip label="+ Extra grants" value={totals.explicitGrant} variant="grant" title="Explicit grants beyond the role baseline." />
               <OverviewChip label="− Revokes" value={totals.explicitRevoke} variant="revoke" title="Explicit revokes that turn off an inherited permission." />
             </div>
-            <p className="mt-2 text-[11px] text-app-fg-muted">
+            <p className="mt-2 text-mini text-app-fg-muted">
               Inherited checks from template (unchanged):{' '}
               <span className="tabular-nums font-medium text-app-fg">{totals.inherited}</span>
               <span className="mx-1.5 text-app-border">·</span>
@@ -323,13 +323,13 @@ export function PermissionMatrix({
                                 />
                               </label>
                               <div className="min-w-0">
-                                <p className="text-[11px] uppercase tracking-wide text-app-fg-muted font-semibold">
+                                <p className="text-mini uppercase tracking-wide text-app-fg-muted font-semibold">
                                   {formatPermissionGroup(groupKey)}
                                 </p>
                                 <p className="text-xs text-app-fg-muted">
                                   {effectiveCount}/{rows.length} granted
                                   {inheritedCount > 0 && (
-                                    <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
+                                    <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-micro font-medium bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
                                       {inheritedCount} from role
                                     </span>
                                   )}
@@ -337,7 +337,7 @@ export function PermissionMatrix({
                               </div>
                             </div>
                             <div className="shrink-0">
-                              <span className="text-[11px] rounded px-2 py-0.5 border border-app-border text-app-fg-muted">
+                              <span className="text-mini rounded px-2 py-0.5 border border-app-border text-app-fg-muted">
                                 {mixed ? 'Mixed' : allGranted ? 'All granted' : 'All revoked'}
                               </span>
                             </div>
@@ -372,7 +372,7 @@ export function PermissionMatrix({
                                     <span className="block text-sm font-medium text-app-fg">
                                       {formatPermissionCode(perm.code)}
                                     </span>
-                                    <span className="block font-mono text-[11px] text-app-fg-muted mt-0.5 break-all">
+                                    <span className="block font-mono text-mini text-app-fg-muted mt-0.5 break-all">
                                       {perm.code}
                                     </span>
                                   </span>
@@ -386,13 +386,13 @@ export function PermissionMatrix({
                                   >
                                     <PermissionInfoIcon className="h-5 w-5" />
                                   </button>
-                                  <span className="text-[11px] rounded px-2 py-0.5 border border-app-border text-app-fg-muted">
+                                  <span className="text-mini rounded px-2 py-0.5 border border-app-border text-app-fg-muted">
                                     {stateLabel}
                                   </span>
                                   {override !== undefined && !readOnly ? (
                                     <button
                                       type="button"
-                                      className="text-[11px] text-brand-500 hover:text-brand-600"
+                                      className="text-mini text-brand-500 hover:text-brand-600"
                                       onClick={() => resetCode(perm.code)}
                                     >
                                       Reset

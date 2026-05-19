@@ -57,46 +57,36 @@ export async function loader({ request }: LoaderFunctionArgs) {
     data: CEODashboardData;
     branchBreakdown: BranchBreakdownRow[];
   }> => {
-    const [res, branchBreakdownRes] = await Promise.all([
-      apiRequest<{ result?: { data?: CEODashboardData } }>(
-        `/trpc/dashboard.ceoOverview?input=${encodeURIComponent(input)}`,
-        { method: 'GET', cookie },
-      ),
-      apiRequest<{ result?: { data?: BranchBreakdownRow[] } }>(
-        `/trpc/dashboard.ceoBranchBreakdown?input=${encodeURIComponent(input)}`,
-        { method: 'GET', cookie },
-      ),
-    ]);
+    const res = await apiRequest<{
+      result?: { data?: { overview?: CEODashboardData; branchBreakdown?: BranchBreakdownRow[] } };
+    }>(`/trpc/dashboard.ceoOverviewBundle?input=${encodeURIComponent(input)}`, { method: 'GET', cookie });
 
-    const data: CEODashboardData =
-      res.ok && res.data?.result?.data
-        ? res.data.result.data
-        : {
-            revenue: 0,
-            trueProfit: 0,
-            margin: 0,
-            costBreakdown: {
-              landedCost: 0,
-              deliveryFee: 0,
-              adSpend: 0,
-              commission: 0,
-              fulfillmentCost: 0,
-              operationalLoss: 0,
-            },
-            orderPipeline: { total: 0, active: 0, delivered: 0, cancelled: 0, returned: 0, statusCounts: {} },
-            marketing: { totalSpend: 0, cpa: 0, roas: 0, deliveryRate: 0 },
-            csTeam: { agentCount: 0, pendingOrders: 0, utilization: 0 },
-            payroll: { totalPaid: 0, totalPending: 0, staffCount: 0 },
-            invoiceSummary: {},
-            revenueByPeriod: { today: 0, thisWeek: 0, thisMonth: 0 },
-            deliveriesByProduct: [],
-            stockPerProduct: [],
-            activeStaffCount: 0,
-          };
+    const bundle = res.ok ? res.data?.result?.data : undefined;
 
-    const branchBreakdown: BranchBreakdownRow[] = branchBreakdownRes.ok
-      ? (branchBreakdownRes.data?.result?.data ?? [])
-      : [];
+    const data: CEODashboardData = bundle?.overview ?? {
+      revenue: 0,
+      trueProfit: 0,
+      margin: 0,
+      costBreakdown: {
+        landedCost: 0,
+        deliveryFee: 0,
+        adSpend: 0,
+        commission: 0,
+        fulfillmentCost: 0,
+        operationalLoss: 0,
+      },
+      orderPipeline: { total: 0, active: 0, delivered: 0, cancelled: 0, returned: 0, statusCounts: {} },
+      marketing: { totalSpend: 0, cpa: 0, roas: 0, deliveryRate: 0 },
+      csTeam: { agentCount: 0, pendingOrders: 0, utilization: 0 },
+      payroll: { totalPaid: 0, totalPending: 0, staffCount: 0 },
+      invoiceSummary: {},
+      revenueByPeriod: { today: 0, thisWeek: 0, thisMonth: 0 },
+      deliveriesByProduct: [],
+      stockPerProduct: [],
+      activeStaffCount: 0,
+    };
+
+    const branchBreakdown: BranchBreakdownRow[] = bundle?.branchBreakdown ?? [];
 
     return { data, branchBreakdown };
   })();

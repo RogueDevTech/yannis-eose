@@ -366,7 +366,7 @@ function BranchPickerDropdown({
                         onChange={() => toggle(b.id)}
                         className="w-3.5 h-3.5"
                       />
-                      <span className="font-mono text-[10px] text-app-fg-muted shrink-0">
+                      <span className="font-mono text-micro text-app-fg-muted shrink-0">
                         {b.code}
                       </span>
                       <span className="truncate">{b.name}</span>

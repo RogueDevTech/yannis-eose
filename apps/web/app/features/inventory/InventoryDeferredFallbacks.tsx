@@ -41,7 +41,7 @@ const reconSkeletonColumns: CompactTableColumn<Reconciliation>[] = [
 /** Layout-matched fallback for reconciliation tab `CompactTable`. */
 export function ReconciliationTableDeferredFallback() {
   return (
-    <div className="card p-0">
+    <div className="list-panel">
       <CompactTable<Reconciliation>
         caption="Stock reconciliations"
         columns={reconSkeletonColumns}

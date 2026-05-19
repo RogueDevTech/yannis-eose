@@ -87,7 +87,7 @@ export function PermissionRequiredModal({
       </div>
 
       <div className="rounded-lg border border-app-border bg-app-hover/40 p-3 space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-app-fg-muted">
+        <p className="text-mini font-semibold uppercase tracking-wide text-app-fg-muted">
           {canonical.length === 1 ? 'Permission needed' : 'Any one of these permissions'}
         </p>
         <ul className="space-y-2">
@@ -101,7 +101,7 @@ export function PermissionRequiredModal({
                 <span className="block text-sm font-medium">
                   {formatPermissionCode(code)}
                 </span>
-                <code className="mt-0.5 inline-block rounded bg-app-elevated px-1.5 py-0.5 font-mono text-[11px] text-app-fg-muted break-all">
+                <code className="mt-0.5 inline-block rounded bg-app-elevated px-1.5 py-0.5 font-mono text-mini text-app-fg-muted break-all">
                   {code}
                 </code>
               </span>
@@ -109,7 +109,7 @@ export function PermissionRequiredModal({
           ))}
         </ul>
         {actorRole ? (
-          <p className="text-[11px] text-app-fg-muted pt-1">
+          <p className="text-mini text-app-fg-muted pt-1">
             Your current role: <span className="font-medium text-app-fg">{actorRole}</span>
           </p>
         ) : null}

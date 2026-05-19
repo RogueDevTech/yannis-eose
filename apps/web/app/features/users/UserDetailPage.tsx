@@ -855,7 +855,7 @@ export function UserDetailPage({
       let productsValue: ReactNode;
       if (!user.restrictProductAccess || assignedIds.length === 0) {
         productsValue = (
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-app-hover text-app-fg-muted">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-mini font-medium bg-app-hover text-app-fg-muted">
             All products
           </span>
         );
@@ -873,7 +873,7 @@ export function UserDetailPage({
             {assignedIds.map((id) => (
               <span
                 key={id}
-                className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300"
+                className="inline-flex items-center px-2 py-0.5 rounded-full text-mini font-medium bg-brand-50 dark:bg-brand-900/20 text-brand-700 dark:text-brand-300"
                 title={productById.get(id) ?? id}
               >
                 {productById.get(id) ?? `Unknown (${id.slice(0, 8)}…)`}
@@ -966,7 +966,7 @@ export function UserDetailPage({
         <div className={`relative isolate overflow-hidden ${profileHeaderTone}`}>
           <div className="relative px-4 sm:px-6 pt-5 sm:pt-7 pb-16 sm:pb-20">
             <div className="max-w-3xl min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/75">
+              <p className="text-mini font-semibold uppercase tracking-[0.22em] text-white/75">
                 {profileHeroLabel}
               </p>
               <h1 className="mt-2 text-3xl sm:text-4xl font-bold text-white leading-tight break-words">
@@ -1627,7 +1627,7 @@ export function UserDetailPage({
             </div>
             <DeferredSection resolve={payoutsResolved} skeleton="table">
               {(payoutList) => (
-                <div className="card p-0">
+                <div className="list-panel">
                   <div className="px-4 py-3 border-b border-app-border">
                     <h3 className="text-sm font-semibold text-app-fg">Payout History</h3>
                   </div>
@@ -1645,7 +1645,7 @@ export function UserDetailPage({
             </DeferredSection>
             <DeferredSection resolve={adjustmentsResolved} skeleton="table">
               {(adjList) => (
-                <div className="card p-0">
+                <div className="list-panel">
                   <div className="px-4 py-3 border-b border-app-border">
                     <h3 className="text-sm font-semibold text-app-fg">Adjustments & Bonuses</h3>
                   </div>
@@ -1778,7 +1778,7 @@ export function UserDetailPage({
             </div>
             <DeferredSection resolve={financeActivityForDeferred} skeleton="table">
               {(data) => (
-                <div className="card p-0">
+                <div className="list-panel">
                   <div className="px-4 py-3 border-b border-app-border">
                     <h3 className="text-sm font-semibold text-app-fg">
                       Approvals Processed
@@ -2213,7 +2213,7 @@ function InstallModeBadge({
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${style}`}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-micro font-medium ${style}`}
     >
       {label}
     </span>
@@ -2233,7 +2233,7 @@ function InfoField({
     <div className="flex items-start gap-2.5">
       {icon && <div className="mt-0.5 text-app-fg-muted flex-shrink-0">{icon}</div>}
       <div>
-        <p className="text-[11px] font-medium text-app-fg-muted uppercase tracking-wider">
+        <p className="text-mini font-medium text-app-fg-muted uppercase tracking-wider">
           {label}
         </p>
         <p className="text-sm text-app-fg mt-0.5">{value}</p>
@@ -2262,7 +2262,7 @@ function MetricCard({
 
   return (
     <div className="p-3 rounded-lg bg-app-hover">
-      <p className="text-[11px] font-medium text-app-fg-muted uppercase tracking-wider">{label}</p>
+      <p className="text-mini font-medium text-app-fg-muted uppercase tracking-wider">{label}</p>
       <p className={`text-lg font-bold mt-0.5 ${color}`}>{value}</p>
     </div>
   );

@@ -224,6 +224,18 @@
     @apply shadow-none;
   }
 
+  /* List panel — desktop-only card chrome for search-toolbar + table groups.
+     On mobile the chrome is dropped entirely so the search field and the
+     per-row mobile cards run full-width (CEO mobile-density directive
+     2026-05-19). Replaces hand-rolled `card p-0` wrappers around listings. */
+  .list-panel {
+    @apply md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card md:overflow-hidden md:text-app-fg;
+  }
+
+  .dark .list-panel {
+    @apply md:shadow-none;
+  }
+
   /* Calm theme: barely-there elevation so surfaces feel quieter */
   [data-app-theme='soft'] .card {
     box-shadow:
@@ -333,6 +345,15 @@
      Here: mouse-primary sizing (html is 14px so text-base = 1rem = 14px; sm:text-sm for compact desktop). */
   .input {
     @apply w-full rounded-lg border border-app-border-strong bg-app-elevated px-3 py-2 text-base sm:text-sm text-app-fg placeholder:text-app-fg-muted focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition-colors duration-150;
+  }
+
+  /* Suppress the native WebKit clear "×" on type="search" inputs — the
+     SearchInput component renders its own clear button, so the native one
+     was a duplicate. */
+  input[type='search']::-webkit-search-cancel-button,
+  input[type='search']::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
   }
 
   /* Override browser autofill to match elevated surface */

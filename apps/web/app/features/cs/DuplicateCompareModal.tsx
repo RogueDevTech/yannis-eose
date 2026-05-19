@@ -51,7 +51,7 @@ function OrderColumn({
   return (
     <div className={`flex flex-col rounded-lg border p-3 sm:p-4 ${meta.tone}`}>
       <div className="flex items-center justify-between gap-2 pb-2 border-b border-app-border/70">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-app-fg-muted">
+        <span className="text-micro font-bold uppercase tracking-wider text-app-fg-muted">
           {meta.title}
         </span>
         <OrderStatusBadge status={order.status} showDot={false} className="!text-xs" />
@@ -59,7 +59,7 @@ function OrderColumn({
 
       <dl className="mt-2.5 space-y-2 text-sm">
         <div>
-          <dt className="text-[10px] font-medium uppercase tracking-wider text-app-fg-muted">
+          <dt className="text-micro font-medium uppercase tracking-wider text-app-fg-muted">
             Order
           </dt>
           <dd className="mt-0.5">
@@ -76,20 +76,20 @@ function OrderColumn({
         </div>
 
         <div>
-          <dt className="text-[10px] font-medium uppercase tracking-wider text-app-fg-muted">
+          <dt className="text-micro font-medium uppercase tracking-wider text-app-fg-muted">
             Customer
           </dt>
           <dd className="mt-0.5 font-medium text-app-fg truncate" title={order.customerName}>
             {order.customerName}
           </dd>
-          <dd className="font-mono text-[11px] text-app-fg-muted">
+          <dd className="font-mono text-mini text-app-fg-muted">
             {order.customerPhoneDisplay || '—'}
           </dd>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <dt className="text-[10px] font-medium uppercase tracking-wider text-app-fg-muted">
+            <dt className="text-micro font-medium uppercase tracking-wider text-app-fg-muted">
               {isOriginal ? 'Placed' : 'New attempt'}
             </dt>
             <dd className="mt-0.5 text-xs text-app-fg-muted tabular-nums">
@@ -97,7 +97,7 @@ function OrderColumn({
             </dd>
           </div>
           <div className="text-right">
-            <dt className="text-[10px] font-medium uppercase tracking-wider text-app-fg-muted">
+            <dt className="text-micro font-medium uppercase tracking-wider text-app-fg-muted">
               Total
             </dt>
             <dd className="mt-0.5 text-sm font-semibold text-app-fg tabular-nums">
@@ -112,10 +112,10 @@ function OrderColumn({
 
         {order.assignedCsId ? (
           <div>
-            <dt className="text-[10px] font-medium uppercase tracking-wider text-app-fg-muted">
+            <dt className="text-micro font-medium uppercase tracking-wider text-app-fg-muted">
               Assigned CS
             </dt>
-            <dd className="mt-0.5 font-mono text-[11px] text-app-fg-muted">
+            <dd className="mt-0.5 font-mono text-mini text-app-fg-muted">
               {order.assignedCsId.slice(0, 8)}…
             </dd>
           </div>

@@ -102,7 +102,7 @@ export function SmartPick({
               disabled={total === 0}
               aria-pressed={isActive}
               className={`inline-flex items-center justify-center rounded-md border font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                compactMobile ? 'h-7 min-w-7 px-1.5 text-[10px] md:px-2 md:text-[11px]' : 'px-2 py-0.5 text-[11px]'
+                compactMobile ? 'h-7 min-w-7 px-1.5 text-micro md:px-2 md:text-mini' : 'px-2 py-0.5 text-mini'
               } ${variant}`}
               title={
                 isShortfall
@@ -127,7 +127,7 @@ export function SmartPick({
               }}
               aria-pressed={isActive}
               className={`inline-flex items-center justify-center rounded-md border font-semibold transition-colors ${
-                compactMobile ? 'h-7 px-1.5 text-[10px] md:px-2 md:text-[11px]' : 'px-2 py-0.5 text-[11px]'
+                compactMobile ? 'h-7 px-1.5 text-micro md:px-2 md:text-mini' : 'px-2 py-0.5 text-mini'
               } ${
                 isActive
                   ? 'border-brand-500 bg-brand-500 text-white hover:bg-brand-600'
@@ -184,7 +184,7 @@ export function SmartPick({
               }}
               className={`shrink-0 text-app-fg-muted hover:text-app-fg ${
                 compactMobile
-                  ? 'inline-flex h-7 w-7 items-center justify-center rounded-md border border-app-border bg-app-elevated text-[11px] md:h-auto md:w-auto md:border-0 md:bg-transparent md:text-xs md:underline-offset-2 md:hover:underline'
+                  ? 'inline-flex h-7 w-7 items-center justify-center rounded-md border border-app-border bg-app-elevated text-mini md:h-auto md:w-auto md:border-0 md:bg-transparent md:text-xs md:underline-offset-2 md:hover:underline'
                   : 'text-xs underline-offset-2 hover:underline'
               }`}
               aria-label="Clear smart pick selection"

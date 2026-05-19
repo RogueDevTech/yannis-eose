@@ -234,6 +234,7 @@ const ENDPOINTS: TrpcEndpoint[] = [
 
   // Dashboard
   { procedure: 'dashboard.ceoOverview', method: 'GET', summary: 'CEO executive overview', tag: 'Dashboard' },
+  { procedure: 'dashboard.ceoOverviewBundle', method: 'GET', summary: 'CEO executive overview + branch breakdown (single-call bundle)', tag: 'Dashboard' },
   { procedure: 'dashboard.ceoOverviewTimeSeries', method: 'GET', summary: 'CEO overview time-series (daily revenue & orders)', tag: 'Dashboard' },
   { procedure: 'dashboard.orderPipelineChart', method: 'GET', summary: 'Order pipeline chart (Volume, Unconfirmed, Confirmed, Logistics, Delivered)', tag: 'Dashboard' },
 

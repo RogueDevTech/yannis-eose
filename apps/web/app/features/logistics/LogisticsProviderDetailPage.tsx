@@ -203,7 +203,7 @@ export function LogisticsProviderDetailPage({
             label: 'Activity',
             badge:
               providerActivityTotal > 0 ? (
-                <span className="rounded-full bg-app-hover px-1.5 py-0.5 text-[10px] font-semibold text-app-fg-muted tabular-nums">
+                <span className="rounded-full bg-app-hover px-1.5 py-0.5 text-micro font-semibold text-app-fg-muted tabular-nums">
                   {providerActivityTotal}
                 </span>
               ) : undefined,

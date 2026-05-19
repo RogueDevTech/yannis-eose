@@ -188,7 +188,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
                   onClick={() => toggleGroup(group.group as string)}
                   className="flex items-center justify-between w-full px-3 py-1 rounded-md hover:bg-app-hover transition-colors duration-150 group/header"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-app-fg-muted font-semibold select-none group-hover/header:text-app-fg transition-colors duration-150">
+                  <span className="text-mini uppercase tracking-wider text-app-fg-muted font-semibold select-none group-hover/header:text-app-fg transition-colors duration-150">
                     {group.group}
                   </span>
                   <svg
@@ -356,13 +356,13 @@ function SidebarNavLink({
       <span className="w-5 h-5 flex-shrink-0">{item.icon}</span>
       {!isExpanded && <span className="truncate">{item.label}</span>}
       {!isExpanded && badge != null && badge > 0 && (
-        <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center px-1 text-[10px] font-bold bg-danger-500 text-white rounded-full flex-shrink-0">
+        <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center px-1 text-micro font-bold bg-danger-500 text-white rounded-full flex-shrink-0">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
       {isExpanded && badge != null && badge > 0 && (
         <span
-          className="absolute top-1/2 -translate-y-1/2 -right-1 min-w-[14px] h-[14px] flex items-center justify-center text-[9px] font-bold bg-danger-500 text-white rounded-full"
+          className="absolute top-1/2 -translate-y-1/2 -right-1 min-w-[14px] h-[14px] flex items-center justify-center text-2xs font-bold bg-danger-500 text-white rounded-full"
           title={`${badge} unread`}
         >
           {badge > 99 ? '99+' : badge}

@@ -49,8 +49,8 @@ export function OfferImagesEditor({
       <div className="w-full min-w-0 max-w-[200px]">
         <div className="rounded-lg border border-app-border bg-app-elevated shadow-sm overflow-hidden ring-1 ring-black/[0.04] dark:ring-white/[0.06]">
           <div className="flex items-center justify-between gap-2 px-2 py-1 border-b border-app-border bg-app-hover/90">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted">Image</span>
-            <span className="text-[10px] text-app-fg-muted">Optional</span>
+            <span className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted">Image</span>
+            <span className="text-micro text-app-fg-muted">Optional</span>
           </div>
           <div className="p-1.5 space-y-1.5">
             {imageUrls.length > 0 && (
@@ -65,7 +65,7 @@ export function OfferImagesEditor({
                       <button
                         type="button"
                         onClick={() => removeAt(i)}
-                        className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity text-[10px] font-medium"
+                        className="absolute inset-0 flex items-center justify-center bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity text-micro font-medium"
                         aria-label={`Remove image ${i + 1}`}
                       >
                         Remove
@@ -89,7 +89,7 @@ export function OfferImagesEditor({
               />
             )}
             {atMax && (
-              <p className="text-[10px] text-app-fg-muted px-0.5">Maximum {MAX_PRODUCT_OFFER_IMAGES} image reached.</p>
+              <p className="text-micro text-app-fg-muted px-0.5">Maximum {MAX_PRODUCT_OFFER_IMAGES} image reached.</p>
             )}
           </div>
         </div>

@@ -1133,9 +1133,9 @@ function BranchMembersPanel({
               />
             </form>
             {isSearching && isFetcherBusy ? (
-              <p className="mt-1 text-[11px] text-app-fg-muted">Searching…</p>
+              <p className="mt-1 text-mini text-app-fg-muted">Searching…</p>
             ) : isSearching && fetcherError ? (
-              <p className="mt-1 text-[11px] text-danger-600 dark:text-danger-400">{fetcherError}</p>
+              <p className="mt-1 text-mini text-danger-600 dark:text-danger-400">{fetcherError}</p>
             ) : null}
           </div>
           {teamFilterOptions.length > 1 ? (
@@ -1229,7 +1229,7 @@ function BranchMembersPanel({
           {/* CompactTable mirrors the Team-card member table shape (Member /
               Role / Supervisor / actions) but adds a Team column scoped to the
               department, plus row-selection for bulk add. */}
-          <div className="card p-0">
+          <div className="list-panel">
             <div className="overflow-x-auto">
               <CompactTable
                 withCard={false}
@@ -1270,7 +1270,7 @@ function BranchMembersPanel({
                           <span className="font-medium text-app-fg truncate">{m.name}</span>
                           {isHead && <RoleBadge role={m.effectiveRole} size="sm" />}
                           {isSupervisor && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400">
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-micro font-bold uppercase tracking-wide bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400">
                               Supervisor
                             </span>
                           )}
@@ -2284,7 +2284,7 @@ function BranchSupervisorTeamsPanel({
                         {deptTitle}
                       </h3>
                       <span
-                        className={`shrink-0 inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        className={`shrink-0 inline-flex items-center rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide ${
                           lane === 'CS'
                             ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
                             : 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300'
@@ -2295,7 +2295,7 @@ function BranchSupervisorTeamsPanel({
                     </div>
 
                     <div className="relative z-10 text-sm text-app-fg-muted mb-4 flex-1 pointer-events-none">
-                      <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-[11px] font-semibold text-app-fg-muted">
+                      <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-mini font-semibold text-app-fg-muted">
                         {lane}
                       </span>
                       <span className="mx-1.5">·</span>
@@ -2311,7 +2311,7 @@ function BranchSupervisorTeamsPanel({
 
                     <div className="relative z-10 grid grid-cols-3 gap-2 mb-4 pointer-events-none">
                       <div className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
-                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                        <p className="text-micro uppercase tracking-wide text-app-fg-muted">
                           Members
                         </p>
                         <p className="mt-1 text-lg font-semibold tabular-nums text-app-fg">
@@ -2319,7 +2319,7 @@ function BranchSupervisorTeamsPanel({
                         </p>
                       </div>
                       <div className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
-                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                        <p className="text-micro uppercase tracking-wide text-app-fg-muted">
                           Teams
                         </p>
                         <p className="mt-1 text-lg font-semibold tabular-nums text-brand-600 dark:text-brand-400">
@@ -2327,7 +2327,7 @@ function BranchSupervisorTeamsPanel({
                         </p>
                       </div>
                       <div className="rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
-                        <p className="text-[10px] uppercase tracking-wide text-app-fg-muted">
+                        <p className="text-micro uppercase tracking-wide text-app-fg-muted">
                           Supervisors
                         </p>
                         <p className="mt-1 text-lg font-semibold tabular-nums text-success-600 dark:text-success-400">
@@ -2557,7 +2557,7 @@ function BranchSupervisorTeamsPanel({
                             trigger={
                               <div className="flex flex-wrap items-center gap-3 min-w-0">
                                 <div
-                                  className={`shrink-0 inline-flex items-center justify-center rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                                  className={`shrink-0 inline-flex items-center justify-center rounded-md px-2 py-0.5 text-micro font-semibold uppercase tracking-wide ${
                                     team.department === 'CS'
                                       ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
                                       : 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300'
@@ -2569,7 +2569,7 @@ function BranchSupervisorTeamsPanel({
                                   <p className="text-sm font-semibold text-app-fg truncate">
                                     {title}
                                     {isOptimistic ? (
-                                      <span className="ml-2 text-[10px] uppercase tracking-wider rounded bg-app-hover text-app-fg-muted px-1.5 py-0.5 font-semibold align-middle">
+                                      <span className="ml-2 text-micro uppercase tracking-wider rounded bg-app-hover text-app-fg-muted px-1.5 py-0.5 font-semibold align-middle">
                                         Creating…
                                       </span>
                                     ) : null}
@@ -2992,7 +2992,7 @@ function BranchOverviewPage({
                 {branch.name}
               </h1>
               <div className="text-sm text-app-fg-muted mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-[11px] font-semibold text-app-fg-muted">
+                <span className="inline-flex items-center rounded-md border border-app-border bg-app-hover px-1.5 py-0.5 font-mono text-mini font-semibold text-app-fg-muted">
                   {branch.code}
                 </span>
                 <span aria-hidden>·</span>

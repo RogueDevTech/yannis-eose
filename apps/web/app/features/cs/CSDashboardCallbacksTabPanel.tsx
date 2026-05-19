@@ -91,14 +91,14 @@ export function CSDashboardCallbacksTabPanel({
                         {order.customerName}
                       </p>
                       {order.totalAmount ? (
-                        <span className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums">
+                        <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
                           &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
                         </span>
                       ) : null}
                     </div>
                     <div className="flex items-center gap-1.5 mb-1 min-w-0">
                       <span
-                        className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide shrink-0 ${
+                        className={`inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide shrink-0 ${
                           isDue
                             ? 'bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400'
                             : 'bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400'
@@ -107,7 +107,7 @@ export function CSDashboardCallbacksTabPanel({
                         {isDue ? 'Due' : `${order.callbackAttempts ?? 0}/3`}
                       </span>
                       {order.callbackScheduledAt ? (
-                        <span className="text-[10px] font-medium text-app-fg-muted truncate">
+                        <span className="text-micro font-medium text-app-fg-muted truncate">
                           {new Date(order.callbackScheduledAt).toLocaleString('en-NG', {
                             month: 'short',
                             day: 'numeric',
@@ -118,10 +118,10 @@ export function CSDashboardCallbacksTabPanel({
                       ) : null}
                     </div>
                     {agent ? (
-                      <p className="text-[10px] text-app-fg-muted truncate mb-1">{agent.agentName}</p>
+                      <p className="text-micro text-app-fg-muted truncate mb-1">{agent.agentName}</p>
                     ) : null}
                     {order.callbackNotes ? (
-                      <p className="text-[10px] text-app-fg-muted italic truncate mb-1.5" title={order.callbackNotes}>
+                      <p className="text-micro text-app-fg-muted italic truncate mb-1.5" title={order.callbackNotes}>
                         {order.callbackNotes}
                       </p>
                     ) : null}
@@ -130,7 +130,7 @@ export function CSDashboardCallbacksTabPanel({
                     <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <Link
                         to={`/admin/orders/${order.id}`}
-                        className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                        className="text-mini font-medium text-brand-600 dark:text-brand-400 hover:underline"
                       >
                         View
                       </Link>

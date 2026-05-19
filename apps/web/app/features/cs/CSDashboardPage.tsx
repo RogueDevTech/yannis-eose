@@ -110,7 +110,7 @@ function AgentWorkloadCard({
     <>
       <div className="flex items-center gap-2 mb-1.5">
         <div className="w-6 h-6 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-          <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400">
+          <span className="text-micro font-bold text-brand-600 dark:text-brand-400">
             {agent.agentName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
           </span>
         </div>
@@ -118,7 +118,7 @@ function AgentWorkloadCard({
           {agent.agentName}
         </p>
       </div>
-      <p className="text-[11px] text-app-fg-muted mb-1.5 truncate">
+      <p className="text-mini text-app-fg-muted mb-1.5 truncate">
         Duty {closesToday}/{agent.capacity} · Backlog {agent.pendingCount}
       </p>
       <div className="flex items-center gap-2">
@@ -128,20 +128,20 @@ function AgentWorkloadCard({
             style={{ width: `${Math.min(dailyPct, 100)}%` }}
           />
         </div>
-        <span className="text-[10px] font-semibold text-app-fg-muted tabular-nums shrink-0">
+        <span className="text-micro font-semibold text-app-fg-muted tabular-nums shrink-0">
           {pctRounded}%
         </span>
       </div>
       {(closesToday >= agent.capacity || agent.pendingCount >= agent.capacity || isNew) && (
         <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
           {closesToday >= agent.capacity && (
-            <span className="text-[10px] font-medium text-success-600 dark:text-success-400">Target met</span>
+            <span className="text-micro font-medium text-success-600 dark:text-success-400">Target met</span>
           )}
           {agent.pendingCount >= agent.capacity && (
-            <span className="text-[10px] font-medium text-warning-600 dark:text-warning-400">At quota</span>
+            <span className="text-micro font-medium text-warning-600 dark:text-warning-400">At quota</span>
           )}
           {isNew && (
-            <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+            <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-micro font-bold bg-success-500 text-white">
               NEW ORDER
             </span>
           )}
@@ -160,7 +160,7 @@ function AgentWorkloadCard({
         <button
           type="button"
           title="Quick view this closer's workload"
-          className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+          className="text-mini font-medium text-brand-600 dark:text-brand-400 hover:underline"
           onClick={(e) => {
             e.stopPropagation();
             onOpen(agent);
@@ -173,7 +173,7 @@ function AgentWorkloadCard({
           to={`/admin/cs/orders?csCloserId=${agent.agentId}&period=all_time`}
           prefetch="intent"
           title="View orders for this closer"
-          className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+          className="text-mini font-medium text-brand-600 dark:text-brand-400 hover:underline"
           onClick={(e) => e.stopPropagation()}
         >
           View
@@ -183,7 +183,7 @@ function AgentWorkloadCard({
         to={`/admin/cs/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
         prefetch="intent"
         title="Hot swap orders from this closer"
-        className="text-[11px] font-medium text-app-fg-muted hover:text-app-fg hover:underline"
+        className="text-mini font-medium text-app-fg-muted hover:text-app-fg hover:underline"
         onClick={(e) => e.stopPropagation()}
       >
         Swap
@@ -316,15 +316,15 @@ function AgentWorkloadDetailModal({
       <div className="px-5 -mt-6">
         <div className="bg-app-elevated rounded-xl shadow-md border border-app-border p-3.5 grid grid-cols-3 gap-2.5">
           <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Backlog</p>
+            <p className="text-mini leading-4 text-app-fg-muted uppercase tracking-wide">Backlog</p>
             <p className="text-xl leading-7 font-bold text-app-fg mt-1">{agent.pendingCount}</p>
           </div>
           <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Daily target</p>
+            <p className="text-mini leading-4 text-app-fg-muted uppercase tracking-wide">Daily target</p>
             <p className="text-xl leading-7 font-bold text-app-fg mt-1">{agent.capacity}</p>
           </div>
           <div className="rounded-lg bg-app-hover border border-app-border px-2.5 py-2.5 text-center min-h-[74px] flex flex-col justify-center">
-            <p className="text-[11px] leading-4 text-app-fg-muted uppercase tracking-wide">Closed today</p>
+            <p className="text-mini leading-4 text-app-fg-muted uppercase tracking-wide">Closed today</p>
             <p className={`text-xl leading-7 font-bold mt-1 ${closesToday >= agent.capacity ? 'text-success-600 dark:text-success-400' : 'text-app-fg'}`}>{closesToday}</p>
           </div>
         </div>
@@ -351,13 +351,13 @@ function AgentWorkloadDetailModal({
 
       {/* Last action */}
       <div className="px-5 py-4 border-t border-app-border">
-        <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted mb-1">Last action</p>
+        <p className="text-micro uppercase tracking-wider font-medium text-app-fg-muted mb-1">Last action</p>
         <p className="text-sm font-medium text-app-fg">{lastAction}</p>
       </div>
 
       {/* Pending queue: orders + line items (API order = updatedAt desc) */}
       <div className="px-5 py-3 border-t border-app-border max-h-[min(50vh,22rem)] overflow-y-auto">
-        <p className="text-[10px] uppercase tracking-wider font-medium text-app-fg-muted mb-2">Orders in queue</p>
+        <p className="text-micro uppercase tracking-wider font-medium text-app-fg-muted mb-2">Orders in queue</p>
         {queueOrders === null ? (
           <div className="flex items-center justify-center py-6 gap-2 text-app-fg-muted text-sm">
             <Spinner size="sm" />
@@ -1731,12 +1731,12 @@ function CSDashboardPageLoaded({
                     <h2 className="text-sm font-semibold text-app-fg flex items-center gap-2">
                       Live Activity
                       {newCartIds.size > 0 && (
-                        <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-success-500 text-white">
+                        <span className="animate-new-badge inline-flex items-center px-1.5 py-0.5 rounded-full text-micro font-bold bg-success-500 text-white">
                           {newCartIds.size} new
                         </span>
                       )}
                       {cartsFetcher.state === 'loading' && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-app-fg-muted font-normal">
+                        <span className="inline-flex items-center gap-1 text-mini text-app-fg-muted font-normal">
                           <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
@@ -2010,7 +2010,7 @@ function CSDashboardPageLoaded({
                       <DeferredSection resolve={claimQueue} fallback={<CSTabCountBadgeSkeleton />}>
                         {(orders: CSOrder[]) =>
                           orders.length > 0 ? (
-                            <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 text-[10px] font-bold">
+                            <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-brand-100 dark:bg-brand-900/30 text-brand-700 dark:text-brand-400 text-micro font-bold">
                               {orders.length}
                             </span>
                           ) : null
@@ -2025,7 +2025,7 @@ function CSDashboardPageLoaded({
               label: 'Cart abandonment',
               badge:
                 abandonedPagination.total > 0 ? (
-                  <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-surface-200 dark:bg-surface-700 text-app-fg-muted text-[10px] font-bold">
+                  <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-surface-200 dark:bg-surface-700 text-app-fg-muted text-micro font-bold">
                     {abandonedPagination.total}
                   </span>
                 ) : undefined,
@@ -2037,7 +2037,7 @@ function CSDashboardPageLoaded({
                 <DeferredSection resolve={callbackOrders} fallback={<CSTabCountBadgeSkeleton />}>
                   {(orders: CSOrder[]) =>
                     orders.length > 0 ? (
-                      <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 text-[10px] font-bold">
+                      <span className="ml-1 inline-flex items-center justify-center min-w-[1rem] h-4 px-1 rounded-full bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 text-micro font-bold">
                         {orders.length}
                       </span>
                     ) : null
@@ -2165,16 +2165,16 @@ function CSDashboardPageLoaded({
                             {order.customerName}
                           </p>
                           {order.totalAmount && (
-                            <span className="text-[11px] font-bold text-app-fg shrink-0 tabular-nums">
+                            <span className="text-mini font-bold text-app-fg shrink-0 tabular-nums">
                               &#8358;{Number(order.totalAmount).toLocaleString('en-NG')}
                             </span>
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 mb-1 min-w-0">
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 shrink-0">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400 shrink-0">
                             Unassigned
                           </span>
-                          <span className="text-[10px] font-medium text-app-fg-muted truncate">
+                          <span className="text-micro font-medium text-app-fg-muted truncate">
                             {new Date(order.createdAt).toLocaleString('en-NG', {
                               month: 'short', day: 'numeric',
                               hour: '2-digit', minute: '2-digit',
@@ -2187,7 +2187,7 @@ function CSDashboardPageLoaded({
                             e.stopPropagation();
                             setSelectedQueueOrder(order);
                           }}
-                          className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          className="text-mini font-medium text-brand-600 dark:text-brand-400 hover:underline"
                         >
                           View
                         </button>
@@ -2326,7 +2326,7 @@ function CSDashboardPageLoaded({
                 {/* Items — lazy-fetched from `orders.getById`. Skeleton while loading,
                     line items table once they arrive. */}
                 <div className="mb-4">
-                  <p className="text-[11px] uppercase tracking-wider font-semibold text-app-fg-muted mb-1.5">Items</p>
+                  <p className="text-mini uppercase tracking-wider font-semibold text-app-fg-muted mb-1.5">Items</p>
                   {queueOrderDetails?.loading ? (
                     <div className="rounded-xl border border-app-border p-3 text-xs text-app-fg-muted animate-pulse">
                       Loading items…
@@ -2349,7 +2349,7 @@ function CSDashboardPageLoaded({
                               <p className="text-sm font-medium text-app-fg truncate">
                                 {item.productName ?? 'Unknown product'}
                               </p>
-                              <p className="text-[11px] text-app-fg-muted">
+                              <p className="text-mini text-app-fg-muted">
                                 {item.quantity} × ₦{Number(item.unitPrice).toLocaleString('en-NG')}
                               </p>
                             </div>
@@ -2723,18 +2723,18 @@ function CSDashboardPageLoaded({
                           {c.customerName}
                         </p>
                       </div>
-                      <p className="text-[10px] font-mono text-app-fg-muted truncate mb-1">
+                      <p className="text-micro font-mono text-app-fg-muted truncate mb-1">
                         {c.customerPhoneDisplay}
                       </p>
                       <div className="flex items-center gap-1.5 mb-1 min-w-0">
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-app-hover text-app-fg-muted shrink-0">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-bold uppercase tracking-wide bg-app-hover text-app-fg-muted shrink-0">
                           Dropped
                         </span>
-                        <span className="text-[10px] text-app-fg-muted truncate min-w-0">
+                        <span className="text-micro text-app-fg-muted truncate min-w-0">
                           {c.productName ?? '—'}
                         </span>
                       </div>
-                      <div className="text-[10px] font-medium text-app-fg-muted truncate mb-1.5">
+                      <div className="text-micro font-medium text-app-fg-muted truncate mb-1.5">
                         {new Date(c.updatedAt).toLocaleString('en-NG', {
                           month: 'short', day: 'numeric',
                           hour: '2-digit', minute: '2-digit',
@@ -2746,7 +2746,7 @@ function CSDashboardPageLoaded({
                         <button
                           type="button"
                           onClick={() => { setSelectedCartStatus('ABANDONED'); setSelectedAbandonedCart(c); }}
-                          className="text-[11px] font-medium text-brand-700 dark:text-brand-300 hover:underline"
+                          className="text-mini font-medium text-brand-700 dark:text-brand-300 hover:underline"
                         >
                           View
                         </button>
@@ -2754,7 +2754,7 @@ function CSDashboardPageLoaded({
                           <button
                             type="button"
                             onClick={() => setDeleteCartConfirm(c)}
-                            className="text-[11px] font-medium text-danger-600 dark:text-danger-400 hover:underline"
+                            className="text-mini font-medium text-danger-600 dark:text-danger-400 hover:underline"
                           >
                             Clear
                           </button>

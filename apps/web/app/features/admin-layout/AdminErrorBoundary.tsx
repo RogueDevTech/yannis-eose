@@ -228,7 +228,7 @@ function NetworkErrorModalLayout({
               {copy.description}
             </p>
             {(showCode || showUpstream) && (
-              <p className="mt-2 inline-flex flex-wrap items-center gap-2 text-[11px] font-mono text-app-fg-muted">
+              <p className="mt-2 inline-flex flex-wrap items-center gap-2 text-mini font-mono text-app-fg-muted">
                 {showCode ? (
                   <span className="rounded bg-app-hover border border-app-border px-1.5 py-0.5">
                     {copy.code}
@@ -257,7 +257,7 @@ function NetworkErrorModalLayout({
             style={{ width: `${progressPercent}%` }}
           />
         </div>
-        <p className="mt-1.5 text-[11px] text-app-fg-muted">
+        <p className="mt-1.5 text-mini text-app-fg-muted">
           Retrying automatically in {countdown}s.
         </p>
 

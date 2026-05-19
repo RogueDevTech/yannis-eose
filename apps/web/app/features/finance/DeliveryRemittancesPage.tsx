@@ -532,6 +532,46 @@ export function DeliveryRemittancesPage({
             sheetTitle="Cash remittances tools"
             sheetSubtitle={<span>Date range, export, and pick orders</span>}
             triggerAriaLabel="Cash remittances toolbar and date range"
+            filtersBadgeCount={viewTab === 'remittances' ? remittanceToolbarFilterBadge : 0}
+            filters={
+              viewTab === 'remittances' ? (
+                <>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Location</span>
+                    <SearchableSelect
+                      id="delivery-remittance-location-filter-kebab"
+                      value={filters.location}
+                      onChange={handleLocationChange}
+                      wrapperClassName="w-full"
+                      placeholder="All locations"
+                      searchPlaceholder="Search locations..."
+                      options={[
+                        { value: '', label: 'All locations' },
+                        ...locations.map((loc) => ({
+                          value: loc.id,
+                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                        })),
+                      ]}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-medium text-app-fg-muted">Sent by</span>
+                    <SearchableSelect
+                      id="delivery-remittance-sent-by-filter-kebab"
+                      value={filters.sentBy}
+                      onChange={handleSentByChange}
+                      wrapperClassName="w-full"
+                      placeholder="Sent by anyone"
+                      searchPlaceholder="Search accountants..."
+                      options={[
+                        { value: '', label: 'Sent by anyone' },
+                        ...sentByOptions.map((u) => ({ value: u.id, label: u.name })),
+                      ]}
+                    />
+                  </div>
+                </>
+              ) : undefined
+            }
             desktop={
               <>
                 <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -662,7 +702,7 @@ export function DeliveryRemittancesPage({
             label: 'Awaiting remittance',
             badge:
               eligibleTotal > 0 ? (
-                <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border border-app-border bg-app-hover px-1.5 text-[10px] font-semibold tabular-nums text-app-fg-muted">
+                <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border border-app-border bg-app-hover px-1.5 text-micro font-semibold tabular-nums text-app-fg-muted">
                   {eligibleTotal > 99 ? '99+' : eligibleTotal}
                 </span>
               ) : null,
@@ -673,9 +713,10 @@ export function DeliveryRemittancesPage({
 
       {viewTab === 'remittances' && (
         <>
-          <div className="card p-0 overflow-hidden">
+          <div className="list-panel">
             <ToolbarFiltersCollapsible
               className="!border-0"
+              hideMobileSheet
               badgeCount={remittanceToolbarFilterBadge}
               sheetSubtitle={<span>Location and sent-by apply immediately</span>}
               desktopInlineFilters={
@@ -813,7 +854,7 @@ export function DeliveryRemittancesPage({
                         amount={Number(r.outcomeAmount ?? 0)}
                         className="text-sm font-semibold text-app-fg tabular-nums"
                       />
-                      <p className="text-[11px] text-app-fg-muted">
+                      <p className="text-mini text-app-fg-muted">
                         {new Date(r.sentAt).toLocaleDateString('en-NG', {
                           month: 'short',
                           day: 'numeric',
@@ -997,7 +1038,7 @@ export function DeliveryRemittancesPage({
                     )}
                   </div>
                 </div>
-                <div className="flex items-center justify-between gap-2 text-[11px] text-app-fg-muted">
+                <div className="flex items-center justify-between gap-2 text-mini text-app-fg-muted">
                   <span className="truncate">
                     {o.logisticsLocationName
                       ? o.logisticsLocationProviderName

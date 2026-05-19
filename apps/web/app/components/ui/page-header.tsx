@@ -11,7 +11,9 @@
  */
 
 interface PageHeaderProps {
-  title: string;
+  /** Page title. Usually a string; accepts a node so loading shells can pass a
+   *  skeleton placeholder and still reuse the real header chrome. */
+  title: React.ReactNode;
   /** Subtitle below the title. Plain string for short copy, or ReactNode when
    * the description needs inline elements (icons, badges, copyable IDs). */
   description?: React.ReactNode;
@@ -62,7 +64,11 @@ export function PageHeader({
             </div>
           ) : null}
           {description && (
-            <div className="mt-0.5 min-w-0 break-words text-sm text-app-fg-muted">{description}</div>
+            // CEO directive 2026-05-19: hide page-description on mobile across
+            // every admin surface — title + filters carry enough context, and
+            // descriptions were creating top-of-page clutter on small screens.
+            // Desktop keeps the description (room to spare).
+            <div className="mt-0.5 hidden min-w-0 break-words text-sm text-app-fg-muted md:block">{description}</div>
           )}
         </div>
 

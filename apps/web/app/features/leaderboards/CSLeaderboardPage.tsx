@@ -2,6 +2,9 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { Collapsible } from '~/components/ui/collapsible';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
+import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useSearchParams } from '@remix-run/react';
@@ -37,21 +40,40 @@ export function CSLeaderboardPage({
 
   return (
     <div className="space-y-6 px-3 sm:px-0">
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-xl font-bold text-app-fg">CS Leaderboard</h1>
-          <p className="text-sm text-app-fg-muted mt-1">
-            Rank closer performance by delivery rate.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <DateFilterBar
-            startDate={dateFilters.startDate}
-            endDate={dateFilters.endDate}
-            periodAllTime={dateFilters.periodAllTime}
+      <PageHeader
+        title="CS Leaderboard"
+        mobileInlineActions
+        description="Rank closer performance by delivery rate."
+        actions={
+          <PageHeaderMobileTools
+            sheetTitle="Leaderboard tools"
+            sheetSubtitle={<span>Date range</span>}
+            triggerAriaLabel="CS leaderboard date range"
+            desktop={
+              <>
+                <PageRefreshButton />
+                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={dateFilters.periodAllTime}
+                  />
+                </div>
+              </>
+            }
+            sheet={() => (
+              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <DateFilterBar
+                  startDate={dateFilters.startDate}
+                  endDate={dateFilters.endDate}
+                  periodAllTime={dateFilters.periodAllTime}
+                  triggerLayout="blockCenter"
+                />
+              </div>
+            )}
           />
-        </div>
-      </div>
+        }
+      />
 
       <DeferredSection resolve={csLeaderboard} skeleton="list">
         {(lb: CSLeaderboardEntry[]) => {

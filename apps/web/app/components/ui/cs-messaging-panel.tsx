@@ -424,7 +424,7 @@ export function CSMessagingPanel({
                     <ChannelIcon channel="sms" />
                   </span>
                   <span className="text-sm font-medium">SMS</span>
-                  <span className="text-[10px] text-app-fg-muted">160 char limit</span>
+                  <span className="text-micro text-app-fg-muted">160 char limit</span>
                 </button>
                 <button
                   type="button"
@@ -435,7 +435,7 @@ export function CSMessagingPanel({
                     <ChannelIcon channel="whatsapp" />
                   </span>
                   <span className="text-sm font-medium">WhatsApp</span>
-                  <span className="text-[10px] text-app-fg-muted">Templates · freeform</span>
+                  <span className="text-micro text-app-fg-muted">Templates · freeform</span>
                 </button>
               </div>
             ) : (
@@ -507,7 +507,7 @@ export function CSMessagingPanel({
                   <button
                     type="button"
                     onClick={() => { setSelectedTemplateId(''); setMessageBody(''); }}
-                    className="text-[11px] text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
+                    className="text-mini text-app-fg-muted hover:text-app-fg underline-offset-2 hover:underline"
                   >
                     Clear · write freeform
                   </button>

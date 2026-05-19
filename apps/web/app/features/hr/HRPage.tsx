@@ -382,7 +382,7 @@ export function HRPage({
                   },
                 ];
                 return (
-                  <div className="card p-0">
+                  <div className="list-panel">
                     <CompactTable
                       withCard={false}
                       columns={adjustmentColumns}

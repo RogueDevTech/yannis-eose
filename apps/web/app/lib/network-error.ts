@@ -95,9 +95,8 @@ export function isNetworkErrorLike(payload: unknown, status?: number): boolean {
 
 /** Generic copy when we can't classify the error any further. */
 export const NETWORK_ERROR_MESSAGE = {
-  title: 'Connection Issue',
-  description:
-    'The app could not reach the API (slow network, VPN, or the server restarted). Wait a few seconds and refresh — your session is usually still valid.',
+  title: 'Connection issue',
+  description: 'Couldn’t reach the server. We’ll retry shortly.',
 } as const;
 
 export interface NetworkErrorCopy {
@@ -112,24 +111,20 @@ export interface NetworkErrorCopy {
 
 const COPY_BY_CODE: Record<ApiUnavailableCode, { title: string; description: string }> = {
   API_TIMEOUT: {
-    title: 'Server is taking too long',
-    description:
-      'The server didn’t respond in time. This is usually a slow network — try again in a moment, or move to a stronger connection.',
+    title: 'Server is slow',
+    description: 'The server took too long. Try again in a moment.',
   },
   API_UNREACHABLE: {
     title: 'Can’t reach the server',
-    description:
-      'We couldn’t connect to the server. Check your internet connection — your session stays valid once you’re back online.',
+    description: 'Check your connection — we’ll retry automatically.',
   },
   API_RATE_LIMITED: {
     title: 'Too many requests',
-    description:
-      'You’re sending requests faster than the server allows. Wait a few seconds and try again.',
+    description: 'Slow down a little, then try again.',
   },
   API_UPSTREAM_ERROR: {
     title: 'Server error',
-    description:
-      'The server returned an unexpected error. This is usually transient — try again in a few seconds.',
+    description: 'Something went wrong on the server. Try again shortly.',
   },
   // Legacy generic code from older payloads.
   API_UNAVAILABLE: {

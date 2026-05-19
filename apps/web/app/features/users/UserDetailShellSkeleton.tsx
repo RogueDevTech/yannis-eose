@@ -73,7 +73,7 @@ export function UserDetailShellSkeleton() {
         <dl className="grid grid-cols-1 gap-x-3 gap-y-2 sm:gap-x-4 sm:gap-y-2.5 sm:grid-cols-3">
           {(['Member Since', 'Last Updated', 'Onboarding'] as const).map((label) => (
             <div key={label} className="flex flex-col gap-px">
-              <dt className="text-[10px] font-semibold uppercase tracking-wide text-app-fg-muted">
+              <dt className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted">
                 {label}
               </dt>
               <dd className="min-h-[1.25rem]">
