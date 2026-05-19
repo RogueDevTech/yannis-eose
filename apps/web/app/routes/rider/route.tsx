@@ -6,7 +6,6 @@ import { useOfflineSync, useOnlineStatus, usePendingCount } from '~/hooks/useOnl
 import { usePwaInstall } from '~/hooks/usePwaInstall';
 import { useSocket, useForceLogoutOnRevoke } from '~/hooks/useSocket';
 import { NavProgressBar } from '~/components/ui/nav-progress-bar';
-import { SlowConnectionToast } from '~/components/ui/slow-connection-toast';
 import { AdminErrorBoundary } from '~/features/admin-layout/AdminErrorBoundary';
 import { normalizeRouteErrorData } from '~/lib/network-error';
 
@@ -49,7 +48,6 @@ export default function RiderLayout() {
   return (
     <div className="min-h-screen bg-app-canvas">
       <NavProgressBar />
-      <SlowConnectionToast />
       {/* Offline banner */}
       {!isOnline && (
         <div className="bg-warning-600 text-white text-center text-xs py-1.5 px-4 font-medium">

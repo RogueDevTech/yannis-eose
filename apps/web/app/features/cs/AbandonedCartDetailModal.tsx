@@ -14,6 +14,7 @@ export function AbandonedCartDetailModal({
   canRecover,
   onClose,
   onClear,
+  cartStatus = 'ABANDONED',
 }: {
   cart: PendingCart | null;
   canReveal: boolean;
@@ -21,6 +22,8 @@ export function AbandonedCartDetailModal({
   canRecover?: boolean;
   onClose: () => void;
   onClear?: (cart: PendingCart) => void;
+  /** Cart status — controls badge label and timestamp wording. Defaults to ABANDONED. */
+  cartStatus?: 'PENDING' | 'ABANDONED';
 }) {
   const revealFetcher = useFetcher<RevealResult>();
   const recoverFetcher = useFetcher<{ success?: boolean; error?: string; orderId?: string }>();
@@ -109,7 +112,7 @@ export function AbandonedCartDetailModal({
       cart.preferredDeliveryDate ? `Preferred date: ${cart.preferredDeliveryDate}` : null,
       cart.paymentMethod ? `Payment method: ${cart.paymentMethod}` : null,
       cart.deliveryNotes ? `Notes: ${cart.deliveryNotes}` : null,
-      `Dropped at: ${new Date(cart.updatedAt).toLocaleString('en-NG', {
+      `${cartStatus === 'PENDING' ? 'Last seen' : 'Dropped at'}: ${new Date(cart.updatedAt).toLocaleString('en-NG', {
         weekday: 'short',
         month: 'short',
         day: 'numeric',
@@ -139,7 +142,11 @@ export function AbandonedCartDetailModal({
     <Modal open={cart != null} onClose={onClose} maxWidth="max-w-md" backdropBlur>
       {cart && (
         <div>
-          <div className="relative bg-gradient-to-br from-surface-700 to-surface-800 dark:from-surface-800 dark:to-surface-900 px-5 pt-5 pb-6 rounded-t-2xl md:rounded-t-xl">
+          <div className={`relative px-5 pt-5 pb-6 rounded-t-2xl md:rounded-t-xl ${
+            cartStatus === 'PENDING'
+              ? 'bg-gradient-to-br from-amber-600 to-amber-700 dark:from-amber-700 dark:to-amber-900'
+              : 'bg-gradient-to-br from-surface-700 to-surface-800 dark:from-surface-800 dark:to-surface-900'
+          }`}>
             <button
               type="button"
               onClick={onClose}
@@ -173,8 +180,12 @@ export function AbandonedCartDetailModal({
               </div>
             </div>
             <div className="mt-3">
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide bg-app-hover/60 text-app-fg-muted">
-                Dropped off
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
+                cartStatus === 'PENDING'
+                  ? 'bg-amber-100/60 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                  : 'bg-app-hover/60 text-app-fg-muted'
+              }`}>
+                {cartStatus === 'PENDING' ? 'Browsing' : 'Dropped off'}
               </span>
             </div>
           </div>
@@ -234,7 +245,7 @@ export function AbandonedCartDetailModal({
                   <DetailRow key={key} label={key} value={String(value)} />
                 ))}
               <DetailRow
-                label="Dropped at"
+                label={cartStatus === 'PENDING' ? 'Last seen' : 'Dropped at'}
                 value={new Date(cart.updatedAt).toLocaleString('en-NG', {
                   weekday: 'short',
                   month: 'short',
