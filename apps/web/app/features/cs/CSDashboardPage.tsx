@@ -999,6 +999,11 @@ function CSDashboardPageLoaded({
     error?: string;
   }>();
   const [bulkDeleteCartsConfirmOpen, setBulkDeleteCartsConfirmOpen] = useState(false);
+  // Optimistic delete overlay — captures the IDs at submit time so we can hide
+  // them from the rendered list immediately, instead of waiting for the
+  // cartsFetcher reload to return. Cleared once the server data no longer
+  // contains them (or on failure).
+  const [bulkDeletingAbandonedIds, setBulkDeletingAbandonedIds] = useState<string[]>([]);
 
   const toggleCallbackSelection = (orderId: string) => {
     setSelectedCallbackIds((prev) => {
@@ -1113,7 +1118,14 @@ function CSDashboardPageLoaded({
     page: 1,
     limit: ABANDONED_CARTS_PAGE_SIZE,
   };
-  const abandonedCartsList = liveActivityData.abandonedCarts ?? [];
+  const serverAbandonedCartsList = liveActivityData.abandonedCarts ?? [];
+  // Optimistic overlay: hide rows currently being deleted so the UI updates
+  // the instant the user clicks "Clear all", not after the refetch returns.
+  const abandonedCartsList = useMemo(() => {
+    if (bulkDeletingAbandonedIds.length === 0) return serverAbandonedCartsList;
+    const hidden = new Set(bulkDeletingAbandonedIds);
+    return serverAbandonedCartsList.filter((c) => !hidden.has(c.id));
+  }, [serverAbandonedCartsList, bulkDeletingAbandonedIds]);
   const abandonedTotalPages =
     abandonedPagination.total === 0 ? 0 : Math.ceil(abandonedPagination.total / abandonedPagination.limit);
   const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -1266,12 +1278,27 @@ function CSDashboardPageLoaded({
   // Bulk delete carts — close confirm, clear selection, refresh
   useEffect(() => {
     if (bulkDeleteCartsFetcher.state !== 'idle' || !bulkDeleteCartsFetcher.data) return;
-    if (bulkDeleteCartsFetcher.data.ok || (bulkDeleteCartsFetcher.data.deleted ?? 0) > 0) {
+    const succeeded =
+      bulkDeleteCartsFetcher.data.ok || (bulkDeleteCartsFetcher.data.deleted ?? 0) > 0;
+    if (succeeded) {
       setBulkDeleteCartsConfirmOpen(false);
       clearAbandonedSelection();
       cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+    } else {
+      // Action errored — drop the optimistic filter so the rows reappear.
+      setBulkDeletingAbandonedIds([]);
     }
   }, [bulkDeleteCartsFetcher.state, bulkDeleteCartsFetcher.data]);
+
+  // Drop the optimistic delete overlay once the server-side refetch has
+  // returned and the deleted carts are no longer in the response.
+  useEffect(() => {
+    if (bulkDeletingAbandonedIds.length === 0) return;
+    if (cartsFetcher.state !== 'idle' || !cartsFetcher.data) return;
+    const stillPresent =
+      cartsFetcher.data.abandonedCarts?.some((c: PendingCart) => bulkDeletingAbandonedIds.includes(c.id)) ?? false;
+    if (!stillPresent) setBulkDeletingAbandonedIds([]);
+  }, [cartsFetcher.state, cartsFetcher.data, bulkDeletingAbandonedIds]);
 
   // Bulk dismiss duplicates — close confirm, clear selection, force loader revalidation
   useEffect(() => {
@@ -2770,9 +2797,11 @@ function CSDashboardPageLoaded({
               type="submit"
               variant="danger"
               size="sm"
-              disabled={bulkDeleteCartsFetcher.state !== 'idle'}
+              loading={bulkDeleteCartsFetcher.state !== 'idle'}
+              loadingText="Clearing…"
+              onClick={() => setBulkDeletingAbandonedIds(Array.from(selectedAbandonedIds))}
             >
-              {bulkDeleteCartsFetcher.state !== 'idle' ? 'Clearing…' : 'Clear all'}
+              Clear all
             </Button>
           </bulkDeleteCartsFetcher.Form>
         </Modal>

@@ -87,6 +87,24 @@ export class CartService {
           : undefined,
     } as const;
     const run = async (db: CartDbOrTx) => {
+      // Guard: if a CONVERTED cart already exists for this campaign + phone,
+      // skip the save — the customer already placed an order and a late-firing
+      // debounced cart save must not create a new PENDING row.
+      const [converted] = await db
+        .select({ id: schema.cartAbandonments.id })
+        .from(schema.cartAbandonments)
+        .where(
+          and(
+            eq(schema.cartAbandonments.campaignId, input.campaignId),
+            eq(schema.cartAbandonments.customerPhoneHash, input.customerPhoneHash),
+            eq(schema.cartAbandonments.status, 'CONVERTED'),
+          ),
+        )
+        .limit(1);
+      if (converted) {
+        return { id: converted.id, created: false as const };
+      }
+
       // Upsert key: campaign_id + phone_hash — one active PENDING cart per person per campaign.
       const existing = await db
         .select()
