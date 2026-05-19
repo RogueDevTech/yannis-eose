@@ -3,6 +3,7 @@ import { json, redirect } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { TextInput } from '~/components/ui/text-input';
 import { PageNotification } from '~/components/ui/page-notification';
 import { apiRequest, getCurrentUser } from '~/lib/api.server';
 
@@ -126,24 +127,17 @@ export default function ForgotPasswordRoute() {
             </>
           ) : (
             <Form method="post" className="space-y-4">
-              <div>
-                <label
-                  htmlFor="email"
-                  className="block text-sm font-medium text-app-fg-muted mb-1.5"
-                >
-                  Email address
-                </label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  className={`input ${mobileInput}`}
-                  placeholder="you@company.com"
-                  autoFocus
-                />
-              </div>
+              <TextInput
+                id="email"
+                name="email"
+                type="email"
+                label="Email address"
+                autoComplete="email"
+                required
+                placeholder="you@company.com"
+                autoFocus
+                className={mobileInput}
+              />
 
               <Button
                 type="submit"

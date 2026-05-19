@@ -712,7 +712,6 @@ export function StaffOnboardingPage({
                 <FileUpload
                   folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
-                  maxSizeMB={10}
                   onUpload={setProofUrl}
                 />
                 {proofUrl ? (
@@ -732,7 +731,6 @@ export function StaffOnboardingPage({
                 <FileUpload
                   folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
-                  maxSizeMB={10}
                   onUpload={setSignedContractUrl}
                 />
                 {signedContractUrl ? (
@@ -747,7 +745,6 @@ export function StaffOnboardingPage({
                 <FileUpload
                   folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
-                  maxSizeMB={10}
                   onUpload={setGovernmentIdUrl}
                 />
                 {governmentIdUrl ? (
@@ -790,7 +787,6 @@ export function StaffOnboardingPage({
                 <FileUpload
                   folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
-                  maxSizeMB={10}
                   onUpload={setRentReceiptUrl}
                 />
                 {rentReceiptUrl ? (
@@ -810,7 +806,6 @@ export function StaffOnboardingPage({
                 <FileUpload
                   folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
-                  maxSizeMB={10}
                   onUpload={setAcademicRecordsUrl}
                 />
                 {academicRecordsUrl ? (
@@ -821,7 +816,6 @@ export function StaffOnboardingPage({
                 <FileUpload
                   folder={ASSET_FOLDERS.ONBOARDING_DOCS}
                   accept="application/pdf,image/*"
-                  maxSizeMB={10}
                   onUpload={setEmploymentHistoryUrl}
                 />
                 {employmentHistoryUrl ? (
@@ -1085,7 +1079,6 @@ function AddSupportingDocument({
           <FileUpload
             folder={ASSET_FOLDERS.ONBOARDING_DOCS}
             accept="application/pdf,image/*"
-            maxSizeMB={10}
             onUpload={setUrl}
             size="sm"
           />
@@ -1135,7 +1128,6 @@ function GuarantorCard({
           <FileUpload
             folder={ASSET_FOLDERS.ONBOARDING_DOCS}
             accept="application/pdf,image/*"
-            maxSizeMB={10}
             onUpload={onFormUpload}
           />
           {formUrl ? (
@@ -1146,7 +1138,6 @@ function GuarantorCard({
           <FileUpload
             folder={ASSET_FOLDERS.ONBOARDING_DOCS}
             accept="application/pdf,image/*"
-            maxSizeMB={10}
             onUpload={onIdUpload}
           />
           {idUrl ? (

@@ -12,6 +12,7 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { RouteFetchErrorBanner } from '~/components/ui/route-fetch-error-banner';
 import { Spinner } from '~/components/ui/spinner';
+import { EmptyState } from '~/components/ui/empty-state';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { DeferredError, DeferredSection } from '~/components/ui/deferred-section';
 import {
@@ -857,6 +858,8 @@ function CSDashboardPageLoaded({
     orderId: string;
     customerName: string;
     branchId?: string | null;
+    /** Source order status — used for optimistic count adjustment when cancelling. */
+    fromStatus?: string;
   } | null>(null);
   /** Reason typed/picked in the cancel modal — required, min 10 chars before Submit enables. */
   const [cancelReason, setCancelReason] = useState('Customer not picking');
@@ -1138,16 +1141,21 @@ function CSDashboardPageLoaded({
     // Order-stage items → generic live activity detail modal
     setSelectedLiveCart(item);
   }, [liveActivityData.pendingCarts, liveActivityData.abandonedCarts]);
-  // Optimistic overlay: hide rows currently being deleted so the UI updates
-  // the instant the user clicks "Clear all", not after the refetch returns.
+  const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  // Optimistic overlay: hide rows currently being deleted (single or bulk) so
+  // the UI updates the instant the user confirms, not after the refetch returns.
   const abandonedCartsList = useMemo(() => {
-    if (bulkDeletingAbandonedIds.length === 0) return serverAbandonedCartsList;
     const hidden = new Set(bulkDeletingAbandonedIds);
+    // Single delete in-flight — extract cart ID from the fetcher form data
+    if (deleteCartFetcher.formData?.get('intent') === 'deleteAbandoned') {
+      const singleId = deleteCartFetcher.formData.get('cartId')?.toString();
+      if (singleId) hidden.add(singleId);
+    }
+    if (hidden.size === 0) return serverAbandonedCartsList;
     return serverAbandonedCartsList.filter((c) => !hidden.has(c.id));
-  }, [serverAbandonedCartsList, bulkDeletingAbandonedIds]);
+  }, [serverAbandonedCartsList, bulkDeletingAbandonedIds, deleteCartFetcher.formData]);
   const abandonedTotalPages =
     abandonedPagination.total === 0 ? 0 : Math.ceil(abandonedPagination.total / abandonedPagination.limit);
-  const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
   const { toast } = useToast();
   const agentScrollRef = useRef<HTMLDivElement>(null);
   const activityScrollRef = useRef<HTMLDivElement>(null);
@@ -1443,15 +1451,46 @@ function CSDashboardPageLoaded({
   const totalPending = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.pendingCount, 0);
   const totalCapacity = workloads.reduce((sum: number, w: AgentWorkload) => sum + w.capacity, 0);
   const totalClosesToday = workloads.reduce((sum: number, w: AgentWorkload) => sum + (w.todayClosesCount ?? 0), 0);
+
+  // ── Optimistic count deltas ─────────────────────────────────────
+  // Collect in-flight mutations from ALL fetchers and compute a unified
+  // delta map: { STATUS: +N/-N }. Applied to rawCounts so the overview
+  // stat strip updates the same tick the modal closes.
+  const rawCounts = statusCounts as Record<string, number>;
+  const optimisticDeltas = useMemo(() => {
+    const d: Record<string, number> = {};
+    const bump = (key: string, n: number) => { d[key] = (d[key] ?? 0) + n; };
+
+    // 1. Bulk assign: UNPROCESSED → CS_ASSIGNED
+    if (inFlightAssignIds.size > 0) {
+      bump('UNPROCESSED', -inFlightAssignIds.size);
+      bump('CS_ASSIGNED', inFlightAssignIds.size);
+    }
+
+    // 2. Cancel order: fromStatus → CANCELLED
+    if (fetcher.formData?.get('intent') === 'transition' && fetcher.formData?.get('newStatus') === 'CANCELLED') {
+      const fromStatus = cancelConfirmOrder?.fromStatus;
+      if (fromStatus) bump(fromStatus, -1);
+      bump('CANCELLED', 1);
+    }
+
+    // 3. Claim order: UNPROCESSED → CS_ASSIGNED
+    if (claimFetcher.formData?.get('intent') === 'claimOrder') {
+      bump('UNPROCESSED', -1);
+      bump('CS_ASSIGNED', 1);
+    }
+
+    return d;
+  }, [inFlightAssignIds, fetcher.formData, cancelConfirmOrder?.fromStatus, claimFetcher.formData]);
+
+  const oCount = (key: string) => Math.max(0, (rawCounts[key] ?? 0) + (optimisticDeltas[key] ?? 0));
+  const optimisticUnassigned = Math.max(0, unassignedTotal + (optimisticDeltas['UNPROCESSED'] ?? 0));
+
   // "Confirmed" rolls up the full post-confirmation in-flight pipeline so the
   // CEO bucket count matches the OrderStatusBadge default (which collapses
   // AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT into "Confirmed").
-  const confirmedCount =
-    ((statusCounts as Record<string, number>)['CONFIRMED'] ?? 0) +
-    ((statusCounts as Record<string, number>)['AGENT_ASSIGNED'] ?? 0) +
-    ((statusCounts as Record<string, number>)['DISPATCHED'] ?? 0) +
-    ((statusCounts as Record<string, number>)['IN_TRANSIT'] ?? 0);
-  const cancelledCount = (statusCounts as Record<string, number>)['CANCELLED'] ?? 0;
+  const confirmedCount = oCount('CONFIRMED') + oCount('AGENT_ASSIGNED') + oCount('DISPATCHED') + oCount('IN_TRANSIT');
+  const cancelledCount = oCount('CANCELLED');
   const overviewStatItems: OverviewStatStripItem[] = [
     { label: 'Active closers', value: workloads.length, valueClassName: 'text-app-fg' },
     {
@@ -1461,17 +1500,17 @@ function CSDashboardPageLoaded({
     },
     {
       label: 'Unassigned',
-      value: unassignedTotal,
+      value: optimisticUnassigned,
       valueClassName: 'text-danger-600 dark:text-danger-400',
     },
     {
       label: 'Assigned',
-      value: (statusCounts as Record<string, number>)['CS_ASSIGNED'] ?? 0,
+      value: oCount('CS_ASSIGNED'),
       valueClassName: 'text-info-600 dark:text-info-400',
     },
     {
       label: 'Unconfirmed',
-      value: (statusCounts as Record<string, number>)['CS_ENGAGED'] ?? 0,
+      value: oCount('CS_ENGAGED'),
       valueClassName: 'text-cyan-600 dark:text-cyan-400',
     },
     {
@@ -1481,12 +1520,12 @@ function CSDashboardPageLoaded({
     },
     {
       label: 'Delivered',
-      value: (statusCounts as Record<string, number>)['DELIVERED'] ?? 0,
+      value: oCount('DELIVERED'),
       valueClassName: 'text-success-600 dark:text-success-400',
     },
     {
       label: 'Cash Remitted',
-      value: (statusCounts as Record<string, number>)['REMITTED'] ?? 0,
+      value: oCount('REMITTED'),
       valueClassName: 'text-green-600 dark:text-green-400',
     },
     {
@@ -1755,15 +1794,16 @@ function CSDashboardPageLoaded({
                     ))}
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
-                    <div className="w-10 h-10 rounded-full bg-app-hover flex items-center justify-center mb-1">
-                      <svg className="w-5 h-5 text-surface-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <EmptyState
+                    variant="inline"
+                    icon={
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
-                    </div>
-                    <p className="text-sm font-medium text-app-fg-muted">No activity yet today</p>
-                    <p className="text-xs text-app-fg-muted">Orders and carts will show here.</p>
-                  </div>
+                    }
+                    title="No activity yet today"
+                    description="Orders and carts will show here."
+                  />
                 )}
 
                 {/* View all modal — paginated, matches Closer workloads modal */}
@@ -1877,7 +1917,7 @@ function CSDashboardPageLoaded({
             branchId: order.branchId,
           })}
         onCancel={(order) =>
-          setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName, branchId: order.branchId })}
+          setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName, branchId: order.branchId, fromStatus: order.status })}
       />
 
       {/* Closer workload detail modal */}
@@ -1929,9 +1969,11 @@ function CSDashboardPageLoaded({
           )}
         </div>
         {workloads.length === 0 ? (
-          <div className="card text-center py-8">
-            <p className="text-app-fg-muted">No closers found. Manage staff from HR → Users.</p>
-          </div>
+          <EmptyState
+            variant="inline"
+            title="No closers found"
+            description="Manage staff from HR → Users."
+          />
         ) : (
           <div
             ref={agentScrollRef}
@@ -2390,6 +2432,7 @@ function CSDashboardPageLoaded({
                         orderId: qOrder.id,
                         customerName: qOrder.customerName,
                         branchId: qOrder.branchId,
+                        fromStatus: qOrder.status,
                       });
                     }}
                     disabled={fetcher.state === 'submitting'}
@@ -2445,7 +2488,15 @@ function CSDashboardPageLoaded({
       {/* ── Claim Queue Tab ──────────────────────────── */}
       {activeTab === 'claim' && claimQueue && (
         <DeferredSection resolve={claimQueue} fallback={<CSClaimQueueTabDeferredFallback />}>
-          {(orders: CSOrder[]) => (
+          {(rawClaimOrders: CSOrder[]) => {
+            // Optimistic: hide the order being claimed so the list updates instantly.
+            const claimInFlightId = claimFetcher.formData?.get('intent') === 'claimOrder'
+              ? claimFetcher.formData?.get('orderId')?.toString()
+              : null;
+            const orders = claimInFlightId
+              ? rawClaimOrders.filter((o) => o.id !== claimInFlightId)
+              : rawClaimOrders;
+            return (
             <div className="space-y-4">
               <div className="card">
                 <div className="flex items-start justify-between gap-4 mb-4">
@@ -2521,7 +2572,8 @@ function CSDashboardPageLoaded({
                 />
               </div>
             </div>
-          )}
+          );
+          }}
         </DeferredSection>
       )}
 
@@ -2572,11 +2624,19 @@ function CSDashboardPageLoaded({
               ))}
             </div>
           ) : abandonedCartsList.length === 0 ? (
-            <div className="rounded-xl border border-app-border bg-app-elevated p-10 text-center text-app-fg-muted">
-              {abandonedPagination.total === 0
-                ? 'No abandoned carts — dropped-off sessions appear here until cleared.'
-                : 'No carts on this page — try another page or go back to page 1.'}
-            </div>
+            <EmptyState
+              variant="inline"
+              title={
+                abandonedPagination.total === 0
+                  ? 'No abandoned carts'
+                  : 'No carts on this page'
+              }
+              description={
+                abandonedPagination.total === 0
+                  ? 'Dropped-off sessions appear here until cleared.'
+                  : 'Try another page or go back to page 1.'
+              }
+            />
           ) : (
             <div>
               {canDeleteCart && abandonedCartsList.length > 0 && (

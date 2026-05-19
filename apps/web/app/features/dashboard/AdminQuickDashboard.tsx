@@ -210,7 +210,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
         <QuickJump to="/admin/cs/queue" label="CS Queue" />
         <QuickJump to="/admin/logistics/orders" label="Logistics" />
         <QuickJump to="/admin/marketing" label="Marketing" />
-        <QuickJump to="/admin/finance" label="Finance" />
+        <QuickJump to="/admin/finance/overview" label="Finance" />
       </div>
     </div>
   );

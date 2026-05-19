@@ -13,6 +13,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { TextInput } from '~/components/ui/text-input';
+import { NumberInput } from '~/components/ui/number-input';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
@@ -443,23 +444,25 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               ...senderOptions.map((name) => ({ value: name, label: name })),
             ]}
           />
-          <TextInput
-            type="number"
+          <NumberInput
             min={0}
             controlSize="sm"
+            allowEmpty
             wrapperClassName="w-full sm:w-28"
             placeholder="Min qty"
-            value={filters.minQty}
-            onChange={(e) => setFilterParam('minQty', e.target.value)}
+            value={filters.minQty === '' ? null : Number(filters.minQty)}
+            onValueChange={(n) => setFilterParam('minQty', String(n))}
+            onValueCleared={() => setFilterParam('minQty', '')}
           />
-          <TextInput
-            type="number"
+          <NumberInput
             min={0}
             controlSize="sm"
+            allowEmpty
             wrapperClassName="w-full sm:w-28"
             placeholder="Max qty"
-            value={filters.maxQty}
-            onChange={(e) => setFilterParam('maxQty', e.target.value)}
+            value={filters.maxQty === '' ? null : Number(filters.maxQty)}
+            onValueChange={(n) => setFilterParam('maxQty', String(n))}
+            onValueCleared={() => setFilterParam('maxQty', '')}
           />
           <Button type="button" variant="secondary" size="sm" onClick={clearAllFilters}>
             Clear all filters

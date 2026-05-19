@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
+import { DateInput } from '~/components/ui/date-input';
 import { useSearchParams, useNavigation, useLocation } from '@remix-run/react';
 
 export interface DateFilterBarProps {
@@ -360,18 +361,18 @@ export function DateFilterBar({
                   <div>
                     <label className="block text-xs font-medium text-app-fg-muted mb-1">From</label>
                     <div className="flex gap-2">
-                      <input
-                        type="date"
+                      <DateInput
+                        kind="date"
                         value={draftStart}
                         onChange={(e) => setDraftCustomDate(e.target.value, draftEnd)}
-                        className="input text-sm flex-1 min-w-0"
+                        wrapperClassName="flex-1 min-w-0"
                         disabled={draftPeriodAllTime}
                       />
-                      <input
-                        type="time"
+                      <DateInput
+                        kind="time"
                         value={draftStartTime}
                         onChange={(e) => setDraftStartTime(e.target.value)}
-                        className="input text-sm w-28"
+                        wrapperClassName="w-28"
                         disabled={draftPeriodAllTime}
                         aria-label="Start time"
                       />
@@ -380,18 +381,18 @@ export function DateFilterBar({
                   <div>
                     <label className="block text-xs font-medium text-app-fg-muted mb-1">To</label>
                     <div className="flex gap-2">
-                      <input
-                        type="date"
+                      <DateInput
+                        kind="date"
                         value={draftEnd}
                         onChange={(e) => setDraftCustomDate(draftStart, e.target.value)}
-                        className="input text-sm flex-1 min-w-0"
+                        wrapperClassName="flex-1 min-w-0"
                         disabled={draftPeriodAllTime}
                       />
-                      <input
-                        type="time"
+                      <DateInput
+                        kind="time"
                         value={draftEndTime}
                         onChange={(e) => setDraftEndTime(e.target.value)}
-                        className="input text-sm w-28"
+                        wrapperClassName="w-28"
                         disabled={draftPeriodAllTime}
                         aria-label="End time"
                       />

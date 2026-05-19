@@ -8,7 +8,8 @@
  */
 
 interface FormFieldProps {
-  label?: string;
+  /** Plain text or rich content (e.g. an inline spinner + status chip). */
+  label?: React.ReactNode;
   /** Plain text or rich content (e.g. an inline link) rendered under the input. */
   hint?: React.ReactNode;
   error?: string;

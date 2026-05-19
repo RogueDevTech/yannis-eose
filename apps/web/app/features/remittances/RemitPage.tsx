@@ -251,7 +251,7 @@ export function RemitPage({
       return;
     }
     const fd = new FormData(formEl);
-    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     fd.set('quantitySent', String(parsed.data.quantitySent));
     fetcher.submit(fd, { method: 'post' });
   };
@@ -365,7 +365,6 @@ export function RemitPage({
             <FileUpload
               folder={ASSET_FOLDERS.RECEIPTS}
               label="Upload receipt"
-              required={deliveryReceiptUrls.length === 0}
               onUpload={addDeliveryReceipt}
               onUploadStateChange={setDeliveryReceiptUploadState}
             />
@@ -443,7 +442,6 @@ export function RemitPage({
           <SearchableSelect
             id="remit-productId"
             label="Product"
-            required
             value={selectedProductId}
             onChange={setSelectedProductId}
             disabled={isSubmitting}
@@ -454,7 +452,6 @@ export function RemitPage({
           <SearchableSelect
             id="remit-toLocationId"
             label="Send to location"
-            required
             value={selectedToLocationId}
             onChange={setSelectedToLocationId}
             disabled={isSubmitting}
@@ -470,14 +467,12 @@ export function RemitPage({
             name="quantitySent"
             label="Quantity sent"
             min={1}
-            required
             disabled={isSubmitting}
           />
           <FileUpload
             folder={ASSET_FOLDERS.RECEIPTS}
             name="receiptUrl"
-            label="Receipt (required)"
-            required
+            label="Receipt"
             onUpload={(url) => setTransferReceiptUrl(url)}
             onUploadStateChange={setTransferReceiptUploadState}
           />

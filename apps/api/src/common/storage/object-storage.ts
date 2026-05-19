@@ -66,9 +66,10 @@ export async function putBufferToObjectStorage(args: {
   if (!config) return false;
 
   if (config.provider === 'gcs') {
-    const storage = new Storage({
-      projectId: config.projectId || undefined,
-    });
+    const keyJson = process.env['GCS_SERVICE_ACCOUNT_KEY_JSON']?.trim();
+    const storage = keyJson
+      ? new Storage({ projectId: config.projectId || undefined, credentials: JSON.parse(keyJson) })
+      : new Storage({ projectId: config.projectId || undefined });
     await storage.bucket(config.bucket).file(args.key).save(args.body, {
       contentType: args.contentType,
       resumable: false,

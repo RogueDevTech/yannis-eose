@@ -1934,7 +1934,7 @@ export class MarketingService {
   async approveFundingRequest(
     requestId: string,
     sentAmount: number,
-    receiptUrl: string,
+    receiptUrl: string | undefined,
     actor: {
       id: string;
       role: string;
@@ -2428,7 +2428,9 @@ export class MarketingService {
         }
       }
 
-      // Screenshot is mandatory — enforced by Zod schema. status defaults to PENDING in DB.
+      // Screenshot is optional per CEO 2026-05 — empty string preserves the
+      // column's NOT NULL constraint without a schema migration. status
+      // defaults to PENDING in DB.
       const platform = input.platform ?? 'FACEBOOK';
       const rows = await tx
         .insert(schema.adSpendLogs)
@@ -2437,7 +2439,7 @@ export class MarketingService {
           productId: input.productId ?? '',
           campaignId: input.campaignId ?? '',
           spendAmount: sql`${String(input.spendAmount)}::numeric`,
-          screenshotUrl: input.screenshotUrl,
+          screenshotUrl: input.screenshotUrl ?? '',
           spendDate: new Date(input.spendDate),
           platform,
           platformCustomLabel:

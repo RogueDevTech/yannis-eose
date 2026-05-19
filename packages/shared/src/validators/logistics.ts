@@ -79,11 +79,21 @@ export type ListLocationsInput = z.infer<typeof listLocationsSchema>;
 // Transfer Remittance (3PL → warehouse)
 // ============================================
 
+/**
+ * Optional asset URL — accepts blank, http(s), and rejects everything else.
+ * Treats empty string as `undefined` for a single truthy check downstream.
+ * Every image field is optional per the platform-wide directive (CEO 2026-05).
+ */
+const optionalAssetUrl = z
+  .union([z.literal(''), z.string().url()])
+  .optional()
+  .transform((v) => (v ? v : undefined));
+
 export const createRemittanceSchema = z.object({
   productId: z.string().uuid(),
   toLocationId: z.string().uuid(),
   quantitySent: z.number().int().min(1),
-  receiptUrl: z.string().url().min(1),
+  receiptUrl: optionalAssetUrl,
 });
 export type CreateRemittanceInput = z.infer<typeof createRemittanceSchema>;
 
@@ -153,7 +163,7 @@ export type RejectDeliveryConfirmationInput = z.infer<typeof rejectDeliveryConfi
 
 export const createDeliveryRemittanceSchema = z.object({
   orderIds: z.array(z.string().uuid()).min(1).max(500),
-  receiptUrls: z.array(z.string().url()).min(1).max(20),
+  receiptUrls: z.array(z.string().url()).max(20).default([]),
   /** Optional comment captured on the remittance row (Phase 18 — accountant-led flow). */
   notes: z.string().trim().max(1000).optional(),
   /**

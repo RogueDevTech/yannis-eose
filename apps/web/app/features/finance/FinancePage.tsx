@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { useSearchParams } from '@remix-run/react';
+import { useNavigation, useSearchParams } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { FormField } from '~/components/ui/form-field';
+import { Spinner } from '~/components/ui/spinner';
 import { Tabs } from '~/components/ui/tabs';
 import { FinanceCashRemittanceSection, FinancePayrollSection, FinanceDisbursementSection } from './finance-overview-pulse';
 import type { FinanceOverviewLoaderData } from './types';
@@ -15,7 +16,18 @@ type FinanceTab = 'remittance' | 'disbursements' | 'payroll';
 export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
   const { pulse, filters, branches = [], fundingSummary, byProduct = [], byLocation = [] } = data;
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState<FinanceTab>('remittance');
+
+  // Only show the inline spinner when the branchId search param is actually
+  // changing (not for unrelated navigations like date-filter or tab clicks).
+  const nextBranchId = navigation.location
+    ? new URLSearchParams(navigation.location.search).get('branchId') ?? ''
+    : null;
+  const branchSwitching =
+    navigation.state === 'loading' &&
+    nextBranchId !== null &&
+    nextBranchId !== (filters.branchId ?? '');
 
   const setFilter = (key: 'branchId', value: string) => {
     setSearchParams(
@@ -81,7 +93,20 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
 
       {branches.length > 0 && (
         <div className="card !p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <FormField label="Branch" htmlFor="finance-overview-branch">
+          <FormField
+            label={
+              <span className="inline-flex items-center gap-2">
+                Branch
+                {branchSwitching && (
+                  <span className="inline-flex items-center gap-1 text-xs font-normal text-app-fg-muted">
+                    <Spinner size="sm" />
+                    Loading…
+                  </span>
+                )}
+              </span>
+            }
+            htmlFor="finance-overview-branch"
+          >
             <SearchableSelect
               id="finance-overview-branch"
               value={filters.branchId ?? ''}
@@ -89,6 +114,7 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
               options={branchOptions}
               placeholder="All branches"
               searchPlaceholder="Search branches..."
+              disabled={branchSwitching}
             />
           </FormField>
           {filters.branchId && (

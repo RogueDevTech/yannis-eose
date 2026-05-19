@@ -23,6 +23,12 @@ export interface LogisticsProviderRow {
   delinquencyRate: number;
   /** Per-status percentage breakdown for the stacked-bar mix column. Sums to ~100. */
   statusBreakdown: { status: string; count: number; pct: number }[];
+  /** Sum of order totals on this provider's RECEIVED batches in the period (₦). */
+  remittedAmount: string;
+  /** Sum of order totals on this provider's still-SENT (Pending) batches in the period (₦). */
+  pendingRemittanceAmount: string;
+  /** Sum of order totals on this provider's DISPUTED batches in the period (₦). */
+  disputedRemittanceAmount: string;
 }
 
 /** Single logistics company from `logistics.getProvider` (loader detail page). */

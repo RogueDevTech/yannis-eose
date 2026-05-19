@@ -799,10 +799,45 @@ export function OrderDetailPage({
   const csCommentFetcher = useFetcher<{ success?: boolean; error?: string }>();
   const revalidator = useRevalidator();
 
+  // Hold the in-flight transition target through the submit→loading→idle gap so the
+  // progress strip doesn't flicker back to the old status while the route loader
+  // revalidation lands. Cleared once serverOrder catches up, or on a server error.
+  const [pendingTransitionStatus, setPendingTransitionStatus] = useState<string | null>(null);
+  useEffect(() => {
+    if (fetcher.state === 'submitting' && fetcher.formData) {
+      if (fetcher.formData.get('intent') === 'transition') {
+        const ns = fetcher.formData.get('newStatus');
+        if (typeof ns === 'string' && ns) setPendingTransitionStatus(ns);
+      }
+    }
+  }, [fetcher.state, fetcher.formData]);
+  useEffect(() => {
+    if (pendingTransitionStatus && serverOrder.status === pendingTransitionStatus) {
+      setPendingTransitionStatus(null);
+    }
+  }, [pendingTransitionStatus, serverOrder.status]);
+  useEffect(() => {
+    if (
+      fetcher.state === 'idle' &&
+      fetcher.data &&
+      typeof fetcher.data === 'object' &&
+      'error' in fetcher.data
+    ) {
+      setPendingTransitionStatus(null);
+    }
+  }, [fetcher.state, fetcher.data]);
+
   // Optimistic order: overlay in-flight transition / assignment / callback patches on top of
   // the server copy. Every downstream `order.status`, `order.assignedCsId`, etc. reads the
   // patched value, so the UI flips on click and snaps back if the server rejects.
-  const orderAfterFetcher = applyOptimisticOrderPatch(serverOrder, fetcher);
+  const orderAfterFetcher = (() => {
+    const fromFetcher = applyOptimisticOrderPatch(serverOrder, fetcher);
+    // If the fetcher patch already overlays a status, keep it; otherwise hold the pending one.
+    if (pendingTransitionStatus && fromFetcher.status === serverOrder.status) {
+      return { ...fromFetcher, status: pendingTransitionStatus };
+    }
+    return fromFetcher;
+  })();
   const order: OrderDetail = (() => {
     if (scheduleFetcher.state !== 'idle' && scheduleFetcher.formData) {
       const fd = scheduleFetcher.formData;
@@ -1126,29 +1161,9 @@ export function OrderDetailPage({
     if (fetcher.state === 'submitting') setDismissedError(false);
   }, [fetcher.state]);
 
-  // When call customer modal opens (VOIP off), auto-reveal the phone in one shot.
-  // `revealPhoneForManualCall` on the server handles the CS_ENGAGED transition itself,
-  // so the user skips the "Reveal number" middle step and lands straight on the dialer buttons.
-  useEffect(() => {
-    if (
-      callCustomerModalOpen &&
-      !voipEnabled &&
-      revealFetcher.state === 'idle' &&
-      !revealFetcher.data
-    ) {
-      ensureBranchForAction({
-        actionLabel: 'revealing phone for call',
-        onProceed: () =>
-          revealFetcher.submit(
-            {
-              intent: 'revealPhone',
-              ...(order.branchId ? { branchId: order.branchId } : {}),
-            },
-            { method: 'post' },
-          ),
-      });
-    }
-  }, [callCustomerModalOpen, voipEnabled, revealFetcher.state, revealFetcher.data, ensureBranchForAction, order.branchId]);
+  // Reveal-on-click: the Copy / Call buttons trigger the reveal inline, so the modal
+  // never blocks behind a spinner. `revealPhoneForManualCall` on the server still handles
+  // the CS_ENGAGED transition + audit row.
 
   // Reset call debug log when opening the call modal (VOIP path)
   useEffect(() => {
@@ -3003,7 +3018,6 @@ export function OrderDetailPage({
               folder={ASSET_FOLDERS.DELIVERY_PROOF}
               onUpload={(url) => setDeliverProofUrl(url)}
               accept="image/*"
-              maxSizeMB={10}
             />
           </div>
           <div className="flex gap-2 mt-5 justify-end">
@@ -3302,8 +3316,33 @@ export function OrderDetailPage({
             ) : (
               <>
                 {(() => {
-                  const phoneReady = !!revealData?.phoneRevealed && !!revealData?.isDialable;
-                  const busy = !phoneReady || recordCallFetcher.state === 'submitting';
+                  // Reveal-on-click: fire the reveal call once when Copy / Call is pressed,
+                  // grab the phone from the response (or cached revealData), then copy / dial.
+                  // No loading state on the buttons — the modal stays usable immediately.
+                  const ensureRevealedPhone = async (): Promise<string | null> => {
+                    if (revealData?.phoneRevealed && revealData?.isDialable && revealData?.phone) {
+                      return revealData.phone;
+                    }
+                    const formData = new FormData();
+                    formData.set('intent', 'revealPhone');
+                    if (order.branchId) formData.set('branchId', order.branchId);
+                    const url = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '';
+                    try {
+                      const res = await fetch(url, { method: 'POST', body: formData, credentials: 'same-origin' });
+                      const data = (await res.json().catch(() => null)) as {
+                        phone?: string;
+                        phoneRevealed?: boolean;
+                        isDialable?: boolean;
+                      } | null;
+                      if (data?.phoneRevealed && data?.isDialable && data?.phone) {
+                        // Mirror the fetcher's cached data so subsequent UI reads work.
+                        return data.phone;
+                      }
+                      return null;
+                    } catch {
+                      return null;
+                    }
+                  };
                   return (
                     <>
                       <div className="flex flex-wrap gap-2 mb-4">
@@ -3311,6 +3350,12 @@ export function OrderDetailPage({
                           type="button"
                           variant="secondary"
                           onClick={async () => {
+                            const phone = await ensureRevealedPhone();
+                            if (phone && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                              await navigator.clipboard.writeText(phone);
+                              setCopyFeedback(true);
+                              setTimeout(() => setCopyFeedback(false), 2000);
+                            }
                             ensureBranchForAction({
                               actionLabel: 'recording customer call',
                               onProceed: () =>
@@ -3322,16 +3367,7 @@ export function OrderDetailPage({
                                   { method: 'post' },
                                 ),
                             });
-                            const phone = revealData?.phone ?? '';
-                            if (phone && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-                              await navigator.clipboard.writeText(phone);
-                              setCopyFeedback(true);
-                              setTimeout(() => setCopyFeedback(false), 2000);
-                            }
                           }}
-                          disabled={busy}
-                          loading={!phoneReady}
-                          loadingText="Copy number"
                         >
                           {copyFeedback ? 'Copied' : 'Copy number'}
                         </Button>
@@ -3339,10 +3375,11 @@ export function OrderDetailPage({
                           type="button"
                           variant="primary"
                           className="inline-flex items-center justify-center gap-2"
-                          disabled={busy}
-                          loading={!phoneReady}
-                          loadingText="Call on my phone"
-                          onClick={() => {
+                          onClick={async () => {
+                            const phone = await ensureRevealedPhone();
+                            if (phone) {
+                              window.location.href = `tel:${phone}`;
+                            }
                             ensureBranchForAction({
                               actionLabel: 'recording customer call',
                               onProceed: () =>
@@ -3354,10 +3391,6 @@ export function OrderDetailPage({
                                   { method: 'post' },
                                 ),
                             });
-                            const phone = revealData?.phone ?? '';
-                            if (phone) {
-                              window.location.href = `tel:${phone}`;
-                            }
                           }}
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -134,7 +134,7 @@ export function AdminQuickDashboardLoadingShell({
           { to: '/admin/cs/queue', label: 'CS Queue' },
           { to: '/admin/logistics/orders', label: 'Logistics' },
           { to: '/admin/marketing', label: 'Marketing' },
-          { to: '/admin/finance', label: 'Finance' },
+          { to: '/admin/finance/overview', label: 'Finance' },
         ].map(({ to, label }) => (
           <Link
             key={to}

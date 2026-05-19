@@ -410,7 +410,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
       return;
     }
     const fd = new FormData(formEl);
-    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     ensureBranchForAction({
       actionLabel: 'sending funding',
       onProceed: () => fetcher.submit(fd, { method: 'post' }),
@@ -442,7 +442,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
       return;
     }
     const fd = new FormData(formEl);
-    fd.set('receiptUrl', parsed.data.receiptUrl);
+    fd.set('receiptUrl', parsed.data.receiptUrl ?? '');
     fd.set('amount', String(parsed.data.amount));
     ensureBranchForAction({
       actionLabel: 'approving funding request',
@@ -936,7 +936,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               <label className="block text-sm font-medium text-app-fg-muted mb-1">Media Buyer</label>
               <SearchableSelect
                 id="marketing-funding-receiver"
-                required
                 value={createFundingReceiverId}
                 onChange={setCreateFundingReceiverId}
                 placeholder="Select recipient..."
@@ -960,7 +959,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Receipt Upload"
-              required
               onUpload={(url) => setCreateFundingReceiptUrl(url)}
               onUploadStateChange={setCreateFundingUploadState}
             />
@@ -1147,7 +1145,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               </label>
               <AmountInput
                 name="amount"
-                required
                 defaultValue={String(approvingRequest.amount)}
                 className="input w-full"
               />
@@ -1156,7 +1153,6 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               folder={ASSET_FOLDERS.RECEIPTS}
               name="receiptUrl"
               label="Receipt image"
-              required
               onUpload={(url) => setApproveFundingReceiptUrl(url)}
               onUploadStateChange={setApproveFundingUploadState}
             />

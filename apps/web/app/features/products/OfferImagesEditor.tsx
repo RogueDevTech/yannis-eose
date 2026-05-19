@@ -80,7 +80,6 @@ export function OfferImagesEditor({
                 key={`offer-upload-${uploadNonce}`}
                 folder={ASSET_FOLDERS.PRODUCT_IMAGES}
                 accept="image/*"
-                maxSizeMB={10}
                 size="sm"
                 variant="minimal"
                 onUpload={(url) => {
@@ -131,7 +130,6 @@ export function OfferImagesEditor({
             key={`offer-upload-${uploadNonce}`}
             folder={ASSET_FOLDERS.PRODUCT_IMAGES}
             accept="image/*"
-            maxSizeMB={10}
             label={imageUrls.length === 0 ? 'Upload images' : 'Add another image'}
             size="sm"
             onUpload={(url) => {

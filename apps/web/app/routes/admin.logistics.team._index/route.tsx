@@ -15,7 +15,7 @@ import { LogisticsTeamLoadingShell } from '~/features/logistics/LogisticsDeferre
 import type { LogisticsProviderRow } from '~/features/logistics/team-types';
 
 export const meta: MetaFunction = () => [
-  { title: 'Logistics Team Analysis — Yannis EOSE' },
+  { title: 'Logistics Agent Analysis — Yannis EOSE' },
 ];
 
 function parseProvidersList(res: { ok: boolean; status: number; data: unknown }): LogisticsProviderRow[] {
