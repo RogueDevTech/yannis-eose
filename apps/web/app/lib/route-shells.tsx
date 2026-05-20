@@ -93,7 +93,7 @@ function pad2Shell(n: number) {
   return String(n).padStart(2, '0');
 }
 
-/** Client-side default month — mirrors CS orders loader when no date params. */
+/** Client-side default month — mirrors Sales orders loader when no date params. */
 function defaultThisMonthRangeClient(): { startDate: string; endDate: string } {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -513,9 +513,9 @@ const entries: ShellEntry[] = [
   },
 
   // ── Admin / CS ──────────────────────────────────────────────────────────────
-  { match: /^\/admin\/cs\/queue$/, render: () => <CSOverviewSkeleton /> },
+  { match: /^\/admin\/sales\/queue$/, render: () => <CSOverviewSkeleton /> },
   {
-    match: /^\/admin\/cs\/team$/,
+    match: /^\/admin\/sales\/team$/,
     render: (_m, sp) => {
       const dateFilters = parseDateFilters(sp);
       const q = (sp.get('q') ?? '').trim();
@@ -534,14 +534,14 @@ const entries: ShellEntry[] = [
     },
   },
   {
-    match: /^\/admin\/cs\/orders$/,
+    match: /^\/admin\/sales\/orders$/,
     render: (_m, sp) => {
       const p = parseCsOrdersLoadingShellFromSearchParams(sp);
       return <CSOrdersLoadingShell {...p} isCSCloser={false} showCSCloserColumn={false} />;
     },
   },
   {
-    match: /^\/admin\/cs\/leaderboard$/,
+    match: /^\/admin\/sales\/leaderboard$/,
     render: (_m, sp) => {
       const periodAllTime = sp.get('period') === 'all_time';
       let startDate = sp.get('startDate') ?? '';
@@ -563,7 +563,7 @@ const entries: ShellEntry[] = [
     },
   },
   {
-    match: /^\/admin\/cs\/message-templates$/,
+    match: /^\/admin\/sales\/message-templates$/,
     render: () => <CSMessageTemplatesLoadingShell />,
   },
 

@@ -1,11 +1,11 @@
 /**
  * Compact 2-letter initials avatar — same treatment as the Closer Workload
- * cards on `/admin/cs/queue` (soft brand surface, brand-coloured glyphs,
+ * cards on `/admin/sales/queue` (soft brand surface, brand-coloured glyphs,
  * tight 24px footprint by default).
  *
  * Used anywhere a user / member name appears in a list cell or compact card
  * row so the visual signature stays consistent across HR Users, Marketing
- * Team, CS Closer Workloads, etc.
+ * Team, Sales Closer Workloads, etc.
  *
  * Falls back to '—' for blank names so the chip is never empty.
  */

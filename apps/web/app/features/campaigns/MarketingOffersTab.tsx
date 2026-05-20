@@ -54,6 +54,12 @@ export interface MarketingOffersTabProps {
   canManageOfferTemplates: boolean;
   /** First fetch of offer summary — show below filters until data is ready. */
   offersLoading?: boolean;
+  /**
+   * Controlled product filter — lifted to the route so the same filter can also
+   * live in the page-header kebab (mobile). Falls back to local state when omitted.
+   */
+  filterProductId?: string;
+  onFilterProductChange?: (productId: string) => void;
 }
 
 /**
@@ -66,6 +72,8 @@ export function MarketingOffersTab({
   offerGroupsLoadError = null,
   canManageOfferTemplates,
   offersLoading = false,
+  filterProductId: filterProductIdProp,
+  onFilterProductChange,
 }: MarketingOffersTabProps) {
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -88,7 +96,10 @@ export function MarketingOffersTab({
     if (offerGroupsLoadError) setDismissedOffersError(false);
   }, [offerGroupsLoadError]);
 
-  const [filterProductId, setFilterProductId] = useState('');
+  // Controlled by the route when the kebab owns the filter; local otherwise.
+  const [localFilterProductId, setLocalFilterProductId] = useState('');
+  const filterProductId = filterProductIdProp ?? localFilterProductId;
+  const setFilterProductId = onFilterProductChange ?? setLocalFilterProductId;
   const [offerSearch, setOfferSearch] = useState('');
 
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -215,7 +226,9 @@ export function MarketingOffersTab({
               </form>
             </FormField>
           </div>
-          <div className="min-w-0 flex-1 sm:max-w-sm">
+          {/* Hidden on mobile — the product filter lives in the page-header
+              kebab there (Action icon). Desktop keeps it inline. */}
+          <div className="hidden md:block min-w-0 flex-1 sm:max-w-sm">
             <SearchableSelect
               id="offers-filter-product"
               label="Product filter"
@@ -275,7 +288,7 @@ export function MarketingOffersTab({
                   <div className="text-xs text-app-fg-muted">+{g.items.length - 3} more</div>
                 ) : null}
               </div>
-              <div className="pt-4 flex flex-wrap justify-end gap-2">
+              <div className="pt-4 flex flex-wrap justify-start gap-2">
                 <TableActionButton type="button" variant="primary" onClick={() => setViewingOffer(g)}>
                   View
                 </TableActionButton>

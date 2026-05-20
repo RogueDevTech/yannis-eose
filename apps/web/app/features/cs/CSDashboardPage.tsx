@@ -170,7 +170,7 @@ function AgentWorkloadCard({
         </button>
       ) : (
         <Link
-          to={`/admin/cs/orders?csCloserId=${agent.agentId}&period=all_time`}
+          to={`/admin/sales/orders?csCloserId=${agent.agentId}&period=all_time`}
           prefetch="intent"
           title="View orders for this closer"
           className="text-mini font-medium text-brand-600 dark:text-brand-400 hover:underline"
@@ -180,7 +180,7 @@ function AgentWorkloadCard({
         </Link>
       )}
       <Link
-        to={`/admin/cs/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
+        to={`/admin/sales/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
         prefetch="intent"
         title="Hot swap orders from this closer"
         className="text-mini font-medium text-app-fg-muted hover:text-app-fg hover:underline"
@@ -407,7 +407,7 @@ function AgentWorkloadDetailModal({
 
       <div className="px-5 pb-5 flex flex-col gap-2">
         <Link
-          to={`/admin/cs/orders?csCloserId=${agent.agentId}&period=all_time`}
+          to={`/admin/sales/orders?csCloserId=${agent.agentId}&period=all_time`}
           prefetch="intent"
           onClick={onClose}
           className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 transition-colors"
@@ -418,7 +418,7 @@ function AgentWorkloadDetailModal({
           View orders
         </Link>
         <Link
-          to={`/admin/cs/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
+          to={`/admin/sales/queue?tab=hotswap&hotSwapFrom=${encodeURIComponent(agent.agentId)}`}
           prefetch="intent"
           onClick={onClose}
           className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-app-fg bg-app-hover hover:bg-app-border border border-app-border transition-colors"
@@ -592,9 +592,9 @@ function CSQueueStaticHeader({
       description="Today's queue and closer activity."
       actions={
         <PageHeaderMobileTools
-          sheetTitle="CS queue tools"
+          sheetTitle="Sales queue tools"
           sheetSubtitle={<span>Create offline orders and refresh the queue</span>}
-          triggerAriaLabel="CS queue tools"
+          triggerAriaLabel="Sales queue tools"
           mobileLeading={
             liveEvents != null && liveEvents.length > 0 ? (
               <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
@@ -1211,15 +1211,15 @@ function CSDashboardPageLoaded({
 
   // Refresh cart payloads whenever abandoned pagination URL changes (and on first paint)
   useEffect(() => {
-    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrl}`);
+    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrl}`);
   }, [abandonedPageFromUrl]);
 
   // Reload activity on any order event
   useSocketEvent('order:new', () => {
-    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
   });
   useSocketEvent('order:status_changed', () => {
-    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
   });
 
   const actionError = (fetcher.data as { error?: string })?.error;
@@ -1298,7 +1298,7 @@ function CSDashboardPageLoaded({
   useEffect(() => {
     if (deleteCartFetcher.state === 'idle' && deleteCartFetcher.data?.ok) {
       setDeleteCartConfirm(null);
-      cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+      cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
     }
   }, [deleteCartFetcher.state, deleteCartFetcher.data]);
 
@@ -1310,7 +1310,7 @@ function CSDashboardPageLoaded({
     if (succeeded) {
       setBulkDeleteCartsConfirmOpen(false);
       clearAbandonedSelection();
-      cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+      cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
     } else {
       // Action errored — drop the optimistic filter so the rows reappear.
       setBulkDeletingAbandonedIds([]);
@@ -1339,7 +1339,7 @@ function CSDashboardPageLoaded({
 
   // cart:updated socket event → reload carts fetcher directly (main loader revalidation won't refresh fetcher data)
   useSocketEvent('cart:updated', () => {
-    cartsFetcher.load(`/admin/cs/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
   });
 
   // Detect newly arrived + updated activity items after each fetcher response
@@ -2116,7 +2116,7 @@ function CSDashboardPageLoaded({
                 onScrollLeft={() => scrollUnassignedQueueStrip(-280)}
                 onScrollRight={() => scrollUnassignedQueueStrip(280)}
                 scrollAriaSubject="unassigned queue"
-                viewAllTo="/admin/cs/orders?status=UNPROCESSED&period=all_time"
+                viewAllTo="/admin/sales/orders?status=UNPROCESSED&period=all_time"
               />
               <div
                 ref={unassignedQueueScrollRef}
@@ -2673,7 +2673,7 @@ function CSDashboardPageLoaded({
                 onScrollLeft={() => scrollAbandonedStrip(-280)}
                 onScrollRight={() => scrollAbandonedStrip(280)}
                 scrollAriaSubject="abandoned carts"
-                viewAllTo="/admin/cs/queue?tab=abandoned&abandonedPage=1"
+                viewAllTo="/admin/sales/queue?tab=abandoned&abandonedPage=1"
               />
               <div
                 ref={abandonedScrollRef}
@@ -2797,7 +2797,7 @@ function CSDashboardPageLoaded({
             </div>
           </div>
           <ModalFetcherInlineError message={deleteCartSurface.errorMatchingIntent('deleteAbandoned')} className="mb-4" />
-          <deleteCartFetcher.Form method="post" action="/admin/cs/queue/carts" className="flex items-center justify-end gap-2">
+          <deleteCartFetcher.Form method="post" action="/admin/sales/queue/carts" className="flex items-center justify-end gap-2">
             <input type="hidden" name="intent" value="deleteAbandoned" />
             <input type="hidden" name="cartId" value={deleteCartConfirm.id} />
             <Button type="button" variant="secondary" size="sm" onClick={() => setDeleteCartConfirm(null)}>
@@ -2833,7 +2833,7 @@ function CSDashboardPageLoaded({
               </p>
             </div>
           </div>
-          <bulkDismissDuplicatesFetcher.Form method="post" action="/admin/cs/queue" className="flex items-center justify-end gap-2">
+          <bulkDismissDuplicatesFetcher.Form method="post" action="/admin/sales/queue" className="flex items-center justify-end gap-2">
             <input type="hidden" name="intent" value="bulkDismissDuplicates" />
             <input type="hidden" name="orderIds" value={Array.from(selectedDuplicateIds).join(',')} />
             <Button type="button" variant="secondary" size="sm" onClick={() => setBulkDismissDuplicatesConfirmOpen(false)}>
@@ -2867,7 +2867,7 @@ function CSDashboardPageLoaded({
               </p>
             </div>
           </div>
-          <bulkDeleteCartsFetcher.Form method="post" action="/admin/cs/queue/carts" className="flex items-center justify-end gap-2">
+          <bulkDeleteCartsFetcher.Form method="post" action="/admin/sales/queue/carts" className="flex items-center justify-end gap-2">
             <input type="hidden" name="intent" value="deleteAbandonedMany" />
             <input type="hidden" name="cartIds" value={Array.from(selectedAbandonedIds).join(',')} />
             <Button type="button" variant="secondary" size="sm" onClick={() => setBulkDeleteCartsConfirmOpen(false)}>
@@ -2959,7 +2959,7 @@ function CSDashboardPageLoaded({
             Please provide a reason (at least 10 characters). The order will be moved to Cancelled.
           </p>
           <ModalFetcherInlineError message={fetcherCsModalError('cancel')} className="mb-3" />
-          {/* Preset reason chips — match the bulk cancel modal on the CS Orders page. */}
+          {/* Preset reason chips — match the bulk cancel modal on the Sales Orders page. */}
           <div className="flex flex-wrap gap-2 mb-3">
             {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {
               const isOther = preset === 'Other';

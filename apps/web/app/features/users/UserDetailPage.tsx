@@ -74,7 +74,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   SUPER_ADMIN: 'Full system access. Can manage all modules, users, and settings.',
   HEAD_OF_MARKETING: 'Oversees all marketing campaigns, funding, and media buyer performance.',
   MEDIA_BUYER: 'Runs ad campaigns, manages ad spend, and tracks CPA/ROAS.',
-  HEAD_OF_CS: 'Manages CS team performance, order processing, and agent workloads.',
+  HEAD_OF_CS: 'Manages Sales team performance, order processing, and agent workloads.',
   CS_CLOSER: 'Handles customer calls, confirms orders, and processes cancellations.',
   FINANCE_OFFICER: 'Manages invoices, approvals, budgets, and financial reporting.',
   HEAD_OF_LOGISTICS:
@@ -540,7 +540,7 @@ export function UserDetailPage({
 
   // Detail-page-only role flags — used for tab visibility and the right-rail cards.
   const isCSRole = ['CS_CLOSER', 'HEAD_OF_CS'].includes(user.role);
-  // Capacity is only a meaningful number for CS closers + Media Buyers.
+  // Capacity is only a meaningful number for Sales closers + Media Buyers.
   // Drives the read-only badge / InfoField in the Overview, independent of CS-vs-MB role logic elsewhere.
   const showCapacityReadonly = ['CS_CLOSER', 'MEDIA_BUYER'].includes(user.role);
   const isLogisticsRole = [

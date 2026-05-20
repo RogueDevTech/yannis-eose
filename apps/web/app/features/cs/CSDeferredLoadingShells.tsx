@@ -305,7 +305,7 @@ export type CSOrdersLoadingShellScheduleFilters = {
   scheduleDate: string | null;
 };
 
-/** CS orders list — real URL-driven filters; pulses only for counts, workload, and table. */
+/** Sales orders list — real URL-driven filters; pulses only for counts, workload, and table. */
 export function CSOrdersLoadingShell({
   filters,
   scheduleFilters,
@@ -455,16 +455,16 @@ export function CSOrdersLoadingShell({
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title={isCSCloser ? 'My Orders' : 'CS Orders'}
+        title={isCSCloser ? 'My Orders' : 'Sales Orders'}
         mobileInlineActions
         description={
-          isCSCloser ? 'Your assigned orders and pipeline' : 'All customer orders for the CS team'
+          isCSCloser ? 'Your assigned orders and pipeline' : 'All customer orders for the Sales team'
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="CS orders tools"
+            sheetTitle="Sales orders tools"
             sheetSubtitle={<span>Date range, chart, export</span>}
-            triggerAriaLabel="CS orders toolbar"
+            triggerAriaLabel="Sales orders toolbar"
             mobileLeading={
               liveEvents != null && liveEvents.length > 0 ? (
                 <LiveIndicator isConnected={false} showGreen={false} />
@@ -696,7 +696,7 @@ const CS_TEAM_LOAD_BACKLOG_OPTIONS = [
   { value: 'NO_PENDING', label: 'No pending' },
 ];
 
-/** CS team analysis — date + real list filters; stat strip + table pulse until bundle returns. */
+/** Sales team analysis — date + real list filters; stat strip + table pulse until bundle returns. */
 export function CSTeamLoadingShell({
   dateFilters,
   q = '',
@@ -766,9 +766,9 @@ export function CSTeamLoadingShell({
         description="View closer workload and performance."
         actions={
           <PageHeaderMobileTools
-            sheetTitle="CS team tools"
+            sheetTitle="Sales team tools"
             sheetSubtitle={<span>Date range</span>}
-            triggerAriaLabel="CS team toolbar"
+            triggerAriaLabel="Sales team toolbar"
             desktop={
               <>
                 <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
@@ -884,7 +884,7 @@ export function CSLeaderboardLoadingShell({
   return (
     <div className="space-y-6 px-3 sm:px-0" aria-busy="true" aria-live="polite">
       <PageHeader
-        title="CS Leaderboard"
+        title="Sales Leaderboard"
         mobileInlineActions
         description="Rank closer performance by delivery rate."
         actions={

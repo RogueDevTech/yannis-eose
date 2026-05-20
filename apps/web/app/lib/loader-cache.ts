@@ -91,12 +91,12 @@ export function clearLoaderCache(): void {
 /**
  * Drop one URL's cache entry. Useful for explicit cache busting after a
  * mutation that affects another page (e.g. creating an order from page A
- * could call `invalidateCachedLoader('/admin/cs/orders')` to ensure the next
+ * could call `invalidateCachedLoader('/admin/sales/orders')` to ensure the next
  * revisit shows the new row immediately rather than waiting for the
  * background revalidate to land).
  */
 export function invalidateCachedLoader(pathname: string): void {
-  // Match by prefix so `/admin/cs/orders?status=PENDING` etc. all drop.
+  // Match by prefix so `/admin/sales/orders?status=PENDING` etc. all drop.
   for (const k of [...cache.keys()]) {
     if (k === pathname || k.startsWith(`${pathname}?`)) {
       cache.delete(k);

@@ -280,12 +280,23 @@ function ShipmentsIndexContent(data: {
   canIntake: boolean;
   loadError: string | null;
 }) {
-  const hasActiveFilters =
-    data.filters.status !== '' ||
-    data.filters.search !== '' ||
-    data.filters.destinationLocationId !== '' ||
-    data.filters.fromDate !== '' ||
-    data.filters.toDate !== '';
+  const activeFilters = [
+    data.filters.status,
+    data.filters.search,
+    data.filters.destinationLocationId,
+    data.filters.fromDate,
+    data.filters.toDate,
+  ].filter((value) => value !== '');
+  const hasActiveFilters = activeFilters.length > 0;
+
+  const statusFilterOptions = SHIPMENT_STATUS_FILTERS.map((item) => ({
+    value: item.value,
+    label: item.label,
+  }));
+  const warehouseFilterOptions = [
+    { value: '', label: 'All warehouses' },
+    ...data.locations.map((location) => ({ value: location.id, label: location.name })),
+  ];
 
   return (
     <div className="space-y-4">
@@ -296,20 +307,78 @@ function ShipmentsIndexContent(data: {
         actions={
           <PageHeaderMobileTools
             sheetTitle="Shipment tools"
-            sheetSubtitle={<span>Refresh and view inventory</span>}
+            sheetSubtitle={<span>Filter, refresh and receive shipments</span>}
             triggerAriaLabel="Shipment toolbar"
+            filtersBadgeCount={activeFilters.length}
+            filters={
+              <form method="get" className="space-y-3">
+                <FormSelect
+                  name="status"
+                  defaultValue={data.filters.status}
+                  wrapperClassName="w-full"
+                  controlSize="lg"
+                  className="!bg-app-hover text-center"
+                  options={statusFilterOptions}
+                />
+                <FormSelect
+                  name="destinationLocationId"
+                  defaultValue={data.filters.destinationLocationId}
+                  wrapperClassName="w-full"
+                  controlSize="lg"
+                  className="!bg-app-hover text-center"
+                  options={warehouseFilterOptions}
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <TextInput label="From" type="date" name="fromDate" defaultValue={data.filters.fromDate} />
+                  <TextInput label="To" type="date" name="toDate" defaultValue={data.filters.toDate} />
+                </div>
+                {/* Search lives in its own bar on the page — carry the current
+                    term so applying filters here does not drop it. */}
+                <input type="hidden" name="search" defaultValue={data.filters.search} />
+                <div className="flex items-center gap-2">
+                  <button type="submit" className="btn-primary btn-sm flex-1 justify-center">
+                    Apply filters
+                  </button>
+                  {hasActiveFilters ? (
+                    <Link to="/admin/shipments" prefetch="intent" className="btn-ghost btn-sm">
+                      Reset
+                    </Link>
+                  ) : null}
+                </div>
+              </form>
+            }
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
                 <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm">
                   View inventory
                 </Link>
+                {data.canIntake ? (
+                  <Link to="/admin/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
+                    Receive shipment
+                  </Link>
+                ) : null}
               </div>
             }
             sheet={
-              <Link to="/admin/inventory" prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
-                View inventory
-              </Link>
+              <>
+                {data.canIntake ? (
+                  <Link
+                    to="/admin/shipments/receive"
+                    prefetch="intent"
+                    className="btn-secondary btn-sm w-full justify-center"
+                  >
+                    Receive shipment
+                  </Link>
+                ) : null}
+                <Link
+                  to="/admin/inventory"
+                  prefetch="intent"
+                  className="btn-secondary btn-sm w-full justify-center"
+                >
+                  View inventory
+                </Link>
+              </>
             }
           />
         }
@@ -327,7 +396,9 @@ function ShipmentsIndexContent(data: {
         ]}
       />
 
-      <div className="card p-4 space-y-3">
+      {/* Desktop-only filter bar — on mobile these filters live in the
+          page-header kebab (Action icon group). */}
+      <div className="card p-4 space-y-3 hidden md:block">
         <form method="get" className="flex flex-col gap-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <FormSelect
@@ -335,17 +406,14 @@ function ShipmentsIndexContent(data: {
               name="status"
               defaultValue={data.filters.status}
               wrapperClassName="w-full sm:w-48"
-              options={SHIPMENT_STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+              options={statusFilterOptions}
             />
             <FormSelect
               label="Warehouse"
               name="destinationLocationId"
               defaultValue={data.filters.destinationLocationId}
               wrapperClassName="w-full sm:w-56"
-              options={[
-                { value: '', label: 'All warehouses' },
-                ...data.locations.map((location) => ({ value: location.id, label: location.name })),
-              ]}
+              options={warehouseFilterOptions}
             />
             <div className="w-full sm:w-40">
               <TextInput label="From" type="date" name="fromDate" defaultValue={data.filters.fromDate} />
@@ -375,6 +443,23 @@ function ShipmentsIndexContent(data: {
           </div>
         </form>
       </div>
+
+      {/* Mobile search bar — search stays on the page; the other filters live
+          in the page-header kebab. Hidden fields carry the active filters so a
+          search submit does not drop them. */}
+      <form method="get" className="md:hidden">
+        <input type="hidden" name="status" defaultValue={data.filters.status} />
+        <input type="hidden" name="destinationLocationId" defaultValue={data.filters.destinationLocationId} />
+        <input type="hidden" name="fromDate" defaultValue={data.filters.fromDate} />
+        <input type="hidden" name="toDate" defaultValue={data.filters.toDate} />
+        <SearchInput
+          name="search"
+          defaultValue={data.filters.search}
+          placeholder="Search label, supplier, or ref…"
+          wrapperClassName="w-full"
+          withSubmitButton
+        />
+      </form>
 
       {data.loadError && (
         <div className="card p-4 text-sm text-danger-700 dark:text-danger-300">

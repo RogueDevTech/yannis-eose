@@ -47,7 +47,7 @@ export function downloadUsersImportTemplate(branches: BranchInfo[]): void {
     [
       'Jane Doe',
       'jane.doe@example.com',
-      'CS Closer',
+      'Sales Closer',
       '08031234567',
       sampleBranchCode,
       sampleSecondBranch,

@@ -29,7 +29,7 @@ export const users = pgTable('users', {
   logisticsLocationId: uuid('logistics_location_id'),
   // Staff WhatsApp/phone number. ALWAYS masked in API responses (Lead Fortress).
   phone: text('phone'),
-  // Array of order status strings this user can see (CS closers).
+  // Array of order status strings this user can see (Sales closers).
   visibleOrderStatuses: jsonb('visible_order_statuses').$type<string[]>(),
   // Limit user to only their assigned products.
   restrictProductAccess: boolean('restrict_product_access').default(false).notNull(),

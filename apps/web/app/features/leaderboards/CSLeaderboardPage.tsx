@@ -41,7 +41,7 @@ export function CSLeaderboardPage({
   return (
     <div className="space-y-6 px-3 sm:px-0">
       <PageHeader
-        title="CS Leaderboard"
+        title="Sales Leaderboard"
         mobileInlineActions
         description="Rank closer performance by delivery rate."
         actions={

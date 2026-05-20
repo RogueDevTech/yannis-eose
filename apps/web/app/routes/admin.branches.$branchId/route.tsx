@@ -573,7 +573,7 @@ const BRANCH_ELIGIBLE_ROLES = new Set([
 ]);
 
 const ROLE_OPTIONS = [
-  { value: 'CS_CLOSER', label: 'CS Closer' },
+  { value: 'CS_CLOSER', label: 'Sales Closer' },
   { value: 'HEAD_OF_CS', label: 'Head of CS' },
   { value: 'MEDIA_BUYER', label: 'Media Buyer' },
   { value: 'HEAD_OF_MARKETING', label: 'Head of Marketing' },
@@ -2143,7 +2143,7 @@ function BranchSupervisorTeamsPanel({
             <>
               Make <strong>{confirmIntent.memberName}</strong> a supervisor on{' '}
               <strong>{confirmIntent.teamTitle}</strong>? Supervisors can mirror supervised staff,
-              assign CS orders, and send marketing funding within their team.
+              assign Sales orders, and send marketing funding within their team.
             </>
           ) : (
             <>
@@ -2217,7 +2217,7 @@ function BranchSupervisorTeamsPanel({
   const defaultCreateDept = canManageCSTeams ? 'CS' : 'MARKETING';
 
   // Per-viewer dept visibility (CEO directive 2026-05-10): Head of Marketing
-  // shouldn't see the CS department, Head of CS shouldn't see Marketing —
+  // shouldn't see the Sales department, Head of CS shouldn't see Marketing —
   // they only manage one of the two. SuperAdmin / Admin / Branch Admin /
   // HR Manager keep `canManageCSTeams && canManageMarketingTeams` so they
   // see both. The same `canManage*` flags drive both visibility AND

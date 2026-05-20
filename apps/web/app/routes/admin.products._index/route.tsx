@@ -11,6 +11,8 @@ import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
+import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Tabs } from '~/components/ui/tabs';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -416,6 +418,12 @@ function ProductsRouteInner(
 ) {
   const [uiTab, setUiTab] = React.useState<'product' | 'offers'>(data.initialTab);
   const [showCreateOffer, setShowCreateOffer] = React.useState(false);
+  // Owned here (not in <ProductsListPage>) so the Status filter can also render
+  // inside the page-header kebab (mobile actions group).
+  const [productStatusFilter, setProductStatusFilter] = React.useState('ACTIVE');
+  // Offers product filter — owned here so it can live in the page-header kebab
+  // and switch the user to the Offers tab on change.
+  const [offerFilterProductId, setOfferFilterProductId] = React.useState('');
   /** Single open-menu id shared by the page-header split-button so opening
    *  one closes any others. */
   const [openHeaderMenuId, setOpenHeaderMenuId] = React.useState<string | null>(null);
@@ -460,6 +468,13 @@ function ProductsRouteInner(
     startOffersSummaryFetch();
   }, [showCreateOffer, startOffersSummaryFetch]);
 
+  // Background-prefetch the offers summary so the kebab's offer-product filter
+  // has options even while the user is still on the Product tab. This is a
+  // non-blocking fetcher.load — the Product tab still paints from `data.products`.
+  React.useEffect(() => {
+    startOffersSummaryFetch();
+  }, [startOffersSummaryFetch]);
+
   React.useEffect(() => {
     if (!offersFetcher.data) return;
     if (offersFetcher.data.ok) {
@@ -490,6 +505,27 @@ function ProductsRouteInner(
   const resolved = data.products;
   const offersCount = data.offerGroupsCount;
 
+  // Options for the kebab offer-product filter — built from the offers summary.
+  const offerProductOptions = React.useMemo(
+    () =>
+      [{ value: '', label: 'Offer product filter' }].concat(
+        offersCache.offersProducts.map((p) => ({
+          value: p.id,
+          label: `${p.name} (₦${Number(p.baseSalePrice).toLocaleString()})`,
+        })),
+      ),
+    [offersCache.offersProducts],
+  );
+
+  // Pick a product in the kebab filter → apply it and jump to the Offers tab.
+  const applyOfferFilterFromKebab = React.useCallback(
+    (productId: string) => {
+      setOfferFilterProductId(productId);
+      setTabInstant('offers');
+    },
+    [setTabInstant],
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -499,8 +535,29 @@ function ProductsRouteInner(
         actions={
           <PageHeaderMobileTools
             sheetTitle="Product tools"
-            sheetSubtitle={<span>Refresh and create</span>}
+            sheetSubtitle={<span>Filter, refresh and create</span>}
             triggerAriaLabel="Product toolbar"
+            filtersBadgeCount={
+              (uiTab === 'product' && productStatusFilter !== 'ACTIVE' ? 1 : 0) +
+              (offerFilterProductId ? 1 : 0)
+            }
+            filters={
+              uiTab === 'product' ? (
+                <FormSelect
+                  value={productStatusFilter}
+                  onChange={(e) => setProductStatusFilter(e.target.value)}
+                  options={[
+                    { value: 'ALL', label: 'All Status' },
+                    { value: 'ACTIVE', label: 'Active' },
+                    { value: 'INACTIVE', label: 'Inactive' },
+                    { value: 'ARCHIVED', label: 'Archived' },
+                  ]}
+                  controlSize="lg"
+                  className="!bg-app-hover text-center"
+                  wrapperClassName="w-full"
+                />
+              ) : undefined
+            }
             desktop={
               <div className="flex items-center gap-2">
                 <PageRefreshButton />
@@ -555,13 +612,30 @@ function ProductsRouteInner(
                     id="add-product-mobile"
                     trigger="button"
                     triggerLabel="+ Add product"
-                    triggerVariant="primary"
+                    triggerVariant="secondary"
+                    triggerClassName="w-full justify-center"
                     openMenuId={openHeaderMenuId}
                     setOpenMenuId={setOpenHeaderMenuId}
                     items={[
                       { label: 'Add manually', to: '/admin/products/new' },
                       { label: 'Import from Excel', to: '/admin/products/import' },
                     ]}
+                  />
+                ) : null}
+                {data.canManageOffers ? (
+                  <SearchableSelect
+                    id="kebab-offer-product-filter"
+                    value={offerFilterProductId}
+                    onChange={(v) => {
+                      applyOfferFilterFromKebab(v);
+                      closeSheet();
+                    }}
+                    options={offerProductOptions}
+                    placeholder="Offer product filter"
+                    searchPlaceholder="Search products…"
+                    controlSize="lg"
+                    triggerClassName="!bg-app-hover !text-center"
+                    wrapperClassName="w-full"
                   />
                 ) : null}
               </>
@@ -618,6 +692,8 @@ function ProductsRouteInner(
               offerGroupsLoadError={offersCache.offerGroupsLoadError}
               canManageOfferTemplates={true}
               offersLoading={!offersLoaded}
+              filterProductId={offerFilterProductId}
+              onFilterProductChange={setOfferFilterProductId}
             />
           ) : null}
         </div>
@@ -635,6 +711,8 @@ function ProductsRouteInner(
           canInstantArchiveProduct={data.canInstantArchiveProduct}
           pageSize={data.perPage}
           pageSizeOptions={data.pageSizeOptions}
+          statusFilter={productStatusFilter}
+          onStatusFilterChange={setProductStatusFilter}
         />
       ) : null}
     </div>

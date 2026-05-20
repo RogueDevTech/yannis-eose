@@ -13,8 +13,8 @@ export type ExportConfig = {
 export const EXPORT_CONFIGS: Record<ExportReportKey, ExportConfig> = {
   cs_orders: {
     reportKey: 'cs_orders',
-    title: 'Export CS Orders',
-    description: 'Choose columns and date range for CS orders export.',
+    title: 'Export Sales Orders',
+    description: 'Choose columns and date range for Sales orders export.',
     columns: [
       { key: 'id', label: 'Order ID' },
       { key: 'customer', label: 'Customer' },
@@ -28,8 +28,8 @@ export const EXPORT_CONFIGS: Record<ExportReportKey, ExportConfig> = {
   },
   cs_team: {
     reportKey: 'cs_team',
-    title: 'Export CS Team',
-    description: 'Choose columns and date range for the CS Team Analysis export. Date range scopes the leaderboard counts (assigned / delivered / confirmed / calls).',
+    title: 'Export Sales Team',
+    description: 'Choose columns and date range for the Sales Team Analysis export. Date range scopes the leaderboard counts (assigned / delivered / confirmed / calls).',
     columns: [
       { key: 'name', label: 'Name' },
       { key: 'role', label: 'Role' },

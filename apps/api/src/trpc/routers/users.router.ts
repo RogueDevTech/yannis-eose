@@ -106,7 +106,7 @@ export const usersRouter = router({
     }),
 
   /**
-   * List CS team (HEAD_OF_CS + CS_CLOSER) for Team page. Gated by cs.teamOverview.
+   * List Sales team (HEAD_OF_CS + CS_CLOSER) for Team page. Gated by cs.teamOverview.
    */
   listCSTeam: permissionProcedure('cs.teamOverview').query(async ({ ctx }) => {
     return getUsersService().listCSTeam(ctx.currentBranchId);

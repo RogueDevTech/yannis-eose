@@ -48,7 +48,7 @@ import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
 import { fetchOrdersMatchingIds, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
 
-/** Deferred loader bundle for `/admin/cs/orders` (counts, chart series, heat, picklists). */
+/** Deferred loader bundle for `/admin/sales/orders` (counts, chart series, heat, picklists). */
 export type CsOrdersDeferredSecondary = {
   statusCounts: Record<string, number>;
   dailyCounts: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
@@ -150,8 +150,8 @@ export interface OrdersListPageProps {
   statusFilter?: string;
   /**
    * Statuses to omit from the status filter dropdown for this surface.
-   * CS context passes `['REMITTED']` because cash remittance is accountant-only
-   * and irrelevant to CS — leaving it in the dropdown is just noise.
+   * Sales context passes `['REMITTED']` because cash remittance is accountant-only
+   * and irrelevant to Sales — leaving it in the dropdown is just noise.
    * The status pills + buckets above the table are unaffected (they read from
    * `statusCounts` directly).
    */
@@ -161,11 +161,11 @@ export interface OrdersListPageProps {
   userRole?: string;
   /** Permission-driven (orders.bulkAssign) — controls the SmartPick toolbar visibility. */
   canBulkPick?: boolean;
-  /** CS closer sees only their assigned orders; when true, title is "My Orders". */
+  /** Sales closer sees only their assigned orders; when true, title is "My Orders". */
   isCSCloser?: boolean;
-  /** HoS/SuperAdmin see "Assigned CS" column and can filter by agent. */
+  /** HoS/SuperAdmin see "Assigned Sales" column and can filter by agent. */
   showCSCloserColumn?: boolean;
-  /** For "Filter by CS Closer" dropdown (HoS/SuperAdmin). */
+  /** For "Filter by Sales Closer" dropdown (HoS/SuperAdmin). */
   csClosersForFilter?: Array<{ agentId: string; agentName: string }>;
   /** Logistics locations for the "Allocate to 3PL" bulk modal (HoS/SuperAdmin/Admin). */
   logisticsLocationsForBulk?: Array<{ id: string; name: string; providerName: string | null }>;
@@ -173,7 +173,7 @@ export interface OrdersListPageProps {
   canAssignDirectly?: boolean;
   /** Current user id. */
   currentUserId?: string;
-  /** Workload snapshot for current CS closer (My Orders). */
+  /** Workload snapshot for current Sales closer (My Orders). */
   myWorkload?: {
     agentId: string;
     agentName: string;
@@ -187,7 +187,7 @@ export interface OrdersListPageProps {
   /**
    * When true, show the Form (campaign) column. Used by the Marketing orders page so
    * a Media Buyer can see which form an order came in from at a glance — not relevant
-   * to the CS / general orders views.
+   * to the Sales / general orders views.
    */
   showCampaignColumn?: boolean;
   /** Active campaign filter for the Form picker (URL `campaignId`). */
@@ -209,9 +209,9 @@ export interface OrdersListPageProps {
   productsForOfflineOrder?: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
   /** Daily order count series for the "Orders over time" chart (from `orders.timeSeriesByCreated`). */
   dailyCounts?: Array<{ date: string; orderCount: number; deliveredCount?: number }>;
-  /** CS orders route passes `cs` so unified order detail breadcrumb returns here for admins. */
+  /** Sales orders route passes `cs` so unified order detail breadcrumb returns here for admins. */
   orderDetailFrom?: OrderDetailListFrom | null;
-  /** CS orders: per-day callback + delivery heat (optional — only `/admin/cs/orders` passes this). */
+  /** Sales orders: per-day callback + delivery heat (optional — only `/admin/sales/orders` passes this). */
   scheduleHeat?: ScheduleHeatDay[];
   scheduleFilters?: {
     calendarMonth: string;
@@ -226,10 +226,10 @@ export interface OrdersListPageProps {
    * Omit it to hide the feature for a given surface.
    */
   bulkSelectAllMatchingInput?: string;
-  /** CS orders route — streams counts, chart data, heat, and bulk-action picklists after the list paints. */
+  /** Sales orders route — streams counts, chart data, heat, and bulk-action picklists after the list paints. */
   deferredSecondary?: Promise<CsOrdersDeferredSecondary>;
   /**
-   * CS orders route — adds a "Cart abandonment" pseudo-option to the status
+   * Sales orders route — adds a "Cart abandonment" pseudo-option to the status
    * dropdown for HoCS+. Maps to `?fromCart=1` (which the loader filters on).
    * When this prop is true the dropdown gains the option and selecting it
    * deletes any `status` param. Selecting any real status clears `fromCart`.
@@ -884,16 +884,16 @@ function OrdersListPageImpl({
         />
       )}
 
-      {/* Page header — Live tag sits directly in front of the refresh button per CS request. */}
+      {/* Page header — Live tag sits directly in front of the refresh button per Sales request. */}
       <PageHeader
-        title={isCSCloser ? 'My Orders' : 'CS Orders'}
+        title={isCSCloser ? 'My Orders' : 'Sales Orders'}
         mobileInlineActions
         description={isCSCloser ? 'Track your assigned orders' : 'Manage and track all customer orders'}
         actions={
           <PageHeaderMobileTools
-              sheetTitle="CS orders tools"
+              sheetTitle="Sales orders tools"
               sheetSubtitle={<span>Chart, offline order, and export</span>}
-              triggerAriaLabel="CS orders toolbar"
+              triggerAriaLabel="Sales orders toolbar"
               filtersBadgeCount={ordersListToolbarFilterBadge}
               filters={
                 <>
@@ -1115,7 +1115,7 @@ function OrdersListPageImpl({
         />
       )}
 
-      {/* My workload (CS closer only) */}
+      {/* My workload (Sales closer only) */}
       {isCSCloser && (myWorkload || deferredLoading) && (
         myWorkload ? (
           <div className="card">
@@ -1214,7 +1214,7 @@ function OrdersListPageImpl({
                   }}
                   disabled={isSubmitting || isAssigning || isAllocating}
                 >
-                  Assign to CS
+                  Assign to Sales
                 </Button>
               )}
               {/* Reassign — orders already assigned / engaged; distinct from first-time assign */}
@@ -1671,7 +1671,7 @@ function OrdersListPageImpl({
           <OrdersChartView
             statusCounts={statusCounts}
             total={total}
-            scopeLabel="CS orders"
+            scopeLabel="Sales orders"
             dailyCounts={dailyCounts}
           />
         )
@@ -1801,7 +1801,7 @@ function OrdersListPageImpl({
         </Modal>
       )}
 
-      {/* Bulk assign / reassign to CS — checkbox list + random split (matches CS queue) */}
+      {/* Bulk assign / reassign to Sales — checkbox list + random split (matches Sales queue) */}
       {assignModalOpen && (
         <AssignCloserModal
           open

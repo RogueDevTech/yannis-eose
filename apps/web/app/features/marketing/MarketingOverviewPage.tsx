@@ -641,7 +641,7 @@ export function MarketingOverviewPage({
           </div>
         ) : (
           (() => {
-            // Single horizontal-scroll strip — matches the CS Unassigned Queue layout.
+            // Single horizontal-scroll strip — matches the Sales Unassigned Queue layout.
             // Cap at 50 cards client-side to keep the DOM bounded on busy days; users
             // who want more click "View all" to land on the full table.
             const rows = localOrders.slice(0, 50);

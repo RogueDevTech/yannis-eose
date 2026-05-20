@@ -107,7 +107,7 @@ export function CSQueueDataSkeleton() {
 }
 
 /**
- * Page skeleton for Live Activities (/admin/cs/queue) and legacy CS dashboard layout.
+ * Page skeleton for Live Activities (/admin/sales/queue) and legacy CS dashboard layout.
  * Mirrors the layout of CSDashboardPage so the loading state matches the final UI.
  */
 export function CSOverviewSkeleton() {

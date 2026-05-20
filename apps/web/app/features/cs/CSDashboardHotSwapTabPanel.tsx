@@ -64,7 +64,7 @@ export function CSDashboardHotSwapTabPanel({
             onScrollLeft={hotSwapFrom && hotSwapSourceOrders.length > 0 ? () => scrollOrdersBy(-280) : undefined}
             onScrollRight={hotSwapFrom && hotSwapSourceOrders.length > 0 ? () => scrollOrdersBy(280) : undefined}
             scrollAriaSubject="hot swap orders"
-            viewAllTo={hotSwapFrom ? `/admin/cs/orders?csCloserId=${hotSwapFrom}&period=all_time` : undefined}
+            viewAllTo={hotSwapFrom ? `/admin/sales/orders?csCloserId=${hotSwapFrom}&period=all_time` : undefined}
             viewAllLabel="View all closer's orders"
           />
           {hotSwapOrderIds.length > 0 && hotSwapTo && (

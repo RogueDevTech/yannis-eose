@@ -904,7 +904,7 @@ export function LogisticsOrderDetailPage({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6">
               {order.assignedCsName && (
-                <InfoRow icon={<UserIcon />} label="CS Closer" value={order.assignedCsName} valueClass="font-medium text-sky-600 dark:text-sky-400" />
+                <InfoRow icon={<UserIcon />} label="Sales Closer" value={order.assignedCsName} valueClass="font-medium text-sky-600 dark:text-sky-400" />
               )}
               {order.mediaBuyerName && (
                 <InfoRow icon={<UserIcon />} label="Media Buyer" value={order.mediaBuyerName} valueClass="font-medium text-purple-600 dark:text-purple-400" />

@@ -183,7 +183,7 @@ function CSTeamMemberCard({ member, embedded }: { member: CSTeamMemberOverview; 
       <div className="border-t border-app-border pt-3">
         <div className="grid grid-cols-2 gap-2">
           <CompactTableActionButton
-            to={`/admin/cs/orders?csCloserId=${member.id}&period=all_time`}
+            to={`/admin/sales/orders?csCloserId=${member.id}&period=all_time`}
             className="w-full justify-center"
           >
             View orders
@@ -379,7 +379,7 @@ export function CSTeamPage({
         tight: true,
         render: (member) => (
           <div className="inline-flex items-center gap-1.5">
-            <CompactTableActionButton to={`/admin/cs/orders?csCloserId=${member.id}&period=all_time`}>
+            <CompactTableActionButton to={`/admin/sales/orders?csCloserId=${member.id}&period=all_time`}>
               View orders
             </CompactTableActionButton>
             <CompactTableActionButton to={`/hr/users/${member.id}`}>View profile</CompactTableActionButton>
@@ -399,9 +399,9 @@ export function CSTeamPage({
         actions={
           dateFilters ? (
             <PageHeaderMobileTools
-              sheetTitle="CS team tools"
+              sheetTitle="Sales team tools"
               sheetSubtitle={<span>Filters, date range and export</span>}
-              triggerAriaLabel="CS team toolbar and date range"
+              triggerAriaLabel="Sales team toolbar and date range"
               filtersBadgeCount={filtersBadgeCount}
               filters={
                 <>
@@ -621,7 +621,7 @@ export function CSTeamPage({
 
       <div className="card">
         <p className="text-sm text-app-fg-muted">
-          <Link to="/admin/cs/queue" prefetch="intent" className="text-brand-500 hover:text-brand-600">
+          <Link to="/admin/sales/queue" prefetch="intent" className="text-brand-500 hover:text-brand-600">
             Live activities
           </Link>
           {' — '}dashboard with workloads, unassigned orders, and leaderboard.

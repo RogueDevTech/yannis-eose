@@ -1550,9 +1550,8 @@ export function MarketingOrdersLoadingShell({
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Marketing orders tools"
-            sheetSubtitle={<span>Date range, chart toggle, and export</span>}
-            triggerAriaLabel="Orders toolbar and date range"
+            sheetTitle="Actions"
+            triggerAriaLabel="Marketing orders tools"
             desktop={
               <>
                 <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">

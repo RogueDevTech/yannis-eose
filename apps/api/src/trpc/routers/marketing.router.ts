@@ -586,13 +586,13 @@ export const marketingRouter = router({
         if (input.mediaBuyerId) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Media buyer filter is not available for CS closers.',
+            message: 'Media buyer filter is not available for Sales closers.',
           });
         }
         if (input.assignedCsId && input.assignedCsId !== ctx.user.id) {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: 'Cannot scope metrics to another CS closer.',
+            message: 'Cannot scope metrics to another Sales closer.',
           });
         }
         assignedCsId = ctx.user.id;

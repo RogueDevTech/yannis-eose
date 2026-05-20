@@ -471,6 +471,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
           <DescriptionList
             layout="grid"
             gridColumns={3}
+            mobileColumns={2}
             divided
             className="gap-y-3"
             items={[
@@ -530,17 +531,17 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title={`Line items (${lines.length})`} />
-        <CardBody>
-          <CompactTable
-            columns={lineColumns}
-            rows={lines}
-            rowKey={(l) => l.id}
-            emptyTitle="No line items on this shipment"
-          />
-        </CardBody>
-      </Card>
+      {/* Line items — card chrome is desktop-only; on mobile each row is
+          already its own elevated card, so a wrapper would just waste width. */}
+      <section className="md:rounded-xl md:border md:border-app-border md:bg-app-elevated md:p-4 md:shadow-card">
+        <CardHeader title={`Line items (${lines.length})`} className="mb-2 md:mb-4" />
+        <CompactTable
+          columns={lineColumns}
+          rows={lines}
+          rowKey={(l) => l.id}
+          emptyTitle="No line items on this shipment"
+        />
+      </section>
 
       {fetcherSurface.rawError && !shipmentModalOpen ? (
         <p className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-200">

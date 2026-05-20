@@ -259,11 +259,11 @@ export function usePollingFallback(intervalMs = 30_000): void {
 }
 
 /**
- * CS Closer — broadcasts current UI state for Team Live View.
- * Call this in route components for CS closers. Only emits if the socket is connected.
+ * Sales Closer — broadcasts current UI state for Team Live View.
+ * Call this in route components for Sales closers. Only emits if the socket is connected.
  *
  * Mirror Mode: when `<html data-mirror="1">` is set by DashboardLayout, the broadcast is
- * skipped. An admin viewing the app as a CS closer would otherwise pollute the supervisor
+ * skipped. An admin viewing the app as a Sales closer would otherwise pollute the supervisor
  * mirror view — and Mirror Mode is contractually view-only.
  */
 export function useAgentStateBroadcast(state: {
@@ -318,7 +318,7 @@ export function useForceLogoutOnRevoke(): void {
 }
 
 /**
- * Team Live View — listens for agent:state_update events from all CS closers.
+ * Team Live View — listens for agent:state_update events from all Sales closers.
  * Used by HoCS to see who's doing what in real-time.
  */
 export function useTeamLiveView(): Map<string, {

@@ -840,11 +840,11 @@ export function CEODashboardPage({
           </div>
         </div>
 
-        {/* CS Team */}
+        {/* Sales Team */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-app-fg">CS Team</h2>
-            <Link to="/admin/cs/queue" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
+            <h2 className="text-lg font-semibold text-app-fg">Sales Team</h2>
+            <Link to="/admin/sales/queue" className="text-xs text-brand-500 hover:text-brand-600 font-medium">View details</Link>
           </div>
           <div className="space-y-3">
             <MetricRow label="Agents Active" value={csTeamSafe.agentCount.toString()} />
@@ -902,7 +902,7 @@ export function CEODashboardPage({
         <h2 className="text-lg font-semibold text-app-fg mb-4">Quick Navigation</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2">
           {[
-            { href: '/admin/cs/orders', label: 'Orders', icon: 'orders' },
+            { href: '/admin/sales/orders', label: 'Orders', icon: 'orders' },
             { href: '/admin/finance/overview', label: 'Finance', icon: 'finance' },
             { href: '/admin/marketing/funding', label: 'Funding', icon: 'marketing' },
             { href: '/admin/marketing/ad-spend', label: 'Ad spend', icon: 'marketing' },
@@ -950,7 +950,7 @@ export function CEODashboardPage({
               options={[
                 { value: 'orders', label: 'Orders' },
                 { value: 'media_buyers', label: 'Media buyers' },
-                { value: 'cs', label: 'CS' },
+                { value: 'cs', label: 'Sales' },
               ]}
             />
           </div>
@@ -1155,7 +1155,7 @@ export function CEODashboardPage({
 
         {topic === 'cs' && (
         <div className="card">
-          <h2 className="text-lg font-semibold text-app-fg mb-4">CS closer workload</h2>
+          <h2 className="text-lg font-semibold text-app-fg mb-4">Sales closer workload</h2>
           <p className="text-sm text-app-fg-muted mb-4">
             Pipeline backlog (pre-confirm queue), per-agent daily duty target (capacity setting), and CS-stage closes
             today (confirm + cancel, Africa/Lagos calendar).
@@ -1202,7 +1202,7 @@ export function CEODashboardPage({
             </div>
           ) : (
             <div className="h-64 flex items-center justify-center rounded-lg bg-app-hover text-app-fg-muted text-sm">
-              No CS closers or workload data available.
+              No Sales closers or workload data available.
             </div>
           )}
         </div>

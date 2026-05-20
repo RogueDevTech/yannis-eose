@@ -58,7 +58,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   // Access model for /hr/users/:id:
   //  - Self-view: any authenticated user may open their own profile (drives /admin/profile).
-  //  - Head of CS  may view their CS team (CS_CLOSER, HEAD_OF_CS) — nothing else.
+  //  - Head of CS  may view their Sales team (CS_CLOSER, HEAD_OF_CS) — nothing else.
   //  - Head of Marketing may view their Marketing team (MEDIA_BUYER, HEAD_OF_MARKETING) — nothing else.
   //  - Branch-team supervisors may view the squad-mates they supervise
   //    (CEO directive 2026-05-11). The supervisor flag lives on
@@ -78,7 +78,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Branch-team supervisor relationship check — only fires when no cheaper
   // gate already passed. A MEDIA_BUYER who supervises a marketing squad can
   // see their squad-mates here; same for CS_CLOSER supervisors over their
-  // CS team. The check is server-authoritative — we don't trust the session
+  // Sales team. The check is server-authoritative — we don't trust the session
   // flag alone since it's per active branch and the profile may be on the
   // viewer's other branch teams.
   let isSupervisorViewingSupervisee = false;

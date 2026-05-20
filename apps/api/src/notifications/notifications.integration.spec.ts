@@ -273,7 +273,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Push Notification Path — Integration', () => {
 
     const loggedUserIds = logs.map((l) => l.userId);
 
-    // CS closers received it
+    // Sales closers received it
     expect(loggedUserIds).toContain(csCloser1.id);
     expect(loggedUserIds).toContain(csCloser2.id);
 

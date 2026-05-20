@@ -655,7 +655,7 @@ function PlanForm({
           label="Plan Name"
           name="planName"
           required
-          placeholder="e.g. CS Standard Plan"
+          placeholder="e.g. Sales Standard Plan"
           defaultValue={plan?.planName ?? ''}
         />
         {mode === 'create' && onlyRole ? (

@@ -174,34 +174,34 @@ const navStructure: NavGroupDef[] = [
       {
         label: 'Live Activities',
         labelShort: 'Sales',
-        href: '/admin/cs/queue',
+        href: '/admin/sales/queue',
         icon: SidebarIcons.cs,
         permission: 'cs.teamOverview',
       },
       {
         label: 'Team Analysis',
-        href: '/admin/cs/team',
+        href: '/admin/sales/team',
         icon: SidebarIcons.cs,
         permission: 'cs.teamOverview',
         roles: ['SUPER_ADMIN', 'ADMIN', 'HEAD_OF_CS'],
       },
       {
         label: 'Orders',
-        href: '/admin/cs/orders',
+        href: '/admin/sales/orders',
         icon: SidebarIcons.orders,
         permission: 'orders.read',
       },
       {
         label: 'Leaderboard',
-        href: '/admin/cs/leaderboard',
+        href: '/admin/sales/leaderboard',
         icon: SidebarIcons.leaderboards,
         permission: 'cs.leaderboard',
       },
       {
         label: 'Message Templates',
-        href: '/admin/cs/message-templates',
+        href: '/admin/sales/message-templates',
         icon: SidebarIcons.notifications,
-        // CS closers need to author + use templates; HoCS / Admins manage shared ones via
+        // Sales closers need to author + use templates; HoCS / Admins manage shared ones via
         // the same page (cs.teamOverview). Ownership-based edit gating is enforced server-side.
         permission: 'cs.teamOverview',
         roles: ['CS_CLOSER'],
@@ -365,7 +365,7 @@ const navStructure: NavGroupDef[] = [
       },
       // /hr/users is the HR-owned staff directory. Gated on `hr.read` (HR_MANAGER + admins);
       // Head of Marketing / Head of CS hold `users.read` for other features but must not see
-      // this link — they manage their team from the Marketing / CS team pages instead.
+      // this link — they manage their team from the Marketing / Sales team pages instead.
       { label: 'Users', href: '/hr/users', icon: SidebarIcons.users, permission: 'hr.read' },
       // Permission-first: link appears only with hr.onboarding.* on the session (or admin-class).
       // Do not add HR_MANAGER (or any role) as a sidebar bypass — grant the caps via template / overrides.
@@ -412,7 +412,7 @@ const navStructure: NavGroupDef[] = [
         href: '/admin/permission-requests',
         icon: SidebarIcons.audit,
         // Visible to anyone holding at least one approve code. SuperAdmin / ADMIN
-        // bypass via the standard permission middleware. Submitters (CS Closers
+        // bypass via the standard permission middleware. Submitters (Sales Closers
         // tracking their own price-change requests) reach the page via direct URL
         // — we don't surface the sidebar link unless they can approve something.
         // Head of Logistics: default approver for CS order price / archive requests
@@ -453,7 +453,7 @@ function getDisplayLabel(
 ): string {
   const role = user?.role ?? '';
   const isMarketingSupervisor = user?.isMarketingTeamSupervisorOnActiveBranch === true;
-  if (item.href === '/admin/cs/orders' && role === 'CS_CLOSER') return 'My Orders';
+  if (item.href === '/admin/sales/orders' && role === 'CS_CLOSER') return 'My Orders';
   // For MEDIA_BUYER who is also a marketing team supervisor, the marketing
   // orders page is HoM-like (their team's orders, not just theirs) — keep the
   // generic "Orders" label there. The "My Orders" override is only for the
@@ -536,7 +536,7 @@ function getNavGroupsForUser(
           );
         }
         // Permission Requests: any of the 6 approve codes → see the link. Submitters
-        // (CS Closer / Media Buyer / etc.) can still reach the page by URL — the
+        // (Sales Closer / Media Buyer / etc.) can still reach the page by URL — the
         // server-side scope shows them only their own rows; we just don't surface
         // the sidebar entry for them.
         if (item.href === '/admin/permission-requests') {
@@ -609,14 +609,14 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
   SUPER_ADMIN: [
     '/admin',
     '/admin/marketing/overview',
-    '/admin/cs/queue',
+    '/admin/sales/queue',
     '/admin/logistics/orders',
     '/admin/finance/overview',
   ],
   ADMIN: [
     '/admin',
     '/admin/marketing/overview',
-    '/admin/cs/queue',
+    '/admin/sales/queue',
     '/admin/logistics/orders',
     '/admin/finance/overview',
   ],
@@ -636,12 +636,12 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
   ],
   HEAD_OF_CS: [
     '/admin',
-    '/admin/cs/queue',
-    '/admin/cs/team',
-    '/admin/cs/orders',
-    '/admin/cs/leaderboard',
+    '/admin/sales/queue',
+    '/admin/sales/team',
+    '/admin/sales/orders',
+    '/admin/sales/leaderboard',
   ],
-  CS_CLOSER: ['/admin', '/admin/cs/queue', '/admin/cs/orders', '/admin/cs/leaderboard'],
+  CS_CLOSER: ['/admin', '/admin/sales/queue', '/admin/sales/orders', '/admin/sales/leaderboard'],
   HEAD_OF_LOGISTICS: [
     '/admin',
     '/admin/shipments',

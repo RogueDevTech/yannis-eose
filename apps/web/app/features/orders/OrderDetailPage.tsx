@@ -869,10 +869,10 @@ export function OrderDetailPage({
     if (userRole === 'HEAD_OF_MARKETING' || userRole === 'MEDIA_BUYER') {
       return '/admin/marketing/orders';
     }
-    return '/admin/cs/orders';
+    return '/admin/sales/orders';
   }, [searchParams, userRole]);
 
-  // Team Live View — broadcast CS closer state to cs-all room.
+  // Team Live View — broadcast Sales closer state to cs-all room.
   const isCSCloser = userRole === 'CS_CLOSER';
   useAgentStateBroadcast(
     isCSCloser
@@ -1207,7 +1207,7 @@ export function OrderDetailPage({
     for (const entry of itemOffers) m.set(entry.productId, entry.offers);
     return m;
   }, [itemOffers]);
-  // CS closer can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
+  // Sales closer can only perform actions when order is assigned to them, or UNPROCESSED with no assignee (take from pool)
   const canPerformCSActionsOnOrder =
     isElevated ||
     viewerIsCsTeamSupervisor ||
@@ -1492,7 +1492,7 @@ export function OrderDetailPage({
         />
       )}
 
-      {/* Duplicate linkage — surface the cross-order tie so a CS closer / MB
+      {/* Duplicate linkage — surface the cross-order tie so a Sales closer / MB
           immediately sees that this order is the merged duplicate (or the
           original it was merged into). The "Duplicate of" row in Details still
           carries the raw UUID for power users; this banner makes the
@@ -1527,12 +1527,12 @@ export function OrderDetailPage({
                   : 'Possibly a duplicate'}
               </p>
               <p className="mt-0.5 text-warning-800 dark:text-warning-200/90">
-                Same phone matched another non-cancelled order. Review and resolve from the CS queue
+                Same phone matched another non-cancelled order. Review and resolve from the Sales queue
                 duplicates tab.
               </p>
             </div>
             <Link
-              to="/admin/cs/queue?tab=duplicates"
+              to="/admin/sales/queue?tab=duplicates"
               className="btn-secondary btn-sm inline-flex shrink-0"
             >
               Open duplicates →
@@ -1991,7 +1991,7 @@ export function OrderDetailPage({
                     correct lifecycle entry point: someone (HoCS / admin) picks a closer first,
                     then the order moves to CS_ASSIGNED and the rest of the workflow opens up.
                     Without this, an admin could engage / confirm an order directly and the
-                    "Closer" column on `/admin/cs/orders` ends up blank because no CS_CLOSER
+                    "Closer" column on `/admin/sales/orders` ends up blank because no CS_CLOSER
                     is on the row. */}
                 {order.status === 'UNPROCESSED' && !order.assignedCsId && (
                   <div className="rounded-lg bg-info-50 dark:bg-info-900/20 border border-info-200 dark:border-info-700/50 px-4 py-3 mb-3">
@@ -2118,7 +2118,7 @@ export function OrderDetailPage({
                   )}
 
                   {/* Assign to closer — queue (UNPROCESSED / CS_ASSIGNED) or reassign while CS_ENGAGED.
-                      The CS closer (closer) drives the order from queue → call → confirm; assignment
+                      The Sales closer (closer) drives the order from queue → call → confirm; assignment
                       happens BEFORE confirmation per the locked Order Lifecycle (CLAUDE.md). */}
                   {(order.status === 'UNPROCESSED' ||
                     order.status === 'CS_ASSIGNED' ||
@@ -2128,7 +2128,7 @@ export function OrderDetailPage({
                     csClosersForAssign.length > 0 && (
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-app-fg-muted">
-                        {order.assignedCsId ? 'Reassign closer' : 'Assign closer (CS closer)'}
+                        {order.assignedCsId ? 'Reassign closer' : 'Assign closer (Sales closer)'}
                       </p>
                       <div className="flex items-stretch gap-2">
                         <SearchableSelect
@@ -2360,7 +2360,7 @@ export function OrderDetailPage({
               );
             })()}
 
-            {/* Communication Panel — unified Call/SMS/WhatsApp panel for CS closers.
+            {/* Communication Panel — unified Call/SMS/WhatsApp panel for Sales closers.
                 Hidden once the order leaves the CS lifecycle (DELIVERED / COMPLETED /
                 CANCELLED / RETURNED / WRITTEN_OFF / RESTOCKED / PARTIALLY_DELIVERED) —
                 customer engagement is already done at that point and the panel

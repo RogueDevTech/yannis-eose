@@ -8,7 +8,7 @@ import { CSLeaderboardLoadingShell } from '~/features/cs/CSDeferredLoadingShells
 import type { CSLeaderboardEntry } from '~/features/cs/types';
 
 export const meta: MetaFunction = () => [
-  { title: 'CS Leaderboard — Yannis EOSE' },
+  { title: 'Sales Leaderboard — Yannis EOSE' },
 ];
 
 function parseCSLeaderboard(res: { ok: boolean; data: unknown }): CSLeaderboardEntry[] {

@@ -180,7 +180,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
 
       {/* ── Quick Navigation ─────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <QuickJump to="/admin/cs/queue" label="CS Queue" />
+        <QuickJump to="/admin/sales/queue" label="Sales Queue" />
         <QuickJump to="/admin/logistics/orders" label="Logistics" />
         <QuickJump to="/admin/marketing" label="Marketing" />
         <QuickJump to="/admin/finance/overview" label="Finance" />

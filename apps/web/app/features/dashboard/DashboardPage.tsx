@@ -141,7 +141,7 @@ function getRoleDescription(role: string | null) {
   if (!role) return 'Welcome. Please sign in again if you see this.';
   const descriptions: Record<string, string> = {
     SUPER_ADMIN: "Here's your full platform overview.",
-    HEAD_OF_CS: 'Your CS team performance at a glance.',
+    HEAD_OF_CS: 'Your Sales team performance at a glance.',
     CS_CLOSER: 'Your personal queue and performance.',
     HEAD_OF_MARKETING: 'Marketing performance and team metrics.',
     MEDIA_BUYER: 'Your campaign performance and payouts.',
@@ -282,7 +282,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
   );
 }
 
-// ── CS Dashboard ─────────────────────────────────────────
+// ── Sales Dashboard ─────────────────────────────────────────
 
 function CSDashboard({
   data,
@@ -291,7 +291,7 @@ function CSDashboard({
 }: {
   data: DashboardPageData;
   role: string;
-  /** When the viewer is a CS Closer who supervises the branch's CS team,
+  /** When the viewer is a Sales Closer who supervises the branch's Sales team,
    *  render the HoCS-style "Team Management" card AND switch the layout
    *  from the lean closer-only view to the operational HoCS view. Metric
    *  tiles already reflect team-aggregated scope (the API auto-applies
@@ -302,18 +302,18 @@ function CSDashboard({
   const counts = data.orderCounts as Record<string, number>;
   // `pendingQueue` rolls UNPROCESSED + CS_ASSIGNED into one waiting-on-engagement
   // bucket for the top stat strip. Deeper per-status breakdown lives on
-  // `/admin/cs/orders` via the status filter.
+  // `/admin/sales/orders` via the status filter.
   const unprocessed = counts['UNPROCESSED'] ?? 0;
   const csAssigned = counts['CS_ASSIGNED'] ?? 0;
   const engaged = counts['CS_ENGAGED'] ?? 0;
   const confirmed = counts['CONFIRMED'] ?? 0;
   const pendingQueue = unprocessed + csAssigned;
 
-  // CS Closers get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
+  // Sales Closers get the lean MB-style dashboard: stats strip + Performance Summary | Quick Actions.
   // No Order Pipeline (they don't manage flow), no Recent Orders feed (they have a dedicated
   // queue/orders page) — keeps the landing page fast and focused on the metrics they care
   // about: their own confirmation/delivery performance.
-  // EXCEPT: a CS Closer who's been promoted to supervise their team falls through to the
+  // EXCEPT: a Sales Closer who's been promoted to supervise their team falls through to the
   // operational HoCS-style view below — same Pipeline / Team Management / metrics as HoCS,
   // scoped to their team via `applySupervisorScope`.
   if (role === 'CS_CLOSER' && !isCsTeamSupervisor) {
@@ -411,7 +411,7 @@ function CSDashboard({
           period Delivered + Delivery Rate) is the at-a-glance row for Head of CS.
           Live-bucket `Confirmed` is current CONFIRMED count; `Delivered` / rate use
           the selected date range from `marketing.metrics`. Per-status counts remain
-          on `/admin/cs/orders` via the status filter pills. */}
+          on `/admin/sales/orders` via the status filter pills. */}
 
       {showsTeamManagementCard && (
         <div className="card">
@@ -422,10 +422,10 @@ function CSDashboard({
               : "Monitor your team's pipeline — metrics above aggregate across every closer you supervise on this branch."}
           </p>
           <div className="flex gap-2 flex-wrap">
-            <Link to="/admin/cs/queue" prefetch="intent" className="btn-primary btn-sm">CS Dashboard</Link>
-            <Link to="/admin/cs/orders" prefetch="intent" className="btn-secondary btn-sm">View All Orders</Link>
+            <Link to="/admin/sales/queue" prefetch="intent" className="btn-primary btn-sm">Sales Dashboard</Link>
+            <Link to="/admin/sales/orders" prefetch="intent" className="btn-secondary btn-sm">View All Orders</Link>
             {/* Team Analysis is HoCS-style team performance — supervisors get the same lens. */}
-            <Link to="/admin/cs/team" prefetch="intent" className="btn-secondary btn-sm">Team Analysis</Link>
+            <Link to="/admin/sales/team" prefetch="intent" className="btn-secondary btn-sm">Team Analysis</Link>
           </div>
         </div>
       )}
@@ -441,11 +441,11 @@ function CSDashboard({
             Jump to the surfaces you use day-to-day.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Link to="/admin/cs/team" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+            <Link to="/admin/sales/team" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
               <p className="text-sm font-semibold text-app-fg">Team performance</p>
               <p className="text-xs text-app-fg-muted mt-0.5">Confirm + delivery rates per agent</p>
             </Link>
-            <Link to="/admin/cs/leaderboard" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
+            <Link to="/admin/sales/leaderboard" prefetch="intent" className="rounded-lg border border-app-border p-3 hover:bg-app-hover/50 transition-colors">
               <p className="text-sm font-semibold text-app-fg">Leaderboard</p>
               <p className="text-xs text-app-fg-muted mt-0.5">Top closers this period</p>
             </Link>
@@ -819,7 +819,7 @@ function RecentOrdersCard({ orders }: { orders: DashboardData['recentOrders'] })
     <div className="card">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-app-fg">Recent Orders</h2>
-        <Link to="/admin/cs/orders" prefetch="intent" className="text-sm text-brand-500 hover:text-brand-600 font-medium">View All</Link>
+        <Link to="/admin/sales/orders" prefetch="intent" className="text-sm text-brand-500 hover:text-brand-600 font-medium">View All</Link>
       </div>
       {orders.length > 0 ? (
         <div className="space-y-2">
@@ -887,7 +887,7 @@ function QuickActionsCard({ role, unprocessed }: { role: string; unprocessed: nu
 
 function getQuickActions(role: string, unprocessed: number) {
   const common = [
-    { href: '/admin/cs/orders', label: 'View Orders', description: unprocessed > 0 ? `${unprocessed} unprocessed` : 'All orders', icon: 'orders', bg: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400' },
+    { href: '/admin/sales/orders', label: 'View Orders', description: unprocessed > 0 ? `${unprocessed} unprocessed` : 'All orders', icon: 'orders', bg: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400' },
   ];
 
   switch (role) {
@@ -908,9 +908,9 @@ function getQuickActions(role: string, unprocessed: number) {
       ];
     case 'CS_CLOSER':
       return [
-        { href: '/admin/cs/queue', label: 'Live Queue', description: unprocessed > 0 ? `${unprocessed} pending` : 'Take new orders', icon: 'pending', bg: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400' },
-        { href: '/admin/cs/orders', label: 'My Orders', description: 'Orders assigned to you', icon: 'orders', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
-        { href: '/admin/cs/leaderboard', label: 'Leaderboard', description: 'See your ranking', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
+        { href: '/admin/sales/queue', label: 'Live Queue', description: unprocessed > 0 ? `${unprocessed} pending` : 'Take new orders', icon: 'pending', bg: 'bg-warning-50 dark:bg-warning-700/20 text-warning-600 dark:text-warning-400' },
+        { href: '/admin/sales/orders', label: 'My Orders', description: 'Orders assigned to you', icon: 'orders', bg: 'bg-brand-50 dark:bg-brand-700/20 text-brand-600 dark:text-brand-400' },
+        { href: '/admin/sales/leaderboard', label: 'Leaderboard', description: 'See your ranking', icon: 'revenue', bg: 'bg-info-50 dark:bg-info-700/20 text-info-600 dark:text-info-400' },
       ];
     case 'FINANCE_OFFICER':
       return [

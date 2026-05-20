@@ -623,7 +623,7 @@ export class CartService {
   }
 
   /**
-   * Reveal the raw customer phone for a single dropped-off cart so a CS rep
+   * Reveal the raw customer phone for a single dropped-off cart so a Sales rep
    * can dial / SMS / WhatsApp the customer (CEO directive 2026-05-08).
    *
    * Pillar 2: phone is never broadcast in lists — only this single-shot,

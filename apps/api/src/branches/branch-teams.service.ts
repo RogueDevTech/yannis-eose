@@ -832,7 +832,7 @@ export class BranchTeamsService {
   /**
    * Combined CS + Marketing supervised IDs for a single actor / branch — used by
    * list endpoints to scope a supervisor to "data that concerns them only" (orders
-   * **assigned to** their CS team agents AND orders **created by** their MB team).
+   * **assigned to** their Sales team agents AND orders **created by** their MB team).
    * The actor's own id is always included so a supervisor still sees their own work.
    */
   async listSupervisorScopeIds(
@@ -890,7 +890,7 @@ export class BranchTeamsService {
 
   /**
    * Symmetric to {@link isMarketingSupervisorOnBranch} for the CS lane.
-   * True when the actor supervises at least one CS team on this branch,
+   * True when the actor supervises at least one Sales team on this branch,
    * regardless of whether that team currently has supervisees — same
    * "empty-team supervisor still has the surfaces" rationale.
    */
