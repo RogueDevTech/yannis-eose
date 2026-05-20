@@ -231,7 +231,7 @@ const navStructure: NavGroupDef[] = [
         permission: 'logistics.read',
       },
       {
-        label: 'Logistics Agent',
+        label: 'Logistics Analysis',
         href: '/admin/logistics/team',
         icon: SidebarIcons.leaderboards,
         permission: 'logistics.teamOverview',

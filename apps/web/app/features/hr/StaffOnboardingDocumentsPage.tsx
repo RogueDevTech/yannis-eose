@@ -136,7 +136,7 @@ export function StaffOnboardingDocumentsPage({
       key: 'actions',
       header: '',
       align: 'right',
-      className: 'w-[1%]',
+      tight: true,
       render: (row) => (
         <TableActionButton to={`/hr/users/${row.userId}/onboarding`} variant="primary">
           Open
