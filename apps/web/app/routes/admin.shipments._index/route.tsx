@@ -7,6 +7,7 @@ import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
   getSessionCookie,
+  parsePerPage,
   requirePermission,
   safeStatus,
 } from '~/lib/api.server';
@@ -54,7 +55,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const toDate = (url.searchParams.get('toDate') ?? '').trim();
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
-  const LIMIT = 20;
+  // URL-driven page size — clamped to [20, 50, 100]; fallback 20.
+  const { perPage: LIMIT } = parsePerPage(url.searchParams);
 
   const receive = url.searchParams.get('receive') === '1';
   if (receive) {
@@ -482,7 +484,7 @@ function ShipmentsIndexContent(data: {
             Showing {(data.page - 1) * data.limit + 1}–{Math.min(data.page * data.limit, data.totalShipments)} of{' '}
             {data.totalShipments} shipments
           </p>
-          <Pagination page={data.page} totalPages={data.totalPages} pageParam="page" />
+          <Pagination page={data.page} totalPages={data.totalPages} pageParam="page" pageSize={data.limit} />
         </div>
       )}
     </div>

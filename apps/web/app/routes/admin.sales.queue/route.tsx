@@ -69,6 +69,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const canCreateOffline = true;
   const canDeleteCart = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
+  // Cancellation is Head of CS / Branch Admin / Admin only (CEO directive 2026-05-20).
+  const canCancelOrders =
+    user.role === 'SUPER_ADMIN' ||
+    user.role === 'ADMIN' ||
+    user.role === 'HEAD_OF_CS' ||
+    user.role === 'BRANCH_ADMIN';
 
   const url = new URL(request.url);
   const abandonedPageRaw = parseInt(url.searchParams.get('abandonedPage') ?? '1', 10);
@@ -294,6 +300,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     claimQueue,
     canCreateOffline,
     canDeleteCart,
+    canCancelOrders,
     productsForOfflineOrder,
   } as unknown as Record<string, unknown>);
 }
@@ -646,6 +653,7 @@ export default function CSQueueRoute() {
       leaderboardPeriod: data.leaderboardPeriod,
       canCreateOffline: data.canCreateOffline,
       canDeleteCart: data.canDeleteCart,
+      canCancelOrders: data.canCancelOrders,
     },
     deferred: {
       shell: data.shell,
@@ -675,6 +683,7 @@ export default function CSQueueRoute() {
         claimQueue={data.claimQueue}
         canCreateOffline={data.canCreateOffline}
         canDeleteCart={data.canDeleteCart}
+        canCancelOrders={data.canCancelOrders}
         productsForOfflineOrder={data.productsForOfflineOrder}
       />
     </Suspense>

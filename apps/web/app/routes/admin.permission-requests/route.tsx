@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
-import { apiRequest, getSessionCookie, getCurrentUser, safeStatus } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, safeStatus, parsePerPage } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { redirect } from '@remix-run/node';
 import { isSuperAdminOnly } from '~/lib/rbac';
@@ -21,8 +21,6 @@ export const meta: MetaFunction = () => [
 
 const ALLOWED_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'ALL'] as const;
 type StatusFilter = (typeof ALLOWED_STATUSES)[number];
-
-const PER_PAGE = 20;
 
 /**
  * Permission codes that grant approve rights for at least one request type.
@@ -82,11 +80,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const pageRaw = parseInt(url.searchParams.get('page') || '1', 10);
   const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
+  // URL-driven page size — clamped to [20, 50, 100]; fallback 20.
+  const { perPage } = parsePerPage(url.searchParams);
 
-  const permissionRequestsShell = { status };
+  const permissionRequestsShell = { status, limit: perPage };
 
   const pageData = (async () => {
-  const listInput = encodeURIComponent(JSON.stringify({ status, page, limit: PER_PAGE }));
+  const listInput = encodeURIComponent(JSON.stringify({ status, page, limit: perPage }));
   const [listRes, countsRes, branchesRes] = await Promise.all([
     apiRequest<unknown>(`/trpc/permissionRequests.list?input=${listInput}`, { method: 'GET', cookie }),
     apiRequest<unknown>(`/trpc/permissionRequests.statusCounts`, { method: 'GET', cookie }),
@@ -104,7 +104,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     : null;
   const requests: PermissionRequest[] = listPayload?.items ?? [];
   const total = listPayload?.total ?? 0;
-  const totalPages = total > 0 ? Math.ceil(total / PER_PAGE) : 1;
+  const totalPages = total > 0 ? Math.ceil(total / perPage) : 1;
 
   type StatusCounts = { pending: number; approved: number; rejected: number; all: number };
   const statusCounts: StatusCounts = countsRes.ok
@@ -152,7 +152,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     total,
     page,
     totalPages,
-    limit: PER_PAGE,
+    limit: perPage,
     statusCounts,
     branches,
     canApprove,

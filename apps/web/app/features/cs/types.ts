@@ -241,6 +241,12 @@ export interface CSDashboardPageProps {
   liveEvents?: string[];
   canCreateOffline?: boolean;
   canDeleteCart?: boolean;
+  /**
+   * Order cancellation is Head of CS / Branch Admin / Admin only — closers (and
+   * teamless supervisors) can no longer cancel orders (CEO directive 2026-05-20).
+   * Gates the "Cancel Order" actions on the queue + active-order modals.
+   */
+  canCancelOrders?: boolean;
   /** Products for offline order modal — loaded in parallel with primary bundle. */
   productsForOfflineOrder: Promise<
     Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>

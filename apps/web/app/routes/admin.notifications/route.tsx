@@ -10,7 +10,7 @@ import {
 } from '@remix-run/react';
 import { useEffect } from 'react';
 import { CachedAwait } from '~/components/ui/cached-await';
-import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, parsePerPage } from '~/lib/api.server';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
@@ -91,7 +91,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
-  const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') ?? '20', 10)));
+  // URL-driven page size — clamped to [20, 50, 100]; the `<Pagination>` per-page picker writes `perPage`.
+  const { perPage: limit } = parsePerPage(url.searchParams);
   const unreadOnly = url.searchParams.get('unreadOnly') === 'true';
   const feedInput = encodeURIComponent(JSON.stringify({ page, limit, unreadOnly }));
 
@@ -122,6 +123,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } satisfies DeliveryLogPagination,
   };
 
+  // Fallback feed reflects the resolved page size so the per-page picker shows the right value.
+  const emptyFeed: FeedListResult = {
+    ...EMPTY_FEED,
+    pagination: { ...EMPTY_FEED.pagination, page, limit },
+  };
+
   const feedPromise: Promise<FeedListResult> =
     tab === 'feed' && user
       ? apiRequest<{ result?: { data?: FeedListResult } }>(
@@ -129,9 +136,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
           { method: 'GET', cookie },
         ).then((feedRes) => {
           if (feedRes.ok && feedRes.data?.result?.data) return feedRes.data.result.data;
-          return EMPTY_FEED;
+          return emptyFeed;
         })
-      : Promise.resolve(EMPTY_FEED);
+      : Promise.resolve(emptyFeed);
 
   const rulesPromise: Promise<AutomationRule[]> =
     tab === 'automations'

@@ -110,6 +110,21 @@ export const cartRouter = router({
   }),
 
   /**
+   * Fetch one cart by id (any status) — powers the "View cart" quick-detail
+   * action on the recovered-from-cart orders list. Same `cart.read` gate as the
+   * other read procedures; the raw phone is only included for `cart.delete`
+   * holders / SUPER_ADMIN, mirroring `listAbandoned`.
+   */
+  getById: permissionProcedure('cart.read')
+    .input(z.object({ cartId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      const canReveal =
+        ctx.user.role === 'SUPER_ADMIN' ||
+        (ctx.user.permissions ?? []).includes('cart.delete');
+      return getCartService().getById(input.cartId, { includeRawPhone: canReveal });
+    }),
+
+  /**
    * Delete an abandoned cart. Head of CS / SuperAdmin only.
    */
   deleteAbandoned: permissionProcedure('cart.delete')

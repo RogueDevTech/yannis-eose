@@ -766,10 +766,23 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
     if (csOnlyStatuses.includes(newStatus)) {
-      const allowedRoles = ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
+      // Cancellation is Head of CS / Branch Admin / Admin only — closers may engage and
+      // confirm but no longer cancel an order (CEO directive 2026-05-20). The backend
+      // re-checks Branch Admin same-branch scope; this is the coarse UI-facing gate.
+      const allowedRoles =
+        newStatus === 'CANCELLED'
+          ? ['HEAD_OF_CS', 'BRANCH_ADMIN', 'SUPER_ADMIN', 'ADMIN']
+          : ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
       if (!allowedRoles.includes(user.role)) {
-        return json({ error: 'Only CS or Head of CS can perform this action' }, { status: 403 });
+        return json({ error: 'You are not allowed to perform this action' }, { status: 403 });
       }
+    }
+    // Restore a cancelled order back to the queue — Admin / Super Admin only.
+    if (newStatus === 'UNPROCESSED' && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
+      return json(
+        { error: 'Only an Admin or Super Admin can restore a cancelled order' },
+        { status: 403 },
+      );
     }
     const reason = formData.get('reason')?.toString() || undefined;
     const logisticsLocationId = formData.get('logisticsLocationId')?.toString() || undefined;

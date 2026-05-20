@@ -2,7 +2,7 @@ import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, type LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermissionOrRoles, redirectIfUnauthorized } from '~/lib/api.server';
 import { MarketingTeamPage } from '~/features/marketing/MarketingTeamPage';
 import { MarketingTeamLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type { FundingBalanceRow, MarketingTeamOverviewStats } from '~/features/marketing/types';
@@ -65,6 +65,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
+  // URL-driven rows-per-page — the team list is sliced client-side from the
+  // full member set, so `perPage` is both the slice size and totalPages divisor.
+  const { perPage } = parsePerPage(url.searchParams);
 
   const teamShell = { dateFilters: filters, leaderboardPeriod };
 
@@ -231,9 +234,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
   }
 
-  // Client-side pagination — `marketing.listFundingBalances` returns all members. With 20/page
-  // the loader is the single source of truth for which slice is shown.
-  const PAGE_SIZE = 20;
+  // Client-side pagination — `marketing.listFundingBalances` returns all members.
+  // The loader is the single source of truth for which slice is shown.
+  const PAGE_SIZE = perPage;
   const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
   const totalCount = sorted.length;
   const totalPages = Math.max(1, Math.ceil(Math.max(0, totalCount) / PAGE_SIZE));
@@ -248,6 +251,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     leaderboardPeriod,
     page,
     totalPages,
+    limit: PAGE_SIZE,
     totalCount,
     q,
     sortBy,
@@ -279,6 +283,7 @@ export default function MarketingTeamRoute() {
             leaderboardPeriod={data.leaderboardPeriod}
             page={data.page}
             totalPages={data.totalPages}
+            limit={data.limit}
             totalCount={data.totalCount}
             q={data.q}
             sortBy={data.sortBy}

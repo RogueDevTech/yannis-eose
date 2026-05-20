@@ -5,6 +5,7 @@ import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { Button } from '~/components/ui/button';
+import { formatRoleLabel } from '~/components/ui/role-badge';
 import { Modal } from '~/components/ui/modal';
 import { FormSelect } from '~/components/ui/form-select';
 import { TextInput } from '~/components/ui/text-input';
@@ -104,7 +105,7 @@ function buildBatchPayoutColumns(args: {
         return (
           <div>
             <p className="font-medium text-app-fg">{p.staffName}</p>
-            <p className="text-xs text-app-fg-muted">{p.staffRole?.replace(/_/g, ' ')}</p>
+            <p className="text-xs text-app-fg-muted">{p.staffRole ? formatRoleLabel(p.staffRole) : ''}</p>
             {adj.length > 0 && (
               <ul className="mt-1 space-y-0.5">
                 {adj.map((a) => (
@@ -230,13 +231,13 @@ export function MonthlyPayrolls({
 
   // Client-side pagination over month groups (typically 1 group per calendar month).
   // 20 groups per page comfortably covers ~1.5 years of payroll history.
-  const PAGE_SIZE = 20;
   const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(monthlyPayrolls.length / PAGE_SIZE));
+  const [pageSize, setPageSize] = useState(20);
+  const totalPages = Math.max(1, Math.ceil(monthlyPayrolls.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pagedMonthlyPayrolls = useMemo(
-    () => monthlyPayrolls.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-    [monthlyPayrolls, safePage],
+    () => monthlyPayrolls.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [monthlyPayrolls, safePage, pageSize],
   );
   // Reset to page 1 when the result set shrinks (filter / refetch).
   useEffect(() => {
@@ -359,11 +360,21 @@ export function MonthlyPayrolls({
       {monthlyPayrolls.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4">
           <p className="text-sm text-app-fg-muted">
-            Showing {(safePage - 1) * PAGE_SIZE + 1}–
-            {Math.min(safePage * PAGE_SIZE, monthlyPayrolls.length)} of {monthlyPayrolls.length}
-            <span className="text-app-fg-muted/90"> · {PAGE_SIZE} per page</span>
+            Showing {(safePage - 1) * pageSize + 1}–
+            {Math.min(safePage * pageSize, monthlyPayrolls.length)} of {monthlyPayrolls.length}
+            <span className="text-app-fg-muted/90"> · {pageSize} per page</span>
           </p>
-          <Pagination page={safePage} totalPages={totalPages} onPageChange={setPage} className="sm:justify-end" />
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            pageSize={pageSize}
+            onPageSizeChange={(n) => {
+              setPageSize(n);
+              setPage(1);
+            }}
+            className="sm:justify-end"
+          />
         </div>
       )}
 

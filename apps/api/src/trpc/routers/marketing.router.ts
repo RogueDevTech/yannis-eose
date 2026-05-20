@@ -870,15 +870,19 @@ export const marketingRouter = router({
   listCampaigns: authedProcedure
     .input(listCampaignsSchema)
     .query(async ({ input, ctx }) => {
-      // Rank-and-file MB sees only their own forms. Supervisors get team scope
-      // injected by `applyMarketingSupervisorScope` (their team + themselves).
-      // Admin / HoM / global-scope perms pass through unchanged and see all.
-      let effectiveInput =
-        ctx.user.role === 'MEDIA_BUYER' && !input.mediaBuyerId
-          ? { ...input, mediaBuyerId: ctx.user.id }
-          : input;
+      // Rank-and-file MB sees only their own forms — always pinned to self so
+      // an MB can never pass another buyer's id. Supervisors get team scope
+      // via `applyMarketingSupervisorScope`. Admin / HoM / global-scope see all.
+      const isOwnMbView = ctx.user.role === 'MEDIA_BUYER';
+      let effectiveInput = isOwnMbView ? { ...input, mediaBuyerId: ctx.user.id } : input;
       effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
-      return getMarketingService().listCampaigns(effectiveInput, ctx.currentBranchId);
+      // An MB's `media_buyer_id = me` filter is exact, so a branch filter would
+      // only hide their own forms built in a branch they were since moved out
+      // of. Drop it — a Media Buyer's forms follow them across branches.
+      return getMarketingService().listCampaigns(
+        effectiveInput,
+        isOwnMbView ? null : ctx.currentBranchId,
+      );
     }),
 
   /**
@@ -961,6 +965,7 @@ export const marketingRouter = router({
         buyersResult,
         productsResult,
         campaignsResult,
+        abandonedCartCount,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
           ordersScope.mediaBuyerId,
@@ -1022,9 +1027,18 @@ export const marketingRouter = router({
           ctx.user.role,
         ),
         getMarketingService().listCampaigns(
-          { page: 1, limit: 100, status: 'ACTIVE' },
-          ctx.currentBranchId,
+          {
+            page: 1,
+            limit: 100,
+            status: 'ACTIVE',
+            // An MB's Form-filter dropdown lists their own forms, every branch.
+            ...(ctx.user.role === 'MEDIA_BUYER' ? { mediaBuyerId: ctx.user.id } : {}),
+          },
+          ctx.user.role === 'MEDIA_BUYER' ? null : ctx.currentBranchId,
         ),
+        // Open abandoned-cart count for the overview strip — scoped to the same
+        // media buyer / branch the rest of the bundle uses.
+        getCartService().countAbandoned({ mediaBuyerId: metricsBuyerId, branchId }),
       ]);
 
       // Slim the picklist payloads down to what the page actually uses (id + name)
@@ -1051,6 +1065,7 @@ export const marketingRouter = router({
         mediaBuyersForFilter,
         productsForFilter,
         campaignsForFilter,
+        abandonedCartCount,
       };
     }),
 
@@ -1218,7 +1233,12 @@ export const marketingRouter = router({
 
       const [adSpendStatusCounts, campaigns, buyersResult] = await Promise.all([
         getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId),
-        getMarketingService().listCampaigns(campaignsScope, branchId),
+        // Pinned to a single MB (pinToSelf) → the branch filter is redundant;
+        // drop it so an MB's forms follow them across branches.
+        getMarketingService().listCampaigns(
+          campaignsScope,
+          campaignsScope.mediaBuyerId ? null : branchId,
+        ),
         canSeeBuyerPicklist
           ? supervisorBuyerIds
             ? getUsersService()

@@ -480,7 +480,7 @@ export function WarehousesPage({
 
         {totalPages > 1 ? (
           <CardFooter className="border-t border-app-border pt-4 mt-0">
-            <Pagination page={page} totalPages={totalPages} />
+            <Pagination page={page} totalPages={totalPages} pageSize={limit} />
             <span className="text-xs text-app-fg-muted">
               {limit} per page · {totalWarehouses} total
             </span>

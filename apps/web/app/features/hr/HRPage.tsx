@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
+import { formatRoleLabel } from '~/components/ui/role-badge';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import {
@@ -224,7 +225,7 @@ export function HRPage({
                       onChange={setAdjustmentStaffId}
                       placeholder="Select staff..."
                       searchPlaceholder="Search staff..."
-                      options={resolvedUsers.map((u: HRUser) => ({ value: u.id, label: `${u.name} (${u.role?.replace(/_/g, ' ')})` }))}
+                      options={resolvedUsers.map((u: HRUser) => ({ value: u.id, label: `${u.name}${u.role ? ` (${formatRoleLabel(u.role)})` : ''}` }))}
                     />
                   )}
                 </DeferredSection>

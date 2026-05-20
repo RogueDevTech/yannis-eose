@@ -12,7 +12,7 @@
 
 import { Link, useSearchParams } from '@remix-run/react';
 import { useEffect, useRef, useState } from 'react';
-import { FormSelect } from '~/components/ui/form-select';
+import { Modal } from '~/components/ui/modal';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 
 interface PaginationProps {
@@ -29,6 +29,8 @@ interface PaginationProps {
   /** Number of sibling pages shown around the current page */
   siblingCount?: number;
   className?: string;
+  /** Horizontal alignment of the controls within their row. @default 'center' */
+  align?: 'start' | 'center' | 'end';
   /**
    * When true, still render Prev / Page X of Y / Next when there is only one page
    * (buttons disabled as appropriate). Hidden when `totalPages` is 0.
@@ -70,6 +72,7 @@ export function Pagination({
   showEdgeButtons = false,
   siblingCount = 1,
   className = '',
+  align = 'center',
   showWhenSinglePage = false,
   pageSizeOptions,
   pageSize,
@@ -217,7 +220,13 @@ export function Pagination({
   return (
     <nav
       aria-label="Pagination"
-      className={['flex flex-wrap items-center justify-center gap-1', className].filter(Boolean).join(' ')}
+      className={[
+        'flex flex-wrap items-center gap-1',
+        align === 'end' ? 'justify-end' : align === 'start' ? 'justify-start' : 'justify-center',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
       {showEdgeButtons && (
         <NavBtn p={1} label="«" disabled={page === 1} />
@@ -279,23 +288,90 @@ export function Pagination({
       )}
 
       {showPageSizePicker ? (
-        <div className="ml-3 inline-flex items-center gap-1.5 text-xs text-app-fg-muted">
-          <label htmlFor="pagination-per-page" className="whitespace-nowrap">
-            Per page
-          </label>
-          <FormSelect
-            id="pagination-per-page"
-            value={String(pageSize)}
-            onChange={(e) => commitPageSize(Number.parseInt(e.target.value, 10))}
-            options={resolvedPageSizeOptions.map((size) => ({ value: String(size), label: String(size) }))}
-            controlSize="sm"
-            wrapperClassName="min-w-[4.5rem]"
-            className="font-medium"
-            aria-label="Rows per page"
-          />
-        </div>
+        <PageSizePicker
+          pageSize={pageSize as number}
+          options={resolvedPageSizeOptions}
+          onSelect={commitPageSize}
+        />
       ) : null}
     </nav>
+  );
+}
+
+/**
+ * "Per page" picker — a compact button that opens a modal to choose the rows-per-page size.
+ * Replaces the inline native <select>: on mobile the modal slides up from the bottom, giving
+ * a larger tap target than a cramped dropdown.
+ */
+function PageSizePicker({
+  pageSize,
+  options,
+  onSelect,
+}: {
+  pageSize: number;
+  options: number[];
+  onSelect: (size: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="ml-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-app-border px-2.5 text-xs font-medium text-app-fg transition-colors hover:bg-app-hover"
+        aria-haspopup="dialog"
+      >
+        <span className="text-app-fg-muted">Per page</span>
+        <span className="font-semibold">{pageSize}</span>
+        <svg className="h-3.5 w-3.5 text-app-fg-muted" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </button>
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        maxWidth="max-w-sm"
+        aria-labelledby="page-size-picker-title"
+      >
+        <div className="px-5 pb-1 pt-5">
+          <h2 id="page-size-picker-title" className="text-base font-semibold text-app-fg">
+            Rows per page
+          </h2>
+          <p className="mt-0.5 text-sm text-app-fg-muted">Choose how many rows to show per page.</p>
+        </div>
+        <div className="p-3">
+          {options.map((size) => {
+            const isActive = size === pageSize;
+            return (
+              <button
+                key={size}
+                type="button"
+                onClick={() => {
+                  onSelect(size);
+                  setOpen(false);
+                }}
+                className={[
+                  'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors',
+                  isActive
+                    ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300'
+                    : 'text-app-fg hover:bg-app-hover',
+                ].join(' ')}
+                aria-current={isActive ? 'true' : undefined}
+              >
+                <span>{size} rows</span>
+                {isActive ? (
+                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0l-3.5-3.5a1 1 0 011.4-1.4l2.8 2.79 6.8-6.79a1 1 0 011.4 0z" clipRule="evenodd" />
+                  </svg>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </Modal>
+    </>
   );
 }
 

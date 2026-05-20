@@ -2,7 +2,7 @@ import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
-import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
+import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, parsePerPage, requirePermissionOrRoles, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -30,6 +30,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
   const actorPerms = new Set((user.permissions ?? []).map((p) => canonicalPermissionCode(p)));
 
+  // URL-driven stock-levels pagination — clamped to [20, 50, 100]; the `<Pagination>`
+  // per-page picker writes `perPage`.
+  const url = new URL(request.url);
+  const rawPage = Number(url.searchParams.get('page') ?? '1');
+  const levelsPage = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+  const { perPage: levelsLimit } = parsePerPage(url.searchParams);
+
   const pageData = (async (): Promise<InventoryStreamData> => {
     const locationId = user.role === 'TPL_MANAGER' && user.logisticsLocationId ? user.logisticsLocationId : undefined;
 
@@ -41,8 +48,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const bundleInput = encodeURIComponent(
       JSON.stringify({
         ...(locationId && { locationId }),
-        levelsPage: 1,
-        levelsLimit: 100,
+        levelsPage,
+        levelsLimit,
         movementsPage: 1,
         movementsLimit: 50,
       }),
@@ -104,10 +111,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: l.status,
     }));
 
+    const totalLevels = bundle?.levels?.pagination?.total ?? 0;
+
     return {
       levels: bundle?.levels?.levels ?? [],
       levelsTotals: bundle?.levels?.totals ?? { totalStock: 0, totalReserved: 0, totalDelivered: 0 },
-      totalLevels: bundle?.levels?.pagination?.total ?? 0,
+      totalLevels,
+      levelsPage,
+      levelsTotalPages: Math.max(1, Math.ceil(totalLevels / levelsLimit)),
+      levelsLimit,
       movements: bundle?.movements?.movements ?? [],
       totalMovements: bundle?.movements?.pagination?.total ?? 0,
       products,

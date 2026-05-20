@@ -1,8 +1,15 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermission } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
-import { ABANDONED_CARTS_PAGE_SIZE, type AbandonedCartPagination } from '~/features/cs/types';
+import {
+  ABANDONED_CARTS_PAGE_SIZE,
+  type AbandonedCartPagination,
+  type PendingCart,
+} from '~/features/cs/types';
+
+/** Per-page choices for the abandoned-carts table — keeps the 25 default a valid option. */
+const ABANDONED_CARTS_PAGE_SIZE_OPTIONS = [ABANDONED_CARTS_PAGE_SIZE, 50, 100] as const;
 
 type ActivityItem = {
   id: string;
@@ -20,9 +27,31 @@ export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'cart.read');
   const cookie = getSessionCookie(request);
   const url = new URL(request.url);
+
+  // Single-cart branch: `?cartId=` returns just that cart (any status). Powers the
+  // "View cart" quick-detail modal on the recovered-from-cart orders list.
+  const cartIdParam = url.searchParams.get('cartId');
+  if (cartIdParam) {
+    const cartRes = await apiRequest<unknown>(
+      `/trpc/cart.getById?input=${encodeURIComponent(JSON.stringify({ cartId: cartIdParam }))}`,
+      { method: 'GET', cookie },
+    );
+    const cart = cartRes.ok
+      ? (cartRes.data as { result?: { data?: PendingCart | null } })?.result?.data ?? null
+      : null;
+    return json({ cart });
+  }
+
   const abandonedPageRaw = parseInt(url.searchParams.get('abandonedPage') ?? '1', 10);
   const abandonedPage =
     Number.isFinite(abandonedPageRaw) && abandonedPageRaw >= 1 ? abandonedPageRaw : 1;
+  // URL-driven page size for the abandoned-carts table — written by the `<Pagination>`
+  // per-page picker as `?abandonedPerPage=`.
+  const { perPage: abandonedPerPage } = parsePerPage(url.searchParams, {
+    param: 'abandonedPerPage',
+    allowed: ABANDONED_CARTS_PAGE_SIZE_OPTIONS,
+    defaultPerPage: ABANDONED_CARTS_PAGE_SIZE,
+  });
 
   const [activityRes, pendingRes, abandonedRes] = await Promise.all([
     apiRequest<unknown>(
@@ -35,7 +64,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     ),
     apiRequest<unknown>(
       `/trpc/cart.listAbandoned?input=${encodeURIComponent(
-        JSON.stringify({ page: abandonedPage, limit: ABANDONED_CARTS_PAGE_SIZE }),
+        JSON.stringify({ page: abandonedPage, limit: abandonedPerPage }),
       )}`,
       { method: 'GET', cookie },
     ),
@@ -82,7 +111,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const abandonedCarts = abandonedPayload?.items ?? [];
   const abandonedPagination: AbandonedCartPagination = abandonedPayload
     ? { total: abandonedPayload.total, page: abandonedPayload.page, limit: abandonedPayload.limit }
-    : { total: 0, page: 1, limit: ABANDONED_CARTS_PAGE_SIZE };
+    : { total: 0, page: 1, limit: abandonedPerPage };
 
   return json({ activityItems, pendingCarts, abandonedCarts, abandonedPagination });
 }

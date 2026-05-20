@@ -161,6 +161,7 @@ export function MarketingAdSpendPage({
   totalAdSpend: _totalRowCount,
   page,
   totalPages,
+  limit,
   statusFilter,
   searchFilter,
   productIdFilter,
@@ -178,6 +179,7 @@ export function MarketingAdSpendPage({
   groups: initialGroups,
   groupsPage,
   groupsTotalPages,
+  groupsPerPage,
   currentUserId,
   picklistsLoading = false,
 }: MarketingAdSpendLoaderData & { picklistsLoading?: boolean }) {
@@ -251,6 +253,7 @@ export function MarketingAdSpendPage({
     if (campaignIdFilter) p.set('campaignId', campaignIdFilter);
     if (mediaBuyerIdFilter) p.set('mediaBuyerId', mediaBuyerIdFilter);
     p.set('gpage', String(groupsPage ?? 1));
+    p.set('gPerPage', String(groupsPerPage));
     p.set('view', viewMode);
     if (userIdsOnPage.length > 0) p.set('userIds', JSON.stringify(userIdsOnPage));
     return p.toString();
@@ -264,6 +267,7 @@ export function MarketingAdSpendPage({
     campaignIdFilter,
     mediaBuyerIdFilter,
     groupsPage,
+    groupsPerPage,
     viewMode,
     userIdsOnPage,
   ]);
@@ -1320,6 +1324,7 @@ export function MarketingAdSpendPage({
                 currentUserId={currentUserId}
                 page={groupsPage}
                 totalPages={groupsTotalPages}
+                pageSize={groupsPerPage}
                 actionUrl="/admin/marketing/ad-spend"
                 onPreviewReceipt={openGroupLineReceiptModal}
                 onEdit={(line) =>
@@ -1474,7 +1479,7 @@ export function MarketingAdSpendPage({
 
               {totalPages > 1 && (
                 <div className="border-t border-app-border px-4 py-3">
-                  <Pagination page={page} totalPages={totalPages} pageParam="page" />
+                  <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
                 </div>
               )}
             </>

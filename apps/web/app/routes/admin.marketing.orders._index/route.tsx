@@ -152,6 +152,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
                 mediaBuyersForFilter: Array<{ id: string; name: string }>;
                 productsForFilter: Array<{ id: string; name: string }>;
                 campaignsForFilter: Array<{ id: string; name: string }>;
+                abandonedCartCount: number;
               };
             };
           })?.result?.data
@@ -182,6 +183,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         mediaBuyersForFilter,
         productsForFilter,
         campaignsForFilter,
+        abandonedCartCount: data?.abandonedCartCount ?? 0,
       };
     } catch {
       return {
@@ -193,6 +195,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         mediaBuyersForFilter: [],
         productsForFilter: [],
         campaignsForFilter: [],
+        abandonedCartCount: 0,
       };
     }
   })();

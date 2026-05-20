@@ -108,16 +108,20 @@ export function defaultThisMonthRange(): { startDate: string; endDate: string } 
  *   const url = new URL(request.url);
  *   const { perPage, pageSizeOptions } = parsePerPage(url.searchParams);
  *   const inputForApi = { page, limit: perPage, ... };
+ *
+ * Pages with more than one paginated table pass a distinct `param` per table so each
+ * picker writes its own search param (the matching `<Pagination pageSizeParam>` must agree):
+ *   const { perPage: requestsPerPage } = parsePerPage(url.searchParams, { param: 'requestsPerPage' });
  */
 const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [20, 50, 100];
 
 export function parsePerPage(
   searchParams: URLSearchParams,
-  options?: { defaultPerPage?: number; allowed?: readonly number[] },
+  options?: { defaultPerPage?: number; allowed?: readonly number[]; param?: string },
 ): { perPage: number; pageSizeOptions: number[] } {
   const allowed = options?.allowed ?? DEFAULT_PAGE_SIZE_OPTIONS;
   const fallback = options?.defaultPerPage ?? allowed[0] ?? 20;
-  const raw = Number(searchParams.get('perPage') ?? '');
+  const raw = Number(searchParams.get(options?.param ?? 'perPage') ?? '');
   const perPage = allowed.includes(raw) ? raw : fallback;
   return { perPage, pageSizeOptions: [...allowed] };
 }

@@ -430,6 +430,8 @@ export interface MarketingAdSpendLoaderData {
   groupsTotal: number;
   groupsPage: number;
   groupsTotalPages: number;
+  /** URL-driven rows-per-page for the daily-grouped accordion (`?gPerPage=`). */
+  groupsPerPage: number;
   /** Current user's id — used to gate per-line "Edit" actions on the accordion
    *  (MB can edit their own PENDING/REJECTED rows; moderators can edit any). */
   currentUserId: string;

@@ -26,6 +26,11 @@ export interface Order {
   /** Form / campaign the order came in from. Used by the Media Buyer view. */
   campaignId?: string | null;
   campaignName?: string | null;
+  /**
+   * Back-link to the abandoned cart this order was recovered from. Non-null only
+   * for cart-recovered orders — drives the "View cart" quick-detail row action.
+   */
+  cartId?: string | null;
 }
 
 export interface CallLogEntry {
