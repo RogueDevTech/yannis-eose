@@ -103,6 +103,7 @@ export function ShipmentsTab({
         header: '',
         align: 'right',
         tight: true,
+        mobileShowLabel: false,
         render: (s) =>
           isOptimisticId(s.id) ? (
             <TableActionButton inert variant="primary">
