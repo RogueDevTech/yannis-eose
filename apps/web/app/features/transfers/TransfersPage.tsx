@@ -522,9 +522,6 @@ export function TransfersPage({
   // grouped into the single action icon, not a separate mobile control).
   const transferFiltersBody = (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Tabs value={uiStatusFilter} onChange={handleStatusTabChange} tabs={statusTabItems} />
-      </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <FormSelect
           id="transfer-filter-from"
@@ -580,6 +577,85 @@ export function TransfersPage({
     </div>
   );
 
+  // Mobile tools-sheet variant — each filter sits in the same boxed, centered
+  // app-hover chrome as the date-range row so the sheet reads as one
+  // consistent column. The field name lives on the dropdown itself (its
+  // default "From location" / "To location" option), not a separate label.
+  // `openAs="modal"` opens the option list as a centered modal so it's
+  // readable inside the tools sheet instead of a cramped anchored popover.
+  // Every sheet control — filter boxes, date box, buttons — shares this height
+  // so the tools sheet reads as one evenly-spaced column.
+  const mobileFilterBoxClass =
+    'flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+  const mobileFilterSelectClass = '!bg-transparent !border-transparent !text-center';
+  const mobileTransferFiltersBody = (
+    <div className="space-y-2">
+      <div className={mobileFilterBoxClass}>
+        <FormSelect
+          id="transfer-filter-from-mobile"
+          value={fromLocationFilter}
+          onChange={(e) => updateFilter('fromLocationId', e.target.value)}
+          options={[
+            { value: '', label: 'From location' },
+            ...locations.map((l: Location) => ({
+              value: l.id,
+              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+            })),
+          ]}
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+          className={mobileFilterSelectClass}
+        />
+      </div>
+      <div className={mobileFilterBoxClass}>
+        <FormSelect
+          id="transfer-filter-to-mobile"
+          value={toLocationFilter}
+          onChange={(e) => updateFilter('toLocationId', e.target.value)}
+          options={[
+            { value: '', label: 'To location' },
+            ...locations.map((l: Location) => ({
+              value: l.id,
+              label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
+            })),
+          ]}
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+          className={mobileFilterSelectClass}
+        />
+      </div>
+      <div className={mobileFilterBoxClass}>
+        <FormSelect
+          id="transfer-filter-product-mobile"
+          value={productFilter}
+          onChange={(e) => updateFilter('productId', e.target.value)}
+          options={[
+            { value: '', label: formDataLoading ? 'Loading products…' : 'All products' },
+            ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
+          ]}
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+          className={mobileFilterSelectClass}
+          disabled={formDataLoading && resolvedProducts.length === 0}
+        />
+      </div>
+      {hasFilters && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="h-12 w-full justify-center"
+          onClick={clearFilters}
+        >
+          Clear filters
+        </Button>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -591,7 +667,7 @@ export function TransfersPage({
             sheetTitle={`${pageTitle} — tools`}
             sheetSubtitle={<span>Date range and new transfer</span>}
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
-            filters={transferFiltersBody}
+            filters={mobileTransferFiltersBody}
             filtersBadgeCount={hasFilters ? 1 : 0}
             desktop={
               <>
@@ -612,7 +688,7 @@ export function TransfersPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                   <DateFilterBar
                     startDate={periodAllTime ? '' : effectiveDateRange.startDate}
                     endDate={periodAllTime ? '' : effectiveDateRange.endDate}
@@ -622,9 +698,9 @@ export function TransfersPage({
                 </div>
                 {canInitiate && (
                   <Button
-                    variant="primary"
+                    variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       openTransferForm();
@@ -685,7 +761,10 @@ export function TransfersPage({
         ]}
       />
 
-      {/* Filters — status pills + from/to/product dropdowns. URL-synced so filters persist
+      {/* Status tabs — primary navigation, always visible at every viewport. */}
+      <Tabs value={uiStatusFilter} onChange={handleStatusTabChange} tabs={statusTabItems} />
+
+      {/* Filters — from/to/product dropdowns. URL-synced so filters persist
           across refreshes and can be deep-linked. Desktop-only here; on mobile the same
           controls render inside the PageHeaderMobileTools kebab (see `filters` prop). */}
       <div className="hidden md:block card p-3 sm:p-4">{transferFiltersBody}</div>
@@ -1023,10 +1102,9 @@ export function TransfersPage({
               {
                 key: 'actions',
                 header: '',
-                mobileLabel: 'Actions',
+                mobileShowLabel: false,
                 align: 'right',
                 tight: true,
-                className: 'w-[1%] whitespace-nowrap',
                 render: (t) => {
                   const isMidFlight =
                     isOptimisticId(t.id) ||
