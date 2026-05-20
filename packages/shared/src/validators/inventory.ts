@@ -203,7 +203,8 @@ const moneyAmount = z.coerce.number().min(0).multipleOf(0.01);
 const createShipmentLineSchema = z.object({
   productId: z.string().uuid(),
   expectedQuantity: z.number().int().min(1, 'Expected quantity must be at least 1'),
-  factoryCost: moneyAmount,
+  // Optional — defaults to 0 when the factory cost is not yet known at intake.
+  factoryCost: moneyAmount.optional(),
 });
 
 export const createShipmentSchema = z.object({

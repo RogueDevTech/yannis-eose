@@ -577,7 +577,7 @@ export class ShipmentsService {
           shipmentId: parent.id,
           productId: line.productId,
           expectedQuantity: line.expectedQuantity,
-          factoryCost: sql`${line.factoryCost}::numeric`,
+          factoryCost: sql`${line.factoryCost ?? 0}::numeric`,
         })),
       );
 
@@ -646,7 +646,7 @@ export class ShipmentsService {
             shipmentId: input.shipmentId,
             productId: line.productId,
             expectedQuantity: line.expectedQuantity,
-            factoryCost: sql`${line.factoryCost}::numeric`,
+            factoryCost: sql`${line.factoryCost ?? 0}::numeric`,
           })),
         );
       }

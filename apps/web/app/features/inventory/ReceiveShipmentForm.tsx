@@ -17,18 +17,38 @@ interface ReceiveLineDraft {
   factoryCost: string;
 }
 
+/** Pre-fill payload — when set, the form renders in edit mode for an existing shipment. */
+export interface ReceiveShipmentInitial {
+  shipmentId: string;
+  destinationLocationId: string;
+  label: string;
+  supplierName: string;
+  supplierReference: string;
+  expectedArrivalDate: string;
+  totalLandingCost: string;
+  notes: string;
+  lines: Array<{ productId: string; expectedQuantity: string; factoryCost: string }>;
+}
+
 export function ReceiveShipmentForm({
   products,
   locations,
   actionUrl,
   disabled = false,
+  initial,
+  cancelTo = '/admin/shipments',
 }: {
   products: ProductOption[];
   locations: LocationOption[];
   actionUrl: string;
   disabled?: boolean;
+  /** When provided, the form edits this shipment instead of creating a new one. */
+  initial?: ReceiveShipmentInitial;
+  /** Destination for the Cancel link. */
+  cancelTo?: string;
 }) {
   const id = useId();
+  const isEdit = !!initial;
   const fetcher = useFetcher<{ success?: boolean; error?: string }>();
   useFetcherToast(fetcher.data, { successMessage: 'Shipment saved' });
 
@@ -37,18 +57,28 @@ export function ReceiveShipmentForm({
   const lineUidRef = useRef(0);
   const newLineUid = () => `line-${id}-${++lineUidRef.current}`;
 
-  const [destinationLocationId, setDestinationLocationId] = useState('');
-  const [supplierName, setSupplierName] = useState('');
-  const [supplierReference, setSupplierReference] = useState('');
-  const [label, setLabel] = useState('');
-  const [expectedArrivalDate, setExpectedArrivalDate] = useState('');
-  const [totalLandingCost, setTotalLandingCost] = useState<string>('');
-  const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<ReceiveLineDraft[]>(() => [
-    { uid: `line-${id}-1`, productId: '', expectedQuantity: '', factoryCost: '' },
-  ]);
+  const [destinationLocationId, setDestinationLocationId] = useState(
+    initial?.destinationLocationId ?? '',
+  );
+  const [supplierName, setSupplierName] = useState(initial?.supplierName ?? '');
+  const [supplierReference, setSupplierReference] = useState(initial?.supplierReference ?? '');
+  const [label, setLabel] = useState(initial?.label ?? '');
+  const [expectedArrivalDate, setExpectedArrivalDate] = useState(
+    initial?.expectedArrivalDate ?? '',
+  );
+  const [totalLandingCost, setTotalLandingCost] = useState<string>(
+    initial?.totalLandingCost ?? '',
+  );
+  const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [lines, setLines] = useState<ReceiveLineDraft[]>(() =>
+    initial && initial.lines.length > 0
+      ? initial.lines.map((l, i) => ({ uid: `line-${id}-${i + 1}`, ...l }))
+      : [{ uid: `line-${id}-1`, productId: '', expectedQuantity: '', factoryCost: '' }],
+  );
 
-  if (lineUidRef.current === 0) lineUidRef.current = 1;
+  if (lineUidRef.current === 0) {
+    lineUidRef.current = Math.max(1, initial?.lines.length ?? 1);
+  }
 
   const updateLine = (uid: string, patch: Partial<ReceiveLineDraft>) => {
     setLines((prev) => prev.map((l) => (l.uid === uid ? { ...l, ...patch } : l)));
@@ -63,13 +93,15 @@ export function ReceiveShipmentForm({
   const removeLine = (uid: string) => setLines((prev) => prev.filter((l) => l.uid !== uid));
 
   const validLines = useMemo(() => {
-    return lines.filter(
-      (l) =>
-        l.productId &&
-        Number(l.expectedQuantity) > 0 &&
-        l.factoryCost !== '' &&
-        Number(l.factoryCost) >= 0,
-    );
+    // Factory cost is optional — a line is valid with just a product + quantity.
+    // If a factory cost is typed it must be a non-negative number.
+    return lines.filter((l) => {
+      if (!l.productId || Number(l.expectedQuantity) <= 0) return false;
+      const fc = l.factoryCost.trim();
+      if (fc === '') return true;
+      const n = Number(fc);
+      return Number.isFinite(n) && n >= 0;
+    });
   }, [lines]);
 
   const ready = !!destinationLocationId && validLines.length > 0;
@@ -92,7 +124,13 @@ export function ReceiveShipmentForm({
 
   const buildFormData = (arrivedNow: boolean): FormData => {
     const fd = new FormData();
-    fd.set('intent', 'createShipment');
+    if (isEdit) {
+      fd.set('intent', 'editShipment');
+      fd.set('shipmentId', initial!.shipmentId);
+    } else {
+      fd.set('intent', 'createShipment');
+      fd.set('arrivedNow', arrivedNow ? 'true' : 'false');
+    }
     fd.set('destinationLocationId', destinationLocationId);
     fd.set('label', label.trim());
     fd.set('supplierName', supplierName.trim());
@@ -100,14 +138,14 @@ export function ReceiveShipmentForm({
     fd.set('expectedArrivalDate', expectedArrivalDate);
     fd.set('totalLandingCost', totalLandingCost.trim() || '0');
     fd.set('notes', notes.trim());
-    fd.set('arrivedNow', arrivedNow ? 'true' : 'false');
     fd.set(
       'lines',
       JSON.stringify(
         validLines.map((l) => ({
           productId: l.productId,
           expectedQuantity: Number(l.expectedQuantity),
-          factoryCost: Number(l.factoryCost),
+          // Omit when blank — factory cost is optional and defaults to 0 server-side.
+          ...(l.factoryCost.trim() === '' ? {} : { factoryCost: Number(l.factoryCost) }),
         })),
       ),
     );
@@ -122,14 +160,21 @@ export function ReceiveShipmentForm({
   return (
     <div className="card p-4 sm:p-6 space-y-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <FormField label="Destination location" hint="Company-owned warehouse where goods will be received">
+        <FormField
+          label="Destination location"
+          hint={
+            isEdit
+              ? 'Destination cannot be changed after creation'
+              : 'Company-owned warehouse where goods will be received'
+          }
+        >
           <SearchableSelect
             id={`${id}-destination`}
             value={destinationLocationId}
             onChange={setDestinationLocationId}
             placeholder="Select a warehouse…"
             searchPlaceholder="Search locations…"
-            disabled={disabled}
+            disabled={disabled || isEdit}
             options={locations.map((l) => ({
               value: l.id,
               label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
@@ -219,7 +264,7 @@ export function ReceiveShipmentForm({
                   <TextInput
                     type="number"
                     inputMode="decimal"
-                    placeholder="Factory cost ₦"
+                    placeholder="Factory cost ₦ (optional)"
                     value={line.factoryCost}
                     onChange={(e) => updateLine(line.uid, { factoryCost: e.target.value })}
                     min={0}
@@ -247,7 +292,7 @@ export function ReceiveShipmentForm({
 
         {validLines.length === 0 ? (
           <p className="text-xs text-app-fg-muted">
-            Add at least one line with product, quantity, and factory cost.
+            Add at least one line with a product and quantity. Factory cost is optional.
           </p>
         ) : null}
       </div>
@@ -258,27 +303,41 @@ export function ReceiveShipmentForm({
 
       <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-app-elevated border-t border-app-border">
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <LinkButton to="/admin/shipments" disabled={isCreating}>
+          <LinkButton to={cancelTo} disabled={isCreating}>
             Cancel
           </LinkButton>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!ready || disabled || isCreating}
-            loading={isCreating}
-            onClick={() => submit(false)}
-          >
-            Save as planned
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            disabled={!ready || disabled || isCreating}
-            loading={isCreating}
-            onClick={() => submit(true)}
-          >
-            Already arrived
-          </Button>
+          {isEdit ? (
+            <Button
+              type="button"
+              variant="primary"
+              disabled={!ready || disabled || isCreating}
+              loading={isCreating}
+              onClick={() => submit(false)}
+            >
+              Save changes
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!ready || disabled || isCreating}
+                loading={isCreating}
+                onClick={() => submit(false)}
+              >
+                Save as planned
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!ready || disabled || isCreating}
+                loading={isCreating}
+                onClick={() => submit(true)}
+              >
+                Already arrived
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>
