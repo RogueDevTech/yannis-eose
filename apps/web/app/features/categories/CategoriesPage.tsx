@@ -323,7 +323,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       {
         key: 'idx',
         header: '#',
-        className: 'w-[1%] whitespace-nowrap',
+        tight: true,
         render: (_row, i) => <span className="text-xs text-app-fg-muted tabular-nums">{i + 1}</span>,
       },
       {
@@ -365,7 +365,6 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         mobileLabel: 'Actions',
         align: 'right',
         tight: true,
-        className: 'w-[1%] whitespace-nowrap',
         render: (cat) => (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
             <CompactTableActionButton onClick={() => setViewCategory(cat)}>View</CompactTableActionButton>

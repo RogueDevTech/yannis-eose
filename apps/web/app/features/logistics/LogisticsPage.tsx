@@ -28,6 +28,7 @@ import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchInput } from '~/components/ui/search-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -159,6 +160,7 @@ function AddProviderForm({
 export function LogisticsPage({ providers, totalProviders, locations, totalLocations, globalLowStockThreshold }: LogisticsPageProps) {
   const fetcher = useFetcher();
   const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('locations');
+  const [search, setSearch] = useState('');
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
@@ -323,6 +325,25 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const displayTotalProviders = totalProviders + optimisticProviders.length;
   const displayTotalLocations = totalLocations + optimisticLocations.length;
 
+  /** Client-side search over the rows already loaded for the active tab. */
+  const searchQuery = search.trim().toLowerCase();
+  const filteredProviders = useMemo(() => {
+    if (!searchQuery) return displayProviders;
+    return displayProviders.filter((p) =>
+      [p.name, p.contactInfo, p.coverageArea].some((field) =>
+        (field ?? '').toLowerCase().includes(searchQuery),
+      ),
+    );
+  }, [displayProviders, searchQuery]);
+  const filteredLocations = useMemo(() => {
+    if (!searchQuery) return displayLocations;
+    return displayLocations.filter((l) =>
+      [l.name, l.address, l.providerName].some((field) =>
+        (field ?? '').toLowerCase().includes(searchQuery),
+      ),
+    );
+  }, [displayLocations, searchQuery]);
+
   const providerTableColumns: CompactTableColumn<Provider>[] = useMemo(
     () => [
       {
@@ -355,8 +376,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {
         key: 'actions',
         header: '',
-        mobileLabel: 'Actions',
         align: 'right',
+        mobileShowLabel: false,
         tight: true,
         render: (p) => {
           const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
@@ -441,8 +462,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {
         key: 'actions',
         header: '',
-        mobileLabel: 'Actions',
         align: 'right',
+        mobileShowLabel: false,
         tight: true,
         render: (l) => {
           const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
@@ -545,6 +566,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                   trigger="button"
                   triggerLabel="+ Logistics company"
                   triggerVariant="secondary"
+                  triggerClassName="w-full justify-center"
                   openMenuId={openHeaderMenuId}
                   setOpenMenuId={setOpenHeaderMenuId}
                   items={[
@@ -562,7 +584,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                   id="add-location-mobile"
                   trigger="button"
                   triggerLabel="+ Location"
-                  triggerVariant="primary"
+                  triggerVariant="secondary"
+                  triggerClassName="w-full justify-center"
                   openMenuId={openHeaderMenuId}
                   setOpenMenuId={setOpenHeaderMenuId}
                   items={[
@@ -1136,36 +1159,57 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
 
       <Tabs
         value={activeTab}
-        onChange={(v) => setActiveTab(v as typeof activeTab)}
+        onChange={(v) => {
+          setActiveTab(v as typeof activeTab);
+          setSearch('');
+        }}
         tabs={[
           { value: 'locations', label: `Locations (${displayTotalLocations})` },
           { value: 'providers', label: `Companies (${displayTotalProviders})` },
         ]}
       />
 
+      <SearchInput
+        value={search}
+        onChange={setSearch}
+        clearable
+        placeholder={
+          activeTab === 'providers'
+            ? 'Search companies by name, contact, or coverage…'
+            : 'Search locations by name, address, or company…'
+        }
+        wrapperClassName="max-w-md"
+        className="!bg-app-elevated"
+      />
+
       {/* Content */}
       {activeTab === 'providers' && (
         <CompactTable<Provider>
           columns={providerTableColumns}
-          rows={displayProviders}
+          rows={filteredProviders}
           rowKey={(p) => p.id}
           rowClassName={(p) =>
             isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id) ? 'opacity-60' : ''
           }
-          emptyTitle="No logistics companies yet"
+          emptyTitle={searchQuery ? 'No companies match your search' : 'No logistics companies yet'}
+          emptyDescription={searchQuery ? 'Try a different name, contact, or coverage area.' : undefined}
         />
       )}
 
       {activeTab === 'locations' && (
         <CompactTable<Location>
           columns={locationTableColumns}
-          rows={displayLocations}
+          rows={filteredLocations}
           rowKey={(l) => l.id}
           rowClassName={(l) =>
             isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id) ? 'opacity-60' : ''
           }
-          emptyTitle="No locations yet"
-          emptyDescription="Add a logistics company first, then add locations."
+          emptyTitle={searchQuery ? 'No locations match your search' : 'No locations yet'}
+          emptyDescription={
+            searchQuery
+              ? 'Try a different name, address, or company.'
+              : 'Add a logistics company first, then add locations.'
+          }
         />
       )}
 

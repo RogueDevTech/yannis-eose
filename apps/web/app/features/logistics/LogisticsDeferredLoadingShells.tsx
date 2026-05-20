@@ -180,10 +180,9 @@ function transfersWorkspaceTableShellColumns(): CompactTableColumn<{ id: string 
     {
       key: 'actions',
       header: '',
-      mobileLabel: 'Actions',
+      mobileShowLabel: false,
       align: 'right',
       tight: true,
-      className: 'w-[1%] whitespace-nowrap',
       render: () => (
         <div className="inline-flex items-center justify-end gap-1.5">
           <CompactTableActionButton disabled>View</CompactTableActionButton>
@@ -267,6 +266,11 @@ export function LogisticsPartnersLoadingShell() {
           { value: 'locations', label: 'Locations' },
           { value: 'providers', label: 'Companies' },
         ]}
+      />
+      {/* Search input placeholder — mirrors the live partners search */}
+      <span
+        className="block h-9 w-full max-w-md animate-pulse rounded-md border border-app-border bg-app-hover"
+        aria-hidden
       />
       {/* Skeleton table matching the locations CompactTable columns */}
       <div className="overflow-hidden rounded-lg border border-app-border">
@@ -640,21 +644,22 @@ function TransfersWorkspaceLoadingShell({
         ]}
       />
 
-      <div className="card space-y-3 p-3 sm:p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Tabs
-            value=""
-            onChange={() => {}}
-            tabs={[
-              { value: '', label: 'All' },
-              { value: 'PENDING', label: 'Pending' },
-              { value: 'IN_TRANSIT', label: 'In transit' },
-              { value: 'RECEIVED', label: 'Received' },
-              { value: 'DISPUTED', label: 'Disputed' },
-              { value: 'CANCELLED', label: 'Cancelled' },
-            ]}
-          />
-        </div>
+      {/* Status tabs — always visible, mirrors the real page. */}
+      <Tabs
+        value=""
+        onChange={() => {}}
+        tabs={[
+          { value: '', label: 'All' },
+          { value: 'PENDING', label: 'Pending' },
+          { value: 'IN_TRANSIT', label: 'In transit' },
+          { value: 'RECEIVED', label: 'Received' },
+          { value: 'DISPUTED', label: 'Disputed' },
+          { value: 'CANCELLED', label: 'Cancelled' },
+        ]}
+      />
+
+      {/* Desktop-only — on mobile the real page moves filters into the kebab. */}
+      <div className="card space-y-3 p-3 sm:p-4 hidden md:block">
         {variant === 'stock' ? (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <TransfersStockFilterControlShell label="From location" widthClassName="w-24" />
@@ -673,18 +678,17 @@ function TransfersWorkspaceLoadingShell({
         )}
       </div>
 
-      <div className="card p-4 sm:p-6">
-        <CompactTable<{ id: string }>
-          caption={pageTitle}
-          columns={transfersWorkspaceTableShellColumns()}
-          rows={rows}
-          rowKey={(r) => r.id}
-          emptyTitle="Loading…"
-          emptyDescription=""
-          withCard={false}
-          className="overflow-hidden rounded-xl border border-app-border"
-        />
-      </div>
+      {/* Bare table — mirrors the real page (no outer card wrapper). */}
+      <CompactTable<{ id: string }>
+        caption={pageTitle}
+        columns={transfersWorkspaceTableShellColumns()}
+        rows={rows}
+        rowKey={(r) => r.id}
+        emptyTitle="Loading…"
+        emptyDescription=""
+        withCard={false}
+        className="overflow-hidden rounded-xl border border-app-border"
+      />
     </div>
   );
 }

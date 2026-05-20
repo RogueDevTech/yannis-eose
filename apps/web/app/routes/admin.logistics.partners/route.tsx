@@ -18,8 +18,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const cookie = getSessionCookie(request);
 
   const pageData = (async (): Promise<LogisticsStreamData> => {
-    const providersInput = JSON.stringify({ page: 1, limit: 20, kind: 'THIRD_PARTY' });
-    const locationsInput = JSON.stringify({ page: 1, limit: 20, providerKind: 'THIRD_PARTY' });
+    // limit 100 (schema max) so the page loads every partner — the Logistics
+    // Partners page has no pagination UI and searches client-side.
+    const providersInput = JSON.stringify({ page: 1, limit: 100, kind: 'THIRD_PARTY' });
+    const locationsInput = JSON.stringify({ page: 1, limit: 100, providerKind: 'THIRD_PARTY' });
     const providersPromise = apiRequest<unknown>(
       `/trpc/logistics.listProviders?input=${encodeURIComponent(providersInput)}`,
       { method: 'GET', cookie },

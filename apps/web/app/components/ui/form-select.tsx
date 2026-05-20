@@ -41,6 +41,13 @@ interface FormSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElem
   /** Visual height — distinct from native HTML `select size` (row count) */
   controlSize?: FormSelectSize;
   wrapperClassName?: string;
+  /**
+   * How the option list is presented when open.
+   * - `popover` (default): anchored dropdown below the trigger.
+   * - `modal`: centered overlay modal — better on mobile and when the select
+   *   sits inside another sheet/modal where an anchored popover gets cramped.
+   */
+  openAs?: 'popover' | 'modal';
 }
 
 const sizeClasses: Record<FormSelectSize, string> = {
@@ -137,6 +144,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
       placeholder,
       controlSize = 'md',
       wrapperClassName = '',
+      openAs = 'popover',
       className = '',
       required,
       id,
@@ -244,7 +252,9 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
     }, [open]);
 
     useEffect(() => {
-      if (!open) return;
+      // Modal mode is not anchored to the trigger, so background scroll/resize
+      // must not close it.
+      if (!open || openAs === 'modal') return;
 
       const onScroll = (e: Event) => {
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -271,7 +281,7 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
         window.removeEventListener('scroll', onScroll, true);
         window.removeEventListener('resize', onResize, true);
       };
-    }, [open]);
+    }, [open, openAs]);
 
     useLayoutEffect(() => {
       if (!open || activeIndex < 0) return;
@@ -423,65 +433,96 @@ export const FormSelect = forwardRef<HTMLSelectElement, FormSelectProps>(
           {open &&
             typeof document !== 'undefined' &&
             createPortal(
-              <div
-                ref={popoverRef}
-                className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated p-2 shadow-lg"
-                style={{
-                  top: pos.top,
-                  left: pos.left,
-                  minWidth: pos.minWidth,
-                  maxWidth: pos.maxWidth,
-                  width: 'auto',
-                }}
-              >
-                <div
-                  id={inputId ? `${inputId}-listbox` : undefined}
-                  role="listbox"
-                  className="min-w-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] touch-pan-y"
-                >
-                  {flatOptions.length === 0 ? (
-                    <p className="px-2 py-1.5 text-xs text-app-fg-muted">No options</p>
-                  ) : (
-                    (() => {
-                      let optionIndex = -1;
-                      return normalizedGroups.map((group, groupIndex) => (
-                        <div key={`${group.label || 'ungrouped'}-${groupIndex}`} className="min-w-0">
-                          {group.label ? (
-                            <p className="px-2 pb-1 pt-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted">
-                              {group.label}
-                            </p>
-                          ) : null}
-                          {group.options.map((option, optionIndexInGroup) => {
-                            optionIndex += 1;
-                            const currentOptionIndex = optionIndex;
-                            const flatOption = flatOptions[currentOptionIndex];
-                            return (
-                              <button
-                                key={flatOption?.key ?? `${groupIndex}-${option.value}-${optionIndexInGroup}`}
-                                id={`${inputId || 'form-select'}-opt-${currentOptionIndex}`}
-                                type="button"
-                                role="option"
-                                aria-selected={flatOption?.value === currentValue}
-                                aria-disabled={option.disabled}
-                                disabled={option.disabled}
-                                className={[
-                                  'w-full rounded-md px-2 py-1.5 text-left transition-colors',
-                                  currentOptionIndex === activeIndex ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-app-hover',
-                                  option.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-                                ].join(' ')}
-                                onMouseEnter={() => !option.disabled && setActiveIndex(currentOptionIndex)}
-                                onClick={() => selectAt(currentOptionIndex)}
-                              >
-                                <span className="block truncate text-sm text-app-fg">{option.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ));
-                    })()
-                  )}
-                </div>
-              </div>,
+              (() => {
+                const listbox = (
+                  <div
+                    id={inputId ? `${inputId}-listbox` : undefined}
+                    role="listbox"
+                    className="min-w-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] touch-pan-y"
+                  >
+                    {flatOptions.length === 0 ? (
+                      <p className="px-2 py-1.5 text-xs text-app-fg-muted">No options</p>
+                    ) : (
+                      (() => {
+                        let optionIndex = -1;
+                        return normalizedGroups.map((group, groupIndex) => (
+                          <div key={`${group.label || 'ungrouped'}-${groupIndex}`} className="min-w-0">
+                            {group.label ? (
+                              <p className="px-2 pb-1 pt-1 text-micro font-semibold uppercase tracking-wide text-app-fg-muted">
+                                {group.label}
+                              </p>
+                            ) : null}
+                            {group.options.map((option, optionIndexInGroup) => {
+                              optionIndex += 1;
+                              const currentOptionIndex = optionIndex;
+                              const flatOption = flatOptions[currentOptionIndex];
+                              return (
+                                <button
+                                  key={flatOption?.key ?? `${groupIndex}-${option.value}-${optionIndexInGroup}`}
+                                  id={`${inputId || 'form-select'}-opt-${currentOptionIndex}`}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={flatOption?.value === currentValue}
+                                  aria-disabled={option.disabled}
+                                  disabled={option.disabled}
+                                  className={[
+                                    openAs === 'modal'
+                                      ? 'w-full rounded-md px-3 py-2.5 text-left transition-colors'
+                                      : 'w-full rounded-md px-2 py-1.5 text-left transition-colors',
+                                    currentOptionIndex === activeIndex ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-app-hover',
+                                    option.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                                  ].join(' ')}
+                                  onMouseEnter={() => !option.disabled && setActiveIndex(currentOptionIndex)}
+                                  onClick={() => selectAt(currentOptionIndex)}
+                                >
+                                  <span className="block truncate text-sm text-app-fg">{option.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ));
+                      })()
+                    )}
+                  </div>
+                );
+
+                if (openAs === 'modal') {
+                  return (
+                    <div
+                      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4"
+                      onMouseDown={(e) => {
+                        if (e.target === e.currentTarget) setOpen(false);
+                      }}
+                    >
+                      <div
+                        ref={popoverRef}
+                        className="flex max-h-[70dvh] w-full max-w-sm flex-col rounded-xl border border-app-border bg-app-elevated p-2 shadow-xl"
+                      >
+                        {label ? (
+                          <p className="px-2 pb-1.5 pt-1 text-sm font-semibold text-app-fg">{label}</p>
+                        ) : null}
+                        {listbox}
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    ref={popoverRef}
+                    className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated p-2 shadow-lg"
+                    style={{
+                      top: pos.top,
+                      left: pos.left,
+                      minWidth: pos.minWidth,
+                      maxWidth: pos.maxWidth,
+                      width: 'auto',
+                    }}
+                  >
+                    {listbox}
+                  </div>
+                );
+              })(),
               document.body
             )}
         </div>
