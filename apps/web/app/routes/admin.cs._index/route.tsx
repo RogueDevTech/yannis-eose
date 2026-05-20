@@ -1,9 +1,12 @@
 import { redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs } from '@remix-run/node';
 
-/** Single entry for /admin/cs → Live Activities (/admin/cs/queue) */
-export async function loader({ request }: LoaderFunctionArgs) {
-  const url = new URL(request.url);
-  const search = url.searchParams.toString();
-  return redirect(search ? `/admin/cs/queue?${search}` : '/admin/cs/queue');
+/**
+ * Redirect shim — `/admin/cs` (the old CS department index) 301s to
+ * `/admin/sales`. See `admin.cs.$/route.tsx` for the sub-path shim.
+ * Remove once `/admin/cs/*` traffic has dried up.
+ */
+export function loader({ request }: LoaderFunctionArgs) {
+  const search = new URL(request.url).search;
+  return redirect(`/admin/sales${search}`, 301);
 }

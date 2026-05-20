@@ -9,6 +9,7 @@ import { PageNotification } from '~/components/ui/page-notification';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
+import { AmountInput } from '~/components/ui/amount-input';
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
@@ -26,6 +27,7 @@ type OfferItem = {
   id: string;
   label: string;
   quantity: number;
+  price?: string | number | null;
   imageUrl?: string | null;
   productId: string;
   productName: string;
@@ -124,7 +126,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (!name) return json({ error: 'Offer name is required' }, { status: 400 });
   if (!productId) return json({ error: 'Product is required' }, { status: 400 });
 
-  let items: Array<{ label: string; quantity: number; imageUrl?: string | null }> = [];
+  let items: Array<{ label: string; quantity: number; price: number; imageUrl?: string | null }> = [];
   try {
     const raw = JSON.parse(formData.get('itemsJson')?.toString() ?? '[]');
     if (!Array.isArray(raw)) throw new Error('bad');
@@ -136,6 +138,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
           typeof r.quantity === 'number' && Number.isFinite(r.quantity)
             ? r.quantity
             : parseInt(String(r.quantity ?? '1'), 10) || 1,
+        price: Number(String(r.price ?? '0').replace(/,/g, '').trim()) || 0,
         imageUrl: r.imageUrl != null ? String(r.imageUrl) : undefined,
       }))
       .filter((it) => it.label.length > 0);
@@ -154,7 +157,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
         productId,
         label: it.label,
         quantity: it.quantity,
-        price: 0,
+        price: it.price,
         imageUrl: it.imageUrl ?? undefined,
         sortOrder: idx,
       })),
@@ -229,15 +232,16 @@ export default function EditOfferRoute() {
 
   const [name, setName] = useState(group.name);
   const [productId, setProductId] = useState(initialProductId);
-  type DraftLine = { label: string; quantity: number; imageUrl?: string };
+  type DraftLine = { label: string; quantity: number; price: string; imageUrl?: string };
   const [lines, setLines] = useState<DraftLine[]>(
     items.length > 0
       ? items.map((it) => ({
           label: it.label,
           quantity: it.quantity,
+          price: it.price != null && Number(it.price) > 0 ? String(Number(it.price)) : '',
           imageUrl: it.imageUrl ?? undefined,
         }))
-      : [{ label: '', quantity: 1 }],
+      : [{ label: '', quantity: 1, price: '' }],
   );
 
   const selectedProduct = useMemo(
@@ -328,7 +332,7 @@ export default function EditOfferRoute() {
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => setLines((p) => p.concat([{ label: '', quantity: 1 }]))}
+              onClick={() => setLines((p) => p.concat([{ label: '', quantity: 1, price: '' }]))}
             >
               + Add line
             </Button>
@@ -355,16 +359,20 @@ export default function EditOfferRoute() {
                       setLines((p) => p.map((x, i) => (i === idx ? { ...x, quantity: n } : x)))
                     }
                   />
-                  <TextInput
-                    label="Total price (₦)"
-                    value={Number.isFinite(basePrice) ? formatMoney(basePrice * (it.quantity ?? 1)) : ''}
-                    disabled
-                    hint={
-                      Number.isFinite(basePrice)
-                        ? `Unit: ₦${formatMoney(basePrice)} × Qty`
-                        : 'Select a product to inherit unit price'
-                    }
-                  />
+                  <div>
+                    <label className="block text-xs font-medium text-app-fg-muted mb-1">Price (₦)</label>
+                    <AmountInput
+                      prefix="₦"
+                      value={it.price}
+                      onChange={(raw) =>
+                        setLines((p) => p.map((x, i) => (i === idx ? { ...x, price: raw } : x)))
+                      }
+                      placeholder={Number.isFinite(basePrice) ? formatMoney(basePrice * (it.quantity ?? 1)) : '0'}
+                    />
+                    {Number.isFinite(basePrice) ? (
+                      <p className="text-xs text-app-fg-muted mt-1">Default: ₦{formatMoney(basePrice)} × {it.quantity}</p>
+                    ) : null}
+                  </div>
                 </div>
 
                 {!productId ? null : gallery.length > 0 ? (

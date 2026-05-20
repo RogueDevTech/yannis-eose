@@ -359,7 +359,8 @@ export function WarehousesPage({
           </div>
         }
         desktopInlineFilters={<div />}
-        sheetFilterBody={<div className="text-sm text-app-fg-muted">No extra filters.</div>}
+        hideMobileSheet
+        sheetFilterBody={null}
         badgeCount={sortIsDefault ? 0 : 1}
         sheetTitle="Filters"
         sheetSubtitle="Search warehouses by name."

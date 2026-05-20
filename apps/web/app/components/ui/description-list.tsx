@@ -31,6 +31,8 @@ interface DescriptionListProps {
   layout?: DescriptionListLayout;
   /** Applies only when layout="grid". Default is 2 columns. */
   gridColumns?: 2 | 3;
+  /** Applies only when layout="grid" — columns on mobile (< sm). Default is 1. */
+  mobileColumns?: 1 | 2;
   /** Applies only when layout="grid" — tighter gaps and smaller value text */
   dense?: boolean;
   /** Separator line between items */
@@ -46,6 +48,7 @@ export function DescriptionList({
   items,
   layout = 'stacked',
   gridColumns = 2,
+  mobileColumns = 1,
   dense = false,
   divided = false,
   className = '',
@@ -55,15 +58,25 @@ export function DescriptionList({
   if (layout === 'grid') {
     const gridColsClass =
       gridColumns === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2';
-    const fullWidthClass = gridColumns === 3 ? 'sm:col-span-3' : 'sm:col-span-2';
+    const mobileGridClass = mobileColumns === 2 ? 'grid-cols-2' : 'grid-cols-1';
+    const desktopFullWidth = gridColumns === 3 ? 'sm:col-span-3' : 'sm:col-span-2';
+    const fullWidthClass = [
+      mobileColumns === 2 ? 'col-span-2' : '',
+      desktopFullWidth,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    // Per-item mobile dividers only make sense in a single-column grid.
+    const useMobileDivider = divided && mobileColumns !== 2;
 
     return (
       <dl
         className={[
-          'grid grid-cols-1',
+          'grid',
+          mobileGridClass,
           dense ? 'gap-x-3 gap-y-2 sm:gap-x-4 sm:gap-y-2.5' : 'gap-x-6 gap-y-4',
           gridColsClass,
-          divided ? 'divide-y divide-app-border sm:divide-y-0' : '',
+          useMobileDivider ? 'divide-y divide-app-border sm:divide-y-0' : '',
           className,
         ]
           .filter(Boolean)
@@ -75,7 +88,7 @@ export function DescriptionList({
             className={[
               dense ? 'flex flex-col gap-px' : 'flex flex-col gap-0.5',
               item.fullWidth ? fullWidthClass : '',
-              divided ? 'pt-4 first:pt-0' : '',
+              useMobileDivider ? 'pt-4 first:pt-0' : '',
             ]
               .filter(Boolean)
               .join(' ')}

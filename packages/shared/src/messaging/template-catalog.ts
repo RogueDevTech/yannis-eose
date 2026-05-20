@@ -10,7 +10,7 @@
  *
  * Scope: every default is org-wide (`branch_id = NULL`). The `templates.list`
  * tRPC procedure surfaces NULL-branch rows alongside the caller's branch
- * templates so all CS reps see them. Branch-specific overrides remain visible
+ * templates so all Sales reps see them. Branch-specific overrides remain visible
  * only inside that branch.
  *
  * Placeholders MUST be in `ALLOWED_TEMPLATE_PLACEHOLDERS` (see

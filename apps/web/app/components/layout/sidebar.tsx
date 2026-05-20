@@ -86,7 +86,7 @@ export function Sidebar({ groups, collapsed, mobileOpen, onToggle, onMobileClose
   })();
 
   // When a role has ≤2 named groups (e.g. HR Manager → "HR"; Media Buyer → "MARKETING";
-  // CS Closer → "SALES & CS"), auto-open the groups so the handful of nav items are
+  // Sales Closer → "SALES & CS"), auto-open the groups so the handful of nav items are
   // immediately visible. Users with many groups (SuperAdmin/Admin) keep the collapsed
   // default to avoid a wall of nav. An explicit user toggle still wins — persisted.
   const namedGroupCount = groups.filter((g) => g.group !== null && g.items.length > 0).length;

@@ -51,7 +51,7 @@ function viewerCanSeePermissionRequests(user: {
   if (APPROVER_CODES.some((code) => perms.includes(canonicalPermissionCode(code)))) {
     return true;
   }
-  // Submitters (CS Closer / Media Buyer / HoMarketing / etc.) need to track their own
+  // Submitters (Sales Closer / Media Buyer / HoMarketing / etc.) need to track their own
   // requests; they pass the gate but only see their own rows.
   if (
     user.role === 'CS_CLOSER' ||

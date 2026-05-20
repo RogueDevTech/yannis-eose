@@ -37,6 +37,13 @@ interface ProductsListPageProps {
   /** Per-page picker — caller threads the URL-resolved size + options through to <Pagination>. */
   pageSize?: number;
   pageSizeOptions?: number[];
+  /**
+   * Controlled status filter. When the route owns this state it can also render
+   * the Status select inside the page-header kebab (mobile actions group).
+   * When omitted, the component keeps its own local state.
+   */
+  statusFilter?: string;
+  onStatusFilterChange?: (value: string) => void;
 }
 
 function getDisplayCategory(product: Product): string {
@@ -76,7 +83,7 @@ function ProductThumb({ product }: { product: Product }) {
   const thumbUrl = firstProductThumbUrl(product);
   if (thumbUrl) {
     return (
-      <div className="w-9 h-9 shrink-0 rounded-md border border-app-border overflow-hidden bg-app-hover shadow-sm" aria-hidden>
+      <div className="hidden md:block w-9 h-9 shrink-0 rounded-md border border-app-border overflow-hidden bg-app-hover shadow-sm" aria-hidden>
         <img src={thumbUrl} alt="" className="w-full h-full object-cover" />
       </div>
     );
@@ -85,7 +92,7 @@ function ProductThumb({ product }: { product: Product }) {
   const gradient = thumbGradient(product.id);
   return (
     <div
-      className={`w-9 h-9 shrink-0 rounded-md bg-gradient-to-br ${gradient} text-white flex items-center justify-center font-semibold text-sm shadow-sm`}
+      className={`hidden md:flex w-9 h-9 shrink-0 rounded-md bg-gradient-to-br ${gradient} text-white items-center justify-center font-semibold text-sm shadow-sm`}
       aria-hidden
     >
       {initial}
@@ -104,9 +111,15 @@ export function ProductsListPage({
   canInstantArchiveProduct = false,
   pageSize,
   pageSizeOptions,
+  statusFilter: statusFilterProp,
+  onStatusFilterChange,
 }: ProductsListPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ACTIVE');
+  // Status filter is controlled by the route when `statusFilter` prop is passed
+  // (so it can also live in the page-header kebab); otherwise local state.
+  const [localStatusFilter, setLocalStatusFilter] = useState('ACTIVE');
+  const statusFilter = statusFilterProp ?? localStatusFilter;
+  const setStatusFilter = onStatusFilterChange ?? setLocalStatusFilter;
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
   const [archiveReason, setArchiveReason] = useState('');
@@ -216,6 +229,7 @@ export function ProductsListPage({
         key: 'baseSalePrice',
         header: 'Base Price',
         align: 'right',
+        mobileAlign: 'left',
         render: (product) => (
           <span className="font-medium tabular-nums">
             <NairaPrice amount={Number(product.baseSalePrice)} />
@@ -228,6 +242,7 @@ export function ProductsListPage({
         key: 'costPrice',
         header: 'Cost',
         align: 'right',
+        mobileAlign: 'left',
         render: (product) => {
           const cost =
             product.costPrice !== null && product.costPrice !== undefined ? Number(product.costPrice) : null;
@@ -244,6 +259,7 @@ export function ProductsListPage({
         key: 'stock',
         header: 'Stock',
         align: 'right',
+        mobileAlign: 'left',
         render: (product) => {
           const stock = product.totalStock ?? 0;
           return (
@@ -263,8 +279,8 @@ export function ProductsListPage({
       {
         key: 'actions',
         header: '',
-        mobileLabel: 'Actions',
         align: 'right',
+        mobileShowLabel: false,
         tight: true,
         render: (product) => (
           <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
@@ -306,7 +322,8 @@ export function ProductsListPage({
     <div className="space-y-4">
       <div className="list-panel">
         <ToolbarFiltersCollapsible
-          className="!border-0"
+          className="!border-0 !px-0 md:!px-4"
+          hideMobileSheet
           badgeCount={productsToolbarFilterBadge}
           sheetSubtitle={<span>Status applies immediately</span>}
           searchRow={

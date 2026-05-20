@@ -48,7 +48,7 @@ export function AbandonedCartDetailModal({
     const fd = new FormData();
     fd.set('intent', 'recoverFromCart');
     fd.set('cartId', cart.id);
-    recoverFetcher.submit(fd, { method: 'post', action: '/admin/cs/queue/carts' });
+    recoverFetcher.submit(fd, { method: 'post', action: '/admin/sales/queue/carts' });
   }
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export function AbandonedCartDetailModal({
     const fd = new FormData();
     fd.set('intent', 'revealAbandonedPhone');
     fd.set('cartId', cart.id);
-    revealFetcher.submit(fd, { method: 'post', action: '/admin/cs/queue/carts' });
+    revealFetcher.submit(fd, { method: 'post', action: '/admin/sales/queue/carts' });
   }, [cart?.id, cart?.customerPhone, canReveal]);
 
   useEffect(() => {

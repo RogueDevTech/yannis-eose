@@ -7,7 +7,7 @@ import { Button } from './button';
  * Left side: tab title + small description (always rendered).
  * Right side: optional left/right scroll arrows + optional View all link.
  *
- * Used across the CS queue tabs (`/admin/cs/queue`) so every strip — Unassigned,
+ * Used across the Sales queue tabs (`/admin/sales/queue`) so every strip — Unassigned,
  * Duplicates, Cart Abandonment, Callbacks, Hot Swap — gets the same chrome.
  *
  * The arrows are the consumer's responsibility — wire `onScrollLeft` and

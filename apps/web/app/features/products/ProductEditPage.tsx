@@ -181,7 +181,7 @@ export function ProductEditPage({
               ]}
             />
 
-            <FormField label="List price (&#8358;)" htmlFor="baseSalePrice" hint='Public “from” price for sorts and dashboards. Marketing offer tiers may sync the minimum when tiers change on a form.'>
+            <FormField label="Base price (&#8358;)" htmlFor="baseSalePrice" hint='Public “from” price for sorts and dashboards. Marketing offer tiers may sync the minimum when tiers change on a form.'>
               <AmountInput
                 id="baseSalePrice"
                 name="baseSalePrice"

@@ -145,7 +145,7 @@ export function ProductCreatePage({ actionData, categoriesPromise = [] }: Produc
             placeholder="Optional product description"
           />
 
-          <FormField label="List price (&#8358;)" htmlFor="baseSalePrice" hint="Public “from” price for sorts and dashboards. Edge packages are offer tiers on Marketing → Forms.">
+          <FormField label="Base price (&#8358;)" htmlFor="baseSalePrice" hint="Public “from” price for sorts and dashboards. Edge packages are offer tiers on Marketing → Forms.">
             <AmountInput
               id="baseSalePrice"
               name="baseSalePrice"

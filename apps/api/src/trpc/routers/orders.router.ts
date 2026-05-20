@@ -136,7 +136,7 @@ function assertCsRoutingBranchAccess(actor: SessionUser, ownerBranchId: string):
     if (!actor.currentBranchId || actor.currentBranchId !== ownerBranchId) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Branch admins may only access CS routing for their active branch.',
+        message: 'Branch admins may only access Sales routing for their active branch.',
       });
     }
     return;
@@ -193,7 +193,7 @@ function canAccessDeliveryMovementCustomerNames(user: SessionUser): boolean {
 /**
  * Phase B supervisor scoping: when the viewer is a non-org-wide branch supervisor
  * on the active branch, restrict the list to:
- *   - orders **assigned to** their CS team members (assignedCsIds), AND
+ *   - orders **assigned to** their Sales team members (assignedCsIds), AND
  *   - orders **created by** their MB team members (mediaBuyerIds).
  * Org-wide scope, admin-class, and the role-restricted CS_CLOSER / MEDIA_BUYER
  * paths short-circuit before this helper. Their own id is always in the set so
@@ -524,7 +524,7 @@ export const ordersRouter = router({
             effectiveInput = { ...effectiveInput, assignedCsId: ctx.user.id };
           }
           // Supervisor scoping (Phase B): non-org-wide branch supervisors only see
-          // orders assigned to their CS team agents OR created by their MB team
+          // orders assigned to their Sales team agents OR created by their MB team
           // members. Their own work is always included.
           effectiveInput = await applySupervisorScope(ctx, effectiveInput, branchId);
         }
@@ -674,8 +674,8 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Assign an order to a CS closer.
-   * `orders.reassign` (HoCS / Admin) or branch CS team supervisor for in-team agents (UNPROCESSED / CS_ASSIGNED only).
+   * Assign an order to a Sales closer.
+   * `orders.reassign` (HoCS / Admin) or branch Sales team supervisor for in-team agents (UNPROCESSED / CS_ASSIGNED only).
    */
   assignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
@@ -721,7 +721,7 @@ export const ordersRouter = router({
   }),
 
   /**
-   * Redistribute one agent's CS_ASSIGNED and CS_ENGAGED orders to other agents (from CS Team page).
+   * Redistribute one agent's CS_ASSIGNED and CS_ENGAGED orders to other agents (from Sales Team page).
    * Restricted to Head of CS and SuperAdmin.
    */
   redistributeOrdersFromAgent: permissionProcedure('orders.reassign')
@@ -734,7 +734,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Distribute all UNPROCESSED (unassigned) orders to CS closers using the dispatch algorithm.
+   * Distribute all UNPROCESSED (unassigned) orders to Sales closers using the dispatch algorithm.
    * Manual fallback when auto-assignment on order creation did not run. Restricted to Head of CS and SuperAdmin.
    */
   distributeUnassignedOrders: permissionProcedure('orders.reassign')
@@ -747,7 +747,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * List CS closers for assign dropdowns — full roster with `orders.reassign`, else supervised team agents only.
+   * List Sales closers for assign dropdowns — full roster with `orders.reassign`, else supervised team agents only.
    */
   listCSClosers: authedProcedure.query(async ({ ctx }) => {
     return getOrdersService().listCSClosers(ctx.user);
@@ -756,7 +756,7 @@ export const ordersRouter = router({
   /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
-   * Optional assignedCsId filters to that CS closer's orders (for CS Orders page).
+   * Optional assignedCsId filters to that Sales closer's orders (for Sales Orders page).
    * Optional startDate/endDate filter by orders.createdAt.
    */
   statusCounts: authedProcedure
@@ -921,7 +921,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Get CS closer workloads — for dispatch dashboard.
+   * Get Sales closer workloads — for dispatch dashboard.
    * Restricted to Head of CS and SuperAdmin.
    */
   csWorkloads: permissionProcedure('orders.csWorkloads').query(async ({ ctx }) => {
@@ -929,7 +929,7 @@ export const ordersRouter = router({
   }),
 
   /**
-   * Pending orders + line items for one closer (CS queue workload modal).
+   * Pending orders + line items for one closer (Sales queue workload modal).
    */
   closerWorkloadOrders: permissionProcedure('orders.csWorkloads')
     .input(z.object({ agentId: z.string().uuid() }))
@@ -938,8 +938,8 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Get workload for the current CS closer — for \"My Orders\" page.
-   * Non–CS closers receive null.
+   * Get workload for the current Sales closer — for \"My Orders\" page.
+   * Non–Sales closers receive null.
    */
   myCSWorkload: authedProcedure.query(async ({ ctx }) => {
     return getOrdersService().getMyCSWorkload(ctx.user);
@@ -960,7 +960,7 @@ export const ordersRouter = router({
   }),
 
   /**
-   * Get inactive CS closers (no action for > threshold minutes).
+   * Get inactive Sales closers (no action for > threshold minutes).
    * Used by Head of CS to monitor agent activity.
    */
   inactiveAgents: permissionProcedure('orders.inactiveAgents')
@@ -970,7 +970,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Get CS closer leaderboard — performance metrics for ranking.
+   * Get Sales closer leaderboard — performance metrics for ranking.
    * Restricted to Head of CS, SuperAdmin, and CS_CLOSER (gamification).
    * period: 'this_month' (default) or 'all_time'
    */
@@ -992,7 +992,7 @@ export const ordersRouter = router({
     ),
 
   /**
-   * Single-request bundle for the `/admin/cs/orders` secondary fan-out.
+   * Single-request bundle for the `/admin/sales/orders` secondary fan-out.
    *
    * Replaces up to 7 parallel loader calls — `orders.statusCounts`,
    * `orders.myCSWorkload` (CS_CLOSER only), `orders.timeSeriesByCreated`,
@@ -1135,7 +1135,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Single-request bundle for the `/admin/cs/team` page.
+   * Single-request bundle for the `/admin/sales/team` page.
    *
    * Replaces 4 parallel loader calls — `users.listCSTeam`,
    * `orders.csWorkloads`, `orders.csLeaderboard`, `orders.inactiveAgents` — with
@@ -1536,7 +1536,7 @@ export const ordersRouter = router({
     }),
 
   /**
-   * Bulk assign multiple orders to a CS closer (same gates as assignToCS).
+   * Bulk assign multiple orders to a Sales closer (same gates as assignToCS).
    */
   bulkAssignToCS: authedProcedure
     .meta({ branchScopedMutation: true })
@@ -1586,7 +1586,7 @@ export const ordersRouter = router({
 
   /**
    * Get the timeline of events for a specific order.
-   * Role-filtered: CS closers only see CS-relevant events; Logistics only see logistics events; etc.
+   * Role-filtered: Sales closers only see CS-relevant events; Logistics only see logistics events; etc.
    * Requires orders.read or marketing.orders permission.
    */
   getTimeline: authedProcedure
@@ -1619,7 +1619,7 @@ export const ordersRouter = router({
   // ── Claim Mode ────────────────────────────────────────
 
   /**
-   * Get the claim queue — UNPROCESSED orders available for CS closers to claim.
+   * Get the claim queue — UNPROCESSED orders available for Sales closers to claim.
    * Only relevant when CS_DISPATCH_STRATEGY = 'claim'.
    */
   claimQueue: permissionProcedure('orders.read')

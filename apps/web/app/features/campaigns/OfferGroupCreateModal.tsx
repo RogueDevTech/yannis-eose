@@ -6,12 +6,31 @@ import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { InlineNotification } from '~/components/ui/inline-notification';
+import { AmountInput } from '~/components/ui/amount-input';
 import { useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import type { Product } from './types';
 
-type DraftLine = { label: string; quantity: number; imageUrl?: string };
+type DraftLine = {
+  label: string;
+  quantity: number;
+  price: string;
+  imageUrl?: string;
+  /** True once the user hand-edits the price — suppresses the qty × base auto-prefill. */
+  priceTouched?: boolean;
+};
+
+/**
+ * Auto-price for a line as a raw (comma-free) string: `quantity × normal price`
+ * so a qty-3 line defaults to 3× the product's base price. '' when unavailable.
+ */
+function productLinePriceRaw(product: Product | null | undefined, quantity: number): string {
+  const base = Number(product?.baseSalePrice);
+  if (!product || !Number.isFinite(base) || base <= 0) return '';
+  const qty = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+  return String(base * qty);
+}
 
 export function OfferGroupCreateModal({
   open,
@@ -37,14 +56,14 @@ export function OfferGroupCreateModal({
 
   const [name, setName] = useState('');
   const [productId, setProductId] = useState('');
-  const [lines, setLines] = useState<DraftLine[]>([{ label: '', quantity: 1 }]);
+  const [lines, setLines] = useState<DraftLine[]>([{ label: '', quantity: 1, price: '' }]);
 
   useEffect(() => {
     if (!open) {
       setInlineError(null);
       setName('');
       setProductId('');
-      setLines([{ label: '', quantity: 1 }]);
+      setLines([{ label: '', quantity: 1, price: '' }]);
     }
   }, [open]);
 
@@ -69,8 +88,7 @@ export function OfferGroupCreateModal({
         lines.map((l) => ({
           label: l.label,
           quantity: l.quantity,
-          // Server inherits the product unit price (kept for legacy action parser shape).
-          price: 0,
+          price: Number(l.price.replace(/,/g, '').trim()) || 0,
           imageUrl: l.imageUrl,
         })),
       ),
@@ -151,7 +169,18 @@ export function OfferGroupCreateModal({
             value={productId}
             onChange={(v) => {
               setProductId(v);
-              setLines((prev) => prev.map((l) => ({ ...l, imageUrl: undefined })));
+              const prod = products.find((p) => p.id === v) ?? null;
+              setLines((prev) =>
+                prev.map((l) => {
+                  // Seed each line with qty × normal price unless hand-priced.
+                  const auto = productLinePriceRaw(prod, l.quantity);
+                  return {
+                    ...l,
+                    imageUrl: undefined,
+                    price: !l.priceTouched && auto ? auto : l.price,
+                  };
+                }),
+              );
             }}
             options={productOptions}
             placeholder="Select product…"
@@ -168,7 +197,11 @@ export function OfferGroupCreateModal({
               type="button"
               variant="secondary"
               size="sm"
-              onClick={() => setLines((p) => p.concat([{ label: '', quantity: 1 }]))}
+              onClick={() =>
+                setLines((p) =>
+                  p.concat([{ label: '', quantity: 1, price: productLinePriceRaw(selectedProduct, 1) }]),
+                )
+              }
             >
               + Add line
             </Button>
@@ -177,7 +210,7 @@ export function OfferGroupCreateModal({
           <div className="space-y-3">
             {lines.map((it, idx) => (
               <div key={idx} className="rounded-xl border border-app-border bg-app-surface p-4 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <TextInput
                     label="Label"
                     value={it.label}
@@ -192,9 +225,31 @@ export function OfferGroupCreateModal({
                     fallbackValue={1}
                     value={it.quantity}
                     onValueChange={(n) =>
-                      setLines((p) => p.map((x, i) => (i === idx ? { ...x, quantity: n } : x)))
+                      setLines((p) =>
+                        p.map((x, i) => {
+                          if (i !== idx) return x;
+                          // Qty change re-seeds price to n × normal price
+                          // unless the user has hand-priced this line.
+                          const auto = productLinePriceRaw(selectedProduct, n);
+                          const price = !x.priceTouched && auto ? auto : x.price;
+                          return { ...x, quantity: n, price };
+                        }),
+                      )
                     }
                   />
+                  <div>
+                    <label className="block text-xs font-medium text-app-fg-muted mb-1">Price (₦)</label>
+                    <AmountInput
+                      prefix="₦"
+                      value={it.price}
+                      onChange={(raw) =>
+                        setLines((p) =>
+                          p.map((x, i) => (i === idx ? { ...x, price: raw, priceTouched: true } : x)),
+                        )
+                      }
+                      placeholder={selectedProduct ? `${Number(selectedProduct.baseSalePrice).toLocaleString()}` : '0'}
+                    />
+                  </div>
                 </div>
 
                 {!productId ? null : gallery.length > 0 ? (

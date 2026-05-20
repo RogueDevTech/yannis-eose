@@ -46,7 +46,7 @@ async function fetchCsTeamsForBranch(cookie: string, branchId: string): Promise<
     .filter((t) => t.department === 'CS')
     .map((t) => ({
       id: t.id,
-      label: t.name?.trim() || 'CS team',
+      label: t.name?.trim() || 'Sales team',
     }));
 }
 
@@ -240,7 +240,7 @@ export async function handleCsOrderRoutingFormJson(request: Request, formData: F
     return json({ success: true as const });
   }
 
-  // ── Bulk product → CS routing (global) ───────────────────────────
+  // ── Bulk product → Sales routing (global) ───────────────────────────
   if (payload.intent === 'bulkUpsertProductRoutingRules') {
     const servicingBranchId = payload.servicingBranchId?.trim();
     if (!servicingBranchId) {

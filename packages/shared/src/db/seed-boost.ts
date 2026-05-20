@@ -198,7 +198,7 @@ async function boostSeed() {
     const mediaBuyerId = campaign.media_buyer_id as string;
     const campaignId = campaign.id as string;
 
-    // Pick CS closer
+    // Pick Sales closer
     const csCloser = faker.helpers.arrayElement(csClosers);
     const csCloserId = csCloser.id as string;
 

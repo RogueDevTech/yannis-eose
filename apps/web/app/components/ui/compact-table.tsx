@@ -58,6 +58,8 @@ export interface CompactTableColumn<T> {
   mobileShowLabel?: boolean;
   /** Column alignment. Default 'left'. Action columns usually use 'right'. */
   align?: CompactTableAlign;
+  /** Mobile-card value alignment override. Defaults to `align` (with `amount` keys forced left). */
+  mobileAlign?: CompactTableAlign;
   /** Tight column for icons / actions — applies w-px + whitespace-nowrap */
   tight?: boolean;
   /** Force whitespace-nowrap on cells in this column */
@@ -449,7 +451,7 @@ export function CompactTable<T>({
                   const title = col.cellTitle?.(row);
                   const valueUsesTabularNums = (col.align ?? 'left') === 'right' && !col.tight;
                   const align = col.align ?? 'left';
-                  const mobileAlign = col.key === 'amount' ? 'left' : align;
+                  const mobileAlign = col.mobileAlign ?? (col.key === 'amount' ? 'left' : align);
                   const valueShellClass = [
                     'min-w-0 w-full overflow-hidden whitespace-nowrap text-ellipsis',
                     mobileAlign === 'right'

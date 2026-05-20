@@ -846,7 +846,7 @@ export function SettingsPage({
 
       {activeTab === 'push' && <SettingsPushPanel userId={user?.id ?? null} />}
 
-      {/* System Tab — grouped form: toggle VOIP, CS routing + distribution then submit once */}
+      {/* System Tab — grouped form: toggle VOIP, Sales routing + distribution then submit once */}
       {activeTab === 'system' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {isSuperAdmin ? (
@@ -879,7 +879,7 @@ export function SettingsPage({
                       </div>
                       <div>
                         <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
-                        <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS closers</p>
+                        <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for Sales closers</p>
                       </div>
                     </div>
                   }
@@ -954,9 +954,9 @@ export function SettingsPage({
                         </svg>
                       </div>
                       <div>
-                        <h3 className="text-lg font-semibold text-app-fg">CS routing — which branch?</h3>
+                        <h3 className="text-lg font-semibold text-app-fg">Sales routing — which branch?</h3>
                         <p className="text-sm text-app-fg-muted">
-                          Decides which CS branch handles each new marketing order. Marketing attribution stays on the funnel; only the servicing CS branch changes.
+                          Decides which Sales branch handles each new marketing order. Marketing attribution stays on the funnel; only the servicing Sales branch changes.
                         </p>
                       </div>
                     </div>
@@ -964,14 +964,14 @@ export function SettingsPage({
                 >
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-sm text-app-fg-muted">
-                    Three options: <strong className="text-app-fg">Split across all CS branches</strong> (default — load-balanced org-wide), <strong className="text-app-fg">Same branch as marketing</strong> (Lagos → Lagos, Abuja → Abuja), or <strong className="text-app-fg">By product</strong> (per-SKU mapping). Runs before the dispatch strategy below picks which closer in the chosen branch takes the order.
+                    Three options: <strong className="text-app-fg">Split across all Sales branches</strong> (default — load-balanced org-wide), <strong className="text-app-fg">Same branch as marketing</strong> (Lagos → Lagos, Abuja → Abuja), or <strong className="text-app-fg">By product</strong> (per-SKU mapping). Runs before the dispatch strategy below picks which closer in the chosen branch takes the order.
                   </p>
                   <p className="mt-3">
                     <Link
                       to="/admin/settings/cs-order-routing"
                       className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
                     >
-                      Open CS routing
+                      Open Sales routing
                     </Link>
                   </p>
                 </div>
@@ -1000,8 +1000,8 @@ export function SettingsPage({
                 >
                 <div className="rounded-lg border border-app-border p-4">
                   <p className="text-xs text-app-fg-muted mb-3">
-                    Branch admins and heads can set per-CS-squad dispatch (manual, load-balanced, performance, claim, claim cap) under{' '}
-                    <strong className="text-app-fg">Admin → Branches → branch → CS team</strong>, keyed to the squad that services the order after routing.
+                    Branch admins and heads can set per-Sales-squad dispatch (manual, load-balanced, performance, claim, claim cap) under{' '}
+                    <strong className="text-app-fg">Admin → Branches → branch → Sales team</strong>, keyed to the squad that services the order after routing.
                   </p>
                   <div className="space-y-3">
                     <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-app-border p-4 hover:bg-app-hover/50 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50 dark:has-[:checked]:bg-brand-700/20">
@@ -1212,7 +1212,7 @@ export function SettingsPage({
                       </div>
                       <div>
                         <h3 className="text-lg font-semibold text-app-fg">VOIP Integration</h3>
-                        <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for CS closers</p>
+                        <p className="text-sm text-app-fg-muted">Africa's Talking phone-to-phone bridging for Sales closers</p>
                       </div>
                     </div>
                   }
@@ -1414,7 +1414,7 @@ export function SettingsPage({
         >
           <h3 className="text-lg font-semibold text-app-fg mb-2">Apply system settings?</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            These changes affect everyone in the org — VOIP availability, the CS dispatch strategy,
+            These changes affect everyone in the org — VOIP availability, the Sales dispatch strategy,
             and the default app theme. Are you sure you want to apply them now?
           </p>
           <ModalFetcherInlineError

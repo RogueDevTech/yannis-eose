@@ -50,6 +50,8 @@ export interface ActionDropdownProps {
   triggerLabel?: string;
   /** Button variant when `trigger === 'button'`. Maps to btn-* classes. */
   triggerVariant?: 'primary' | 'secondary';
+  /** Extra classes on the trigger button (e.g. `w-full justify-center` to match a stacked button group). */
+  triggerClassName?: string;
   /** Menu alignment relative to trigger: 'end' = right-align (default for actions), 'start' = left-align */
   align?: 'start' | 'end';
 }
@@ -62,6 +64,7 @@ export function ActionDropdown({
   trigger = 'actions',
   triggerLabel,
   triggerVariant = 'secondary',
+  triggerClassName = '',
   align = 'end',
 }: ActionDropdownProps) {
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -170,7 +173,7 @@ export function ActionDropdown({
         onClick={() => setOpenMenuId(isOpen ? null : id)}
         className={
           trigger === 'button'
-            ? `${triggerVariant === 'primary' ? 'btn-primary' : 'btn-secondary'} btn-sm inline-flex items-center gap-1.5`
+            ? `${triggerVariant === 'primary' ? 'btn-primary' : 'btn-secondary'} btn-sm inline-flex items-center gap-1.5 ${triggerClassName}`.trim()
             : trigger === 'actions'
               ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-app-fg-muted bg-app-hover hover:brightness-95 dark:hover:brightness-110 border border-app-border transition-colors'
               : 'w-8 h-8 flex items-center justify-center rounded-full bg-app-hover text-app-fg-muted hover:bg-app-elevated border border-transparent hover:border-app-border hover:text-app-fg transition-colors'

@@ -15,7 +15,7 @@ import { PG_CLIENT } from './database.tokens';
  *
  * Templates are seeded with `branch_id = NULL` (org-wide). The
  * `messaging.templates.list` tRPC procedure surfaces NULL-branch templates
- * to all CS reps regardless of their session branch.
+ * to all Sales reps regardless of their session branch.
  *
  * `created_by` is required by the schema (FK → users). On a brand-new
  * deploy where no SuperAdmin exists yet, this seeder no-ops gracefully and

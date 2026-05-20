@@ -8,7 +8,7 @@ import {
   loadCsOrderRoutingPageData,
 } from '~/lib/cs-order-routing.server';
 
-export const meta: MetaFunction = () => [{ title: 'CS routing — which branch? — Yannis EOSE' }];
+export const meta: MetaFunction = () => [{ title: 'Sales routing — which branch? — Yannis EOSE' }];
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'orders.routing');

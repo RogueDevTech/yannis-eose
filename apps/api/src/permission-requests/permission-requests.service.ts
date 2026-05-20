@@ -125,7 +125,7 @@ export class PermissionRequestsService {
    * Returns the set of permission_request types the viewer is allowed to see in the
    * approval queue. Drives the server-side row filter — types the viewer can't
    * approve are hidden, but rows the viewer personally submitted always surface
-   * (so a CS Closer can track their own price-change asks).
+   * (so a Sales Closer can track their own price-change asks).
    *
    * Permission-first: a viewer sees a type iff they hold its approve code (or are
    * admin-class). Adding a new request type is a one-line change to
@@ -413,7 +413,7 @@ export class PermissionRequestsService {
         approver,
       );
       // Surface the approval on the order timeline. The underlying `update` call writes
-      // a `QUANTITY_UPDATED` event when items change, but that doesn't tell the CS rep
+      // a `QUANTITY_UPDATED` event when items change, but that doesn't tell the Sales rep
       // (or auditor) that this was specifically an approval of THEIR pending request.
       const approvedTotal = Math.round(Number(totalAmount) * 100) / 100;
       this.ordersService.writeTimelineEvent({

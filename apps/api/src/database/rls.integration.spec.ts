@@ -75,10 +75,10 @@ describe.skipIf(SKIP_IF_NO_DB)('RLS Policies — Integration', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // CS Closer assignment: assigned order is retrievable
+  // Sales Closer assignment: assigned order is retrievable
   // ---------------------------------------------------------------------------
 
-  it('CS closer can see their own assigned order', async () => {
+  it('Sales closer can see their own assigned order', async () => {
     const csCloser = await createTestUser(db as any, { role: 'CS_CLOSER' });
     await setSessionActor(pgClient, csCloser.id);
 
@@ -127,7 +127,7 @@ describe.skipIf(SKIP_IF_NO_DB)('RLS Policies — Integration', () => {
   // Multi-user isolation: two agents' orders don't bleed into each other
   // ---------------------------------------------------------------------------
 
-  it('two CS closers have separate assigned orders', async () => {
+  it('two Sales closers have separate assigned orders', async () => {
     const agentA = await createTestUser(db as any, { role: 'CS_CLOSER' });
     const agentB = await createTestUser(db as any, { role: 'CS_CLOSER' });
 

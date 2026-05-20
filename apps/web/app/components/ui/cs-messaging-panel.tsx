@@ -1,5 +1,5 @@
 /**
- * CSMessagingPanel — Call (optional) + collapsible SMS/WhatsApp for CS closers.
+ * CSMessagingPanel — Call (optional) + collapsible SMS/WhatsApp for Sales closers.
  * SMS/WhatsApp stays collapsed with zero template/outbox/prepare requests until expanded and a channel is chosen.
  * Phone is never revealed to the client — sends go through server actions / device handlers as before.
  */
@@ -581,7 +581,7 @@ export function CSMessagingPanel({
           {templatesFetcher.state === 'idle' && channelTemplates.length === 0 && (
             <p className="text-xs text-app-fg-muted">
               No {textChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'} templates yet.{' '}
-              <a href="/admin/cs/message-templates" className="text-primary-600 hover:underline">
+              <a href="/admin/sales/message-templates" className="text-primary-600 hover:underline">
                 Create one
               </a>
             </p>

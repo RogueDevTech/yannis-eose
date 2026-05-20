@@ -126,7 +126,7 @@ export function SuperAdminDashboardLoadingShell({
 
       {/* Quick Navigation */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {['CS Queue', 'Logistics', 'Marketing', 'Finance'].map((label) => (
+        {['Sales Queue', 'Logistics', 'Marketing', 'Finance'].map((label) => (
           <div key={label} className="card text-center py-4">
             <span className="text-sm font-medium text-app-fg">{label}</span>
           </div>
@@ -201,13 +201,13 @@ export function AdminQuickDashboardLoadingShell({
 
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-app-fg">CS activity today</h2>
+          <h2 className="text-lg font-semibold text-app-fg">Sales activity today</h2>
           <Link
-            to="/admin/cs/queue"
+            to="/admin/sales/queue"
             prefetch="intent"
             className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
           >
-            CS queue →
+            Sales queue →
           </Link>
         </div>
         <OverviewStatStrip
@@ -262,7 +262,7 @@ export function AdminQuickDashboardLoadingShell({
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { to: '/admin/cs/queue', label: 'CS Queue' },
+          { to: '/admin/sales/queue', label: 'Sales Queue' },
           { to: '/admin/logistics/orders', label: 'Logistics' },
           { to: '/admin/marketing', label: 'Marketing' },
           { to: '/admin/finance/overview', label: 'Finance' },

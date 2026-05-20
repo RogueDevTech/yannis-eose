@@ -237,7 +237,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
   let csClosersForAssign: Array<{ id: string; name: string }> | undefined;
   // `orders.listCSClosers` returns the full roster for HoCS/Admin (`orders.reassign`) and supervised
-  // CS closers only for branch CS team supervisors; others get an empty list.
+  // Sales closers only for branch Sales team supervisors; others get an empty list.
   if (agentsRes.ok) {
     const agentsData = agentsRes.data as { result?: { data?: Array<{ agentId: string; agentName: string }> } };
     const list = agentsData?.result?.data ?? [];
@@ -247,7 +247,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   }
 
   // Logistics locations — used by the "Allocate to logistics company" action available to the assigned
-  // CS closer, Logistics, and admins when the order is CONFIRMED.
+  // Sales closer, Logistics, and admins when the order is CONFIRMED.
   let logisticsLocations: Array<{ id: string; name: string; address: string | null; whatsappGroupLink?: string | null; providerName?: string | null }> = [];
   if (locationsRes.ok) {
     const locationsData = locationsRes.data as {
@@ -882,7 +882,7 @@ export default function OrderDetailRoute() {
                 A server or database error can look like a missing order. If you just deployed, run pending
                 migrations on the API database, then redeploy the API.
               </p>
-              <a href="/admin/cs/orders" className="btn-primary mt-6 inline-block">
+              <a href="/admin/sales/orders" className="btn-primary mt-6 inline-block">
                 Back to Orders
               </a>
             </div>
@@ -893,7 +893,7 @@ export default function OrderDetailRoute() {
               <p className="mt-2 text-sm text-app-fg-muted">
                 The order you're looking for doesn't exist or has been removed.
               </p>
-              <a href="/admin/cs/orders" className="btn-primary mt-4 inline-block">
+              <a href="/admin/sales/orders" className="btn-primary mt-4 inline-block">
                 Back to Orders
               </a>
             </div>

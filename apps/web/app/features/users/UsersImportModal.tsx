@@ -49,7 +49,7 @@ const SPREADSHEET_IMPORT_ROLE_REFERENCE = [
   { enum: 'HEAD_OF_MARKETING', acceptedLabels: 'Head of Marketing' },
   { enum: 'MEDIA_BUYER', acceptedLabels: 'Media Buyer' },
   { enum: 'HEAD_OF_CS', acceptedLabels: 'Head of CS' },
-  { enum: 'CS_CLOSER', acceptedLabels: 'CS Closer' },
+  { enum: 'CS_CLOSER', acceptedLabels: 'Sales Closer' },
   { enum: 'FINANCE_OFFICER', acceptedLabels: 'Finance Officer' },
   { enum: 'HEAD_OF_LOGISTICS', acceptedLabels: 'Head of Logistics' },
   { enum: 'STOCK_MANAGER', acceptedLabels: 'Stock Manager' },
@@ -249,7 +249,7 @@ function resolveRow(parsed: ParsedRow, branches: BranchInfo[]): ResolvedRow {
   const resolvedRole = parsed.role ? normalizeRole(parsed.role) : null;
   if (!resolvedRole) {
     errors.push(
-      `Unknown role "${parsed.role}". Use a valid role enum (e.g. CS_CLOSER) or label (e.g. "CS Closer").`,
+      `Unknown role "${parsed.role}". Use a valid role enum (e.g. CS_CLOSER) or label (e.g. "Sales Closer").`,
     );
   }
   const primaryBranchId = resolveBranchId(parsed.primaryBranchInput, branches);
@@ -552,7 +552,7 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
     const sampleA: Record<string, string | number> = {
       Name: 'Jane Doe',
       Email: 'jane.doe@example.com',
-      Role: 'CS Closer',
+      Role: 'Sales Closer',
       Phone: '08031234567',
       'Primary Branch': sampleBranchCode,
       'Additional Branches': sampleSecondBranch ? sampleSecondBranch : '',
@@ -577,7 +577,7 @@ export function UsersImportModal({ open, onClose, onComplete }: UsersImportModal
       Name: 'Required. Min 2 characters.',
       Email: 'Required. Must be unique.',
       Role:
-        'Required. Pick a value from the Reference sheet — enum (CS_CLOSER) or label (CS Closer) both work.',
+        'Required. Pick a value from the Reference sheet — enum (CS_CLOSER) or label (Sales Closer) both work.',
       Phone: 'Required. Nigerian number.',
       'Primary Branch':
         'Required. Use the branch CODE first; NAME also works. See Reference sheet for the full list.',

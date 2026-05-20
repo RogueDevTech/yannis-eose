@@ -3553,7 +3553,7 @@ export class MarketingService {
   // ============================================
 
   /**
-   * Order statuses that count as "confirmed or beyond" — orders the CS team has
+   * Order statuses that count as "confirmed or beyond" — orders the Sales team has
    * scheduled (got past CS_ENGAGED). Used for the confirmation-rate KPI.
    */
   private static readonly CONFIRMED_OR_BEYOND_STATUSES = [
@@ -4389,10 +4389,13 @@ export class MarketingService {
         productId: it.productId,
         label: it.label,
         quantity: it.quantity ?? 1,
-        // Price is the TOTAL line price, relative to quantity (unit price inherited from product).
-        price: Number.isFinite(inheritedUnitPrice)
-          ? sql`${String(inheritedUnitPrice * (it.quantity ?? 1))}::numeric`
-          : sql`0::numeric`,
+        // Use the submitted price when provided (allows discounts); fall back
+        // to unit price × qty when price is 0 or missing.
+        price: it.price > 0
+          ? sql`${String(it.price)}::numeric`
+          : Number.isFinite(inheritedUnitPrice)
+            ? sql`${String(inheritedUnitPrice * (it.quantity ?? 1))}::numeric`
+            : sql`0::numeric`,
         imageUrl: it.imageUrl ?? null,
         sortOrder: it.sortOrder ?? idx,
         status: 'ACTIVE' as const,
@@ -4450,10 +4453,13 @@ export class MarketingService {
           productId: it.productId,
           label: it.label,
           quantity: it.quantity ?? 1,
-          // Price is the TOTAL line price, relative to quantity (unit price inherited from product).
-          price: Number.isFinite(inheritedUnitPrice)
-            ? sql`${String(inheritedUnitPrice * (it.quantity ?? 1))}::numeric`
-            : sql`0::numeric`,
+          // Use the submitted price when provided (allows discounts); fall back
+          // to unit price × qty when price is 0 or missing.
+          price: it.price > 0
+            ? sql`${String(it.price)}::numeric`
+            : Number.isFinite(inheritedUnitPrice)
+              ? sql`${String(inheritedUnitPrice * (it.quantity ?? 1))}::numeric`
+              : sql`0::numeric`,
           imageUrl: it.imageUrl ?? null,
           sortOrder: it.sortOrder ?? idx,
           status: 'ACTIVE' as const,

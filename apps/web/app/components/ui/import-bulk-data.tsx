@@ -28,6 +28,28 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { InlineNotification } from '~/components/ui/inline-notification';
 import { useToast } from '~/components/ui/toast';
 
+/** Down-arrow-into-tray glyph for the Download template button. */
+function DownloadIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" />
+    </svg>
+  );
+}
+
+/** Document-with-plus glyph for the Choose file button. */
+function ChooseFileIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+      />
+    </svg>
+  );
+}
+
 export interface ImportColumn<TResolved> {
   /** Header text shown in the editor's `<thead>`. */
   header: string;
@@ -329,104 +351,112 @@ export function ImportBulkData<
         actions={
           <PageHeaderMobileTools
             sheetTitle="Import tools"
-            sheetSubtitle={<span>Navigation</span>}
+            sheetSubtitle={<span>Download template, choose file, navigate</span>}
             triggerAriaLabel="Import toolbar"
             showMobileRefresh={false}
             desktop={
-              <Link to={backHref} prefetch="intent" className="btn-secondary btn-sm">
-                {backLabel}
-              </Link>
+              <>
+                {downloadTemplate ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={downloadTemplate}
+                    disabled={isImporting || downloadTemplateDisabled}
+                    title="Download an .xlsx template with example rows + a Reference sheet"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <DownloadIcon />
+                      Download template
+                    </span>
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isImporting}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <ChooseFileIcon />
+                    {selectedFileName ? 'Replace file' : 'Choose file'}
+                  </span>
+                </Button>
+                <Link to={backHref} prefetch="intent" className="btn-secondary btn-sm">
+                  {backLabel}
+                </Link>
+              </>
             }
-            sheet={
-              <Link to={backHref} prefetch="intent" className="btn-secondary btn-sm w-full justify-center">
-                {backLabel}
-              </Link>
-            }
+            sheet={({ closeSheet }) => (
+              <>
+                {downloadTemplate ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      downloadTemplate();
+                    }}
+                    disabled={isImporting || downloadTemplateDisabled}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <DownloadIcon />
+                      Download template
+                    </span>
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    closeSheet();
+                    fileInputRef.current?.click();
+                  }}
+                  disabled={isImporting}
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <ChooseFileIcon />
+                    {selectedFileName ? 'Replace file' : 'Choose file'}
+                  </span>
+                </Button>
+                <Link to={backHref} prefetch="intent" className="btn-secondary w-full justify-center">
+                  {backLabel}
+                </Link>
+              </>
+            )}
           />
         }
       />
 
       {/* ── Upload card ───────────────────────────────────────────────── */}
       <div className="card space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold text-app-fg">1. Upload</h2>
-            <p className="text-xs text-app-fg-muted">
-              .xlsx, .xls, or .csv. Max {maxRows} rows. Headers are case-insensitive — see the
-              column reference below for what each cell expects.
-            </p>
-          </div>
-          <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-            {downloadTemplate ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={downloadTemplate}
-                disabled={isImporting || downloadTemplateDisabled}
-                title="Download an .xlsx template with example rows + a Reference sheet"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    aria-hidden
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16"
-                    />
-                  </svg>
-                  Download template
-                </span>
-              </Button>
-            ) : null}
-            {/* Native <input type="file"> styling is unfixable across browsers,
-                so we hide it via `sr-only` and drive it with a styled button. */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleFileChange(file);
-                // Reset so re-picking the SAME file fires onChange again.
-                e.target.value = '';
-              }}
-              className="sr-only"
-              aria-label="Choose spreadsheet to import"
-            />
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isImporting}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  aria-hidden
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-                {selectedFileName ? 'Replace file' : 'Choose file'}
-              </span>
-            </Button>
-          </div>
+        {/* Download template + Choose file live in the page-header tools group
+            (kebab on mobile) — see PageHeaderMobileTools above. */}
+        <div>
+          <h2 className="text-sm font-semibold text-app-fg">1. Upload</h2>
+          <p className="text-xs text-app-fg-muted">
+            .xlsx, .xls or .csv · max {maxRows} rows. Tap{' '}
+            <span className="font-medium text-app-fg">Choose file</span> in the toolbar.
+          </p>
         </div>
+        {/* Native <input type="file"> styling is unfixable across browsers,
+            so we hide it via `sr-only` and drive it with the toolbar button. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFileChange(file);
+            // Reset so re-picking the SAME file fires onChange again.
+            e.target.value = '';
+          }}
+          className="sr-only"
+          aria-label="Choose spreadsheet to import"
+        />
         {selectedFileName ? (
           <p
             className="-mt-1 text-xs text-app-fg-muted truncate"
@@ -440,15 +470,12 @@ export function ImportBulkData<
 
         {referenceContent ? (
           <div className="space-y-2 pt-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
-                Expected columns
-              </p>
-              <p className="text-micro text-app-fg-muted">
-                Header names are case-insensitive ·{' '}
-                <span className="text-danger-500">*</span> required
-              </p>
-            </div>
+            <p className="text-mini font-semibold uppercase tracking-wider text-app-fg-muted">
+              Expected columns
+              <span className="ml-1.5 font-normal normal-case tracking-normal text-micro text-app-fg-muted">
+                — tap one for details · <span className="text-danger-500">*</span> required
+              </span>
+            </p>
             {referenceContent}
           </div>
         ) : null}

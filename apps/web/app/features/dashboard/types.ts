@@ -71,8 +71,8 @@ export interface DashboardPageProps {
    */
   isMarketingTeamSupervisor?: boolean;
   /**
-   * Symmetric for CS — true when the viewer is a CS Closer promoted to
-   * supervise their branch's CS team. Renders the HoCS-style "Team Management"
+   * Symmetric for Sales — true when the viewer is a Sales Closer promoted to
+   * supervise their branch's Sales team. Renders the HoCS-style "Team Management"
    * card; metrics already aggregate via `applySupervisorScope`.
    */
   isCsTeamSupervisor?: boolean;

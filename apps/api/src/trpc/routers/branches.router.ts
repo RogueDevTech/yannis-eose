@@ -247,7 +247,7 @@ async function assertCanManageTeamOrSupervisor(
     code: 'FORBIDDEN',
     message:
       dept === 'CS'
-        ? 'You don’t have permission to manage this CS team'
+        ? 'You don’t have permission to manage this Sales team'
         : 'You don’t have permission to manage this Marketing team',
   });
 }

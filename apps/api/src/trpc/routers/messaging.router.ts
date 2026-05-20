@@ -5,7 +5,7 @@
  *  - templates.list    — list active templates (filtered by channel/branch)
  *  - templates.create  — create a new template (HoCS/SuperAdmin)
  *  - templates.update  — update template name/body/status (HoCS/SuperAdmin)
- *  - sendMessage       — send an SMS or WhatsApp message to a customer (CS closer)
+ *  - sendMessage       — send an SMS or WhatsApp message to a customer (Sales closer)
  *  - outboxList        — list outbound messages for an order
  *
  * Phone masking: raw phone is retrieved server-side from the orders table and
@@ -195,7 +195,7 @@ export const messagingRouter = router({
 
   /**
    * Create a message template. HoCS / Admin / SuperAdmin can create branch-shared templates;
-   * CS closers can also author their own (visible to the team but only editable by the
+   * Sales closers can also author their own (visible to the team but only editable by the
    * creator and Heads).
    *
    * Phase 21: gated by `messaging.templates.create` permission so custom role templates
@@ -244,7 +244,7 @@ export const messagingRouter = router({
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
 
-      // Without org-wide CS scope, you may only edit templates you created.
+      // Without org-wide Sales scope, you may only edit templates you created.
       const editorPerms = (ctx.user.permissions ?? []).map((p) => canonicalPermissionCode(p));
       const hasOrgWideTemplateEdit =
         ctx.user.role === 'SUPER_ADMIN' ||
@@ -282,7 +282,7 @@ export const messagingRouter = router({
 
   /**
    * Send an outbound message to the order's customer.
-   * CS closers can access this via `orders.read` permission.
+   * Sales closers can access this via `orders.read` permission.
    * Phone number is fetched server-side and NEVER returned to the client.
    */
   sendMessage: permissionProcedure('orders.read')

@@ -10,7 +10,7 @@ export interface Order {
   /** ISO datetime — when a CS callback was scheduled. Drives the "Callback due" row tag. */
   callbackScheduledAt?: string | null;
   assignedCsId: string | null;
-  /** Set in list when available (e.g. CS orders for HoS/SuperAdmin) */
+  /** Set in list when available (e.g. Sales orders for HoS/SuperAdmin) */
   assignedCsName?: string | null;
   /** Set in list when available (e.g. marketing orders for HoM/SuperAdmin) */
   mediaBuyerId?: string | null;
@@ -133,7 +133,7 @@ export interface OrderDetail {
   }>;
   /** From getById — true when this viewer may change line unit prices / derived total */
   viewerCanEditOrderLinePrices?: boolean;
-  /** From getById — branch CS team supervisor for the assigned agent (same branch session) */
+  /** From getById — branch Sales team supervisor for the assigned agent (same branch session) */
   viewerIsCsTeamSupervisor?: boolean;
   /** PENDING permission_request id for ORDER_LINE_PRICE_CHANGE, if any */
   pendingOrderLinePriceRequestId?: string | null;
@@ -256,7 +256,7 @@ export interface OrderDetailPageExtraProps {
       }> | null;
     }>
   >;
-  /** WhatsApp group dispatch templates — loaded for the CS "Share to logistics company" flow. */
+  /** WhatsApp group dispatch templates — loaded for the Sales "Share to logistics company" flow. */
   logisticsDispatchTemplates?: Array<{ id: string; name: string; body: string }>;
   /** Auto-generated invoice for the order (CONFIRMED side effect). null if none yet. Streamed. */
   invoice?: Promise<OrderInvoice | null> | OrderInvoice | null;

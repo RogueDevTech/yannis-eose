@@ -591,6 +591,138 @@ export function InventoryPage(props: InventoryStreamData) {
     },
   ];
 
+  // ── Levels-tab filter controls ────────────────────────────────────────
+  // Hoisted out of the JSX (was an inline IIFE) so the page-header kebab AND
+  // the toolbar can share the same filter elements — one mobile actions group.
+  const levelsHasActiveFilters =
+    currentProductFilter !== 'ALL' ||
+    currentLocationFilter !== 'ALL' ||
+    currentShipmentFilter !== 'ALL' ||
+    serverSortBy !== 'updatedAt' ||
+    serverSortDir !== 'desc' ||
+    !!serverSearch;
+  const levelsFilterBadgeCount =
+    (currentProductFilter !== 'ALL' ? 1 : 0) +
+    (currentLocationFilter !== 'ALL' ? 1 : 0) +
+    (currentShipmentFilter !== 'ALL' ? 1 : 0) +
+    (serverSortBy !== 'updatedAt' || serverSortDir !== 'desc' ? 1 : 0);
+  /** Toolbar hides entirely when there's no data AND no active filter. */
+  const levelsShowToolbar = !(totalLevels === 0 && !levelsHasActiveFilters);
+  const levelsProductSelect = (
+    <SearchableSelect
+      id="levels-product-filter"
+      value={currentProductFilter}
+      onChange={(v) => updateLevelsParam('productId', v)}
+      wrapperClassName="w-full md:w-48"
+      placeholder="All products"
+      searchPlaceholder="Search products..."
+      options={[
+        { value: 'ALL', label: 'All products' },
+        ...products.map((p: ProductOption) => ({ value: p.id, label: p.name })),
+      ]}
+    />
+  );
+  const levelsLocationSelect = (
+    <SearchableSelect
+      id="levels-location-filter"
+      value={currentLocationFilter}
+      onChange={(v) => updateLevelsParam('locationId', v)}
+      wrapperClassName="w-full md:w-48"
+      placeholder="All locations"
+      searchPlaceholder="Search locations..."
+      options={[
+        { value: 'ALL', label: 'All locations' },
+        ...(displayLocations.length > 0 ? displayLocations : locations).map((l: LocationOption) => ({
+          value: l.id,
+          label: l.name,
+          ...(l.providerKind === 'WAREHOUSE'
+            ? {
+                leading: (
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full bg-brand-600 dark:bg-brand-500"
+                    title="Our warehouse"
+                    aria-label="Our warehouse"
+                  />
+                ),
+              }
+            : l.providerName
+              ? {
+                  leading: (
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-micro font-medium whitespace-nowrap ${locationTagClasses(l.providerKind)}`}
+                    >
+                      {l.providerName}
+                    </span>
+                  ),
+                }
+              : {}),
+        })),
+      ]}
+    />
+  );
+  const levelsShipmentSelect = (
+    <SearchableSelect
+      id="levels-shipment-filter"
+      value={currentShipmentFilter}
+      onChange={(v) => updateLevelsParam('shipmentId', v)}
+      wrapperClassName="w-full md:w-52"
+      placeholder="All shipments"
+      searchPlaceholder="Search SHIP ref…"
+      options={[
+        { value: 'ALL', label: 'All shipments' },
+        ...shipmentOptions.map((shipment) => ({
+          value: shipment.id,
+          label: shipment.label,
+        })),
+      ]}
+    />
+  );
+  const levelsSortMenu = (
+    <SortMenu
+      value={{ sortBy: serverSortBy, sortDir: serverSortDir }}
+      onChange={(next) =>
+        updateLevelsSort(next.sortBy as 'available' | 'updatedAt', next.sortDir)
+      }
+      defaultValue={{ sortBy: 'updatedAt', sortDir: 'desc' }}
+      options={[
+        {
+          value: 'updatedAt',
+          label: 'Last updated',
+          description: 'Most recently changed inventory rows.',
+          ascLabel: 'Oldest first',
+          descLabel: 'Newest first',
+          defaultDir: 'desc',
+        },
+        {
+          value: 'available',
+          label: 'Available units',
+          description: 'Stock count minus units reserved on open orders.',
+          ascLabel: 'Lowest first',
+          descLabel: 'Highest first',
+          defaultDir: 'desc',
+        },
+      ]}
+    />
+  );
+  const levelsResetBtn = levelsHasActiveFilters ? (
+    <button
+      type="button"
+      onClick={resetLevelsFilters}
+      className="text-xs text-brand-600 dark:text-brand-400 hover:underline self-center shrink-0"
+    >
+      Reset
+    </button>
+  ) : null;
+  const levelsFilterControls = (
+    <div className="space-y-3">
+      {levelsProductSelect}
+      {levelsLocationSelect}
+      {levelsShipmentSelect}
+      {levelsSortMenu}
+      {levelsResetBtn && <div className="pt-1">{levelsResetBtn}</div>}
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       {/* Page header */}
@@ -601,8 +733,14 @@ export function InventoryPage(props: InventoryStreamData) {
         actions={
           <PageHeaderMobileTools
             sheetTitle="Inventory tools"
-            sheetSubtitle={<span>Threshold, receive shipment, and export</span>}
+            sheetSubtitle={<span>Filters, threshold, receive shipment, export</span>}
             triggerAriaLabel="Inventory toolbar"
+            filtersBadgeCount={
+              activeTab === 'levels' && levelsShowToolbar ? levelsFilterBadgeCount : 0
+            }
+            filters={
+              activeTab === 'levels' && levelsShowToolbar ? levelsFilterControls : undefined
+            }
             desktop={
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <PageRefreshButton />
@@ -1214,6 +1352,7 @@ export function InventoryPage(props: InventoryStreamData) {
 
           return (
             <ToolbarFiltersCollapsible
+              hideMobileSheet
               badgeCount={filterBadgeCount}
               searchRow={
                 <form
@@ -1246,15 +1385,7 @@ export function InventoryPage(props: InventoryStreamData) {
                   {resetBtn}
                 </>
               }
-              sheetFilterBody={
-                <div className="space-y-3">
-                  {productSelect}
-                  {locationSelect}
-                  {shipmentSelect}
-                  {sortMenu}
-                  {resetBtn && <div className="pt-1">{resetBtn}</div>}
-                </div>
-              }
+              sheetFilterBody={null}
             />
           );
         })()}
