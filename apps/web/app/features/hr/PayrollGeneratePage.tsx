@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useFetcher } from '@remix-run/react';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
+import { formatRoleLabel } from '~/components/ui/role-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { FormSelect } from '~/components/ui/form-select';
@@ -164,7 +165,7 @@ export function PayrollGeneratePage({ branches, viewer }: PayrollGenerateLoaderD
       render: (r) => (
         <div>
           <p className="font-medium text-app-fg">{r.staffName}</p>
-          <p className="text-xs text-app-fg-muted">{r.staffRole.replace(/_/g, ' ')}</p>
+          <p className="text-xs text-app-fg-muted">{formatRoleLabel(r.staffRole)}</p>
         </div>
       ),
     },

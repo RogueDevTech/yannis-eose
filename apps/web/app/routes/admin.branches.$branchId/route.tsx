@@ -27,7 +27,7 @@ import { FormSelect } from '~/components/ui/form-select';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { EmptyState } from '~/components/ui/empty-state';
 import { SearchInput } from '~/components/ui/search-input';
-import { RoleBadge } from '~/components/ui/role-badge';
+import { RoleBadge, formatRoleLabel } from '~/components/ui/role-badge';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Pagination } from '~/components/ui/pagination';
 import {
@@ -1027,6 +1027,7 @@ function BranchMembersPanel({
   const fetchedMembers = searchFetcher.data?.data?.members ?? null;
   const [removeTarget, setRemoveTarget] = useState<OverviewMember | null>(null);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(MEMBERS_PAGE_SIZE);
   const [selectedUserIds, setSelectedUserIds] = useState<ReadonlySet<string>>(new Set());
   const [bulkTeamId, setBulkTeamId] = useState('');
   const bulkEnabled = canManageTeamAssignments && !!onBulkAddToTeam && teamsForBulk.length > 0;
@@ -1071,7 +1072,7 @@ function BranchMembersPanel({
     });
   }, [sourceMembers, teamFilter, teamByUserId]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / MEMBERS_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
 
   // Snap back to page 1 whenever any filter changes so the user isn't stranded
   // on a page that no longer has rows.
@@ -1085,8 +1086,8 @@ function BranchMembersPanel({
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  const pageStart = (page - 1) * MEMBERS_PAGE_SIZE;
-  const pageRows = filtered.slice(pageStart, pageStart + MEMBERS_PAGE_SIZE);
+  const pageStart = (page - 1) * pageSize;
+  const pageRows = filtered.slice(pageStart, pageStart + pageSize);
 
   if (members.length === 0) {
     return (
@@ -1320,15 +1321,22 @@ function BranchMembersPanel({
             </div>
           </div>
 
-          {totalPages > 1 && (
-            <div className="card p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-app-fg-muted">
-                Showing {pageStart + 1}–{Math.min(pageStart + MEMBERS_PAGE_SIZE, filtered.length)}{' '}
-                of {filtered.length}
-              </p>
-              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
-            </div>
-          )}
+          <div className="card p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-app-fg-muted">
+              Showing {pageStart + 1}–{Math.min(pageStart + pageSize, filtered.length)}{' '}
+              of {filtered.length}
+            </p>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              pageSize={pageSize}
+              onPageSizeChange={(n) => {
+                setPageSize(n);
+                setPage(1);
+              }}
+            />
+          </div>
         </>
       )}
 
@@ -2006,7 +2014,7 @@ function BranchSupervisorTeamsPanel({
       .filter((m) => m.department === lane && !inSquads.has(m.userId) && !onRoster.has(m.userId))
       .map((m) => ({
         value: m.userId,
-        label: `${m.name} · ${m.effectiveRole.replace(/_/g, ' ')}`,
+        label: `${m.name} · ${formatRoleLabel(m.effectiveRole)}`,
       }));
   };
 
@@ -2020,7 +2028,7 @@ function BranchSupervisorTeamsPanel({
       .filter((m) => m.department === dept && !onTeam.has(m.userId) && !rosterUserIds.has(m.userId))
       .map((m) => ({
         value: m.userId,
-        label: `${m.name} · ${m.effectiveRole.replace(/_/g, ' ')}`,
+        label: `${m.name} · ${formatRoleLabel(m.effectiveRole)}`,
       }));
   };
 
@@ -3198,7 +3206,7 @@ function BranchOverviewPage({
                   placeholder="Select a staff member…"
                   options={availableUsers.map((u) => ({
                     value: u.id,
-                    label: `${u.name} — ${u.role.replace(/_/g, ' ')}`,
+                    label: `${u.name} — ${formatRoleLabel(u.role)}`,
                   }))}
                 />
               )}

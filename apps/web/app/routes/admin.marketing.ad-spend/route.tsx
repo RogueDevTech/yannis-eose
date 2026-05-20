@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLoaderData } from '@remix-run/react';
 import { defer, json, redirect } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermission } from '~/lib/api.server';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
@@ -17,7 +17,6 @@ import {
   runMarketingAdSpendAction,
 } from '~/lib/marketing-pages.server';
 
-const AD_SPEND_PER_PAGE = 20;
 const AD_SPEND_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
 export const meta: MetaFunction = () => [{ title: 'Ads Expense — Marketing — Yannis EOSE' }];
@@ -36,6 +35,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const { isMediaBuyer, isFundingAdmin, canApproveAdSpend } = getMarketingRoleFlags(user);
 
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+  // URL-driven page sizes — flat list keyed on `?perPage=`, the daily-grouped
+  // accordion on `?gPerPage=` (its own pagination param is `gpage`).
+  const { perPage: AD_SPEND_PER_PAGE } = parsePerPage(url.searchParams);
+  const { perPage: GROUPS_PER_PAGE } = parsePerPage(url.searchParams, { param: 'gPerPage' });
   const searchRaw = url.searchParams.get('search')?.trim();
   const searchFilter = searchRaw && searchRaw.length > 0 ? searchRaw : undefined;
   const statusParam = url.searchParams.get('status') ?? undefined;
@@ -79,7 +82,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const groupsPage = Math.max(1, parseInt(url.searchParams.get('gpage') || '1', 10));
   const groupedScope: Record<string, unknown> = {
     page: groupsPage,
-    limit: 20,
+    limit: GROUPS_PER_PAGE,
     ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
@@ -179,6 +182,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     groupsTotal: 0,
     groupsPage: groupsPage,
     groupsTotalPages: 1,
+    groupsPerPage: GROUPS_PER_PAGE,
   };
 
   return data;

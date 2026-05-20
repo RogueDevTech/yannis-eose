@@ -65,9 +65,13 @@ export type CsOrdersDeferredSecondary = {
   csClosersForFilter: Array<{ agentId: string; agentName: string }>;
   logisticsLocationsForBulk: Array<{ id: string; name: string; providerName: string | null }>;
   productsForOfflineOrder: Array<{ id: string; name: string; offers?: Array<{ label: string; price: string; qty: number }> }>;
+  /** Open abandoned-cart count for the overview strip — null when the viewer is not HoCS+. */
+  cartAbandonmentCount: number | null;
 };
 import type { ListOrdersScheduleKind } from '@yannis/shared';
 import type { Order } from './types';
+import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
+import type { PendingCart } from '~/features/cs/types';
 import {
   isPreferredDeliveryDueToday,
   isPreferredDeliveryOverdue,
@@ -237,6 +241,19 @@ export interface OrdersListPageProps {
    * Server still enforces the role gate; this prop is just UI visibility.
    */
   enableFromCartStatusOption?: boolean;
+  /**
+   * Open abandoned-cart count — when provided, an extra "Cart abandonment" tile
+   * is shown in the overview strip. Only the Sales orders route supplies it (via
+   * `deferredSecondary`) and only for HoCS / Admin / SuperAdmin.
+   */
+  cartAbandonmentCount?: number | null;
+  /**
+   * Cart-abandonment mode — true when the `?fromCart=1` filter is active and the
+   * loader has populated `orders` with abandoned CARTS (status `'CART'`) instead
+   * of real orders. Switches the table to a read-only cart view: "Cart" status
+   * badge, "View cart" action only, no bulk toolbar / smart pick.
+   */
+  isCartAbandonmentView?: boolean;
 }
 
 type OrdersListPageImplProps = Omit<OrdersListPageProps, 'deferredSecondary'> & {
@@ -278,6 +295,8 @@ function OrdersListPageImpl({
   orderDetailFrom = 'cs',
   deferredLoading = false,
   enableFromCartStatusOption = false,
+  cartAbandonmentCount = null,
+  isCartAbandonmentView = false,
   bulkSelectAllMatchingInput,
 }: OrdersListPageImplProps) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -307,6 +326,19 @@ function OrdersListPageImpl({
   const [showSelectedExportModal, setShowSelectedExportModal] = useState(false);
   // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
   const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
+
+  // "View cart" quick-detail — for cart-recovered orders, fetches the source cart
+  // on demand and shows it in the shared abandoned-cart detail modal.
+  const cartDetailFetcher = useFetcher<{ cart: PendingCart | null }>();
+  const [viewCartOrderId, setViewCartOrderId] = useState<string | null>(null);
+  const openCartDetail = useCallback(
+    (order: Order) => {
+      if (!order.cartId) return;
+      setViewCartOrderId(order.id);
+      cartDetailFetcher.load(`/admin/sales/queue/carts?cartId=${order.cartId}`);
+    },
+    [cartDetailFetcher],
+  );
 
   // Sync URL params to local state when loader data changes (e.g. back/forward)
   useEffect(() => {
@@ -485,8 +517,12 @@ function OrdersListPageImpl({
 
   // Stat-strip pill per status — funnel order, per-status colors. Same pattern as
   // MarketingOrdersPage so the strip surfaces every stage of the lifecycle, not just
-  // Unprocessed / Confirmed / Delivered.
-  const STATUS_KEYS = STATUS_OPTIONS.filter((s) => s !== 'ALL');
+  // Unprocessed / Confirmed / Delivered. `excludeStatuses` is honoured here too so
+  // Sales (which excludes REMITTED — cash remittance is accountant-only) doesn't get
+  // a "Cash Remitted" tile the closer can't act on.
+  const STATUS_KEYS = STATUS_OPTIONS.filter(
+    (s) => s !== 'ALL' && !excludeStatuses?.includes(s),
+  );
   const statusItems = STATUS_KEYS.map((status) => ({
     label: STATUS_LABELS[status] ?? formatStatus(status),
     value: statusCounts[status] ?? 0,
@@ -575,7 +611,7 @@ function OrdersListPageImpl({
   // Smart pick + deep-select toolbar — shared between the desktop inline card
   // and the mobile Smart-pick modal (opened from the tools sheet).
   function renderSmartPickToolbar() {
-    if (!canBulkPick || filteredOrders.length === 0) return null;
+    if (!canBulkPick || isCartAbandonmentView || filteredOrders.length === 0) return null;
     return (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <SmartPick
@@ -757,7 +793,11 @@ function OrdersListPageImpl({
     });
   };
 
-  const canBulkAction = userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'STOCK_MANAGER';
+  // Bulk transition / assign / cancel act on orders — disabled entirely in the
+  // cart-abandonment view, where the rows are carts, not orders.
+  const canBulkAction =
+    !isCartAbandonmentView &&
+    (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS' || userRole === 'HEAD_OF_LOGISTICS' || userRole === 'STOCK_MANAGER');
 
   const ordersListColumns = useMemo((): CompactTableColumn<Order>[] => {
     const cols: CompactTableColumn<Order>[] = [
@@ -834,7 +874,14 @@ function OrdersListPageImpl({
       {
         key: 'status',
         header: 'Status',
-        render: (order) => <OrderStatusBadge status={order.status} />,
+        render: (order) =>
+          order.status === 'CART' ? (
+            <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+              Cart
+            </span>
+          ) : (
+            <OrderStatusBadge status={order.status} />
+          ),
       },
       {
         key: 'amount',
@@ -863,17 +910,46 @@ function OrdersListPageImpl({
         headerClassName: 'text-center',
         tight: true,
         mobileShowLabel: false,
-        render: (order) => <TableActionButton to={toOrderDetail(order.id)} variant="primary">View</TableActionButton>,
+        // Abandoned-cart rows (cart-abandonment view) get "View cart" — the quick
+        // cart-detail modal. Real orders get the plain "View" → order detail.
+        render: (order) =>
+          order.status === 'CART' ? (
+            <TableActionButton
+              variant="primary"
+              onClick={() => openCartDetail(order)}
+              disabled={cartDetailFetcher.state !== 'idle' && viewCartOrderId === order.id}
+            >
+              View cart
+            </TableActionButton>
+          ) : (
+            <TableActionButton to={toOrderDetail(order.id)} variant="primary">
+              View
+            </TableActionButton>
+          ),
       },
     );
     return cols;
-  }, [showCSCloserColumn, showCampaignColumn, toOrderDetail]);
+  }, [
+    showCSCloserColumn,
+    showCampaignColumn,
+    toOrderDetail,
+    openCartDetail,
+    cartDetailFetcher.state,
+    viewCartOrderId,
+  ]);
 
   const statusOptions = [
     ...STATUS_OPTIONS.filter((status) => !excludeStatuses?.includes(status)).map((status) => ({
       value: status,
       label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
     })),
+    // "Deleted" tab — cancelled orders are never removed from the database; this
+    // surfaces them so admins can review (and restore) them. CANCELLED is kept out
+    // of the shared STATUS_OPTIONS by the six-bucket CEO directive, so it is
+    // appended here explicitly. Visible to every role (CEO directive 2026-05-20).
+    ...(!excludeStatuses?.includes('CANCELLED')
+      ? [{ value: 'CANCELLED', label: 'Deleted' }]
+      : []),
     ...(enableFromCartStatusOption
       ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
       : []),
@@ -1119,9 +1195,11 @@ function OrdersListPageImpl({
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
                 <PageRefreshButton />
-                <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
-                  {showChartView ? 'View as data' : 'View data in chart'}
-                </Button>
+                {!isCartAbandonmentView && (
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowChartView((v) => !v)}>
+                    {showChartView ? 'View as data' : 'View data in chart'}
+                  </Button>
+                )}
                 {canCreateOffline && (
                   <Button variant="primary" size="sm" onClick={() => setCreateOfflineOpen(true)}>
                     <span className="hidden sm:inline">Create offline order</span>
@@ -1133,31 +1211,35 @@ function OrdersListPageImpl({
                     Generate report
                   </Button>
                 )}
-                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
-                    startDate={filters?.startDate ?? ''}
-                    endDate={filters?.endDate ?? ''}
-                    startTime={filters?.startTime ?? ''}
-                    endTime={filters?.endTime ?? ''}
-                    periodAllTime={filters?.periodAllTime ?? false}
-                  />
-                </div>
+                {!isCartAbandonmentView && (
+                  <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
+                    <DateFilterBar
+                      startDate={filters?.startDate ?? ''}
+                      endDate={filters?.endDate ?? ''}
+                      startTime={filters?.startTime ?? ''}
+                      endTime={filters?.endTime ?? ''}
+                      periodAllTime={filters?.periodAllTime ?? false}
+                    />
+                  </div>
+                )}
               </>
             }
             sheet={({ closeSheet }) => (
               <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="h-12 w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowChartView((v) => !v);
-                  }}
-                >
-                  {showChartView ? 'View as data' : 'View data in chart'}
-                </Button>
+                {!isCartAbandonmentView && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setShowChartView((v) => !v);
+                    }}
+                  >
+                    {showChartView ? 'View as data' : 'View data in chart'}
+                  </Button>
+                )}
                 {canCreateOffline && (
                   <Button
                     variant="secondary"
@@ -1194,7 +1276,7 @@ function OrdersListPageImpl({
                     triggerLayout="blockCenter"
                   />
                 </div>
-                {canBulkPick && filteredOrders.length > 0 && (
+                {canBulkPick && !isCartAbandonmentView && filteredOrders.length > 0 && (
                   <Button
                     type="button"
                     variant="secondary"
@@ -1214,14 +1296,44 @@ function OrdersListPageImpl({
         }
       />
 
-      {/* Status totals — moved above My Workload so the funnel snapshot reads first. */}
+      {/* Status totals — moved above My Workload so the funnel snapshot reads first.
+          For HoCS+ the strip leads with a "Cart abandonment" KPI (open un-recovered
+          carts) so the recovery backlog is visible without opening the filter. */}
       {deferredLoading ? (
-        <OverviewStatStripSkeleton count={1 + STATUS_KEYS.length} />
+        <OverviewStatStripSkeleton
+          count={1 + STATUS_KEYS.length + (enableFromCartStatusOption ? 1 : 0)}
+        />
+      ) : isCartAbandonmentView ? (
+        <OverviewStatStrip
+          mobileGrid
+          items={[
+            {
+              label: 'Abandoned carts',
+              value: total,
+              valueClassName:
+                total > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
+              title: 'Open abandoned carts not yet recovered',
+            },
+          ]}
+        />
       ) : (
         <OverviewStatStrip
           mobileGrid
           items={[
             { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+            ...(enableFromCartStatusOption
+              ? [
+                  {
+                    label: 'Cart abandonment',
+                    value: cartAbandonmentCount ?? 0,
+                    valueClassName:
+                      (cartAbandonmentCount ?? 0) > 0
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-app-fg',
+                    title: 'Open abandoned carts not yet recovered',
+                  },
+                ]
+              : []),
             ...statusItems,
           ]}
         />
@@ -1598,7 +1710,7 @@ function OrdersListPageImpl({
           Smart-pick modal. SmartPick picks the first N of the current page;
           the deep-select checkbox selects every order matching the filter
           (capped server-side at ORDERS_DEEP_SELECT_MAX). */}
-      {canBulkPick && filteredOrders.length > 0 && (
+      {canBulkPick && !isCartAbandonmentView && filteredOrders.length > 0 && (
         <div
           className={`hidden md:block rounded-lg border px-3 py-2 ${
             selectAllMatchingActive
@@ -1793,8 +1905,20 @@ function OrdersListPageImpl({
                   }
                 : undefined
             }
-            emptyTitle={orders.length === 0 ? 'No orders yet' : 'No orders found'}
-            emptyDescription={orders.length === 0 ? undefined : 'Try adjusting your filters or search query'}
+            emptyTitle={
+              isCartAbandonmentView
+                ? 'No abandoned carts'
+                : orders.length === 0
+                  ? 'No orders yet'
+                  : 'No orders found'
+            }
+            emptyDescription={
+              isCartAbandonmentView
+                ? 'Every dropped cart has been recovered or cleared.'
+                : orders.length === 0
+                  ? undefined
+                  : 'Try adjusting your filters or search query'
+            }
           />
         </div>
       </TableLoadingOverlay>
@@ -1804,9 +1928,12 @@ function OrdersListPageImpl({
       {!showChartView && (
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-sm text-app-fg-muted">
-            {total > 0
-              ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
-              : 'No orders'}
+            {(() => {
+              const noun = isCartAbandonmentView ? 'carts' : 'orders';
+              return total > 0
+                ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} ${noun}`
+                : `No ${noun}`;
+            })()}
           </p>
           <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
         </div>
@@ -1981,6 +2108,17 @@ function OrdersListPageImpl({
         }}
       />
 
+      <AbandonedCartDetailModal
+        cart={
+          viewCartOrderId && cartDetailFetcher.state === 'idle'
+            ? cartDetailFetcher.data?.cart ?? null
+            : null
+        }
+        canReveal
+        cartStatus="ABANDONED"
+        onClose={() => setViewCartOrderId(null)}
+      />
+
     </div>
   );
 }
@@ -2015,6 +2153,7 @@ export function OrdersListPage(props: OrdersListPageProps) {
               csClosersForFilter={sec.csClosersForFilter}
               logisticsLocationsForBulk={sec.logisticsLocationsForBulk}
               productsForOfflineOrder={sec.productsForOfflineOrder}
+              cartAbandonmentCount={sec.cartAbandonmentCount}
             />
           )}
         </Await>

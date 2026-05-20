@@ -31,6 +31,8 @@ export interface MarketingTeamPageProps {
   leaderboardPeriod: 'this_month' | 'all_time';
   page?: number;
   totalPages?: number;
+  /** URL-driven rows-per-page — feeds the `<Pagination>` per-page picker. */
+  limit?: number;
   totalCount?: number;
   unfilteredCount?: number;
   q?: string;
@@ -149,6 +151,7 @@ export function MarketingTeamPage({
   dateFilters,
   page = 1,
   totalPages = 1,
+  limit,
   totalCount = 0,
   unfilteredCount = 0,
   q = '',
@@ -535,7 +538,7 @@ export function MarketingTeamPage({
             </div>
 
             {totalPages > 1 && (
-              <Pagination page={page} totalPages={totalPages} pageParam="page" />
+              <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} align="end" />
             )}
           </>
         )}

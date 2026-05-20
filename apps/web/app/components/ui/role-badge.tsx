@@ -92,8 +92,30 @@ interface RoleBadgeProps {
   style?: CSSProperties;
 }
 
-function formatRoleLabel(role: string): string {
-  return role.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+/**
+ * Per-word overrides so role labels keep acronyms uppercase (CS / TPL / HR /
+ * 3PL) and small connector words lowercase ("of"). Without this a plain
+ * title-case turns `HEAD_OF_CS` into "Head Of Cs".
+ */
+const ROLE_WORD_OVERRIDES: Record<string, string> = {
+  CS: 'CS',
+  TPL: 'TPL',
+  '3PL': '3PL',
+  HR: 'HR',
+  OF: 'of',
+  AND: 'and',
+};
+
+/** Turn a role enum (`HEAD_OF_CS`) into a display label (`Head of CS`). */
+export function formatRoleLabel(role: string): string {
+  return role
+    .split('_')
+    .map((word) => {
+      const override = ROLE_WORD_OVERRIDES[word.toUpperCase()];
+      if (override) return override;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
 }
 
 export function RoleBadge({

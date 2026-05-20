@@ -29,6 +29,9 @@ const ALLOWED_TRANSITIONS: TransitionRule[] = [
   { from: 'CS_ENGAGED', to: 'CONFIRMED', gate: 'VOIP call_duration > 15 seconds' },
   { from: 'CS_ENGAGED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
   { from: 'UNPROCESSED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
+  // Restore — a cancelled order is never deleted; an Admin / Super Admin can send it
+  // back to the unassigned queue (it returns to UNPROCESSED, closer assignment cleared).
+  { from: 'CANCELLED', to: 'UNPROCESSED', gate: 'Admin / Super Admin only' },
 
   // Logistics flow
   { from: 'CONFIRMED', to: 'AGENT_ASSIGNED', gate: '3PL location must have available stock' },

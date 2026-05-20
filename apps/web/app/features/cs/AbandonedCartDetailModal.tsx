@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useFetcher } from '@remix-run/react';
+import { Link, useFetcher } from '@remix-run/react';
 import { Modal } from '~/components/ui/modal';
 import { Spinner } from '~/components/ui/spinner';
 import { DetailRow } from '~/components/ui/live-activity-card';
@@ -15,6 +15,7 @@ export function AbandonedCartDetailModal({
   onClose,
   onClear,
   cartStatus = 'ABANDONED',
+  orderHref,
 }: {
   cart: PendingCart | null;
   canReveal: boolean;
@@ -23,7 +24,12 @@ export function AbandonedCartDetailModal({
   onClose: () => void;
   onClear?: (cart: PendingCart) => void;
   /** Cart status — controls badge label and timestamp wording. Defaults to ABANDONED. */
-  cartStatus?: 'PENDING' | 'ABANDONED';
+  cartStatus?: 'PENDING' | 'ABANDONED' | 'CONVERTED';
+  /**
+   * When set, renders an "Open full order" link instead of Recover/Clear — used when the
+   * cart has already been recovered into an order (the recovered-from-cart orders list).
+   */
+  orderHref?: string | null;
 }) {
   const revealFetcher = useFetcher<RevealResult>();
   const recoverFetcher = useFetcher<{ success?: boolean; error?: string; orderId?: string }>();
@@ -31,6 +37,28 @@ export function AbandonedCartDetailModal({
   const [phoneState, setPhoneState] = useState<'idle' | 'loading' | 'masked' | 'unavailable' | 'error'>('idle');
   const { toast } = useToast();
   const isRecovering = recoverFetcher.state !== 'idle';
+
+  // Per-status presentation: header gradient, status pill, and timestamp wording.
+  const statusMeta = {
+    PENDING: {
+      badge: 'Browsing',
+      stamp: 'Last seen',
+      headerGradient: 'bg-gradient-to-br from-amber-600 to-amber-700 dark:from-amber-700 dark:to-amber-900',
+      pillClass: 'bg-amber-100/60 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+    },
+    ABANDONED: {
+      badge: 'Dropped off',
+      stamp: 'Dropped at',
+      headerGradient: 'bg-gradient-to-br from-surface-700 to-surface-800 dark:from-surface-800 dark:to-surface-900',
+      pillClass: 'bg-app-hover/60 text-app-fg-muted',
+    },
+    CONVERTED: {
+      badge: 'Recovered',
+      stamp: 'Recovered at',
+      headerGradient: 'bg-gradient-to-br from-success-600 to-success-700 dark:from-success-700 dark:to-success-900',
+      pillClass: 'bg-success-100/60 dark:bg-success-900/30 text-success-700 dark:text-success-400',
+    },
+  }[cartStatus];
 
   // Close modal + toast on successful recovery.
   useEffect(() => {
@@ -112,7 +140,7 @@ export function AbandonedCartDetailModal({
       cart.preferredDeliveryDate ? `Preferred date: ${cart.preferredDeliveryDate}` : null,
       cart.paymentMethod ? `Payment method: ${cart.paymentMethod}` : null,
       cart.deliveryNotes ? `Notes: ${cart.deliveryNotes}` : null,
-      `${cartStatus === 'PENDING' ? 'Last seen' : 'Dropped at'}: ${new Date(cart.updatedAt).toLocaleString('en-NG', {
+      `${statusMeta.stamp}: ${new Date(cart.updatedAt).toLocaleString('en-NG', {
         weekday: 'short',
         month: 'short',
         day: 'numeric',
@@ -142,11 +170,7 @@ export function AbandonedCartDetailModal({
     <Modal open={cart != null} onClose={onClose} maxWidth="max-w-md" backdropBlur>
       {cart && (
         <div>
-          <div className={`relative px-5 pt-5 pb-6 rounded-t-2xl md:rounded-t-xl ${
-            cartStatus === 'PENDING'
-              ? 'bg-gradient-to-br from-amber-600 to-amber-700 dark:from-amber-700 dark:to-amber-900'
-              : 'bg-gradient-to-br from-surface-700 to-surface-800 dark:from-surface-800 dark:to-surface-900'
-          }`}>
+          <div className={`relative px-5 pt-5 pb-6 rounded-t-2xl md:rounded-t-xl ${statusMeta.headerGradient}`}>
             <button
               type="button"
               onClick={onClose}
@@ -180,12 +204,8 @@ export function AbandonedCartDetailModal({
               </div>
             </div>
             <div className="mt-3">
-              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
-                cartStatus === 'PENDING'
-                  ? 'bg-amber-100/60 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                  : 'bg-app-hover/60 text-app-fg-muted'
-              }`}>
-                {cartStatus === 'PENDING' ? 'Browsing' : 'Dropped off'}
+              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${statusMeta.pillClass}`}>
+                {statusMeta.badge}
               </span>
             </div>
           </div>
@@ -245,7 +265,7 @@ export function AbandonedCartDetailModal({
                   <DetailRow key={key} label={key} value={String(value)} />
                 ))}
               <DetailRow
-                label={cartStatus === 'PENDING' ? 'Last seen' : 'Dropped at'}
+                label={statusMeta.stamp}
                 value={new Date(cart.updatedAt).toLocaleString('en-NG', {
                   weekday: 'short',
                   month: 'short',
@@ -322,6 +342,18 @@ export function AbandonedCartDetailModal({
                 )}
                 {isRecovering ? 'Creating order…' : 'Recover as order'}
               </button>
+            )}
+
+            {orderHref && (
+              <Link
+                to={orderHref}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-app-fg bg-app-hover hover:bg-app-hover/80 border border-app-border transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                Open full order
+              </Link>
             )}
 
             {onClear && (

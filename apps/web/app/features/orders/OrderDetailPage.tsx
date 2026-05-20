@@ -881,6 +881,7 @@ export function OrderDetailPage({
   );
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [assignToId, setAssignToId] = useState('');
   const [callCustomerModalOpen, setCallCustomerModalOpen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -1048,6 +1049,7 @@ export function OrderDetailPage({
   const mainFetcherActionModalOpen =
     confirmModalOpen ||
     cancelModalOpen ||
+    restoreModalOpen ||
     allocateModalOpen ||
     deliverModalOpen ||
     callCustomerModalOpen;
@@ -1242,6 +1244,9 @@ export function OrderDetailPage({
     if (!isCSOrHoS) return false;
     if (userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch) return true;
     if (userRole === 'CS_CLOSER') {
+      // Closers can no longer cancel an order — that is Head of CS / Branch Admin /
+      // Admin only (CEO directive 2026-05-20). They still engage and confirm.
+      if (newStatus === 'CANCELLED') return false;
       if (newStatus === 'CS_ENGAGED') {
         return isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId);
       }
@@ -1339,6 +1344,9 @@ export function OrderDetailPage({
       setCancelModalOpen(false);
       setCancelReason('');
     }
+    if (restoreModalOpen) {
+      setRestoreModalOpen(false);
+    }
     const justAllocated =
       allocateModalOpen &&
       fetcherSubmissionKeyRef.current?.intent === 'transition' &&
@@ -1375,6 +1383,7 @@ export function OrderDetailPage({
   }, [
     confirmModalOpen,
     cancelModalOpen,
+    restoreModalOpen,
     allocateModalOpen,
     deliverModalOpen,
     logisticsLocations,
@@ -2088,19 +2097,23 @@ export function OrderDetailPage({
                     </div>
                   ) : null}
 
-                  {/* Cancel order — lifecycle transition to CANCELLED */}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
-                    onClick={() => {
-                      setCancelModalOpen(true);
-                      setCancelReason('Customer not picking');
-                    }}
-                    disabled={fetcher.state === 'submitting' || !canTransitionTo('CANCELLED')}
-                  >
-                    Cancel order
-                  </Button>
+                  {/* Cancel order — lifecycle transition to CANCELLED. Restricted to
+                      Head of CS / Branch Admin / Admin: hidden entirely for closers
+                      rather than shown disabled (CEO directive 2026-05-20). */}
+                  {canTransitionTo('CANCELLED') && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full border-danger-200 dark:border-danger-700 text-danger-700 dark:text-danger-400 hover:bg-danger-50 dark:hover:bg-danger-900/20"
+                      onClick={() => {
+                        setCancelModalOpen(true);
+                        setCancelReason('Customer not picking');
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                    >
+                      Cancel order
+                    </Button>
+                  )}
 
                   </>
                   )}
@@ -2159,6 +2172,28 @@ export function OrderDetailPage({
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Restore — a cancelled order is never deleted from the database. It stays
+                visible under the "Deleted" tab and an Admin / Super Admin can send it
+                back to the unprocessed queue (CEO directive 2026-05-20). */}
+            {canEditOrder && order.status === 'CANCELLED' && isAdminLevel({ role: userRole }) && (
+              <div className="card">
+                <h2 className="text-lg font-semibold text-app-fg mb-1">Cancelled order</h2>
+                <p className="text-sm text-app-fg-muted mb-3">
+                  This order was cancelled. Restoring sends it back to the unprocessed
+                  queue for re-assignment — it is not deleted.
+                </p>
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="w-full"
+                  onClick={() => setRestoreModalOpen(true)}
+                  disabled={fetcher.state === 'submitting'}
+                >
+                  Restore to Unprocessed
+                </Button>
               </div>
             )}
 
@@ -2757,6 +2792,37 @@ export function OrderDetailPage({
         </Modal>
       )}
 
+      {/* Restore order modal (CANCELLED → UNPROCESSED) — Admin / Super Admin only */}
+      {restoreModalOpen && (
+        <Modal open onClose={() => setRestoreModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
+          <h3 className="text-lg font-semibold text-app-fg mb-1">Restore cancelled order</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            This order moves back to <strong>Unprocessed</strong> and returns to the
+            unassigned queue. The previous closer assignment is cleared.
+          </p>
+          <ModalFetcherInlineError message={fetcherErrorForTransition('UNPROCESSED')} />
+          <div className="flex gap-2 mt-4 justify-end">
+            <Button type="button" variant="secondary" onClick={() => setRestoreModalOpen(false)}>
+              Back
+            </Button>
+            <fetcher.Form method="post">
+              <input type="hidden" name="intent" value="transition" />
+              <input type="hidden" name="newStatus" value="UNPROCESSED" />
+              {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={fetcher.state === 'submitting'}
+                loading={fetcher.state === 'submitting'}
+                loadingText="Restoring..."
+              >
+                Restore order
+              </Button>
+            </fetcher.Form>
+          </div>
+        </Modal>
+      )}
+
       {/* Assign / move assignment — CONFIRMED → ALLOCATED or ALLOCATED → ALLOCATED */}
       {allocateModalOpen && (
         <Modal open onClose={() => setAllocateModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
@@ -2960,12 +3026,17 @@ export function OrderDetailPage({
                 placeholder="Select the provider that delivered…"
                 options={logisticsLocations.map((loc) => {
                   const stockInfo = resolvedAllocatableLocations.find((a) => a.id === loc.id);
-                  const stockDesc =
-                    stockInfo?.availabilityByProduct && stockInfo.availabilityByProduct.length > 0
-                      ? stockInfo.availabilityByProduct
-                          .map((p) => `${p.productName}: ${p.available} available`)
-                          .join(' · ')
-                      : undefined;
+                  const hasStock =
+                    !!stockInfo?.availabilityByProduct &&
+                    stockInfo.availabilityByProduct.length > 0;
+                  // Locations with no inventory level for this order's products
+                  // can't have stock deducted — disable them so they can't be
+                  // picked (which would fail the delivery with a stock error).
+                  const stockDesc = hasStock
+                    ? stockInfo!.availabilityByProduct
+                        .map((p) => `${p.productName}: ${p.available} available`)
+                        .join(' · ')
+                    : 'No inventory for this order — cannot deliver from here';
                   const originLabel =
                     loc.id === order.logisticsLocationId ? 'Originally allocated' : undefined;
                   const description = [stockDesc, originLabel].filter(Boolean).join(' · ') || undefined;
@@ -2973,6 +3044,7 @@ export function OrderDetailPage({
                     value: loc.id,
                     label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                     description,
+                    disabled: !hasStock,
                   };
                 })}
                 searchPlaceholder="Search providers..."

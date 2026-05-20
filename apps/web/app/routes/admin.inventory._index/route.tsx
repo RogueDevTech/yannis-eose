@@ -7,6 +7,7 @@ import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
   getSessionCookie,
+  parsePerPage,
   requirePermission,
   requirePermissionOrRoles,
   safeStatus,
@@ -65,7 +66,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const rawSearch = (url.searchParams.get('search') ?? '').trim();
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
-  const LEVELS_LIMIT = 20;
+  // URL-driven page size — clamped to [20, 50, 100]; the `<Pagination>` per-page picker writes `perPage`.
+  const { perPage: LEVELS_LIMIT } = parsePerPage(url.searchParams);
 
   const levelsInput: {
     productId?: string;

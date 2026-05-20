@@ -152,7 +152,7 @@ jobs:
     name: Deploy to Prod (AWS)
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ vars.DEPLOY_PLATFORM != 'gcp' }}
+    if: ${{ vars.DEPLOY_PLATFORM == 'aws' }}
     environment: prod
     # All AWS secrets are `PROD_AWS_*` / `PROD_EC2_*`-prefixed so they cannot
     # be confused with the unprefixed dev secrets in the same repo.

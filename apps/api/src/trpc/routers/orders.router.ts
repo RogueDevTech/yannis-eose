@@ -29,6 +29,7 @@ import { getBranchTeamsService } from './branches.router';
 import { getUsersService } from './users.router';
 import { getProductsService } from './products.router';
 import { getLogisticsService } from './logistics.router';
+import { getCartService } from './cart.router';
 import { getInventoryService } from './inventory.router';
 import {
   OrdersService,
@@ -179,6 +180,25 @@ export function buildOrdersListOpts(
 }
 
 function orderListBranchId(_user: { role: string }, sessionBranchId: string | null): string | null {
+  return sessionBranchId;
+}
+
+/**
+ * Branch filter for endpoints that ALSO scope Media Buyers by ownership
+ * (`media_buyer_id = me`). For an MB that ownership filter is exact, so a
+ * branch filter can only hide their own cross-branch history — e.g. orders
+ * from a branch they were since moved out of. Drop it: an MB always sees all
+ * of their own orders, every branch.
+ *
+ * SAFETY: every caller MUST apply the MB ownership scope — directly
+ * (`orders.list`) or via `narrowOrdersAggregateFiltersForViewer`. Without that,
+ * returning `null` here would expose other branches' orders to the MB.
+ */
+function orderListBranchIdOwnerAware(
+  user: { role: string },
+  sessionBranchId: string | null,
+): string | null {
+  if (user.role === 'MEDIA_BUYER') return null;
   return sessionBranchId;
 }
 
@@ -485,7 +505,7 @@ export const ordersRouter = router({
   list: authedProcedure
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
-      const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const branchId = orderListBranchIdOwnerAware(ctx.user, ctx.currentBranchId);
 
       // Resolve scoping (authz + effective filters) BEFORE the cache so a cache
       // hit can never bypass a permission check.
@@ -518,6 +538,8 @@ export const ordersRouter = router({
         }
         if (!hasOrgWideScope) {
           if (ctx.user.role === 'MEDIA_BUYER') {
+            // `branchId` is already null for MBs (orderListBranchIdOwnerAware);
+            // this ownership filter is what makes that safe.
             effectiveInput = { ...effectiveInput, mediaBuyerId: ctx.user.id };
           }
           if (hasOrdersRead && ctx.user.role === 'CS_CLOSER') {
@@ -789,7 +811,7 @@ export const ordersRouter = router({
         .optional(),
     )
     .query(async ({ input, ctx }) => {
-      const effectiveBranchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const effectiveBranchId = orderListBranchIdOwnerAware(ctx.user, ctx.currentBranchId);
       const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, effectiveBranchId, {
         mediaBuyerId: input?.mediaBuyerId,
         assignedCsId: input?.assignedCsId,
@@ -872,7 +894,7 @@ export const ordersRouter = router({
         .optional(),
     )
     .query(async ({ input, ctx }) => {
-      const effectiveBranchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const effectiveBranchId = orderListBranchIdOwnerAware(ctx.user, ctx.currentBranchId);
       const narrowed = await narrowOrdersAggregateFiltersForViewer(ctx, effectiveBranchId, {
         mediaBuyerId: input?.mediaBuyerId,
         assignedCsId: input?.assignedCsId,
@@ -1043,10 +1065,14 @@ export const ordersRouter = router({
         isCSCloser: z.boolean().optional().default(false),
         showCSCloserColumn: z.boolean().optional().default(false),
         canCreateOffline: z.boolean().optional().default(false),
+        // HoCS / Admin / SuperAdmin only — adds the open abandoned-cart count to
+        // the orders-page overview strip. The loader sets this from the same
+        // role gate as the "Cart abandonment" status filter.
+        includeCartAbandonment: z.boolean().optional().default(false),
       }),
     )
     .query(async ({ input, ctx }) => {
-      const branchId = orderListBranchId(ctx.user, ctx.currentBranchId);
+      const branchId = orderListBranchIdOwnerAware(ctx.user, ctx.currentBranchId);
       const scope = await narrowOrdersAggregateFiltersForViewer(ctx, branchId, {
         assignedCsId: input.countsAssignedCsId,
         startDate: input.countsStartDate,
@@ -1082,6 +1108,7 @@ export const ordersRouter = router({
         csClosersForFilter,
         logisticsLocationsForBulk,
         productsForOfflineOrder,
+        cartStats,
       ] = await Promise.all([
         getOrdersService().getStatusCounts(
           scope.mediaBuyerId,
@@ -1113,6 +1140,9 @@ export const ordersRouter = router({
               ctx.user.role,
             )
           : Promise.resolve(null),
+        input.includeCartAbandonment
+          ? getCartService().getStats()
+          : Promise.resolve(null),
       ]);
 
       return {
@@ -1131,6 +1161,11 @@ export const ordersRouter = router({
           providerName: loc.providerName ?? null,
         })),
         productsForOfflineOrder: productsForOfflineOrder?.products ?? [],
+        // Open (un-recovered) abandoned-cart count for the overview strip — null
+        // when the viewer is not HoCS+ so the pill simply doesn't render.
+        cartAbandonmentCount: cartStats
+          ? (cartStats as { abandonedOpen: number }).abandonedOpen
+          : null,
       };
     }),
 

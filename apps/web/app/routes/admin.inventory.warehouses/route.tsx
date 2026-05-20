@@ -7,6 +7,7 @@ import {
   apiRequest,
   getCurrentUser,
   getSessionCookie,
+  parsePerPage,
   requirePermission,
   safeStatus,
 } from '~/lib/api.server';
@@ -20,8 +21,6 @@ import {
 import { WarehousesListLoadingShell } from '~/features/inventory/InventoryDeferredLoadingShells';
 
 export const meta: MetaFunction = () => [{ title: 'Our warehouse — Yannis EOSE' }];
-
-const WAREHOUSES_PAGE_LIMIT = 20;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'inventory.read');
@@ -37,6 +36,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+  // URL-driven page size — clamped to [20, 50, 100]; fallback 20.
+  const { perPage } = parsePerPage(url.searchParams);
   const search = (url.searchParams.get('search') ?? '').trim();
   const rawSortBy = url.searchParams.get('sortBy') ?? '';
   const rawSortDir = url.searchParams.get('sortDir') ?? '';
@@ -59,7 +60,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     } = {
       status: 'ACTIVE',
       page,
-      limit: WAREHOUSES_PAGE_LIMIT,
+      limit: perPage,
       listScope: 'our',
       sortBy,
       sortOrder: sortDir,
@@ -101,7 +102,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       totalWarehouses = data?.pagination?.total ?? 0;
     }
 
-    const totalPages = Math.max(1, Math.ceil(totalWarehouses / WAREHOUSES_PAGE_LIMIT));
+    const totalPages = Math.max(1, Math.ceil(totalWarehouses / perPage));
 
     const actorPerms = new Set((user?.permissions ?? []).map((p) => canonicalPermissionCode(p)));
     const canManage =
@@ -128,7 +129,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       warehouses,
       totalWarehouses,
       page,
-      limit: WAREHOUSES_PAGE_LIMIT,
+      limit: perPage,
       totalPages,
       search,
       sortBy,

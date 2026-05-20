@@ -23,6 +23,7 @@ import {
 import { EDGE_FORM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
+import { isAdminLevel } from '../common/authz';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -2598,6 +2599,9 @@ export class OrdersService {
       logisticsProviderId: schema.orders.logisticsProviderId,
       logisticsLocationId: schema.orders.logisticsLocationId,
       riderId: schema.orders.riderId,
+      // Back-link to the abandoned cart this order was recovered from (migration 0142).
+      // Surfaced so list rows can offer a "View cart" quick-detail action.
+      cartId: schema.orders.cartId,
     } as const;
 
     const [orders, totalRows] = await Promise.all([
@@ -2932,6 +2936,17 @@ export class OrdersService {
             message: 'You do not have CS access required to take this order.',
           });
         }
+      } else if (newStatus === 'CANCELLED') {
+        // Cancellation is restricted to Head of CS, a Branch Admin (same branch), or an
+        // Admin. The assigned Sales closer can engage and confirm an order but can no
+        // longer cancel it themselves (CEO directive 2026-05-20).
+        if (!isElevated) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message:
+              'Only Head of CS, a Branch Admin (same branch), or an Admin can cancel an order.',
+          });
+        }
       } else {
         const isAssignedCs = order.assignedCsId === actor.id;
         if (!isElevated && !isAssignedCs) {
@@ -2941,6 +2956,18 @@ export class OrdersService {
               'Only the assigned Sales closer, anyone with Sales scope, a Branch Admin (same branch), or an Admin may perform this transition.',
           });
         }
+      }
+    }
+
+    // CANCELLED → UNPROCESSED: restore a cancelled order back to the queue. Admin-only —
+    // the order was never deleted from the database; it returns to the unassigned pool
+    // for re-distribution (closer assignment cleared below). CEO directive 2026-05-20.
+    if (currentStatus === 'CANCELLED' && newStatus === 'UNPROCESSED') {
+      if (!isAdminLevel(actor)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only an Admin or Super Admin can restore a cancelled order.',
+        });
       }
     }
 
@@ -3053,6 +3080,14 @@ export class OrdersService {
       newStatus === 'CONFIRMED' ||
       newStatus === 'CANCELLED'
     ) {
+      updateFields['lockedUntil'] = null;
+      updateFields['lockedBy'] = null;
+    }
+
+    // Restoring a cancelled order — send it back to the unassigned pool: drop the
+    // previous closer + any stale lock so it re-enters CS distribution cleanly.
+    if (currentStatus === 'CANCELLED' && newStatus === 'UNPROCESSED') {
+      updateFields['assignedCsId'] = null;
       updateFields['lockedUntil'] = null;
       updateFields['lockedBy'] = null;
     }
@@ -3188,6 +3223,7 @@ export class OrdersService {
       CS_ENGAGED: 'CALL_INITIATED',
       CONFIRMED: 'ORDER_CONFIRMED',
       CANCELLED: 'ORDER_CANCELLED',
+      UNPROCESSED: 'ORDER_RESTORED',
       AGENT_ASSIGNED: 'ORDER_ALLOCATED',
       DISPATCHED: 'ORDER_DISPATCHED',
       IN_TRANSIT: 'ORDER_IN_TRANSIT',
@@ -6831,6 +6867,8 @@ export class OrdersService {
           : 'Order confirmed';
       case 'CANCELLED':
         return `Order cancelled${reasonSuffix}`;
+      case 'UNPROCESSED':
+        return 'Cancelled order restored to the unprocessed queue';
       case 'AGENT_ASSIGNED':
         if (
           options?.reallocatedFromName &&

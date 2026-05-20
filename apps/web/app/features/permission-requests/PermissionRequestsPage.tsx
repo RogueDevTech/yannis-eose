@@ -3,6 +3,7 @@ import { Link, useFetcher, useRevalidator, useSearchParams } from '@remix-run/re
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useFetcherActionSurface, ModalFetcherInlineError } from '~/hooks/use-fetcher-action-surface';
 import { Button } from '~/components/ui/button';
+import { formatRoleLabel } from '~/components/ui/role-badge';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -54,7 +55,7 @@ function requestedSummary(req: PermissionRequest): string {
   if (req.type === 'PRODUCT_ARCHIVE') return 'Archive product';
   if (req.type === 'ORDER_LINE_PRICE_CHANGE') return 'Change order line prices';
   if (req.type === 'ORDER_DELETION') return 'Archive order (soft delete)';
-  if (req.requestedRole) return req.requestedRole.replace(/_/g, ' ');
+  if (req.requestedRole) return formatRoleLabel(req.requestedRole);
   if (req.permissionCode) return req.permissionCode;
   return '—';
 }
@@ -88,7 +89,7 @@ export function PermissionRequestsPage({
   total = 0,
   page = 1,
   totalPages = 1,
-  limit: _limit = 20,
+  limit = 20,
   statusCounts,
   branches = [],
   canApprove = false,
@@ -309,7 +310,7 @@ export function PermissionRequestsPage({
             {total} {total === 1 ? 'request' : 'requests'}
             {totalPages > 1 ? ` · page ${page} of ${totalPages}` : null}
           </p>
-          <Pagination page={page} totalPages={totalPages} pageParam="page" />
+          <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
         </div>
       )}
 

@@ -89,6 +89,8 @@ export interface DisbursementsPageData {
   totalFunding: number;
   totalPages: number;
   page: number;
+  /** URL-driven page size for the funding table (`perPage` param). */
+  perPage?: number;
   users: Array<{ id: string; name: string; email: string; role: string }>;
   canDisburseToHoM: boolean;
   canDisburseToMediaBuyers: boolean;
@@ -116,6 +118,8 @@ export interface DisbursementsPageData {
   recipientBalancesTotal?: number;
   balancesPage?: number;
   balancesTotalPages?: number;
+  /** URL-driven page size for the recipient balances table (`balancesPerPage` param). */
+  balancesPerPage?: number;
   summary?: {
     totalSent: string;
     totalCompleted: string;
@@ -131,6 +135,8 @@ export interface DisbursementsPageData {
   fundingRequestStatusCounts?: { PENDING: number; APPROVED: number; REJECTED: number; ALL: number };
   requestsPage?: number;
   requestsTotalPages?: number;
+  /** URL-driven page size for the funding requests table (`requestsPerPage` param). */
+  requestsPerPage?: number;
   requestersList?: Array<{ id: string; name: string; email: string; role: string }>;
 }
 
@@ -369,6 +375,7 @@ export function DisbursementsPage({
   totalFunding,
   totalPages,
   page,
+  perPage = 20,
   users,
   canDisburseToHoM,
   preselectedReceiverId = null,
@@ -387,12 +394,14 @@ export function DisbursementsPage({
   recipientBalancesTotal = 0,
   balancesPage = 1,
   balancesTotalPages = 1,
+  balancesPerPage = 20,
   summary = { totalSent: '0', totalCompleted: '0', totalDisputed: '0' },
   fundingRequests = [],
   fundingRequestsTotal = 0,
   fundingRequestStatusCounts = { PENDING: 0, APPROVED: 0, REJECTED: 0, ALL: 0 },
   requestsPage = 1,
   requestsTotalPages = 1,
+  requestsPerPage = 20,
   requestersList = [],
 }: DisbursementsPageData) {
   const { toast } = useToast();
@@ -1141,7 +1150,7 @@ export function DisbursementsPage({
           </TableLoadingOverlay>
 
           {totalPages > 1 && (
-            <Pagination page={page} totalPages={totalPages} pageParam="page" />
+            <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={perPage} pageSizeParam="perPage" />
           )}
         </>
       )}
@@ -1207,7 +1216,7 @@ export function DisbursementsPage({
                 </div>
               </TableLoadingOverlay>
               {requestsTotalPages > 1 && (
-                <Pagination page={requestsPage} totalPages={requestsTotalPages} pageParam="requestsPage" />
+                <Pagination page={requestsPage} totalPages={requestsTotalPages} pageParam="requestsPage" pageSize={requestsPerPage} pageSizeParam="requestsPerPage" />
               )}
         </>
       )}
@@ -1327,7 +1336,7 @@ export function DisbursementsPage({
             </div>
           </TableLoadingOverlay>
           {balancesTotalPages > 1 && (
-            <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" />
+            <Pagination page={balancesPage} totalPages={balancesTotalPages} pageParam="balancesPage" pageSize={balancesPerPage} pageSizeParam="balancesPerPage" />
           )}
         </>
       )}

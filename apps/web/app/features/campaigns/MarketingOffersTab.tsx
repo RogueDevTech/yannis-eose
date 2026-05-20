@@ -134,17 +134,17 @@ export function MarketingOffersTab({
 
   // Client-side pagination — backend `marketing.listOfferGroups` does not paginate.
   // 20 cards/page is the same scale we use across the rest of the app.
-  const OFFERS_PAGE_SIZE = 20;
   const [offersPage, setOffersPage] = useState(1);
-  const offersTotalPages = Math.max(1, Math.ceil(filteredGroups.length / OFFERS_PAGE_SIZE));
+  const [offersPageSize, setOffersPageSize] = useState(20);
+  const offersTotalPages = Math.max(1, Math.ceil(filteredGroups.length / offersPageSize));
   const safeOffersPage = Math.min(offersPage, offersTotalPages);
   const pagedGroups = useMemo(
     () =>
       filteredGroups.slice(
-        (safeOffersPage - 1) * OFFERS_PAGE_SIZE,
-        safeOffersPage * OFFERS_PAGE_SIZE,
+        (safeOffersPage - 1) * offersPageSize,
+        safeOffersPage * offersPageSize,
       ),
-    [filteredGroups, safeOffersPage],
+    [filteredGroups, safeOffersPage, offersPageSize],
   );
   // Reset to page 1 when filters change.
   useEffect(() => {
@@ -322,15 +322,20 @@ export function MarketingOffersTab({
       {!offersLoading && filteredGroups.length > 0 && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border pt-4">
           <p className="text-sm text-app-fg-muted">
-            Showing {(safeOffersPage - 1) * OFFERS_PAGE_SIZE + 1}–
-            {Math.min(safeOffersPage * OFFERS_PAGE_SIZE, filteredGroups.length)} of{' '}
+            Showing {(safeOffersPage - 1) * offersPageSize + 1}–
+            {Math.min(safeOffersPage * offersPageSize, filteredGroups.length)} of{' '}
             {filteredGroups.length}
-            <span className="text-app-fg-muted/90"> · {OFFERS_PAGE_SIZE} per page</span>
+            <span className="text-app-fg-muted/90"> · {offersPageSize} per page</span>
           </p>
           <Pagination
             page={safeOffersPage}
             totalPages={offersTotalPages}
             onPageChange={setOffersPage}
+            pageSize={offersPageSize}
+            onPageSizeChange={(n) => {
+              setOffersPageSize(n);
+              setOffersPage(1);
+            }}
             className="sm:justify-end"
           />
         </div>

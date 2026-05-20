@@ -50,8 +50,18 @@ const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(
   }),
 );
 
+/**
+ * Status filter list for the Marketing orders page: the shared CS-funnel buckets
+ * plus Cancelled, minus Cash Remitted — remittance is accountant-only and never
+ * relevant to a marketing view of the funnel.
+ */
+const MARKETING_ORDERS_STATUSES = [
+  ...STATUS_OPTIONS.filter((status) => status !== 'REMITTED'),
+  'CANCELLED',
+];
+
 /** Status dropdown labels before streamed counts hydrate (same order as full options). */
-const MARKETING_ORDERS_STATUS_OPTIONS_BASE = STATUS_OPTIONS.map((status) => ({
+const MARKETING_ORDERS_STATUS_OPTIONS_BASE = MARKETING_ORDERS_STATUSES.map((status) => ({
   value: status,
   label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
 }));
@@ -68,6 +78,8 @@ export type MarketingOrdersSecondaryPayload = {
   productsForFilter: Array<{ id: string; name: string }>;
   /** Always populated — Form (campaign) filter so a Media Buyer can isolate a single funnel. */
   campaignsForFilter: Array<{ id: string; name: string }>;
+  /** Open (un-recovered) abandoned-cart count, scoped to the viewer's media buyer / branch. */
+  abandonedCartCount: number;
 };
 
 interface MarketingOrdersPageProps {
@@ -518,6 +530,7 @@ export function MarketingOrdersPage({
                 { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Delivery Rate', value: <StatValuePulse className="min-w-[3rem]" /> },
                 { label: 'CPA', value: <StatValuePulse className="min-w-[4rem]" /> },
+                { label: 'Cancelled', value: <StatValuePulse className="min-w-[2rem]" /> },
               ]}
             />
 
@@ -576,10 +589,10 @@ export function MarketingOrdersPage({
               (statusCounts['DISPATCHED'] ?? 0) +
               (statusCounts['IN_TRANSIT'] ?? 0);
             const deliveredCount = statusCounts['DELIVERED'] ?? 0;
-            const remittedCount = statusCounts['REMITTED'] ?? 0;
+            const cancelledCount = statusCounts['CANCELLED'] ?? 0;
             const deliveryRate =
               total > 0 ? (((statusCounts['DELIVERED'] ?? 0) / total) * 100).toFixed(1) : '0';
-            const statusOptions = STATUS_OPTIONS.map((status) => ({
+            const statusOptions = MARKETING_ORDERS_STATUSES.map((status) => ({
               value: status,
               label:
                 status === 'ALL'
@@ -619,9 +632,13 @@ export function MarketingOrdersPage({
                       valueClassName: 'text-success-600 dark:text-success-400',
                     },
                     {
-                      label: 'Cash Remitted',
-                      value: remittedCount,
-                      valueClassName: 'text-green-600 dark:text-green-400',
+                      label: 'Cart abandonment',
+                      value: ins.abandonedCartCount,
+                      valueClassName:
+                        ins.abandonedCartCount > 0
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-app-fg',
+                      title: 'Open abandoned carts not yet recovered',
                     },
                     { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
                     {
@@ -636,6 +653,14 @@ export function MarketingOrdersPage({
                           '\u2014'
                         ),
                       valueClassName: 'text-app-fg',
+                    },
+                    {
+                      label: 'Cancelled',
+                      value: cancelledCount,
+                      valueClassName:
+                        cancelledCount > 0
+                          ? 'text-danger-600 dark:text-danger-400'
+                          : 'text-app-fg',
                     },
                   ]}
                 />

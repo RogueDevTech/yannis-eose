@@ -4,7 +4,7 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import type { ShouldRevalidateFunctionArgs } from '@remix-run/react';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
-import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, getCurrentUser, safeStatus, defaultThisMonthRange, parsePerPage } from '~/lib/api.server';
 import { USERS_LIST_MAX_LIMIT } from '~/lib/trpc-list-limits';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
@@ -93,7 +93,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const balancesRole = url.searchParams.get('balancesRole') || '';
   const balancesStatus = url.searchParams.get('balancesStatus') || '';
 
-  const TAB_PAGE_LIMIT = 20;
+  // URL-driven page sizes — one param per paginated table (funding / requests / balances).
+  const { perPage } = parsePerPage(url.searchParams);
+  const { perPage: requestsPerPage } = parsePerPage(url.searchParams, { param: 'requestsPerPage' });
+  const { perPage: balancesPerPage } = parsePerPage(url.searchParams, { param: 'balancesPerPage' });
 
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
@@ -128,14 +131,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const bundleInput = encodeURIComponent(
     JSON.stringify({
       page,
-      limit: 20,
+      limit: perPage,
       ...(startDate && { startDate }),
       ...(endDate && { endDate }),
       ...(statusFilter && { status: statusFilter }),
       ...(receiverFilter && { receiverId: receiverFilter }),
       ...(searchFilter && { search: searchFilter }),
       requestsPage,
-      requestsLimit: TAB_PAGE_LIMIT,
+      requestsLimit: requestsPerPage,
       usersLimit: USERS_LIST_MAX_LIMIT,
     }),
   );
@@ -168,25 +171,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return roleMatch && searchMatch && statusMatch;
   });
   const recipientBalancesTotal = filteredRecipientBalancesAll.length;
-  const balancesTotalPages = Math.max(1, Math.ceil(recipientBalancesTotal / TAB_PAGE_LIMIT));
+  const balancesTotalPages = Math.max(1, Math.ceil(recipientBalancesTotal / balancesPerPage));
   balancesPage = Math.min(balancesPage, balancesTotalPages);
   const recipientBalances = filteredRecipientBalancesAll.slice(
-    (balancesPage - 1) * TAB_PAGE_LIMIT,
-    balancesPage * TAB_PAGE_LIMIT,
+    (balancesPage - 1) * balancesPerPage,
+    balancesPage * balancesPerPage,
   );
 
   const fundingData = bundle?.funding ?? null;
   const summary = bundle?.summary ?? { totalSent: '0', totalCompleted: '0', totalDisputed: '0' };
   let fundingRequestsResult = bundle?.requests ?? { records: [], pagination: { page: 1, limit: 20, total: 0 } };
   const requestsTotal = Number(fundingRequestsResult.pagination.total);
-  let requestsTotalPages = Math.max(1, Math.ceil(requestsTotal / TAB_PAGE_LIMIT));
+  let requestsTotalPages = Math.max(1, Math.ceil(requestsTotal / requestsPerPage));
   if (requestsPageParam > requestsTotalPages && requestsTotal > 0) {
     requestsPage = requestsTotalPages;
     const retryRes = await apiRequest<unknown>(
       `/trpc/marketing.listFundingRequests?input=${encodeURIComponent(
         JSON.stringify({
           page: requestsPage,
-          limit: TAB_PAGE_LIMIT,
+          limit: requestsPerPage,
           // Keep the overshoot-retry consistent with the bundle: Finance
           // Disbursements only lists Head of Marketing funding requests.
           requesterRole: 'HEAD_OF_MARKETING',
@@ -211,13 +214,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }));
 
   const total = fundingData?.pagination?.total ?? 0;
-  const totalPages = Math.ceil(total / 20);
+  const totalPages = Math.ceil(total / perPage);
 
   return {
     funding: fundingData?.records ?? [],
     totalFunding: total,
     totalPages,
     page,
+    perPage,
     users,
     canDisburseToHoM,
     canDisburseToMediaBuyers,
@@ -227,12 +231,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
     recipientBalancesTotal,
     balancesPage,
     balancesTotalPages,
+    balancesPerPage,
     summary,
     fundingRequests,
     fundingRequestsTotal: requestsTotal,
     fundingRequestStatusCounts,
     requestsPage,
     requestsTotalPages,
+    requestsPerPage,
     requestersList,
   } satisfies DisbursementsPageData;
   })();
