@@ -896,6 +896,7 @@ export function MarketingAdSpendPage({
 
       {metrics ? (
         <OverviewStatStrip
+          mobileGrid
           items={[
             {
               label: 'Total spend',

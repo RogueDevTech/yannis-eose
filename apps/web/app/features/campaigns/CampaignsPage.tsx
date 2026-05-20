@@ -266,6 +266,7 @@ export function FormsPage({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total Forms', value: totalForms, valueClassName: 'text-app-fg' },
           {

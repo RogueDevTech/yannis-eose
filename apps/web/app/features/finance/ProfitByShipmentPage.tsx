@@ -266,6 +266,7 @@ export function ProfitByShipmentPage({ shipments, shipmentId, profit }: Props) {
           )}
 
           <OverviewStatStrip
+            mobileGrid
             items={[
               {
                 label: 'Cost in (total)',

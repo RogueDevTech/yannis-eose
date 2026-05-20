@@ -645,6 +645,7 @@ function ProductsRouteInner(
       />
 
 <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Products', value: resolved.total, valueClassName: 'text-app-fg' },
           {

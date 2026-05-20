@@ -3,6 +3,7 @@ import {
   customFieldOrderToken,
   fixedFieldOrderToken,
   normalizeCampaignFieldOrder,
+  OFFER_FIELD_ORDER_TOKEN,
   orderStandardFieldsByFieldOrder,
   standardFieldOrderToken,
   type CampaignFieldOrderToken,
@@ -27,6 +28,10 @@ export type OrderedPreviewField =
       token: CampaignFieldOrderToken;
       kind: 'custom';
       field: CustomFormField;
+    }
+  | {
+      token: CampaignFieldOrderToken;
+      kind: 'offer';
     };
 
 export function parseFieldOrderPayload(
@@ -85,6 +90,9 @@ export function buildOrderedPreviewFields(
       if (token === fixedFieldOrderToken('phoneNumber')) {
         return { token, kind: 'fixed', key: 'phoneNumber' };
       }
+      if (token === OFFER_FIELD_ORDER_TOKEN) {
+        return { token, kind: 'offer' };
+      }
       if (token.startsWith('standard.')) {
         const key = token.slice('standard.'.length) as StandardFieldKey;
         const field = standardMap.get(key);
@@ -104,6 +112,7 @@ export function buildOrderedPreviewFields(
 export function describeFieldOrderToken(token: CampaignFieldOrderToken): string {
   if (token === fixedFieldOrderToken('fullName')) return 'Full Name';
   if (token === fixedFieldOrderToken('phoneNumber')) return 'Phone Number';
+  if (token === OFFER_FIELD_ORDER_TOKEN) return 'Offer selection';
   if (token.startsWith('standard.')) {
     const key = token.slice('standard.'.length) as StandardFieldKey;
     return STANDARD_FIELD_LABELS[key] ?? 'Additional field';
@@ -115,5 +124,6 @@ export {
   customFieldOrderToken,
   fixedFieldOrderToken,
   standardFieldOrderToken,
+  OFFER_FIELD_ORDER_TOKEN,
   type CampaignFieldOrderToken,
 };

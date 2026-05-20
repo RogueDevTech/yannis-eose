@@ -185,6 +185,44 @@
     opacity: 1;
   }
 
+  /*
+   * Native date / time inputs — typography normalisation (all themes).
+   *
+   * Two browser quirks make these fields look inconsistent vs our text inputs:
+   *   1. The editable value (`::-webkit-datetime-edit` and its segments) falls
+   *      back to the UA font instead of inheriting Inter — so the `dd/mm/yyyy`
+   *      and entered date render in the wrong typeface/size on some passes.
+   *   2. The native widget box ignores zoom cleanly, clipping / shifting the
+   *      value when the page is zoomed.
+   * `appearance: none` drops the native widget box (the calendar-picker icon
+   * pseudo still renders); forcing `font: inherit` on the edit region pins the
+   * value to our font. Input `font-size` is left alone so the touch-device
+   * 16px anti-zoom rule below still applies.
+   */
+  input[type='date'],
+  input[type='time'],
+  input[type='datetime-local'],
+  input[type='month'],
+  input[type='week'] {
+    -webkit-appearance: none;
+    appearance: none;
+    font-family: inherit;
+  }
+
+  input[type='date']::-webkit-datetime-edit,
+  input[type='time']::-webkit-datetime-edit,
+  input[type='datetime-local']::-webkit-datetime-edit,
+  input[type='month']::-webkit-datetime-edit,
+  input[type='week']::-webkit-datetime-edit,
+  input[type='date']::-webkit-datetime-edit-fields-wrapper,
+  input[type='time']::-webkit-datetime-edit-fields-wrapper,
+  input[type='datetime-local']::-webkit-datetime-edit-fields-wrapper {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: normal;
+    padding: 0;
+  }
+
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     @apply w-1.5;
@@ -378,23 +416,32 @@
     @apply input border-danger-500 focus:border-danger-500 focus:ring-danger-500;
   }
 
+  /* Native checkbox / radio — brand primary accent app-wide. `accent-color`
+     paints the checked fill + tick in our logo blue on every supporting
+     browser. The custom <Checkbox> component covers Safari / iOS, where
+     `accent-color` is only partially honoured. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: #1565c0; /* brand-500 — primary */
+  }
+
   /* Checkbox / radio dark mode */
   .dark input[type="checkbox"],
   .dark input[type="radio"] {
     background-color: rgb(30 41 59); /* surface-800 */
-    border-color: rgb(71 85 105); /* surface-600 */
+    border-color: #1565c0; /* brand-500 — primary */
     color-scheme: dark;
-    accent-color: rgb(129 140 248); /* brand-400 for visible check in dark */
+    accent-color: #1565c0; /* brand-500 — primary */
   }
   .dark input[type="checkbox"]:checked,
   .dark input[type="radio"]:checked {
-    background-color: rgb(99 102 241); /* brand-500 */
-    border-color: rgb(99 102 241);
-    accent-color: rgb(99 102 241);
+    background-color: #1565c0; /* brand-500 */
+    border-color: #1565c0;
+    accent-color: #1565c0;
   }
   .dark input[type="checkbox"]:focus,
   .dark input[type="radio"]:focus {
-    --tw-ring-color: rgb(99 102 241 / 0.5);
+    --tw-ring-color: rgb(21 101 192 / 0.5); /* brand-500 */
   }
 
   .table-header {

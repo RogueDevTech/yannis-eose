@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Form, Link, useActionData, useNavigation } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { PageNotification } from '~/components/ui/page-notification';
 import { EyeToggle } from './EyeToggle';
@@ -201,13 +202,11 @@ function LoginForm({
           htmlFor="rememberMe"
           className="flex items-center gap-2 cursor-pointer select-none text-sm text-app-fg-muted"
         >
-          <input
+          <Checkbox
             id="rememberMe"
             name="rememberMe"
-            type="checkbox"
             checked={rememberMe}
             onChange={(e) => setRememberMe(e.target.checked)}
-            className="h-4 w-4 rounded border-app-border text-brand-600 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
           />
           <span>Remember me on this device</span>
         </label>

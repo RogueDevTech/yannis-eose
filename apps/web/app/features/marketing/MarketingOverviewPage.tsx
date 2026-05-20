@@ -403,7 +403,7 @@ export function MarketingOverviewPage({
         }
       />
 
-      <OverviewStatStrip items={statItems} />
+      <OverviewStatStrip mobileGrid items={statItems} />
 
       {/* ── Live Activity strip (browsing / abandoned / order-placed cards) ── */}
       <div>

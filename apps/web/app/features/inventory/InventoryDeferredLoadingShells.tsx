@@ -368,6 +368,7 @@ export function InventoryOverviewLoadingShell() {
         ]}
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total Stock', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Reserved', value: <StatValuePulse className="min-w-[2.5rem]" /> },
@@ -479,6 +480,7 @@ export function InventoryLevelDetailLoadingShell() {
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <div className="h-8 w-64 max-w-full rounded bg-app-hover animate-pulse" aria-hidden />
       <OverviewStatStrip
+        mobileGrid
         tileClassName="min-w-[7rem]"
         items={[
           { label: 'Stock', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -526,6 +528,7 @@ export function WarehousesListLoadingShell() {
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Active warehouses', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Warehouses with stock available', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -642,6 +645,7 @@ export function ShipmentsListLoadingShell() {
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Created', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -983,6 +987,7 @@ export function CategoriesLoadingShell() {
       />
 
       <OverviewStatStrip
+        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Total Categories', value: <StatValuePulse className="min-w-[2rem]" /> },

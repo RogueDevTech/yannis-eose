@@ -123,6 +123,7 @@ export function TplOrdersLoadingShell({
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total Orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
           { label: 'Awaiting logistics assignment', value: <StatValuePulse className="min-w-[2rem]" /> },

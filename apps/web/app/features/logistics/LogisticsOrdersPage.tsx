@@ -736,11 +736,11 @@ function LogisticsOrdersPageImpl({
 
       {deferredLoading ? (
         <OverviewStatStrip
-          tileClassName="min-w-[6rem]"
+          mobileGrid
           items={[
-            { label: 'Total Orders', value: <StatValuePulse className="min-w-[3rem]" /> },
-            { label: 'Awaiting assignment', value: <StatValuePulse className="min-w-[2rem]" /> },
-            { label: 'Agent assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Total', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+            { label: 'Unassigned', value: <StatValuePulse className="min-w-[2rem]" /> },
+            { label: 'Assigned', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Dispatched', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'In transit', value: <StatValuePulse className="min-w-[2rem]" /> },
             { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -748,11 +748,11 @@ function LogisticsOrdersPageImpl({
         />
       ) : (
         <OverviewStatStrip
-          tileClassName="min-w-[6rem]"
+          mobileGrid
           items={[
-            { label: 'Total Orders', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
-            { label: 'Awaiting assignment', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Agent assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
+            { label: 'Total', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
+            { label: 'Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
+            { label: 'Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
             { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400' },
             { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
             { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },

@@ -167,6 +167,7 @@ export function ImportBulkData<
   const [statuses, setStatuses] = useState<RowStatus[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importDone, setImportDone] = useState(false);
+  const [processedCount, setProcessedCount] = useState(0);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   /** Open-state for the per-cell error-detail modal. */
   const [errorDetail, setErrorDetail] = useState<{
@@ -251,6 +252,7 @@ export function ImportBulkData<
     cancelRef.current = false;
     setIsImporting(true);
     setImportDone(false);
+    setProcessedCount(0);
     const initial: RowStatus[] = resolved.map((r) =>
       r.errors.length > 0 ? { state: 'invalid' } : { state: 'pending' },
     );
@@ -272,15 +274,31 @@ export function ImportBulkData<
 
       try {
         const res = await fetch(actionPath, { method: 'POST', body: formData });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok && (data as { success?: boolean }).success === true) {
-          const meta = parseSuccessMeta?.(data);
+
+        // With v3_singleFetch, Remix returns turbo-stream instead of JSON.
+        // The HTTP status code is still reliable: 200 = action returned
+        // json({ success: true }), 400+ = json({ error: ... }).
+        // We trust res.ok for success and only parse text for error messages.
+        if (res.ok) {
           createdAcc += 1;
           setStatuses((prev) =>
-            prev.map((s, idx) => (idx === i ? { state: 'created', meta } : s)),
+            prev.map((s, idx) => (idx === i ? { state: 'created' } : s)),
           );
         } else {
-          const reason = (data as { error?: string }).error ?? `HTTP ${res.status}`;
+          // Try to extract error message from the response
+          const text = await res.text().catch(() => '');
+          let reason = `HTTP ${res.status}`;
+          try {
+            const json = JSON.parse(text);
+            if (json.error) reason = json.error;
+          } catch {
+            // turbo-stream: look for "error","<message>" after "actionData"
+            const actionIdx = text.indexOf('"actionData"');
+            if (actionIdx >= 0) {
+              const errMatch = text.slice(actionIdx).match(/"error","([^"]+)"/);
+              if (errMatch) reason = errMatch[1];
+            }
+          }
           failedAcc += 1;
           setStatuses((prev) =>
             prev.map((s, idx) => (idx === i ? { state: 'failed', reason } : s)),
@@ -293,6 +311,7 @@ export function ImportBulkData<
           prev.map((s, idx) => (idx === i ? { state: 'failed', reason } : s)),
         );
       }
+      setProcessedCount((c) => c + 1);
     }
 
     setIsImporting(false);
@@ -305,23 +324,18 @@ export function ImportBulkData<
     // created").
     const noun = `${resourceLabel}${createdAcc === 1 ? '' : 's'}`;
     if (createdAcc > 0 && failedAcc === 0) {
-      toast.success(`Import complete`, `${createdAcc} ${noun} created.`);
+      toast.success(`Import complete`, `${createdAcc} ${noun} imported.`);
     } else if (createdAcc > 0 && failedAcc > 0) {
       toast.warning(
         `Import finished with errors`,
-        `${createdAcc} ${noun} created, ${failedAcc} failed.`,
+        `${createdAcc} ${noun} imported, ${failedAcc} failed.`,
       );
     } else if (failedAcc > 0) {
       toast.error(`Import failed`, `${failedAcc} of ${resolved.length} rows failed.`);
     }
 
-    if (redirectOnComplete) {
-      // Brief delay so the toast + completed status icons are visible before
-      // we navigate away. The dest defaults to backHref so the operator
-      // lands on the listing they came from.
-      const dest = doneHref ?? backHref;
-      window.setTimeout(() => navigate(dest), 1200);
-    }
+    // Navigation is now handled by the progress modal's "Go to list" button
+    // when redirectOnComplete is set — no more auto-timeout redirect.
   }
 
   const completedCount = statuses.filter((s) => s.state === 'created').length;
@@ -484,27 +498,29 @@ export function ImportBulkData<
       {/* ── Editable preview / editor ─────────────────────────────────── */}
       {parsed.length > 0 ? (
         <div className="card space-y-3 p-0 overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-app-border">
+          <div className="px-4 py-3 border-b border-app-border space-y-2.5">
             <div>
               <h2 className="text-sm font-semibold text-app-fg">2. Preview &amp; edit</h2>
               <p className="text-xs text-app-fg-muted">
                 Rows in{' '}
                 <span className="text-success-700 dark:text-success-400 font-medium">green</span>{' '}
-                are ready to import. Edit any cell to fix the others.
+                are ready. Edit any cell to fix the others.
               </p>
             </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-app-fg">
-                <strong>{resolved.length}</strong> total
+            {/* Stat pills + actions */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1 rounded-full bg-app-hover px-2.5 py-1 font-medium text-app-fg">
+                {resolved.length} total
               </span>
-              <span className="text-success-700 dark:text-success-400">
-                <strong>{validCount}</strong> ready
+              <span className="inline-flex items-center gap-1 rounded-full bg-success-100 dark:bg-success-900/30 px-2.5 py-1 font-medium text-success-700 dark:text-success-400">
+                {validCount} ready
               </span>
               {invalidCount > 0 ? (
-                <span className="text-danger-700 dark:text-danger-400">
-                  <strong>{invalidCount}</strong> need fixing
+                <span className="inline-flex items-center gap-1 rounded-full bg-danger-100 dark:bg-danger-900/30 px-2.5 py-1 font-medium text-danger-700 dark:text-danger-400">
+                  {invalidCount} need fixing
                 </span>
               ) : null}
+              <span className="flex-1" />
               <Button type="button" variant="secondary" size="sm" onClick={addBlankRow} disabled={isImporting}>
                 + Row
               </Button>
@@ -522,7 +538,8 @@ export function ImportBulkData<
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          {/* ── Desktop: horizontal table ─────────────────────────────── */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="text-app-fg-muted bg-app-hover/30 border-b border-app-border">
                 <tr>
@@ -542,8 +559,6 @@ export function ImportBulkData<
                 {resolved.map((row, idx) => {
                   const ok = row.errors.length === 0;
                   const status = statuses[idx];
-                  // Only valid rows get the green tint — invalid rows stay
-                  // neutral and let the per-cell red rings localise the issue.
                   const rowTint = ok ? 'bg-success-50/50 dark:bg-success-900/15' : '';
                   return (
                     <tr
@@ -615,20 +630,110 @@ export function ImportBulkData<
             </table>
           </div>
 
+          {/* ── Mobile: stacked cards ────────────────────────────────────── */}
+          <div className="sm:hidden px-3 py-3 space-y-3">
+            {resolved.map((row, idx) => {
+              const ok = row.errors.length === 0;
+              const status = statuses[idx];
+              const cardBorder = ok
+                ? 'border-success-200 dark:border-success-800/60'
+                : 'border-danger-200 dark:border-danger-800/60';
+              const cardBg = ok
+                ? 'bg-success-50/30 dark:bg-success-950/20'
+                : 'bg-app-elevated';
+              return (
+                <div
+                  key={`m-${row.rowIndex}-${idx}`}
+                  className={`rounded-xl border ${cardBorder} ${cardBg} shadow-sm overflow-hidden`}
+                >
+                  {/* Card header */}
+                  <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-app-border/60 bg-app-hover/30">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-app-fg tabular-nums">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-app-fg/10 text-micro font-bold text-app-fg-muted">
+                        {row.rowIndex}
+                      </span>
+                      <RowImportStatusIcon status={status} />
+                      {ok ? (
+                        <span className="inline-flex items-center gap-0.5 text-micro font-semibold text-success-600 dark:text-success-400 bg-success-100 dark:bg-success-900/40 px-1.5 py-0.5 rounded-full">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                          Ready
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-0.5 text-micro font-semibold text-danger-600 dark:text-danger-400 bg-danger-100 dark:bg-danger-900/40 px-1.5 py-0.5 rounded-full">
+                          {row.errors.length} {row.errors.length === 1 ? 'issue' : 'issues'}
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeRow(idx)}
+                      disabled={isImporting}
+                      className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-danger-200 dark:border-danger-700/60 bg-danger-50 dark:bg-danger-900/30 text-danger-700 dark:text-danger-300 hover:bg-danger-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      aria-label={`Remove row ${row.rowIndex}`}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  {/* Card fields */}
+                  <div className="px-3.5 py-3 space-y-3">
+                    {columns.map((col) => {
+                      const errored = isFieldErrored(row.errors, col.errorTokens);
+                      const fieldErrors = errored
+                        ? getFieldErrors(row.errors, col.errorTokens)
+                        : [];
+                      return (
+                        <div key={col.header}>
+                          <label className="block text-xs font-medium text-app-fg-muted mb-1">
+                            {col.header}
+                          </label>
+                          <div className="flex items-start gap-1.5">
+                            <div className="flex-1 min-w-0">
+                              {col.renderCell({
+                                row,
+                                rowIndex: idx,
+                                disabled: isImporting,
+                                errored,
+                                patch: (patch) => patchRow(idx, patch),
+                              })}
+                            </div>
+                            {!col.hideErrorInfo && fieldErrors.length > 0 ? (
+                              <CellErrorInfoButton
+                                fieldLabel={col.errorLabel}
+                                rowNumber={row.rowIndex}
+                                value={col.getDisplayValue(row)}
+                                errors={fieldErrors}
+                                onOpen={setErrorDetail}
+                              />
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
           {/* ── Footer / actions ───────────────────────────────────────── */}
-          <div className="border-t border-app-border px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-app-fg-muted">
+          <div className="border-t border-app-border px-4 py-3 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
+            <p className="text-xs text-app-fg-muted">
               {importDone
-                ? `${completedCount} created${failedCount > 0 ? `, ${failedCount} failed` : ''}.`
+                ? `${completedCount} imported${failedCount > 0 ? `, ${failedCount} failed` : ''}.`
                 : isImporting
                   ? `Importing… ${completedCount} done.`
-                  : `Invalid rows are skipped automatically — fix or drop them.`}
-            </div>
-            <div className="flex items-center gap-2">
+                  : `Invalid rows are skipped — fix or drop them.`}
+            </p>
+            <div className="flex items-center gap-2 max-sm:w-full">
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
+                className="max-sm:flex-1"
                 onClick={() => navigate(cancelHref)}
                 disabled={isImporting}
               >
@@ -638,6 +743,7 @@ export function ImportBulkData<
                 type="button"
                 variant="primary"
                 size="sm"
+                className="max-sm:flex-1"
                 onClick={runImport}
                 loading={isImporting}
                 loadingText="Importing…"
@@ -743,6 +849,138 @@ export function ImportBulkData<
           </>
         ) : null}
       </Modal>
+
+      {/* ── Import progress modal ────────────────────────────────────── */}
+      <Modal
+        open={isImporting || importDone}
+        onClose={() => {
+          // Only allow closing when done
+          if (importDone) setImportDone(false);
+        }}
+        maxWidth="max-w-sm"
+        aria-labelledby="import-progress-title"
+        contentClassName="p-0"
+      >
+        {(() => {
+          const pct = validCount > 0 ? Math.round((processedCount / validCount) * 100) : 0;
+          const currentCreated = statuses.filter((s) => s.state === 'created').length;
+          const currentFailed = statuses.filter((s) => s.state === 'failed').length;
+          const done = importDone;
+          const allSuccess = done && currentFailed === 0;
+          const hasFailures = done && currentFailed > 0;
+          return (
+            <div className="px-5 py-5 space-y-4">
+              <div className="flex items-center gap-3">
+                {done ? (
+                  allSuccess ? (
+                    <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-success-100 dark:bg-success-900/40">
+                      <svg className="w-5 h-5 text-success-600 dark:text-success-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-warning-100 dark:bg-warning-900/40">
+                      <svg className="w-5 h-5 text-warning-600 dark:text-warning-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                      </svg>
+                    </span>
+                  )
+                ) : (
+                  <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900/40">
+                    <span className="inline-block w-5 h-5 rounded-full border-2 border-brand-600 dark:border-brand-400 border-t-transparent animate-spin" />
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <h3 id="import-progress-title" className="text-sm font-semibold text-app-fg">
+                    {done
+                      ? allSuccess
+                        ? 'Import complete'
+                        : 'Import finished'
+                      : 'Importing…'}
+                  </h3>
+                  <p className="text-xs text-app-fg-muted">
+                    {done
+                      ? `${currentCreated} imported${currentFailed > 0 ? `, ${currentFailed} failed` : ''}`
+                      : `Processing ${processedCount} of ${validCount} ${resourceLabel}${validCount === 1 ? '' : 's'}`}
+                  </p>
+                </div>
+              </div>
+              {/* Progress bar */}
+              <div className="space-y-1.5">
+                <div className="h-2.5 w-full rounded-full bg-app-hover overflow-hidden">
+                  <div
+                    className={[
+                      'h-full rounded-full transition-all duration-300 ease-out',
+                      done
+                        ? hasFailures
+                          ? 'bg-warning-500'
+                          : 'bg-success-500'
+                        : 'bg-brand-500',
+                    ].join(' ')}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-micro text-app-fg-muted tabular-nums">
+                  <span>{pct}%</span>
+                  <span>
+                    {processedCount}/{validCount}
+                  </span>
+                </div>
+              </div>
+              {/* Per-status counters */}
+              {(currentCreated > 0 || currentFailed > 0) ? (
+                <div className="flex items-center gap-4 text-xs">
+                  {currentCreated > 0 ? (
+                    <span className="inline-flex items-center gap-1 text-success-700 dark:text-success-400">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      {currentCreated} imported
+                    </span>
+                  ) : null}
+                  {currentFailed > 0 ? (
+                    <span className="inline-flex items-center gap-1 text-danger-700 dark:text-danger-400">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      {currentFailed} failed
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-1">
+                {isImporting ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => { cancelRef.current = true; }}
+                  >
+                    Cancel import
+                  </Button>
+                ) : done ? (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => {
+                      setImportDone(false);
+                      if (redirectOnComplete) {
+                        navigate(doneHref ?? backHref);
+                      }
+                    }}
+                  >
+                    {redirectOnComplete ? 'Go to list' : 'Close'}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }
@@ -769,10 +1007,15 @@ function getFieldErrors(errors: string[], tokens: string[]): string[] {
  * Reusable Tailwind classes for an editable cell input. Neutral by default;
  * red ring when `errored`. Exported so resource-specific renderCells can
  * mirror the input chrome without re-deriving it.
+ *
+ * Compact on desktop (table rows), full-sized on mobile (cards).
  */
 export function importCellInputClass(errored: boolean): string {
   return [
-    'w-full rounded-md border bg-app-elevated px-2 py-1 text-xs text-app-fg',
+    'w-full rounded-md border bg-app-elevated text-app-fg',
+    // Compact for desktop table, comfortable for mobile cards
+    'px-2 py-1 text-xs sm:px-2 sm:py-1 sm:text-xs',
+    'max-sm:px-3 max-sm:py-2 max-sm:text-sm max-sm:rounded-lg',
     'focus:outline-none focus:ring-1',
     errored
       ? 'border-danger-400 ring-1 ring-danger-200 dark:border-danger-700 dark:ring-danger-900/40 focus:ring-danger-500'

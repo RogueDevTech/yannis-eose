@@ -360,7 +360,7 @@ export function MarketingFundingLoadingShell({
         }
       />
 
-      <OverviewStatStrip items={statItems} />
+      <OverviewStatStrip mobileGrid items={statItems} />
 
       <div className="list-panel scroll-mt-4" id="funding-ledger">
         {canDistribute ? (
@@ -646,6 +646,7 @@ export function MarketingAdSpendLoadingShell({
       ) : null}
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total spend', value: <StatValuePulse className="min-w-[5rem]" /> },
           { label: 'CPA', value: <StatValuePulse className="min-w-[4rem]" /> },
@@ -897,6 +898,7 @@ export function MarketingTeamLoadingShell({
       />
 
       <OverviewStatStrip
+        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Total Sent', value: <StatValuePulse className="min-w-[5rem]" /> },
@@ -1222,6 +1224,7 @@ export function MarketingCrossFunnelLoadingShell({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Attempts', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Unique customers', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -1358,6 +1361,7 @@ export function MarketingFormsLoadingShell({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total Forms', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Active Forms', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -1582,6 +1586,7 @@ export function MarketingOrdersLoadingShell({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total', value: <StatValuePulse className="min-w-[2.25rem]" /> },
           { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },

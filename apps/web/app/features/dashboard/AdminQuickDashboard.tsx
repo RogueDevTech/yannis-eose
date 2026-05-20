@@ -87,6 +87,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
           </Link>
         </div>
         <OverviewStatStrip
+          mobileGrid
           embedded
           showScrollControls={false}
           items={[
@@ -132,6 +133,7 @@ export function AdminQuickDashboard({ data, userName, role }: AdminQuickDashboar
           </Link>
         </div>
         <OverviewStatStrip
+          mobileGrid
           embedded
           showScrollControls={false}
           items={[

@@ -397,6 +397,7 @@ export function MarketingTeamPage({
       />
 
       <OverviewStatStrip
+        mobileGrid
         showScrollControls={false}
         items={[
           {

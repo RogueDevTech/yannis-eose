@@ -14,10 +14,19 @@ export type OrderableStandardFieldKey = (typeof ORDERABLE_STANDARD_FIELD_KEYS)[n
 
 export const FIXED_FIELD_ORDER_TOKENS = ['fixed.fullName', 'fixed.phoneNumber'] as const;
 
+/**
+ * Single token for the whole "Select Offer" block. It is orderable like any
+ * field so the builder can place it anywhere; `defaultCampaignFieldOrder`
+ * appends it last so the offer block defaults to the bottom of the form.
+ * Rendering stays conditional on the form actually having offers.
+ */
+export const OFFER_FIELD_ORDER_TOKEN = 'offer' as const;
+
 export type CampaignFieldOrderToken =
   | `fixed.${OrderableFixedFieldKey}`
   | `standard.${OrderableStandardFieldKey}`
-  | `custom.${string}`;
+  | `custom.${string}`
+  | typeof OFFER_FIELD_ORDER_TOKEN;
 
 type StandardFieldLike = { key: string };
 type CustomFieldLike = { id: string; order?: number | null; required?: boolean };
@@ -57,6 +66,8 @@ export function defaultCampaignFieldOrder(
       standardFieldOrderToken(key),
     ),
     ...customTokens,
+    // Offer block defaults to the bottom of the form.
+    OFFER_FIELD_ORDER_TOKEN,
   ];
 }
 
