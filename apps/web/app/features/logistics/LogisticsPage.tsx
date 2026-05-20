@@ -699,7 +699,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 type="url"
                 label="WhatsApp group link"
                 placeholder="https://chat.whatsapp.com/…"
-                hint="Used by the CS Share to logistics company flow. Optional."
+                hint="Used by the Sales Share to logistics company flow. Optional."
                 wrapperClassName="sm:col-span-2"
               />
               <TextInput
@@ -987,7 +987,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
                 label="WhatsApp group link"
                 defaultValue={editingLocation.whatsappGroupLink ?? ''}
                 placeholder="https://chat.whatsapp.com/…"
-                hint="Leave empty to remove. Used by the CS Share to logistics company flow."
+                hint="Leave empty to remove. Used by the Sales Share to logistics company flow."
                 wrapperClassName="sm:col-span-2"
               />
               <TextInput

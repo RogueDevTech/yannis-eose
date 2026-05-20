@@ -33,7 +33,7 @@ const CS_ORDERS_VISIBLE_STATUSES = new Set(
   STATUS_OPTIONS.filter((s) => s !== 'ALL' && s !== 'REMITTED'),
 );
 export const meta: MetaFunction = () => [
-  { title: 'CS Orders — Yannis EOSE' },
+  { title: 'Sales Orders — Yannis EOSE' },
 ];
 
 const CS_ORDERS_LIVE_EVENTS = [

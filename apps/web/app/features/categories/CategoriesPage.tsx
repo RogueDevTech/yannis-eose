@@ -410,7 +410,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
             }
             sheet={({ closeSheet }) => (
               <Button
-                variant="primary"
+                variant="secondary"
                 className="w-full justify-center"
                 onClick={() => {
                   closeSheet();
@@ -441,27 +441,29 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
         ]}
       />
 
-      {/* Search */}
-      <div className="card">
-        <form onSubmit={applySearch} className="flex items-center gap-2">
-          <SearchInput
-            value={draftSearch}
-            onChange={(v) => {
-              setDraftSearch(v);
-              if (v === '') {
-                const params = new URLSearchParams(searchParams);
-                params.delete('search');
-                setSearchParams(params);
-              }
-            }}
-            placeholder="Search categories or brand names..."
-            withSubmitButton
-            wrapperClassName="flex-1 min-w-0"
-          />
-        </form>
-      </div>
+      {/* Search — bare (no card chrome) so it runs full-width on mobile, matching
+          other list pages. The input carries its own border/background. */}
+      <form onSubmit={applySearch} className="flex items-center gap-2">
+        <SearchInput
+          value={draftSearch}
+          onChange={(v) => {
+            setDraftSearch(v);
+            if (v === '') {
+              const params = new URLSearchParams(searchParams);
+              params.delete('search');
+              setSearchParams(params);
+            }
+          }}
+          placeholder="Search categories or brand names..."
+          withSubmitButton
+          wrapperClassName="flex-1 min-w-0"
+          className="bg-white dark:bg-app-elevated"
+        />
+      </form>
 
-      <div className="card p-4 sm:p-6">
+      {/* Card chrome is desktop-only — on mobile each row renders as its own
+          elevated card, so an outer card would double the chrome and waste width. */}
+      <div className="md:bg-app-elevated md:rounded-xl md:border md:border-app-border md:shadow-card dark:md:shadow-none md:overflow-hidden">
         <CompactTable<Category>
           caption="Product categories"
           columns={columns}

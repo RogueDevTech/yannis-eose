@@ -1,5 +1,5 @@
 /**
- * Order customer phone as shown in admin / CS UIs and list rows.
+ * Order customer phone as shown in admin / Sales UIs and list rows.
  * - When `customer_phone` is stored: classic digit mask (first 4 + **** + last 4 digits).
  * - When only a hash exists (edge intake): show "Hidden" — never slice the hash into
  *   phone-like hex strings (that confused operators and logistics paste).

@@ -1200,7 +1200,7 @@ export class UsersService {
   }
 
   /**
-   * List CS team members (HEAD_OF_CS + CS_CLOSER) for Team page.
+   * List Sales team members (HEAD_OF_CS + CS_CLOSER) for Team page.
    * Gated by cs.teamOverview; does not require users.read.
    */
   async listCSTeam(branchId?: string | null): Promise<Array<{
@@ -1453,7 +1453,7 @@ export class UsersService {
     // Scoped team-lead edits: anyone holding `users.staff.update_supervised` can narrow-edit
     // their direct reports (capacity, productIds, visibleOrderStatuses). The supervised role
     // resolution still uses the team-supervision codes (cs.teamOverview, team.supervise_cs, etc.)
-    // so a CS-domain supervisor edits CS Closers and a marketing-domain supervisor edits MBs.
+    // so a CS-domain supervisor edits Sales Closers and a marketing-domain supervisor edits MBs.
     // Cannot change role, status, email, phone, name, logistics location, commission plan, etc.
     // Team-leads cannot edit each other or themselves — that stays admin territory.
     const p = (actor.permissions ?? []).map((c) => canonicalPermissionCode(c));
@@ -1483,7 +1483,7 @@ export class UsersService {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: actorIsCsLead
-            ? 'You can only edit CS Closers on your team. Contact an administrator for anything else.'
+            ? 'You can only edit Sales Closers on your team. Contact an administrator for anything else.'
             : 'You can only edit Media Buyers on your team. Contact an administrator for anything else.',
         });
       }

@@ -28,7 +28,7 @@ interface AgentStatePayload {
  * Room naming:
  * - admin           → SuperAdmin dashboard
  * - finance         → Finance dashboard
- * - cs-{userId}     → Individual CS closer
+ * - cs-{userId}     → Individual Sales closer
  * - cs-all          → Head of CS (all CS events)
  * - logistics       → Head of Logistics
  * - marketing-{userId} → Individual Media Buyer
@@ -94,7 +94,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayInit {
   }
 
   /**
-   * CS closer broadcasts their current UI state.
+   * Sales closer broadcasts their current UI state.
    * Server broadcasts to cs-all for Team Live View.
    */
   @SubscribeMessage('agent:state_update')

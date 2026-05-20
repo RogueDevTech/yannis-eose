@@ -683,8 +683,26 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
         actions={
           <PageHeaderMobileTools
             sheetTitle="Funding tools"
-            sheetSubtitle={<span>Request, send, and date range</span>}
+            sheetSubtitle={<span>Filters, request, send, and date range</span>}
             triggerAriaLabel="Filters and funding actions"
+            filtersBadgeCount={(() => {
+              const s =
+                displaySection === 'distributing' ? unifiedDistributingSlice : unifiedReceivedSlice;
+              return s ? ledgerFilterBadgeCount(s.typeFilter, s.statusFilter) : 0;
+            })()}
+            filters={(() => {
+              const s =
+                displaySection === 'distributing' ? unifiedDistributingSlice : unifiedReceivedSlice;
+              if (!s) return undefined;
+              return (
+                <FundingFilterControls
+                  slice={s}
+                  sentLabel={displaySection === 'distributing' ? 'Sent' : 'Pending mark-received'}
+                  onTypeChange={(v) => updateSliceParam('entryType', v)}
+                  onStatusChange={(v) => updateSliceParam('entryStatus', v)}
+                />
+              );
+            })()}
             desktop={renderFundingHeaderToolbar(() => undefined)}
             sheet={({ closeSheet }) =>
               renderFundingHeaderToolbar(closeSheet, {
@@ -1456,6 +1474,78 @@ function SliceFilterBar({
   );
 }
 
+/**
+ * Type + Status selects for funding ledger filters. Shared by the two filter
+ * bars (desktop inline) and the page-header kebab (mobile actions group), so
+ * the same controls render in one place no matter the viewport.
+ */
+function FundingFilterControls({
+  slice,
+  sentLabel,
+  onTypeChange,
+  onStatusChange,
+}: {
+  slice: {
+    typeFilter: string;
+    statusFilter?: string | null;
+    typeCounts: { all: number; transfer: number; request: number };
+    statusCounts: {
+      ALL: number;
+      SENT: number;
+      COMPLETED: number;
+      DISPUTED: number;
+      PENDING: number;
+      APPROVED: number;
+      REJECTED: number;
+    };
+  };
+  /** Label for the SENT bucket — "Sent" (distributing) vs "Pending mark-received" (received). */
+  sentLabel: string;
+  onTypeChange: (val: string) => void;
+  onStatusChange: (val: string) => void;
+}) {
+  const typeOptions = DISTRIBUTING_TYPE_OPTIONS.map((opt) => ({
+    value: opt.value,
+    label:
+      opt.value === 'all'
+        ? `${opt.label} (${slice.typeCounts.all})`
+        : opt.value === 'transfer'
+          ? `${opt.label} (${slice.typeCounts.transfer})`
+          : `${opt.label} (${slice.typeCounts.request})`,
+  }));
+  const statusOptions = [
+    { value: 'ALL', label: `All Status (${slice.statusCounts.ALL})` },
+    { value: 'SENT', label: `${sentLabel} (${slice.statusCounts.SENT})` },
+    { value: 'COMPLETED', label: `Received (${slice.statusCounts.COMPLETED})` },
+    { value: 'DISPUTED', label: `Disputed (${slice.statusCounts.DISPUTED})` },
+    { value: 'PENDING', label: `Pending requests (${slice.statusCounts.PENDING})` },
+    { value: 'APPROVED', label: `Approved requests (${slice.statusCounts.APPROVED})` },
+    { value: 'REJECTED', label: `Rejected requests (${slice.statusCounts.REJECTED})` },
+  ];
+  return (
+    <>
+      <div className="space-y-1.5">
+        <span className="text-xs font-medium text-app-fg-muted">Type</span>
+        <FormSelect
+          value={slice.typeFilter}
+          onChange={(e) => onTypeChange(e.target.value)}
+          options={typeOptions}
+          wrapperClassName="w-full"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <span className="text-xs font-medium text-app-fg-muted">Status</span>
+        <FormSelect
+          value={slice.statusFilter ?? 'ALL'}
+          onChange={(e) => onStatusChange(e.target.value)}
+          options={statusOptions}
+          wrapperClassName="w-full"
+        />
+      </div>
+    </>
+  );
+}
+
 function UnifiedDistributingFilterBar({
   slice,
   searchQuery,
@@ -1495,6 +1585,7 @@ function UnifiedDistributingFilterBar({
 
   return (
     <ToolbarFiltersCollapsible
+      hideMobileSheet
       badgeCount={filterBadge}
       sheetSubtitle={<span>Type and status apply immediately</span>}
       searchRow={
@@ -1524,28 +1615,7 @@ function UnifiedDistributingFilterBar({
           />
         </>
       }
-      sheetFilterBody={
-        <>
-          <div className="space-y-1.5">
-            <span className="text-xs font-medium text-app-fg-muted">Type</span>
-            <FormSelect
-              value={slice.typeFilter}
-              onChange={(e) => onTypeChange(e.target.value)}
-              options={typeOptions}
-              wrapperClassName="w-full"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <span className="text-xs font-medium text-app-fg-muted">Status</span>
-            <FormSelect
-              value={slice.statusFilter ?? 'ALL'}
-              onChange={(e) => onStatusChange(e.target.value)}
-              options={statusOptions}
-              wrapperClassName="w-full"
-            />
-          </div>
-        </>
-      }
+      sheetFilterBody={null}
     />
   );
 }
@@ -1794,6 +1864,7 @@ function UnifiedReceivedFilterBar({
 
   return (
     <ToolbarFiltersCollapsible
+      hideMobileSheet
       badgeCount={filterBadge}
       sheetSubtitle={<span>Type and status apply immediately</span>}
       searchRow={
@@ -1823,28 +1894,7 @@ function UnifiedReceivedFilterBar({
           />
         </>
       }
-      sheetFilterBody={
-        <>
-          <div className="space-y-1.5">
-            <span className="text-xs font-medium text-app-fg-muted">Type</span>
-            <FormSelect
-              value={slice.typeFilter}
-              onChange={(e) => onTypeChange(e.target.value)}
-              options={typeOptions}
-              wrapperClassName="w-full"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <span className="text-xs font-medium text-app-fg-muted">Status</span>
-            <FormSelect
-              value={slice.statusFilter ?? 'ALL'}
-              onChange={(e) => onStatusChange(e.target.value)}
-              options={statusOptions}
-              wrapperClassName="w-full"
-            />
-          </div>
-        </>
-      }
+      sheetFilterBody={null}
     />
   );
 }

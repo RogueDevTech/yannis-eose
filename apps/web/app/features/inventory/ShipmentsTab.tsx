@@ -124,15 +124,9 @@ export function ShipmentsTab({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-sm text-app-fg-muted">
-          {totalShipments} shipment{totalShipments === 1 ? '' : 's'}
-        </div>
-        {canIntake ? (
-          <Link to="/admin/shipments/receive" prefetch="intent" className="btn-primary btn-sm">
-            Receive shipment
-          </Link>
-        ) : null}
+      {/* "Receive shipment" moved to the page-header Action icon group. */}
+      <div className="text-sm text-app-fg-muted">
+        {totalShipments} shipment{totalShipments === 1 ? '' : 's'}
       </div>
 
       {display.length === 0 ? (

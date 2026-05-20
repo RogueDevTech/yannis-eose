@@ -33,7 +33,7 @@ export function CSDashboardCallbacksTabPanel({
             onScrollLeft={() => scrollBy(-280)}
             onScrollRight={() => scrollBy(280)}
             scrollAriaSubject="callbacks"
-            viewAllTo="/admin/cs/orders?scheduleKind=callback_due&period=all_time"
+            viewAllTo="/admin/sales/orders?scheduleKind=callback_due&period=all_time"
           />
           <div
             ref={scrollRef}

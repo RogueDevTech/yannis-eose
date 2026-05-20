@@ -190,7 +190,7 @@ export class HrService {
     const payouts = [];
 
     for (const member of staff) {
-      // Get delivered orders in this period — check BOTH CS closer and Media Buyer attribution
+      // Get delivered orders in this period — check BOTH Sales closer and Media Buyer attribution
       // Commission is based on DELIVERED_AT timestamp, NOT CREATED_AT
       const deliveredRows = await tx
         .select({ count: count(), revenue: sum(schema.orders.totalAmount) })
@@ -453,7 +453,7 @@ export class HrService {
 
   /**
    * Called when an order transitions to RETURNED.
-   * Creates PENDING_DEDUCTION for both Media Buyer and CS Closer.
+   * Creates PENDING_DEDUCTION for both Media Buyer and Sales Closer.
    */
   async createClawbackForReturn(orderId: string, actorId: string) {
     const clawbacks = await withActor(this.db, { id: actorId }, async (tx) => {

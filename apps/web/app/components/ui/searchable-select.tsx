@@ -29,6 +29,8 @@ interface SearchableSelectProps {
   required?: boolean;
   controlSize?: SearchableSelectSize;
   wrapperClassName?: string;
+  /** Extra classes on the trigger button — e.g. `!bg-app-hover text-center`. */
+  triggerClassName?: string;
   filterFn?: (opt: SearchableSelectOption, query: string) => boolean;
 }
 
@@ -66,6 +68,7 @@ export function SearchableSelect({
   required = false,
   controlSize = 'md',
   wrapperClassName = '',
+  triggerClassName = '',
   filterFn,
 }: SearchableSelectProps) {
   const inputId = id ?? (label ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
@@ -79,6 +82,9 @@ export function SearchableSelect({
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [pos, setPos] = useState({ top: 0, left: 0, minWidth: 0, maxWidth: 0 });
+  /** Below `md` the dropdown opens as its own modal so options are never clipped
+   *  when the trigger sits low on screen (e.g. inside a bottom sheet). */
+  const [isMobile, setIsMobile] = useState(false);
 
   const selected = options.find((o) => o.value === value);
   const effectiveFilter = filterFn ?? defaultFilter;
@@ -89,6 +95,25 @@ export function SearchableSelect({
   const firstEnabled = filtered.findIndex((o) => !o.disabled);
   /** Ignore scroll/resize close briefly after open — iOS scrolls focused inputs into view and fires capture scroll; VK opens resize. */
   const suppressCloseUntilRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(max-width: 767px)');
+    const sync = () => setIsMobile(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  // Lock background scroll while the mobile modal is open.
+  useEffect(() => {
+    if (!open || !isMobile || typeof document === 'undefined') return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open, isMobile]);
 
   useEffect(() => {
     if (!open) return;
@@ -134,7 +159,9 @@ export function SearchableSelect({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    // The modal variant must not close on scroll/resize — keyboard open and
+    // listbox scrolling are expected; only the desktop popover is anchored.
+    if (!open || isMobile) return;
     const onScroll = (e: Event) => {
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       if (now < suppressCloseUntilRef.current) return;
@@ -160,7 +187,7 @@ export function SearchableSelect({
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize, true);
     };
-  }, [open]);
+  }, [open, isMobile]);
 
   /** Keep keyboard-highlighted option visible; listbox uses its own scroll container. */
   useLayoutEffect(() => {
@@ -215,7 +242,90 @@ export function SearchableSelect({
     disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
     hasError ? 'border-danger-500 focus:border-danger-500 focus:ring-danger-500' : '',
     sizeClasses[controlSize],
+    triggerClassName,
   ].filter(Boolean).join(' ');
+
+  // Search + listbox — shared by the desktop popover and the mobile modal.
+  const panelBody = (
+    <>
+      <SearchInput
+        ref={searchRef}
+        value={query}
+        onChange={updateQuery}
+        placeholder={searchPlaceholder}
+        controlSize="sm"
+        withSubmitButton={false}
+        wrapperClassName="mb-2"
+        className="!rounded-md !text-sm !placeholder:text-sm"
+        onWheel={forwardWheelToListbox}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            move(1);
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            move(-1);
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            selectAt(activeIndex);
+          } else if (e.key === 'Escape' || e.key === 'Tab') {
+            setOpen(false);
+          }
+        }}
+        role="combobox"
+        aria-controls={listboxId}
+        aria-expanded={open}
+        aria-activedescendant={activeIndex >= 0 ? `${listboxId}-opt-${activeIndex}` : undefined}
+      />
+
+      <div
+        ref={listboxRef}
+        id={listboxId}
+        role="listbox"
+        className={[
+          'min-w-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] touch-pan-y',
+          filtered.length === 0
+            ? 'max-h-40 shrink-0'
+            : isMobile
+              ? 'min-h-0 flex-1'
+              : 'min-h-0 max-h-56 flex-1',
+        ].join(' ')}
+      >
+        {filtered.length === 0 ? (
+          <p className="px-2 py-1.5 text-xs text-app-fg-muted">{emptyText}</p>
+        ) : (
+          filtered.map((opt, idx) => (
+            <button
+              key={`${listboxId}-${idx}-${opt.value}`}
+              id={`${listboxId}-opt-${idx}`}
+              type="button"
+              role="option"
+              aria-selected={opt.value === value}
+              aria-disabled={opt.disabled}
+              disabled={opt.disabled}
+              className={[
+                'w-full text-left px-2 py-1.5 rounded-md transition-colors',
+                idx === activeIndex ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-app-hover',
+                opt.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+              ].join(' ')}
+              onMouseEnter={() => !opt.disabled && setActiveIndex(idx)}
+              onClick={() => selectAt(idx)}
+            >
+              <div className="flex items-start gap-2">
+                {opt.leading ? <span className="mt-0.5">{opt.leading}</span> : null}
+                <div className="min-w-0">
+                  <p className="text-sm text-app-fg truncate">{opt.label}</p>
+                  {opt.description ? (
+                    <p className="text-xs text-app-fg-muted truncate">{opt.description}</p>
+                  ) : null}
+                </div>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </>
+  );
 
   return (
     <div className={['flex flex-col gap-1', wrapperClassName].filter(Boolean).join(' ')}>
@@ -276,84 +386,48 @@ export function SearchableSelect({
       )}
 
       {open && typeof document !== 'undefined' && createPortal(
-        <div
-          ref={popoverRef}
-          className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated shadow-lg p-2"
-          style={{ top: pos.top, left: pos.left, minWidth: pos.minWidth, maxWidth: pos.maxWidth, width: 'auto' }}
-        >
-          <SearchInput
-            ref={searchRef}
-            value={query}
-            onChange={updateQuery}
-            placeholder={searchPlaceholder}
-            controlSize="sm"
-            withSubmitButton={false}
-            wrapperClassName="mb-2"
-            className="!rounded-md !text-sm !placeholder:text-sm"
-            onWheel={forwardWheelToListbox}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                move(1);
-              } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                move(-1);
-              } else if (e.key === 'Enter') {
-                e.preventDefault();
-                selectAt(activeIndex);
-              } else if (e.key === 'Escape' || e.key === 'Tab') {
-                setOpen(false);
-              }
-            }}
-            role="combobox"
-            aria-controls={listboxId}
-            aria-expanded={open}
-            aria-activedescendant={activeIndex >= 0 ? `${listboxId}-opt-${activeIndex}` : undefined}
-          />
-
+        isMobile ? (
+          // Mobile: a self-contained modal so the full option list is always
+          // visible even when the trigger sits low on screen / in a bottom sheet.
           <div
-            ref={listboxRef}
-            id={listboxId}
-            role="listbox"
-            className={[
-              'min-w-0 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] touch-pan-y',
-              filtered.length === 0 ? 'max-h-40 shrink-0' : 'min-h-0 max-h-56 flex-1',
-            ].join(' ')}
+            className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/40 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setOpen(false);
+            }}
           >
-            {filtered.length === 0 ? (
-              <p className="px-2 py-1.5 text-xs text-app-fg-muted">{emptyText}</p>
-            ) : (
-              filtered.map((opt, idx) => (
+            <div
+              ref={popoverRef}
+              role="dialog"
+              aria-modal="true"
+              className="flex max-h-[80dvh] w-full max-w-md flex-col rounded-xl border border-app-border bg-app-elevated p-3 shadow-lg"
+            >
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="truncate text-sm font-semibold text-app-fg">
+                  {label ?? placeholder}
+                </span>
                 <button
-                  key={`${listboxId}-${idx}-${opt.value}`}
-                  id={`${listboxId}-opt-${idx}`}
                   type="button"
-                  role="option"
-                  aria-selected={opt.value === value}
-                  aria-disabled={opt.disabled}
-                  disabled={opt.disabled}
-                  className={[
-                    'w-full text-left px-2 py-1.5 rounded-md transition-colors',
-                    idx === activeIndex ? 'bg-brand-50 dark:bg-brand-900/20' : 'hover:bg-app-hover',
-                    opt.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-                  ].join(' ')}
-                  onMouseEnter={() => !opt.disabled && setActiveIndex(idx)}
-                  onClick={() => selectAt(idx)}
+                  onClick={() => setOpen(false)}
+                  aria-label="Close"
+                  className="shrink-0 rounded-lg p-1 text-app-fg-muted hover:bg-app-hover hover:text-app-fg"
                 >
-                  <div className="flex items-start gap-2">
-                    {opt.leading ? <span className="mt-0.5">{opt.leading}</span> : null}
-                    <div className="min-w-0">
-                      <p className="text-sm text-app-fg truncate">{opt.label}</p>
-                      {opt.description ? (
-                        <p className="text-xs text-app-fg-muted truncate">{opt.description}</p>
-                      ) : null}
-                    </div>
-                  </div>
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
-              ))
-            )}
+              </div>
+              {panelBody}
+            </div>
           </div>
-        </div>,
+        ) : (
+          <div
+            ref={popoverRef}
+            className="fixed z-[9999] flex max-h-[min(24rem,calc(100dvh-1rem))] flex-col rounded-lg border border-app-border bg-app-elevated shadow-lg p-2"
+            style={{ top: pos.top, left: pos.left, minWidth: pos.minWidth, maxWidth: pos.maxWidth, width: 'auto' }}
+          >
+            {panelBody}
+          </div>
+        ),
         document.body,
       )}
     </div>

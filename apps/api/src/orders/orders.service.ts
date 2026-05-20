@@ -149,7 +149,7 @@ export class OrdersService {
     `cache:orders:detail:${orderId}`;
   private static readonly ORDER_DETAIL_CACHE_TTL_SECONDS = 60;
 
-  /** HoCS / Admin / `orders.reassign`, or CS team supervisor for same-branch team (supervisor: UNPROCESSED / CS_ASSIGNED only). */
+  /** HoCS / Admin / `orders.reassign`, or Sales team supervisor for same-branch team (supervisor: UNPROCESSED / CS_ASSIGNED only). */
   private async assertCanManualAssignToCs(
     actor: SessionUser,
     csCloserId: string,
@@ -187,7 +187,7 @@ export class OrdersService {
    *
    * Capability gate: caller must hold `orders.line_price.edit`. SuperAdmin bypasses.
    * Scope gate (runs after capability passes): org-wide via `cs.scope.global` /
-   * `logistics.scope.global` → any branch; otherwise same-branch only; CS team supervisors
+   * `logistics.scope.global` → any branch; otherwise same-branch only; Sales team supervisors
    * additionally pass for the orders of agents they supervise.
    */
   async canActorEditOrderLinePrices(
@@ -217,7 +217,7 @@ export class OrdersService {
     return false;
   }
 
-  /** Branch CS team: actor is a supervisor row for this assignee on this branch. */
+  /** Branch Sales team: actor is a supervisor row for this assignee on this branch. */
   async isActorCsTeamSupervisor(actorId: string, assignedCsId: string, branchId: string): Promise<boolean> {
     return this.branchTeams.isCsSupervisorOf(actorId, assignedCsId, branchId);
   }
@@ -253,7 +253,7 @@ export class OrdersService {
     // Same-branch admin (Branch Admin).
     if (has('branches.manage') && actor.currentBranchId === ob) return;
 
-    // CS team supervisor for the assignee in same branch.
+    // Sales team supervisor for the assignee in same branch.
     if (order.assignedCsId && actor.currentBranchId === ob) {
       const sup = await this.branchTeams.isCsSupervisorOf(actor.id, order.assignedCsId, ob);
       if (sup) return;
@@ -580,7 +580,7 @@ export class OrdersService {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Failed to create approval request' });
     }
 
-    // Surface the request on the order timeline so the CS rep, HoCS, and any approver
+    // Surface the request on the order timeline so the Sales rep, HoCS, and any approver
     // can see "<actor> proposed price change pending approval" right alongside the
     // other order events. Without this, the request was completely invisible on the
     // detail page until the approver acted on it.
@@ -736,7 +736,7 @@ export class OrdersService {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message:
-          'Only Head of CS, Head of Logistics, Branch Admin, a CS team supervisor for the assignee, or an Admin may archive this order.',
+          'Only Head of CS, Head of Logistics, Branch Admin, a Sales team supervisor for the assignee, or an Admin may archive this order.',
       });
     }
 
@@ -1222,7 +1222,7 @@ export class OrdersService {
           isDuplicate: duplicateFlag,
           duplicateOfId,
           // Back-link to the originating cart so HoCS can filter "Recovered from
-          // cart" on /admin/cs/orders (migration 0142). NULL for direct orders.
+          // cart" on /admin/sales/orders (migration 0142). NULL for direct orders.
           cartId: cartId ?? null,
         })
         .returning();
@@ -1256,7 +1256,7 @@ export class OrdersService {
       mediaBuyerId: order.mediaBuyerId ?? null,
     });
 
-    // Notify Head of CS + Head of Marketing only on new order (not every CS closer — they get
+    // Notify Head of CS + Head of Marketing only on new order (not every Sales closer — they get
     // order:assigned when Hot Swap / auto-dispatch / claim assigns them). SuperAdmin excluded (volume).
     this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
       type: 'order:new',
@@ -1299,7 +1299,7 @@ export class OrdersService {
       });
     }
 
-    // Auto-dispatch to least-loaded CS closer
+    // Auto-dispatch to least-loaded Sales closer
     await this.autoDispatchToCS(order.id);
 
     const mediaBuyerName = order.mediaBuyerId
@@ -1420,7 +1420,7 @@ export class OrdersService {
     }
 
     // When recovering from a cart, pull attribution (MB + campaign) from the
-    // cart row if the CS rep didn't explicitly set it on the modal.
+    // cart row if the Sales rep didn't explicitly set it on the modal.
     if (input.cartId && (!input.campaignId || !input.mediaBuyerId)) {
       const cartRows = await this.db
         .select({
@@ -2301,7 +2301,7 @@ export class OrdersService {
 
     if (order.status === 'UNPROCESSED' || order.status === 'CS_ASSIGNED') {
       // Pass `engagementMethod: 'phone_revealed'` so the timeline records the EXACT
-      // action the CS rep took (revealed + copied the customer's phone for a manual
+      // action the Sales rep took (revealed + copied the customer's phone for a manual
       // dial) instead of the generic "started customer engagement" line.
       await this.transition(
         {
@@ -2431,7 +2431,7 @@ export class OrdersService {
     if (input.supervisorScope) {
       const { csUserIds, mediaBuyerIds } = input.supervisorScope;
       // Supervisor "my team only" scope (Phase B) — OR across the two dimensions:
-      // assigned to a CS team agent OR created by a supervised MB. Both lists also
+      // assigned to a Sales team agent OR created by a supervised MB. Both lists also
       // include the actor's own id so a supervisor sees their own work.
       const orParts = [];
       if (csUserIds.length > 0) orParts.push(inArray(schema.orders.assignedCsId, csUserIds));
@@ -2913,8 +2913,8 @@ export class OrdersService {
     const sameBranchAsOrder =
       !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
 
-    // CS-only transitions (engagement, confirm, cancel): assigned CS closer, anyone with
-    // CS scope (`cs.scope.global`), or branch admin (`branches.manage` + same-branch).
+    // CS-only transitions (engagement, confirm, cancel): assigned Sales closer, anyone with
+    // Sales scope (`cs.scope.global`), or branch admin (`branches.manage` + same-branch).
     const csOnlyTransitions =
       (currentStatus === 'UNPROCESSED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
       (currentStatus === 'CS_ASSIGNED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
@@ -2938,14 +2938,14 @@ export class OrdersService {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message:
-              'Only the assigned CS closer, anyone with CS scope, a Branch Admin (same branch), or an Admin may perform this transition.',
+              'Only the assigned Sales closer, anyone with Sales scope, a Branch Admin (same branch), or an Admin may perform this transition.',
           });
         }
       }
     }
 
-    // CONFIRMED → ALLOCATED: assigned CS closer (CS-as-rider-proxy), anyone with logistics
-    // capability (`logistics.read` covers HoLogistics + LogisticsManager), or org-wide CS scope.
+    // CONFIRMED → ALLOCATED: assigned Sales closer (CS-as-rider-proxy), anyone with logistics
+    // capability (`logistics.read` covers HoLogistics + LogisticsManager), or org-wide Sales scope.
     if (currentStatus === 'CONFIRMED' && newStatus === 'AGENT_ASSIGNED') {
       const isAssignedCs = order.assignedCsId === actor.id;
       const isAuthorized =
@@ -2957,7 +2957,7 @@ export class OrdersService {
       if (!isAuthorized) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only the assigned CS closer, Logistics, or an Admin can allocate this order to a 3PL location.',
+          message: 'Only the assigned Sales closer, Logistics, or an Admin can allocate this order to a 3PL location.',
         });
       }
     }
@@ -2974,14 +2974,14 @@ export class OrdersService {
       if (!isAuthorized) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'Only the assigned CS closer, Logistics, or an Admin can reallocate this order to another 3PL location.',
+          message: 'Only the assigned Sales closer, Logistics, or an Admin can reallocate this order to another 3PL location.',
         });
       }
     }
 
     // {ALLOCATED|DISPATCHED|IN_TRANSIT} → DELIVERED/PARTIALLY_DELIVERED:
     //   - anyone holding `orders.delivery.confirm` (HoLogistics, CS, TPL_MANAGER w/ receipt, Admin via ALL),
-    //   - assigned CS closer (rider-proxy follow-up call),
+    //   - assigned Sales closer (rider-proxy follow-up call),
     //   - TPL_MANAGER specifically requires the receipt to be present (resolveReceiptUrl).
     //   3PL isn't in-app yet, so CS / HoLogistics marks delivered directly after ALLOCATED.
     if (
@@ -3058,7 +3058,7 @@ export class OrdersService {
     }
 
     // Update agent's lastActionAt for dispatch tiebreaker + inactivity tracking.
-    // Tracked for anyone with CS scope (CS closers, anyone with cs.scope.global, etc.).
+    // Tracked for anyone with Sales scope (Sales closers, anyone with cs.scope.global, etc.).
     if (
       transitionPerms.includes(canonicalPermissionCode('orders.read')) &&
       (transitionPerms.includes(canonicalPermissionCode('cs.leaderboard')) ||
@@ -3437,7 +3437,7 @@ export class OrdersService {
       return row;
     });
 
-    const actorName = actor.name ?? 'CS closer';
+    const actorName = actor.name ?? 'Sales closer';
     if (
       workingInput.customerAddress !== undefined ||
       workingInput.deliveryAddress !== undefined ||
@@ -3701,8 +3701,8 @@ export class OrdersService {
   }
 
   /**
-   * Manually assign an order to a CS closer.
-   * Callers with `orders.reassign` (HoCS / Admin), or a branch CS team supervisor for in-team agents
+   * Manually assign an order to a Sales closer.
+   * Callers with `orders.reassign` (HoCS / Admin), or a branch Sales team supervisor for in-team agents
    * on orders in UNPROCESSED or CS_ASSIGNED (supervisors only).
    */
   async assignToCS(orderId: string, csCloserId: string, actor: SessionUser) {
@@ -3982,7 +3982,7 @@ export class OrdersService {
 
   /**
    * Redistribute one agent's CS_ASSIGNED and CS_ENGAGED orders to other agents using the same
-   * load-balanced or performance strategy. Used from CS Team page (Head of CS). Excludes the source
+   * load-balanced or performance strategy. Used from Sales Team page (Head of CS). Excludes the source
    * agent from receiving orders. Returns the number of orders reassigned.
    */
   async redistributeOrdersFromAgent(agentId: string, actor: SessionUser): Promise<{ redistributed: number }> {
@@ -4104,7 +4104,7 @@ export class OrdersService {
   }
 
   /**
-   * List active CS closers (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
+   * List active Sales closers (id + name) for Hot Swap dropdowns (HoCS/SuperAdmin only).
    * Agent-initiated order transfers have been removed — reassignment is management-only.
    */
   async listCSClosers(actor: SessionUser): Promise<Array<{ agentId: string; agentName: string }>> {
@@ -4133,7 +4133,7 @@ export class OrdersService {
   /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
-   * Optional assignedCsId filters to that CS closer's orders (for CS Orders page).
+   * Optional assignedCsId filters to that Sales closer's orders (for Sales Orders page).
    * Optional logisticsLocationId filters to that 3PL location (for Logistics Orders page / TPL_MANAGER scoping).
    * Optional startDate/endDate filter by orders.createdAt (when provided: counts = orders created in period).
    */
@@ -4212,7 +4212,7 @@ export class OrdersService {
   }
 
   /**
-   * Distinct orders per assigned CS closer whose CS stage closed today (Africa/Lagos calendar).
+   * Distinct orders per assigned Sales closer whose CS stage closed today (Africa/Lagos calendar).
    * Uses timeline ORDER_CONFIRMED / ORDER_CANCELLED joined to orders by assigned_cs_id (display-only).
    * Attribution uses current assigned_cs_id — rare reassignment after close could mis-attribute.
    */
@@ -4251,7 +4251,7 @@ export class OrdersService {
   }
 
   /**
-   * Get CS closer workload — for dispatch algorithm and dashboard.
+   * Get Sales closer workload — for dispatch algorithm and dashboard.
    * Single aggregation query + user list (no N+1).
    */
   async getCSCloserWorkloads(
@@ -4322,7 +4322,7 @@ export class OrdersService {
   }
 
   /**
-   * Pending workload orders for a CS closer (same status/branch rules as getCSCloserWorkloads),
+   * Pending workload orders for a Sales closer (same status/branch rules as getCSCloserWorkloads),
    * with line items for HoCS queue modal. Sorted by updatedAt desc (most recently touched first).
    */
   async getCloserWorkloadOrdersWithItems(agentId: string, branchId?: string | null) {
@@ -4390,8 +4390,8 @@ export class OrdersService {
   }
 
   /**
-   * Get workload for the current CS closer — for \"My Orders\" page.
-   * Returns null for non–CS closers or inactive users.
+   * Get workload for the current Sales closer — for \"My Orders\" page.
+   * Returns null for non–Sales closers or inactive users.
    */
   async getMyCSWorkload(actor: SessionUser) {
     if (actor.role !== 'CS_CLOSER') {
@@ -4766,7 +4766,7 @@ export class OrdersService {
   }
 
   /**
-   * Check for inactive CS closers (no action for > 10 min).
+   * Check for inactive Sales closers (no action for > 10 min).
    * Returns agent IDs that should receive an inactivity alert.
    *
    * Implementation note (perf): previously this issued **one COUNT per agent**
@@ -4867,7 +4867,7 @@ export class OrdersService {
   }
 
   /**
-   * Get CS closer leaderboard — performance metrics for ranking.
+   * Get Sales closer leaderboard — performance metrics for ranking.
    * period: 'this_month' (default) or 'all_time'; optional startDate/endDate override for custom range.
    *
    * Implementation note (perf): previously this issued **6 queries per agent**
@@ -5114,7 +5114,7 @@ export class OrdersService {
   }
 
   /**
-   * Assign a single UNPROCESSED order to the best available CS closer using the configured
+   * Assign a single UNPROCESSED order to the best available Sales closer using the configured
    * dispatch strategy. Used by auto-dispatch on creation and by distributeUnassignedOrders.
    * Returns true if the order was assigned, false if no eligible closer was found.
    */
@@ -5239,7 +5239,7 @@ export class OrdersService {
   }
 
   /**
-   * Auto-dispatch a new order to a CS closer.
+   * Auto-dispatch a new order to a Sales closer.
    * Strategy is configurable via system setting CS_DISPATCH_STRATEGY:
    * - manual (default): no auto-assignment; orders sit UNPROCESSED until HoCS assigns them.
    * - load_balanced: lowest pending count first, then most idle.
@@ -5290,7 +5290,7 @@ export class OrdersService {
    */
   async claimOrder(orderId: string, actor: SessionUser): Promise<{ success: boolean; message?: string }> {
     if (actor.role !== 'CS_CLOSER') {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only CS closers can claim orders' });
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Sales closers can claim orders' });
     }
 
     // Atomic claim using Postgres row lock (FOR UPDATE SKIP LOCKED)
@@ -5402,7 +5402,7 @@ export class OrdersService {
   }
 
   /**
-   * Distribute all UNPROCESSED (unassigned) orders to CS closers using the same algorithm as
+   * Distribute all UNPROCESSED (unassigned) orders to Sales closers using the same algorithm as
    * auto-dispatch. Manual fallback when assignment on order creation did not run or failed.
    * Restricted to Head of CS and SuperAdmin.
    */
@@ -5903,7 +5903,7 @@ export class OrdersService {
             message: 'Cannot record delivery: order has no fulfillment location (allocate to a Logistics provider first).',
           });
         }
-        // The CS rep can pick a different logistics provider at delivery time (because
+        // The Sales rep can pick a different logistics provider at delivery time (because
         // a different provider may have actually delivered). When that happens, the
         // ALLOCATED reserve still sits at the original location — release it before
         // depleting stock at the actual delivering location, otherwise we'd silently
@@ -6230,7 +6230,7 @@ export class OrdersService {
   }
 
   /**
-   * Cron: every 2 minutes, check for callbacks that are due and notify the assigned CS closer.
+   * Cron: every 2 minutes, check for callbacks that are due and notify the assigned Sales closer.
    * Uses a Redis set to avoid duplicate notifications for the same order.
    */
   @Cron('0 */2 * * * *')
@@ -6556,7 +6556,7 @@ export class OrdersService {
   }
 
   /**
-   * Bulk assign multiple orders to one or more CS closers.
+   * Bulk assign multiple orders to one or more Sales closers.
    * - One agent: every order goes to that agent (same as before).
    * - Multiple agents: each order is assigned to a uniformly random pick from the list.
    */
@@ -6596,7 +6596,7 @@ export class OrdersService {
   /**
    * Build a meaningful notification body for "order assigned to you" pings — replaces
    * the legacy "An order has been assigned to you. Please attend to it." stub. Includes
-   * customer name + amount so the CS rep can prioritise without opening the order.
+   * customer name + amount so the Sales rep can prioritise without opening the order.
    */
   private formatAssignedOrderBody(input: {
     customerName: string | null;

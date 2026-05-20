@@ -121,8 +121,8 @@ export default function AdminDashboard() {
           /** From the session bundle — true when this Media Buyer supervises the
            *  branch's marketing team. Unlocks the HoM-style dashboard layout. */
           isMarketingTeamSupervisorOnActiveBranch?: boolean;
-          /** Symmetric for CS — true when this CS Closer supervises the branch's
-           *  CS team. Unlocks the HoCS-style dashboard layout (team-aggregated
+          /** Symmetric for Sales — true when this Sales Closer supervises the branch's
+           *  Sales team. Unlocks the HoCS-style dashboard layout (team-aggregated
            *  metrics + Team Management card). */
           isCsTeamSupervisorOnActiveBranch?: boolean;
         };

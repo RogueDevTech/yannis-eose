@@ -27,7 +27,7 @@ export type CsRoutingDispatchResolution = {
   crossBranchServicing: boolean;
   /**
    * CS squad whose branch_team_settings control CS_DISPATCH_STRATEGY / CS_CLAIM_CAP for this order.
-   * When routing targets the whole branch (no squad), this is the branch's default CS team (first created).
+   * When routing targets the whole branch (no squad), this is the branch's default Sales team (first created).
    */
   dispatchSettingsTeamId: string | null;
 };
@@ -39,7 +39,7 @@ function assertRoutingBranchScope(actor: SessionUser, ownerBranchId: string): vo
     if (!actor.currentBranchId || actor.currentBranchId !== ownerBranchId) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Branch admins may only manage CS routing for their active branch.',
+        message: 'Branch admins may only manage Sales routing for their active branch.',
       });
     }
     return;

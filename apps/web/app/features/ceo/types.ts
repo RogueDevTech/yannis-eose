@@ -37,11 +37,11 @@ export interface CEODashboardData {
     deliveryRate: number;
   };
 
-  // CS Team
+  // Sales Team
   csTeam: {
     agentCount: number;
     pendingOrders: number;
-    /** Mean of (todayClosesCount / capacity) across CS closers — Lagos calendar day. */
+    /** Mean of (todayClosesCount / capacity) across Sales closers — Lagos calendar day. */
     utilization: number;
   };
 

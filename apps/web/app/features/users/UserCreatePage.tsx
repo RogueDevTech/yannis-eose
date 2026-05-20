@@ -94,7 +94,7 @@ const ROLES = [
   },
   {
     value: 'CS_CLOSER',
-    label: 'CS Closer',
+    label: 'Sales Closer',
     description: 'Handles customer calls and order confirmation',
   },
   {
@@ -326,7 +326,7 @@ export function UserCreatePage({
     : (conflictingBranch?.name ?? 'This branch');
 
   // Role-conditional visibility
-  // Capacity is only meaningful for roles that work an individual workload — CS closers
+  // Capacity is only meaningful for roles that work an individual workload — Sales closers
   // (max concurrent orders they can handle) and Media Buyers (max concurrent campaigns).
   // Managers / heads don't carry a personal load, so hiding it removes noise from their forms.
   const showCapacity = ['CS_CLOSER', 'MEDIA_BUYER'].includes(selectedRole);

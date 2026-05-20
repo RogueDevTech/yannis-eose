@@ -53,7 +53,7 @@ interface CsOrderRoutingSettingsPageProps {
 /**
  * Three routing methods — global, no per-branch picker:
  *   - split_all   (SPLIT_ALL_BRANCHES, default) → org-wide load-balanced pool.
- *                 Every order is dispatched to whichever CS closer (across
+ *                 Every order is dispatched to whichever Sales closer (across
  *                 ALL branches) has the lowest pending workload. Marketing
  *                 branch is irrelevant for routing (kept for attribution).
  *   - same_branch (BRANCH_DEFAULT) → marketing branch == servicing CS branch.
@@ -254,15 +254,15 @@ export function CsOrderRoutingSettingsPage({
       t.teamId && teamsByBranchId[t.servicingBranchId]
         ? teamsByBranchId[t.servicingBranchId]!.find((x) => x.id === t.teamId)?.label ?? t.teamId
         : null;
-    const narrow = teamLabel ? teamLabel : 'All CS closers';
+    const narrow = teamLabel ? teamLabel : 'All Sales closers';
     return `${b} · ${narrow}`;
   };
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="CS Routing"
-        description="Choose which CS branch handles new marketing orders."
+        title="Sales Routing"
+        description="Choose which Sales branch handles new marketing orders."
       />
 
       <Card>
@@ -298,7 +298,7 @@ export function CsOrderRoutingSettingsPage({
               {
                 value: 'by_product',
                 label: 'By product',
-                description: 'Each product is handled by the CS branch you assign.',
+                description: 'Each product is handled by the Sales branch you assign.',
               },
             ]}
           />
@@ -514,7 +514,7 @@ export function CsOrderRoutingSettingsPage({
           const branchLabel =
             branchNameById.get(bulkServicingBranchId) ?? 'the chosen servicing branch';
           const verbing = selectedProductIds.size === 1 ? 'this product' : 'these products';
-          return `New orders for ${verbing} will route to CS at ${branchLabel}. Existing routes will be replaced.`;
+          return `New orders for ${verbing} will route to Sales at ${branchLabel}. Existing routes will be replaced.`;
         })()}
         confirmLabel="Assign"
         variant="warning"

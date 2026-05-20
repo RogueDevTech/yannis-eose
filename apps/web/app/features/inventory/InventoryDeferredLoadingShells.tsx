@@ -896,6 +896,7 @@ export function ShipmentDetailLoadingShell() {
           <DescriptionList
             layout="grid"
             gridColumns={3}
+            mobileColumns={2}
             divided
             className="gap-y-3"
             items={SHIPMENT_DETAIL_FIELDS.map((f) => ({
@@ -906,9 +907,11 @@ export function ShipmentDetailLoadingShell() {
         </CardBody>
       </Card>
 
-      {/* Line items — table chrome (column headers) is real, rows pulse. */}
-      <Card>
+      {/* Line items — table chrome (column headers) is real, rows pulse.
+          Card chrome is desktop-only to mirror the real page. */}
+      <section className="md:rounded-xl md:border md:border-app-border md:bg-app-elevated md:p-4 md:shadow-card">
         <CardHeader
+          className="mb-2 md:mb-4"
           title={
             <span className="inline-flex flex-wrap items-center gap-x-1">
               <span>Line items</span>
@@ -923,16 +926,14 @@ export function ShipmentDetailLoadingShell() {
             </span>
           }
         />
-        <CardBody>
-          <CompactTable
-            columns={lineColumns}
-            rows={lineRows}
-            rowKey={(r) => r.id}
-            emptyTitle="Loading…"
-            emptyDescription=""
-          />
-        </CardBody>
-      </Card>
+        <CompactTable
+          columns={lineColumns}
+          rows={lineRows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </section>
     </div>
   );
 }

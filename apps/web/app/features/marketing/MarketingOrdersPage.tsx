@@ -310,9 +310,8 @@ export function MarketingOrdersPage({
         }
         actions={
           <PageHeaderMobileTools
-            sheetTitle="Marketing orders tools"
-            sheetSubtitle={<span>Date range, chart toggle, and export</span>}
-            triggerAriaLabel="Orders toolbar and date range"
+            sheetTitle="Actions"
+            triggerAriaLabel="Marketing orders tools"
             mobileLeading={
               liveEvents != null && liveEvents.length > 0 ? (
                 <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
@@ -361,15 +360,14 @@ export function MarketingOrdersPage({
             filtersBadgeCount={ordersToolbarFilterBadge}
             filters={
               <>
-                <div className="space-y-1.5">
-                  <span className="text-xs font-medium text-app-fg-muted">Status</span>
-                  <FormSelect
-                    value={selectedStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
-                    options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
-                    wrapperClassName="w-full"
-                  />
-                </div>
+                <FormSelect
+                  value={selectedStatus}
+                  onChange={(e) => handleStatusChange(e.target.value)}
+                  options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
+                  controlSize="lg"
+                  className="!bg-app-hover text-center"
+                  wrapperClassName="w-full"
+                />
                 <Suspense fallback={null}>
                   <Await resolve={secondary}>
                     {(ins) => {
@@ -380,76 +378,73 @@ export function MarketingOrdersPage({
                       return (
                         <>
                           {showMediaBuyerColumn && ins.mediaBuyersForFilter.length > 0 ? (
-                            <div className="space-y-1.5">
-                              <span className="text-xs font-medium text-app-fg-muted">Media buyer</span>
-                              <SearchableSelect
-                                id="marketing-orders-filter-buyer-sheet"
-                                value={searchParams.get('mediaBuyerId') || 'ALL'}
-                                onChange={(v) => {
-                                  setSearchParams((p) => {
-                                    const next = new URLSearchParams(p);
-                                    next.set('page', '1');
-                                    if (v && v !== 'ALL') next.set('mediaBuyerId', v);
-                                    else next.delete('mediaBuyerId');
-                                    return next;
-                                  });
-                                }}
-                                options={mediaBuyerFilterOptions}
-                                wrapperClassName="w-full"
-                                placeholder="All media buyers"
-                                searchPlaceholder="Search buyers…"
-                              />
-                            </div>
+                            <SearchableSelect
+                              id="marketing-orders-filter-buyer-sheet"
+                              value={searchParams.get('mediaBuyerId') || 'ALL'}
+                              onChange={(v) => {
+                                setSearchParams((p) => {
+                                  const next = new URLSearchParams(p);
+                                  next.set('page', '1');
+                                  if (v && v !== 'ALL') next.set('mediaBuyerId', v);
+                                  else next.delete('mediaBuyerId');
+                                  return next;
+                                });
+                              }}
+                              options={mediaBuyerFilterOptions}
+                              controlSize="lg"
+                              triggerClassName="!bg-app-hover text-center"
+                              wrapperClassName="w-full"
+                              placeholder="All media buyers"
+                              searchPlaceholder="Search buyers…"
+                            />
                           ) : null}
                           {ins.productsForFilter.length > 0 ? (
-                            <div className="space-y-1.5">
-                              <span className="text-xs font-medium text-app-fg-muted">Product</span>
-                              <SearchableSelect
-                                id="marketing-orders-filter-product-sheet"
-                                value={searchParams.get('productId') || 'ALL'}
-                                onChange={(v) => {
-                                  setSearchParams((p) => {
-                                    const next = new URLSearchParams(p);
-                                    next.set('page', '1');
-                                    if (v && v !== 'ALL') next.set('productId', v);
-                                    else next.delete('productId');
-                                    return next;
-                                  });
-                                }}
-                                options={[
-                                  { value: 'ALL', label: 'All products' },
-                                  ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
-                                ]}
-                                wrapperClassName="w-full"
-                                placeholder="All products"
-                                searchPlaceholder="Search products…"
-                              />
-                            </div>
+                            <SearchableSelect
+                              id="marketing-orders-filter-product-sheet"
+                              value={searchParams.get('productId') || 'ALL'}
+                              onChange={(v) => {
+                                setSearchParams((p) => {
+                                  const next = new URLSearchParams(p);
+                                  next.set('page', '1');
+                                  if (v && v !== 'ALL') next.set('productId', v);
+                                  else next.delete('productId');
+                                  return next;
+                                });
+                              }}
+                              options={[
+                                { value: 'ALL', label: 'All products' },
+                                ...ins.productsForFilter.map((p) => ({ value: p.id, label: p.name })),
+                              ]}
+                              controlSize="lg"
+                              triggerClassName="!bg-app-hover text-center"
+                              wrapperClassName="w-full"
+                              placeholder="All products"
+                              searchPlaceholder="Search products…"
+                            />
                           ) : null}
                           {ins.campaignsForFilter.length > 0 ? (
-                            <div className="space-y-1.5">
-                              <span className="text-xs font-medium text-app-fg-muted">Form</span>
-                              <SearchableSelect
-                                id="marketing-orders-filter-form-sheet"
-                                value={searchParams.get('campaignId') || 'ALL'}
-                                onChange={(v) => {
-                                  setSearchParams((p) => {
-                                    const next = new URLSearchParams(p);
-                                    next.set('page', '1');
-                                    if (v && v !== 'ALL') next.set('campaignId', v);
-                                    else next.delete('campaignId');
-                                    return next;
-                                  });
-                                }}
-                                options={[
-                                  { value: 'ALL', label: 'All forms' },
-                                  ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
-                                ]}
-                                wrapperClassName="w-full"
-                                placeholder="All forms"
-                                searchPlaceholder="Search forms…"
-                              />
-                            </div>
+                            <SearchableSelect
+                              id="marketing-orders-filter-form-sheet"
+                              value={searchParams.get('campaignId') || 'ALL'}
+                              onChange={(v) => {
+                                setSearchParams((p) => {
+                                  const next = new URLSearchParams(p);
+                                  next.set('page', '1');
+                                  if (v && v !== 'ALL') next.set('campaignId', v);
+                                  else next.delete('campaignId');
+                                  return next;
+                                });
+                              }}
+                              options={[
+                                { value: 'ALL', label: 'All forms' },
+                                ...ins.campaignsForFilter.map((c) => ({ value: c.id, label: c.name })),
+                              ]}
+                              controlSize="lg"
+                              triggerClassName="!bg-app-hover text-center"
+                              wrapperClassName="w-full"
+                              placeholder="All forms"
+                              searchPlaceholder="Search forms…"
+                            />
                           ) : null}
                         </>
                       );
@@ -771,7 +766,7 @@ export function MarketingOrdersPage({
           emptyDescription="Try adjusting your status filter or search query"
         />
       </div>
-      {/* Pagination — same layout as CS Orders list; page size is fixed at 20 in the route loader.
+      {/* Pagination — same layout as Sales Orders list; page size is fixed at 20 in the route loader.
           We deliberately gate the skeleton on `deferredLoading` (initial Suspense fallback) NOT
           `showSkeletonRows` (which also goes true on `isLoaderRefetchBusy`). Reason: the pointerdown
           handler in `useLoaderRefetchBusy` calls `flushSync(setArmed(true))` synchronously, which

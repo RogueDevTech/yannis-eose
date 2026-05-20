@@ -333,7 +333,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
 
         {config.reportKey === 'cs_team' && (
           <div className="space-y-3 rounded-md border border-app-border bg-app-hover/40 p-3">
-            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">CS team filters (optional)</p>
+            <p className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Sales team filters (optional)</p>
             <TextInput
               type="number"
               min={0}

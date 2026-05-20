@@ -1,12 +1,12 @@
 /**
- * AssignCloserModal — shared modal for assigning/reassigning orders to CS closers.
+ * AssignCloserModal — shared modal for assigning/reassigning orders to Sales closers.
  *
  * Features:
  * - Search input to filter closers by name
  * - Infinite-scroll pagination (renders a batch at a time, loads more on scroll)
  * - Multi-select via checkboxes
  *
- * Used by: CSDashboardPage (CS Live Activities) and OrdersListPage (CS Orders).
+ * Used by: CSDashboardPage (Sales Live Activities) and OrdersListPage (Sales Orders).
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';

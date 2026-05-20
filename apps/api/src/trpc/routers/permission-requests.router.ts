@@ -19,7 +19,7 @@ function getService(): PermissionRequestsService {
  * Permission requests router.
  * listPending / list: viewer-scoped server-side — admin-class sees everything; approvers
  *   see types they can approve; everyone else only sees rows they personally submitted.
- *   Stops a CS Closer / Media Buyer with the URL from reading every HR user-creation
+ *   Stops a Sales Closer / Media Buyer with the URL from reading every HR user-creation
  *   draft, order-deletion reason, etc.
  * approve/reject: authedProcedure — service enforces per-type gates (audit.read / SuperAdmin / order price approvers).
  */

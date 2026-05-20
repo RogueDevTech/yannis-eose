@@ -189,7 +189,7 @@ function renderTimelineDescription(event: TimelineEvent): ReactNode {
       return (
         <>
           {event.description}{' '}
-          (<TimelineLink to="/admin/cs/message-templates">message template</TimelineLink>)
+          (<TimelineLink to="/admin/sales/message-templates">message template</TimelineLink>)
         </>
       );
     }

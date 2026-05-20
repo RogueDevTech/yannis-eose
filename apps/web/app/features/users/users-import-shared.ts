@@ -33,7 +33,7 @@ export const SPREADSHEET_IMPORT_ROLE_REFERENCE = [
   { enum: 'HEAD_OF_MARKETING', acceptedLabels: 'Head of Marketing' },
   { enum: 'MEDIA_BUYER', acceptedLabels: 'Media Buyer' },
   { enum: 'HEAD_OF_CS', acceptedLabels: 'Head of CS' },
-  { enum: 'CS_CLOSER', acceptedLabels: 'CS Closer' },
+  { enum: 'CS_CLOSER', acceptedLabels: 'Sales Closer' },
   { enum: 'FINANCE_OFFICER', acceptedLabels: 'Finance Officer' },
   { enum: 'HEAD_OF_LOGISTICS', acceptedLabels: 'Head of Logistics' },
   { enum: 'STOCK_MANAGER', acceptedLabels: 'Stock Manager' },
@@ -147,7 +147,7 @@ export function resolveRow(parsed: ParsedRow, branches: BranchInfo[]): ResolvedR
   const resolvedRole = parsed.role ? normalizeRole(parsed.role) : null;
   if (!resolvedRole) {
     errors.push(
-      `Unknown role "${parsed.role}". Use a valid role enum (e.g. CS_CLOSER) or label (e.g. "CS Closer").`,
+      `Unknown role "${parsed.role}". Use a valid role enum (e.g. CS_CLOSER) or label (e.g. "Sales Closer").`,
     );
   }
   const roleNeedsBranch = !!resolvedRole && BRANCH_ELIGIBLE_IMPORT_ROLES.has(resolvedRole);

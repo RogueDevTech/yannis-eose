@@ -7,7 +7,7 @@ export type OrderDetailListFrom = 'logistics' | 'cs' | 'marketing';
 
 const FROM_TO_PATH: Record<OrderDetailListFrom, string> = {
   logistics: '/admin/logistics/orders',
-  cs: '/admin/cs/orders',
+  cs: '/admin/sales/orders',
   marketing: '/admin/marketing/orders',
 };
 

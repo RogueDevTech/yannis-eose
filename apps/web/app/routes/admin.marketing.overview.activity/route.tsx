@@ -5,7 +5,7 @@ import { canViewAllBranches } from '~/lib/rbac';
 
 /**
  * Sibling endpoint for the Marketing Overview "Live activity" strip — mirrors the shape
- * of `/admin/cs/queue/carts` but uses marketing-scoped permission so MBs and HoM can
+ * of `/admin/sales/queue/carts` but uses marketing-scoped permission so MBs and HoM can
  * subscribe to live cart/order activity for their own funnel(s) without being granted
  * the broader `cart.read`. Backed by `cart.listActivity` which already accepts an OR of
  * `cart.read` / `marketing.read` (see apps/api/src/trpc/routers/cart.router.ts).

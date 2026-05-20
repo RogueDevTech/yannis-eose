@@ -20,7 +20,7 @@ import { EmptyState } from './empty-state';
 /**
  * Toggle between table and chart views on order list pages.
  *
- * Reused by `/admin/marketing/orders`, `/admin/cs/orders`, and `/admin/logistics/orders`
+ * Reused by `/admin/marketing/orders`, `/admin/sales/orders`, and `/admin/logistics/orders`
  * via a "View data in chart" / "View as data" button in the page header. When chart view is
  * on, the page swaps the table for two charts derived from the existing `statusCounts` —
  * which is the FULL filtered count for the date/branch range, not paginated, so the charts

@@ -2,7 +2,7 @@
  * ProbationBadge — amber chip used wherever a probation user is identified.
  *
  * Rendered next to (or just under) the RoleBadge so it doesn't replace role identity
- * — a user is still "CS Closer", they're just CS Closer on probation. The amber palette
+ * — a user is still "Sales Closer", they're just Sales Closer on probation. The amber palette
  * is chosen to be distinct from the dept-color RoleBadge palette (red/blue/amber/green/...)
  * — even though Marketing roles are amber, the dot + label "Probation" is unambiguous.
  *

@@ -80,7 +80,7 @@ export interface CSUserBranchMembership {
   roleInBranch: string | null;
 }
 
-/** Team member with optional workload, leaderboard, and idle state for CS Team overview page. */
+/** Team member with optional workload, leaderboard, and idle state for Sales Team overview page. */
 export interface CSTeamMemberOverview {
   id: string;
   name: string;
@@ -174,7 +174,7 @@ export interface CSActivityItem {
   meta?: Record<string, unknown>;
 }
 
-/** Tab keys for Live Activities (/admin/cs/queue). */
+/** Tab keys for Live Activities (/admin/sales/queue). */
 export const CS_QUEUE_TAB_VALUES = [
   'queue',
   'abandoned',
@@ -226,7 +226,7 @@ export interface CSDashboardShell {
   claimCap: number;
 }
 
-/** `/admin/cs/queue` loader — shell + primary bundle stream in parallel + existing deferred slices. */
+/** `/admin/sales/queue` loader — shell + primary bundle stream in parallel + existing deferred slices. */
 export interface CSDashboardPageProps {
   shell: Promise<CSDashboardShell>;
   criticalData: Promise<CSDashboardCriticalPayload>;

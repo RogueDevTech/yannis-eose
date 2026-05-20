@@ -306,7 +306,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
       eventType: 'ORDER_VIEWED',
       actorId: actor.id,
       actorName: 'Test User',
-      description: 'CS closer engaged order',
+      description: 'Sales closer engaged order',
     });
 
     // Both the status update and timeline event should exist
@@ -577,7 +577,7 @@ describe.skipIf(SKIP_IF_NO_DB)('Order State Transitions — Integration', () => 
     expect(rows[0]!.actorId).toBe(closer.id);
   });
 
-  it('addCsOrderComment rejects CS closer not assigned to the order', async () => {
+  it('addCsOrderComment rejects Sales closer not assigned to the order', async () => {
     const branch = await createTestBranch(db as any);
     const assignee = await createTestUser(db as any, { role: 'CS_CLOSER' });
     const stranger = await createTestUser(db as any, { role: 'CS_CLOSER' });

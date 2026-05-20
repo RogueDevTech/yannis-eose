@@ -394,7 +394,7 @@ export const dashboardRouter = router({
    *
    * Returns two stat-card-shaped sections:
    *   - `marketing.today.{newOrders,confirmed,delivered,cancelled}` — today's order pulse
-   *   - `cs.{unassigned,engaged,confirmed,delivered}` — today's CS activity snapshot
+   *   - `cs.{unassigned,engaged,confirmed,delivered}` — today's Sales activity snapshot
    * Plus `pendingApprovals` for finance.
    */
   quickOverview: permissionProcedure('ceo.overview').query(async ({ ctx }) => {

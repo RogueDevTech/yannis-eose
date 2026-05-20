@@ -65,7 +65,7 @@ export function CSDashboardDuplicatesTabPanel({
             onScrollLeft={pairs.length > 0 ? () => scrollBy(-280) : undefined}
             onScrollRight={pairs.length > 0 ? () => scrollBy(280) : undefined}
             scrollAriaSubject="duplicates"
-            viewAllTo="/admin/cs/queue?tab=duplicates"
+            viewAllTo="/admin/sales/queue?tab=duplicates"
           />
 
           {pairs.length === 0 ? (
