@@ -510,6 +510,7 @@ export function MarketingOrdersPage({
         fallback={
           <>
             <OverviewStatStrip
+              mobileGrid
               items={[
                 { label: 'Total', value: total, valueClassName: 'text-app-fg' },
                 { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -589,6 +590,7 @@ export function MarketingOrdersPage({
             return (
               <>
                 <OverviewStatStrip
+                  mobileGrid
                   items={[
                     { label: 'Total', value: total, valueClassName: 'text-app-fg' },
                     {

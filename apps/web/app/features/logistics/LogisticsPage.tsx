@@ -5,8 +5,9 @@ import {
   CompactTableActionButton,
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
-import { useFetcher } from '@remix-run/react';
+import { Link, useFetcher } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useOptimisticListMerge } from '~/hooks/useOptimisticListMerge';
@@ -23,7 +24,6 @@ import { DeferredSection } from '~/components/ui/deferred-section';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
-import { ActionDropdown } from '~/components/ui/action-dropdown';
 import { Tabs } from '~/components/ui/tabs';
 import { PageHeader } from '~/components/ui/page-header';
 import { TextInput } from '~/components/ui/text-input';
@@ -157,10 +157,51 @@ function AddProviderForm({
   );
 }
 
+/** 36 Nigerian states + FCT. */
+const NIGERIAN_STATES = [
+  'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
+  'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT Abuja', 'Gombe',
+  'Imo', 'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara',
+  'Lagos', 'Nassarawa', 'Niger', 'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau',
+  'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara',
+] as const;
+
+/** Keywords that map fuzzy address/area text to a canonical Nigerian state. */
+const STATE_ALIASES: Record<string, string> = {
+  abuja: 'FCT Abuja', fct: 'FCT Abuja', nassarawa: 'Nassarawa', nasarawa: 'Nassarawa',
+  lagos: 'Lagos', ogun: 'Ogun', oyo: 'Oyo', osun: 'Osun', ondo: 'Ondo', ekiti: 'Ekiti',
+  edo: 'Edo', benin: 'Edo', delta: 'Delta', warri: 'Delta', asaba: 'Delta',
+  anambra: 'Anambra', onitsha: 'Anambra', awka: 'Anambra', enugu: 'Enugu',
+  abia: 'Abia', aba: 'Abia', imo: 'Imo', owerri: 'Imo', ebonyi: 'Ebonyi',
+  rivers: 'Rivers', portharcourt: 'Rivers', 'port harcourt': 'Rivers', ph: 'Rivers',
+  bayelsa: 'Bayelsa', 'cross river': 'Cross River', calabar: 'Cross River',
+  'akwa ibom': 'Akwa Ibom', uyo: 'Akwa Ibom',
+  kano: 'Kano', kaduna: 'Kaduna', katsina: 'Katsina', kebbi: 'Kebbi',
+  sokoto: 'Sokoto', zamfara: 'Zamfara', jigawa: 'Jigawa',
+  borno: 'Borno', maiduguri: 'Borno', yobe: 'Yobe', bauchi: 'Bauchi',
+  gombe: 'Gombe', adamawa: 'Adamawa', taraba: 'Taraba',
+  plateau: 'Plateau', jos: 'Plateau', benue: 'Benue',
+  niger: 'Niger', minna: 'Niger', kwara: 'Kwara', ilorin: 'Kwara',
+  kogi: 'Kogi', nassawara: 'Nassarawa',
+  ibadan: 'Oyo', abeokuta: 'Ogun', ijebu: 'Ogun', mowe: 'Ogun', 'ibafo': 'Ogun',
+  badagry: 'Lagos', ikeja: 'Lagos', island: 'Lagos', surulere: 'Lagos',
+};
+
+/** Best-effort state detection from a location's address / name / provider coverage. */
+function detectState(loc: Location, providerCoverage?: string | null): string | null {
+  const haystack = [loc.name, loc.address, providerCoverage ?? ''].join(' ').toLowerCase();
+  for (const [keyword, state] of Object.entries(STATE_ALIASES)) {
+    if (haystack.includes(keyword)) return state;
+  }
+  return null;
+}
+
 export function LogisticsPage({ providers, totalProviders, locations, totalLocations, globalLowStockThreshold }: LogisticsPageProps) {
   const fetcher = useFetcher();
   const [activeTab, setActiveTab] = useState<'providers' | 'locations'>('locations');
   const [search, setSearch] = useState('');
+  const [filterProviderId, setFilterProviderId] = useState('');
+  const [filterState, setFilterState] = useState('');
   const [showAddProvider, setShowAddProvider] = useState(false);
   const [showAddLocation, setShowAddLocation] = useState(false);
   const [addLocationProviderId, setAddLocationProviderId] = useState('');
@@ -168,6 +209,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [viewingProvider, setViewingProvider] = useState<Provider | null>(null);
   const [viewingLocation, setViewingLocation] = useState<Location | null>(null);
+  const [deleteProvider, setDeleteProvider] = useState<Provider | null>(null);
+  const [deleteLocation, setDeleteLocation] = useState<Location | null>(null);
+  const deleteFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const deleteSubmitting = deleteFetcher.state !== 'idle';
+  useFetcherToast(deleteFetcher.data, { successMessage: 'Removed successfully' });
+  useCloseOnFetcherSuccess(deleteFetcher, useCallback(() => {
+    setDeleteProvider(null);
+    setDeleteLocation(null);
+  }, []));
 
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const actionError = fetcherSurface.rawError;
@@ -176,7 +226,6 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
   const [dismissedError, setDismissedError] = useState(false);
   /** Single open-menu id shared by the page-header "+ Logistics company" /
    *  "+ Location" dropdowns so opening one closes the other. */
-  const [openHeaderMenuId, setOpenHeaderMenuId] = useState<string | null>(null);
   useFetcherToast(fetcher.data, {
     successMessage: 'Logistics action completed',
     skipErrorToast: mutationModalOpen,
@@ -336,13 +385,36 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
     );
   }, [displayProviders, searchQuery]);
   const filteredLocations = useMemo(() => {
-    if (!searchQuery) return displayLocations;
-    return displayLocations.filter((l) =>
-      [l.name, l.address, l.providerName].some((field) =>
-        (field ?? '').toLowerCase().includes(searchQuery),
-      ),
-    );
-  }, [displayLocations, searchQuery]);
+    let result = displayLocations;
+    if (filterProviderId) {
+      result = result.filter((l) => l.providerId === filterProviderId);
+    }
+    if (filterState) {
+      result = result.filter((l) => {
+        const provider = displayProviders.find((p) => p.id === l.providerId);
+        return detectState(l, provider?.coverageArea) === filterState;
+      });
+    }
+    if (searchQuery) {
+      result = result.filter((l) =>
+        [l.name, l.address, l.providerName].some((field) =>
+          (field ?? '').toLowerCase().includes(searchQuery),
+        ),
+      );
+    }
+    return result;
+  }, [displayLocations, displayProviders, filterProviderId, filterState, searchQuery]);
+
+  /** Nigerian states that actually appear in the current location data. */
+  const availableStates = useMemo(() => {
+    const stateSet = new Set<string>();
+    for (const loc of displayLocations) {
+      const provider = displayProviders.find((p) => p.id === loc.providerId);
+      const state = detectState(loc, provider?.coverageArea);
+      if (state) stateSet.add(state);
+    }
+    return NIGERIAN_STATES.filter((s) => stateSet.has(s));
+  }, [displayLocations, displayProviders]);
 
   const providerTableColumns: CompactTableColumn<Provider>[] = useMemo(
     () => [
@@ -381,6 +453,8 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         tight: true,
         render: (p) => {
           const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
+          const providerLocations = displayLocations.filter((l) => l.providerId === p.id);
+          const providerTotalStock = providerLocations.reduce((sum, l) => sum + (l.totalStock ?? 0), 0);
           return (
             <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
               <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingProvider(p)}>
@@ -393,12 +467,21 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               >
                 Edit
               </CompactTableActionButton>
+              {providerTotalStock === 0 && (
+                <CompactTableActionButton
+                  tone="danger"
+                  disabled={isOptimistic}
+                  onClick={() => setDeleteProvider(p)}
+                >
+                  Remove
+                </CompactTableActionButton>
+              )}
             </div>
           );
         },
       },
     ],
-    [providerPatches],
+    [providerPatches, displayLocations],
   );
 
   const locationTableColumns: CompactTableColumn<Location>[] = useMemo(
@@ -418,7 +501,19 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       {
         key: 'address',
         header: 'Address',
+        hideOnMobile: true,
         render: (l) => <span className="text-app-fg-muted">{l.address}</span>,
+      },
+      {
+        key: 'state',
+        header: 'State',
+        render: (l) => {
+          const provider = displayProviders.find((p: Provider) => p.id === l.providerId);
+          const state = detectState(l, provider?.coverageArea);
+          return state
+            ? <span className="text-app-fg-muted">{state}</span>
+            : <span className="text-app-fg-muted">—</span>;
+        },
       },
       {
         key: 'provider',
@@ -432,6 +527,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         key: 'totalStock',
         header: 'Total stock',
         align: 'right',
+        mobileAlign: 'left',
         hideOnMobile: true,
         render: (l) => (
           <span className={`tabular-nums ${(l.totalStock ?? 0) === 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg-muted'}`}>
@@ -443,6 +539,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         key: 'lowStock',
         header: 'Alert threshold',
         align: 'right',
+        mobileAlign: 'left',
         hideOnMobile: true,
         render: (l) => {
           const hasOverride = l.lowStockThreshold != null;
@@ -460,6 +557,29 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         render: (l) => <StatusBadge status={l.status} />,
       },
       {
+        key: 'whatsapp',
+        header: 'WhatsApp',
+        mobileLabel: 'WhatsApp',
+        tight: true,
+        render: (l) =>
+          l.whatsappGroupLink ? (
+            <a
+              href={l.whatsappGroupLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-success-600 dark:text-success-400 hover:underline text-xs font-medium"
+              title={l.whatsappGroupLink}
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+              </svg>
+              Linked
+            </a>
+          ) : (
+            <span className="text-xs text-app-fg-muted">—</span>
+          ),
+      },
+      {
         key: 'actions',
         header: '',
         align: 'right',
@@ -467,6 +587,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
         tight: true,
         render: (l) => {
           const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
+          const hasStock = (l.totalStock ?? 0) > 0;
           return (
             <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
               <CompactTableActionButton disabled={isOptimistic} onClick={() => setViewingLocation(l)}>
@@ -479,6 +600,15 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               >
                 Edit
               </CompactTableActionButton>
+              {!hasStock && (
+                <CompactTableActionButton
+                  tone="danger"
+                  disabled={isOptimistic}
+                  onClick={() => setDeleteLocation(l)}
+                >
+                  Remove
+                </CompactTableActionButton>
+              )}
             </div>
           );
         },
@@ -518,90 +648,28 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             desktop={
               <div className="flex flex-wrap gap-2">
                 <PageRefreshButton />
-                <ActionDropdown
-                  id="add-company"
-                  trigger="button"
-                  triggerLabel="+ Logistics company"
-                  triggerVariant="secondary"
-                  openMenuId={openHeaderMenuId}
-                  setOpenMenuId={setOpenHeaderMenuId}
-                  items={[
-                    {
-                      label: 'Add manually',
-                      onClick: () => setShowAddProvider(true),
-                    },
-                    {
-                      label: 'Import from Excel',
-                      to: '/admin/logistics/partners/import-providers',
-                    },
-                  ]}
-                />
-                <ActionDropdown
-                  id="add-location"
-                  trigger="button"
-                  triggerLabel="+ Location"
-                  triggerVariant="primary"
-                  openMenuId={openHeaderMenuId}
-                  setOpenMenuId={setOpenHeaderMenuId}
-                  items={[
-                    {
-                      label: 'Add manually',
-                      onClick: () => {
-                        setAddLocationProviderId('');
-                        setShowAddLocation(true);
-                      },
-                    },
-                    {
-                      label: 'Import from Excel',
-                      to: '/admin/logistics/partners/import-locations',
-                    },
-                  ]}
-                />
+                <Button variant="secondary" size="sm" onClick={() => setShowAddProvider(true)}>
+                  + Company
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => { setAddLocationProviderId(''); setShowAddLocation(true); }}>
+                  + Location
+                </Button>
+                <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-primary btn-sm">
+                  Import from Excel
+                </Link>
               </div>
             }
             sheet={
               <>
-                <ActionDropdown
-                  id="add-company-mobile"
-                  trigger="button"
-                  triggerLabel="+ Logistics company"
-                  triggerVariant="secondary"
-                  triggerClassName="w-full justify-center"
-                  openMenuId={openHeaderMenuId}
-                  setOpenMenuId={setOpenHeaderMenuId}
-                  items={[
-                    {
-                      label: 'Add manually',
-                      onClick: () => setShowAddProvider(true),
-                    },
-                    {
-                      label: 'Import from Excel',
-                      to: '/admin/logistics/partners/import-providers',
-                    },
-                  ]}
-                />
-                <ActionDropdown
-                  id="add-location-mobile"
-                  trigger="button"
-                  triggerLabel="+ Location"
-                  triggerVariant="secondary"
-                  triggerClassName="w-full justify-center"
-                  openMenuId={openHeaderMenuId}
-                  setOpenMenuId={setOpenHeaderMenuId}
-                  items={[
-                    {
-                      label: 'Add manually',
-                      onClick: () => {
-                        setAddLocationProviderId('');
-                        setShowAddLocation(true);
-                      },
-                    },
-                    {
-                      label: 'Import from Excel',
-                      to: '/admin/logistics/partners/import-locations',
-                    },
-                  ]}
-                />
+                <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => setShowAddProvider(true)}>
+                  + Company
+                </Button>
+                <Button variant="secondary" className="h-12 w-full justify-center" onClick={() => { setAddLocationProviderId(''); setShowAddLocation(true); }}>
+                  + Location
+                </Button>
+                <Link to="/admin/logistics/partners/import-combined" prefetch="intent" className="btn-secondary h-12 w-full justify-center text-center">
+                  Import from Excel
+                </Link>
               </>
             }
           />
@@ -618,6 +686,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
       )}
 
       <OverviewStatStrip
+        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Logistics companies', value: displayTotalProviders, valueClassName: 'text-app-fg' },
@@ -1164,23 +1233,57 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           setSearch('');
         }}
         tabs={[
-          { value: 'locations', label: `Locations (${displayTotalLocations})` },
+          { value: 'locations', label: `Locations (${filteredLocations.length !== displayTotalLocations ? `${filteredLocations.length}/` : ''}${displayTotalLocations})` },
           { value: 'providers', label: `Companies (${displayTotalProviders})` },
         ]}
       />
 
-      <SearchInput
-        value={search}
-        onChange={setSearch}
-        clearable
-        placeholder={
-          activeTab === 'providers'
-            ? 'Search companies by name, contact, or coverage…'
-            : 'Search locations by name, address, or company…'
-        }
-        wrapperClassName="max-w-md"
-        className="!bg-app-elevated"
-      />
+      <div className="flex flex-wrap items-end gap-2">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          clearable
+          placeholder={
+            activeTab === 'providers'
+              ? 'Search companies by name, contact, or coverage…'
+              : 'Search locations by name, address, or company…'
+          }
+          wrapperClassName="flex-1 min-w-[12rem] max-w-md"
+          className="!bg-app-elevated"
+        />
+        {activeTab === 'locations' && (
+          <>
+            <FormSelect
+              value={filterProviderId}
+              onChange={(e) => setFilterProviderId(e.target.value)}
+              placeholder="All companies"
+              options={displayProviders.map((p) => ({ value: p.id, label: p.name }))}
+              controlSize="sm"
+              wrapperClassName="w-40 sm:w-48"
+              className="!bg-app-elevated"
+            />
+            <FormSelect
+              value={filterState}
+              onChange={(e) => setFilterState(e.target.value)}
+              placeholder="All states"
+              options={availableStates.map((s) => ({ value: s, label: s }))}
+              controlSize="sm"
+              wrapperClassName="w-36 sm:w-44"
+              className="!bg-app-elevated"
+            />
+            {(filterProviderId || filterState) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => { setFilterProviderId(''); setFilterState(''); }}
+              >
+                Clear filters
+              </Button>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Content */}
       {activeTab === 'providers' && (
@@ -1204,15 +1307,64 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           rowClassName={(l) =>
             isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id) ? 'opacity-60' : ''
           }
-          emptyTitle={searchQuery ? 'No locations match your search' : 'No locations yet'}
+          emptyTitle={
+            searchQuery || filterProviderId || filterState
+              ? 'No locations match your filters'
+              : 'No locations yet'
+          }
           emptyDescription={
-            searchQuery
-              ? 'Try a different name, address, or company.'
+            searchQuery || filterProviderId || filterState
+              ? 'Try adjusting your search, company, or state filter.'
               : 'Add a logistics company first, then add locations.'
           }
         />
       )}
 
+      <ConfirmActionModal
+        open={!!deleteProvider}
+        onClose={() => { if (!deleteSubmitting) setDeleteProvider(null); }}
+        title="Remove logistics company?"
+        description={
+          deleteProvider
+            ? `"${deleteProvider.name}" and all its locations will be archived. Historical data (orders, transfers, audit trail) is preserved.`
+            : ''
+        }
+        confirmLabel="Remove company"
+        cancelLabel="Keep"
+        variant="danger"
+        loading={deleteSubmitting}
+        onConfirm={() => {
+          if (!deleteProvider) return;
+          const fd = new FormData();
+          fd.set('intent', 'deleteProvider');
+          fd.set('providerId', deleteProvider.id);
+          deleteFetcher.submit(fd, { method: 'POST' });
+        }}
+        error={(deleteFetcher.data as { error?: string } | undefined)?.error ?? null}
+      />
+
+      <ConfirmActionModal
+        open={!!deleteLocation}
+        onClose={() => { if (!deleteSubmitting) setDeleteLocation(null); }}
+        title="Remove location?"
+        description={
+          deleteLocation
+            ? `"${deleteLocation.name}" will be archived. Historical data (orders, transfers, stock movements) is preserved.`
+            : ''
+        }
+        confirmLabel="Remove location"
+        cancelLabel="Keep"
+        variant="danger"
+        loading={deleteSubmitting}
+        onConfirm={() => {
+          if (!deleteLocation) return;
+          const fd = new FormData();
+          fd.set('intent', 'deleteLocation');
+          fd.set('locationId', deleteLocation.id);
+          deleteFetcher.submit(fd, { method: 'POST' });
+        }}
+        error={(deleteFetcher.data as { error?: string } | undefined)?.error ?? null}
+      />
     </div>
   );
 }

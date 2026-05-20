@@ -684,6 +684,7 @@ export function LogisticsOrderDetailPage({
       </div>
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           {
             label: 'Amount',

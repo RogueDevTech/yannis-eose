@@ -238,6 +238,69 @@ export class LogisticsService {
     });
   }
 
+  async deleteProvider(providerId: string, actorId: string) {
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      // Guard: cannot delete a provider whose locations still hold stock.
+      const stockRows = await tx
+        .select({
+          total: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`,
+        })
+        .from(schema.inventoryLevels)
+        .innerJoin(
+          schema.logisticsLocations,
+          eq(schema.inventoryLevels.locationId, schema.logisticsLocations.id),
+        )
+        .where(eq(schema.logisticsLocations.providerId, providerId));
+      const totalStock = Number(stockRows[0]?.total ?? 0);
+      if (totalStock > 0) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `Cannot delete this company — its locations still hold ${totalStock} unit(s) of stock. Move or write off all stock first.`,
+        });
+      }
+      // Delete all locations under this provider first (FK constraint).
+      await tx
+        .delete(schema.logisticsLocations)
+        .where(eq(schema.logisticsLocations.providerId, providerId));
+      // Delete the provider.
+      const rows = await tx
+        .delete(schema.logisticsProviders)
+        .where(eq(schema.logisticsProviders.id, providerId))
+        .returning();
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Logistics company not found' });
+      }
+      return rows[0];
+    });
+  }
+
+  async deleteLocation(locationId: string, actorId: string) {
+    return withActor(this.db, { id: actorId }, async (tx) => {
+      // Guard: cannot delete a location that still holds stock.
+      const stockRows = await tx
+        .select({
+          total: sql<number>`COALESCE(SUM(${schema.inventoryLevels.stockCount}), 0)`,
+        })
+        .from(schema.inventoryLevels)
+        .where(eq(schema.inventoryLevels.locationId, locationId));
+      const totalStock = Number(stockRows[0]?.total ?? 0);
+      if (totalStock > 0) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `Cannot delete this location — it still holds ${totalStock} unit(s) of stock. Move or write off all stock first.`,
+        });
+      }
+      const rows = await tx
+        .delete(schema.logisticsLocations)
+        .where(eq(schema.logisticsLocations.id, locationId))
+        .returning();
+      if (!rows[0]) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Location not found' });
+      }
+      return rows[0];
+    });
+  }
+
   async listLocations(input: ListLocationsInput) {
     const conditions = [];
     if (input.providerId) {

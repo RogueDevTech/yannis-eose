@@ -161,6 +161,7 @@ export function StaffOnboardingDocumentsPage({
 
       {counts ? (
         <OverviewStatStrip
+          mobileGrid
           items={[
             {
               label: 'Total',

@@ -188,6 +188,7 @@ export function AdminQuickDashboardLoadingShell({
           </Link>
         </div>
         <OverviewStatStrip
+          mobileGrid
           embedded
           showScrollControls={false}
           items={[
@@ -211,6 +212,7 @@ export function AdminQuickDashboardLoadingShell({
           </Link>
         </div>
         <OverviewStatStrip
+          mobileGrid
           embedded
           showScrollControls={false}
           items={[

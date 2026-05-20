@@ -9,8 +9,8 @@ import { EmptyState } from '~/components/ui/empty-state';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { StatusBadge } from '~/components/ui/status-badge';
-import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Tabs } from '~/components/ui/tabs';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import {
@@ -21,6 +21,12 @@ import { formatActivityDescription } from '~/lib/format-activity';
 import type { HistoryEntry } from '~/features/orders/types';
 import type { Location } from './types';
 import type { LogisticsProviderDetailRecord, LogisticsProviderRow } from './team-types';
+
+function formatNaira(value: string | number | null | undefined): string {
+  const n = typeof value === 'string' ? parseFloat(value) : (value ?? 0);
+  if (!Number.isFinite(n) || n === 0) return '₦0';
+  return `₦${n.toLocaleString('en-NG', { maximumFractionDigits: 0 })}`;
+}
 
 function providerInitials(name: string): string {
   return name
@@ -152,10 +158,17 @@ export function LogisticsProviderDetailPage({
         actions={
           <PageHeaderMobileTools
             sheetTitle="Provider tools"
-            sheetSubtitle={<span>Refresh and navigation</span>}
+            sheetSubtitle={<span>Date range and navigation</span>}
             triggerAriaLabel="Provider toolbar"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={periodAllTime}
+                  />
+                </div>
                 <Link
                   to={backHref}
                   className="btn-secondary btn-sm inline-flex items-center justify-center"
@@ -165,18 +178,32 @@ export function LogisticsProviderDetailPage({
                 <PageRefreshButton />
               </div>
             }
-            sheet={
-              <Link to={backHref} className="btn-secondary btn-sm w-full justify-center">
-                Back to team analysis
-              </Link>
-            }
+            sheet={({ closeSheet }) => (
+              <>
+                <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
+                  <DateFilterBar
+                    startDate={dateFilters.startDate}
+                    endDate={dateFilters.endDate}
+                    periodAllTime={periodAllTime}
+                    triggerLayout="blockCenter"
+                  />
+                </div>
+                <Link
+                  to={backHref}
+                  className="btn-secondary btn-sm h-12 w-full justify-center"
+                  onClick={() => closeSheet()}
+                >
+                  Back to team analysis
+                </Link>
+              </>
+            )}
           />
         }
       />
 
-      <div className="flex flex-col sm:flex-row gap-6 items-start">
-        <div className="w-20 h-20 rounded-2xl bg-brand-100 dark:bg-brand-900/40 flex items-center justify-center shrink-0 border border-app-border">
-          <span className="text-2xl font-bold text-brand-600 dark:text-brand-400">
+      <div className="flex gap-3 sm:gap-6 items-start">
+        <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-2xl bg-brand-100 dark:bg-brand-900/40 flex items-center justify-center shrink-0 border border-app-border">
+          <span className="text-lg sm:text-2xl font-bold text-brand-600 dark:text-brand-400">
             {providerInitials(provider.name)}
           </span>
         </div>
@@ -187,8 +214,8 @@ export function LogisticsProviderDetailPage({
               {provider.locationCount} location{provider.locationCount === 1 ? '' : 's'}
             </span>
           </div>
-          <p className="text-sm text-app-fg-muted">
-            Reporting period: <span className="text-app-fg font-medium">{periodLabel}</span>
+          <p className="text-xs sm:text-sm text-app-fg-muted">
+            Period: <span className="text-app-fg font-medium">{periodLabel}</span>
           </p>
         </div>
       </div>
@@ -221,18 +248,17 @@ export function LogisticsProviderDetailPage({
                 <DescriptionList
                   divided
                   layout="grid"
+                  mobileColumns={2}
                   items={[
                     { label: 'Name', value: provider.name },
                     { label: 'Status', value: <StatusBadge status={provider.status} /> },
                     {
                       label: 'Contact',
                       value: provider.contactInfo?.trim() ? provider.contactInfo : '—',
-                      fullWidth: true,
                     },
                     {
                       label: 'Coverage area',
                       value: provider.coverageArea?.trim() ? provider.coverageArea : '—',
-                      fullWidth: true,
                     },
                     { label: 'Created', value: formatDate(provider.createdAt) },
                     { label: 'Last updated', value: formatDate(provider.updatedAt) },
@@ -256,29 +282,29 @@ export function LogisticsProviderDetailPage({
               />
               <CardBody className="pt-0">
                 {performance ? (
-                  <OverviewStatStrip
-                    embedded
-                    showScrollControls={false}
-                    items={[
-                      { label: 'Assigned', value: performance.totalAssigned, valueClassName: 'text-app-fg' },
-                      {
-                        label: 'Delivered',
-                        value: performance.delivered,
-                        valueClassName: 'text-success-600 dark:text-success-400',
-                      },
-                      {
-                        label: 'Delivery rate',
-                        value: performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '—',
-                        valueClassName: deliveryRateColorClass(performance.deliveryRate),
-                      },
-                      {
-                        label: 'Delinquency rate',
-                        value: performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '—',
-                        valueClassName: delinquencyRateColorClass(performance.delinquencyRate),
-                      },
-                      { label: 'Returned', value: performance.returned, valueClassName: 'text-app-fg-muted' },
-                    ]}
-                  />
+                  (() => {
+                    const stats = [
+                      { label: 'Assigned', value: String(performance.totalAssigned), cls: 'text-app-fg' },
+                      { label: 'Delivered', value: String(performance.delivered), cls: 'text-success-600 dark:text-success-400' },
+                      { label: 'Delivery rate', value: performance.totalAssigned > 0 ? `${Math.round(performance.deliveryRate)}%` : '—', cls: deliveryRateColorClass(performance.deliveryRate) },
+                      { label: 'Delinquency', value: performance.totalAssigned > 0 ? `${Math.round(performance.delinquencyRate)}%` : '—', cls: delinquencyRateColorClass(performance.delinquencyRate) },
+                      { label: 'Returned', value: String(performance.returned), cls: 'text-app-fg-muted' },
+                      { label: 'Remitted', value: formatNaira(performance.remittedAmount), cls: 'text-success-600 dark:text-success-400' },
+                      { label: 'Pending', value: formatNaira(performance.pendingRemittanceAmount), cls: 'text-warning-600 dark:text-warning-400' },
+                      { label: 'Disputed', value: formatNaira(performance.disputedRemittanceAmount), cls: 'text-danger-600 dark:text-danger-400' },
+                    ];
+                    const tile = 'rounded-lg bg-app-hover px-2.5 py-2 text-center';
+                    return (
+                      <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                        {stats.map((s) => (
+                          <div key={s.label} className={tile}>
+                            <p className="text-micro font-semibold uppercase tracking-wide text-app-fg-muted truncate">{s.label}</p>
+                            <p className={`mt-0.5 text-base md:text-lg font-bold tabular-nums ${s.cls}`}>{s.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()
                 ) : (
                   <p className="text-sm text-app-fg-muted">
                     No metrics for this date range yet.
@@ -294,9 +320,10 @@ export function LogisticsProviderDetailPage({
               actions={
                 <Link
                   to="/admin/logistics/partners"
-                  className="btn-secondary btn-sm inline-flex items-center justify-center"
+                  className="btn-secondary btn-sm inline-flex items-center justify-center text-xs sm:text-sm"
                 >
-                  Manage on Partners page
+                  <span className="hidden sm:inline">Manage on Partners page</span>
+                  <span className="sm:hidden">Manage</span>
                 </Link>
               }
             />

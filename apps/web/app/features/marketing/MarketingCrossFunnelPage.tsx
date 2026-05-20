@@ -125,6 +125,7 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
         fallback={
           <>
             <OverviewStatStrip
+              mobileGrid
               items={[
                 { label: 'Attempts', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Unique customers', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -155,6 +156,7 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
           {(stats) => (
             <>
               <OverviewStatStrip
+                mobileGrid
                 items={[
                   { label: 'Attempts', value: stats.totalAttempts },
                   { label: 'Unique customers', value: stats.uniqueCustomers },

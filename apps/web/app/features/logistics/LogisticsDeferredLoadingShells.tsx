@@ -405,6 +405,7 @@ export function LogisticsRemittancesLoadingShell() {
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total transfers', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Pending', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -520,6 +521,7 @@ export function LogisticsTeamLoadingShell({
         }
       />
       <OverviewStatStrip
+        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Active providers', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -632,6 +634,7 @@ function TransfersWorkspaceLoadingShell({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Transfer records', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Pending', value: <StatValuePulse className="min-w-[2rem]" /> },

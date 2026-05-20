@@ -544,6 +544,7 @@ export function StaffOnboardingDocsLoadingShell() {
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Not started', value: <StatValuePulse className="min-w-[2rem]" /> },

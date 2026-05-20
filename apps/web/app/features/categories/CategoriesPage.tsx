@@ -433,6 +433,7 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
       )}
 
       <OverviewStatStrip
+        mobileGrid
         showScrollControls={false}
         items={[
           { label: 'Total Categories', value: total, valueClassName: 'text-app-fg' },

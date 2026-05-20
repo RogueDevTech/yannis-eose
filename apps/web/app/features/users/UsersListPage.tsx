@@ -14,6 +14,7 @@ import { SearchableSelect } from '~/components/ui/searchable-select';
 import { useBranchesCatalog } from '~/contexts/branches-catalog-context';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast } from '~/components/ui/toast';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
@@ -661,6 +662,7 @@ export function UsersListPage({
           />
         ) : (
           <OverviewStatStrip
+            mobileGrid
             tileClassName="min-w-[6.5rem]"
             items={[
               { label: 'Total Users', value: total, valueClassName: 'text-app-fg' },
@@ -694,6 +696,7 @@ export function UsersListPage({
           />
         ) : (
           <OverviewStatStrip
+            mobileGrid
             tileClassName="min-w-[6.5rem]"
             items={[
               { label: 'Total matching', value: total, valueClassName: 'text-app-fg tabular-nums' },
@@ -954,16 +957,14 @@ export function UsersListPage({
                     </div>
                   ) : null}
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={probationOnly}
                       onChange={(e) => handleProbationOnlyToggle(e.target.checked)}
                     />
                     <span className="text-sm text-app-fg">Show probation users only</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={supervisorOnly}
                       onChange={(e) => handleSupervisorOnlyToggle(e.target.checked)}
                     />

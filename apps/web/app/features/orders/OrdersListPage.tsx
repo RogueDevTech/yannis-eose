@@ -1,6 +1,7 @@
 import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
+import { Checkbox } from '~/components/ui/checkbox';
 import { SmartPick } from '~/components/ui/smart-pick';
 import { Modal } from '~/components/ui/modal';
 import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
@@ -304,6 +305,8 @@ function OrdersListPageImpl({
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSelectedExportModal, setShowSelectedExportModal] = useState(false);
+  // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
+  const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
 
   // Sync URL params to local state when loader data changes (e.g. back/forward)
   useEffect(() => {
@@ -544,6 +547,87 @@ function OrdersListPageImpl({
   const availableTransitions = selectedStatuses.length === 1 && singleStatus !== undefined
     ? BULK_TRANSITIONS[singleStatus] ?? []
     : [];
+
+  // Tooltip copy for the deep-select info icon — replaces the verbose helper
+  // lines that used to sit under the "Select all matching" checkbox.
+  const deepSelectInfoTitle = selectAllMatchingActive
+    ? `Bulk actions will affect all ${selectedIds.size.toLocaleString()} selected orders.${
+        selectedIds.size > filteredOrders.length
+          ? ` ${(selectedIds.size - filteredOrders.length).toLocaleString()} are not visible on this page.`
+          : ''
+      }${
+        selectAllMatchingCapped
+          ? ` Capped at ${ORDERS_DEEP_SELECT_MAX} of ${total.toLocaleString()} matching.`
+          : ''
+      }`
+    : `Selects every order matching the current filter.${
+        total > ORDERS_DEEP_SELECT_MAX
+          ? ` Capped at ${ORDERS_DEEP_SELECT_MAX} — to process more, narrow the filter or run the action again.`
+          : ''
+      }`;
+
+  // Mobile tools-sheet chrome — every option sits in the same boxed, centered,
+  // grey (app-hover) row at one shared height so the sheet reads consistently.
+  const mobileFilterBoxClass =
+    'flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+  const mobileSelectTransparent = '!bg-transparent !border-transparent !text-center';
+
+  // Smart pick + deep-select toolbar — shared between the desktop inline card
+  // and the mobile Smart-pick modal (opened from the tools sheet).
+  function renderSmartPickToolbar() {
+    if (!canBulkPick || filteredOrders.length === 0) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <SmartPick
+          total={filteredOrders.length}
+          selectedCount={selectedIds.size}
+          onPick={(count) =>
+            setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)))
+          }
+          onClear={clearSelection}
+          itemNoun="orders"
+        />
+        {canBulkAction && bulkSelectAllMatchingInput && total > 0 && (
+          <label className="flex items-center gap-1.5 text-sm">
+            <Checkbox
+              checked={selectAllMatchingActive}
+              disabled={selectAllMatchingLoading}
+              onChange={(e) => {
+                if (e.target.checked) selectAllMatchingFilter();
+                else clearSelection();
+              }}
+            />
+            <span className="font-medium text-app-fg">
+              {selectAllMatchingActive
+                ? `${selectedIds.size.toLocaleString()} selected across filter`
+                : `Select all ${total.toLocaleString()} matching`}
+            </span>
+            <span
+              className="inline-flex shrink-0 text-app-fg-muted"
+              title={deepSelectInfoTitle}
+              aria-label={deepSelectInfoTitle}
+            >
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </span>
+            {selectAllMatchingLoading && (
+              <span className="text-xs text-app-fg-muted">Loading…</span>
+            )}
+          </label>
+        )}
+        {selectAllMatchingError && (
+          <p className="w-full text-xs text-danger-600 dark:text-danger-400">
+            {selectAllMatchingError}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   const isSubmitting = fetcher.state !== 'idle';
 
@@ -820,7 +904,10 @@ function OrdersListPageImpl({
     campaignFilter,
   ]);
 
-  const scheduleFilterFields = scheduleFilters ? (() => {
+  // `boxed` → the mobile tools-sheet variant: same boxed/centered/grey chrome
+  // as the other sheet filters. Plain inline layout for the desktop filter row.
+  function renderScheduleFilter(boxed: boolean) {
+    if (!scheduleFilters) return null;
     // Inline the picked date into the schedule label so we don't need a
     // separate date pill next to the dropdown. The calendar still opens
     // on selection (always — including Overdue) so a fresh date can be
@@ -840,38 +927,45 @@ function OrdersListPageImpl({
       scheduleSelectValue === 'callback_on_day' && formattedScheduleDate
         ? `Callbacks on ${formattedScheduleDate}`
         : 'Callbacks (on date)';
+    const select = (
+      <FormSelect
+        aria-label="Filter by schedule"
+        value={scheduleSelectValue}
+        placeholder="Schedule"
+        onChange={(e) => {
+          setSelectedIds(new Set());
+          setBulkResult(null);
+          const v = e.target.value;
+          applyScheduleKind(v);
+          // All three date-aware options now open the calendar so users
+          // can pick / change the date inline. Overdue is date-less in
+          // the URL today, but opening the calendar still lets them
+          // see the heat map at a glance.
+          if (v === 'delivery_on_day' || v === 'callback_on_day' || v === 'delivery_overdue') {
+            setScheduleCalendarModalOpen(true);
+          }
+        }}
+        options={[
+          { value: '', label: 'All schedules' },
+          { value: 'delivery_on_day', label: deliveryOnDayLabel },
+          { value: 'callback_on_day', label: callbackOnDayLabel },
+          { value: 'delivery_overdue', label: 'Overdue (undelivered)' },
+        ]}
+        controlSize={boxed ? 'sm' : undefined}
+        openAs={boxed ? 'modal' : undefined}
+        wrapperClassName={boxed ? 'w-full' : 'w-full min-w-0 sm:w-52'}
+        className={boxed ? mobileSelectTransparent : undefined}
+      />
+    );
+    if (boxed) {
+      return <div className={mobileFilterBoxClass}>{select}</div>;
+    }
     return (
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
-        <div className="flex min-w-0 flex-col gap-1 sm:flex-1">
-          <FormSelect
-            aria-label="Filter by schedule"
-            value={scheduleSelectValue}
-            placeholder="Schedule"
-            onChange={(e) => {
-              setSelectedIds(new Set());
-              setBulkResult(null);
-              const v = e.target.value;
-              applyScheduleKind(v);
-              // All three date-aware options now open the calendar so users
-              // can pick / change the date inline. Overdue is date-less in
-              // the URL today, but opening the calendar still lets them
-              // see the heat map at a glance.
-              if (v === 'delivery_on_day' || v === 'callback_on_day' || v === 'delivery_overdue') {
-                setScheduleCalendarModalOpen(true);
-              }
-            }}
-            options={[
-              { value: '', label: 'All schedules' },
-              { value: 'delivery_on_day', label: deliveryOnDayLabel },
-              { value: 'callback_on_day', label: callbackOnDayLabel },
-              { value: 'delivery_overdue', label: 'Overdue (undelivered)' },
-            ]}
-            wrapperClassName="w-full min-w-0 sm:w-52"
-          />
-        </div>
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-1">{select}</div>
       </div>
     );
-  })() : null;
+  }
 
   return (
     <div className="space-y-4">
@@ -897,11 +991,8 @@ function OrdersListPageImpl({
               filtersBadgeCount={ordersListToolbarFilterBadge}
               filters={
                 <>
-                  {scheduleFilterFields ? (
-                    <div className="space-y-1.5 pb-2 border-b border-app-border mb-3">{scheduleFilterFields}</div>
-                  ) : null}
-                  <div className="space-y-1.5">
-                    <span className="text-xs font-medium text-app-fg-muted">Status</span>
+                  {renderScheduleFilter(true)}
+                  <div className={mobileFilterBoxClass}>
                     <FormSelect
                       value={selectedStatus}
                       onChange={(e) => {
@@ -924,14 +1015,16 @@ function OrdersListPageImpl({
                         });
                       }}
                       options={statusOptions}
+                      controlSize="sm"
+                      openAs="modal"
                       wrapperClassName="w-full"
+                      className={mobileSelectTransparent}
                     />
                   </div>
                   {showCSCloserColumn && ((csClosersForFilter?.length ?? 0) > 0 || deferredLoading) ? (
-                    <div className="space-y-1.5">
-                      <span className="text-xs font-medium text-app-fg-muted">Closer</span>
+                    <div className={mobileFilterBoxClass}>
                       {deferredLoading && !(csClosersForFilter?.length) ? (
-                        <div className="h-9 w-full rounded-md bg-app-hover animate-pulse" aria-hidden />
+                        <div className="h-5 w-32 rounded-md bg-app-border/70 animate-pulse" aria-hidden />
                       ) : (
                         <SearchableSelect
                           id="orders-filter-closer-sheet"
@@ -948,7 +1041,9 @@ function OrdersListPageImpl({
                             });
                           }}
                           options={csCloserOptions}
+                          controlSize="sm"
                           wrapperClassName="w-full"
+                          triggerClassName={mobileSelectTransparent}
                           placeholder="All closers"
                           searchPlaceholder="Search closers..."
                         />
@@ -956,8 +1051,7 @@ function OrdersListPageImpl({
                     </div>
                   ) : null}
                   {(productsForFilter?.length ?? 0) > 0 ? (
-                    <div className="space-y-1.5">
-                      <span className="text-xs font-medium text-app-fg-muted">Product</span>
+                    <div className={mobileFilterBoxClass}>
                       <SearchableSelect
                         id="orders-filter-product-sheet"
                         value={productFilter || 'ALL'}
@@ -976,15 +1070,16 @@ function OrdersListPageImpl({
                           { value: 'ALL', label: 'All products' },
                           ...(productsForFilter ?? []).map((p) => ({ value: p.id, label: p.name })),
                         ]}
+                        controlSize="sm"
                         wrapperClassName="w-full"
+                        triggerClassName={mobileSelectTransparent}
                         placeholder="All products"
                         searchPlaceholder="Search products..."
                       />
                     </div>
                   ) : null}
                   {showCampaignColumn && (campaignsForFilter?.length ?? 0) > 0 ? (
-                    <div className="space-y-1.5">
-                      <span className="text-xs font-medium text-app-fg-muted">Form</span>
+                    <div className={mobileFilterBoxClass}>
                       <SearchableSelect
                         id="orders-filter-form-sheet"
                         value={campaignFilter || 'ALL'}
@@ -1003,7 +1098,9 @@ function OrdersListPageImpl({
                           { value: 'ALL', label: 'All forms' },
                           ...(campaignsForFilter ?? []).map((c) => ({ value: c.id, label: c.name })),
                         ]}
+                        controlSize="sm"
                         wrapperClassName="w-full"
+                        triggerClassName={mobileSelectTransparent}
                         placeholder="All forms"
                         searchPlaceholder="Search forms..."
                       />
@@ -1053,7 +1150,7 @@ function OrdersListPageImpl({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="w-full justify-center"
+                  className="h-12 w-full justify-center"
                   onClick={() => {
                     closeSheet();
                     setShowChartView((v) => !v);
@@ -1063,9 +1160,9 @@ function OrdersListPageImpl({
                 </Button>
                 {canCreateOffline && (
                   <Button
-                    variant="primary"
+                    variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       setCreateOfflineOpen(true);
@@ -1078,7 +1175,7 @@ function OrdersListPageImpl({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="h-12 w-full justify-center"
                     onClick={() => {
                       closeSheet();
                       setShowExportModal(true);
@@ -1087,7 +1184,7 @@ function OrdersListPageImpl({
                     Generate report
                   </Button>
                 )}
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+                <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                   <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
@@ -1097,6 +1194,20 @@ function OrdersListPageImpl({
                     triggerLayout="blockCenter"
                   />
                 </div>
+                {canBulkPick && filteredOrders.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    onClick={() => {
+                      closeSheet();
+                      setSmartPickModalOpen(true);
+                    }}
+                  >
+                    Smart pick{selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ''}
+                  </Button>
+                )}
               </>
             )}
             />
@@ -1108,6 +1219,7 @@ function OrdersListPageImpl({
         <OverviewStatStripSkeleton count={1 + STATUS_KEYS.length} />
       ) : (
         <OverviewStatStrip
+          mobileGrid
           items={[
             { label: 'Total', value: total, valueClassName: 'text-app-fg' },
             ...statusItems,
@@ -1476,90 +1588,54 @@ function OrdersListPageImpl({
               </div>
             </div>
           }
-          desktopInlineFilters={scheduleFilterFields}
+          desktopInlineFilters={renderScheduleFilter(false)}
           sheetFilterBody={null}
         />
       </div>
 
-      {/* Smart pick — sits directly under the filters card so the bulk-pick
-          toolbar reads as a continuation of the filter row. Permission-driven
-          (orders.bulkAssign); held by HEAD_OF_CS by default and admin-class
-          inherits via ALL_PERMISSION_CODES. Picks the first N from the
-          filtered list; per-row checkboxes still work alongside it. */}
+      {/* Smart pick + deep-select. Desktop: inline card under the filters.
+          Mobile: hidden here — it lives in the tools sheet and opens its own
+          Smart-pick modal. SmartPick picks the first N of the current page;
+          the deep-select checkbox selects every order matching the filter
+          (capped server-side at ORDERS_DEEP_SELECT_MAX). */}
       {canBulkPick && filteredOrders.length > 0 && (
-        <div className="rounded-lg border border-app-border bg-app-elevated px-3 py-2">
-          <SmartPick
-            total={filteredOrders.length}
-            selectedCount={selectedIds.size}
-            onPick={(count) =>
-              setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)))
-            }
-            onClear={clearSelection}
-            itemNoun="orders"
-          />
+        <div
+          className={`hidden md:block rounded-lg border px-3 py-2 ${
+            selectAllMatchingActive
+              ? 'border-warning-400 bg-warning-50 dark:border-warning-700 dark:bg-warning-900/20'
+              : 'border-app-border bg-app-elevated'
+          }`}
+        >
+          {renderSmartPickToolbar()}
         </div>
       )}
 
-      {/* Deep-select — "Select all matching this filter" (capped at
-          ORDERS_DEEP_SELECT_MAX, matches server-side bulk-action caps).
-          Always visible when bulk-pick is enabled so CS can deep-select even
-          when all results fit on one page. */}
-      {canBulkPick &&
-        canBulkAction &&
-        bulkSelectAllMatchingInput &&
-        total > 0 && (
-          <div
-            className={`rounded-lg border px-3 py-2 ${
-              selectAllMatchingActive
-                ? 'border-warning-400 bg-warning-50 dark:border-warning-700 dark:bg-warning-900/20'
-                : 'border-app-border bg-app-elevated'
-            }`}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 rounded border-app-border text-brand-600 focus:ring-brand-500"
-                  checked={selectAllMatchingActive}
-                  disabled={selectAllMatchingLoading}
-                  onChange={(e) => {
-                    if (e.target.checked) selectAllMatchingFilter();
-                    else clearSelection();
-                  }}
-                />
-                <span className="min-w-0">
-                  <span className="font-medium text-app-fg">
-                    {selectAllMatchingActive
-                      ? `${selectedIds.size} orders selected across the entire filter`
-                      : `Select all ${total.toLocaleString()} orders matching this filter`}
-                  </span>
-                  {!selectAllMatchingActive && total > ORDERS_DEEP_SELECT_MAX && (
-                    <span className="block text-xs text-app-fg-muted">
-                      Capped at {ORDERS_DEEP_SELECT_MAX}. To process more, narrow the filter or run the action again.
-                    </span>
-                  )}
-                  {selectAllMatchingActive && (
-                    <span className="block text-xs text-warning-800 dark:text-warning-200">
-                      Bulk actions will affect all {selectedIds.size} selected orders.
-                      {selectedIds.size > filteredOrders.length &&
-                        ` ${selectedIds.size - filteredOrders.length} are not visible on this page.`}
-                      {selectAllMatchingCapped &&
-                        ` (Capped at ${ORDERS_DEEP_SELECT_MAX} of ${total.toLocaleString()} matching.)`}
-                    </span>
-                  )}
-                  {selectAllMatchingError && (
-                    <span className="block text-xs text-danger-600 dark:text-danger-400">
-                      {selectAllMatchingError}
-                    </span>
-                  )}
-                </span>
-              </label>
-              {selectAllMatchingLoading && (
-                <span className="text-xs text-app-fg-muted">Loading…</span>
-              )}
-            </div>
+      {/* Mobile Smart-pick modal — opened from the tools sheet. */}
+      <Modal
+        open={smartPickModalOpen}
+        onClose={() => setSmartPickModalOpen(false)}
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4 p-5">
+          <div>
+            <h3 className="text-base font-semibold text-app-fg">Smart pick</h3>
+            <p className="mt-0.5 text-sm text-app-fg-muted">
+              Select a batch of orders for bulk actions.
+            </p>
           </div>
-        )}
+          {renderSmartPickToolbar()}
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => setSmartPickModalOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Schedule heat calendar — modal only. The Schedule dropdown's "…on date" options
           open this; the date badge next to the dropdown reopens it to change the day. */}

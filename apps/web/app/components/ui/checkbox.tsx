@@ -7,8 +7,8 @@ type CheckboxProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>;
 // iOS ignore CSS `accent-color` on the box itself and only tint the tick,
 // which is why earlier renders looked washed-out / purple in some themes).
 const baseClasses =
-  'yannis-checkbox appearance-none w-4 h-4 rounded border border-app-border bg-app-elevated cursor-pointer ' +
-  'transition-colors hover:border-brand-400 ' +
+  'yannis-checkbox appearance-none w-4 h-4 rounded border border-brand-500 bg-app-elevated cursor-pointer ' +
+  'transition-colors hover:border-brand-600 ' +
   'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:focus-visible:ring-brand-400 ' +
   'focus:ring-offset-0 dark:focus:ring-offset-0 ' +
   'disabled:opacity-50 disabled:cursor-not-allowed';

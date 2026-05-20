@@ -725,6 +725,7 @@ export function TransfersPage({
       )}
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Transfer records', value: summaryTransfers.length, valueClassName: 'text-app-fg' },
           {
