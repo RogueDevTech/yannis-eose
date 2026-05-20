@@ -2429,6 +2429,7 @@ function BranchSupervisorTeamsPanel({
               return (
                 <div className="space-y-4">
                   <OverviewStatStrip
+                    mobileGrid
                     items={[
                       {
                         label: 'Members',
@@ -3210,12 +3211,10 @@ function BranchOverviewPage({
               options={ROLE_OPTIONS}
             />
             <div className="flex items-center gap-2">
-              <input
+              <Checkbox
                 id="add-member-primary"
-                type="checkbox"
                 checked={isPrimary}
                 onChange={(e) => setIsPrimary(e.target.checked)}
-                className="rounded border-app-border text-brand-600"
               />
               <label
                 htmlFor="add-member-primary"

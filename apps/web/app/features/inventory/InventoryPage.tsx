@@ -1174,6 +1174,7 @@ export function InventoryPage(props: InventoryStreamData) {
 
       {/* Overview stats — stock posture for the current filtered result set. */}
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total Stock', value: totalStock.toLocaleString(), valueClassName: 'text-app-fg' },
           { label: 'Reserved', value: totalReserved.toLocaleString(), valueClassName: 'text-warning-600 dark:text-warning-400' },

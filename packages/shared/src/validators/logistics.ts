@@ -15,8 +15,8 @@ export type CreateProviderInput = z.infer<typeof createProviderSchema>;
 export const updateProviderSchema = z.object({
   providerId: z.string().uuid(),
   name: z.string().trim().min(2).max(200).optional(),
-  contactInfo: z.string().trim().min(1).max(500),
-  coverageArea: z.string().trim().min(1).max(500),
+  contactInfo: z.string().trim().min(1).max(500).optional(),
+  coverageArea: z.string().trim().min(1).max(500).optional(),
   rateCard: z.record(z.unknown()).optional(),
   status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
 });

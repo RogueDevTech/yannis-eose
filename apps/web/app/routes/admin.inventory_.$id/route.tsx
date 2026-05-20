@@ -363,6 +363,7 @@ function InventoryLevelDetailRouteInner({
 
       {/* Overview — live state + date-filtered movement totals (in/out within range) */}
       <OverviewStatStrip
+        mobileGrid
         tileClassName="min-w-[7rem]"
         items={[
           {

@@ -195,6 +195,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
       <DashboardProfitSection fallback={<OverviewStatStripSkeleton count={4} />}>
         {(profit) => (
           <OverviewStatStrip
+            mobileGrid
             items={[
               { label: 'Revenue', value: naira(Math.round(profit.revenue)), valueClassName: 'text-app-fg' },
               {
@@ -244,6 +245,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
       <div className="card">
         <h2 className="text-lg font-semibold text-app-fg mb-4">Order Pipeline</h2>
         <OverviewStatStrip
+          mobileGrid
           embedded
           tileClassName="min-w-[5.5rem]"
           items={[
@@ -322,6 +324,7 @@ function CSDashboard({
         <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={6} />}>
           {(metrics) => (
             <OverviewStatStrip
+              mobileGrid
               tileClassName="min-w-[6rem]"
               items={[
                 {
@@ -381,6 +384,7 @@ function CSDashboard({
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={5} />}>
         {(metrics) => (
           <OverviewStatStrip
+            mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
               {
@@ -486,6 +490,7 @@ function MarketingDashboard({
       <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
         {(metrics) => (
           <OverviewStatStrip
+            mobileGrid
             tileClassName="min-w-[6rem]"
             items={[
               { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
@@ -585,6 +590,7 @@ function FinanceDashboard({ data, naira }: { data: DashboardPageData; naira: (am
           return (
             <>
               <OverviewStatStrip
+                mobileGrid
                 items={[
                   { label: 'Revenue', value: naira(Math.round(profit.revenue)), valueClassName: 'text-app-fg' },
                   {
@@ -648,6 +654,7 @@ function LogisticsDashboard({ data, role }: { data: DashboardPageData; role: str
   return (
     <>
       <OverviewStatStrip
+        mobileGrid
         tileClassName="min-w-[6rem]"
         items={[
           {
@@ -711,6 +718,7 @@ function WarehouseDashboard({ data }: { data: DashboardPageData }) {
       <DashboardTotalProductsSection fallback={<OverviewStatStripSkeleton count={4} />}>
         {(total) => (
           <OverviewStatStrip
+            mobileGrid
             items={[
               { label: 'Products', value: total.toString(), valueClassName: 'text-app-fg' },
               { label: 'Total Orders', value: data.totalOrders.toString(), valueClassName: 'text-app-fg' },
@@ -760,6 +768,7 @@ function HRDashboard({ naira }: { naira: (amount: number, opts?: Parameters<type
         return (
           <>
             <OverviewStatStrip
+              mobileGrid
               items={[
                 {
                   label: 'Draft Payouts',

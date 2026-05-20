@@ -109,6 +109,7 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Products', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Active', value: <StatValuePulse className="min-w-[2rem]" /> },

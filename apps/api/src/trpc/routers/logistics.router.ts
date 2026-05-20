@@ -197,6 +197,22 @@ export const logisticsRouter = router({
       return res;
     }),
 
+  deleteProvider: permissionProcedure('logistics.write')
+    .input(z.object({ providerId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getLogisticsService().deleteProvider(input.providerId, ctx.user.id);
+      await invalidateLogisticsOptionsCache();
+      return res;
+    }),
+
+  deleteLocation: permissionProcedure('logistics.write')
+    .input(z.object({ locationId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getLogisticsService().deleteLocation(input.locationId, ctx.user.id);
+      await invalidateLogisticsOptionsCache();
+      return res;
+    }),
+
   // Escalation & Monitoring
   shrinkageAlerts: permissionProcedure('logistics.read')
     .query(async () => {

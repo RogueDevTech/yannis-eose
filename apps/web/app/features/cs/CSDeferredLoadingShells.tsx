@@ -502,7 +502,7 @@ export function CSOrdersLoadingShell({
           />
         }
       />
-      <OverviewStatStrip items={csOrdersStatPulseStripItems()} />
+      <OverviewStatStrip mobileGrid items={csOrdersStatPulseStripItems()} />
 
       {isCSCloser ? (
         <div className="card animate-pulse space-y-3" aria-hidden>
@@ -795,6 +795,7 @@ export function CSTeamLoadingShell({
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Closers', value: <StatValuePulse className="min-w-[2rem]" /> },
           { label: 'Total pending', value: <StatValuePulse className="min-w-[2.5rem]" /> },

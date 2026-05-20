@@ -385,6 +385,7 @@ function ShipmentsIndexContent(data: {
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total', value: data.summary.total, valueClassName: 'text-app-fg' },
           { label: 'Created', value: data.summary.created, valueClassName: 'text-app-fg' },

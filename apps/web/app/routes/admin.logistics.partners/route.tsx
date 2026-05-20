@@ -234,6 +234,40 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true });
   }
 
+  if (intent === 'deleteProvider') {
+    const providerId = formData.get('providerId')?.toString()?.trim() ?? '';
+    if (!providerId) return json({ error: 'Provider ID is required.' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/logistics.deleteProvider', {
+      method: 'POST',
+      cookie,
+      body: { providerId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to delete logistics company') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
+  if (intent === 'deleteLocation') {
+    const locationId = formData.get('locationId')?.toString()?.trim() ?? '';
+    if (!locationId) return json({ error: 'Location ID is required.' }, { status: 400 });
+    const res = await apiRequest<unknown>('/trpc/logistics.deleteLocation', {
+      method: 'POST',
+      cookie,
+      body: { locationId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to delete location') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true });
+  }
+
   if (intent === 'importProvider') {
     // Per-row submit from /admin/logistics/partners/import-providers. Each
     // row is one POST that calls `logistics.createProvider` so the same
@@ -292,6 +326,160 @@ export async function action({ request }: ActionFunctionArgs) {
       return json(
         { error: extractApiErrorMessage(res.data, 'Failed to create location'), rowIndex },
         { status: safeStatus(res.status) },
+      );
+    }
+    return json({ success: true, rowIndex });
+  }
+
+  if (intent === 'importCombined') {
+    // Combined provider + location import. Each row carries provider details +
+    // location details. The server find-or-creates the provider, then creates
+    // the location under it — idempotent on provider name.
+    const rowIndexRaw = formData.get('rowIndex')?.toString() ?? '';
+    const rowIndex = Number.parseInt(rowIndexRaw, 10);
+    const providerName = formData.get('providerName')?.toString().trim() ?? '';
+    const contactPhone = formData.get('contactPhone')?.toString().trim() ?? '';
+    const coverageArea = formData.get('coverageArea')?.toString().trim() ?? '';
+    const locationName = formData.get('locationName')?.toString().trim() ?? '';
+    const locationAddress = formData.get('locationAddress')?.toString().trim() ?? '';
+    const state = formData.get('state')?.toString().trim() ?? '';
+    const whatsappGroupLink = formData.get('whatsappGroupLink')?.toString().trim() ?? '';
+    const existingProviderId = formData.get('existingProviderId')?.toString().trim() ?? '';
+
+    if (!providerName || !contactPhone || !coverageArea || !locationName || !locationAddress) {
+      return json(
+        { error: 'Provider name, contact phone, coverage area, location name, and address are required.', rowIndex },
+        { status: 400 },
+      );
+    }
+
+    let providerId = existingProviderId;
+
+    // Step 1: Find or create the provider.
+    // Always search by name first (even when client didn't resolve an ID) so
+    // that sequential rows sharing a new provider name reuse the provider
+    // created by the first row instead of trying to create a duplicate.
+    if (!providerId) {
+      const searchInput = JSON.stringify({ search: providerName, page: 1, limit: 50, kind: 'THIRD_PARTY' });
+      const searchRes = await apiRequest<unknown>(
+        `/trpc/logistics.listProviders?input=${encodeURIComponent(searchInput)}`,
+        { method: 'GET', cookie },
+      );
+      if (searchRes.ok) {
+        const providers =
+          (searchRes.data as { result?: { data?: { providers: Array<{ id: string; name: string }> } } })
+            ?.result?.data?.providers ?? [];
+        const match = providers.find((p) => p.name.trim().toLowerCase() === providerName.trim().toLowerCase());
+        if (match) providerId = match.id;
+      }
+    }
+
+    if (!providerId) {
+      // Create the provider
+      const createRes = await apiRequest<unknown>('/trpc/logistics.createProvider', {
+        method: 'POST',
+        cookie,
+        body: { name: providerName, contactInfo: contactPhone, coverageArea },
+      });
+
+      if (createRes.ok) {
+        // tRPC mutation response: { result: { data: { ...provider } } }
+        const created = (createRes.data as { result?: { data?: { id: string } } })?.result?.data;
+        if (created?.id) {
+          providerId = created.id;
+        }
+      }
+
+      // If create failed (e.g. duplicate race) or ID parsing failed, retry search
+      if (!providerId) {
+        const retryInput = JSON.stringify({ search: providerName, page: 1, limit: 50, kind: 'THIRD_PARTY' });
+        const retryRes = await apiRequest<unknown>(
+          `/trpc/logistics.listProviders?input=${encodeURIComponent(retryInput)}`,
+          { method: 'GET', cookie },
+        );
+        if (retryRes.ok) {
+          const providers =
+            (retryRes.data as { result?: { data?: { providers: Array<{ id: string; name: string }> } } })
+              ?.result?.data?.providers ?? [];
+          const match = providers.find((p) => p.name.trim().toLowerCase() === providerName.trim().toLowerCase());
+          if (match) providerId = match.id;
+        }
+      }
+
+      if (!providerId) {
+        return json(
+          { error: `Could not create or find provider "${providerName}".`, rowIndex },
+          { status: 500 },
+        );
+      }
+    }
+
+    // Step 2: Find or create the location under the provider.
+    // Idempotency key = (providerId, locationName) — case-insensitive.
+    const locSearchInput = JSON.stringify({ providerId, page: 1, limit: 100 });
+    const locSearchRes = await apiRequest<unknown>(
+      `/trpc/logistics.listLocations?input=${encodeURIComponent(locSearchInput)}`,
+      { method: 'GET', cookie },
+    );
+    let existingLocationId: string | null = null;
+    if (locSearchRes.ok) {
+      const locations =
+        (locSearchRes.data as { result?: { data?: { locations: Array<{ id: string; name: string }> } } })
+          ?.result?.data?.locations ?? [];
+      const match = locations.find(
+        (loc) => loc.name.trim().toLowerCase() === locationName.trim().toLowerCase(),
+      );
+      if (match) existingLocationId = match.id;
+    }
+
+    if (existingLocationId) {
+      // Update the existing location (address, whatsapp link may have changed)
+      // Append state to address so the client-side state filter picks it up
+      const effectiveAddress = state && !locationAddress.toLowerCase().includes(state.toLowerCase())
+        ? `${locationAddress}, ${state}`
+        : locationAddress;
+      const updateBody: Record<string, unknown> = {
+        locationId: existingLocationId,
+        name: locationName,
+        address: effectiveAddress,
+      };
+      if (whatsappGroupLink) {
+        updateBody.whatsappGroupLink = whatsappGroupLink;
+      }
+      const updateRes = await apiRequest<unknown>('/trpc/logistics.updateLocation', {
+        method: 'POST',
+        cookie,
+        body: updateBody,
+      });
+      if (!updateRes.ok) {
+        return json(
+          { error: extractApiErrorMessage(updateRes.data, 'Failed to update location'), rowIndex },
+          { status: safeStatus(updateRes.status) },
+        );
+      }
+      return json({ success: true, rowIndex, updated: true });
+    }
+
+    // Create new location — append state to address for state-filter detection
+    const newEffectiveAddress = state && !locationAddress.toLowerCase().includes(state.toLowerCase())
+      ? `${locationAddress}, ${state}`
+      : locationAddress;
+    const locBody: Record<string, unknown> = {
+      providerId,
+      name: locationName,
+      address: newEffectiveAddress,
+    };
+    if (whatsappGroupLink) locBody.whatsappGroupLink = whatsappGroupLink;
+
+    const locRes = await apiRequest<unknown>('/trpc/logistics.createLocation', {
+      method: 'POST',
+      cookie,
+      body: locBody,
+    });
+    if (!locRes.ok) {
+      return json(
+        { error: extractApiErrorMessage(locRes.data, 'Failed to create location'), rowIndex },
+        { status: safeStatus(locRes.status) },
       );
     }
     return json({ success: true, rowIndex });

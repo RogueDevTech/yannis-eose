@@ -18,7 +18,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
-import { FilterPills, type FilterPillOption } from '~/components/ui/filter-pills';
+import { type FilterPillOption } from '~/components/ui/filter-pills';
 import { Textarea } from '~/components/ui/textarea';
 import {
   CompactTable,
@@ -341,6 +341,102 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     return 'No stock transfers match your filters. Try clearing filters or changing the date range.';
   }, [statusValue]);
 
+  const hasNonSearchFilters = !!(statusValue || filters.locationId || filters.sender || filters.minQty || filters.maxQty);
+
+  const mobileFilterBoxClass =
+    'flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+  const mobileFilterSelectClass = '!bg-transparent !border-transparent !text-center';
+
+  const mobileFiltersBody = (
+    <div className="space-y-2">
+      <div className={mobileFilterBoxClass}>
+        <FormSelect
+          id="remit-filter-status-mobile"
+          value={statusValue}
+          onChange={(e) => setFilterParam('status', e.target.value)}
+          options={statusPillOptions.map((o) => ({
+            value: o.value,
+            label: `${o.label} (${o.count ?? 0})`,
+          }))}
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+          className={mobileFilterSelectClass}
+        />
+      </div>
+      <div className={mobileFilterBoxClass}>
+        <FormSelect
+          id="remit-filter-location-mobile"
+          value={filters.locationId}
+          onChange={(e) => setFilterParam('locationId', e.target.value)}
+          options={[
+            { value: '', label: 'All locations' },
+            ...locations.map((loc) => ({
+              value: loc.id,
+              label: loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name,
+            })),
+          ]}
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+          className={mobileFilterSelectClass}
+        />
+      </div>
+      <div className={mobileFilterBoxClass}>
+        <FormSelect
+          id="remit-filter-sender-mobile"
+          value={filters.sender}
+          onChange={(e) => setFilterParam('sender', e.target.value)}
+          options={[
+            { value: '', label: 'All senders' },
+            ...senderOptions.map((name) => ({ value: name, label: name })),
+          ]}
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+          className={mobileFilterSelectClass}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className={mobileFilterBoxClass}>
+          <NumberInput
+            min={0}
+            controlSize="sm"
+            allowEmpty
+            wrapperClassName="w-full"
+            placeholder="Min qty"
+            value={filters.minQty === '' ? null : Number(filters.minQty)}
+            onValueChange={(n) => setFilterParam('minQty', String(n))}
+            onValueCleared={() => setFilterParam('minQty', '')}
+          />
+        </div>
+        <div className={mobileFilterBoxClass}>
+          <NumberInput
+            min={0}
+            controlSize="sm"
+            allowEmpty
+            wrapperClassName="w-full"
+            placeholder="Max qty"
+            value={filters.maxQty === '' ? null : Number(filters.maxQty)}
+            onValueChange={(n) => setFilterParam('maxQty', String(n))}
+            onValueCleared={() => setFilterParam('maxQty', '')}
+          />
+        </div>
+      </div>
+      {hasNonSearchFilters && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="h-12 w-full justify-center"
+          onClick={clearAllFilters}
+        >
+          Clear all filters
+        </Button>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -350,8 +446,11 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
         actions={
           <PageHeaderMobileTools
             sheetTitle="Transfer confirmation tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetSubtitle={<span>Date range and filters</span>}
             triggerAriaLabel="Transfer confirmation toolbar"
+            filters={mobileFiltersBody}
+            filtersBadgeCount={hasNonSearchFilters ? 1 : 0}
+            sheetCloseLabel="Done"
             desktop={
               <div className="flex items-center gap-2">
                 <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
@@ -365,7 +464,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               </div>
             }
             sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+              <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
                 <DateFilterBar
                   startDate={filters.startDate}
                   endDate={filters.endDate}
@@ -379,6 +478,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total transfers', value: remittances.length, valueClassName: 'text-app-fg' },
           { label: 'Pending', value: sentRemittances.length, valueClassName: 'text-warning-600 dark:text-warning-400' },
@@ -389,21 +489,33 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
         ]}
       />
 
-      {/* Status pills first — they're the primary segmentation. The FilterPills drive
-          the URL `status` param and replace the previous "Pending receipt / Received-Disputed"
-          tab pair plus the duplicate "All statuses" dropdown. */}
-      <div className="card p-4 space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <FilterPills
-            options={statusPillOptions}
-            value={statusValue}
-            onChange={(v) => setFilterParam('status', v)}
-            size="sm"
-          />
-        </div>
+      {/* Search — mobile only; on desktop it sits inline in the filter bar below. */}
+      <form
+        className="w-full md:hidden"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setFilterParam('search', searchDraft);
+        }}
+      >
+        <SearchInput
+          controlSize="sm"
+          wrapperClassName="w-full"
+          placeholder="Search by ID or product"
+          value={searchDraft}
+          onChange={(value) => {
+            setSearchDraft(value);
+            if (value === '') setFilterParam('search', '');
+          }}
+          withSubmitButton
+        />
+      </form>
+
+      {/* Desktop-only filter bar — search + filters on one line. On mobile these
+          live in the PageHeaderMobileTools sheet (search renders separately above). */}
+      <div className="hidden md:block card p-4">
         <div className="flex flex-wrap items-center gap-2">
           <form
-            className="w-full sm:w-auto sm:min-w-[16rem]"
+            className="w-64"
             onSubmit={(e) => {
               e.preventDefault();
               setFilterParam('search', searchDraft);
@@ -423,7 +535,17 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           </form>
           <FormSelect
             controlSize="sm"
-            wrapperClassName="w-full sm:w-52"
+            wrapperClassName="w-44"
+            value={statusValue}
+            onChange={(e) => setFilterParam('status', e.target.value)}
+            options={statusPillOptions.map((o) => ({
+              value: o.value,
+              label: `${o.label} (${o.count ?? 0})`,
+            }))}
+          />
+          <FormSelect
+            controlSize="sm"
+            wrapperClassName="w-52"
             value={filters.locationId}
             onChange={(e) => setFilterParam('locationId', e.target.value)}
             options={[
@@ -436,7 +558,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           />
           <FormSelect
             controlSize="sm"
-            wrapperClassName="w-full sm:w-48"
+            wrapperClassName="w-48"
             value={filters.sender}
             onChange={(e) => setFilterParam('sender', e.target.value)}
             options={[
@@ -448,7 +570,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
             min={0}
             controlSize="sm"
             allowEmpty
-            wrapperClassName="w-full sm:w-28"
+            wrapperClassName="w-28"
             placeholder="Min qty"
             value={filters.minQty === '' ? null : Number(filters.minQty)}
             onValueChange={(n) => setFilterParam('minQty', String(n))}
@@ -458,7 +580,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
             min={0}
             controlSize="sm"
             allowEmpty
-            wrapperClassName="w-full sm:w-28"
+            wrapperClassName="w-28"
             placeholder="Max qty"
             value={filters.maxQty === '' ? null : Number(filters.maxQty)}
             onValueChange={(n) => setFilterParam('maxQty', String(n))}

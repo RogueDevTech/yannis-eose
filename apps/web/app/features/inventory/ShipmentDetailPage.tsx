@@ -526,6 +526,7 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
           {summary.verifiedLineCount > 0 ? (
             <>
               <OverviewStatStrip
+                mobileGrid
                 embedded
                 items={[
                   { label: 'Received', value: summary.totalReceived, valueClassName: 'text-app-fg' },

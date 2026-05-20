@@ -567,6 +567,7 @@ export function CEODashboardPage({
           Revenue & Profit Detail
         </h2>
         <OverviewStatStrip
+          mobileGrid
           items={[
             { label: 'Revenue', value: fmt(revenue), valueClassName: 'text-app-fg tabular-nums' },
             {
@@ -789,6 +790,7 @@ export function CEODashboardPage({
           </div>
           )}
           <OverviewStatStrip
+            mobileGrid
             embedded
             showScrollControls={
               Object.entries(orderPipeline.statusCounts).filter(([s, c]) => CEO_VISIBLE_STATUSES.has(s) && c > 0).length > 4

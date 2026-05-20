@@ -658,6 +658,7 @@ export function DeliveryRemittancesPage({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           {
             label: 'Expected (awaiting)',

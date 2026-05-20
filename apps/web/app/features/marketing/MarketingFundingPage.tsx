@@ -1407,7 +1407,7 @@ function FundingMetricsStrip({
       title: 'Transfers flagged as Not Received (you or counterparty)',
     },
   ];
-  return <OverviewStatStrip items={items} />;
+  return <OverviewStatStrip mobileGrid items={items} />;
 }
 
 /**

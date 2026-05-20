@@ -21,6 +21,7 @@ import {
   importCellInputClass,
 } from '~/components/ui/import-bulk-data';
 import { FormSelect } from '~/components/ui/form-select';
+import { Checkbox } from '~/components/ui/checkbox';
 import {
   BRANCH_ELIGIBLE_IMPORT_ROLES,
   type BranchInfo,
@@ -182,8 +183,7 @@ export function UsersImportPage({ branches }: UsersImportPageProps) {
         getDisplayValue: (row) => (row.isProbation ? 'true' : 'false'),
         hideErrorInfo: true,
         renderCell: ({ row, disabled, patch }) => (
-          <input
-            type="checkbox"
+          <Checkbox
             checked={row.isProbation}
             onChange={(e) => patch({ isProbation: e.target.checked } as Partial<ResolvedRow>)}
             disabled={disabled}

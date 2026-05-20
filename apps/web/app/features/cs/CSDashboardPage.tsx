@@ -1695,7 +1695,7 @@ function CSDashboardPageLoaded({
         />
       )}
 
-      <OverviewStatStrip items={overviewStatItems} />
+      <OverviewStatStrip mobileGrid items={overviewStatItems} />
 
       {/* ── Live Activity Feed ──────────────────────────────── */}
       <div>

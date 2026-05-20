@@ -407,6 +407,7 @@ export function FinanceDisbursementsLoadingShell({
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total disbursed', value: <StatValuePulse className="min-w-[3.5rem]" /> },
           { label: 'Pending', value: <StatValuePulse className="min-w-[3rem]" /> },
@@ -761,6 +762,7 @@ export function DeliveryRemittancesLoadingShell({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Expected (awaiting)', value: <StatValuePulse className="min-w-[3.5rem]" /> },
           { label: 'Total on batches', value: <StatValuePulse className="min-w-[3.5rem]" /> },
@@ -1168,6 +1170,7 @@ export function FinancePayoutLoadingShell({
         }
       />
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Pending finance', value: <StatValuePulse className="min-w-[3.5rem]" /> },
           { label: 'Paid', value: <StatValuePulse className="min-w-[3.5rem]" /> },

@@ -386,6 +386,7 @@ export function WarehousesPage({
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           {
             label: 'Active warehouses',

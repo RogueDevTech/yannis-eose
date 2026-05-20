@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { MAX_OFFER_TIER_IMAGES } from './products';
 import {
   FIXED_FIELD_ORDER_TOKENS,
+  OFFER_FIELD_ORDER_TOKEN,
   ORDERABLE_STANDARD_FIELD_KEYS,
 } from '../marketing/form-field-order';
 
@@ -509,6 +510,7 @@ const fieldOrderCustomTokenSchema = z
 
 export const campaignFieldOrderTokenSchema = z.union([
   z.enum(FIXED_FIELD_ORDER_TOKENS),
+  z.literal(OFFER_FIELD_ORDER_TOKEN),
   fieldOrderStandardTokenSchema,
   fieldOrderCustomTokenSchema,
 ]);

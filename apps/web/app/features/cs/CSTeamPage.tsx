@@ -493,6 +493,7 @@ export function CSTeamPage({
 
       {unfilteredCount > 0 && (
         <OverviewStatStrip
+          mobileGrid
           items={[
             {
               label: 'Closers',

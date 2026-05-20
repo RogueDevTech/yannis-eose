@@ -812,6 +812,9 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .offer-details{display:flex;flex-wrap:wrap;align-items:center;column-gap:.5rem;row-gap:.125rem}
     .yannis-form-card .offer-qty{font-size:.75rem;color:#666}
     .yannis-form-card .offer-price{color:${accentColor};font-weight:700;font-size:.9375rem}
+    .yannis-form-card .radio-group,.yannis-form-card .checkbox-group{display:flex;flex-direction:column;gap:.5rem;margin-bottom:.75rem}
+    .yannis-form-card .radio-option,.yannis-form-card .checkbox-option{display:flex;align-items:center;gap:.5rem;cursor:pointer;font-size:.875rem;font-weight:500;color:#333;text-transform:none;letter-spacing:normal;margin-bottom:0}
+    .yannis-form-card .radio-option input[type=radio],.yannis-form-card .checkbox-option input[type=checkbox]{accent-color:${accentColor};width:18px;height:18px;flex-shrink:0;margin:0;cursor:pointer}
     @media (max-width:480px){
       .yannis-form-card{padding:1rem;border-radius:10px}
       .yannis-form-card h2{font-size:1.25rem;margin-bottom:.375rem}
@@ -1574,6 +1577,11 @@ function getFormInnerHTML(config: CampaignConfig): string {
     return `<div id="offers-${p.id}" class="offer-group offer-selector" style="display:${display}">${offersHtml}</div>`;
   }).join('\n');
 
+  // The whole "Select Offer" block. Placed by its `offer` field-order token so
+  // the form builder can position it anywhere (defaults to the bottom).
+  const offerSelectionHtml = `<label>Select Offer</label>
+      ${offerGroupsHtml}`;
+
   // If single product, auto-set selectedProduct via hidden data attribute
   const firstProduct = config.products[0];
   const singleProductAttr = hasSingleProduct && firstProduct ? ` data-single-product="${firstProduct.id}"` : '';
@@ -1586,6 +1594,9 @@ function getFormInnerHTML(config: CampaignConfig): string {
       if (token === 'fixed.phoneNumber') {
         return `<label for="customerPhone">Phone Number</label>
       <input id="customerPhone" name="customerPhone" type="tel" inputmode="tel" required placeholder="08012345678" maxlength="14" pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$" title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678" autocomplete="tel-national">`;
+      }
+      if (token === 'offer') {
+        return offerSelectionHtml;
       }
       if (token.startsWith('standard.')) {
         return renderStandardField(
@@ -1620,8 +1631,6 @@ function getFormInnerHTML(config: CampaignConfig): string {
       </div>
       ${!hasSingleProduct ? `<label>Select Product</label>
       <div class="product-selector">${productOptionsHtml}</div>` : ''}
-      <label>Select Offer</label>
-      ${offerGroupsHtml}
       ${orderedFormInfoHtml}
       <button type="submit" class="btn" id="yannisSubmitBtn">${escapeHtml(buttonText)}</button>
     </form>

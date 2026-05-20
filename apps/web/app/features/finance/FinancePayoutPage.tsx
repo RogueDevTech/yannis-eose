@@ -230,6 +230,7 @@ export function FinancePayoutPage({ batches, selectedBatch, status }: FinancePay
       />
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Pending finance', value: <NairaPrice amount={totalPending} />, valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums' },
           { label: 'Paid', value: <NairaPrice amount={totalPaid} />, valueClassName: 'text-success-600 dark:text-success-400 tabular-nums' },

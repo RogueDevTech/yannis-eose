@@ -479,6 +479,7 @@ export function LogisticsTeamPage({
       />
 
       <OverviewStatStrip
+        mobileGrid
         showScrollControls={false}
         items={[
           {

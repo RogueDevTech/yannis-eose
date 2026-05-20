@@ -1003,6 +1003,7 @@ export function DisbursementsPage({
       )}
 
       <OverviewStatStrip
+        mobileGrid
         items={[
           { label: 'Total disbursed', value: formatNaira(totalAllAmt), valueClassName: 'text-app-fg tabular-nums' },
           { label: 'Pending', value: formatNaira(totalSentAmt), valueClassName: 'text-warning-600 dark:text-warning-400 tabular-nums' },

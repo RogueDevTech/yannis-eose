@@ -71,6 +71,12 @@ type OverviewStatStripProps = {
   tileClassName?: string;
   /** Omit outer `card` wrapper (use inside an existing card). */
   embedded?: boolean;
+  /**
+   * On mobile, render a wrapping grid (3 columns) instead of the horizontal
+   * scroll strip. Better for strips with ≤6 fixed items where the user
+   * should see everything at a glance. Desktop layout is unchanged.
+   */
+  mobileGrid?: boolean;
 };
 
 export function OverviewStatStrip({
@@ -79,6 +85,7 @@ export function OverviewStatStrip({
   className,
   tileClassName = '',
   embedded = false,
+  mobileGrid = false,
 }: OverviewStatStripProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollBy = useCallback((delta: number) => {
@@ -150,8 +157,41 @@ export function OverviewStatStrip({
     </div>
   ) : null;
 
+  const gridTile = [
+    'rounded-lg',
+    'bg-app-hover',
+    'px-2',
+    'py-1',
+    'text-center',
+    tileClassName,
+  ].join(' ');
+
+  const mobileGridContent = mobileGrid ? (
+    <div className="md:hidden">
+      <div
+        className="gap-1 px-1.5 py-1.5"
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(6.5rem, 1fr))' }}
+      >
+      {items.map((item, i) => (
+        <div key={i} className={gridTile} title={item.title}>
+          <p className="whitespace-nowrap text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
+          {item.plainValue ? (
+            <div className="mt-0.5 flex justify-center">{item.value}</div>
+          ) : (
+            <p
+              className={`mt-0.5 text-lg font-bold leading-tight ${item.valueClassName ?? 'text-app-fg'}`}
+            >
+              {item.value}
+            </p>
+          )}
+        </div>
+      ))}
+      </div>
+    </div>
+  ) : null;
+
   const stripContent = (
-    <div ref={scrollRef} className="flex-1 min-w-0 overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem]">
+    <div ref={scrollRef} className={`flex-1 min-w-0 overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem] ${mobileGrid ? 'hidden md:block' : ''}`}>
       <div className="flex w-max min-w-full flex-nowrap gap-2 pb-0.5">
         {items.map((item, i) => (
           <div key={i} className={tileBase} title={item.title}>
@@ -176,7 +216,8 @@ export function OverviewStatStrip({
   if (embedded) {
     return (
       <div className={className}>
-        <div className="flex items-center gap-1.5 min-w-0">
+        {mobileGridContent}
+        <div className={`flex items-center gap-1.5 min-w-0 ${mobileGrid ? 'hidden md:flex' : ''}`}>
           {stripContent}
           {scrollButtons}
         </div>
@@ -187,7 +228,8 @@ export function OverviewStatStrip({
   const outer = ['card', '!p-0', 'overflow-hidden', className].filter(Boolean).join(' ');
   return (
     <div className={outer}>
-      <div className="flex items-center gap-1.5 min-w-0">
+      {mobileGridContent}
+      <div className={`flex items-center gap-1.5 min-w-0 ${mobileGrid ? 'hidden md:flex' : ''}`}>
         {stripContent}
         {scrollButtons ? <div className="hidden md:flex shrink-0 pr-[0.9rem]">{scrollButtons}</div> : null}
       </div>

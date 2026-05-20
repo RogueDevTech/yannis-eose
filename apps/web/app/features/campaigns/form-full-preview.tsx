@@ -238,6 +238,17 @@ export function FormFullPreview({
     return [{ id: 'single', name: '', offers }];
   }, [multiProduct, previewProducts, previewOffers]);
 
+  // The offer token is always in the order (so its position is remembered even
+  // when a form temporarily has no offers) but only renders a row when there
+  // are offers to show.
+  const renderableFields = useMemo(
+    () =>
+      offerSections.length > 0
+        ? baseOrderedPreviewFields
+        : baseOrderedPreviewFields.filter((field) => field.kind !== 'offer'),
+    [baseOrderedPreviewFields, offerSections.length],
+  );
+
   useEffect(() => {
     setSubmitted(false);
     setPaymentMethod('');
@@ -337,63 +348,7 @@ export function FormFullPreview({
           setSubmitted(true);
         }}
       >
-        {offerSections.length > 0 ? (
-          <div className="space-y-3 sm:space-y-4">
-            <span className="block text-xs font-bold uppercase tracking-wider text-app-fg-muted mb-1.5 sm:mb-2">
-              Select Offer
-            </span>
-            {offerSections.map((section) => (
-              <div key={section.id} className="space-y-2 sm:space-y-3">
-                {section.name ? (
-                  <p className="text-sm font-medium text-app-fg-muted -mt-1">{section.name}</p>
-                ) : null}
-                <div className="space-y-2 sm:space-y-3">
-                  {section.offers.map((o, idx) => {
-                    const thumb = showProductImages ? firstOfferThumbnailUrl(o.imageUrls) : '';
-                    return (
-                    <label
-                      key={`${section.id}-${idx}-${o.label}`}
-                      className="flex items-start gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl border-2 border-[#c8c8c8] px-3 py-2.5 sm:px-4 sm:py-3 cursor-pointer"
-                    >
-                      <input
-                        type="radio"
-                        className="mt-1 shrink-0"
-                        name={multiProduct ? `preview-offer-${section.id}` : 'preview-offer'}
-                        defaultChecked={idx === 0}
-                      />
-                      {thumb ? (
-                        <img
-                          src={thumb}
-                          alt=""
-                          width={48}
-                          height={48}
-                          loading="lazy"
-                          className="mt-0.5 w-12 h-12 rounded-lg object-cover border border-[#c8c8c8] shrink-0 bg-app-hover"
-                        />
-                      ) : null}
-                      <span className="min-w-0 flex-1 flex flex-col gap-1">
-                        <span className="text-base sm:text-xl tracking-wide font-semibold text-app-fg leading-snug">
-                          {o.label}
-                        </span>
-                        <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0 text-sm text-app-fg-muted">
-                          <span>
-                            {o.qty} UNIT{o.qty > 1 ? 'S' : ''}
-                          </span>
-                          <span className="font-semibold" style={{ color: accentColor }}>
-                            {formatOfferPrice(o.price)}
-                          </span>
-                        </span>
-                      </span>
-                    </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {baseOrderedPreviewFields.map((field, index) => {
+        {renderableFields.map((field, index) => {
           const projectedIndex = projectedFieldOrder.indexOf(field.token);
           const currentLayout = rowLayouts[field.token];
           const projectedSlotToken = resolvedFieldOrder[projectedIndex];
@@ -445,6 +400,9 @@ export function FormFullPreview({
               previewDateOpts,
               showStandaloneEmail: standard.has('customerEmail'),
               onPaymentMethodChange: setPaymentMethod,
+              offerSections,
+              showProductImages,
+              multiProduct,
             })}
           </ReorderablePreviewField>
           );
@@ -458,6 +416,12 @@ export function FormFullPreview({
   );
 }
 
+interface PreviewOfferSection {
+  id: string;
+  name: string;
+  offers: ProductOfferRow[];
+}
+
 function renderPreviewField({
   field,
   accentColor,
@@ -467,6 +431,9 @@ function renderPreviewField({
   previewDateOpts,
   showStandaloneEmail,
   onPaymentMethodChange,
+  offerSections,
+  showProductImages,
+  multiProduct,
 }: {
   field: OrderedPreviewField;
   accentColor: string;
@@ -476,7 +443,69 @@ function renderPreviewField({
   previewDateOpts: string[];
   showStandaloneEmail: boolean;
   onPaymentMethodChange: (value: string) => void;
+  offerSections: PreviewOfferSection[];
+  showProductImages: boolean;
+  multiProduct: boolean;
 }) {
+  if (field.kind === 'offer') {
+    if (offerSections.length === 0) return null;
+    return (
+      <div className="space-y-3 sm:space-y-4">
+        <span className="block text-xs font-bold uppercase tracking-wider text-app-fg-muted mb-1.5 sm:mb-2">
+          Select Offer
+        </span>
+        {offerSections.map((section) => (
+          <div key={section.id} className="space-y-2 sm:space-y-3">
+            {section.name ? (
+              <p className="text-sm font-medium text-app-fg-muted -mt-1">{section.name}</p>
+            ) : null}
+            <div className="space-y-2 sm:space-y-3">
+              {section.offers.map((o, idx) => {
+                const thumb = showProductImages ? firstOfferThumbnailUrl(o.imageUrls) : '';
+                return (
+                  <label
+                    key={`${section.id}-${idx}-${o.label}`}
+                    className="flex items-start gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl border-2 border-[#c8c8c8] px-3 py-2.5 sm:px-4 sm:py-3 cursor-pointer"
+                  >
+                    <input
+                      type="radio"
+                      className="mt-1 shrink-0"
+                      name={multiProduct ? `preview-offer-${section.id}` : 'preview-offer'}
+                      defaultChecked={idx === 0}
+                    />
+                    {thumb ? (
+                      <img
+                        src={thumb}
+                        alt=""
+                        width={48}
+                        height={48}
+                        loading="lazy"
+                        className="mt-0.5 w-12 h-12 rounded-lg object-cover border border-[#c8c8c8] shrink-0 bg-app-hover"
+                      />
+                    ) : null}
+                    <span className="min-w-0 flex-1 flex flex-col gap-1">
+                      <span className="text-base sm:text-xl tracking-wide font-semibold text-app-fg leading-snug">
+                        {o.label}
+                      </span>
+                      <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0 text-sm text-app-fg-muted">
+                        <span>
+                          {o.qty} UNIT{o.qty > 1 ? 'S' : ''}
+                        </span>
+                        <span className="font-semibold" style={{ color: accentColor }}>
+                          {formatOfferPrice(o.price)}
+                        </span>
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   if (field.kind === 'fixed') {
     if (field.key === 'fullName') {
       return (
