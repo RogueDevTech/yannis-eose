@@ -414,6 +414,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
     'returns.read',
     'products.read',
     'products.create',
+    'products.update',
     'products.offers',
     'categories.read',
     'categories.write',

@@ -367,6 +367,15 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                     View shipment stock
                   </Link>
                 ) : null}
+                {allow('EDIT_LINES') ? (
+                  <Link
+                    to={`/admin/shipments/${shipment.id}/edit`}
+                    prefetch="intent"
+                    className="btn-secondary btn-sm"
+                  >
+                    Edit details
+                  </Link>
+                ) : null}
                 {allow('MARK_IN_TRANSIT') ? (
                   <Button variant="secondary" size="sm" disabled={optimisticBusy} onClick={() => setConfirmInTransit(true)}>
                     Mark in transit
@@ -399,6 +408,15 @@ export function ShipmentDetailPage({ data, actionUrl }: ShipmentDetailPageProps)
                 {(status === 'VERIFIED' || status === 'CLOSED') ? (
                   <Link to={`/admin/inventory?shipmentId=${shipment.id}`} prefetch="intent" className="btn-primary btn-sm w-full justify-center">
                     View shipment stock
+                  </Link>
+                ) : null}
+                {allow('EDIT_LINES') ? (
+                  <Link
+                    to={`/admin/shipments/${shipment.id}/edit`}
+                    prefetch="intent"
+                    className="btn-secondary btn-sm w-full justify-center"
+                  >
+                    Edit details
                   </Link>
                 ) : null}
                 {allow('MARK_IN_TRANSIT') ? (

@@ -14,6 +14,7 @@ import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageNotification } from '~/components/ui/page-notification';
+import { useRevalidateOnFocus } from '~/hooks/use-revalidate-on-focus';
 import type { LocationOption, ProductOption } from '~/features/inventory/types';
 import { ReceiveShipmentForm } from '~/features/inventory/ReceiveShipmentForm';
 
@@ -100,7 +101,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const arrivedNow = formData.get('arrivedNow')?.toString() === 'true';
   const linesRaw = formData.get('lines')?.toString() ?? '[]';
 
-  let lines: Array<{ productId: string; expectedQuantity: number; factoryCost: number }>;
+  let lines: Array<{ productId: string; expectedQuantity: number; factoryCost?: number }>;
   try {
     const parsed = JSON.parse(linesRaw);
     if (!Array.isArray(parsed) || parsed.length === 0) {
@@ -157,6 +158,10 @@ export default function ReceiveShipmentRoute() {
     loadError: string | null;
   };
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
+
+  // Pick up products/warehouses added in another tab or a create flow when the
+  // user returns to this page, without needing a manual refresh.
+  useRevalidateOnFocus();
 
   return (
     <div className="space-y-4">
