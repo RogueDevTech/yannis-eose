@@ -25,6 +25,8 @@ export interface LogisticsTeamPageProps {
   dateFilters: { startDate: string; endDate: string; periodAllTime: boolean };
   page?: number;
   totalPages?: number;
+  /** URL-driven rows-per-page — feeds the `<Pagination>` per-page picker. */
+  limit?: number;
   totalCount?: number;
   unfilteredCount?: number;
   q?: string;
@@ -241,6 +243,7 @@ export function LogisticsTeamPage({
   dateFilters,
   page = 1,
   totalPages = 1,
+  limit,
   totalCount = 0,
   unfilteredCount = 0,
   q = '',
@@ -597,7 +600,7 @@ export function LogisticsTeamPage({
             </div>
 
             {totalPages > 1 && (
-              <Pagination page={page} totalPages={totalPages} pageParam="page" />
+              <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
             )}
           </>
         )}

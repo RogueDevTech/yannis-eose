@@ -11,7 +11,7 @@ import { AmountInput } from '~/components/ui/amount-input';
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { useFetcherToast } from '~/components/ui/toast';
-import { RoleBadge } from '~/components/ui/role-badge';
+import { RoleBadge, formatRoleLabel } from '~/components/ui/role-badge';
 import { Collapsible } from '~/components/ui/collapsible';
 import { RadioGroup } from '~/components/ui/radio-group';
 import {
@@ -320,7 +320,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
               ...(hasUniversalPlans
                 ? [{ value: ROLE_FILTER_UNIVERSAL, label: 'Per-user templates (no role)' }]
                 : []),
-              ...visibleRoles.map((r) => ({ value: r, label: r.replace(/_/g, ' ') })),
+              ...visibleRoles.map((r) => ({ value: r, label: formatRoleLabel(r) })),
             ]}
             className="sm:w-56"
           />
@@ -419,7 +419,7 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
             title={`Edit · ${editPlan.planName}`}
             subtitle={`${
               editPlan.role
-                ? `Role default: ${editPlan.role.replace(/_/g, ' ')}`
+                ? `Role default: ${formatRoleLabel(editPlan.role)}`
                 : 'Per-user template (no role default)'
             } · Effective from ${new Date(editPlan.effectiveFrom).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}`}
             onClose={() => {
@@ -670,7 +670,7 @@ function PlanForm({
               options={[
                 {
                   value: 'dept_default',
-                  label: `Department default (${onlyRole!.replace(/_/g, ' ')})`,
+                  label: `Department default (${formatRoleLabel(onlyRole!)})`,
                   description: 'Every staff member in this role uses this plan unless they have their own assignment.',
                 },
                 {
@@ -690,14 +690,14 @@ function PlanForm({
             onChange={(e) => setCreateRoleDraft(e.target.value)}
             options={[
               { value: '', label: 'None — assign plan on staff profile only' },
-              ...manageableRoles.map((r) => ({ value: r, label: r.replace(/_/g, ' ') })),
+              ...manageableRoles.map((r) => ({ value: r, label: formatRoleLabel(r) })),
             ]}
           />
         ) : (
           <div>
             <p className="block text-sm font-medium text-app-fg-muted mb-1">Role default</p>
             <p className="input bg-app-hover/40 cursor-not-allowed">
-              {plan!.role ? plan!.role.replace(/_/g, ' ') : 'Per-user assignment only'}
+              {plan!.role ? formatRoleLabel(plan!.role) : 'Per-user assignment only'}
             </p>
             <p className="text-xs text-app-fg-muted mt-0.5">Create a fresh plan if you must change linkage.</p>
           </div>

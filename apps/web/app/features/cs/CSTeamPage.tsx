@@ -6,6 +6,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { PageHeader } from '~/components/ui/page-header';
+import { formatRoleLabel } from '~/components/ui/role-badge';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -66,7 +67,7 @@ function formatLastActive(lastActionAt: string | null): string {
 }
 
 function csRoleLabel(role: string): string {
-  return role === 'CS_CLOSER' ? 'Closer' : role.replace(/_/g, ' ');
+  return role === 'CS_CLOSER' ? 'Closer' : formatRoleLabel(role);
 }
 
 function CSTeamCompactStat({

@@ -7,11 +7,10 @@ import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools'
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
+import { useState } from 'react';
 import { useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import type { CSLeaderboardEntry } from '~/features/cs/types';
-
-const LEADERBOARD_PAGE_SIZE = 10;
 
 interface CSLeaderboardPageProps {
   csLeaderboard: CSLeaderboardEntry[];
@@ -37,6 +36,13 @@ export function CSLeaderboardPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const pageParam = Number(searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
+  const [pageSize, setPageSize] = useState(10);
+
+  const goToPage = (nextPage: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('page', String(nextPage));
+    setSearchParams(next, { replace: true });
+  };
 
   return (
     <div className="space-y-6 px-3 sm:px-0">
@@ -86,11 +92,11 @@ export function CSLeaderboardPage({
               </TableLoadingOverlay>
             );
           }
-          // 10/page client-side. Rank still reflects global position so #1 stays #1 regardless of page.
-          const totalPages = Math.max(1, Math.ceil(lb.length / LEADERBOARD_PAGE_SIZE));
+          // Client-side paged. Rank still reflects global position so #1 stays #1 regardless of page.
+          const totalPages = Math.max(1, Math.ceil(lb.length / pageSize));
           const safePage = Math.min(page, totalPages);
-          const startIdx = (safePage - 1) * LEADERBOARD_PAGE_SIZE;
-          const pagedLb = lb.slice(startIdx, startIdx + LEADERBOARD_PAGE_SIZE);
+          const startIdx = (safePage - 1) * pageSize;
+          const pagedLb = lb.slice(startIdx, startIdx + pageSize);
           return (
             <TableLoadingOverlay show={isFilterLoading}>
             <div className="card p-0">
@@ -174,22 +180,21 @@ export function CSLeaderboardPage({
                   );
                 })}
               </div>
-              {totalPages > 1 && (
-                <div className="border-t border-app-border px-4 py-3 flex items-center justify-between">
-                  <p className="text-xs text-app-fg-muted">
-                    Showing {startIdx + 1}–{Math.min(startIdx + LEADERBOARD_PAGE_SIZE, lb.length)} of {lb.length}
-                  </p>
-                  <Pagination
-                    page={safePage}
-                    totalPages={totalPages}
-                    onPageChange={(nextPage) => {
-                      const next = new URLSearchParams(searchParams);
-                      next.set('page', String(nextPage));
-                      setSearchParams(next, { replace: true });
-                    }}
-                  />
-                </div>
-              )}
+              <div className="border-t border-app-border px-4 py-3 flex items-center justify-between">
+                <p className="text-xs text-app-fg-muted">
+                  Showing {startIdx + 1}–{Math.min(startIdx + pageSize, lb.length)} of {lb.length}
+                </p>
+                <Pagination
+                  page={safePage}
+                  totalPages={totalPages}
+                  onPageChange={goToPage}
+                  pageSize={pageSize}
+                  onPageSizeChange={(n) => {
+                    setPageSize(n);
+                    goToPage(1);
+                  }}
+                />
+              </div>
             </div>
             </TableLoadingOverlay>
           );

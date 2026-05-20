@@ -242,17 +242,73 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'canCreateOffline'
       | 'canExport'
       | 'canBulkPick'
+      | 'isCartAbandonmentView'
       | 'bulkSelectAllMatchingInput'
       | 'deferredSecondary'
     >
   > => {
-  const listRes = await apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie });
-
-  const trpcData = listRes.ok
-    ? (listRes.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
-    : null;
-  const total = trpcData?.pagination?.total ?? 0;
-  const totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+  // Cart-abandonment view: the "Cart abandonment" status pseudo-filter swaps the
+  // table from real orders to the un-recovered abandoned-cart backlog. Each cart
+  // is mapped into an `Order`-shaped row with the synthetic status `'CART'` so the
+  // shared table renders it (the page switches to a read-only cart view).
+  let orders: Order[] = [];
+  let total = 0;
+  let totalPages = 0;
+  if (fromCart) {
+    const cartsInput = encodeURIComponent(JSON.stringify({ page, limit: ORDERS_PER_PAGE }));
+    const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
+      method: 'GET',
+      cookie,
+    });
+    const cartsData = cartsRes.ok
+      ? (
+          cartsRes.data as {
+            result?: {
+              data?: {
+                items: Array<{
+                  id: string;
+                  customerName: string;
+                  customerPhoneDisplay: string;
+                  productId: string | null;
+                  productName: string | null;
+                  campaignId: string | null;
+                  campaignName: string | null;
+                  updatedAt: string;
+                  quantity: number | null;
+                }>;
+                total: number;
+              };
+            };
+          }
+        )?.result?.data
+      : null;
+    total = cartsData?.total ?? 0;
+    totalPages = total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE);
+    orders = (cartsData?.items ?? []).map((c) => ({
+      id: c.id,
+      customerName: c.customerName,
+      customerPhoneDisplay: c.customerPhoneDisplay ?? '',
+      status: 'CART',
+      totalAmount: null,
+      createdAt: c.updatedAt,
+      assignedCsId: null,
+      primaryProductId: c.productId ?? null,
+      primaryProductName: c.productName ?? null,
+      itemCount: c.quantity ?? 0,
+      campaignId: c.campaignId ?? null,
+      campaignName: c.campaignName ?? null,
+      // Back-link drives the "View cart" quick-detail modal — for a cart row it's the cart's own id.
+      cartId: c.id,
+    }));
+  } else {
+    const listRes = await apiRequest<unknown>(`/trpc/orders.list?input=${input}`, { method: 'GET', cookie });
+    const trpcData = listRes.ok
+      ? (listRes.data as { result?: { data?: { orders: Order[]; pagination: { total: number; totalPages: number } } } })?.result?.data
+      : null;
+    orders = trpcData?.orders ?? [];
+    total = trpcData?.pagination?.total ?? 0;
+    totalPages = trpcData?.pagination?.totalPages ?? Math.ceil(total / ORDERS_PER_PAGE);
+  }
 
   const deferredSecondary = (async () => {
     // Single bundle endpoint replaces what used to be 5 (or up to 7 for HoCS /
@@ -271,6 +327,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         isCSCloser,
         showCSCloserColumn,
         canCreateOffline,
+        includeCartAbandonment: canFilterFromCart,
       }),
     );
     const bundleRes = await apiRequest<unknown>(
@@ -297,6 +354,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         name: string;
         offers?: Array<{ label: string; price: string; qty: number }>;
       }>;
+      cartAbandonmentCount: number | null;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -310,17 +368,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       csClosersForFilter: bundle?.csClosersForFilter ?? [],
       logisticsLocationsForBulk: bundle?.logisticsLocationsForBulk ?? [],
       productsForOfflineOrder: bundle?.productsForOfflineOrder ?? [],
+      cartAbandonmentCount: bundle?.cartAbandonmentCount ?? null,
     };
   })();
 
   return {
-    orders: trpcData?.orders ?? [],
+    orders,
     total,
     totalPages,
     page,
     limit: ORDERS_PER_PAGE,
     statusFilter: status,
     searchFilter: search,
+    isCartAbandonmentView: fromCart,
     isCSCloser,
     showCSCloserColumn,
     canAssignDirectly: user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN',
@@ -585,6 +645,7 @@ export default function CSOrdersRoute() {
         | 'canAssignDirectly'
         | 'currentUserId'
         | 'canCreateOffline'
+        | 'isCartAbandonmentView'
         | 'bulkSelectAllMatchingInput'
         | 'deferredSecondary'
       >
@@ -621,7 +682,10 @@ export default function CSOrdersRoute() {
           statusCounts={{}}
           userRole={userRole}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
-          excludeStatuses={['REMITTED']}
+          // REMITTED is accountant-only. The "Deleted" (CANCELLED) option is
+          // limited to HoCS / Admin / SuperAdmin here — CS closers don't filter
+          // their own queue by cancelled orders.
+          excludeStatuses={isHoCSPlus ? ['REMITTED'] : ['REMITTED', 'CANCELLED']}
           enableFromCartStatusOption={isHoCSPlus}
         />
       )}

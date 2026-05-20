@@ -386,6 +386,8 @@ interface AdSpendDayAccordionProps {
   currentUserId?: string;
   page: number;
   totalPages: number;
+  /** URL-driven rows-per-page — feeds the `<Pagination>` per-page picker. */
+  pageSize?: number;
   /** Remix action URL for approve/reject intents. */
   actionUrl: string;
   /** Open a receipt/screenshot inside the parent modal. */
@@ -403,6 +405,7 @@ export function AdSpendDayAccordion({
   currentUserId,
   page,
   totalPages,
+  pageSize,
   actionUrl,
   onPreviewReceipt,
   onEdit,
@@ -569,7 +572,13 @@ export function AdSpendDayAccordion({
       </ul>
 
       {totalPages > 1 && (
-        <Pagination page={page} totalPages={totalPages} pageParam="gpage" />
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          pageParam="gpage"
+          pageSize={pageSize}
+          pageSizeParam="gPerPage"
+        />
       )}
     </div>
   );

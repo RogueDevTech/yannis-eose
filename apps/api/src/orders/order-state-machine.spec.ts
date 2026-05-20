@@ -143,8 +143,10 @@ describe('getAllowedNextStatuses', () => {
     expect(result).not.toContain('DELIVERED');
   });
 
-  it('returns empty array for CANCELLED (no forward path)', () => {
-    expect(getAllowedNextStatuses('CANCELLED')).toHaveLength(0);
+  it('returns the restore path for CANCELLED (Admin can reopen to UNPROCESSED)', () => {
+    // A cancelled order is never deleted — Admin / SuperAdmin can send it back to
+    // the unassigned queue. UNPROCESSED is the only allowed next status.
+    expect(getAllowedNextStatuses('CANCELLED')).toEqual(['UNPROCESSED']);
   });
 
   it('returns ALLOCATED from ALLOCATED (reallocate to another 3PL)', () => {

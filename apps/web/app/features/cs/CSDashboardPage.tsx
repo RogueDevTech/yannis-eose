@@ -441,12 +441,15 @@ function ActiveOrderDetailModal({
   onClose,
   onReassign,
   onCancel,
+  canCancelOrders,
 }: {
   order: CSOrder | null;
   agent?: AgentWorkload;
   onClose: () => void;
   onReassign: (order: CSOrder) => void;
   onCancel: (order: CSOrder) => void;
+  /** Head of CS / Branch Admin / Admin only — closers can no longer cancel. */
+  canCancelOrders: boolean;
 }) {
   return (
     <Modal open={order != null} onClose={onClose} maxWidth="max-w-sm" backdropBlur>
@@ -544,16 +547,18 @@ function ActiveOrderDetailModal({
                   Reassign closer
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => { onClose(); onCancel(order); }}
-                className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-900/20 hover:bg-danger-100 dark:hover:bg-danger-900/40 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                Cancel Order
-              </button>
+              {canCancelOrders && (
+                <button
+                  type="button"
+                  onClick={() => { onClose(); onCancel(order); }}
+                  className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-900/20 hover:bg-danger-100 dark:hover:bg-danger-900/40 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  Cancel Order
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -656,6 +661,7 @@ function CSDashboardPageLoaded({
   liveEvents,
   canCreateOffline = false,
   canDeleteCart = false,
+  canCancelOrders = false,
   productsForOfflineOrder,
 }: CSDashboardPageLoadedProps) {
   const {
@@ -700,6 +706,20 @@ function CSDashboardPageLoaded({
   }, [searchParams]);
   const abandonedPageFromUrlRef = useRef(abandonedPageFromUrl);
   abandonedPageFromUrlRef.current = abandonedPageFromUrl;
+  // URL-driven page size for the abandoned-carts table — written by the `<Pagination>`
+  // per-page picker as `?abandonedPerPage=`. The carts fetcher reloads when it changes.
+  const abandonedPerPageFromUrl = useMemo(() => {
+    const n = parseInt(searchParams.get('abandonedPerPage') ?? '', 10);
+    return [ABANDONED_CARTS_PAGE_SIZE, 50, 100].includes(n) ? n : ABANDONED_CARTS_PAGE_SIZE;
+  }, [searchParams]);
+  const abandonedPerPageFromUrlRef = useRef(abandonedPerPageFromUrl);
+  abandonedPerPageFromUrlRef.current = abandonedPerPageFromUrl;
+  /** Build the carts resource-route URL with both abandoned pagination params. */
+  const buildCartsUrl = useCallback(
+    (page: number, perPage: number) =>
+      `/admin/sales/queue/carts?abandonedPage=${page}&abandonedPerPage=${perPage}`,
+    [],
+  );
   const [, startHotSwapSearchTransition] = useTransition();
   const claimFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
   const cartsFetcher = useFetcher<{
@@ -1211,15 +1231,15 @@ function CSDashboardPageLoaded({
 
   // Refresh cart payloads whenever abandoned pagination URL changes (and on first paint)
   useEffect(() => {
-    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrl}`);
-  }, [abandonedPageFromUrl]);
+    cartsFetcher.load(buildCartsUrl(abandonedPageFromUrl, abandonedPerPageFromUrl));
+  }, [abandonedPageFromUrl, abandonedPerPageFromUrl]);
 
   // Reload activity on any order event
   useSocketEvent('order:new', () => {
-    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+    cartsFetcher.load(buildCartsUrl(abandonedPageFromUrlRef.current, abandonedPerPageFromUrlRef.current));
   });
   useSocketEvent('order:status_changed', () => {
-    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+    cartsFetcher.load(buildCartsUrl(abandonedPageFromUrlRef.current, abandonedPerPageFromUrlRef.current));
   });
 
   const actionError = (fetcher.data as { error?: string })?.error;
@@ -1298,7 +1318,7 @@ function CSDashboardPageLoaded({
   useEffect(() => {
     if (deleteCartFetcher.state === 'idle' && deleteCartFetcher.data?.ok) {
       setDeleteCartConfirm(null);
-      cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+      cartsFetcher.load(buildCartsUrl(abandonedPageFromUrlRef.current, abandonedPerPageFromUrlRef.current));
     }
   }, [deleteCartFetcher.state, deleteCartFetcher.data]);
 
@@ -1310,7 +1330,7 @@ function CSDashboardPageLoaded({
     if (succeeded) {
       setBulkDeleteCartsConfirmOpen(false);
       clearAbandonedSelection();
-      cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+      cartsFetcher.load(buildCartsUrl(abandonedPageFromUrlRef.current, abandonedPerPageFromUrlRef.current));
     } else {
       // Action errored — drop the optimistic filter so the rows reappear.
       setBulkDeletingAbandonedIds([]);
@@ -1339,7 +1359,7 @@ function CSDashboardPageLoaded({
 
   // cart:updated socket event → reload carts fetcher directly (main loader revalidation won't refresh fetcher data)
   useSocketEvent('cart:updated', () => {
-    cartsFetcher.load(`/admin/sales/queue/carts?abandonedPage=${abandonedPageFromUrlRef.current}`);
+    cartsFetcher.load(buildCartsUrl(abandonedPageFromUrlRef.current, abandonedPerPageFromUrlRef.current));
   });
 
   // Detect newly arrived + updated activity items after each fetcher response
@@ -1918,6 +1938,7 @@ function CSDashboardPageLoaded({
           })}
         onCancel={(order) =>
           setCancelConfirmOrder({ orderId: order.id, customerName: order.customerName, branchId: order.branchId, fromStatus: order.status })}
+        canCancelOrders={canCancelOrders}
       />
 
       {/* Closer workload detail modal */}
@@ -2424,25 +2445,27 @@ function CSDashboardPageLoaded({
                     </svg>
                     View order
                   </Link>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedQueueOrder(null);
-                      setCancelConfirmOrder({
-                        orderId: qOrder.id,
-                        customerName: qOrder.customerName,
-                        branchId: qOrder.branchId,
-                        fromStatus: qOrder.status,
-                      });
-                    }}
-                    disabled={fetcher.state === 'submitting'}
-                    className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-900/20 hover:bg-danger-100 dark:hover:bg-danger-900/40 transition-colors disabled:opacity-50"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                    Cancel Order
-                  </button>
+                  {canCancelOrders && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedQueueOrder(null);
+                        setCancelConfirmOrder({
+                          orderId: qOrder.id,
+                          customerName: qOrder.customerName,
+                          branchId: qOrder.branchId,
+                          fromStatus: qOrder.status,
+                        });
+                      }}
+                      disabled={fetcher.state === 'submitting'}
+                      className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-danger-700 dark:text-danger-300 bg-danger-50 dark:bg-danger-900/20 hover:bg-danger-100 dark:hover:bg-danger-900/40 transition-colors disabled:opacity-50"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      Cancel Order
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -2771,6 +2794,9 @@ function CSDashboardPageLoaded({
                     page={abandonedPagination.page}
                     totalPages={abandonedTotalPages}
                     pageParam="abandonedPage"
+                    pageSize={abandonedPagination.limit}
+                    pageSizeParam="abandonedPerPage"
+                    pageSizeOptions={[ABANDONED_CARTS_PAGE_SIZE, 50, 100]}
                     showWhenSinglePage
                   />
                 </div>
@@ -3219,6 +3245,7 @@ export function CSDashboardPage({
   liveEvents,
   canCreateOffline,
   canDeleteCart,
+  canCancelOrders = false,
 }: CSDashboardPageProps) {
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
   const queueBundle = useMemo(
@@ -3256,6 +3283,7 @@ export function CSDashboardPage({
               liveEvents={liveEvents}
               canCreateOffline={canCreateOffline}
               canDeleteCart={canDeleteCart}
+              canCancelOrders={canCancelOrders}
             />
           )}
         </Await>

@@ -6,6 +6,7 @@ import {
   apiRequest,
   DEFERRED_LOADER_TIMEOUT_MS,
   getSessionCookie,
+  parsePerPage,
   requirePermission,
 } from '~/lib/api.server';
 import { PageHeader } from '~/components/ui/page-header';
@@ -72,6 +73,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const rawPage = Number(url.searchParams.get('page') ?? '1');
   const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+  // URL-driven page size — clamped to [20, 50, 100]; fallback 20.
+  const { perPage } = parsePerPage(url.searchParams);
   const rawSearch = (url.searchParams.get('search') ?? '').trim();
   const rawStatus = (url.searchParams.get('status') ?? 'ALL').toUpperCase();
   const status = (SHIPMENT_STATUSES.includes(rawStatus as ShipmentStatusFilter)
@@ -87,7 +90,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       limit: number;
       search?: string;
       status?: Exclude<ShipmentStatusFilter, 'ALL'>;
-    } = { destinationLocationId: warehouseId, page, limit: 20 };
+    } = { destinationLocationId: warehouseId, page, limit: perPage };
 
     if (rawSearch) listInput.search = rawSearch;
     if (status !== 'ALL') listInput.status = status;
@@ -119,6 +122,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     return {
       warehouseId,
       page,
+      limit: perPage,
       search: rawSearch,
       status,
       rows: shipmentsData?.rows ?? [],
@@ -137,6 +141,7 @@ clientLoader.hydrate = false;
 type WarehouseShipmentsPageProps = {
   warehouseId: string;
   page: number;
+  limit: number;
   search: string;
   status: ShipmentStatusFilter;
   rows: ShipmentRow[];
@@ -285,7 +290,7 @@ function WarehouseShipmentsPage(data: WarehouseShipmentsPageProps) {
 
         {data.totalPages > 1 ? (
           <div className="border-t border-app-border p-4">
-            <Pagination page={data.page} totalPages={data.totalPages} />
+            <Pagination page={data.page} totalPages={data.totalPages} pageSize={data.limit} />
           </div>
         ) : null}
       </Card>

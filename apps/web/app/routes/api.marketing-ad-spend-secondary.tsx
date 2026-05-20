@@ -1,7 +1,13 @@
 import type { LoaderFunctionArgs } from '@remix-run/node';
 import { json } from '@remix-run/node';
 import { secondaryCacheJson } from '~/lib/secondary-api-cache';
-import { apiRequest, DEFERRED_LOADER_TIMEOUT_MS, getSessionCookie, requirePermission } from '~/lib/api.server';
+import {
+  apiRequest,
+  DEFERRED_LOADER_TIMEOUT_MS,
+  getSessionCookie,
+  parsePerPage,
+  requirePermission,
+} from '~/lib/api.server';
 import {
   emptyMetrics,
   parseMetrics,
@@ -49,6 +55,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const mediaBuyerId = url.searchParams.get('mediaBuyerId') ?? undefined;
 
   const gpage = Math.max(1, parseInt(url.searchParams.get('gpage') || '1', 10));
+  // Daily-grouped accordion's URL-driven rows-per-page (`?gPerPage=`).
+  const { perPage: groupsPerPage } = parsePerPage(url.searchParams, { param: 'gPerPage' });
   const userIdsJson = url.searchParams.get('userIds') ?? '[]';
   let userIds: string[] = [];
   try {
@@ -65,7 +73,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const groupedScope: Record<string, unknown> = {
       page: gpage,
-      limit: 20,
+      limit: groupsPerPage,
       ...(isMediaBuyer ? { mediaBuyerId: user.id } : {}),
       ...(startDate && !periodAllTime ? { startDate } : {}),
       ...(endDate && !periodAllTime ? { endDate } : {}),
@@ -195,7 +203,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       })),
     }));
     const groupsTotal = groupedData.pagination?.total ?? 0;
-    const groupsTotalPages = Math.max(1, Math.ceil(groupsTotal / 20));
+    const groupsTotalPages = Math.max(1, Math.ceil(groupsTotal / groupsPerPage));
 
     const payload: SecondaryPayload = {
       metrics,

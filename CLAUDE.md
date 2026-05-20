@@ -119,6 +119,8 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → 
 - `CONFIRMED → AGENT_ASSIGNED`: 3PL location must have stock. Stock: Reserved → Allocated.
 - `AGENT_ASSIGNED/DISPATCHED/IN_TRANSIT → DELIVERED`: Stock deducted, commission triggered. deliveryNote/deliveryProofUrl both optional.
 - `DELIVERED → REMITTED`: accountant only (via cash remittance flow). CS NEVER marks REMITTED.
+- `{UNPROCESSED,CS_ASSIGNED,CS_ENGAGED} → CANCELLED`: HoCS / Branch Admin (same branch) / Admin/SuperAdmin only — CS closers can NOT cancel (CEO directive 2026-05-20). Mandatory reason ≥10 chars.
+- `CANCELLED → UNPROCESSED`: restore — Admin/SuperAdmin only. Cancelled orders are never deleted; they surface in the **Deleted** tab (`status=CANCELLED` filter on the orders list, all roles). Restore clears the closer assignment + lock so the order re-enters the pool.
 
 ---
 
@@ -269,6 +271,8 @@ Flow: submit → modal stays open → server `{success: true}` → modal closes 
 ### Order Lifecycle
 - Never skip states in order lifecycle
 - Never let CS mark REMITTED — accountant only
+- Never let CS closers cancel orders — HoCS / Branch Admin (same branch) / Admin only
+- Never delete a cancelled order from the DB — it lives in the "Deleted" tab; only Admin/SuperAdmin restore it to UNPROCESSED
 - Never let CS closers transfer orders — HoCS/SuperAdmin only via Hot Swap
 - Never bypass order↔inventory gates (assertGlobalAvailability → assertLocationCanFulfill → reserveForAllocate → completeDelivery)
 - Never deduct source stock on PENDING transfer — only on approveTransfer

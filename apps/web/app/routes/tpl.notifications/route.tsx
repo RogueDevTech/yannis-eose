@@ -2,7 +2,7 @@ import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { Suspense } from 'react';
 import { Await, useLoaderData, useSearchParams } from '@remix-run/react';
-import { apiRequest, getSessionCookie, getCurrentUser } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, getCurrentUser, parsePerPage } from '~/lib/api.server';
 import { NotificationsPage } from '~/features/notifications/NotificationsPage';
 import type { Notification } from '~/features/notifications/types';
 import { TplNotificationsLoadingShell } from '~/features/tpl/TplDeferredLoadingShells';
@@ -20,13 +20,20 @@ interface ListResult {
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const page = Math.max(1, parseInt(url.searchParams.get('page') ?? '1', 10));
-  const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') ?? '20', 10)));
+  // URL-driven page size — clamped to [20, 50, 100]; the `<Pagination>` per-page picker writes `perPage`.
+  const { perPage: limit } = parsePerPage(url.searchParams);
   const unreadOnly = url.searchParams.get('unreadOnly') === 'true';
+
+  const emptyResult: ListResult = {
+    notifications: [],
+    unreadCount: 0,
+    pagination: { page, limit, total: 0, totalPages: 0 },
+  };
 
   const pageData = (async (): Promise<ListResult> => {
     const user = await getCurrentUser(request);
     if (!user) {
-      return { notifications: [], unreadCount: 0, pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } };
+      return emptyResult;
     }
 
     const cookie = getSessionCookie(request);
@@ -38,7 +45,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return res.ok && res.data?.result?.data
       ? res.data.result.data
-      : { notifications: [], unreadCount: 0, pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } };
+      : emptyResult;
   })();
 
   return defer({ pageData });

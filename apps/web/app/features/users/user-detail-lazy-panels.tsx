@@ -81,12 +81,12 @@ export function UserDetailEarningsOutlookCard({
  * round-trip per page keeps the tab responsive.
  */
 export function UserDetailActivityTabContent({ entries }: { entries: UserAuditEntry[] }) {
-  const PAGE_SIZE = 10;
   const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const [pageSize, setPageSize] = useState(10);
+  const totalPages = Math.max(1, Math.ceil(entries.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const startIdx = (safePage - 1) * PAGE_SIZE;
-  const paged = entries.slice(startIdx, startIdx + PAGE_SIZE);
+  const startIdx = (safePage - 1) * pageSize;
+  const paged = entries.slice(startIdx, startIdx + pageSize);
 
   return (
     <div className="card space-y-3">
@@ -117,9 +117,18 @@ export function UserDetailActivityTabContent({ entries }: { entries: UserAuditEn
           {totalPages > 1 && (
             <div className="pt-2 border-t border-app-border flex items-center justify-between">
               <p className="text-mini text-app-fg-muted">
-                Showing {startIdx + 1}–{Math.min(startIdx + PAGE_SIZE, entries.length)} of {entries.length}
+                Showing {startIdx + 1}–{Math.min(startIdx + pageSize, entries.length)} of {entries.length}
               </p>
-              <Pagination page={safePage} totalPages={totalPages} onPageChange={setPage} />
+              <Pagination
+                page={safePage}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={(n) => {
+                  setPageSize(n);
+                  setPage(1);
+                }}
+              />
             </div>
           )}
         </>

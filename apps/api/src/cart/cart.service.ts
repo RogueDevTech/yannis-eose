@@ -479,6 +479,96 @@ export class CartService {
   }
 
   /**
+   * Fetch a single cart by id — same row shape as `listAbandoned` items, but with
+   * no status filter so a CONVERTED cart (one already recovered into an order) can
+   * still be inspected. Powers the "View cart" quick-detail action on the recovered-
+   * from-cart orders list. Returns null when the id matches nothing.
+   *
+   * `includeRawPhone` mirrors `listAbandoned`: only callers who could already trigger
+   * the audited reveal (`cart.delete` / SUPER_ADMIN) get the dialable number inline.
+   */
+  async getById(
+    cartId: string,
+    opts: { includeRawPhone?: boolean } = {},
+  ): Promise<{
+    id: string;
+    customerName: string;
+    customerPhoneDisplay: string;
+    customerPhone: string | null;
+    productId: string;
+    productName: string | null;
+    campaignId: string;
+    campaignName: string | null;
+    offerLabel: string | null;
+    updatedAt: Date;
+    customerEmail: string | null;
+    customerAddress: string | null;
+    deliveryAddress: string | null;
+    deliveryState: string | null;
+    deliveryNotes: string | null;
+    customerGender: string | null;
+    preferredDeliveryDate: string | null;
+    paymentMethod: string | null;
+    quantity: number | null;
+    customFieldValues: Record<string, unknown> | null;
+  } | null> {
+    const rows = await this.db
+      .select({
+        id: schema.cartAbandonments.id,
+        customerName: schema.cartAbandonments.customerName,
+        customerPhoneHash: schema.cartAbandonments.customerPhoneHash,
+        customerPhone: schema.cartAbandonments.customerPhone,
+        productId: schema.cartAbandonments.productId,
+        productName: schema.products.name,
+        campaignId: schema.cartAbandonments.campaignId,
+        campaignName: schema.campaigns.name,
+        offerLabel: schema.cartAbandonments.offerLabel,
+        updatedAt: schema.cartAbandonments.updatedAt,
+        customerEmail: schema.cartAbandonments.customerEmail,
+        customerAddress: schema.cartAbandonments.customerAddress,
+        deliveryAddress: schema.cartAbandonments.deliveryAddress,
+        deliveryState: schema.cartAbandonments.deliveryState,
+        deliveryNotes: schema.cartAbandonments.deliveryNotes,
+        customerGender: schema.cartAbandonments.customerGender,
+        preferredDeliveryDate: schema.cartAbandonments.preferredDeliveryDate,
+        paymentMethod: schema.cartAbandonments.paymentMethod,
+        quantity: schema.cartAbandonments.quantity,
+        customFieldValues: schema.cartAbandonments.customFieldValues,
+      })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(eq(schema.cartAbandonments.id, cartId))
+      .limit(1);
+
+    const r = rows[0];
+    if (!r) return null;
+
+    return {
+      id: r.id,
+      customerName: r.customerName,
+      customerPhoneDisplay: maskCartPhone(r.customerPhone, r.customerPhoneHash),
+      customerPhone: opts.includeRawPhone ? r.customerPhone ?? null : null,
+      productId: r.productId,
+      productName: r.productName ?? null,
+      campaignId: r.campaignId,
+      campaignName: r.campaignName ?? null,
+      offerLabel: r.offerLabel ?? null,
+      updatedAt: r.updatedAt ?? new Date(),
+      customerEmail: r.customerEmail ?? null,
+      customerAddress: r.customerAddress ?? null,
+      deliveryAddress: r.deliveryAddress ?? null,
+      deliveryState: r.deliveryState ?? null,
+      deliveryNotes: r.deliveryNotes ?? null,
+      customerGender: r.customerGender ?? null,
+      preferredDeliveryDate: r.preferredDeliveryDate ?? null,
+      paymentMethod: r.paymentMethod ?? null,
+      quantity: r.quantity ?? null,
+      customFieldValues: (r.customFieldValues as Record<string, unknown> | null) ?? null,
+    };
+  }
+
+  /**
    * Live activity feed for CS dashboard.
    * Merges two sources:
    *   1. Cart-originated activity — carts in last 6h + their linked order status
@@ -693,5 +783,32 @@ export class CartService {
       pending: pendingRes[0]?.count ?? 0,
       abandonedOpen: abandonedRes[0]?.count ?? 0,
     };
+  }
+
+  /**
+   * Count open (un-recovered) ABANDONED carts, optionally scoped to one media
+   * buyer and/or branch via the cart's campaign. Powers the "Cart abandonment"
+   * KPI on the Marketing Orders overview strip — a Media Buyer sees only their
+   * own dropped carts; HoM / admin see branch-wide or org-wide.
+   */
+  async countAbandoned(
+    opts: { mediaBuyerId?: string | null; branchId?: string | null } = {},
+  ): Promise<number> {
+    const conditions = [eq(schema.cartAbandonments.status, 'ABANDONED')];
+    if (opts.mediaBuyerId) {
+      conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+    }
+    if (opts.branchId) {
+      conditions.push(eq(schema.campaigns.branchId, opts.branchId));
+    }
+    const res = await this.db
+      .select({ count: count() })
+      .from(schema.cartAbandonments)
+      .leftJoin(
+        schema.campaigns,
+        eq(schema.cartAbandonments.campaignId, schema.campaigns.id),
+      )
+      .where(and(...conditions));
+    return Number(res[0]?.count ?? 0);
   }
 }
