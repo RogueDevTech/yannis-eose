@@ -28,6 +28,7 @@ import { Checkbox } from '~/components/ui/checkbox';
 import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
+import { formatOrderTimestamp } from '~/lib/format-date';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Pagination } from '~/components/ui/pagination';
@@ -2545,49 +2546,47 @@ function CSDashboardPageLoaded({
                   renderMobileCard={(order) => {
                     const isClaiming = claimingOrderId === order.id && claimFetcher.state === 'submitting';
                     return (
-                      <div className="rounded-lg border border-app-border bg-app-elevated p-4 space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+                              {order.customerName || '—'}
+                            </span>
                             <OrderIdBadge
                               id={order.id}
-                              uppercase
-                              ellipsis=""
                               linkTo={`/admin/orders/${order.id}`}
-                              textClassName="text-brand-500 hover:text-brand-600 font-mono text-xs font-medium"
+                              textClassName="text-sm font-medium text-brand-500 hover:text-brand-600"
                             />
-                            <p className="mt-0.5 text-sm font-medium text-app-fg">{order.customerName}</p>
-                            <p className="text-xs font-mono text-app-fg-muted">{order.customerPhoneDisplay}</p>
-                            {order.totalAmount && (
-                              <p className="mt-1 text-xs text-app-fg-muted">₦{Number(order.totalAmount).toLocaleString()}</p>
-                            )}
-                            <p className="mt-1 text-xs text-app-fg-muted">
-                              {new Date(order.createdAt).toLocaleString('en-NG', {
-                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                              })}
-                            </p>
                           </div>
-                          <Button
-                            type="button"
-                            variant="primary"
-                            size="sm"
-                            loading={isClaiming}
-                            loadingText="Claiming..."
-                            disabled={claimFetcher.state === 'submitting'}
-                            onClick={() => {
-                              setClaimingOrderId(order.id);
-                              claimFetcher.submit(
-                                {
-                                  intent: 'claimOrder',
-                                  orderId: order.id,
-                                  ...csMutationBranchPayload([order]),
-                                },
-                                { method: 'post' },
-                              );
-                            }}
-                          >
-                            Claim
-                          </Button>
+                          <div className="flex items-center justify-between gap-2">
+                            <OrderStatusBadge status={order.status} />
+                            <span className="whitespace-nowrap text-xs text-app-fg-muted">
+                              {formatOrderTimestamp(order.createdAt)}
+                            </span>
+                          </div>
                         </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="w-full justify-center"
+                          loading={isClaiming}
+                          loadingText="Claiming..."
+                          disabled={claimFetcher.state === 'submitting'}
+                          onClick={() => {
+                            setClaimingOrderId(order.id);
+                            claimFetcher.submit(
+                              {
+                                intent: 'claimOrder',
+                                orderId: order.id,
+                                ...csMutationBranchPayload([order]),
+                              },
+                              { method: 'post' },
+                            );
+                          }}
+                        >
+                          Claim
+                        </Button>
                       </div>
                     );
                   }}

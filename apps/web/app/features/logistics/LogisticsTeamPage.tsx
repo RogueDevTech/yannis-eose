@@ -8,6 +8,7 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { EmptyState } from '~/components/ui/empty-state';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
@@ -465,20 +466,14 @@ export function LogisticsTeamPage({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-              </>
-            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
       />
 
       <OverviewStatStrip

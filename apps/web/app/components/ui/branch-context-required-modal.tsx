@@ -22,7 +22,7 @@ export function BranchContextRequiredModal({
   onClose: () => void;
 }) {
   return (
-    <Modal open={open} onClose={onClose} maxWidth="max-w-lg" aria-labelledby="branch-context-required-title">
+    <Modal open={open} onClose={onClose} maxWidth="max-w-lg" contentClassName="p-5" aria-labelledby="branch-context-required-title">
       <div className="space-y-4">
         <div className="space-y-1">
           <h2 id="branch-context-required-title" className="text-base font-semibold text-app-fg">

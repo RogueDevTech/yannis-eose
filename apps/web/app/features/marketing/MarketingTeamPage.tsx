@@ -11,6 +11,7 @@ import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-colla
 import { EmptyState } from '~/components/ui/empty-state';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
@@ -359,31 +360,27 @@ export function MarketingTeamPage({
               </>
             }
             sheet={({ closeSheet }) => (
-              <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="w-full justify-center"
-                  onClick={() => {
-                    closeSheet();
-                    setShowExportModal(true);
-                  }}
-                >
-                  Generate report
-                </Button>
-              </>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full justify-center"
+                onClick={() => {
+                  closeSheet();
+                  setShowExportModal(true);
+                }}
+              >
+                Generate report
+              </Button>
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
       />
 
       <ExportModal

@@ -1,6 +1,7 @@
 import { DeferredSection } from '~/components/ui/deferred-section';
 import { Collapsible } from '~/components/ui/collapsible';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -67,18 +68,14 @@ export function CSLeaderboardPage({
                 </div>
               </>
             }
-            sheet={() => (
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={dateFilters.startDate}
-                  endDate={dateFilters.endDate}
-                  periodAllTime={dateFilters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
       />
 
       <DeferredSection resolve={csLeaderboard} skeleton="list">

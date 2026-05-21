@@ -786,15 +786,19 @@ export class CartService {
   }
 
   /**
-   * Count open (un-recovered) ABANDONED carts, optionally scoped to one media
-   * buyer and/or branch via the cart's campaign. Powers the "Cart abandonment"
-   * KPI on the Marketing Orders overview strip — a Media Buyer sees only their
-   * own dropped carts; HoM / admin see branch-wide or org-wide.
+   * Count open (un-recovered) carts — both PENDING (still browsing) and
+   * ABANDONED (aged out by the cron) — optionally scoped to one media buyer
+   * and/or branch via the cart's campaign. Powers the "Open carts" KPI on the
+   * Marketing Orders overview strip. PENDING is included so a freshly captured
+   * cart shows immediately instead of waiting ~10-15 min for the abandonment
+   * cron to flip its status — otherwise the KPI looks frozen right after a
+   * capture. A Media Buyer sees only their own carts; HoM / admin see
+   * branch-wide or org-wide. CONVERTED carts are excluded (already recovered).
    */
   async countAbandoned(
     opts: { mediaBuyerId?: string | null; branchId?: string | null } = {},
   ): Promise<number> {
-    const conditions = [eq(schema.cartAbandonments.status, 'ABANDONED')];
+    const conditions = [inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED'])];
     if (opts.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
     }

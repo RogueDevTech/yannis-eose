@@ -6,6 +6,7 @@ import { SmartPick } from '~/components/ui/smart-pick';
 import { Modal } from '~/components/ui/modal';
 import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatOrderTimestamp } from '~/lib/format-date';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -42,7 +43,11 @@ import { orderDetailHref, type OrderDetailListFrom } from '~/lib/order-detail-re
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import {
+  CompactTable,
+  type CompactTableColumn,
+  type CompactTableMobileCardHelpers,
+} from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
@@ -939,6 +944,80 @@ function OrdersListPageImpl({
     viewCartOrderId,
   ]);
 
+  // Mobile card — deliberately minimal: customer name + order ID on the first
+  // row, status + created time on the second. The default CompactTable card
+  // stacked every column as label:value, which is too noisy on a phone. The
+  // whole card is a tap target → order detail (or the cart-detail modal for
+  // abandoned-cart rows). When bulk selection is active the checkbox sits in
+  // its own row above the link (matching CompactTable's default) so the link
+  // never wraps an interactive control.
+  const renderOrderMobileCard = useCallback(
+    (order: Order, _index: number, helpers: CompactTableMobileCardHelpers<Order>) => {
+      const isCart = order.status === 'CART';
+      const hasTags =
+        isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ||
+        isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ||
+        isCallbackDue(order.callbackScheduledAt, order.status);
+      const body = (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+              {order.customerName || '—'}
+            </span>
+            <OrderIdBadge id={order.id} textClassName="text-sm font-medium text-app-fg" />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            {isCart ? (
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                Cart
+              </span>
+            ) : (
+              <OrderStatusBadge status={order.status} />
+            )}
+            <span className="whitespace-nowrap text-xs text-app-fg-muted">
+              {formatOrderTimestamp(order.createdAt)}
+            </span>
+          </div>
+          {hasTags ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
+              {isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ? <OverdueTag /> : null}
+              {isCallbackDue(order.callbackScheduledAt, order.status) ? <CallbackDueTag /> : null}
+            </div>
+          ) : null}
+        </>
+      );
+
+      const tappable = isCart ? (
+        <button
+          type="button"
+          onClick={() => openCartDetail(order)}
+          className="block w-full space-y-1.5 text-left"
+        >
+          {body}
+        </button>
+      ) : (
+        <Link to={toOrderDetail(order.id)} className="block space-y-1.5">
+          {body}
+        </Link>
+      );
+
+      if (helpers.rowSelection) {
+        return (
+          <div>
+            <div className="mb-2 flex justify-end border-b border-app-border/80 pb-2">
+              {helpers.rowSelection}
+            </div>
+            {tappable}
+          </div>
+        );
+      }
+      // No selection — let the link bleed to the card edges for a bigger tap target.
+      return <div className="-mx-3 -my-2.5 px-3 py-2.5">{tappable}</div>;
+    },
+    [toOrderDetail, openCartDetail],
+  );
+
   const statusOptions = [
     ...STATUS_OPTIONS.filter((status) => !excludeStatuses?.includes(status)).map((status) => ({
       value: status,
@@ -1267,16 +1346,6 @@ function OrdersListPageImpl({
                     Generate report
                   </Button>
                 )}
-                <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                  <DateFilterBar
-                    startDate={filters?.startDate ?? ''}
-                    endDate={filters?.endDate ?? ''}
-                    startTime={filters?.startTime ?? ''}
-                    endTime={filters?.endTime ?? ''}
-                    periodAllTime={filters?.periodAllTime ?? false}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 {canBulkPick && !isCartAbandonmentView && filteredOrders.length > 0 && (
                   <Button
                     type="button"
@@ -1296,6 +1365,16 @@ function OrdersListPageImpl({
             />
         }
       />
+
+      {!isCartAbandonmentView && (
+        <MobileDateFilterRow
+          startDate={filters?.startDate ?? ''}
+          endDate={filters?.endDate ?? ''}
+          startTime={filters?.startTime ?? ''}
+          endTime={filters?.endTime ?? ''}
+          periodAllTime={filters?.periodAllTime ?? false}
+        />
+      )}
 
       {/* Status totals — moved above My Workload so the funnel snapshot reads first.
           For HoCS+ the strip leads with a "Cart abandonment" KPI (open un-recovered
@@ -1877,6 +1956,7 @@ function OrdersListPageImpl({
             columns={ordersListColumns}
             rows={filteredOrders}
             rowKey={(o) => o.id}
+            renderMobileCard={renderOrderMobileCard}
             rowClassName={(o) =>
               [selectedIds.has(o.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '', highlightedIds.has(o.id) ? 'row-new-highlight' : '']
                 .filter(Boolean)

@@ -115,6 +115,11 @@ export function FormFullPreview({
   const [paymentMethod, setPaymentMethod] = useState('');
   const [draggingToken, setDraggingToken] = useState<CampaignFieldOrderToken | null>(null);
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
+  // `dragover` is a continuous event — React may not commit `setDragInsertIndex`
+  // before the discrete `drop` fires, leaving `onDrop` with a stale gap (the
+  // drag-start index → a no-op reorder). The ref always holds the latest gap,
+  // so the drop reads it synchronously. State stays for the live animation.
+  const dragInsertIndexRef = useRef<number | null>(null);
   const [rowLayouts, setRowLayouts] = useState<Record<string, { top: number; height: number }>>({});
   const rowRefs = useRef(new Map<CampaignFieldOrderToken, HTMLDivElement>());
 
@@ -264,6 +269,7 @@ export function FormFullPreview({
     const next = moveFieldOrderToken(resolvedFieldOrder, draggedToken, targetIndex);
     setDraggingToken(null);
     setDragInsertIndex(null);
+    dragInsertIndexRef.current = null;
     onFieldOrderChange(next);
   }
 
@@ -375,17 +381,23 @@ export function FormFullPreview({
               }
             }}
             onDragStart={(token) => {
+              const startIndex = resolvedFieldOrder.indexOf(token);
               setDraggingToken(token);
-              setDragInsertIndex(resolvedFieldOrder.indexOf(token));
+              setDragInsertIndex(startIndex);
+              dragInsertIndexRef.current = startIndex;
             }}
-            onDragHoverGap={(nextGapIndex) =>
-              setDragInsertIndex((current) => (current === nextGapIndex ? current : nextGapIndex))
-            }
+            onDragHoverGap={(nextGapIndex) => {
+              dragInsertIndexRef.current = nextGapIndex;
+              setDragInsertIndex((current) => (current === nextGapIndex ? current : nextGapIndex));
+            }}
             onDragEnd={() => {
               setDraggingToken(null);
               setDragInsertIndex(null);
+              dragInsertIndexRef.current = null;
             }}
-            onDropToken={(token) => reorderFields(token, dragInsertIndex ?? resolvedFieldOrder.indexOf(token))}
+            onDropToken={(token) =>
+              reorderFields(token, dragInsertIndexRef.current ?? resolvedFieldOrder.indexOf(token))
+            }
           >
             {renderPreviewField({
               field,

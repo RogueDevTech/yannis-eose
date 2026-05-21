@@ -18,6 +18,7 @@ import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { type FilterPillOption } from '~/components/ui/filter-pills';
 import { Textarea } from '~/components/ui/textarea';
 import {
@@ -471,18 +472,14 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                 <PageRefreshButton />
               </div>
             }
-            sheet={
-              <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip

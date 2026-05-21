@@ -16,7 +16,10 @@ export const meta: MetaFunction = () => [
   { title: 'Marketing Orders — Yannis EOSE' },
 ];
 
-const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed'] as const;
+// `cart:updated` is included so the "Open carts" KPI revalidates live when a
+// cart is captured, abandoned by the cron, or recovered — without it the stat
+// only refreshed on a manual reload.
+const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed', 'cart:updated'] as const;
 
 const getDefaultThisMonthRange = defaultThisMonthRange;
 

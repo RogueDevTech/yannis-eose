@@ -283,7 +283,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     ...(heading ? { heading } : {}),
     ...(buttonText ? { buttonText } : {}),
     ...(accentColor ? { accentColor } : {}),
-    ...(successCallbackUrl ? { successCallbackUrl } : {}),
+    successCallbackUrl: successCallbackUrl ?? undefined,
     showProductImages,
     standardFields: parsedStandard.fields,
     fieldOrder: normalizeBuilderFieldOrder(
