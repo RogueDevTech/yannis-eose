@@ -139,6 +139,16 @@ resource "google_compute_instance" "vm" {
   name         = "${local.name_prefix}-vm"
   machine_type = var.machine_type
   zone         = var.zone
+
+  # Lets `terraform apply` power the VM off when a change needs a stopped
+  # instance — notably a `machine_type` resize. Without this the apply errors
+  # out instead of performing the stop → resize → start.
+  allow_stopping_for_update = true
+
+  # Prod sets this true via tfvars so an errant apply / destroy can't tear the
+  # box down. Flip the tfvars value to false when an intentional teardown is needed.
+  deletion_protection = var.vm_deletion_protection
+
   tags = [
     "${local.name_prefix}-ssh",
     "${local.name_prefix}-web",
