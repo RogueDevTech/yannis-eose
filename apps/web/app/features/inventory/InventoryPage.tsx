@@ -179,7 +179,7 @@ export function InventoryPage(props: InventoryStreamData) {
     canAdjust = false,
     canExport = false,
     transfers, returnedOrders, reconciliations, locationsWithLock,
-    lowStockThreshold = 10, canEditLowStock = false, lowStockAlerts,
+    lowStockThreshold = 10, canEditLowStock = false, canEditGlobalThreshold = false, lowStockAlerts,
     locationThresholds = [] as LocationLowStockThreshold[],
     shipmentOptions = [] as ShipmentFilterOption[],
     levelsLoadError = null,
@@ -401,13 +401,13 @@ export function InventoryPage(props: InventoryStreamData) {
       return { locationId: loc.id, threshold: draft === '' ? null : (draft as number) };
     });
 
-  const globalChanged = draftThreshold !== lowStockThreshold;
+  const globalChanged = canEditGlobalThreshold && draftThreshold !== lowStockThreshold;
   const hasAnyChange = globalChanged || locationChanges.length > 0;
 
   function handleBulkSave() {
     const fd = new FormData();
     fd.set('intent', 'bulkSaveThresholds');
-    fd.set('globalThreshold', String(draftThreshold));
+    fd.set('globalThreshold', canEditGlobalThreshold ? String(draftThreshold) : '');
     fd.set('locationChanges', JSON.stringify(locationChanges));
     bulkThresholdFetcher.submit(fd, { method: 'post' });
   }
@@ -1024,8 +1024,12 @@ export function InventoryPage(props: InventoryStreamData) {
                 value={draftThreshold}
                 onValueChange={setDraftThreshold}
                 wrapperClassName="w-28"
+                disabled={!canEditGlobalThreshold}
               />
               <span className="text-xs text-app-fg-muted">units</span>
+              {!canEditGlobalThreshold && (
+                <span className="text-xs text-app-fg-muted">Admin only</span>
+              )}
               {globalChanged && (
                 <span className="text-xs text-brand-600 dark:text-brand-400 font-medium">Changed</span>
               )}

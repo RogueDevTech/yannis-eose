@@ -2363,7 +2363,6 @@ function CSDashboardPageLoaded({
                   ) : queueOrderDetails ? (
                     <ul className="rounded-xl border border-app-border bg-app-elevated divide-y divide-app-border overflow-hidden">
                       {queueOrderDetails.items.map((item) => {
-                        const subtotal = item.quantity * Number(item.unitPrice);
                         return (
                           <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2">
                             <div className="min-w-0 flex-1">
@@ -2371,11 +2370,11 @@ function CSDashboardPageLoaded({
                                 {item.productName ?? 'Unknown product'}
                               </p>
                               <p className="text-mini text-app-fg-muted">
-                                {item.quantity} × ₦{Number(item.unitPrice).toLocaleString('en-NG')}
+                                Qty: {item.quantity}{item.offerLabel ? ` · ${item.offerLabel}` : ''}
                               </p>
                             </div>
                             <span className="text-sm font-semibold text-app-fg shrink-0">
-                              ₦{subtotal.toLocaleString('en-NG')}
+                              ₦{Number(item.unitPrice).toLocaleString('en-NG')}
                             </span>
                           </li>
                         );

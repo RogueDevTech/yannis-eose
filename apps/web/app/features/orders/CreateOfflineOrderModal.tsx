@@ -195,10 +195,10 @@ export function CreateOfflineOrderModal({
     );
   }
 
+  // unitPrice is the offer/line total — sum directly without multiplying by quantity
   const totalAmount = items.reduce((sum, it) => {
-    const qty = Number(it.quantity) || 0;
     const price = Number(it.unitPrice) || 0;
-    return sum + qty * price;
+    return sum + price;
   }, 0);
 
   function handleSubmit(e: React.FormEvent) {

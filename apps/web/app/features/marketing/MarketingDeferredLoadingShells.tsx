@@ -222,12 +222,14 @@ export function MarketingFundingLoadingShell({
   filters,
   canDistribute,
   isMediaBuyer,
+  isAdminViewer,
   canRequestFunding,
   canSendFunding,
 }: {
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
   canDistribute: boolean;
   isMediaBuyer: boolean;
+  isAdminViewer: boolean;
   canRequestFunding: boolean;
   canSendFunding: boolean;
 }) {
@@ -238,9 +240,14 @@ export function MarketingFundingLoadingShell({
     setSearchQuery(searchParams.get('search') ?? '');
   }, [searchParams]);
 
-  const receivedTitle = isMediaBuyer ? 'Incoming Funding' : "Funds I've Received";
-  const activeSection =
-    !canDistribute ? 'received' : searchParams.get('section') === 'received' ? 'received' : 'distributing';
+  const receivedTitle = isMediaBuyer ? 'Incoming Funding' : 'Funds Received';
+  const activeSection = isAdminViewer
+    ? 'distributing'
+    : !canDistribute
+      ? 'received'
+      : searchParams.get('section') === 'received'
+        ? 'received'
+        : 'distributing';
 
   const entryType = searchParams.get('entryType') ?? 'all';
   const entryStatus = searchParams.get('entryStatus') ?? '';
@@ -363,23 +370,25 @@ export function MarketingFundingLoadingShell({
       <OverviewStatStrip mobileGrid items={statItems} />
 
       <div className="list-panel scroll-mt-4" id="funding-ledger">
-        {canDistribute ? (
+        {canDistribute && !isAdminViewer ? (
           <div className="px-4 pt-2">
             <Tabs
               variant="underline"
               value={activeSection}
               onChange={navigateSection}
               tabs={[
-                { value: 'distributing', label: 'Funds I Distribute' },
+                { value: 'distributing', label: 'Funds Distributed' },
                 { value: 'received', label: receivedTitle },
               ]}
             />
           </div>
         ) : null}
 
-        {!canDistribute ? (
+        {isAdminViewer || !canDistribute ? (
           <div className="border-b border-app-border px-4 py-3">
-            <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2>
+            <h2 className="text-base font-semibold text-app-fg">
+              {isAdminViewer ? 'Funds Disbursed' : receivedTitle}
+            </h2>
           </div>
         ) : null}
 
