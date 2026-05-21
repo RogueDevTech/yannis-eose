@@ -17,7 +17,36 @@ import { STATUS_COLORS, formatStatus } from '~/features/shared/order-status';
 import type { LeaderboardEntry, Metrics, FundingBalanceRow, MarketingOverviewRecentOrder } from './types';
 import type { LiveActivityItem } from '~/features/cs/types';
 
-function renderMediaBuyerLeaderboardCard(buyer: LeaderboardEntry, className = '', isNew = false) {
+/**
+ * Build the Marketing Orders link, forwarding the overview's active date range
+ * so the orders page opens on the SAME window the leaderboard was computed for.
+ * Without this the orders page falls back to its own default (today), so a
+ * media buyer with no orders today looks empty — the bug Head of Marketing
+ * reported when clicking "View orders" from team analysis. Mirrors
+ * `buildOrdersQuery` in MarketingTeamPage.
+ */
+function buildOrdersQuery(
+  filters: { startDate: string; endDate: string; periodAllTime: boolean } | undefined,
+  mediaBuyerId?: string,
+): string {
+  const params = new URLSearchParams();
+  if (mediaBuyerId) params.set('mediaBuyerId', mediaBuyerId);
+  if (filters?.periodAllTime) {
+    params.set('period', 'all_time');
+  } else {
+    if (filters?.startDate) params.set('startDate', filters.startDate);
+    if (filters?.endDate) params.set('endDate', filters.endDate);
+  }
+  const qs = params.toString();
+  return qs ? `/admin/marketing/orders?${qs}` : '/admin/marketing/orders';
+}
+
+function renderMediaBuyerLeaderboardCard(
+  buyer: LeaderboardEntry,
+  filters: { startDate: string; endDate: string; periodAllTime: boolean } | undefined,
+  className = '',
+  isNew = false,
+) {
   const isHighCpa = buyer.cpa > HIGH_CPA_THRESHOLD && buyer.totalOrders > 0;
   const roasBarWidth = Math.min((buyer.trueRoas / 4) * 100, 100); // cap at 4x ROAS = full bar
   const barColor = buyer.trueRoas >= 2
@@ -38,7 +67,7 @@ function renderMediaBuyerLeaderboardCard(buyer: LeaderboardEntry, className = ''
   return (
     <Link
       key={buyer.mediaBuyerId}
-      to={`/admin/marketing/orders?mediaBuyerId=${buyer.mediaBuyerId}`}
+      to={buildOrdersQuery(filters, buyer.mediaBuyerId)}
       prefetch="intent"
       className={`
         group relative block rounded-xl border transition-all duration-200 cursor-pointer
@@ -622,7 +651,7 @@ export function MarketingOverviewPage({
                 </svg>
               </button>
               <Link
-                to="/admin/marketing/orders"
+                to={buildOrdersQuery(filters)}
                 prefetch="intent"
                 className="btn-secondary btn-sm inline-flex items-center justify-center"
               >
@@ -816,7 +845,7 @@ export function MarketingOverviewPage({
               ref={mediaBuyerScrollRef}
               className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
             >
-              {sortedSource != null && sortedSource.map((buyer) => renderMediaBuyerLeaderboardCard(buyer, 'shrink-0 w-48', newBuyerIds.has(buyer.mediaBuyerId)))}
+              {sortedSource != null && sortedSource.map((buyer) => renderMediaBuyerLeaderboardCard(buyer, filters, 'shrink-0 w-48', newBuyerIds.has(buyer.mediaBuyerId)))}
               {balanceOnlySource != null && balanceOnlySource.map((row) => (
                 <MediaBuyerBalanceCard key={row.userId} row={row} compact className="shrink-0 w-48" />
               ))}

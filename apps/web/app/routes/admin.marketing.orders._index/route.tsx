@@ -4,7 +4,7 @@ import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
-import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultTodayRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -21,7 +21,7 @@ export const meta: MetaFunction = () => [
 // only refreshed on a manual reload.
 const MARKETING_ORDERS_LIVE_EVENTS = ['order:new', 'order:status_changed', 'cart:updated'] as const;
 
-const getDefaultThisMonthRange = defaultThisMonthRange;
+const getDefaultTodayRange = defaultTodayRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'marketing.orders');
@@ -35,12 +35,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const search = url.searchParams.get('search') || undefined;
   const mediaBuyerIdParam = url.searchParams.get('mediaBuyerId') || undefined;
 
-  // Date filter — default to this month when no params
+  // Date filter — default to today when no params
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
   if (!periodAllTime && !startDate && !endDate) {
-    const def = getDefaultThisMonthRange();
+    const def = getDefaultTodayRange();
     startDate = def.startDate;
     endDate = def.endDate;
   }

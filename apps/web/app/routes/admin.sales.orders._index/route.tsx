@@ -8,7 +8,7 @@ import {
   BULK_ORDER_MUTATION_TIMEOUT_MS,
   getSessionCookie,
   requirePermission,
-  defaultThisMonthRange,
+  defaultTodayRange,
   parsePerPage,
   safeStatus,
 } from '~/lib/api.server';
@@ -45,7 +45,7 @@ const CS_ORDERS_LIVE_EVENTS = [
   'order:transfer_rejected',
 ] as const;
 
-const defaultThisMonth = defaultThisMonthRange;
+const defaultToday = defaultTodayRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'orders.read');
@@ -102,7 +102,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const period = url.searchParams.get('period') ?? undefined;
   const periodAllTime = period === 'all_time';
   if (!periodAllTime && !startDate && !endDate) {
-    const def = defaultThisMonth();
+    const def = defaultToday();
     startDate = def.startDate;
     endDate = def.endDate;
   }
