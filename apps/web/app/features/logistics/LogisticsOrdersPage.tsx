@@ -4,6 +4,7 @@ import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { useFetcherToast } from '~/components/ui/toast';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
@@ -35,6 +36,7 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { Pagination } from '~/components/ui/pagination';
 import { TextInput } from '~/components/ui/text-input';
 import { formatStatus } from '~/features/shared/order-status';
+import { formatOrderTimestamp } from '~/lib/format-date';
 import type { Order } from '~/features/orders/types';
 import type { Location } from './types';
 
@@ -574,15 +576,24 @@ function LogisticsOrdersPageImpl({
       : order.locationName;
     return (
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <OrderIdBadge
-            id={order.id}
-            linkTo={toOrderDetail(order.id)}
-            textClassName="font-medium text-brand-500 hover:text-brand-600"
-          />
-          <OrderStatusBadge status={order.status} expanded />
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+              {order.customerName || '—'}
+            </span>
+            <OrderIdBadge
+              id={order.id}
+              linkTo={toOrderDetail(order.id)}
+              textClassName="text-sm font-medium text-brand-500 hover:text-brand-600"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <OrderStatusBadge status={order.status} expanded />
+            <span className="whitespace-nowrap text-xs text-app-fg-muted">
+              {formatOrderTimestamp(order.createdAt)}
+            </span>
+          </div>
         </div>
-        <p className="text-sm text-app-fg">{order.customerName}</p>
         <div className="flex flex-col gap-1 text-sm text-app-fg-muted">
           <span>{companyLine}</span>
           {order.preferredDeliveryDate && (
@@ -728,18 +739,16 @@ function LogisticsOrdersPageImpl({
                   >
                     {showChartView ? 'View as data' : 'View data in chart'}
                   </button>
-                  <div className="flex h-10 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                    <DateFilterBar
-                      startDate={filters.startDate}
-                      endDate={filters.endDate}
-                      periodAllTime={filters.periodAllTime}
-                      triggerLayout="blockCenter"
-                    />
-                  </div>
                 </div>
               )}
             />
           }
+        />
+
+        <MobileDateFilterRow
+          startDate={filters.startDate}
+          endDate={filters.endDate}
+          periodAllTime={filters.periodAllTime}
         />
       </div>
 

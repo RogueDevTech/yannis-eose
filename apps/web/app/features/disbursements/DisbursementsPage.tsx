@@ -4,6 +4,7 @@ import { useFetcherToast, useToast } from '~/components/ui/toast';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { createFundingSchema, approveFundingRequestSchema } from '@yannis/shared/validators';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { AmountInput } from '~/components/ui/amount-input';
 import { formatNaira } from '~/lib/format-amount';
 import { Button } from '~/components/ui/button';
@@ -936,14 +937,6 @@ export function DisbursementsPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -972,6 +965,12 @@ export function DisbursementsPage({
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <ExportModal

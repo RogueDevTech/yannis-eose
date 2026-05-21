@@ -17,6 +17,7 @@ import {
 } from '~/components/ui/compact-table';
 import { DescriptionList } from '~/components/ui/description-list';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -701,14 +702,6 @@ export function TransfersPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                  <DateFilterBar
-                    startDate={periodAllTime ? '' : effectiveDateRange.startDate}
-                    endDate={periodAllTime ? '' : effectiveDateRange.endDate}
-                    periodAllTime={periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 {canInitiate && (
                   <>
                     <Button
@@ -735,6 +728,12 @@ export function TransfersPage({
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={periodAllTime ? '' : effectiveDateRange.startDate}
+        endDate={periodAllTime ? '' : effectiveDateRange.endDate}
+        periodAllTime={periodAllTime}
       />
 
       {actionError && !dismissedError && (

@@ -13,6 +13,7 @@ import { FileUpload } from '~/components/ui/file-upload';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { ResponsiveFormPanel } from '~/components/ui/responsive-form-panel';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Spinner } from '~/components/ui/spinner';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -866,27 +867,23 @@ export function MarketingAdSpendPage({
               </>
             }
             sheet={({ closeSheet }) => (
-              <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-                <BranchScopedLink
-                  to="/admin/marketing/ad-spend/new"
-                  actionLabel="adding ad spend"
-                  onClick={() => closeSheet()}
-                  className="btn-primary btn-sm w-full justify-center inline-flex items-center"
-                >
-                  + Add Expense
-                </BranchScopedLink>
-              </>
+              <BranchScopedLink
+                to="/admin/marketing/ad-spend/new"
+                actionLabel="adding ad spend"
+                onClick={() => closeSheet()}
+                className="btn-primary btn-sm w-full justify-center inline-flex items-center"
+              >
+                + Add Expense
+              </BranchScopedLink>
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
       />
 
       {actionError && !dismissedError && !adSpendDetailFetcherModalOpen && (

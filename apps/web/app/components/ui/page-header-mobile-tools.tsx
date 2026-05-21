@@ -24,12 +24,14 @@ export interface PageHeaderMobileToolsProps {
    */
   desktop: ReactNode;
   /**
-   * Mobile sheet body — usually the same controls with full-width buttons and
-   * `DateFilterBar` `triggerLayout="blockCenter"`; omit duplicate refresh when
-   * `showMobileRefresh` is true. Use the function form to receive `closeSheet`
-   * (e.g. before opening another modal).
+   * Mobile sheet body — usually the same controls with full-width buttons;
+   * omit duplicate refresh when `showMobileRefresh` is true. Use the function
+   * form to receive `closeSheet` (e.g. before opening another modal). Optional:
+   * when omitted (and no `filters`), the kebab trigger is not rendered — the
+   * mobile row shows just the refresh button. The date filter is no longer
+   * placed here — pages render `<MobileDateFilterRow />` under the header.
    */
-  sheet: ReactNode | PageHeaderMobileToolsSheetRender;
+  sheet?: ReactNode | PageHeaderMobileToolsSheetRender;
   /**
    * Optional filter controls. When provided, the mobile sheet renders them under
    * a small "Filters" header above the action controls — letting a page collapse
@@ -79,9 +81,12 @@ export function PageHeaderMobileTools({
   const closeSheet = useCallback(() => setOpen(false), []);
 
   const sheetContent = typeof sheet === 'function' ? sheet({ closeSheet }) : sheet;
+  const hasSheet = sheetContent != null && sheetContent !== false;
   const filtersContent =
     typeof filters === 'function' ? filters({ closeSheet }) : filters;
   const hasFilters = filtersContent != null && filtersContent !== false;
+  // Nothing to group → don't render the kebab; the mobile row is just refresh.
+  const hasSheetOrFilters = hasSheet || hasFilters;
 
   return (
     <>
@@ -89,25 +94,27 @@ export function PageHeaderMobileTools({
       <div className="flex shrink-0 items-center justify-end gap-0.5 md:hidden">
         {mobileLeading}
         {showMobileRefresh ? <PageRefreshButton iconOnly /> : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          // Grey-filled chrome to mirror PageRefreshButton (CEO 2026-05-19).
-          className="relative h-9 w-9 shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 p-0 text-app-fg-muted hover:bg-surface-200 hover:text-brand-600 dark:hover:bg-surface-700"
-          aria-label={triggerAriaLabel}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onClick={() => setOpen(true)}
-        >
-          <KebabVerticalIcon />
-          {hasFilters && filtersBadgeCount > 0 ? (
-            <span
-              className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-brand-500 ring-2 ring-app-elevated"
-              aria-hidden
-            />
-          ) : null}
-        </Button>
+        {hasSheetOrFilters ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            // Grey-filled chrome to mirror PageRefreshButton (CEO 2026-05-19).
+            className="relative h-9 w-9 shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 p-0 text-app-fg-muted hover:bg-surface-200 hover:text-brand-600 dark:hover:bg-surface-700"
+            aria-label={triggerAriaLabel}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            onClick={() => setOpen(true)}
+          >
+            <KebabVerticalIcon />
+            {hasFilters && filtersBadgeCount > 0 ? (
+              <span
+                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-brand-500 ring-2 ring-app-elevated"
+                aria-hidden
+              />
+            ) : null}
+          </Button>
+        ) : null}
         <Modal
           open={open}
           onClose={() => setOpen(false)}

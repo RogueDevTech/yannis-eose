@@ -3,6 +3,7 @@ import { Await, Link, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatOrderTimestamp } from '~/lib/format-date';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -20,6 +21,7 @@ import {
   CompactTable,
   CompactTableActionButton,
   type CompactTableColumn,
+  type CompactTableMobileCardHelpers,
 } from '~/components/ui/compact-table';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { OrderIdBadge } from '~/components/ui/order-id-badge';
@@ -320,6 +322,50 @@ export function MarketingOrdersPage({
     return cols;
   }, [showMediaBuyerColumn, showSkeletonRows]);
 
+  // Mobile card — deliberately minimal: order ID (with copy), customer name,
+  // status, and created time. The full label:value stack the default CompactTable
+  // mobile card produces is too noisy here. The whole card is a tap target that
+  // opens the order detail page; the copy button inside OrderIdBadge stops
+  // propagation so copying never triggers the card navigation.
+  const renderMarketingOrderMobileCard = useCallback(
+    (order: Order, _index: number, _helpers: CompactTableMobileCardHelpers<Order>) => {
+      if (showSkeletonRows) {
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <TableCellTextPulse className="w-[9rem]" />
+              <TableCellTextPulse className="w-[7rem]" />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <TableCellTextPulse className="w-[5.5rem]" />
+              <TableCellTextPulse className="w-[8rem]" />
+            </div>
+          </div>
+        );
+      }
+      return (
+        <Link
+          to={orderDetailHref('/admin/orders', order.id, 'marketing')}
+          className="-mx-3 -my-2.5 block space-y-1.5 px-3 py-2.5"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+              {order.customerName || '—'}
+            </span>
+            <OrderIdBadge id={order.id} textClassName="text-sm font-medium text-app-fg" />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <OrderStatusBadge status={order.status} />
+            <span className="whitespace-nowrap text-xs text-app-fg-muted">
+              {formatOrderTimestamp(order.createdAt)}
+            </span>
+          </div>
+        </Link>
+      );
+    },
+    [showSkeletonRows],
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -477,14 +523,6 @@ export function MarketingOrdersPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 <Button
                   type="button"
                   variant="secondary"
@@ -528,6 +566,12 @@ export function MarketingOrdersPage({
         }
       />
 
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
+      />
+
       {isMarketingSupervisor && viewerUserId && (
         <FilterPills
           variant="tab"
@@ -556,6 +600,7 @@ export function MarketingOrdersPage({
           <>
             <OverviewStatStrip
               mobileGrid
+              tileClassName="!py-2.5"
               items={[
                 { label: 'Total', value: total, valueClassName: 'text-app-fg' },
                 { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -637,6 +682,7 @@ export function MarketingOrdersPage({
               <>
                 <OverviewStatStrip
                   mobileGrid
+                  tileClassName="!py-2.5"
                   items={[
                     {
                       label: 'Total',
@@ -677,13 +723,13 @@ export function MarketingOrdersPage({
                       to: buildQueryString({ status: 'DELIVERED', page: 1 }),
                     },
                     {
-                      label: 'Cart abandonment',
+                      label: 'Open carts',
                       value: ins.abandonedCartCount,
                       valueClassName:
                         ins.abandonedCartCount > 0
                           ? 'text-amber-600 dark:text-amber-400'
                           : 'text-app-fg',
-                      title: 'Open abandoned carts not yet recovered',
+                      title: 'Captured carts not yet recovered (browsing + dropped off)',
                     },
                     { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
                     {
@@ -835,6 +881,7 @@ export function MarketingOrdersPage({
           columns={marketingOrderColumns}
           rows={showSkeletonRows ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}
+          renderMobileCard={renderMarketingOrderMobileCard}
           emptyTitle="No orders match your filters"
           emptyDescription="Try adjusting your status filter or search query"
         />

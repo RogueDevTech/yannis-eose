@@ -10,6 +10,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -180,14 +181,6 @@ export function LogisticsProviderDetailPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <div className="flex h-12 w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5">
-                  <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 <Link
                   to={backHref}
                   className="btn-secondary btn-sm h-12 w-full justify-center"
@@ -199,6 +192,12 @@ export function LogisticsProviderDetailPage({
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={periodAllTime}
       />
 
       <div className="flex gap-3 sm:gap-6 items-start">

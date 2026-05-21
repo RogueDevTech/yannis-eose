@@ -889,6 +889,20 @@ function getFormScript(
       var singleProductId = form ? form.dataset.singleProduct : null;
       var successPanel = null;
 
+      // Funnel navigation for success / payment redirects. In iframe mode the
+      // form is sandboxed inside the customer's page — a plain window.location
+      // would only move the iframe, so the thank-you page (and the Media
+      // Buyer's conversion pixel on it) never gets a real top-level pageview.
+      // Navigate the TOP window instead. Hosted / shadow-DOM / fallback modes
+      // already run in the page itself, so window.location is correct there.
+      function yannisGo(url) {
+        ${
+          formMode === 'iframe'
+            ? 'try { (window.top || window).location.href = url; } catch (e) { window.location.href = url; }'
+            : 'window.location.href = url;'
+        }
+      }
+
       function resetForAnotherOrder() {
         if (!form) return;
         // Re-enable cart saves for the new order and clear stale cart ID.
@@ -1509,14 +1523,14 @@ function getFormScript(
               if (showInlineSuccess('Order created successfully. Continue to secure payment.', authUrl)) {
                 return;
               }
-              window.location.href = authUrl;
+              yannisGo(authUrl);
               return;
             }
             // Optional Media Buyer success callback — redirects to their funnel's thank-you page.
             // Validated as a full URL on save; redirect only if it parses as http(s).
             var callbackUrl = (form.dataset.successCallback || '').trim();
             if (callbackUrl && /^https?:\\/\\//i.test(callbackUrl)) {
-              window.location.href = callbackUrl;
+              yannisGo(callbackUrl);
               return;
             }
             if (showInlineSuccess(result.data.message || 'Order received successfully! We will contact you shortly.')) {

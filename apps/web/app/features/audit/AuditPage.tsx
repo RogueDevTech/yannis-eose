@@ -3,6 +3,7 @@ import { Link, useSearchParams, useFetcher, useRevalidator } from '@remix-run/re
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageNotification } from '~/components/ui/page-notification';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
@@ -1244,14 +1245,6 @@ export function AuditPage({
             }
             sheet={({ closeSheet }) => (
               <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime ?? false}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 <div className="flex justify-center">
                   <PollingStatusIndicator state={pollState} countdown={countdown} />
                 </div>
@@ -1272,6 +1265,12 @@ export function AuditPage({
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime ?? false}
       />
 
       {error && !dismissedError && (

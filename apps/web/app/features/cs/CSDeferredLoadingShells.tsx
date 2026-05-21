@@ -16,6 +16,7 @@ import {
 } from '~/components/ui/deferred-skeletons';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { LiveIndicator } from '~/components/ui/live-indicator';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -125,6 +126,26 @@ function csOrdersShellTableColumns(
     },
   );
   return cols;
+}
+
+/**
+ * Mobile loading-card skeleton — mirrors the minimal 2-row order card the live
+ * Sales Orders list now renders (customer + order ID, then status + created).
+ * Keep this in sync with `renderOrderMobileCard` in `OrdersListPage.tsx`.
+ */
+function renderCSOrdersMobileCardShell(): ReactNode {
+  return (
+    <div className="space-y-1.5" aria-hidden>
+      <div className="flex items-center justify-between gap-2">
+        <TableCellTextPulse className="w-[9rem]" />
+        <TableCellTextPulse className="w-[7rem]" />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <TableCellTextPulse className="w-[5.5rem]" />
+        <TableCellTextPulse className="w-[8rem]" />
+      </div>
+    </div>
+  );
 }
 
 const CST_TEAM_SHELL_ROWS = 8;
@@ -487,20 +508,15 @@ export function CSOrdersLoadingShell({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  startTime={filters.startTime ?? ''}
-                  endTime={filters.endTime ?? ''}
-                  periodAllTime={filters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
+      />
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        startTime={filters.startTime ?? ''}
+        endTime={filters.endTime ?? ''}
+        periodAllTime={filters.periodAllTime}
       />
       <OverviewStatStrip mobileGrid items={csOrdersStatPulseStripItems()} />
 
@@ -677,6 +693,7 @@ export function CSOrdersLoadingShell({
         rows={CS_ORDERS_SHELL_ROW_DATA}
         rowKey={(o) => o.id}
         columns={csOrdersShellTableColumns(showCSCloserColumn, showCampaignColumn)}
+        renderMobileCard={() => renderCSOrdersMobileCardShell()}
         emptyTitle="Loading…"
         emptyDescription=""
       />
@@ -781,18 +798,13 @@ export function CSTeamLoadingShell({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={dateFilters.startDate}
-                  endDate={dateFilters.endDate}
-                  periodAllTime={dateFilters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
+      />
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
       />
       <OverviewStatStrip
         mobileGrid
@@ -905,18 +917,14 @@ export function CSLeaderboardLoadingShell({
                 </div>
               </>
             }
-            sheet={() => (
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <div className="card p-0">
