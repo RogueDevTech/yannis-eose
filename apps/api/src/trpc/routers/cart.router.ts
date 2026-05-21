@@ -125,6 +125,25 @@ export const cartRouter = router({
     }),
 
   /**
+   * Count open abandoned carts — lightweight stat for dashboard overview strips.
+   * Gated on `marketing.read` (not `cart.read`) so Media Buyers and supervisors
+   * can see their own cart abandonment count without over-exposing other cart procs.
+   */
+  countAbandoned: permissionProcedure('marketing.read')
+    .input(
+      z
+        .object({
+          mediaBuyerId: z.string().uuid().optional(),
+          branchId: z.string().uuid().optional(),
+        })
+        .optional(),
+    )
+    .query(async ({ input, ctx }) => {
+      const mediaBuyerId = ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : input?.mediaBuyerId;
+      return { count: await getCartService().countAbandoned({ mediaBuyerId, branchId: input?.branchId }) };
+    }),
+
+  /**
    * Delete an abandoned cart. Head of CS / SuperAdmin only.
    */
   deleteAbandoned: permissionProcedure('cart.delete')

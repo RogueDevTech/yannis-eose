@@ -503,6 +503,14 @@ export function TransfersPage({
     updateFilter('status', value);
   };
 
+  const buildStatusQuery = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set('status', value);
+    else next.delete('status');
+    const qs = next.toString();
+    return qs ? `?${qs}` : '?';
+  };
+
   const pageTitle =
     transfersPageVariant === 'logistics' ? 'Partner Transfers' : 'Stock Transfers';
   const pageDescription =
@@ -732,26 +740,31 @@ export function TransfersPage({
             label: 'Pending',
             value: summaryStatusCounts.PENDING,
             valueClassName: 'text-warning-600 dark:text-warning-400',
+            to: buildStatusQuery('PENDING'),
           },
           {
             label: 'In transit',
             value: summaryStatusCounts.IN_TRANSIT,
             valueClassName: 'text-brand-600 dark:text-brand-400',
+            to: buildStatusQuery('IN_TRANSIT'),
           },
           {
             label: 'Received',
             value: summaryStatusCounts.RECEIVED,
             valueClassName: 'text-success-600 dark:text-success-400',
+            to: buildStatusQuery('RECEIVED'),
           },
           {
             label: 'Disputed',
             value: summaryStatusCounts.DISPUTED,
             valueClassName: 'text-danger-600 dark:text-danger-400',
+            to: buildStatusQuery('DISPUTED'),
           },
           {
             label: 'Cancelled',
             value: summaryStatusCounts.CANCELLED,
             valueClassName: 'text-app-fg-muted',
+            to: buildStatusQuery('CANCELLED'),
           },
           { label: 'Qty sent', value: summaryQuantitySent, valueClassName: 'text-app-fg' },
           {

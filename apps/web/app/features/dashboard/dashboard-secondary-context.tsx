@@ -51,10 +51,12 @@ export function DashboardSecondaryProvider({
         error: null,
         bundle: {
           metrics: d.metrics,
+          personalMetrics: d.personalMetrics,
           profit: d.profit,
           totalUsers: d.totalUsers,
           totalProducts: d.totalProducts,
           payoutSummary: d.payoutSummary,
+          abandonedCartCount: d.abandonedCartCount ?? 0,
         },
         retry,
       };
@@ -89,7 +91,7 @@ export function DashboardMetricsSection({
   children,
 }: {
   fallback: React.ReactNode;
-  children: (metrics: DashboardData['metrics']) => React.ReactNode;
+  children: (metrics: DashboardData['metrics'], abandonedCartCount: number) => React.ReactNode;
 }) {
   const { loading, error, bundle, retry } = useDashboardSecondary();
   if (error) {
@@ -102,7 +104,29 @@ export function DashboardMetricsSection({
     );
   }
   if (loading || !bundle) return <>{fallback}</>;
-  return <>{children(bundle.metrics)}</>;
+  return <>{children(bundle.metrics, bundle.abandonedCartCount)}</>;
+}
+
+/** Supervisor-aware section: provides both team and personal metrics when available. */
+export function DashboardSupervisorMetricsSection({
+  fallback,
+  children,
+}: {
+  fallback: React.ReactNode;
+  children: (teamMetrics: DashboardData['metrics'], personalMetrics: DashboardData['metrics'] | null, abandonedCartCount: number) => React.ReactNode;
+}) {
+  const { loading, error, bundle, retry } = useDashboardSecondary();
+  if (error) {
+    return (
+      <InlineNotification
+        variant="danger"
+        message={error}
+        actions={[{ label: 'Retry', onClick: retry }]}
+      />
+    );
+  }
+  if (loading || !bundle) return <>{fallback}</>;
+  return <>{children(bundle.metrics, bundle.personalMetrics ?? null, bundle.abandonedCartCount)}</>;
 }
 
 export function DashboardProfitSection({

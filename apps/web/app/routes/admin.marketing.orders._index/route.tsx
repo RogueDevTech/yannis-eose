@@ -103,12 +103,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const ordersShell = {
     filters,
     isMediaBuyer,
+    isMarketingSupervisor,
     showMediaBuyerColumn,
     canExport,
     page,
     perPage: ORDERS_PER_PAGE,
     statusFilter: status,
     searchFilter: search,
+    viewerUserId: user.id,
+    activeMediaBuyerFilter: mediaBuyerId ?? null,
   };
 
   // Defer the orders list — page chrome renders immediately, table swaps from
@@ -233,10 +236,13 @@ export default function MarketingOrdersRoute() {
     statusFilter: ordersShell.statusFilter,
     searchFilter: ordersShell.searchFilter,
     isMediaBuyer: ordersShell.isMediaBuyer,
+    isMarketingSupervisor: ordersShell.isMarketingSupervisor,
     showMediaBuyerColumn: ordersShell.showMediaBuyerColumn,
     filters: ordersShell.filters,
     liveEvents: [...MARKETING_ORDERS_LIVE_EVENTS],
     canExport: ordersShell.canExport,
+    viewerUserId: ordersShell.viewerUserId,
+    activeMediaBuyerFilter: ordersShell.activeMediaBuyerFilter,
   };
   return (
     <CachedAwait

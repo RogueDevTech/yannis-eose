@@ -244,7 +244,9 @@ export default function App() {
               }
             } else {
               window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js').then(function(reg) {
+              // updateViaCache:'none' — never let the HTTP cache serve a stale
+              // /sw.js, so a new deploy's service worker is always detected.
+              navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(function(reg) {
                 // If there's already a waiting worker on load (e.g. tab was kept open), fire immediately
                 if (reg.waiting && navigator.serviceWorker.controller) {
                   window.dispatchEvent(new CustomEvent('yannis:sw-update-ready'));
@@ -258,6 +260,15 @@ export default function App() {
                         window.dispatchEvent(new CustomEvent('yannis:sw-update-ready'));
                       }
                     });
+                  }
+                });
+                // A backgrounded PWA only checks for a new service worker on
+                // cold start. Re-check every time the app returns to the
+                // foreground so a long-lived installed session still picks up
+                // deploys without the user fully quitting the app.
+                document.addEventListener('visibilitychange', function() {
+                  if (document.visibilityState === 'visible') {
+                    reg.update().catch(function() {});
                   }
                 });
               });

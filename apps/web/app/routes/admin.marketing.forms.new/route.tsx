@@ -19,7 +19,7 @@ import {
   parseStandardFieldsPayload,
   toLegacyStandardFieldFlags,
 } from '~/features/campaigns/standard-fields';
-import type { OfferGroupRow } from '~/features/campaigns/types';
+import type { Campaign, OfferGroupRow } from '~/features/campaigns/types';
 
 export const meta: MetaFunction = () => [{ title: 'New form — Yannis EOSE' }];
 
@@ -56,7 +56,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return { offerGroups: [], offerGroupsLoadError: 'Could not load offers. Try refreshing the page.' };
     });
 
-  return defer({ offerGroupsPromise });
+  // Duplicate flow — `?duplicateFrom=<campaignId>` seeds the create page with
+  // an existing form's config (everything but the name). Awaited (not deferred)
+  // because the builder's initial state must be set at first render.
+  const duplicateFromId = new URL(request.url).searchParams.get('duplicateFrom');
+  let duplicateFrom: Campaign | null = null;
+  if (duplicateFromId) {
+    const dupRes = await apiRequest<unknown>(
+      `/trpc/marketing.getCampaign?input=${encodeURIComponent(JSON.stringify({ id: duplicateFromId }))}`,
+      { method: 'GET', cookie },
+    );
+    if (dupRes.ok) {
+      duplicateFrom = (dupRes.data as { result?: { data?: Campaign } })?.result?.data ?? null;
+    }
+  }
+
+  return defer({ offerGroupsPromise, duplicateFrom });
 }
 
 export const clientLoader = cachedClientLoader;
@@ -174,5 +189,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
 export default function MarketingFormNewRoute() {
   const data = useLoaderData<typeof loader>();
-  return <MarketingFormCreatePage offerGroupsPromise={data.offerGroupsPromise} />;
+  return (
+    <MarketingFormCreatePage
+      offerGroupsPromise={data.offerGroupsPromise}
+      duplicateFrom={data.duplicateFrom}
+    />
+  );
 }
