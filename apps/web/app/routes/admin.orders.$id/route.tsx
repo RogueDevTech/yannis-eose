@@ -558,7 +558,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const totalAmount = totalAmountStr != null && totalAmountStr !== ''
       ? parseFloat(totalAmountStr)
-      : parsedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+      : parsedItems.reduce((sum, i) => sum + i.unitPrice, 0);
     if (Number.isNaN(totalAmount) || totalAmount < 0) {
       return json({ error: 'Invalid total amount' }, { status: 400 });
     }
@@ -627,7 +627,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     }
     const totalAmount = totalAmountStr != null && totalAmountStr !== ''
       ? Math.round(parseFloat(totalAmountStr) * 100) / 100
-      : Math.round(parsedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
+      : Math.round(parsedItems.reduce((sum, i) => sum + i.unitPrice, 0) * 100) / 100;
     if (Number.isNaN(totalAmount) || totalAmount < 0) {
       return json({ error: 'Invalid total amount' }, { status: 400 });
     }

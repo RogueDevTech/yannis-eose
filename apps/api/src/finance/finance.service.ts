@@ -188,8 +188,9 @@ export class FinanceService {
       unitPrice: String(it.unitPrice),
     }));
 
+    // unitPrice is the offer/line total — sum directly
     const totalAmount = params.order.orderItems.reduce(
-      (sum, it) => sum + it.quantity * Number(it.unitPrice),
+      (sum, it) => sum + Number(it.unitPrice),
       0,
     );
 
@@ -525,7 +526,8 @@ export class FinanceService {
     const byOrder = new Map<string, OrderAgg>();
 
     for (const row of lineRows) {
-      const lineRev = Number(row.quantity) * Number(row.unitPrice);
+      // unitPrice is the offer/line total — use directly
+      const lineRev = Number(row.unitPrice);
       let agg = byOrder.get(row.orderId);
       if (!agg) {
         agg = {

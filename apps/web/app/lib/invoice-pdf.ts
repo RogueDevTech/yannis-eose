@@ -377,7 +377,7 @@ async function buildInvoicePdf(invoice: InvoicePdfData): Promise<jsPDF> {
 
   let subtotal = 0;
   for (const item of invoice.lineItems) {
-    const lineTotal = item.quantity * Number(item.unitPrice);
+    const lineTotal = Number(item.unitPrice);
     subtotal += lineTotal;
 
     doc.text(item.description, colX.desc + 3, y);

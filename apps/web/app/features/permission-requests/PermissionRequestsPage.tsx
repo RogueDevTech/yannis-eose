@@ -608,7 +608,7 @@ function OrderPayloadView({ payload, kind }: { payload: OrderPayload; kind: 'ORD
   const total =
     typeof payload.totalAmount === 'number'
       ? payload.totalAmount
-      : items.reduce((acc, line) => acc + (Number(line.unitPrice) || 0) * (Number(line.quantity) || 0), 0);
+      : items.reduce((acc, line) => acc + (Number(line.unitPrice) || 0), 0);
 
   const headerLabel =
     kind === 'ORDER_DELETION' ? 'Order to archive' : 'Proposed items & total';
@@ -640,7 +640,7 @@ function OrderPayloadView({ payload, kind }: { payload: OrderPayload; kind: 'ORD
               {items.map((line, i) => {
                 const qty = Number(line.quantity) || 0;
                 const unit = Number(line.unitPrice) || 0;
-                const lineTotal = qty * unit;
+                const lineTotal = unit;
                 const productLabel =
                   line.productName?.trim() ||
                   (line.productId ? `Product · ${line.productId.slice(0, 8)}…` : '—');

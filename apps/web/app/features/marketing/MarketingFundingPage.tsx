@@ -35,6 +35,7 @@ import { StatusBadge } from '~/components/ui/status-badge';
 import { NairaPrice } from '~/components/ui/naira-price';
 import { Textarea } from '~/components/ui/textarea';
 import { useBranchScopeActionGuard } from '~/contexts/branch-scope-action-guard';
+import { isAdminLevel } from '~/lib/rbac';
 import type { FileUploadUploadState } from '~/components/ui/file-upload';
 import type {
   DistributingFundingEntry,
@@ -113,8 +114,11 @@ function parseSectionTab(
 /**
  * `/admin/marketing/funding` — two-tier funding model as **primary tabs** + **sub-tabs**:
  *
- *   Primary — "Funds I've Received" / "Incoming Funding" | "Funds I Distribute" (HoM/Admin)
+ *   Primary — "Funds Received" / "Incoming Funding" | "Funds Distributed" (HoM)
  *   Sub — Transfers | My Requests (received) or MB Requests (distribute)
+ *
+ * Admin-level viewers sit at the top of the funding chain — they only disburse,
+ * never receive — so they get a single "Funds Disbursed" section with no tabs.
  *
  * URL: `?section=received|distributing&tab=transfers|requests` — loader revalidates on change.
  * Tabs read the **pending** URL from `navigation.location` so they update immediately; the ledger
@@ -144,6 +148,10 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   } = props;
 
   const isMediaBuyer = viewMode === 'media_buyer';
+  // Admin-level viewers sit at the top of the funding chain — they only
+  // disburse, never receive — so the "received" tab is hidden for them and
+  // their distribute section reads "Funds Disbursed".
+  const isAdminViewer = isAdminLevel({ role: currentUserRole });
   const fetcher = useFetcher();
   const { toast } = useToast();
   const { ensureBranchForAction, requiresBranchSelection } = useBranchScopeActionGuard();
@@ -153,12 +161,15 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   /** Loader revalidation for this route (date range, section/tab, filters, pagination). */
   const isFundingRouteLoading = useLoaderRefetchBusy().busy;
 
-  const { section: displaySection, tab: displayTab } = useMemo(() => {
+  const { section: rawDisplaySection, tab: displayTab } = useMemo(() => {
     const pending =
       navigation.state === 'loading' && navigation.location?.pathname.includes('/admin/marketing/funding');
     const search = (pending && navigation.location ? navigation.location.search : location.search) || '';
     return parseSectionTab(search, canDistribute);
   }, [navigation.state, navigation.location, location.search, canDistribute]);
+  // Admin-level viewers are pinned to the distribute section — they have no
+  // `received` tab to switch to (matches the loader's `activeSection` pin).
+  const displaySection: FundingSection = isAdminViewer ? 'distributing' : rawDisplaySection;
 
   // ── Modal state ─────────────────────────────────────────
   const [showSendForm, setShowSendForm] = useState(false);
@@ -381,7 +392,7 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
   };
 
   // ── Role-aware copy ─────────────────────────────────────
-  const receivedTitle = isMediaBuyer ? 'Incoming Funding' : "Funds I've Received";
+  const receivedTitle = isMediaBuyer ? 'Incoming Funding' : 'Funds Received';
 
   // ── Disputed totals + search local state ────────────────
   const totalDisputed = directionSummary.disputedAsReceiver + directionSummary.disputedAsSender;
@@ -783,25 +794,29 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
       {/* ─── Ledger: primary tabs (received | distribute) ─ */}
       <div className="list-panel" id="funding-ledger">
-        {canDistribute && (
+        {canDistribute && !isAdminViewer && (
           <div className="px-4 pt-2">
             <Tabs
               variant="underline"
               value={displaySection}
               onChange={(v) => navigateToSlice(v as FundingSection, 'transfers')}
               tabs={[
-                { value: 'distributing', label: 'Funds I Distribute' },
+                { value: 'distributing', label: 'Funds Distributed' },
                 { value: 'received', label: receivedTitle },
               ]}
             />
           </div>
         )}
 
-        {!canDistribute ? (
+        {/* Admin-level: only disburse — single "Funds Disbursed" section, no tabs.
+            Media Buyer: only receive — single "Incoming Funding" section. */}
+        {(isAdminViewer || !canDistribute) && (
           <div className="border-b border-app-border px-4 py-3">
-            <h2 className="text-base font-semibold text-app-fg">{receivedTitle}</h2>
+            <h2 className="text-base font-semibold text-app-fg">
+              {isAdminViewer ? 'Funds Disbursed' : receivedTitle}
+            </h2>
           </div>
-        ) : null}
+        )}
 
         {displaySection === 'distributing' && unifiedDistributingSlice ? (
           <>

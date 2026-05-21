@@ -314,7 +314,8 @@ export class OrdersService {
       };
     });
 
-    const totalAmount = nextItems.reduce((sum, row) => sum + row.quantity * row.unitPrice, 0);
+    // unitPrice is the offer/line total (not per-unit) — do not multiply by quantity
+    const totalAmount = nextItems.reduce((sum, row) => sum + row.unitPrice, 0);
     return { items: nextItems, totalAmount };
   }
 
@@ -524,11 +525,12 @@ export class OrdersService {
       });
     }
 
-    const sumLines = input.items.reduce((s, it) => s + it.quantity * it.unitPrice, 0);
+    // unitPrice is the offer/line total (not per-unit) — sum directly
+    const sumLines = input.items.reduce((s, it) => s + it.unitPrice, 0);
     if (Math.abs(sumLines - input.totalAmount) > 0.02) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
-        message: 'Total amount must match the sum of quantity × unit price for all lines.',
+        message: 'Total amount must match the sum of line prices.',
       });
     }
 
@@ -3546,8 +3548,9 @@ export class OrdersService {
       // Derive order amount from payload (totalAmount or sum of items) for verification
       let orderAmountKobo = Math.round((parseFloat(String(payload.totalAmount ?? 0)) || 0) * 100);
       if (orderAmountKobo <= 0 && payload.items?.length) {
+        // unitPrice is the offer/line total — sum directly without multiplying by quantity
         const sum = payload.items.reduce(
-          (acc, item) => acc + (Number(item.quantity) || 0) * (parseFloat(String(item.unitPrice)) || 0),
+          (acc, item) => acc + (parseFloat(String(item.unitPrice)) || 0),
           0,
         );
         orderAmountKobo = Math.round(sum * 100);
@@ -5804,8 +5807,9 @@ export class OrdersService {
       unitPrice: String(it.unitPrice),
     }));
 
+    // unitPrice is the offer/line total — sum directly
     const totalAmount = items.reduce(
-      (sum, it) => sum + it.quantity * Number(it.unitPrice),
+      (sum, it) => sum + Number(it.unitPrice),
       0,
     );
 

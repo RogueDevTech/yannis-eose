@@ -4,6 +4,7 @@ import { cachedClientLoader } from '~/lib/loader-cache';
 import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { apiRequest, getSessionCookie, requirePermission } from '~/lib/api.server';
+import { isAdminLevel } from '~/lib/rbac';
 import { MarketingFundingPage } from '~/features/marketing/MarketingFundingPage';
 import { MarketingFundingLoadingShell } from '~/features/marketing/MarketingDeferredLoadingShells';
 import type {
@@ -61,9 +62,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Default section is `distributing` for users who can distribute (HoM/Admin)
   // — that's their primary working surface. MBs (no canDistribute) default to
   // `received`. Explicit `?section=received` always wins.
+  // Admin-level viewers sit at the top of the funding chain — they only
+  // disburse, never receive — so they are pinned to `distributing` regardless
+  // of the URL (the `received` tab is hidden for them in the UI).
+  const isAdminViewer = isAdminLevel(user);
   const sectionParam = url.searchParams.get('section');
-  const activeSection: FundingSection =
-    sectionParam === 'received'
+  const activeSection: FundingSection = isAdminViewer
+    ? 'distributing'
+    : sectionParam === 'received'
       ? 'received'
       : canDistribute
         ? 'distributing'
@@ -346,6 +352,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       filters,
       canDistribute,
       isMediaBuyer,
+      isAdminViewer,
       canRequestFunding,
       canSendFunding: isFundingAdmin,
     },

@@ -274,7 +274,7 @@ const LOGISTICS_ORDER_LINE_COLUMNS: CompactTableColumn<LogisticsOrderLineItem>[]
     align: 'right',
     render: (item) => (
       <span className="text-sm font-semibold tabular-nums text-app-fg">
-        <NairaPrice amount={Number(item.unitPrice) * item.quantity} />
+        <NairaPrice amount={Number(item.unitPrice)} />
       </span>
     ),
   },

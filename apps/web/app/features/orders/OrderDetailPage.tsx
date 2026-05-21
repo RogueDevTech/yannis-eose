@@ -1668,7 +1668,6 @@ export function OrderDetailPage({
               <h2 className="text-lg font-semibold text-app-fg mb-3">Order Items</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {order.orderItems.map((item) => {
-                  const subtotal = item.quantity * Number(item.unitPrice);
                   return (
                     <div
                       key={item.id}
@@ -1679,13 +1678,13 @@ export function OrderDetailPage({
                       </p>
                       <div className="mt-2 flex items-center justify-between text-sm text-app-fg-muted">
                         <span>Qty: {item.quantity}</span>
-                        <span className="tabular-nums">
-                          <NairaPrice amount={Number(item.unitPrice)} /> each
-                        </span>
+                        {item.offerLabel && (
+                          <span className="text-xs text-app-fg-muted">{item.offerLabel}</span>
+                        )}
                       </div>
                       <p className="mt-1.5 text-sm font-semibold text-app-fg flex items-center gap-1">
-                        <span>Subtotal:</span>
-                        <NairaPrice amount={subtotal} />
+                        <span>Price:</span>
+                        <NairaPrice amount={Number(item.unitPrice)} />
                       </p>
                       <Link
                         to={`/admin/products/${item.productId}`}
@@ -3521,9 +3520,7 @@ export function OrderDetailPage({
                   { value: '__custom__', label: 'Custom — set quantity & price' },
                   ...productOffers.map((o) => ({
                     value: o.label,
-                    label: `${o.label} · ${o.quantity} × ₦${o.unitPrice.toLocaleString()} = ₦${(
-                      o.quantity * o.unitPrice
-                    ).toLocaleString()}`,
+                    label: `${o.label} · Qty ${o.quantity} — ₦${o.unitPrice.toLocaleString()}`,
                   })),
                 ];
                 // Preserve a saved offer label even if it is no longer an active tier.
@@ -3611,7 +3608,7 @@ export function OrderDetailPage({
                       Line total:{' '}
                       <span className="font-medium text-app-fg">
                         &#8358;
-                        {(item.quantity * item.unitPrice).toLocaleString(undefined, {
+                        {item.unitPrice.toLocaleString(undefined, {
                           minimumFractionDigits: 2,
                         })}
                       </span>
@@ -3643,7 +3640,7 @@ export function OrderDetailPage({
             <div className="p-6 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] border-t border-app-border">
               <p className="text-sm font-semibold text-app-fg mb-4">
                 Total: &#8358;
-                {editedItems.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                {editedItems.reduce((sum, i) => sum + i.unitPrice, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </p>
               <div className="flex flex-wrap gap-2 justify-end">
                 <Button
@@ -3676,7 +3673,7 @@ export function OrderDetailPage({
                         unitPrice: Math.round(unitPrice * 100) / 100,
                         ...(offerLabel ? { offerLabel } : {}),
                       }));
-                      const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
+                      const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.unitPrice, 0) * 100) / 100;
                       const fd: Record<string, string> = {
                         intent: 'requestOrderLinePriceChange',
                         items: JSON.stringify(payload),
@@ -3712,7 +3709,7 @@ export function OrderDetailPage({
                         unitPrice: Math.round(unitPrice * 100) / 100,
                         ...(offerLabel ? { offerLabel } : {}),
                       }));
-                      const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0) * 100) / 100;
+                      const totalAmount = Math.round(payload.reduce((sum, i) => sum + i.unitPrice, 0) * 100) / 100;
                       ensureBranchForAction({
                         actionLabel: 'updating order items',
                         onProceed: () =>

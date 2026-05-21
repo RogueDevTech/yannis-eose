@@ -301,7 +301,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // bypasses; STOCK_MANAGER and HoLogistics get it by default in the catalog.
     // Other roles can be granted ad-hoc via the user permission overrides UI.
     canExport: isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.export')),
-    canEditLowStock: isAdminLevel(user),
+    canEditLowStock: isAdminLevel(user) || actorPerms.has(canonicalPermissionCode('inventory.lowStockAlerts')),
+    canEditGlobalThreshold: isAdminLevel(user),
     lowStockThreshold: extras.lowStockThreshold,
     lowStockAlerts: Promise.resolve(extras.lowStockAlerts),
     locationThresholds: extras.locationThresholds,

@@ -837,8 +837,27 @@ function getFormStyles(accentColor: string): string {
     .yannis-form-card .embed-success-actions{margin-top:.875rem;display:flex;justify-content:center;gap:.5rem;flex-wrap:wrap}
     .yannis-form-card .embed-success-actions .btn{width:auto;min-width:140px;padding:.625rem .875rem}
     .yannis-form-card .embed-success-actions .btn-secondary{background:#fff;color:#374151;border:1px solid #d1d5db}
+    .yd{position:relative;margin-bottom:1rem}
+    .yd-trigger{width:100%;padding:.625rem .75rem;border:1px solid #ddd;border-radius:8px;font-size:.875rem;font-family:inherit;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:space-between;transition:border-color .2s;text-align:left;color:#111}
+    .yd-trigger:focus{outline:none;border-color:${accentColor}}
+    .yd-trigger.placeholder{color:#999}
+    .yd-arrow{width:10px;height:10px;border-right:2px solid #999;border-bottom:2px solid #999;transform:rotate(45deg);flex-shrink:0;transition:transform .2s}
+    .yd.open .yd-arrow{transform:rotate(-135deg)}
+    .yd-panel{display:none;position:absolute;left:0;right:0;top:100%;margin-top:2px;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:50;max-height:240px;overflow:hidden;flex-direction:column}
+    .yd.open .yd-panel{display:flex}
+    .yd-search{padding:.5rem .75rem;border:none;border-bottom:1px solid #eee;font-size:.875rem;font-family:inherit;outline:none;width:100%;box-sizing:border-box;flex-shrink:0}
+    .yd-search:focus{border-bottom-color:${accentColor}}
+    .yd-list{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1}
+    .yd-opt{padding:.625rem .75rem;cursor:pointer;font-size:.875rem;transition:background .15s}
+    .yd-opt:hover,.yd-opt:focus{background:#f3f4f6;outline:none}
+    .yd-opt.active{background:${accentColor}12;color:${accentColor};font-weight:600}
+    .yd-opt.hidden{display:none}
+    .yd-empty{padding:.75rem;text-align:center;color:#999;font-size:.8125rem}
     @media (max-width:480px){
       body{padding:.5rem!important;align-items:flex-start}
+      .yd-trigger{font-size:16px;padding:.5rem .625rem}
+      .yd-search{font-size:16px}
+      .yd-opt{padding:.75rem}
     }
   `;
 }
@@ -876,6 +895,8 @@ function getFormScript(
         cartSaveDisabled = false;
         savedCartId = null;
         form.reset();
+        // Reset custom dropdowns back to placeholder state.
+        document.querySelectorAll('[data-yd]').forEach(function(yd) { if (yd._ydReset) yd._ydReset(); });
         selectedOffer = null;
         selectedProduct = singleProductId || null;
         document.querySelectorAll('.product-option').forEach(function(o) { o.classList.remove('selected'); });
@@ -1212,6 +1233,86 @@ function getFormScript(
         });
       }
 
+      // ── Custom dropdown (yd) initialisation ──
+      document.querySelectorAll('[data-yd]').forEach(function(yd) {
+        var trigger = yd.querySelector('.yd-trigger');
+        var panel = yd.querySelector('.yd-panel');
+        var label = yd.querySelector('.yd-label');
+        var hidden = yd.querySelector('input[type="hidden"]');
+        var search = yd.querySelector('.yd-search');
+        var opts = yd.querySelectorAll('.yd-opt');
+
+        function openPanel() {
+          yd.classList.add('open');
+          trigger.setAttribute('aria-expanded', 'true');
+          if (search) { search.value = ''; filterOpts(''); search.focus(); }
+        }
+        function closePanel() {
+          yd.classList.remove('open');
+          trigger.setAttribute('aria-expanded', 'false');
+        }
+        function selectOpt(opt) {
+          var val = opt.getAttribute('data-value');
+          hidden.value = val;
+          label.textContent = opt.textContent;
+          trigger.classList.remove('placeholder');
+          opts.forEach(function(o) { o.classList.remove('active'); });
+          opt.classList.add('active');
+          closePanel();
+          // Fire change event so existing listeners (e.g. payment method → email toggle) work.
+          var evt = document.createEvent('HTMLEvents');
+          evt.initEvent('change', true, false);
+          hidden.dispatchEvent(evt);
+        }
+        function resetDropdown() {
+          hidden.value = '';
+          label.textContent = trigger.getAttribute('data-placeholder') || label.textContent;
+          trigger.classList.add('placeholder');
+          opts.forEach(function(o) { o.classList.remove('active'); o.classList.remove('hidden'); });
+          if (search) search.value = '';
+        }
+        function filterOpts(q) {
+          var lower = q.toLowerCase();
+          var anyVisible = false;
+          opts.forEach(function(o) {
+            var match = !lower || o.textContent.toLowerCase().indexOf(lower) !== -1;
+            o.classList.toggle('hidden', !match);
+            if (match) anyVisible = true;
+          });
+          var empty = yd.querySelector('.yd-empty');
+          if (!anyVisible && !empty) {
+            empty = document.createElement('div');
+            empty.className = 'yd-empty';
+            empty.textContent = 'No matches';
+            yd.querySelector('.yd-list').appendChild(empty);
+          } else if (anyVisible && empty) {
+            empty.remove();
+          }
+        }
+
+        // Store original placeholder for reset.
+        trigger.setAttribute('data-placeholder', label.textContent);
+
+        trigger.addEventListener('click', function(e) {
+          e.preventDefault();
+          if (yd.classList.contains('open')) { closePanel(); } else { openPanel(); }
+        });
+        opts.forEach(function(opt) {
+          opt.addEventListener('click', function() { selectOpt(opt); });
+        });
+        if (search) {
+          search.addEventListener('input', function() { filterOpts(search.value); });
+          // Prevent form submit on Enter inside search.
+          search.addEventListener('keydown', function(e) { if (e.key === 'Enter') e.preventDefault(); });
+        }
+        // Close on outside click.
+        document.addEventListener('click', function(e) {
+          if (!yd.contains(e.target)) closePanel();
+        });
+        // Expose reset for form.reset().
+        yd._ydReset = resetDropdown;
+      });
+
       var pmSelect = form.querySelector('#paymentMethod');
       if (pmSelect) {
         var emailWrap = document.getElementById('customerEmailWrap');
@@ -1343,7 +1444,7 @@ function getFormScript(
           customerEmail: customerEmail ? customerEmail : undefined,
           items: [{ productId: selectedProduct, quantity: selectedOffer.qty, unitPrice: selectedOffer.price, offerLabel: selectedOffer.label }],
           cartId: savedCartId || undefined,
-          totalAmount: (selectedOffer.qty * parseFloat(selectedOffer.price)).toString(),
+          totalAmount: selectedOffer.price.toString(),
           customFields: Object.keys(customFields).length > 0 ? customFields : undefined
         };
 
@@ -1644,6 +1745,38 @@ function getFormInnerHTML(config: CampaignConfig): string {
  * attributes. The form-submit JS reads these via `[data-yannis-cf]` and folds them into
  * the `customFields` payload sent to the API.
  */
+/**
+ * Render a custom dropdown (replaces native <select> for consistent cross-device UX).
+ * Uses a hidden input with the same name/id so fv() reads it unchanged.
+ * `searchable` adds a filter input (useful for long lists like states).
+ */
+function renderCustomDropdown(
+  id: string,
+  name: string,
+  placeholder: string,
+  options: Array<{ value: string; label: string }>,
+  opts: { required?: boolean; searchable?: boolean; cfAttr?: string; cfType?: string } = {},
+): string {
+  const optionsHtml = options
+    .map((o) => `<div class="yd-opt" role="option" data-value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</div>`)
+    .join('');
+  const searchHtml = opts.searchable
+    ? `<input type="text" class="yd-search" placeholder="Type to filter…" autocomplete="off">`
+    : '';
+  const cfAttrs = opts.cfAttr ? ` data-yannis-cf="${escapeHtml(opts.cfAttr)}" data-yannis-cf-type="${escapeHtml(opts.cfType || 'dropdown')}"` : '';
+  return `<div class="yd" data-yd>
+    <input type="hidden" id="${id}" name="${name}"${opts.required ? ' required' : ''}${cfAttrs}>
+    <button type="button" class="yd-trigger placeholder" aria-haspopup="listbox" aria-expanded="false">
+      <span class="yd-label">${escapeHtml(placeholder)}</span>
+      <span class="yd-arrow"></span>
+    </button>
+    <div class="yd-panel" role="listbox">
+      ${searchHtml}
+      <div class="yd-list">${optionsHtml}</div>
+    </div>
+  </div>`;
+}
+
 function renderStandardField(
   field:
     | {
@@ -1666,52 +1799,49 @@ function renderStandardField(
 ): string {
   if (!field) return '';
   switch (field.key) {
-    case 'gender':
+    case 'gender': {
+      const genderOpts = (fc.genderOptions && fc.genderOptions.length > 0 ? fc.genderOptions : ['Male', 'Female'])
+        .map((o) => ({ value: o, label: o }));
       return `<label for="customerGender">${escapeHtml(field.label)}${requiredField('gender') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="customerGender" name="customerGender"${requiredField('gender') ? ' required' : ''}>
-        <option value="">Select gender...</option>
-        ${(
-          fc.genderOptions && fc.genderOptions.length > 0 ? fc.genderOptions : ['Male', 'Female']
-        ).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('\n')}
-      </select>`;
-    case 'deliveryState':
+      ${renderCustomDropdown('customerGender', 'customerGender', 'Select gender...', genderOpts, { required: requiredField('gender') })}`;
+    }
+    case 'deliveryState': {
+      const stateOpts = (fc.deliveryStateOptions && fc.deliveryStateOptions.length > 0
+        ? fc.deliveryStateOptions
+        : ['Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun', 'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo', 'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue', 'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe', 'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi']
+      ).map((o) => ({ value: o, label: o }));
       return `<label for="deliveryState">${escapeHtml(field.label)}${requiredField('deliveryState') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="deliveryState" name="deliveryState"${requiredField('deliveryState') ? ' required' : ''}>
-        <option value="">Select state...</option>
-        ${(fc.deliveryStateOptions && fc.deliveryStateOptions.length > 0
-          ? fc.deliveryStateOptions
-          : ['Lagos', 'Abuja (FCT)', 'Rivers', 'Oyo', 'Kano', 'Delta', 'Edo', 'Ogun', 'Anambra', 'Enugu', 'Kaduna', 'Imo', 'Abia', 'Kwara', 'Osun', 'Ondo', 'Ekiti', 'Bayelsa', 'Cross River', 'Akwa Ibom', 'Plateau', 'Benue', 'Nasarawa', 'Niger', 'Kogi', 'Taraba', 'Adamawa', 'Bauchi', 'Gombe', 'Borno', 'Yobe', 'Jigawa', 'Zamfara', 'Sokoto', 'Kebbi', 'Katsina', 'Ebonyi']
-        ).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('\n')}
-      </select>`;
+      ${renderCustomDropdown('deliveryState', 'deliveryState', 'Select state...', stateOpts, { required: requiredField('deliveryState'), searchable: true })}`;
+    }
     case 'deliveryAddress':
       return `<label for="deliveryAddress">${escapeHtml(field.label)}${requiredField('deliveryAddress') ? ' <span class="required">*</span>' : ''}</label>
       <textarea id="deliveryAddress" name="deliveryAddress" placeholder="Your delivery address"${requiredField('deliveryAddress') ? ' required' : ''}></textarea>`;
     case 'deliveryNotes':
       return `<label for="deliveryNotes">${escapeHtml(field.label)}${requiredField('deliveryNotes') ? ' <span class="required">*</span>' : ' (optional)'}</label>
       <input id="deliveryNotes" name="deliveryNotes" type="text" placeholder="Any special instructions"${requiredField('deliveryNotes') ? ' required' : ''}>`;
-    case 'preferredDeliveryDate':
+    case 'preferredDeliveryDate': {
+      const dateOpts = (fc.preferredDeliveryDateOptions && fc.preferredDeliveryDateOptions.length > 0
+        ? fc.preferredDeliveryDateOptions
+        : ['As soon as possible', 'Within 1-2 days', 'Within 3-5 days', 'Next week', 'Specific date (mention in notes)']
+      ).map((o) => ({ value: o, label: o }));
       return `<label for="preferredDeliveryDate">${escapeHtml(field.label)}${requiredField('preferredDeliveryDate') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="preferredDeliveryDate" name="preferredDeliveryDate"${requiredField('preferredDeliveryDate') ? ' required' : ''}>
-        <option value="">Select...</option>
-        ${(fc.preferredDeliveryDateOptions && fc.preferredDeliveryDateOptions.length > 0
-          ? fc.preferredDeliveryDateOptions
-          : ['As soon as possible', 'Within 1-2 days', 'Within 3-5 days', 'Next week', 'Specific date (mention in notes)']
-        ).map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join('\n')}
-      </select>`;
+      ${renderCustomDropdown('preferredDeliveryDate', 'preferredDeliveryDate', 'Select...', dateOpts, { required: requiredField('preferredDeliveryDate') })}`;
+    }
     case 'customerEmail':
       return `<label for="customerEmail">${escapeHtml(field.label)}${requiredField('customerEmail') ? ' <span class="required">*</span>' : ''}</label>
       <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com"${requiredField('customerEmail') ? ' required' : ''}>`;
-    case 'paymentMethod':
+    case 'paymentMethod': {
+      const pmOpts = [
+        { value: 'PAY_ON_DELIVERY', label: 'Pay on delivery' },
+        { value: 'PAY_ONLINE', label: 'Pay online (card / bank)' },
+      ];
       return `<label for="paymentMethod">${escapeHtml(field.label)}${requiredField('paymentMethod') ? ' <span class="required">*</span>' : ''}</label>
-      <select id="paymentMethod" name="paymentMethod"${requiredField('paymentMethod') ? ' required' : ''}>
-        <option value="">Select payment method...</option>
-        <option value="PAY_ON_DELIVERY">Pay on delivery</option>
-        <option value="PAY_ONLINE">Pay online (card / bank)</option>
-      </select>
+      ${renderCustomDropdown('paymentMethod', 'paymentMethod', 'Select payment method...', pmOpts, { required: requiredField('paymentMethod') })}
       ${showStandaloneEmail ? '' : `<div id="customerEmailWrap" class="hidden">
         <label for="customerEmail">${escapeHtml(emailLabel)} (for payment receipt) <span class="required">*</span></label>
         <input id="customerEmail" name="customerEmail" type="email" placeholder="your@email.com">
       </div>`}`;
+    }
   }
 }
 
@@ -1765,14 +1895,10 @@ function renderCustomField(field: CampaignCustomField): string {
           ${field.max ? `max="${escapeHtml(String(field.max))}"` : ''}>
         ${helpHtml}`;
     case 'dropdown': {
-      const options = (field.options ?? [])
-        .map((option: string) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`)
-        .join('\n');
+      const cfOpts = (field.options ?? []).map((option: string) => ({ value: option, label: option }));
+      const cfSearchable = cfOpts.length > 6;
       return `${labelHtml}
-        <select id="${id}" name="${id}" data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="dropdown" ${required}>
-          <option value="">Select...</option>
-          ${options}
-        </select>
+        ${renderCustomDropdown(id, id, field.placeholder || 'Select...', cfOpts, { required: field.required, searchable: cfSearchable, cfAttr: field.id, cfType: 'dropdown' })}
         ${helpHtml}`;
     }
     case 'radio': {

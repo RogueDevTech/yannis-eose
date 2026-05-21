@@ -396,7 +396,9 @@ export class NotificationsService {
     if (data['permissionRequestKind'] === 'order_line_price') return '/admin/permission-requests';
     if (data['permissionRequestKind'] === 'order_deletion') return '/admin/permission-requests';
     if (data['orderId']) return `/admin/orders/${data['orderId']}`;
-    if (data['requestId'] && type.includes('approval')) return '/admin/users';
+    if (data['requestId'] && type === 'approval:email_change') {
+      return data['userId'] ? `/hr/users/${data['userId']}` : '/hr/users';
+    }
     if (data['fundingId'] || (data['requesterId'] && type === 'funding:request')) return '/admin/marketing/funding';
     if (data['requestId'] && (type === 'funding:approved' || type === 'funding:rejected')) return '/admin/marketing/funding';
     if (data['transferId']) {

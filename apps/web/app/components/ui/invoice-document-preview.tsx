@@ -16,8 +16,9 @@ import { formatNaira } from '~/lib/format-amount';
 
 function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
   const taxRate = Number(invoice.taxRate ?? 0);
+  // unitPrice is the offer/line total — sum directly
   const subtotal = invoice.lineItems.reduce(
-    (sum, li) => sum + li.quantity * Number(li.unitPrice || 0),
+    (sum, li) => sum + Number(li.unitPrice || 0),
     0,
   );
   const taxAmount = taxRate > 0 ? subtotal * taxRate : 0;
@@ -115,7 +116,7 @@ function PdfLikeInvoice({ invoice }: { invoice: InvoicePdfData }) {
             </thead>
             <tbody className="text-black">
               {invoice.lineItems.map((li, idx) => {
-                const lineTotal = li.quantity * Number(li.unitPrice || 0);
+                const lineTotal = Number(li.unitPrice || 0);
                 return (
                   <tr key={`${li.description}-${idx}`} className="border-0">
                     <td className="px-1.5 py-1.5 pr-2 align-top">{li.description}</td>

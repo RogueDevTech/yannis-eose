@@ -259,7 +259,7 @@ export const inventoryRouter = router({
    * the org-wide threshold again. Admin-class only — gated by the
    * `system_settings` write capability.
    */
-  setLocationLowStockThreshold: permissionProcedure('settings.write')
+  setLocationLowStockThreshold: permissionProcedure('inventory.lowStockAlerts')
     .input(
       z.object({
         locationId: z.string().uuid(),

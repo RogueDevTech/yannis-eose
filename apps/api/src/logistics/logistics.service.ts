@@ -1880,7 +1880,7 @@ export class LogisticsService {
       .select({
         productId: schema.orderItems.productId,
         productName: schema.products.name,
-        totalAmount: sql<string>`COALESCE(SUM(${schema.orderItems.unitPrice} * ${schema.orderItems.quantity}), 0)::text`,
+        totalAmount: sql<string>`COALESCE(SUM(${schema.orderItems.unitPrice}), 0)::text`,
         orderCount: sql<number>`COUNT(DISTINCT ${schema.orders.id})::int`,
       })
       .from(schema.orders)
@@ -1888,7 +1888,7 @@ export class LogisticsService {
       .innerJoin(schema.products, eq(schema.products.id, schema.orderItems.productId))
       .where(and(...conditions))
       .groupBy(schema.orderItems.productId, schema.products.name)
-      .orderBy(sql`SUM(${schema.orderItems.unitPrice} * ${schema.orderItems.quantity}) DESC`)
+      .orderBy(sql`SUM(${schema.orderItems.unitPrice}) DESC`)
       .limit(10);
 
     return rows;
