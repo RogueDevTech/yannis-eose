@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '~/components/ui/button';
-import { useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
+import { Link, useFetcher, useNavigation, useSearchParams } from '@remix-run/react';
 import { useFetcherToast } from '~/components/ui/toast';
 import { PageNotification } from '~/components/ui/page-notification';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
@@ -687,9 +687,14 @@ export function TransfersPage({
                   />
                 </div>
                 {canInitiate && (
-                  <Button variant="primary" size="sm" onClick={openTransferForm}>
-                    {initiateTransferCta}
-                  </Button>
+                  <>
+                    <Button variant="primary" size="sm" onClick={openTransferForm}>
+                      {initiateTransferCta}
+                    </Button>
+                    <Link to="/admin/transfers/import" prefetch="intent" className="btn-secondary btn-sm">
+                      Bulk import
+                    </Link>
+                  </>
                 )}
                 <PageRefreshButton />
               </>
@@ -705,17 +710,26 @@ export function TransfersPage({
                   />
                 </div>
                 {canInitiate && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="h-12 w-full justify-center"
-                    onClick={() => {
-                      closeSheet();
-                      openTransferForm();
-                    }}
-                  >
-                    {initiateTransferCta}
-                  </Button>
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="h-12 w-full justify-center"
+                      onClick={() => {
+                        closeSheet();
+                        openTransferForm();
+                      }}
+                    >
+                      {initiateTransferCta}
+                    </Button>
+                    <Link
+                      to="/admin/transfers/import"
+                      prefetch="intent"
+                      className="btn-secondary btn-sm h-12 flex items-center justify-center w-full"
+                    >
+                      Bulk import
+                    </Link>
+                  </>
                 )}
               </>
             )}
@@ -1477,6 +1491,7 @@ export function TransfersPage({
           </div>
         }
       />
+
     </div>
   );
 }
