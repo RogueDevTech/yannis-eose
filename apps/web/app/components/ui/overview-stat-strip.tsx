@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { Link } from '@remix-run/react';
 
 import { useHasHorizontalOverflow } from '~/hooks/useHasHorizontalOverflow';
 
@@ -9,7 +10,16 @@ export type OverviewStatStripItem = {
   title?: string;
   /** When true, value is not forced to text-xl font-bold (e.g. badges). */
   plainValue?: boolean;
+  /**
+   * When set, the tile becomes a navigation link to this URL (e.g. a status
+   * filter like `?status=CANCELLED`). Tiles without `to` stay plain display.
+   */
+  to?: string;
 };
+
+/** Subtle clickable affordance — no layout/colour change, just press feedback. */
+const clickableTileClass =
+  'cursor-pointer transition-opacity hover:opacity-80 active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
 
 const SCROLL_DELTA = 280;
 
@@ -172,20 +182,31 @@ export function OverviewStatStrip({
         className="gap-1 px-1.5 py-1.5"
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(6.5rem, 1fr))' }}
       >
-      {items.map((item, i) => (
-        <div key={i} className={gridTile} title={item.title}>
-          <p className="whitespace-nowrap text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
-          {item.plainValue ? (
-            <div className="mt-0.5 flex justify-center">{item.value}</div>
-          ) : (
-            <p
-              className={`mt-0.5 text-lg font-bold leading-tight ${item.valueClassName ?? 'text-app-fg'}`}
-            >
-              {item.value}
-            </p>
-          )}
-        </div>
-      ))}
+      {items.map((item, i) => {
+        const inner = (
+          <>
+            <p className="whitespace-nowrap text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
+            {item.plainValue ? (
+              <div className="mt-0.5 flex justify-center">{item.value}</div>
+            ) : (
+              <p
+                className={`mt-0.5 text-lg font-bold leading-tight ${item.valueClassName ?? 'text-app-fg'}`}
+              >
+                {item.value}
+              </p>
+            )}
+          </>
+        );
+        return item.to ? (
+          <Link key={i} to={item.to} className={`${gridTile} ${clickableTileClass}`} title={item.title}>
+            {inner}
+          </Link>
+        ) : (
+          <div key={i} className={gridTile} title={item.title}>
+            {inner}
+          </div>
+        );
+      })}
       </div>
     </div>
   ) : null;
@@ -193,8 +214,8 @@ export function OverviewStatStrip({
   const stripContent = (
     <div ref={scrollRef} className={`flex-1 min-w-0 overflow-x-auto scrollbar-hide px-[0.9rem] py-[0.9rem] ${mobileGrid ? 'hidden md:block' : ''}`}>
       <div className="flex w-max min-w-full flex-nowrap gap-2 pb-0.5">
-        {items.map((item, i) => (
-          <div key={i} className={tileBase} title={item.title}>
+        {items.map((item, i) => {
+          const inner = (
             <div>
               <p className={`truncate ${labelClass}`}>{item.label}</p>
               {item.plainValue ? (
@@ -207,8 +228,17 @@ export function OverviewStatStrip({
                 </p>
               )}
             </div>
-          </div>
-        ))}
+          );
+          return item.to ? (
+            <Link key={i} to={item.to} className={`${tileBase} ${clickableTileClass}`} title={item.title}>
+              {inner}
+            </Link>
+          ) : (
+            <div key={i} className={tileBase} title={item.title}>
+              {inner}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

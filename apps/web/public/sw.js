@@ -9,7 +9,14 @@
  * - IndexedDB-based offline queue for rider/CS agent workflows
  */
 
-const CACHE_NAME = 'yannis-v1';
+// `__BUILD_ID__` is replaced at build time by scripts/inject-sw-build-id.mjs
+// with the git SHA + a build timestamp. This is what makes a routine deploy
+// change the bytes of /sw.js — without it the browser never sees a "new"
+// service worker, `updatefound` never fires, and the in-app update modal
+// (dashboard-layout.tsx) can never appear. In dev the placeholder is left
+// as-is (harmless — the SW is unregistered on localhost in root.tsx).
+const BUILD_ID = '__BUILD_ID__';
+const CACHE_NAME = 'yannis-' + BUILD_ID;
 const OFFLINE_URL = '/offline';
 
 // Static assets to pre-cache for app shell

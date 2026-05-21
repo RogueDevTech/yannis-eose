@@ -93,6 +93,18 @@ export function StaffOnboardingDocumentsPage({
     setSearchParams(next, { replace: true });
   };
 
+  /** Mirrors `patchParams` but returns a `?query` string for `<Link to>`. */
+  const buildQuery = (patch: Record<string, string | undefined>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined || v === '') next.delete(k);
+      else next.set(k, v);
+    }
+    next.set('page', '1');
+    const qs = next.toString();
+    return qs ? `?${qs}` : '?';
+  };
+
   const columns: CompactTableColumn<StaffOnboardingDocumentRow>[] = [
     {
       key: 'name',
@@ -175,6 +187,7 @@ export function StaffOnboardingDocumentsPage({
                 counts.NOT_STARTED > 0
                   ? 'text-app-fg-muted'
                   : 'text-app-fg',
+              to: buildQuery({ onboarding: 'NOT_STARTED' }),
             },
             {
               label: 'In progress',
@@ -183,6 +196,7 @@ export function StaffOnboardingDocumentsPage({
                 counts.IN_PROGRESS > 0
                   ? 'text-warning-600 dark:text-warning-400'
                   : 'text-app-fg',
+              to: buildQuery({ onboarding: 'IN_PROGRESS' }),
             },
             {
               label: 'Submitted',
@@ -191,6 +205,7 @@ export function StaffOnboardingDocumentsPage({
                 counts.SUBMITTED > 0
                   ? 'text-info-600 dark:text-info-400'
                   : 'text-app-fg',
+              to: buildQuery({ onboarding: 'SUBMITTED' }),
             },
             {
               label: 'Approved',
@@ -199,6 +214,7 @@ export function StaffOnboardingDocumentsPage({
                 counts.APPROVED > 0
                   ? 'text-success-600 dark:text-success-400'
                   : 'text-app-fg',
+              to: buildQuery({ onboarding: 'APPROVED' }),
             },
           ]}
         />

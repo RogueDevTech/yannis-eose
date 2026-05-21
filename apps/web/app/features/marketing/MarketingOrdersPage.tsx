@@ -11,6 +11,7 @@ import { OrderStatusBadge } from '~/components/ui/order-status-badge';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { FilterPills } from '~/components/ui/filter-pills';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SearchInput } from '~/components/ui/search-input';
 import { FormSelect } from '~/components/ui/form-select';
@@ -92,6 +93,8 @@ interface MarketingOrdersPageProps {
   statusFilter?: string;
   searchFilter?: string;
   isMediaBuyer: boolean;
+  /** True when the viewer is a marketing-team supervisor. */
+  isMarketingSupervisor?: boolean;
   /** Show Media buyer column (HoM and SuperAdmin only). */
   showMediaBuyerColumn?: boolean;
   filters?: { startDate: string; endDate: string; periodAllTime: boolean };
@@ -102,6 +105,10 @@ interface MarketingOrdersPageProps {
    * enforces `orders.export` on the actual download.
    */
   canExport?: boolean;
+  /** The current viewer's user ID — used for supervisor My/Team tab toggle. */
+  viewerUserId?: string;
+  /** Active mediaBuyerId filter from the URL (null = all team). */
+  activeMediaBuyerFilter?: string | null;
   /**
    * When true, the page renders its real chrome but swaps row data + pagination
    * for pulse skeletons — used as the route-level Suspense fallback so the layout
@@ -120,10 +127,13 @@ export function MarketingOrdersPage({
   statusFilter,
   searchFilter,
   isMediaBuyer,
+  isMarketingSupervisor = false,
   showMediaBuyerColumn = false,
   filters,
   liveEvents,
   canExport = false,
+  viewerUserId,
+  activeMediaBuyerFilter,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
@@ -518,6 +528,29 @@ export function MarketingOrdersPage({
         }
       />
 
+      {isMarketingSupervisor && viewerUserId && (
+        <FilterPills
+          variant="tab"
+          options={[
+            { label: 'My Orders', value: 'personal' },
+            { label: 'Team Orders', value: 'team' },
+          ]}
+          value={activeMediaBuyerFilter === viewerUserId ? 'personal' : 'team'}
+          onChange={(v) => {
+            setSearchParams((p) => {
+              const next = new URLSearchParams(p);
+              next.set('page', '1');
+              if (v === 'personal') {
+                next.set('mediaBuyerId', viewerUserId);
+              } else {
+                next.delete('mediaBuyerId');
+              }
+              return next;
+            });
+          }}
+        />
+      )}
+
       <Suspense
         fallback={
           <>
@@ -605,23 +638,34 @@ export function MarketingOrdersPage({
                 <OverviewStatStrip
                   mobileGrid
                   items={[
-                    { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+                    {
+                      label: 'Total',
+                      value: total,
+                      valueClassName: 'text-app-fg',
+                      to: buildQueryString({ status: 'ALL', page: 1 }),
+                    },
                     {
                       label: 'Unassigned',
                       value: unprocessedCount,
                       valueClassName: 'text-warning-600 dark:text-warning-400',
+                      to: buildQueryString({ status: 'UNPROCESSED', page: 1 }),
                     },
                     {
                       label: 'Assigned',
                       value: csAssignedCount,
                       valueClassName: 'text-info-600 dark:text-info-400',
+                      to: buildQueryString({ status: 'CS_ASSIGNED', page: 1 }),
                     },
                     {
                       label: 'Unconfirmed',
                       value: unconfirmedCount,
                       valueClassName: 'text-cyan-600 dark:text-cyan-400',
+                      to: buildQueryString({ status: 'CS_ENGAGED', page: 1 }),
                     },
                     {
+                      // No `to` — "Confirmed" rolls up 4 statuses, so it can't
+                      // map to a single `?status=` value without the count and
+                      // the filtered result disagreeing.
                       label: 'Confirmed',
                       value: confirmedCount,
                       valueClassName: 'text-brand-600 dark:text-brand-400',
@@ -630,6 +674,7 @@ export function MarketingOrdersPage({
                       label: 'Delivered',
                       value: deliveredCount,
                       valueClassName: 'text-success-600 dark:text-success-400',
+                      to: buildQueryString({ status: 'DELIVERED', page: 1 }),
                     },
                     {
                       label: 'Cart abandonment',
@@ -661,6 +706,7 @@ export function MarketingOrdersPage({
                         cancelledCount > 0
                           ? 'text-danger-600 dark:text-danger-400'
                           : 'text-app-fg',
+                      to: buildQueryString({ status: 'CANCELLED', page: 1 }),
                     },
                   ]}
                 />

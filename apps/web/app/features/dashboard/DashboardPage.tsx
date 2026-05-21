@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -6,6 +7,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OrderStatusBadge } from '~/components/ui/order-status-badge';
+import { FilterPills } from '~/components/ui/filter-pills';
 import { formatNaira } from '~/lib/format-amount';
 import { formatOrderTimestampShort } from '~/lib/format-date';
 import type { DashboardData, DashboardPageData, DashboardPageProps } from './types';
@@ -15,6 +17,7 @@ import {
   DashboardMetricsSection,
   DashboardProfitSection,
   DashboardSecondaryProvider,
+  DashboardSupervisorMetricsSection,
   DashboardTotalProductsSection,
 } from './dashboard-secondary-context';
 
@@ -470,6 +473,61 @@ function CSDashboard({
 
 // ── Marketing Dashboard ──────────────────────────────────
 
+function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { metrics: DashboardData['metrics']; naira: (amount: number) => string; abandonedCartCount?: number }) {
+  return (
+    <OverviewStatStrip
+      mobileGrid
+      tileClassName="min-w-[6rem]"
+      items={[
+        { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
+        {
+          label: 'Delivered',
+          value: metrics.deliveredOrders.toString(),
+          valueClassName: metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+        },
+        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg' },
+        {
+          label: 'True ROAS',
+          value: `${metrics.trueRoas.toFixed(2)}x`,
+          valueClassName: metrics.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : metrics.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
+        },
+        {
+          label: 'Delivery Rate',
+          value: `${metrics.deliveryRate.toFixed(1)}%`,
+          valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+        },
+        {
+          label: 'Confirmation Rate',
+          value: `${metrics.confirmationRate.toFixed(1)}%`,
+          valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+        },
+        {
+          label: 'Cart abandonment',
+          value: abandonedCartCount.toString(),
+          valueClassName: abandonedCartCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
+          title: 'Open abandoned carts not yet recovered',
+        },
+        { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg' },
+      ]}
+    />
+  );
+}
+
+function MarketingPerformanceSummary({ metrics, naira }: { metrics: DashboardData['metrics']; naira: (amount: number) => string }) {
+  return (
+    <div className="card">
+      <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
+      <div className="space-y-3">
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
+        <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
+      </div>
+    </div>
+  );
+}
+
 function MarketingDashboard({
   data,
   role,
@@ -479,80 +537,84 @@ function MarketingDashboard({
   data: DashboardPageData;
   role: string;
   naira: (amount: number, opts?: Parameters<typeof formatNaira>[1]) => string;
-  /** When the viewer is a Media Buyer who supervises the branch's marketing
-   *  team, render the HoM-style "Team Management" card. Metric tiles already
-   *  reflect the team-aggregated scope (the API auto-applies supervisorScope). */
   isMarketingTeamSupervisor?: boolean;
 }) {
   const showsTeamManagementCard = role === 'HEAD_OF_MARKETING' || isMarketingTeamSupervisor;
+  const [viewTab, setViewTab] = useState<'personal' | 'team'>(isMarketingTeamSupervisor ? 'personal' : 'team');
+
+  // Supervisor: show My Performance / Team toggle
+  if (isMarketingTeamSupervisor) {
+    return (
+      <>
+        <FilterPills
+          variant="tab"
+          options={[
+            { label: 'My Performance', value: 'personal' },
+            { label: 'Team', value: 'team' },
+          ]}
+          value={viewTab}
+          onChange={(v) => setViewTab(v as 'personal' | 'team')}
+        />
+
+        <DashboardSupervisorMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
+          {(teamMetrics, personalMetrics, abandonedCartCount) => {
+            const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
+            return <MarketingMetricsStrip metrics={active} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />;
+          }}
+        </DashboardSupervisorMetricsSection>
+
+        {viewTab === 'team' && (
+          <div className="card">
+            <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
+            <p className="text-sm text-app-fg-muted mb-4">
+              Monitor your team's performance — metrics above aggregate across every buyer you supervise on this branch.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
+              <Link to="/admin/marketing/team" prefetch="intent" className="btn-secondary btn-sm">Team Analysis</Link>
+              <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
+            </div>
+          </div>
+        )}
+
+        <DashboardSupervisorMetricsSection fallback={<DualCardSkeleton />}>
+          {(teamMetrics, personalMetrics) => {
+            const active = viewTab === 'personal' ? (personalMetrics ?? teamMetrics) : teamMetrics;
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <MarketingPerformanceSummary metrics={active} naira={(a) => naira(a)} />
+                <QuickActionsCard role={role} unprocessed={0} />
+              </div>
+            );
+          }}
+        </DashboardSupervisorMetricsSection>
+      </>
+    );
+  }
+
+  // Non-supervisor MB / HoM: original layout
   return (
     <>
-      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={7} />}>
-        {(metrics) => (
-          <OverviewStatStrip
-            mobileGrid
-            tileClassName="min-w-[6rem]"
-            items={[
-              { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
-              {
-                label: 'Delivered',
-                value: metrics.deliveredOrders.toString(),
-                valueClassName:
-                  metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
-              },
-              { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg' },
-              {
-                label: 'True ROAS',
-                value: `${metrics.trueRoas.toFixed(2)}x`,
-                valueClassName:
-                  metrics.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : metrics.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
-              },
-              {
-                label: 'Delivery Rate',
-                value: `${metrics.deliveryRate.toFixed(1)}%`,
-                valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
-              },
-              {
-                label: 'Confirmation Rate',
-                value: `${metrics.confirmationRate.toFixed(1)}%`,
-                valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
-              },
-              { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg' },
-            ]}
-          />
-        )}
+      <DashboardMetricsSection fallback={<OverviewStatStripSkeleton count={8} />}>
+        {(metrics, abandonedCartCount) => <MarketingMetricsStrip metrics={metrics} naira={(a) => naira(a)} abandonedCartCount={abandonedCartCount} />}
       </DashboardMetricsSection>
 
       {showsTeamManagementCard && (
         <div className="card">
           <h2 className="text-lg font-semibold text-app-fg mb-2">Team Management</h2>
           <p className="text-sm text-app-fg-muted mb-4">
-            {role === 'HEAD_OF_MARKETING'
-              ? 'Manage media buyers and monitor team performance.'
-              : "Monitor your team's performance — metrics above aggregate across every buyer you supervise on this branch."}
+            Manage media buyers and monitor team performance.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">
-              Live Activities
-            </Link>
-            <Link to="/admin/marketing/team" prefetch="intent" className="btn-secondary btn-sm">
-              Team Analysis
-            </Link>
-            {/* Funding + Ad spend approvals are HoM-only privileges; supervisors see only the
-                surfaces they can actually act on (their team's funnels + the leaderboard). */}
+            <Link to="/admin/marketing/overview" prefetch="intent" className="btn-primary btn-sm">Live Activities</Link>
+            <Link to="/admin/marketing/team" prefetch="intent" className="btn-secondary btn-sm">Team Analysis</Link>
             {role === 'HEAD_OF_MARKETING' && (
               <>
-                <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">
-                  Funding
-                </Link>
-                <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">
-                  Ad spend
-                </Link>
+                <Link to="/admin/marketing/funding" prefetch="intent" className="btn-secondary btn-sm">Funding</Link>
+                <Link to="/admin/marketing/ad-spend" prefetch="intent" className="btn-secondary btn-sm">Ad spend</Link>
               </>
             )}
-            <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">
-              Leaderboard
-            </Link>
+            <Link to="/admin/marketing/leaderboard" prefetch="intent" className="btn-secondary btn-sm">Leaderboard</Link>
           </div>
         </div>
       )}
@@ -560,17 +622,7 @@ function MarketingDashboard({
       <DashboardMetricsSection fallback={<DualCardSkeleton />}>
         {(metrics) => (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="card">
-              <h2 className="text-lg font-semibold text-app-fg mb-4">Performance Summary</h2>
-              <div className="space-y-3">
-                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Total Orders</span><span className="text-sm font-medium text-app-fg">{metrics.totalOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.deliveredOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Confirmed</span><span className="text-sm font-medium text-success-600 dark:text-success-400">{metrics.confirmedOrders}</span></div>
-                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Conf. Rate</span><span className="text-sm font-medium text-app-fg">{metrics.confirmationRate.toFixed(1)}%</span></div>
-                <div className="flex justify-between"><span className="text-sm text-app-fg-muted">Delivered Revenue</span><span className="text-sm font-medium text-app-fg">{naira(Math.round(metrics.deliveredRevenue))}</span></div>
-              </div>
-            </div>
-
+            <MarketingPerformanceSummary metrics={metrics} naira={(a) => naira(a)} />
             <QuickActionsCard role={role} unprocessed={0} />
           </div>
         )}

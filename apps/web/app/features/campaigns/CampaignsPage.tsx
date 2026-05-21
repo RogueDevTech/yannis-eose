@@ -96,6 +96,12 @@ const EditIcon = (
   </svg>
 );
 
+const DuplicateIcon = (
+  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m11.25 6.875h-3.375a1.125 1.125 0 01-1.125-1.125v-3.375" />
+  </svg>
+);
+
 type DeploymentCopySection = 'hosted' | 'iframe' | 'shadow';
 
 const CheckIconSm = (
@@ -388,6 +394,15 @@ export function FormsPage({
               >
                 {EditIcon}
                 <span>Edit</span>
+              </BranchScopedLink>
+              <BranchScopedLink
+                to={`/admin/marketing/forms/new?duplicateFrom=${c.id}`}
+                actionLabel="duplicating this form"
+                prefetch="intent"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-app-fg-muted hover:text-app-fg hover:bg-surface-100 dark:hover:bg-surface-800 rounded-lg transition-colors duration-150"
+              >
+                {DuplicateIcon}
+                <span>Duplicate</span>
               </BranchScopedLink>
             </div>
           </article>

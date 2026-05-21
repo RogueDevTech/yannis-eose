@@ -2433,17 +2433,24 @@ export class OrdersService {
     // supervised MB funnel rows (`assigned_cs_id` IS NULL) from list/count parity.
     if (input.supervisorScope) {
       const { csUserIds, mediaBuyerIds } = input.supervisorScope;
-      // Supervisor "my team only" scope (Phase B) — OR across the two dimensions:
-      // assigned to a Sales team agent OR created by a supervised MB. Both lists also
-      // include the actor's own id so a supervisor sees their own work.
-      const orParts = [];
-      if (csUserIds.length > 0) orParts.push(inArray(schema.orders.assignedCsId, csUserIds));
-      if (mediaBuyerIds.length > 0) orParts.push(inArray(schema.orders.mediaBuyerId, mediaBuyerIds));
-      if (orParts.length === 0) {
-        conditions.push(sql`FALSE`);
+      // When a specific mediaBuyerId filter is also present (e.g. supervisor viewing
+      // a team member's orders from Team Analysis), narrow to that single MB within
+      // the team boundary instead of showing all team orders.
+      if (input.mediaBuyerId && mediaBuyerIds.includes(input.mediaBuyerId)) {
+        conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
       } else {
-        const combined = or(...orParts);
-        if (combined) conditions.push(combined);
+        // Supervisor "my team only" scope (Phase B) — OR across the two dimensions:
+        // assigned to a Sales team agent OR created by a supervised MB. Both lists also
+        // include the actor's own id so a supervisor sees their own work.
+        const orParts = [];
+        if (csUserIds.length > 0) orParts.push(inArray(schema.orders.assignedCsId, csUserIds));
+        if (mediaBuyerIds.length > 0) orParts.push(inArray(schema.orders.mediaBuyerId, mediaBuyerIds));
+        if (orParts.length === 0) {
+          conditions.push(sql`FALSE`);
+        } else {
+          const combined = or(...orParts);
+          if (combined) conditions.push(combined);
+        }
       }
     } else {
       if (input.assignedCsId) {

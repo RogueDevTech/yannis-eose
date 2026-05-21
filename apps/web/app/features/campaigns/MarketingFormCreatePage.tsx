@@ -13,9 +13,10 @@ import { Checkbox } from '~/components/ui/checkbox';
 import { TextInput } from '~/components/ui/text-input';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { PageNotification } from '~/components/ui/page-notification';
-import type { CustomFormField, OfferGroupRow, StandardFieldConfig } from './types';
+import type { Campaign, CustomFormField, OfferGroupRow, StandardFieldConfig } from './types';
 import { AccentColorInput } from './accent-color-input';
 import { CustomFieldsEditor } from './custom-fields-editor';
+import { sortAndReindexCustomFields } from './custom-fields-order';
 import {
   getOrderedCustomFields,
   getOrderedStandardFields,
@@ -23,7 +24,11 @@ import {
   type CampaignFieldOrderToken,
 } from './form-field-order';
 import { FormFullPreview, type FormFullPreviewPreviewProduct } from './form-full-preview';
-import { cloneDefaultAdditionalFieldSelectOptions } from './standard-fields';
+import {
+  additionalFieldSelectOptionsFromConfig,
+  cloneDefaultAdditionalFieldSelectOptions,
+  normalizeStandardFields,
+} from './standard-fields';
 import { StandardFieldsEditor } from './standard-fields-editor';
 
 export interface MarketingFormCreatePageProps {
@@ -35,6 +40,12 @@ export interface MarketingFormCreatePageProps {
   offerGroupsPromise:
     | Promise<{ offerGroups: OfferGroupRow[]; offerGroupsLoadError: string | null }>
     | { offerGroups: OfferGroupRow[]; offerGroupsLoadError: string | null };
+  /**
+   * When set (`?duplicateFrom=<id>`), every builder input is seeded from this
+   * form — heading, offer, fields, field order, etc. The name is intentionally
+   * NOT seeded: it stays blank for the Media Buyer to name the copy.
+   */
+  duplicateFrom?: Campaign | null;
 }
 
 /**
@@ -43,6 +54,7 @@ export interface MarketingFormCreatePageProps {
  */
 export function MarketingFormCreatePage({
   offerGroupsPromise,
+  duplicateFrom = null,
 }: MarketingFormCreatePageProps) {
   // Bridge the deferred offer-groups payload to local state so the rest of the
   // form (heading/subtitle/preview/custom field builder) renders immediately.
@@ -84,21 +96,39 @@ export function MarketingFormCreatePage({
     navigation.formData?.get('intent') === 'createForm' &&
     (navigation.state === 'submitting' || navigation.state === 'loading');
 
-  const [accentColor, setAccentColor] = useState<string>(DEFAULT_CAMPAIGN_FORM_ACCENT_HEX);
-  const [fields, setFields] = useState<CustomFormField[]>([]);
-  const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>([]);
+  // Duplicate flow: seed every builder input from the source form's config.
+  // The form NAME is deliberately not seeded — it stays blank for the MB.
+  const dupCfg = duplicateFrom?.formConfig ?? null;
+
+  const [accentColor, setAccentColor] = useState<string>(
+    dupCfg?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX,
+  );
+  const [fields, setFields] = useState<CustomFormField[]>(() =>
+    sortAndReindexCustomFields((dupCfg?.customFields ?? []) as CustomFormField[]),
+  );
+  const [standardFields, setStandardFields] = useState<StandardFieldConfig[]>(() =>
+    normalizeStandardFields(dupCfg),
+  );
   const [fieldOrder, setFieldOrder] = useState<CampaignFieldOrderToken[]>(() =>
-    normalizeBuilderFieldOrder(undefined, [], []),
+    normalizeBuilderFieldOrder(
+      dupCfg?.fieldOrder,
+      normalizeStandardFields(dupCfg),
+      sortAndReindexCustomFields((dupCfg?.customFields ?? []) as CustomFormField[]),
+    ),
   );
   const [dismissedOffersError, setDismissedOffersError] = useState(false);
   const [dismissedActionError, setDismissedActionError] = useState(false);
-  const [formHeading, setFormHeading] = useState('');
-  const [formSubtitle, setFormSubtitle] = useState('');
-  const [formButtonText, setFormButtonText] = useState('');
-  const [successCallbackUrl, setSuccessCallbackUrl] = useState('');
-  const [showProductImages, setShowProductImages] = useState(true);
-  const [additionalSelectOptions, setAdditionalSelectOptions] = useState(cloneDefaultAdditionalFieldSelectOptions);
-  const [selectedOfferGroupId, setSelectedOfferGroupId] = useState('');
+  const [formHeading, setFormHeading] = useState(dupCfg?.heading ?? '');
+  const [formSubtitle, setFormSubtitle] = useState(dupCfg?.subtitle ?? '');
+  const [formButtonText, setFormButtonText] = useState(dupCfg?.buttonText ?? '');
+  const [successCallbackUrl, setSuccessCallbackUrl] = useState(dupCfg?.successCallbackUrl ?? '');
+  const [showProductImages, setShowProductImages] = useState(
+    dupCfg?.showProductImages !== false && dupCfg?.showProductImages !== 'false',
+  );
+  const [additionalSelectOptions, setAdditionalSelectOptions] = useState(() =>
+    dupCfg ? additionalFieldSelectOptionsFromConfig(dupCfg) : cloneDefaultAdditionalFieldSelectOptions(),
+  );
+  const [selectedOfferGroupId, setSelectedOfferGroupId] = useState(duplicateFrom?.offerGroupId ?? '');
 
   useEffect(() => {
     setFieldOrder((current) => normalizeBuilderFieldOrder(current, standardFields, fields));

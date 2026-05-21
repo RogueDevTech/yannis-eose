@@ -136,13 +136,16 @@ async function resolveMarketingTeamViewerScope(ctx: {
     throw new TRPCError({ code: 'FORBIDDEN', message: 'Marketing team overview access denied.' });
   }
   const scope = await getBranchTeamsService().listSupervisorScopeIds(ctx.user.id, branchId);
-  const supervisedMbOnly = scope.marketingUserIds.filter((id) => id !== ctx.user.id);
-  if (supervisedMbOnly.length === 0) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: 'Marketing team overview access denied.' });
-  }
+  // Always include the supervisor themselves — they are also a Media Buyer with their own orders.
+  // Even if the team is empty, the supervisor should see their own data.
+  const mbIds = scope.marketingUserIds.length > 0
+    ? scope.marketingUserIds
+    : [ctx.user.id];
+  // Ensure supervisor is always in the list
+  if (!mbIds.includes(ctx.user.id)) mbIds.push(ctx.user.id);
   return {
-    supervisorScope: { csUserIds: scope.csUserIds, mediaBuyerIds: scope.marketingUserIds },
-    restrictMediaBuyerIds: scope.marketingUserIds,
+    supervisorScope: { csUserIds: scope.csUserIds, mediaBuyerIds: mbIds },
+    restrictMediaBuyerIds: mbIds,
   };
 }
 
@@ -542,6 +545,8 @@ export const marketingRouter = router({
         assignedCsId: z.string().uuid().optional(),
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
+        /** When true, skip supervisor scope expansion — return only the caller's own metrics. */
+        personalOnly: z.boolean().optional(),
       }),
     )
     .query(async ({ input, ctx }) => {
@@ -561,7 +566,9 @@ export const marketingRouter = router({
         // The narrow helper auto-derives `supervisorScope.mediaBuyerIds[]`
         // from `applySupervisorScope` and drops the single `mediaBuyerId`
         // filter; the metrics service then OR-aggregates across the IDs.
+        // When `personalOnly` is set, skip this expansion — supervisor sees only their own stats.
         if (
+          !input.personalOnly &&
           ctx.user.isMarketingTeamSupervisorOnActiveBranch === true &&
           ctx.currentBranchId
         ) {

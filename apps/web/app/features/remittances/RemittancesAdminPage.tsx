@@ -216,6 +216,14 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     setSearchParams(next);
   };
 
+  const buildStatusHref = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value.trim().length === 0) next.delete('status');
+    else next.set('status', value);
+    const qs = next.toString();
+    return qs ? `?${qs}` : '?';
+  };
+
   const clearAllFilters = () => {
     const next = new URLSearchParams(searchParams);
     next.delete('status');
@@ -481,9 +489,9 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
         mobileGrid
         items={[
           { label: 'Total transfers', value: remittances.length, valueClassName: 'text-app-fg' },
-          { label: 'Pending', value: sentRemittances.length, valueClassName: 'text-warning-600 dark:text-warning-400' },
-          { label: 'Received', value: receivedCount, valueClassName: 'text-success-600 dark:text-success-400' },
-          { label: 'Disputed', value: disputedCount, valueClassName: 'text-danger-600 dark:text-danger-400' },
+          { label: 'Pending', value: sentRemittances.length, valueClassName: 'text-warning-600 dark:text-warning-400', to: buildStatusHref('IN_TRANSIT') },
+          { label: 'Received', value: receivedCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusHref('RECEIVED') },
+          { label: 'Disputed', value: disputedCount, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusHref('DISPUTED') },
           { label: 'Qty sent', value: totalQuantitySent, valueClassName: 'text-app-fg' },
           { label: 'Qty received', value: totalQuantityReceived, valueClassName: 'text-brand-600 dark:text-brand-400' },
         ]}

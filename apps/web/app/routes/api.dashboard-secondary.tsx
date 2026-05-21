@@ -39,10 +39,13 @@ const defaultProfit: DashboardData['profit'] = {
 
 export type DashboardSecondaryApiPayload = {
   metrics: DashboardData['metrics'];
+  /** Supervisor's personal-only metrics (own funnel, no team expansion). Undefined for non-supervisors. */
+  personalMetrics?: DashboardData['metrics'];
   profit: DashboardData['profit'];
   totalUsers: number;
   totalProducts: number;
   payoutSummary: DashboardData['payoutSummary'];
+  abandonedCartCount: number;
 };
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -65,7 +68,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
   const mediaBuyerIdParam = role === 'MEDIA_BUYER' ? { mediaBuyerId: user.id } : {};
   const assignedCsParam = role === 'CS_CLOSER' ? { assignedCsId: user.id } : {};
+  const isSupervisor = (user as { isMarketingTeamSupervisorOnActiveBranch?: boolean }).isMarketingTeamSupervisorOnActiveBranch === true;
   const metricsInput = JSON.stringify({ startDate, endDate, ...mediaBuyerIdParam, ...assignedCsParam });
+  // For supervisors, also fetch personal-only metrics (without team expansion)
+  const personalMetricsInput = isSupervisor
+    ? JSON.stringify({ startDate, endDate, mediaBuyerId: user.id, personalOnly: true })
+    : null;
   const profitInput = JSON.stringify({ groupBy: 'product', startDate, endDate });
 
   const needsMetrics =
@@ -74,11 +82,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const needsUsers = isAdminLevel({ role }) || role === 'HR_MANAGER';
   const needsProducts = isAdminLevel({ role }) || role === 'STOCK_MANAGER';
   const needsPayout = isAdminLevel({ role }) || role === 'HR_MANAGER';
+  const needsCartAbandoned =
+    isAdminLevel({ role }) || role === 'HEAD_OF_MARKETING' || role === 'MEDIA_BUYER' || isSupervisor;
 
   try {
     const metricsP = needsMetrics
       ? apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(metricsInput)}`, deferredOpt)
       : Promise.resolve({ ok: true, data: { result: { data: defaultMetrics } } });
+    // Supervisor personal metrics — their own funnel only (no team expansion)
+    const personalMetricsP = personalMetricsInput
+      ? apiRequest<unknown>(`/trpc/marketing.metrics?input=${encodeURIComponent(personalMetricsInput)}`, deferredOpt)
+          .then((r) => extractTrpc(r, defaultMetrics)).catch(() => defaultMetrics)
+      : Promise.resolve(null);
     const profitP = needsProfit
       ? apiRequest<unknown>(`/trpc/finance.profitReport?input=${encodeURIComponent(profitInput)}`, deferredOpt)
       : Promise.resolve({ ok: true, data: { result: { data: defaultProfit } } });
@@ -91,9 +106,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const payoutP = needsPayout
       ? apiRequest<unknown>('/trpc/hr.payoutSummary', deferredOpt)
       : Promise.resolve({ ok: false, data: {} });
+    const cartAbandonedInput = JSON.stringify({
+      ...(role === 'MEDIA_BUYER' ? { mediaBuyerId: user.id } : {}),
+    });
+    const cartAbandonedP = needsCartAbandoned
+      ? apiRequest<unknown>(`/trpc/cart.countAbandoned?input=${encodeURIComponent(cartAbandonedInput)}`, deferredOpt)
+      : Promise.resolve({ ok: false, data: {} });
 
-    const [metrics, profit, totalUsers, totalProducts, payoutSummary] = await Promise.all([
+    const [metrics, personalMetrics, profit, totalUsers, totalProducts, payoutSummary, abandonedCartCount] = await Promise.all([
       metricsP.then((r) => extractTrpc(r, defaultMetrics)).catch(() => defaultMetrics),
+      personalMetricsP,
       profitP.then((r) => extractTrpc(r, defaultProfit)).catch(() => defaultProfit),
       usersP
         .then((r) => {
@@ -112,15 +134,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
           r.ok ? (r.data as { result?: { data?: DashboardData['payoutSummary'] } })?.result?.data ?? {} : {},
         )
         .catch(() => ({})),
+      cartAbandonedP
+        .then((r) => {
+          const d = r.ok ? (r.data as { result?: { data?: { count: number } } })?.result?.data : null;
+          return d?.count ?? 0;
+        })
+        .catch(() => 0),
     ]);
 
     return secondaryCacheJson({
       ok: true as const,
       metrics,
+      personalMetrics: personalMetrics ?? undefined,
       profit,
       totalUsers,
       totalProducts,
       payoutSummary,
+      abandonedCartCount,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Dashboard secondary load failed';
@@ -135,5 +165,6 @@ function emptyPayload(): DashboardSecondaryApiPayload {
     totalUsers: 0,
     totalProducts: 0,
     payoutSummary: {},
+    abandonedCartCount: 0,
   };
 }
