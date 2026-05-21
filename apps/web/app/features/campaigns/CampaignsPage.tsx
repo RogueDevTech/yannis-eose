@@ -190,6 +190,20 @@ export function FormsPage({
 
   const edgeWorkerUrl = ((typeof window !== 'undefined' ? window.__ENV?.EDGE_WORKER_URL : '') || '').replace(/\/+$/, '');
 
+  // Embed snippets — both auto-size to the form's content so the host page
+  // never gets an inner scrollbar (iframe) or dead space under the submit
+  // button (shadow DOM). The iframe variant points at `/iframe/:id` (which
+  // broadcasts `yannis-form-resize`) and ships a tiny listener that applies
+  // the height. The shadow variant injects into a dedicated, campaign-scoped
+  // `#yannis-form-:id` div that shrinks to the form rather than the host
+  // funnel section it was pasted into.
+  const iframeSnippet = deploymentModal
+    ? `<iframe id="yannis-frame-${deploymentModal.id}" src="${edgeWorkerUrl}/iframe/${deploymentModal.id}" width="100%" height="600" frameBorder="0" scrolling="no" style="border:0;width:100%"></iframe>\n<script>(function(){var f=document.getElementById("yannis-frame-${deploymentModal.id}");window.addEventListener("message",function(e){if(f&&e.data&&e.data.type==="yannis-form-resize"&&typeof e.data.height==="number"){f.style.height=e.data.height+"px";}});})();</script>`
+    : '';
+  const shadowSnippet = deploymentModal
+    ? `<div id="yannis-form-${deploymentModal.id}"></div><script src="${edgeWorkerUrl}/embed.js?campaign=${deploymentModal.id}"></script>`
+    : '';
+
   useEffect(() => {
     if (!deploymentModal) {
       setDeploymentCopiedSection(null);
@@ -487,12 +501,7 @@ export function FormsPage({
                   <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">iFrame Embed</label>
                   <button
                     type="button"
-                    onClick={() =>
-                      copyDeploymentSnippet(
-                        `<iframe src="${edgeWorkerUrl}/form/${deploymentModal.id}" width="100%" height="500" frameBorder="0"></iframe>`,
-                        'iframe',
-                      )
-                    }
+                    onClick={() => copyDeploymentSnippet(iframeSnippet, 'iframe')}
                     className={`inline-flex items-center gap-1 text-xs font-medium transition-colors duration-200 ${
                       deploymentCopiedSection === 'iframe'
                         ? 'text-emerald-600 dark:text-emerald-400'
@@ -516,8 +525,8 @@ export function FormsPage({
                       : 'ring-2 ring-transparent'
                   }`}
                 >
-                  <code className="text-xs text-app-fg-muted break-all">
-                    {`<iframe src="${edgeWorkerUrl}/form/${deploymentModal.id}" width="100%" height="500" frameBorder="0"></iframe>`}
+                  <code className="text-xs text-app-fg-muted break-all whitespace-pre-wrap">
+                    {iframeSnippet}
                   </code>
                 </div>
                 <p className="text-xs text-app-fg-muted mt-1">
@@ -530,12 +539,7 @@ export function FormsPage({
                   <label className="text-xs font-medium text-app-fg-muted uppercase tracking-wider">Shadow DOM Snippet</label>
                   <button
                     type="button"
-                    onClick={() =>
-                      copyDeploymentSnippet(
-                        `<div id="yannis-form"></div><script src="${edgeWorkerUrl}/embed.js?campaign=${deploymentModal.id}"></script>`,
-                        'shadow',
-                      )
-                    }
+                    onClick={() => copyDeploymentSnippet(shadowSnippet, 'shadow')}
                     className={`inline-flex items-center gap-1 text-xs font-medium transition-colors duration-200 ${
                       deploymentCopiedSection === 'shadow'
                         ? 'text-emerald-600 dark:text-emerald-400'
@@ -560,7 +564,7 @@ export function FormsPage({
                   }`}
                 >
                   <code className="text-xs text-app-fg-muted break-all">
-                    {`<div id="yannis-form"></div><script src="${edgeWorkerUrl}/embed.js?campaign=${deploymentModal.id}"></script>`}
+                    {shadowSnippet}
                   </code>
                 </div>
                 <p className="text-xs text-app-fg-muted mt-1">

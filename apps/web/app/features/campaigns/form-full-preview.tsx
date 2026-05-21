@@ -50,7 +50,12 @@ function moveFieldOrderToken(
   if (currentIndex === -1) return fieldOrder;
 
   const remaining = fieldOrder.filter((token) => token !== draggedToken);
-  const clampedTargetIndex = Math.max(0, Math.min(targetIndex, remaining.length));
+  // `targetIndex` is a gap index in the ORIGINAL list (which still contains the
+  // dragged token). Removing the token shifts every slot after its old position
+  // left by one, so a target past `currentIndex` must be decremented — without
+  // this, dragging a field downward overshoots its drop slot by one.
+  const adjustedTarget = targetIndex > currentIndex ? targetIndex - 1 : targetIndex;
+  const clampedTargetIndex = Math.max(0, Math.min(adjustedTarget, remaining.length));
   remaining.splice(clampedTargetIndex, 0, draggedToken);
 
   const nextIndex = remaining.indexOf(draggedToken);
@@ -110,9 +115,7 @@ export function FormFullPreview({
   const [paymentMethod, setPaymentMethod] = useState('');
   const [draggingToken, setDraggingToken] = useState<CampaignFieldOrderToken | null>(null);
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
-  const [dragContainerTop, setDragContainerTop] = useState(0);
   const [rowLayouts, setRowLayouts] = useState<Record<string, { top: number; height: number }>>({});
-  const formRef = useRef<HTMLFormElement | null>(null);
   const rowRefs = useRef(new Map<CampaignFieldOrderToken, HTMLDivElement>());
 
   const h = heading.trim() || DEFAULT_HEADING;
@@ -254,7 +257,6 @@ export function FormFullPreview({
     setPaymentMethod('');
     setDraggingToken(null);
     setDragInsertIndex(null);
-    setDragContainerTop(0);
   }, [previewSignature]);
 
   function reorderFields(draggedToken: CampaignFieldOrderToken, targetIndex: number) {
@@ -341,8 +343,7 @@ export function FormFullPreview({
       ) : null}
 
       <form
-        ref={formRef}
-        className="space-y-3 sm:space-y-4"
+        className="relative space-y-3 sm:space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
           setSubmitted(true);
@@ -366,9 +367,6 @@ export function FormFullPreview({
             isDragging={draggingToken === field.token}
             activeDraggingToken={draggingToken}
             translateY={translateY}
-            dragContainerTop={dragContainerTop}
-            rowTop={currentLayout?.top ?? 0}
-            rowHeight={currentLayout?.height ?? 0}
             rowRef={(node) => {
               if (node) {
                 rowRefs.current.set(field.token, node);
@@ -377,7 +375,6 @@ export function FormFullPreview({
               }
             }}
             onDragStart={(token) => {
-              setDragContainerTop(formRef.current?.getBoundingClientRect().top ?? 0);
               setDraggingToken(token);
               setDragInsertIndex(resolvedFieldOrder.indexOf(token));
             }}
@@ -387,7 +384,6 @@ export function FormFullPreview({
             onDragEnd={() => {
               setDraggingToken(null);
               setDragInsertIndex(null);
-              setDragContainerTop(0);
             }}
             onDropToken={(token) => reorderFields(token, dragInsertIndex ?? resolvedFieldOrder.indexOf(token))}
           >
@@ -658,9 +654,6 @@ function ReorderablePreviewField({
   isDragging,
   activeDraggingToken,
   translateY,
-  dragContainerTop,
-  rowTop,
-  rowHeight,
   rowRef,
   onDragStart,
   onDragHoverGap,
@@ -679,9 +672,6 @@ function ReorderablePreviewField({
    *  events and historically caused drops to silently no-op). */
   activeDraggingToken: CampaignFieldOrderToken | null;
   translateY: number;
-  dragContainerTop: number;
-  rowTop: number;
-  rowHeight: number;
   rowRef: (node: HTMLDivElement | null) => void;
   onDragStart: (token: CampaignFieldOrderToken) => void;
   onDragHoverGap: (gapIndex: number) => void;
@@ -701,8 +691,20 @@ function ReorderablePreviewField({
         if (!isDragInProgress) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
-        const pointerY = e.clientY - dragContainerTop;
-        const gapIndex = pointerY < rowTop + rowHeight / 2 ? index : index + 1;
+        // Hit-test in the form's own content space. `offsetTop` / `offsetHeight`
+        // are pure layout values — immune to BOTH scrolling and the drag-reflow
+        // CSS transform — so the gap can neither drift on auto-scroll nor
+        // flicker while rows animate into place. The form is `position:
+        // relative`, so it is each row's offsetParent; the pointer is converted
+        // into the same space via the form's live viewport rect. The old math
+        // mixed a frozen drag-start origin with `offsetTop` and desynced the
+        // moment the scrollable preview scrolled.
+        const row = e.currentTarget;
+        const formEl = row.offsetParent as HTMLElement | null;
+        if (!formEl) return;
+        const pointerInForm = e.clientY - formEl.getBoundingClientRect().top;
+        const rowMid = row.offsetTop + row.offsetHeight / 2;
+        const gapIndex = pointerInForm < rowMid ? index : index + 1;
         onDragHoverGap(gapIndex);
       }}
       onDrop={(e) => {
