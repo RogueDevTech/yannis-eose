@@ -2041,9 +2041,16 @@ function renderHostedForm(config: CampaignConfig, workerUrl: string): Response {
 function renderEmbedScript(config: CampaignConfig, workerUrl: string): Response {
   const accentColor = config.formConfig?.accentColor ?? DEFAULT_CAMPAIGN_FORM_ACCENT_HEX;
 
-  // Self-executing script that injects form into Shadow DOM
+  // Self-executing script that injects form into Shadow DOM.
+  // Target the dedicated, campaign-scoped `#yannis-form-:id` div so the form
+  // shrinks to its own content. Falls back to the legacy `#yannis-form` id
+  // (older embeds) and finally the script's parent element. Attaching to the
+  // host funnel section directly leaves dead space under the submit button.
   const js = `(function(){
-  var target = document.currentScript.parentElement;
+  var CID = ${JSON.stringify(config.id)};
+  var target = document.getElementById('yannis-form-' + CID)
+    || document.getElementById('yannis-form')
+    || document.currentScript.parentElement;
   var shadow = target.attachShadow({ mode: 'open' });
 
   var style = document.createElement('style');
