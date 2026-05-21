@@ -7,6 +7,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -188,18 +189,13 @@ export function FinanceOverviewLoadingShell({
                 </div>
               </>
             }
-            sheet={() => (
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime ?? false}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            )}
           />
         }
+      />
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime ?? false}
       />
       <Tabs
         variant="underline"
@@ -387,14 +383,6 @@ export function FinanceDisbursementsLoadingShell({
             }
             sheet={() => (
               <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
                   Generate report
                 </Button>
@@ -405,6 +393,11 @@ export function FinanceDisbursementsLoadingShell({
             )}
           />
         }
+      />
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
       <OverviewStatStrip
         mobileGrid
@@ -744,14 +737,6 @@ export function DeliveryRemittancesLoadingShell({
             }
             sheet={() => (
               <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
                   Generate report
                 </Button>
@@ -759,6 +744,12 @@ export function DeliveryRemittancesLoadingShell({
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip

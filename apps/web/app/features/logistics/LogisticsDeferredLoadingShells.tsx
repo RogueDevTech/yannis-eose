@@ -7,6 +7,7 @@ import {
 } from '~/components/ui/compact-table';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { FormSelect } from '~/components/ui/form-select';
@@ -391,19 +392,10 @@ export function LogisticsRemittancesLoadingShell() {
                 <PageRefreshButton />
               </div>
             }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={startDate}
-                  endDate={endDate}
-                  periodAllTime={periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
       />
+      <MobileDateFilterRow startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} />
       <OverviewStatStrip
         mobileGrid
         items={[
@@ -615,22 +607,18 @@ function TransfersWorkspaceLoadingShell({
               </>
             }
             sheet={
-              <>
-                <div className="flex min-h-[2.5rem] w-full flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.periodAllTime ? '' : filters.startDate}
-                    endDate={filters.periodAllTime ? '' : filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-                <Button variant="primary" size="sm" className="w-full justify-center" disabled>
-                  {initiateCta}
-                </Button>
-              </>
+              <Button variant="primary" size="sm" className="w-full justify-center" disabled>
+                {initiateCta}
+              </Button>
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.periodAllTime ? '' : filters.startDate}
+        endDate={filters.periodAllTime ? '' : filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip

@@ -16,6 +16,7 @@ import { Modal } from '~/components/ui/modal';
 import { FileUpload } from '~/components/ui/file-upload';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import {
   CompactTable,
   CompactTableActionButton,
@@ -636,10 +637,15 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
 
   const renderFundingHeaderToolbar = (
     closeMobileSheet: () => void,
-    opts?: { showRefresh?: boolean; dateTriggerLayout?: 'inline' | 'blockCenter' },
+    opts?: {
+      showRefresh?: boolean;
+      dateTriggerLayout?: 'inline' | 'blockCenter';
+      includeDateFilter?: boolean;
+    },
   ) => {
     const showRefresh = opts?.showRefresh !== false;
     const dateTriggerLayout = opts?.dateTriggerLayout ?? 'inline';
+    const includeDateFilter = opts?.includeDateFilter !== false;
     return (
       <>
         {canRequestFunding && (
@@ -668,14 +674,16 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             + Send Funding
           </Button>
         )}
-        <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2 md:min-h-[2rem] md:w-auto md:flex-row md:items-center md:justify-start md:py-1 md:pl-2.5 md:pr-2">
-          <DateFilterBar
-            startDate={filters.startDate}
-            endDate={filters.endDate}
-            periodAllTime={filters.periodAllTime}
-            triggerLayout={dateTriggerLayout}
-          />
-        </div>
+        {includeDateFilter && (
+          <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2 md:min-h-[2rem] md:w-auto md:flex-row md:items-center md:justify-start md:py-1 md:pl-2.5 md:pr-2">
+            <DateFilterBar
+              startDate={filters.startDate}
+              endDate={filters.endDate}
+              periodAllTime={filters.periodAllTime}
+              triggerLayout={dateTriggerLayout}
+            />
+          </div>
+        )}
         {showRefresh && (
           <div className="flex w-full justify-center md:inline-flex md:w-auto">
             <PageRefreshButton className="justify-center py-2 md:py-1" />
@@ -718,11 +726,17 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
             sheet={({ closeSheet }) =>
               renderFundingHeaderToolbar(closeSheet, {
                 showRefresh: false,
-                dateTriggerLayout: 'blockCenter',
+                includeDateFilter: false,
               })
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       {actionError && !dismissedError && !fundingFetcherModalOpen && (

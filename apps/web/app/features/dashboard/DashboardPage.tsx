@@ -3,6 +3,7 @@ import { Link } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -80,18 +81,14 @@ export function DashboardPage({
                 </div>
               </>
             }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={dateFilters.startDate}
-                  endDate={dateFilters.endDate}
-                  periodAllTime={dateFilters.periodAllTime ?? false}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime ?? false}
       />
 
       {/* Missing role: minimal welcome (safer than defaulting to SuperAdmin) */}
@@ -502,10 +499,10 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
           valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
         },
         {
-          label: 'Cart abandonment',
+          label: 'Open carts',
           value: abandonedCartCount.toString(),
           valueClassName: abandonedCartCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
-          title: 'Open abandoned carts not yet recovered',
+          title: 'Captured carts not yet recovered (browsing + dropped off)',
         },
         { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg' },
       ]}

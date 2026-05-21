@@ -9,6 +9,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { FormSelect } from '~/components/ui/form-select';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { LiveIndicator } from '~/components/ui/live-indicator';
@@ -350,14 +351,6 @@ export function MarketingFundingLoadingShell({
                     + Send Funding
                   </Button>
                 )}
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
                 <Button type="button" variant="ghost" size="sm" className="w-full" onClick={closeSheet}>
                   Done
                 </Button>
@@ -365,6 +358,12 @@ export function MarketingFundingLoadingShell({
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip mobileGrid items={statItems} />
@@ -621,27 +620,23 @@ export function MarketingAdSpendLoadingShell({
               </>
             }
             sheet={({ closeSheet }) => (
-              <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-                <BranchScopedLink
-                  to="/admin/marketing/ad-spend/new"
-                  actionLabel="adding ad spend"
-                  onClick={() => closeSheet()}
-                  className="btn-primary btn-sm w-full justify-center inline-flex items-center"
-                >
-                  + Add Expense
-                </BranchScopedLink>
-              </>
+              <BranchScopedLink
+                to="/admin/marketing/ad-spend/new"
+                actionLabel="adding ad spend"
+                onClick={() => closeSheet()}
+                className="btn-primary btn-sm w-full justify-center inline-flex items-center"
+              >
+                + Add Expense
+              </BranchScopedLink>
             )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       {canApproveAdSpend ? (
@@ -888,22 +883,18 @@ export function MarketingTeamLoadingShell({
               </>
             }
             sheet={
-              <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={dateFilters.startDate}
-                    endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-                <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
-                  Generate report
-                </Button>
-              </>
+              <Button type="button" variant="secondary" size="sm" className="w-full justify-center" disabled>
+                Generate report
+              </Button>
             }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={dateFilters.startDate}
+        endDate={dateFilters.endDate}
+        periodAllTime={dateFilters.periodAllTime}
       />
 
       <OverviewStatStrip
@@ -1076,21 +1067,16 @@ export function MarketingLeaderboardLoadingShell({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-              </>
-            }
           />
         }
       />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
+      />
+
       <div className="card p-0">
         <div className="space-y-3 px-3 py-3 md:space-y-4 md:px-4 md:py-4">
           {[1, 2, 3, 4, 5].map((rank) => {
@@ -1216,20 +1202,14 @@ export function MarketingCrossFunnelLoadingShell({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <>
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                  <DateFilterBar
-                    startDate={filters.startDate}
-                    endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                    triggerLayout="blockCenter"
-                  />
-                </div>
-              </>
-            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip
@@ -1476,6 +1456,27 @@ function marketingOrdersShellTableColumns(
   return cols;
 }
 
+/**
+ * Mobile loading-card skeleton — mirrors the minimal 2-row order card the live
+ * Marketing Orders list renders (customer + order ID, then status + created).
+ * Keep this in sync with `renderMarketingOrderMobileCard` in
+ * `MarketingOrdersPage.tsx`.
+ */
+function renderMarketingOrdersMobileCardShell() {
+  return (
+    <div className="space-y-1.5" aria-hidden>
+      <div className="flex items-center justify-between gap-2">
+        <TableCellTextPulse className="w-[9rem]" />
+        <TableCellTextPulse className="w-[7rem]" />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <TableCellTextPulse className="w-[5.5rem]" />
+        <TableCellTextPulse className="w-[8rem]" />
+      </div>
+    </div>
+  );
+}
+
 const MARKETING_ORDERS_SHELL_STATUS_OPTIONS = STATUS_OPTIONS.map((status) => ({
   value: status,
   label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
@@ -1580,18 +1581,14 @@ export function MarketingOrdersLoadingShell({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={filters.startDate}
-                  endDate={filters.endDate}
-                  periodAllTime={filters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters.startDate}
+        endDate={filters.endDate}
+        periodAllTime={filters.periodAllTime}
       />
 
       <OverviewStatStrip
@@ -1661,6 +1658,7 @@ export function MarketingOrdersLoadingShell({
         rows={MARKETING_ORDERS_SHELL_ROW_DATA}
         rowKey={(r) => r.id}
         columns={marketingOrdersShellTableColumns(showMediaBuyerColumn)}
+        renderMobileCard={() => renderMarketingOrdersMobileCardShell()}
         emptyTitle="Loading…"
         emptyDescription=""
       />

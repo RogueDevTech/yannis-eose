@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Link } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -129,18 +130,14 @@ export function MarketingOverviewLoadingShell({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={filters?.startDate ?? ''}
-                  endDate={filters?.endDate ?? ''}
-                  periodAllTime={filters?.periodAllTime ?? false}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={filters?.startDate ?? ''}
+        endDate={filters?.endDate ?? ''}
+        periodAllTime={filters?.periodAllTime ?? false}
       />
 
       <OverviewStatStripSkeleton count={statLabels.length} labels={statLabels} />

@@ -13,6 +13,7 @@ import { OrderIdBadge } from '~/components/ui/order-id-badge';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { Tabs } from '~/components/ui/tabs';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { CompactTable, CompactTableActionButton, type CompactTableColumn } from '~/components/ui/compact-table';
 import { Modal } from '~/components/ui/modal';
 import { RoleBadge } from '~/components/ui/role-badge';
@@ -348,17 +349,13 @@ function InventoryLevelDetailRouteInner({
                 <PageRefreshButton />
               </>
             }
-            sheet={
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={startDate ?? undefined}
-                  endDate={endDate ?? undefined}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            }
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={startDate ?? undefined}
+        endDate={endDate ?? undefined}
       />
 
       {/* Overview — live state + date-filtered movement totals (in/out within range) */}

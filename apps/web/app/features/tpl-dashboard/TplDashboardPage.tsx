@@ -1,5 +1,6 @@
 import { Link } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
+import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
@@ -54,18 +55,14 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
                 </div>
               </>
             }
-            sheet={() => (
-              <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
-                <DateFilterBar
-                  startDate={data.filters.startDate}
-                  endDate={data.filters.endDate}
-                  periodAllTime={data.filters.periodAllTime}
-                  triggerLayout="blockCenter"
-                />
-              </div>
-            )}
           />
         }
+      />
+
+      <MobileDateFilterRow
+        startDate={data.filters.startDate}
+        endDate={data.filters.endDate}
+        periodAllTime={data.filters.periodAllTime}
       />
 
       {/* KPI Stats */}

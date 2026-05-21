@@ -35,87 +35,106 @@ function norm(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+/** Strings to skip when scanning for agent names */
+const SKIP_PATTERNS = [
+  'total', 'sub-tota', 'new product', 'new stock', 'openning', 'opening',
+  'closing', 'agent', 'sheet', 'transferred', 'balance', 'received',
+];
+/** True if the string looks like a date header (e.g. "10th 16th November", "13TH JAN 26") */
+function isDateLike(s: string): boolean {
+  return /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december)\b/i.test(s)
+    || /^\d{1,2}(st|nd|rd|th)\s/i.test(s);
+}
+
 function parseSpreadsheet(buffer: ArrayBuffer): { rows: ParsedRow[]; productHeaders: string[] } {
   const wb = read(buffer, { type: 'array' });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   if (!sheet) return { rows: [], productHeaders: [] };
   const data = utils.sheet_to_json<string[]>(sheet, { header: 1 }) as unknown[][];
 
-  const rows: ParsedRow[] = [];
+  // The spreadsheet has multiple sections, each with its own header row.
+  // Structure: col 0-1 may have "Agent" or date labels, col 2 has "Agent" or agent name,
+  // cols 3+ have product names in header rows, quantities in data rows.
+  //
+  // Step 1: Find the FIRST header row to extract product names.
+  // Products start at column 3 in all observed formats.
+  const PRODUCT_START_COL = 3;
   let productHeaders: string[] = [];
-  let headerRowIdx = -1;
 
-  for (let i = 0; i < Math.min(data.length, 5); i++) {
+  for (let i = 0; i < data.length; i++) {
     const row = data[i] as (string | number | null | undefined)[];
-    const agentCol = row.findIndex(
+    if (!row) continue;
+    const hasAgent = row.some(
       (cell) => typeof cell === 'string' && norm(cell) === 'agent',
     );
-    if (agentCol >= 0) {
-      productHeaders = row
-        .slice(agentCol + 1)
-        .map((c) => (typeof c === 'string' ? c.trim() : ''))
-        .filter(Boolean);
-      headerRowIdx = i;
-      break;
+    if (!hasAgent) continue;
+    // Extract product names from col 3 onward, skip empties and date-like values
+    const headers: string[] = [];
+    for (let c = PRODUCT_START_COL; c < row.length; c++) {
+      const cell = row[c];
+      if (typeof cell === 'string' && cell.trim().length > 0 && !isDateLike(cell.trim())) {
+        headers.push(cell.trim());
+      }
     }
-  }
-
-  if (headerRowIdx === -1 || productHeaders.length === 0) {
-    const row = data[1] as (string | number | null | undefined)[] | undefined;
-    if (row) {
-      productHeaders = row
-        .slice(3)
-        .map((c) => (typeof c === 'string' ? c.trim() : ''))
-        .filter(Boolean);
-      headerRowIdx = 1;
+    if (headers.length > productHeaders.length) {
+      productHeaders = headers;
     }
+    break; // Use the first header row for product names
   }
 
   if (productHeaders.length === 0) return { rows: [], productHeaders: [] };
 
-  for (let i = headerRowIdx + 1; i < data.length; i++) {
+  // Step 2: Parse all data rows. Agent name is in column 2.
+  // Quantities start at column 3 and map to productHeaders by position.
+  // Skip header rows (contain "Agent"), summary rows (totals, balances), and empty rows.
+  const rows: ParsedRow[] = [];
+  const seenAgents = new Set<string>(); // Deduplicate agents with same name across sections
+
+  for (let i = 0; i < data.length; i++) {
     const row = data[i] as (string | number | null | undefined)[];
-    if (!row || row.length === 0) continue;
+    if (!row || row.length < PRODUCT_START_COL + 1) continue;
 
-    let agentName = '';
-    for (let c = 0; c < Math.min(row.length, 4); c++) {
-      const cell = row[c];
-      if (typeof cell === 'string' && cell.trim().length > 1) {
-        const lower = cell.trim().toLowerCase();
-        if (
-          lower.startsWith('total') ||
-          lower.startsWith('sub-tota') ||
-          lower.startsWith('new product') ||
-          lower.startsWith('new stock') ||
-          lower.startsWith('openning') ||
-          lower.startsWith('closing') ||
-          lower.startsWith('agent') ||
-          lower.startsWith('sheet') ||
-          lower.includes('transferred')
-        ) {
-          continue;
-        }
-        agentName = cell.trim();
-        break;
-      }
-    }
-    if (!agentName) continue;
-
-    const agentColInRow = row.findIndex(
-      (cell) =>
-        typeof cell === 'string' && cell.trim().length > 1 && norm(cell.trim()) === norm(agentName),
+    // Check if this is a header/summary row — skip it
+    const isHeaderRow = row.some(
+      (cell) => typeof cell === 'string' && norm(cell) === 'agent',
     );
-    const quantityStartCol = agentColInRow >= 0 ? agentColInRow + 1 : 3;
+    if (isHeaderRow) continue;
 
+    // Agent name is in column 2
+    const agentCell = row[2];
+    if (typeof agentCell !== 'string' || agentCell.trim().length < 2) continue;
+    const agentName = agentCell.trim();
+    const lower = agentName.toLowerCase();
+
+    // Skip summary/date rows
+    if (SKIP_PATTERNS.some((p) => lower.startsWith(p) || lower.includes(p))) continue;
+    if (isDateLike(agentName)) continue;
+
+    // Extract quantities from col 3 onward, mapped to productHeaders
     const items: ParsedRow['items'] = [];
     for (let p = 0; p < productHeaders.length; p++) {
-      const cellVal = row[quantityStartCol + p];
+      const cellVal = row[PRODUCT_START_COL + p];
       const qty = typeof cellVal === 'number' ? cellVal : parseInt(String(cellVal ?? ''), 10);
       if (qty > 0) {
         items.push({ productHeader: productHeaders[p], quantity: qty });
       }
     }
-    if (items.length > 0) {
+    if (items.length === 0) continue;
+
+    // For duplicate agent names across sections, merge quantities
+    const existingIdx = rows.findIndex((r) => r.agentName === agentName);
+    if (existingIdx >= 0) {
+      // Merge: add quantities for matching products, append new products
+      const existing = rows[existingIdx];
+      for (const item of items) {
+        const matchIdx = existing.items.findIndex((e) => e.productHeader === item.productHeader);
+        if (matchIdx >= 0) {
+          existing.items[matchIdx].quantity += item.quantity;
+        } else {
+          existing.items.push(item);
+        }
+      }
+    } else {
       rows.push({ agentName, items });
     }
   }

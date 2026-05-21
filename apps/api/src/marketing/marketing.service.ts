@@ -5032,6 +5032,7 @@ export class MarketingService {
         buttonText?: string;
         accentColor?: string;
         successMessage?: string;
+        successCallbackUrl?: string;
         showDeliveryAddress?: boolean;
         showDeliveryNotes?: boolean;
         showDeliveryState?: boolean;
