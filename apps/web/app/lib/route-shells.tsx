@@ -446,6 +446,7 @@ const entries: ShellEntry[] = [
         filters={parseDateFilters(sp)}
         canDistribute={false}
         isMediaBuyer={false}
+        isAdminViewer={false}
         canRequestFunding={false}
         canSendFunding={false}
       />
