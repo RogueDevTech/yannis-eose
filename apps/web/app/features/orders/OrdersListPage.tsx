@@ -527,6 +527,7 @@ function OrdersListPageImpl({
     label: STATUS_LABELS[status] ?? formatStatus(status),
     value: statusCounts[status] ?? 0,
     valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
+    to: buildQueryString({ status, page: 1 }),
   }));
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
@@ -1320,7 +1321,12 @@ function OrdersListPageImpl({
         <OverviewStatStrip
           mobileGrid
           items={[
-            { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+            {
+              label: 'Total',
+              value: total,
+              valueClassName: 'text-app-fg',
+              to: buildQueryString({ status: 'ALL', page: 1 }),
+            },
             ...(enableFromCartStatusOption
               ? [
                   {

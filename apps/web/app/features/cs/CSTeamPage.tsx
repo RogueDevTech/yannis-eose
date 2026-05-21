@@ -255,6 +255,25 @@ export function CSTeamPage({
     mergeListParams({ q: searchQuery, page: 1 });
   };
 
+  /** Mirrors `mergeListParams` but returns a `?query` string for `<Link to>`. */
+  const buildListQuery = (overrides: { activity?: string; backlog?: string; page?: number }) => {
+    const params = new URLSearchParams(searchParams);
+    if (overrides.activity !== undefined) {
+      if (overrides.activity === 'ALL') params.delete('activity');
+      else params.set('activity', overrides.activity);
+    }
+    if (overrides.backlog !== undefined) {
+      if (overrides.backlog === 'ALL') params.delete('backlog');
+      else params.set('backlog', overrides.backlog);
+    }
+    if (overrides.page !== undefined) {
+      if (overrides.page <= 1) params.delete('page');
+      else params.set('page', String(overrides.page));
+    }
+    const qs = params.toString();
+    return qs ? `?${qs}` : '?';
+  };
+
   const filtersBadgeCount = useMemo(() => {
     let count = 0;
     if (activityFilter !== 'ALL') count += 1;
@@ -513,6 +532,7 @@ export function CSTeamPage({
                 summary.idleCount > 0
                   ? 'text-warning-600 dark:text-warning-400'
                   : 'text-app-fg',
+              to: buildListQuery({ activity: 'IDLE', page: 1 }),
             },
           ]}
         />

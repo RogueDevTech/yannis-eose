@@ -252,6 +252,16 @@ export function UsersListPage({
     );
   };
 
+  /** Mirrors `handleStatusChange` but returns a `?query` string for `<Link to>`. */
+  const buildStatusQuery = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'ALL') next.delete('status');
+    else next.set('status', value);
+    next.set('page', '1');
+    const qs = next.toString();
+    return qs ? `?${qs}` : '?';
+  };
+
   const handleRoleChange = (value: string) => {
     setSearchParams(
       (prev) => {
@@ -670,11 +680,13 @@ export function UsersListPage({
                 label: 'Active',
                 value: rosterSummary.active,
                 valueClassName: 'text-success-600 dark:text-success-400',
+                to: buildStatusQuery('ACTIVE'),
               },
               {
                 label: 'Pending',
                 value: rosterSummary.pending,
                 valueClassName: 'text-info-600 dark:text-info-400',
+                to: buildStatusQuery('PENDING'),
               },
               {
                 label: 'Inactive / Archived',

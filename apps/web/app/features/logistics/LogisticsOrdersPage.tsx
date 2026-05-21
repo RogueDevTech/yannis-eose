@@ -327,6 +327,15 @@ function LogisticsOrdersPageImpl({
   const deliveredCount = statusCounts['DELIVERED'] ?? 0;
   const totalOrdersCount = Object.values(statusCounts).reduce((sum, n) => sum + (n ?? 0), 0);
 
+  const buildStatusQuery = (status: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('page', '1');
+    if (status === 'ALL' || !status) next.delete('status');
+    else next.set('status', status);
+    const qs = next.toString();
+    return qs ? `?${qs}` : '?';
+  };
+
   const handleStatusChange = (status: string) => {
     setSelectedStatus(status);
     setSelectedIds(new Set());
@@ -750,12 +759,12 @@ function LogisticsOrdersPageImpl({
         <OverviewStatStrip
           mobileGrid
           items={[
-            { label: 'Total', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg' },
-            { label: 'Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400' },
-            { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400' },
-            { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400' },
-            { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400' },
+            { label: 'Total', value: totalOrdersCount.toLocaleString(), valueClassName: 'text-app-fg', to: buildStatusQuery('ALL') },
+            { label: 'Unassigned', value: confirmedCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('CONFIRMED') },
+            { label: 'Assigned', value: allocatedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('AGENT_ASSIGNED') },
+            { label: 'Dispatched', value: dispatchedCount, valueClassName: 'text-info-600 dark:text-info-400', to: buildStatusQuery('DISPATCHED') },
+            { label: 'In transit', value: inTransitCount, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('IN_TRANSIT') },
+            { label: 'Delivered', value: deliveredCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('DELIVERED') },
           ]}
         />
       )}

@@ -537,9 +537,12 @@ export const ordersRouter = router({
           });
         }
         if (!hasOrgWideScope) {
-          if (ctx.user.role === 'MEDIA_BUYER') {
+          if (ctx.user.role === 'MEDIA_BUYER' && !marketingTeamSupervisorOrders) {
             // `branchId` is already null for MBs (orderListBranchIdOwnerAware);
             // this ownership filter is what makes that safe.
+            // Supervisors skip this — they can view specific team members' orders
+            // via mediaBuyerId URL param; applySupervisorScope below enforces
+            // team-boundary security.
             effectiveInput = { ...effectiveInput, mediaBuyerId: ctx.user.id };
           }
           if (hasOrdersRead && ctx.user.role === 'CS_CLOSER') {
