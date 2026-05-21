@@ -14,7 +14,7 @@ export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
 
   const pageData = (async () => {
     const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
-    const locationsPromise = apiRequest<unknown>('/trpc/logistics.listLocations', { method: 'GET', cookie });
+    const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ limit: 100 }))}`, { method: 'GET', cookie });
 
     const [transfersRes, locationsRes] = await Promise.all([transfersPromise, locationsPromise]);
 

@@ -15,10 +15,12 @@ project_id          = "REPLACE-WITH-PROD-GCP-PROJECT-ID"
 region              = "europe-west2"
 zone                = "europe-west2-a"
 environment         = "prod"
-# A larger machine for prod — the current e2-small is fine for dev but the
-# API has been hitting 70%+ CPU under modest load. Revisit after Phase 22
-# latency work lands.
-machine_type        = "e2-standard-2"
+# A larger machine for prod — e2-small is dev-only. Prod runs web + api +
+# nginx + Docker on one box, so it needs real RAM. e2-standard-4 = 4 vCPU /
+# 16 GB; e2-standard-2 (2 vCPU / 8 GB) is the floor.
+machine_type        = "e2-standard-4"
+# Prod VM cannot be deleted until this is flipped back to false.
+vm_deletion_protection = true
 vm_admin_user       = "deployer"
 ssh_public_key      = "ssh-ed25519 AAAA... REPLACE WITH PROD SSH KEY"
 

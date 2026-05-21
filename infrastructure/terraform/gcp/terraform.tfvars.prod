@@ -14,10 +14,17 @@ region              = "europe-west2"
 zone                = "europe-west2-a"
 environment         = "prod"
 
-# Match dev sizing — dev runs ~20% CPU / storage headroom on e2-small, so
-# prod starts there too. Resize on stop later if real traffic needs more.
-machine_type        = "e2-small"
+# Prod runs web (Remix SSR) + api (NestJS) + nginx + Docker on one VM, so it
+# needs real RAM — e2-small (2 GB) is dev-only sizing and starves under load.
+# e2-standard-4 = 4 vCPU / 16 GB, with headroom for on-box build/deploy.
+# Changing this triggers a brief stop → resize → start on the next apply
+# (allow_stopping_for_update is set on the VM resource).
+machine_type        = "e2-standard-4"
+# Boot disk left at 20 GB — grow it live via `gcloud compute disks resize`
+# rather than Terraform (a boot-disk size change can force VM replacement).
 vm_boot_disk_size_gb = 20
+# Prod VM cannot be deleted until this is flipped back to false.
+vm_deletion_protection = true
 vm_admin_user       = "deployer"
 
 # Operator SSH key (matches the key on the dev box). Replace with a

@@ -28,7 +28,7 @@ variable "app_name" {
 }
 
 variable "machine_type" {
-  description = "Compute Engine machine type for the dev VM."
+  description = "Compute Engine machine type for the VM. Dev defaults to e2-small; prod overrides via tfvars (the app runs web + api + nginx + Docker, so prod needs real RAM)."
   type        = string
   default     = "e2-small"
 }
@@ -37,6 +37,12 @@ variable "vm_boot_disk_size_gb" {
   description = "Boot disk size for the GCE VM."
   type        = number
   default     = 20
+}
+
+variable "vm_deletion_protection" {
+  description = "When true, the VM cannot be deleted until this is flipped back to false. Dev leaves it off for easy teardown; prod sets it true via tfvars."
+  type        = bool
+  default     = false
 }
 
 variable "vm_image" {

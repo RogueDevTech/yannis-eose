@@ -74,6 +74,17 @@ Rider dashboard lives in `apps/web` at `/rider/` (not a separate app). Local dev
 
 Local dev still does **not** require Docker — Postgres 18 + Redis can be reached via remote connection strings in `.env`.
 
+### GCP Prod Infrastructure (Locked)
+
+- **Prod app VM is `e2-standard-4`** (4 vCPU / 16 GB), zone `europe-west2-a`. `e2-small` is **dev-only** — 2 GB RAM starves the `web` + `api` + nginx + Docker stack (swap → multi-second latency; shared-core CPU throttles). Never set the prod `machine_type` to a shared-core type (`e2-small/medium`). Lives in `infrastructure/terraform/gcp/terraform.tfvars.prod`.
+- **Prod VM Terraform carries `allow_stopping_for_update = true`** (so a `machine_type` resize can apply instead of erroring) **and `deletion_protection = true`** (via the `vm_deletion_protection` var). Do not regress either.
+- **The whole app tier lives in `europe-west2`** — VM, Artifact Registry, Secret Manager. **Cloud SQL MUST be co-located in `europe-west2`.** A cross-region DB adds ~25ms per query round-trip; every N+1 page pays it N times.
+- **Cloud SQL connectivity standard:** Private IP (same VPC as the VM) + High Availability (regional, not zonal) + public IP **disabled**. If public IP is ever enabled, Authorized Networks must be locked to the VM IP — never `0.0.0.0/0`.
+- **Cloud SQL must be managed in Terraform** (`google_sql_database_instance`). Never hand-create cloud resources in the console — the prod DB was created by hand and that is exactly how an undetected region drift happened.
+- **Cloud SQL region is immutable.** "Moving" regions = new instance + data migration (cross-region read replica → promote is the low-downtime path) + repoint `DATABASE_URL` in the `prod-yannis-runtime-env` secret + API restart. Private IP and HA are in-place edits — bundle them into the same rebuild.
+- **Don't downsize the DB blind.** Right-size only *after* the app VM is correctly sized and Query Insights shows a week of real load.
+- **Outstanding prod drift (as of 2026-05-21, to fix):** Cloud SQL `yannis-eose-prod` is still in `europe-north2` (Stockholm), still public-IP / zonal, and still not in Terraform. Pending migration: rebuild in `europe-west2` with Private IP + HA, import into Terraform, verify Authorized Networks.
+
 ---
 
 ## Database Principles
