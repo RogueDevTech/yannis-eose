@@ -196,6 +196,7 @@ export function CSDashboardHotSwapTabPanel({
                             </div>
                             <OrderIdBadge
                               id={order.id}
+                              orderNumber={order.orderNumber}
                               length={8}
                               ellipsis=""
                               textClassName="text-micro text-app-fg-muted"

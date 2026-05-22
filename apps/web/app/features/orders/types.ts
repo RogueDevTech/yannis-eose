@@ -1,5 +1,6 @@
 export interface Order {
   id: string;
+  orderNumber?: number | null;
   customerName: string;
   customerPhoneDisplay: string;
   status: string;
@@ -46,6 +47,7 @@ export interface CallLogEntry {
 
 export interface OrderDetail {
   id: string;
+  orderNumber?: number | null;
   customerName: string;
   customerPhoneDisplay: string;
   customerAddress: string | null;

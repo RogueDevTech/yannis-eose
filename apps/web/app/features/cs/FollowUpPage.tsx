@@ -140,7 +140,7 @@ export function FollowUpPage({
         header: 'Order ID',
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
-          : (order) => <OrderIdBadge id={order.id} linkTo={`/admin/orders/${order.id}`} />,
+          : (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={`/admin/orders/${order.id}`} />,
       },
       {
         key: 'customer',

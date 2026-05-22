@@ -100,7 +100,7 @@ export function DeliveryRemittanceDetailPage({
         header: 'Order',
         nowrap: true,
         render: (o) => (
-          <OrderIdBadge id={o.id} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />
+          <OrderIdBadge id={o.id} orderNumber={o.orderNumber} ellipsis="" textClassName="font-mono text-xs text-app-fg-muted" />
         ),
       },
       {
@@ -435,7 +435,7 @@ export function DeliveryRemittanceDetailPage({
                   <p className="text-sm font-medium text-app-fg truncate" title={o.customerName}>
                     {o.customerName}
                   </p>
-                  <OrderIdBadge id={o.id} ellipsis="" textClassName="font-mono text-mini text-app-fg-muted" />
+                  <OrderIdBadge id={o.id} orderNumber={o.orderNumber} ellipsis="" textClassName="font-mono text-mini text-app-fg-muted" />
                 </div>
                 <div className="shrink-0 text-right">
                   {o.totalAmount != null ? (

@@ -335,6 +335,7 @@ export function RemitPage({
                     />
                     <OrderIdBadge
                       id={order.id}
+                      orderNumber={order.orderNumber}
                       ellipsis="…"
                       className="shrink-0"
                       textClassName="font-mono text-xs text-app-fg-muted"

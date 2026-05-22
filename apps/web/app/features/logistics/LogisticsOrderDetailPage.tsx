@@ -639,7 +639,7 @@ export function LogisticsOrderDetailPage({
         mobileInlineActions
         description={
           <span className="inline-flex items-center gap-1.5">
-            <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg-muted" />
             <span>· Created {formatDate(order.createdAt)}</span>
           </span>
         }
@@ -651,7 +651,7 @@ export function LogisticsOrderDetailPage({
             <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
             </svg>
-            <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg font-medium truncate min-w-0" />
           </div>
         }
         actions={

@@ -273,9 +273,9 @@ export function MarketingOrdersPage({
           : (order) =>
               order.status === 'CART' ? (
                 // Cart rows have no order detail page — copyable id only.
-                <OrderIdBadge id={order.id} />
+                <OrderIdBadge id={order.id} orderNumber={order.orderNumber} />
               ) : (
-                <OrderIdBadge id={order.id} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />
+                <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />
               ),
       },
       {
@@ -429,7 +429,7 @@ export function MarketingOrdersPage({
             <span className="min-w-0 truncate text-sm font-medium text-app-fg">
               {order.customerName || '—'}
             </span>
-            <OrderIdBadge id={order.id} textClassName="text-sm font-medium text-app-fg" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
           </div>
           <div className="flex items-center justify-between gap-2">
             {order.status === 'CART' ? (

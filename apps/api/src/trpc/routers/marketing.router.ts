@@ -998,6 +998,9 @@ export const marketingRouter = router({
           branchId,
           undefined,
           ordersScope.supervisorScope,
+          // Head of Marketing scopes by the campaign (marketing) branch so the
+          // count matches the order rows (`orders.list` does the same for HoM).
+          ctx.user.role === 'HEAD_OF_MARKETING' ? 'campaign' : 'order',
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
