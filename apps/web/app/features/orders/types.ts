@@ -205,6 +205,8 @@ export interface OrderDetailStreamData {
   voipProviderDisplayName?: string;
   /** Campaign-scoped offer tiers per product — powers the Adjust order items offer picker. */
   itemOffers: OrderItemOffers[];
+  /** Pre-loaded callable phone when VOIP is off and viewer is authorised — no separate reveal fetch. */
+  callablePhone?: { phone: string; isDialable: boolean } | null;
 }
 
 /** Passed from route when user has view-only access (e.g. Media Buyer) */

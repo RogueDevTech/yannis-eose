@@ -786,9 +786,9 @@ export function OrderDetailPage({
   logisticsDispatchTemplates = [],
   invoice,
   itemOffers = [],
+  callablePhone,
 }: OrderDetailStreamData & OrderDetailPageExtraProps) {
   const fetcher = useFetcher();
-  const revealFetcher = useFetcher();
   const recordCallFetcher = useFetcher();
   const scheduleFetcher = useFetcher();
   const adjustItemsFetcher = useFetcher();
@@ -885,6 +885,8 @@ export function OrderDetailPage({
   const [assignToId, setAssignToId] = useState('');
   const [callCustomerModalOpen, setCallCustomerModalOpen] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  // After the first Copy/Call, the unmasked phone stays visible in the order header.
+  const [phoneUnmasked, setPhoneUnmasked] = useState(false);
   const [dismissedError, setDismissedError] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [scheduleCallbackModalOpen, setScheduleCallbackModalOpen] = useState(false);
@@ -1163,9 +1165,9 @@ export function OrderDetailPage({
     if (fetcher.state === 'submitting') setDismissedError(false);
   }, [fetcher.state]);
 
-  // Phone is pre-fetched on modal open (useEffect below). Copy / Call read from the
-  // cached `revealData.phone` — no network call on click. The call-log fires in the
-  // background via `recordCallFetcher`.
+  // Phone is loaded with the page via `callablePhone` prop — no separate fetch.
+  // Copy / Call read directly from it. The call-log fires in the background via
+  // `recordCallFetcher`.
 
   // Reset call debug log when opening the call modal (VOIP path)
   useEffect(() => {
@@ -1296,34 +1298,6 @@ export function OrderDetailPage({
   useEffect(() => {
     if (fetcher.state === 'submitting') revalidatedForCallInitiatedRef.current = false;
   }, [fetcher.state]);
-
-  const revealData = revealFetcher.data as {
-    phoneRevealed?: boolean;
-    phone?: string;
-    isDialable?: boolean;
-    error?: string;
-  } | undefined;
-
-  // Reveal the customer's number as soon as the manual-call modal opens, so the
-  // Copy / Call buttons act on an already-cached value. If the reveal fired only
-  // on the button click, the `await fetch` would run BEFORE
-  // `navigator.clipboard.writeText` and consume the browser's user-gesture
-  // window — the copy then silently fails (Safari / iOS especially). Pre-loading
-  // here keeps the clipboard write synchronous within the click. VOIP path
-  // doesn't expose Copy / Call buttons, so it's skipped.
-  useEffect(() => {
-    if (
-      callCustomerModalOpen &&
-      !voipEnabled &&
-      !revealData &&
-      revealFetcher.state === 'idle'
-    ) {
-      const fd = new FormData();
-      fd.set('intent', 'revealPhone');
-      if (order.branchId) fd.set('branchId', order.branchId);
-      revealFetcher.submit(fd, { method: 'post' });
-    }
-  }, [callCustomerModalOpen, voipEnabled, revealData, revealFetcher, order.branchId]);
 
   // Revalidate when MANUAL_CALL is recorded (after Copy or Call on my phone) so Confirm order appears.
   // Use a ref to avoid revalidation loop: only revalidate once per success.
@@ -1475,7 +1449,7 @@ export function OrderDetailPage({
         <div className="min-w-0">
           <h1 className="text-xl sm:text-2xl font-bold text-app-fg truncate">{order.customerName}</h1>
           <p className="text-sm text-app-fg-muted font-mono mt-0.5 break-all">
-            {order.customerPhoneDisplay}
+            {phoneUnmasked && callablePhone?.phone ? callablePhone.phone : order.customerPhoneDisplay}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -2277,7 +2251,7 @@ export function OrderDetailPage({
                 showLogisticsOrderSummaryCopy;
               if (!showCard) return null;
               return (
-                <div className="card">
+                <div className="card order-[-2] lg:order-none">
                   <h2 className="text-lg font-semibold text-app-fg mb-3">Logistics</h2>
                   {order.confirmedAt ? (
                     <div className="rounded-lg border border-app-border bg-app-hover px-3 py-2 mb-3">
@@ -3359,29 +3333,32 @@ export function OrderDetailPage({
                   </Button>
                 </div>
               </>
-            ) : revealData?.error ? (
+            ) : !callablePhone ? (
+              /* No callable phone — VOIP is on, viewer not authorised, or order in a terminal status. */
               <>
-                <p className="text-sm text-danger-600 dark:text-danger-400 mb-3">{revealData.error}</p>
-                <div className="flex gap-2 justify-end">
+                <p className="text-sm text-app-fg-muted mb-3">
+                  The customer&apos;s number is not available. This can happen when VOIP is enabled, the order is in a terminal status, or you don&apos;t have access. Enable VOIP in Settings to call via the app, or record that you called using your own records below.
+                </p>
+                <div className="flex gap-2 justify-end flex-wrap">
                   <Button type="button" variant="secondary" onClick={() => setCallCustomerModalOpen(false)}>
                     Close
                   </Button>
-                  <revealFetcher.Form method="post">
-                    <input type="hidden" name="intent" value="revealPhone" />
+                  <recordCallFetcher.Form method="post">
+                    <input type="hidden" name="intent" value="initiateCall" />
                     {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={revealFetcher.state === 'submitting'}
-                      loading={revealFetcher.state === 'submitting'}
-                      loadingText="Retrying..."
+                      disabled={recordCallFetcher.state === 'submitting'}
+                      loading={recordCallFetcher.state === 'submitting'}
+                      loadingText="Recording..."
                     >
-                      Retry
+                      I&apos;ve called the customer
                     </Button>
-                  </revealFetcher.Form>
+                  </recordCallFetcher.Form>
                 </div>
               </>
-            ) : revealData?.phoneRevealed && !revealData?.isDialable ? (
+            ) : !callablePhone.isDialable ? (
               <>
                 <p className="text-sm text-app-fg-muted mb-3">
                   This order was created with phone protection. The customer&apos;s number is not stored in a dialable form and cannot be shown. Enable VOIP in Settings to call via the app, or record that you called using your own records below.
@@ -3405,89 +3382,77 @@ export function OrderDetailPage({
                   </recordCallFetcher.Form>
                 </div>
               </>
-            ) : revealFetcher.state !== 'idle' ? (
-              <div className="flex items-center gap-2 py-4 justify-center text-sm text-app-fg-muted">
-                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Loading number…
-              </div>
             ) : (
               <>
-                {/* Phone is already in memory from the pre-fetch on modal open.
-                    Copy/dial reads directly — no network call. The call-log
-                    request fires as a background side-effect after the action. */}
-                {(() => {
-                  const phone = revealData?.phone ?? '';
-                  const logCall = () =>
-                    ensureBranchForAction({
-                      actionLabel: 'recording customer call',
-                      onProceed: () =>
-                        recordCallFetcher.submit(
-                          {
-                            intent: 'initiateCall',
-                            ...(order.branchId ? { branchId: order.branchId } : {}),
-                          },
-                          { method: 'post' },
-                        ),
-                    });
-                  return (
-                    <>
-                      <div className="flex flex-wrap gap-2 mb-4">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => {
-                            if (!phone) {
-                              toast.error('Copy failed', 'Could not retrieve the customer number — try again.');
-                              return;
-                            }
-                            if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
-                              toast.error('Copy failed', 'Clipboard is not available in this browser.');
-                              return;
-                            }
-                            navigator.clipboard.writeText(phone).then(
-                              () => {
-                                setCopyFeedback(true);
-                                setTimeout(() => setCopyFeedback(false), 2000);
-                              },
-                              () => toast.error('Copy failed', 'Could not copy the number — try again.'),
-                            );
-                            logCall();
-                          }}
-                        >
-                          {copyFeedback ? 'Copied' : 'Copy number'}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="primary"
-                          className="inline-flex items-center justify-center gap-2"
-                          onClick={() => {
-                            if (phone) {
-                              window.location.href = `tel:${phone}`;
-                            }
-                            logCall();
-                          }}
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                          </svg>
-                          Call on my phone
-                        </Button>
-                      </div>
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => setCallCustomerModalOpen(false)}
-                        >
-                          Close
-                        </Button>
-                      </div>
-                    </>
-                  );
-                })()}
+                {/* Phone loaded with page — instant copy/dial, no fetch. */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      const phone = callablePhone.phone;
+                      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+                        toast.error('Copy failed', 'Clipboard is not available in this browser.');
+                        return;
+                      }
+                      navigator.clipboard.writeText(phone).then(
+                        () => {
+                          setCopyFeedback(true);
+                          setPhoneUnmasked(true);
+                          setTimeout(() => setCopyFeedback(false), 2000);
+                        },
+                        () => toast.error('Copy failed', 'Could not copy the number — try again.'),
+                      );
+                      ensureBranchForAction({
+                        actionLabel: 'recording customer call',
+                        onProceed: () =>
+                          recordCallFetcher.submit(
+                            {
+                              intent: 'initiateCall',
+                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                            },
+                            { method: 'post' },
+                          ),
+                      });
+                    }}
+                  >
+                    {copyFeedback ? 'Copied' : 'Copy number'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    className="inline-flex items-center justify-center gap-2"
+                    onClick={() => {
+                      window.location.href = `tel:${callablePhone.phone}`;
+                      setPhoneUnmasked(true);
+                      ensureBranchForAction({
+                        actionLabel: 'recording customer call',
+                        onProceed: () =>
+                          recordCallFetcher.submit(
+                            {
+                              intent: 'initiateCall',
+                              ...(order.branchId ? { branchId: order.branchId } : {}),
+                            },
+                            { method: 'post' },
+                          ),
+                      });
+                    }}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                    </svg>
+                    Call on my phone
+                  </Button>
+                </div>
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setCallCustomerModalOpen(false)}
+                  >
+                    Close
+                  </Button>
+                </div>
               </>
             )}
         </Modal>

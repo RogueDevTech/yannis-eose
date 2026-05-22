@@ -252,6 +252,26 @@ export async function action({ request, params }: ActionFunctionArgs) {
     });
   }
 
+  // Reset permissions to role defaults — strips ALL per-user overrides.
+  if (intent === 'resetPermissionsToDefaults') {
+    const res = await apiRequest<unknown>('/trpc/users.resetPermissionsToDefaults', {
+      method: 'POST', cookie, body: { userId },
+    });
+    if (!res.ok) {
+      return json(
+        { error: extractApiErrorMessage(res.data, 'Failed to reset permissions') },
+        { status: safeStatus(res.status) },
+      );
+    }
+    const payload = (res.data as { result?: { data?: { templateBaselineCount: number } } })?.result?.data;
+    return json({
+      success: true,
+      message: payload
+        ? `Permissions reset to role defaults (${payload.templateBaselineCount} codes from template)`
+        : 'Permissions reset to role defaults',
+    });
+  }
+
   // Fetch the current target so we only send fields that actually changed
   // (mirrors the diff logic in the detail-route `intent === 'update'` branch).
   const targetRes = await apiRequest<unknown>(
