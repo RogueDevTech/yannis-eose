@@ -1368,6 +1368,7 @@ export class MarketingService {
   async listFundingBalances(
     caller: { id: string; role: string; permissions?: string[] },
     branchId?: string | null,
+    opts?: { activeOnly?: boolean },
   ): Promise<
     Array<{
       userId: string;
@@ -1378,6 +1379,12 @@ export class MarketingService {
       balance: string;
     }>
   > {
+    // `activeOnly` drops DEACTIVATED / ARCHIVED accounts so the Team Analysis
+    // roster matches `getMediaBuyerLeaderboard` (ACTIVE-only). Without it a
+    // deactivated MB shows as a half-empty ghost row — funding ₦0 but dashes
+    // for every metric. Finance/report callers leave it off so a deactivated
+    // recipient with a real outstanding balance still surfaces.
+    const activeOnly = opts?.activeOnly === true;
     const callerPerms = (caller.permissions ?? []).map((p) => canonicalPermissionCode(p));
     const hasGlobalView =
       caller.role === 'SUPER_ADMIN' ||
@@ -1389,7 +1396,14 @@ export class MarketingService {
       const recipients = await this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']));
+        .where(
+          activeOnly
+            ? and(
+                inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']),
+                eq(schema.users.status, 'ACTIVE'),
+              )
+            : inArray(schema.users.role, ['HEAD_OF_MARKETING', 'MEDIA_BUYER']),
+        );
       recipientUserIds.push(...recipients.map((r) => r.id));
     } else {
       // Non-global viewer (e.g. HoM without scope.global, or branch-scoped marketing reader)
@@ -1398,7 +1412,11 @@ export class MarketingService {
       const mediaBuyers = await this.db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(eq(schema.users.role, 'MEDIA_BUYER'));
+        .where(
+          activeOnly
+            ? and(eq(schema.users.role, 'MEDIA_BUYER'), eq(schema.users.status, 'ACTIVE'))
+            : eq(schema.users.role, 'MEDIA_BUYER'),
+        );
       for (const u of mediaBuyers) {
         if (u.id !== caller.id) recipientUserIds.push(u.id);
       }
@@ -3463,7 +3481,13 @@ export class MarketingService {
         if (mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, mediaBuyerId));
         if (assignedCsId) conditions.push(eq(schema.orders.assignedCsId, assignedCsId));
       }
-      if (branchId && !mediaBuyerId) conditions.push(eq(schema.orders.branchId, branchId));
+      // Branch-scope the orders side whenever a branch is in play — matches the
+      // spend side above (which filters by `branchCampaignIds` regardless of
+      // mediaBuyerId). Callers that want an org-wide result for one buyer (the
+      // team-analysis drill) already pass `branchId = null`, so a non-null
+      // branchId here always means "scope to this branch" — including for a
+      // Media Buyer viewing their own metrics after switching branches.
+      if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
     };
 
     const orderConditions: Parameters<typeof and>[0][] = [];
@@ -4780,6 +4804,23 @@ export class MarketingService {
       }
       if (input.status !== undefined) updateData['status'] = input.status;
 
+      // Form transfer (migration 0150): when a parked/deactivated form is
+      // reactivated, re-stamp its branch to the owner's current primary branch
+      // so the form follows the media buyer to whichever branch they now
+      // belong to. A form removed from a branch (its owner left) parks as
+      // DEACTIVATED and resurfaces under the owner's new branch; activating it
+      // there makes it a form of that branch.
+      if (input.status === 'ACTIVE' && existing[0]!.status !== 'ACTIVE') {
+        const [owner] = await tx
+          .select({ primaryBranchId: schema.users.primaryBranchId })
+          .from(schema.users)
+          .where(eq(schema.users.id, existing[0]!.mediaBuyerId))
+          .limit(1);
+        if (owner?.primaryBranchId && owner.primaryBranchId !== existing[0]!.branchId) {
+          updateData['branchId'] = owner.primaryBranchId;
+        }
+      }
+
       if (input.formConfig !== undefined) {
         const prevRow = existing[0]!;
         const prev = (prevRow.formConfig as Record<string, unknown> | null) ?? {};
@@ -5061,7 +5102,28 @@ export class MarketingService {
       conditions.push(eq(schema.campaigns.status, input.status));
     }
     if (branchId) {
-      conditions.push(eq(schema.campaigns.branchId, branchId));
+      // A branch's form list shows forms attributed to it, PLUS "parked" forms
+      // (migration 0150): when a media buyer is moved to this branch, their
+      // forms from the old branch are DEACTIVATED but still carry the old
+      // branch_id. They resurface here — under the owner's new primary branch —
+      // so the MB can reactivate them (which re-stamps branch_id; see
+      // updateCampaign). The branch_id only moves on reactivation.
+      conditions.push(
+        or(
+          eq(schema.campaigns.branchId, branchId),
+          and(
+            eq(schema.campaigns.status, 'DEACTIVATED'),
+            ne(schema.campaigns.branchId, branchId),
+            inArray(
+              schema.campaigns.mediaBuyerId,
+              this.db
+                .select({ id: schema.users.id })
+                .from(schema.users)
+                .where(eq(schema.users.primaryBranchId, branchId)),
+            ),
+          ),
+        )!,
+      );
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

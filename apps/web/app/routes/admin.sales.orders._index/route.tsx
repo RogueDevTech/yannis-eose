@@ -172,6 +172,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     user.role === 'HEAD_OF_CS' || user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
   const fromCart = fromCartParam && canFilterFromCart;
 
+  const testOrdersParam = url.searchParams.get('testOrders') === '1';
+  const canFilterTestOrders = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const testOrders = testOrdersParam && canFilterTestOrders;
+
   const listInput: Record<string, unknown> = {
     page,
     limit: ORDERS_PER_PAGE,
@@ -179,6 +183,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     search: search || undefined,
     ...(assignedCsId && { assignedCsId }),
     ...(fromCart && { fromCart: true }),
+    ...(testOrders && { testOrders: true }),
     ...(!hasScheduleListFilter && apiStartDate && { startDate: apiStartDate }),
     ...(!hasScheduleListFilter && apiEndDate && { endDate: apiEndDate }),
   };
@@ -642,6 +647,23 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
   }
 
+  if (intent === 'purgeTestOrders') {
+    const purgeUser = await requirePermission(request, 'orders.read');
+    if (!['SUPER_ADMIN', 'ADMIN'].includes(purgeUser.role)) {
+      return json({ error: 'SuperAdmin only' }, { status: 403 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.purgeTestOrders', {
+      method: 'POST',
+      cookie,
+      body: {},
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to clear test orders') }, { status: safeStatus(res.status) });
+    }
+    const data = (res.data as { result?: { data?: { deleted: number; skipped: number } } })?.result?.data;
+    return json({ success: true, deleted: data?.deleted ?? 0, skipped: data?.skipped ?? 0 });
+  }
+
   return json({ success: false, error: 'Unknown intent' });
 }
 
@@ -720,6 +742,7 @@ export default function CSOrdersRoute() {
           // their own queue by cancelled orders.
           excludeStatuses={isHoCSPlus ? ['REMITTED'] : ['REMITTED', 'CANCELLED']}
           enableFromCartStatusOption={isHoCSPlus}
+          enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN'}
         />
       )}
     </CachedAwait>

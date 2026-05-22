@@ -2,14 +2,13 @@ import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
-import { cachedClientLoader } from '~/lib/loader-cache';
-import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultTodayRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOrdersPage, type MarketingOrdersSecondaryPayload } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import type { ExportModalPicklists } from '~/components/ui/export-modal';
 export const meta: MetaFunction = () => [
@@ -38,6 +37,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // the abandoned-cart backlog (Media Buyers see only their own campaigns'
   // carts; the backend `cart.listAbandoned` auto-scopes them).
   const fromCart = url.searchParams.get('fromCart') === '1';
+  const testOrders = url.searchParams.get('testOrders') === '1' && isAdminLevel(user);
 
   // Date filter — default to today when no params
   const periodAllTime = url.searchParams.get('period') === 'all_time';
@@ -80,8 +80,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     mediaBuyerId,
     productId: productIdParam,
     campaignId: campaignIdParam,
+    // Marketing orders scope by the marketing branch (`orders.branch_id`), not
+    // the CS servicing branch (`orders.servicing_branch_id`) — see migration 0150.
+    branchScope: 'marketing' as const,
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
+    ...(testOrders && { testOrders: true }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
@@ -122,6 +126,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Everyone who can open this page (gated on `marketing.orders`) may switch
     // to the cart-abandonment view; scope is enforced server-side per role.
     enableFromCartStatusOption: true,
+    enableTestOrdersOption:
+      isAdminLevel(user) ||
+      user.role === 'HEAD_OF_MARKETING' ||
+      user.isMarketingTeamSupervisorOnActiveBranch === true,
     isCartAbandonmentView: fromCart,
   };
 
@@ -281,25 +289,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
-export const clientLoader = cachedClientLoader;
-clientLoader.hydrate = false;
+// NOTE: no `clientLoader` / full-loader cache here. This is a live socket page
+// (live order events + branch switcher) — client-caching the loader payload by
+// URL served stale data after a branch switch ("All branches" showed another
+// branch's numbers). Per CLAUDE.md, live socket pages are not client-cached.
 
 export async function action({ request }: ActionFunctionArgs) {
   const exportResponse = await handleExportReportAction(request);
   if (exportResponse) return exportResponse;
+
+  const cookie = getSessionCookie(request);
+  if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
+
+  const form = await request.formData();
+  const intent = form.get('intent')?.toString();
+
+  if (intent === 'purgeTestOrders') {
+    const user = await requirePermission(request, 'marketing.orders');
+    const canPurge =
+      isAdminLevel(user) ||
+      user.role === 'HEAD_OF_MARKETING' ||
+      user.isMarketingTeamSupervisorOnActiveBranch === true;
+    if (!canPurge) {
+      return json({ error: 'Not authorized' }, { status: 403 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.purgeTestOrders', {
+      method: 'POST',
+      cookie,
+      body: {},
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to clear test orders') }, { status: res.status > 599 ? 500 : res.status });
+    }
+    const data = (res.data as { result?: { data?: { deleted: number; skipped: number } } })?.result?.data;
+    return json({ success: true, deleted: data?.deleted ?? 0, skipped: data?.skipped ?? 0 });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
 export default function MarketingOrdersRoute() {
   const { ordersShell, listPromise, secondaryPromise } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
-  // Cache the full multi-deferred loader shape so `clientLoader` can serve it
-  // instantly on revisit (instant LinkedIn-style navigation). Both promises
-  // must resolve before the cache write fires.
-  useMultiDeferredCacheSync({
-    shell: { ordersShell },
-    deferred: { listPromise, secondaryPromise },
-  });
   const sharedProps = {
     page: ordersShell.page,
     limit: ordersShell.perPage,
@@ -315,6 +346,7 @@ export default function MarketingOrdersRoute() {
     viewerUserId: ordersShell.viewerUserId,
     activeMediaBuyerFilter: ordersShell.activeMediaBuyerFilter,
     enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
+    enableTestOrdersOption: ordersShell.enableTestOrdersOption,
     isCartAbandonmentView: ordersShell.isCartAbandonmentView,
   };
   return (

@@ -80,12 +80,18 @@ export function setCachedLoaderEntry(key: string, data: unknown): void {
 }
 
 /**
- * Wipe the entire cache. Called from the logout action so a different user
- * signing into the same browser tab cannot read the previous user's cached
- * loader payloads.
+ * Wipe ALL client loader caches — the deferred-portion cache, the full-loader
+ * cache (`fullCache`, used by `clientLoader`), and the in-flight revalidation
+ * flags. Call this whenever the effective scope of every page changes:
+ *  - logout (a different user must not read the previous user's payloads), and
+ *  - branch switch (every cached payload is branch-scoped, but the cache key is
+ *    URL-only — the branch lives in the session cookie, so without this wipe a
+ *    switch would serve the previous branch's data).
  */
 export function clearLoaderCache(): void {
   cache.clear();
+  fullCache.clear();
+  inFlightRevalidations.clear();
 }
 
 /**

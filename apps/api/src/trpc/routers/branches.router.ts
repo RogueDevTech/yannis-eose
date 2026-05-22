@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { eq, and, inArray, count, asc, sql } from 'drizzle-orm';
+import { eq, and, or, inArray, count, asc, sql } from 'drizzle-orm';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -80,14 +80,46 @@ export function getBranchTeamsService(): BranchTeamsService {
 }
 
 /**
+ * Branch IDs a Media Buyer may scope to in the header switcher: current
+ * memberships UNION every branch their own orders / campaigns are attributed
+ * to. A buyer moved off a branch keeps the branch in this set so they can
+ * still open it as a read-only data lens and review what they created there.
+ * Attribution is by ownership (`media_buyer_id`), so this never widens what a
+ * buyer can see beyond their own data.
+ */
+async function mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
+  const db = getDb();
+  const [memberships, orderBranches, campaignBranches] = await Promise.all([
+    db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, userId)),
+    db
+      .selectDistinct({ branchId: schema.orders.branchId })
+      .from(schema.orders)
+      .where(eq(schema.orders.mediaBuyerId, userId)),
+    db
+      .selectDistinct({ branchId: schema.campaigns.branchId })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.mediaBuyerId, userId)),
+  ]);
+  const ids = new Set<string>();
+  for (const r of [...memberships, ...orderBranches, ...campaignBranches]) {
+    if (r.branchId) ids.add(r.branchId);
+  }
+  return [...ids];
+}
+
+/**
  * Inline branch list for cross-router bundles. Mirrors `branches.list` (admin
- * sees all, others see their memberships only) and reuses the same Redis cache.
- * Exported so `*PageBundle` procedures can avoid a second HTTP round-trip.
+ * sees all, Media Buyers see their data-footprint branches, everyone else
+ * their memberships only) and reuses the same Redis cache. Exported so
+ * `*PageBundle` procedures can avoid a second HTTP round-trip.
  */
 export async function listBranchesForUser(user: {
   id: string;
   role: string;
-}): Promise<Array<{ id: string; name: string; code?: string }>> {
+}): Promise<Array<{ id: string; name: string; code: string; status: string }>> {
   const db = getDb();
   // Org-wide roles see every branch even without explicit branch memberships:
   // SuperAdmin / Admin manage anything; HR creates / edits staff across the
@@ -104,18 +136,32 @@ export async function listBranchesForUser(user: {
   ]);
   const seesAll = SEES_ALL_BRANCHES_ROLES.has(user.role);
 
-  const fetchRows = async (): Promise<Array<{ id: string; name: string; code?: string }>> => {
+  // Explicit projection — `status` is threaded through so the header branch
+  // switcher can tag a disabled (INACTIVE) branch instead of dropping it.
+  const branchCols = {
+    id: schema.branches.id,
+    name: schema.branches.name,
+    code: schema.branches.code,
+    status: schema.branches.status,
+  };
+  const fetchRows = async (): Promise<
+    Array<{ id: string; name: string; code: string; status: string }>
+  > => {
     if (seesAll) {
-      return db.select().from(schema.branches);
+      return db.select(branchCols).from(schema.branches);
     }
-    const memberships = await db
-      .select({ branchId: schema.userBranches.branchId })
-      .from(schema.userBranches)
-      .where(eq(schema.userBranches.userId, user.id));
-    if (memberships.length === 0) return [];
-    const branchIds = memberships.map((m) => m.branchId);
+    const branchIds =
+      user.role === 'MEDIA_BUYER'
+        ? await mediaBuyerBranchScopeIds(user.id)
+        : (
+            await db
+              .select({ branchId: schema.userBranches.branchId })
+              .from(schema.userBranches)
+              .where(eq(schema.userBranches.userId, user.id))
+          ).map((m) => m.branchId);
+    if (branchIds.length === 0) return [];
     return db
-      .select()
+      .select(branchCols)
       .from(schema.branches)
       .where(
         branchIds.length === 1
@@ -402,7 +448,15 @@ export const branchesRouter = router({
           orderCount: count(),
         })
         .from(schema.orders)
-        .where(eq(schema.orders.branchId, input.branchId))
+        // Branch overview — count every order this branch touches, whether it
+        // ran the campaign (marketing branch) or works it (servicing branch).
+        // Migration 0150 split these into two columns.
+        .where(
+          or(
+            eq(schema.orders.branchId, input.branchId),
+            eq(schema.orders.servicingBranchId, input.branchId),
+          ),
+        )
         .groupBy(schema.orders.status);
 
       let totalOrders = 0;
@@ -753,6 +807,10 @@ export const branchesRouter = router({
         isPrimary: input.isPrimary ?? false,
       });
       await invalidateBranchesListCache();
+      // `branchIds` is captured on the Redis session at login and never
+      // refreshed live — push the new membership onto the user's active
+      // sessions so it takes effect on their next request (no forced logout).
+      await getSessionStore().refreshUserBranchMemberships(input.userId).catch(() => {});
 
       const branchRows = await db
         .select({ name: schema.branches.name })
@@ -791,6 +849,7 @@ export const branchesRouter = router({
     .mutation(async ({ input }) => {
       const db = getDb();
       const notifications = getBranchesNotificationsService();
+      const branchTeams = getBranchTeamsService();
 
       const branchRows = await db
         .select({ name: schema.branches.name })
@@ -799,18 +858,71 @@ export const branchesRouter = router({
         .limit(1);
       const branchName = branchRows[0]?.name ?? 'A branch';
 
-      const removed = await db
-        .delete(schema.userBranches)
-        .where(
-          and(
-            eq(schema.userBranches.userId, input.userId),
-            eq(schema.userBranches.branchId, input.branchId),
-          ),
-        )
-        .returning({ userId: schema.userBranches.userId });
+      // Removing a user from a branch must also drop them from that branch's
+      // org chart — the optional team squads (`branch_team_members`) and the
+      // teamless department roster (`branch_department_members`). A user who
+      // no longer belongs to the branch must not linger as a member — or a
+      // stale supervisor — of any team in it. Done in one transaction so the
+      // membership delete and the org-chart cleanup commit together.
+      const removed = await db.transaction(async (tx) => {
+        const removedRows = await tx
+          .delete(schema.userBranches)
+          .where(
+            and(
+              eq(schema.userBranches.userId, input.userId),
+              eq(schema.userBranches.branchId, input.branchId),
+            ),
+          )
+          .returning({ userId: schema.userBranches.userId });
+        if (removedRows.length === 0) return removedRows;
+
+        const teamRows = await tx
+          .select({ id: schema.branchTeams.id })
+          .from(schema.branchTeams)
+          .where(eq(schema.branchTeams.branchId, input.branchId));
+        if (teamRows.length > 0) {
+          await tx
+            .delete(schema.branchTeamMembers)
+            .where(
+              and(
+                eq(schema.branchTeamMembers.userId, input.userId),
+                inArray(
+                  schema.branchTeamMembers.teamId,
+                  teamRows.map((t) => t.id),
+                ),
+              ),
+            );
+        }
+        const deptRows = await tx
+          .select({ id: schema.branchDepartments.id })
+          .from(schema.branchDepartments)
+          .where(eq(schema.branchDepartments.branchId, input.branchId));
+        if (deptRows.length > 0) {
+          await tx
+            .delete(schema.branchDepartmentMembers)
+            .where(
+              and(
+                eq(schema.branchDepartmentMembers.userId, input.userId),
+                inArray(
+                  schema.branchDepartmentMembers.branchDepartmentId,
+                  deptRows.map((d) => d.id),
+                ),
+              ),
+            );
+        }
+        return removedRows;
+      });
 
       if (removed[0]) {
         await invalidateBranchesListCache();
+        // Supervisor team rows may have been deleted — resync the flag.
+        void branchTeams.syncUserSupervisorFlag(input.userId).catch(() => {});
+        // `branchIds` / `currentBranchId` are captured on the Redis session at
+        // login and never refreshed live. Push the removal onto the user's
+        // active sessions so access is revoked on their next request (their
+        // `currentBranchId` is reconciled if it was the removed branch) —
+        // this is the "still has access after removal" fix, no forced logout.
+        await getSessionStore().refreshUserBranchMemberships(input.userId).catch(() => {});
         notifications
           .create({
             userId: input.userId,
@@ -1294,15 +1406,35 @@ export const branchesRouter = router({
       const db = getDb();
       const sessionStore = getSessionStore();
 
-      // null = "All Branches" — only SuperAdmin may clear branch context
+      const isAdminClass =
+        ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+      const isMediaBuyer = ctx.user.role === 'MEDIA_BUYER';
+
+      // null = "All Branches". Admin-class clears branch context org-wide; a
+      // Media Buyer clears it to view ALL of their own orders across every
+      // branch (ownership-scoped, so still only their data). Anyone else may
+      // not run unscoped.
       if (input.branchId === null) {
-        if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
+        if (!isAdminClass && !isMediaBuyer) {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'Only SuperAdmin can view all branches',
           });
         }
-      } else if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
+      } else if (isMediaBuyer) {
+        // A Media Buyer may switch to any branch in their data footprint —
+        // current memberships PLUS branches their own orders/campaigns are
+        // attributed to. A branch they were removed from stays reachable as a
+        // read-only data lens; branch-scoped mutations are blocked server-side
+        // (see `blockMediaBuyerMutationsOutsideMemberBranch` in trpc.ts).
+        const scopeIds = await mediaBuyerBranchScopeIds(ctx.user.id);
+        if (!scopeIds.includes(input.branchId)) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You have no orders or campaigns in this branch',
+          });
+        }
+      } else if (!isAdminClass) {
         const membership = await db
           .select({ branchId: schema.userBranches.branchId })
           .from(schema.userBranches)

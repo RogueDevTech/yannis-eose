@@ -20,6 +20,7 @@ import { NavProgressBar } from '~/components/ui/nav-progress-bar';
 import { getFullLoaderEntry } from '~/lib/loader-cache';
 import { getShellForPath } from '~/lib/route-shells';
 import { playNotificationSound, unlockAudioContext } from '~/lib/notification-sound';
+import { isNotificationSoundEnabled } from '~/lib/notification-sound-preference';
 import { useAppTheme } from '~/hooks/useAppTheme';
 import { PullToRefresh } from '~/components/ui/pull-to-refresh';
 import { BranchScopeGuardProvider } from '~/contexts/branch-scope-action-guard';
@@ -885,7 +886,7 @@ function DashboardLayoutInner({
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as Window & { __playNotificationSound?: () => void }).__playNotificationSound =
-        playNotificationSound;
+        () => { if (isNotificationSoundEnabled()) playNotificationSound(); };
     }
     return () => {
       if (typeof window !== 'undefined') {
@@ -897,7 +898,7 @@ function DashboardLayoutInner({
 
   useEffect(() => {
     if (realtimeCount > prevRealtimeCountRef.current && prevRealtimeCountRef.current >= 0) {
-      playNotificationSound();
+      if (isNotificationSoundEnabled()) playNotificationSound();
     }
     prevRealtimeCountRef.current = realtimeCount;
   }, [realtimeCount]);

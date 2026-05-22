@@ -281,6 +281,8 @@ export const listOrdersSchema = z
      * Migration 0142 added the back-link column + index.
      */
     fromCart: z.boolean().optional(),
+    /** Filter to orders where customer_name starts with "test" (whole word). Admin only. */
+    testOrders: z.boolean().optional(),
     search: z.string().optional(),
     // Accept either `YYYY-MM-DD` (whole-day default) OR `YYYY-MM-DDTHH:MM[:SS]`
     // (precise moment from the time-aware DateFilterBar). API service detects the
@@ -292,6 +294,14 @@ export const listOrdersSchema = z
     scheduleDate: z.string().date().optional(),
     page: z.number().int().min(1).default(1),
     limit: z.number().int().min(1).max(100).default(20),
+    /**
+     * Branch scoping strategy (migration 0150).
+     * `'servicing'` (default) filters by `orders.servicing_branch_id` — the CS
+     * branch that works the order. Correct for CS / Sales / Logistics surfaces.
+     * `'marketing'` filters by `orders.branch_id` — the campaign/form branch the
+     * order is attributed to. Marketing pages (MB / HoM) pass `'marketing'`.
+     */
+    branchScope: z.enum(['servicing', 'marketing']).optional(),
     sortBy: z.enum(['createdAt', 'updatedAt', 'status', 'totalAmount', 'preferredDeliveryDate']).default('createdAt'),
     sortOrder: z.enum(['asc', 'desc']).default('desc'),
   })

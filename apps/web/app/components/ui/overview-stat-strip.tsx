@@ -15,11 +15,19 @@ export type OverviewStatStripItem = {
    * filter like `?status=CANCELLED`). Tiles without `to` stay plain display.
    */
   to?: string;
+  /** Highlight this tile as the currently-selected filter. */
+  active?: boolean;
+  /** Fires on click — use to update local state instantly before navigation completes. */
+  onClick?: () => void;
 };
 
 /** Subtle clickable affordance — no layout/colour change, just press feedback. */
 const clickableTileClass =
   'cursor-pointer transition-opacity hover:opacity-80 active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500';
+
+/** Active tile — border-only highlight, same background as siblings. */
+const activeTileClass =
+  'ring-2 ring-brand-500 dark:ring-brand-400';
 
 const SCROLL_DELTA = 280;
 
@@ -197,12 +205,17 @@ export function OverviewStatStrip({
             )}
           </>
         );
+        const activeClass = item.active ? activeTileClass : '';
         return item.to ? (
-          <Link key={i} to={item.to} className={`${gridTile} ${clickableTileClass}`} title={item.title}>
+          <Link key={i} to={item.to} onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass}`} title={item.title}>
             {inner}
           </Link>
+        ) : item.onClick ? (
+          <button key={i} type="button" onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} text-left`} title={item.title}>
+            {inner}
+          </button>
         ) : (
-          <div key={i} className={gridTile} title={item.title}>
+          <div key={i} className={`${gridTile} ${activeClass}`} title={item.title}>
             {inner}
           </div>
         );
@@ -229,12 +242,17 @@ export function OverviewStatStrip({
               )}
             </div>
           );
+          const activeClass = item.active ? activeTileClass : '';
           return item.to ? (
-            <Link key={i} to={item.to} className={`${tileBase} ${clickableTileClass}`} title={item.title}>
+            <Link key={i} to={item.to} onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass}`} title={item.title}>
               {inner}
             </Link>
+          ) : item.onClick ? (
+            <button key={i} type="button" onClick={item.onClick} className={`${tileBase} ${clickableTileClass} ${activeClass} text-left`} title={item.title}>
+              {inner}
+            </button>
           ) : (
-            <div key={i} className={tileBase} title={item.title}>
+            <div key={i} className={`${tileBase} ${activeClass}`} title={item.title}>
               {inner}
             </div>
           );

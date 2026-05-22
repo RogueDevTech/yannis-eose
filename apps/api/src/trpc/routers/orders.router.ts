@@ -36,6 +36,7 @@ import {
   type OrdersAggregateSupervisorScope,
 } from '../../orders/orders.service';
 import { CsOrderRoutingService } from '../../orders/cs-order-routing.service';
+import { TestOrderPurgeService } from '../../orders/test-order-purge.service';
 import type { VoipService } from '../../voip/voip.service';
 import { isAdminLevel } from '../../common/authz';
 import type { SessionUser } from '../../common/decorators/current-user.decorator';
@@ -47,6 +48,7 @@ let ordersServiceInstance: OrdersService | null = null;
 let voipServiceInstance: VoipService | null = null;
 let ordersCacheService: CacheService | null = null;
 let csOrderRoutingInstance: CsOrderRoutingService | null = null;
+let testOrderPurgeInstance: TestOrderPurgeService | null = null;
 
 export function setOrdersService(service: OrdersService) {
   ordersServiceInstance = service;
@@ -62,6 +64,10 @@ export function setVoipService(service: VoipService) {
 
 export function setOrdersCacheService(service: CacheService) {
   ordersCacheService = service;
+}
+
+export function setTestOrderPurgeService(service: TestOrderPurgeService) {
+  testOrderPurgeInstance = service;
 }
 
 const ORDERS_AGG_TTL_SECONDS = 15;
@@ -171,7 +177,7 @@ export function buildOrdersListOpts(
   | {
       assignedCloserViewerId?: string;
       searchIncludeCustomerPhone?: boolean;
-      branchScope?: 'order' | 'campaign';
+      branchScope?: 'servicing' | 'marketing';
     }
   | undefined {
   const closer = csCloserSelfQueueListOpts(user, input);
@@ -182,13 +188,13 @@ export function buildOrdersListOpts(
   const out: {
     assignedCloserViewerId?: string;
     searchIncludeCustomerPhone?: boolean;
-    branchScope?: 'order' | 'campaign';
+    branchScope?: 'servicing' | 'marketing';
   } = {};
   if (closer) Object.assign(out, closer);
   if (searchIncludeCustomerPhone) out.searchIncludeCustomerPhone = true;
-  // Head of Marketing's order lists scope by the *marketing* (campaign) branch,
-  // not the CS servicing branch on `orders.branch_id` — see OrdersService.list.
-  if (user.role === 'HEAD_OF_MARKETING') out.branchScope = 'campaign';
+  // Head of Marketing's order lists scope by the *marketing* branch
+  // (`orders.branch_id`), not the CS servicing branch — see OrdersService.list.
+  if (user.role === 'HEAD_OF_MARKETING') out.branchScope = 'marketing';
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -198,14 +204,15 @@ function orderListBranchId(_user: { role: string }, sessionBranchId: string | nu
 
 /**
  * Branch filter for endpoints that ALSO scope Media Buyers by ownership
- * (`media_buyer_id = me`). For an MB that ownership filter is exact, so a
- * branch filter can only hide their own cross-branch history — e.g. orders
- * from a branch they were since moved out of. Drop it: an MB always sees all
- * of their own orders, every branch.
+ * (`media_buyer_id = me`). A Media Buyer's branch is their header data lens:
+ *   - currentBranchId = a branch  → their orders attributed to that branch
+ *   - currentBranchId = null ("All Branches") → all their orders, every branch
+ * The ownership filter stays exact either way, so selecting a branch the buyer
+ * was since removed from still surfaces only their own historical orders there.
  *
  * SAFETY: every caller MUST apply the MB ownership scope — directly
  * (`orders.list`) or via `narrowOrdersAggregateFiltersForViewer`. Without that,
- * returning `null` here would expose other branches' orders to the MB.
+ * a non-null branch here would let a buyer read another buyer's orders.
  */
 /**
  * True when the viewer has org-wide marketing visibility — they may read any
@@ -221,7 +228,9 @@ function orderListBranchIdOwnerAware(
   sessionBranchId: string | null,
   explicitMediaBuyerId?: string | null,
 ): string | null {
-  if (user.role === 'MEDIA_BUYER') return null;
+  // A Media Buyer scopes by their header branch lens (see comment above):
+  // null currentBranchId = "All Branches" → no branch filter, all their orders.
+  if (user.role === 'MEDIA_BUYER') return sessionBranchId;
   // An explicit single-media-buyer filter is itself an exact scope. For an
   // org-wide marketing viewer (HoM / admin) drilling into one buyer — e.g. the
   // "View orders" link from team analysis — keep the result org-wide so it
@@ -571,8 +580,10 @@ export const ordersRouter = router({
         }
         if (!hasOrgWideScope) {
           if (ctx.user.role === 'MEDIA_BUYER' && !marketingTeamSupervisorOrders) {
-            // `branchId` is already null for MBs (orderListBranchIdOwnerAware);
-            // this ownership filter is what makes that safe.
+            // This ownership filter is what keeps `orderListBranchIdOwnerAware`
+            // safe: an MB scopes by their header branch lens (a branch, or null
+            // for "All Branches"), and this `media_buyer_id = me` filter ensures
+            // a selected branch only ever exposes the buyer's own orders.
             // Supervisors skip this — they can view specific team members' orders
             // via mediaBuyerId URL param; applySupervisorScope below enforces
             // team-boundary security.
@@ -588,7 +599,12 @@ export const ordersRouter = router({
         }
       }
 
-      const opts = buildOrdersListOpts(ctx.user, effectiveInput);
+      const baseOpts = buildOrdersListOpts(ctx.user, effectiveInput) ?? {};
+      // Caller-supplied branchScope (e.g. marketing pages pass 'marketing') takes
+      // precedence over the role-based default — lets the same endpoint serve both
+      // CS (servicing-scoped) and marketing (marketing-scoped) pages correctly.
+      if (input.branchScope) baseOpts.branchScope = input.branchScope;
+      const opts = Object.keys(baseOpts).length > 0 ? baseOpts : undefined;
       const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);
 
       // Cache page 1 only — the dominant traffic for the hottest CS/marketing
@@ -856,10 +872,10 @@ export const ordersRouter = router({
         startDate: input?.startDate,
         endDate: input?.endDate,
       });
-      // Head of Marketing scopes by the *marketing* (campaign) branch, not the CS
-      // servicing branch that `orders.branch_id` carries since the routing change.
-      const branchScope: 'order' | 'campaign' =
-        ctx.user.role === 'HEAD_OF_MARKETING' ? 'campaign' : 'order';
+      // Head of Marketing scopes by the *marketing* branch (`orders.branch_id`);
+      // every other role scopes by the CS servicing branch.
+      const branchScope: 'servicing' | 'marketing' =
+        ctx.user.role === 'HEAD_OF_MARKETING' ? 'marketing' : 'servicing';
 
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
@@ -955,6 +971,9 @@ export const ordersRouter = router({
         statuses: narrowed.statuses,
         supervisorScope: narrowed.supervisorScope,
       };
+      // HoM trend follows the marketing branch; everyone else the servicing branch.
+      const tsBranchScope: 'servicing' | 'marketing' =
+        ctx.user.role === 'HEAD_OF_MARKETING' ? 'marketing' : 'servicing';
 
       if (!ordersCacheService) {
         return getOrdersService().getOrdersTimeSeriesByCreated(
@@ -962,6 +981,7 @@ export const ordersRouter = router({
           narrowed.endDate,
           effectiveBranchId,
           filters,
+          tsBranchScope,
         );
       }
 
@@ -980,6 +1000,7 @@ export const ordersRouter = router({
           narrowed.endDate,
           effectiveBranchId,
           filters,
+          tsBranchScope,
         ),
       );
     }),
@@ -1127,6 +1148,10 @@ export const ordersRouter = router({
         supervisorScope: scope.supervisorScope,
         status: input.trendStatus,
       };
+      // HoM order surfaces scope by the marketing branch; everyone else by the
+      // CS servicing branch (matches the standalone statusCounts procedure).
+      const bundleBranchScope: 'servicing' | 'marketing' =
+        ctx.user.role === 'HEAD_OF_MARKETING' ? 'marketing' : 'servicing';
 
       const scheduleHeatInput =
         scope.supervisorScope != null
@@ -1161,9 +1186,16 @@ export const ordersRouter = router({
           branchId,
           undefined,
           scope.supervisorScope,
+          bundleBranchScope,
         ),
         input.isCSCloser ? getOrdersService().getMyCSWorkload(ctx.user) : Promise.resolve(null),
-        getOrdersService().getOrdersTimeSeriesByCreated(scope.startDate, scope.endDate, branchId, trendFilters),
+        getOrdersService().getOrdersTimeSeriesByCreated(
+          scope.startDate,
+          scope.endDate,
+          branchId,
+          trendFilters,
+          bundleBranchScope,
+        ),
         getOrdersService().scheduleCalendarHeat(scheduleHeatInput, branchId),
         // csWorkloads requires `orders.csWorkloads` permission. Defense-in-depth
         // — bundle gate is `orders.read` so we re-check before exposing the
@@ -1830,4 +1862,22 @@ export const ordersRouter = router({
         input.relationshipMode,
       );
     }),
+
+  /**
+   * Manually purge test orders (customer name starts with "test").
+   * Admin, HoM, and marketing team supervisors. Always runs armed.
+   */
+  purgeTestOrders: authedProcedure.mutation(async ({ ctx }) => {
+    const allowed =
+      isAdminLevel(ctx.user) ||
+      ctx.user.role === 'HEAD_OF_MARKETING' ||
+      ctx.user.isMarketingTeamSupervisorOnActiveBranch === true;
+    if (!allowed) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'Not authorized to purge test orders' });
+    }
+    if (!testOrderPurgeInstance) {
+      throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'TestOrderPurgeService not initialized' });
+    }
+    return testOrderPurgeInstance.purgeTestOrders(true, true);
+  }),
 });

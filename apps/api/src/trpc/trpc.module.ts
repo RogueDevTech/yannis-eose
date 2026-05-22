@@ -3,11 +3,13 @@ import { TrpcMiddleware } from './trpc.middleware';
 import { OrdersModule } from '../orders/orders.module';
 import { OrdersService } from '../orders/orders.service';
 import { CsOrderRoutingService } from '../orders/cs-order-routing.service';
+import { TestOrderPurgeService } from '../orders/test-order-purge.service';
 import {
   setOrdersCacheService,
   setOrdersService,
   setVoipService,
   setCsOrderRoutingService,
+  setTestOrderPurgeService,
 } from './routers/orders.router';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
@@ -105,6 +107,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     private readonly permissionRequestsService: PermissionRequestsService,
     private readonly ordersService: OrdersService,
     private readonly csOrderRoutingService: CsOrderRoutingService,
+    private readonly testOrderPurgeService: TestOrderPurgeService,
     private readonly usersService: UsersService,
     private readonly productsService: ProductsService,
     private readonly productCategoriesService: ProductCategoriesService,
@@ -135,6 +138,7 @@ export class TrpcModule implements NestModule, OnModuleInit {
     setPermissionRequestsService(this.permissionRequestsService);
     setOrdersService(this.ordersService);
     setCsOrderRoutingService(this.csOrderRoutingService);
+    setTestOrderPurgeService(this.testOrderPurgeService);
     setOrdersCacheService(this.cacheService);
     setUsersService(this.usersService);
     setUsersSessionStore(this.sessionStore);

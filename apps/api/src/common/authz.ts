@@ -274,16 +274,37 @@ const STAFF_ACCOUNTS_DIRECTORY_PERMISSIONS = new Set<string>([
  * excluding the unrestricted `users.getById` read (masked phone only).
  */
 export function canAccessStaffHrUserDetail(
-  viewer: { id: string; role: string; permissions?: string[] },
-  target: { id: string; role: string },
+  viewer: {
+    id: string;
+    role: string;
+    permissions?: string[];
+    branchIds?: string[];
+    currentBranchId?: string | null;
+  },
+  target: { id: string; role: string; branchIds?: string[] },
 ): boolean {
   if (viewer.id === target.id) return true;
 
+  // A department head may only open a TEAM MEMBER's profile when they share a
+  // branch: the head's selected branch when one is active, otherwise any of
+  // the head's own branches ("All branches" = the union they belong to, never
+  // the whole company). Peer heads are not branch-bounded.
+  const headSharesBranchWithTarget = (): boolean => {
+    const targetBranches = target.branchIds ?? [];
+    if (targetBranches.length === 0) return false;
+    if (viewer.currentBranchId) return targetBranches.includes(viewer.currentBranchId);
+    const ownBranches = new Set(viewer.branchIds ?? []);
+    return targetBranches.some((b) => ownBranches.has(b));
+  };
+
   const headOfCSViewingTeam =
-    viewer.role === 'HEAD_OF_CS' && ['CS_CLOSER', 'HEAD_OF_CS'].includes(target.role);
+    viewer.role === 'HEAD_OF_CS' &&
+    (target.role === 'HEAD_OF_CS' ||
+      (target.role === 'CS_CLOSER' && headSharesBranchWithTarget()));
   const headOfMarketingViewingTeam =
     viewer.role === 'HEAD_OF_MARKETING' &&
-    ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(target.role);
+    (target.role === 'HEAD_OF_MARKETING' ||
+      (target.role === 'MEDIA_BUYER' && headSharesBranchWithTarget()));
   const isHoMOrHoCS = viewer.role === 'HEAD_OF_MARKETING' || viewer.role === 'HEAD_OF_CS';
 
   if (isHoMOrHoCS && !headOfCSViewingTeam && !headOfMarketingViewingTeam) {

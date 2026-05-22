@@ -1268,7 +1268,7 @@ function BranchMembersPanel({
                       const isSupervisor = supervisorUserIds?.has(m.userId) ?? false;
                       return (
                         <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          <span className="font-medium text-app-fg truncate">{m.name}</span>
+                          <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300 truncate">{m.name}</Link>
                           {isHead && <RoleBadge role={m.effectiveRole} size="sm" />}
                           {isSupervisor && (
                             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-micro font-bold uppercase tracking-wide bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400">
@@ -1400,7 +1400,7 @@ function buildBranchTeamMemberColumns(
     {
       key: 'member',
       header: 'Member',
-      render: (m) => <span className="font-medium text-app-fg">{m.name}</span>,
+      render: (m) => <Link to={`/hr/users/${m.userId}`} className="font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300">{m.name}</Link>,
     },
     {
       key: 'role',

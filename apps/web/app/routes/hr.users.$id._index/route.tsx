@@ -68,11 +68,28 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // target search, etc.), so we can't just require `users.read` — we'd leak unrelated profiles.
   const isSelfView =
     actorUserIdsMatch(currentUser.id, profileUser.id) || actorUserIdsMatch(currentUser.id, userId);
+  // A department head may only open a TEAM MEMBER's profile when they share a
+  // branch: the head's selected branch when one is active, otherwise any of
+  // the head's own branches ("All branches" = the union they belong to, never
+  // the whole company). Peer heads are not branch-bounded. Mirrors
+  // canAccessStaffHrUserDetail in apps/api/src/common/authz.ts.
+  const headSharesBranchWithProfile = (): boolean => {
+    const targetBranches = (profileUser.branchMemberships ?? []).map((m) => m.branchId);
+    if (targetBranches.length === 0) return false;
+    if (currentUser.currentBranchId) {
+      return targetBranches.includes(currentUser.currentBranchId);
+    }
+    const ownBranches = new Set(currentUser.branchIds ?? []);
+    return targetBranches.some((b) => ownBranches.has(b));
+  };
   const headOfCSViewingTeam =
-    currentUser.role === 'HEAD_OF_CS' && ['CS_CLOSER', 'HEAD_OF_CS'].includes(profileUser.role);
+    currentUser.role === 'HEAD_OF_CS' &&
+    (profileUser.role === 'HEAD_OF_CS' ||
+      (profileUser.role === 'CS_CLOSER' && headSharesBranchWithProfile()));
   const headOfMarketingViewingTeam =
     currentUser.role === 'HEAD_OF_MARKETING' &&
-    ['MEDIA_BUYER', 'HEAD_OF_MARKETING'].includes(profileUser.role);
+    (profileUser.role === 'HEAD_OF_MARKETING' ||
+      (profileUser.role === 'MEDIA_BUYER' && headSharesBranchWithProfile()));
   const isHoMOrHoCS = currentUser.role === 'HEAD_OF_MARKETING' || currentUser.role === 'HEAD_OF_CS';
 
   // Branch-team supervisor relationship check — only fires when no cheaper
