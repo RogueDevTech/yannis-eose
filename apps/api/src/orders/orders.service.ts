@@ -1138,6 +1138,25 @@ export class OrdersService {
       await this.assertEdgeFormLineItemsAllowlisted(orderInput);
     }
 
+    // Idempotency check for edge-form orders — duplicate-order protection is
+    // the API's job (the edge worker no longer keeps its own KV dedup). A
+    // double-tap / refresh / retry / QStash replay can deliver the identical
+    // submission more than once; if an identical order already landed in the
+    // last few minutes, return THAT order instead of inserting a second. We
+    // return idempotently, never reject: rejecting edge-form orders is what
+    // caused the 2026-05-19 false-positive incident, and an idempotent return
+    // cannot lose a sale.
+    if (orderSource === 'edge-form') {
+      const existingIdentical = await this.findRecentIdenticalOrder(orderInput);
+      if (existingIdentical) {
+        this.logger.warn(
+          { existingOrderId: existingIdentical.id, phoneHash: orderInput.customerPhoneHash },
+          'edge-form idempotency: identical order within window — returning existing, not creating a duplicate',
+        );
+        return { id: existingIdentical.id };
+      }
+    }
+
     let branchId = await this.resolveBranchIdForNewOrder({
       campaignId: orderInput.campaignId ?? null,
       mediaBuyerId: orderInput.mediaBuyerId ?? null,
@@ -2472,6 +2491,7 @@ export class OrdersService {
       totalAmount: detail.totalAmount ?? null,
       preferredDeliveryDate: detail.preferredDeliveryDate ?? null,
       logisticsLocationName: detail.logisticsLocationName ?? null,
+      logisticsProviderName: detail.logisticsProviderName ?? null,
       paymentStatus: detail.paymentStatus ?? null,
       deliveryNotes: detail.deliveryNotes ?? null,
       campaignCustomFieldDefs: detail.campaignCustomFieldDefs,
@@ -6643,6 +6663,66 @@ export class OrdersService {
       .orderBy(desc(schema.orders.createdAt))
       .limit(1);
     return recent ?? null;
+  }
+
+  /**
+   * Idempotency guard for edge-form submissions. Finds a non-cancelled order
+   * placed in the last 15 minutes with the EXACT same customer phone, campaign,
+   * media buyer AND line items as `input`.
+   *
+   * This is the SOLE duplicate-order guard for edge-form submissions — the edge
+   * worker no longer keeps its own KV dedup. A double-tap / refresh / retry /
+   * QStash replay can deliver the identical submission more than once; without
+   * this, each delivery creates a separate order.
+   *
+   * The match is EXACT — a different product, quantity, or offer is a genuinely
+   * different order and is allowed straight through. The 15-minute window is
+   * deliberately tight: it covers every realistic re-submission path while
+   * staying far short of a customer legitimately re-ordering the same thing
+   * later in the day. The item fingerprint mirrors the edge worker's `dedupKey`
+   * (productId + quantity + offerLabel).
+   */
+  private async findRecentIdenticalOrder(input: {
+    customerPhoneHash?: string;
+    campaignId?: string | null;
+    mediaBuyerId?: string | null;
+    items: Array<{ productId: string; quantity?: number; offerLabel?: string }>;
+  }): Promise<{ id: string } | null> {
+    if (!input.customerPhoneHash || input.items.length === 0) return null;
+
+    const conditions = [
+      eq(schema.orders.customerPhoneHash, input.customerPhoneHash),
+      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '15 minutes'`,
+      sql`${schema.orders.status} != 'CANCELLED'`,
+    ];
+    if (input.campaignId) conditions.push(eq(schema.orders.campaignId, input.campaignId));
+    if (input.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
+
+    const candidates = await this.db
+      .select({ id: schema.orders.id, items: schema.orders.items })
+      .from(schema.orders)
+      .where(and(...conditions))
+      .orderBy(desc(schema.orders.createdAt))
+      .limit(5);
+
+    const fingerprint = (
+      items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
+    ): string =>
+      items
+        .map((i) => `${i.productId}:${i.quantity ?? 1}:${i.offerLabel ?? ''}`)
+        .sort()
+        .join('|');
+
+    const target = fingerprint(input.items);
+    for (const candidate of candidates) {
+      const candidateItems = Array.isArray(candidate.items)
+        ? (candidate.items as Array<{ productId: string; quantity?: number; offerLabel?: string }>)
+        : [];
+      if (candidateItems.length > 0 && fingerprint(candidateItems) === target) {
+        return { id: candidate.id };
+      }
+    }
+    return null;
   }
 
   /**

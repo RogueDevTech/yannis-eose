@@ -60,13 +60,27 @@ export class MessageTemplateSeedService implements OnApplicationBootstrap {
       }
 
       let inserted = 0;
+      let updated = 0;
       for (const template of DEFAULT_MESSAGE_TEMPLATES) {
-        const existing = await this.sql<{ id: string }[]>`
-          SELECT id FROM message_templates
+        const existing = await this.sql<{ id: string; body: string }[]>`
+          SELECT id, body FROM message_templates
           WHERE name = ${template.name} AND branch_id IS NULL
           LIMIT 1
         `;
-        if (existing[0]) continue;
+        if (existing[0]) {
+          // Update the body when the catalog version has changed (e.g. new
+          // placeholders or formatting). Org-wide defaults are code-managed;
+          // branch-level overrides (branch_id IS NOT NULL) are untouched.
+          if (existing[0].body !== template.body) {
+            await this.sql`
+              UPDATE message_templates
+              SET body = ${template.body}
+              WHERE id = ${existing[0].id}::uuid
+            `;
+            updated += 1;
+          }
+          continue;
+        }
         await this.sql`
           INSERT INTO message_templates (id, name, channel, body, created_by, branch_id, status)
           VALUES (
@@ -84,7 +98,7 @@ export class MessageTemplateSeedService implements OnApplicationBootstrap {
 
       const ms = Date.now() - startedAt;
       this.logger.log(
-        `Default message templates synced in ${ms}ms (${inserted} new, ${DEFAULT_MESSAGE_TEMPLATES.length - inserted} already present).`,
+        `Default message templates synced in ${ms}ms (${inserted} new, ${updated} updated, ${DEFAULT_MESSAGE_TEMPLATES.length - inserted - updated} unchanged).`,
       );
     } catch (err) {
       // Soft fail — existing rows still work, agents can use them as-is.

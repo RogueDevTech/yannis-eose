@@ -33,6 +33,7 @@ export type OrderClipboardSummaryInput = {
   totalAmount?: string | null;
   preferredDeliveryDate?: string | null;
   logisticsLocationName?: string | null;
+  logisticsProviderName?: string | null;
   paymentStatus?: string | null;
   deliveryNotes?: string | null;
   campaignCustomFieldDefs?: OrderClipboardSummaryCustomFieldDef[];
@@ -76,12 +77,12 @@ export function buildOrderClipboardSummaryText(order: OrderClipboardSummaryInput
     lines.push('Items:');
     for (const item of order.orderItems) {
       const name = item.productName ?? item.productId;
-      const unit = Number(item.unitPrice);
-      const sub = item.quantity * unit;
-      const subStr = Number.isFinite(unit)
-        ? `${item.quantity} × ${formatNaira(unit)} = ${formatNaira(sub)}`
+      const price = Number(item.unitPrice);
+      // unitPrice is the line total (offer/bundle price), not per-unit.
+      const priceStr = Number.isFinite(price) && price > 0
+        ? `${formatNaira(price)} (qty ${item.quantity})`
         : `Qty: ${item.quantity}`;
-      lines.push(`- ${name}: ${subStr}`);
+      lines.push(`- ${name}: ${priceStr}`);
     }
     lines.push('');
   }
@@ -99,8 +100,9 @@ export function buildOrderClipboardSummaryText(order: OrderClipboardSummaryInput
     lines.push('');
   }
 
-  if (order.logisticsLocationName) {
-    lines.push(`Logistics company location: ${order.logisticsLocationName}`);
+  if (order.logisticsProviderName || order.logisticsLocationName) {
+    const parts = [order.logisticsProviderName, order.logisticsLocationName].filter(Boolean);
+    lines.push(`Logistics: ${parts.join(' — ')}`);
     lines.push('');
   }
 

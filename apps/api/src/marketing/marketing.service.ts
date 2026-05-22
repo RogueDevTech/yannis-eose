@@ -3702,7 +3702,12 @@ export class MarketingService {
             ),
         })
         .from(schema.orders)
-        .where(inArray(schema.orders.mediaBuyerId, buyerIds))
+        .where(
+          and(
+            inArray(schema.orders.mediaBuyerId, buyerIds),
+            branchId ? eq(schema.orders.branchId, branchId) : undefined,
+          ),
+        )
         .groupBy(schema.orders.mediaBuyerId),
     ]);
 

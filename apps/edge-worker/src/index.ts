@@ -5,10 +5,12 @@ import { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX, normalizeCampaignFieldOrder } from '@
  * Yannis EOSE — Edge Worker
  *
  * Handles sales form submissions at the Cloudflare Edge.
- * Implements: rate limiting, dedup, inventory budget cap,
- * circuit breaker with QStash failover, Upstash Redis defense-in-depth
- * (drained by per-minute cron), phone hashing, campaign config loading,
- * embed modes, and offline IndexedDB fallback.
+ * Implements: rate limiting, circuit breaker with QStash failover, Upstash
+ * Redis defense-in-depth (drained by per-minute cron), phone hashing, campaign
+ * config loading, embed modes, and offline IndexedDB fallback.
+ *
+ * Duplicate-order protection is the API's job (`findRecentIdenticalOrder` in
+ * OrdersService.create) — the edge no longer keeps its own KV dedup.
  */
 
 export interface Env {
@@ -31,7 +33,6 @@ export interface Env {
   // healer cron. Optional: if either is unset, Redis fallback is skipped.
   UPSTASH_REDIS_REST_URL?: string;
   UPSTASH_REDIS_REST_TOKEN?: string;
-  DEDUP_CACHE: KVNamespace;
   RATE_LIMIT_CACHE: KVNamespace;
   CAMPAIGN_CACHE: KVNamespace;
 }
@@ -253,7 +254,6 @@ interface CampaignConfig {
 const RATE_LIMIT_WINDOW_SECONDS = 300; // 5 minutes
 const RATE_LIMIT_MAX_REQUESTS = 5;
 const RATE_LIMIT_CAPTCHA_THRESHOLD = 3; // After 3 submissions, require CAPTCHA
-const DEDUP_WINDOW_SECONDS = 21600; // 6 hours
 const CIRCUIT_BREAKER_TIMEOUT_MS = 20000; // 20s production (slow API/cold start still completes; short timeout caused false "busy" after successful creates)
 const CIRCUIT_BREAKER_TIMEOUT_LOCAL_MS = 30000; // 30s for localhost (cold starts, slow DB)
 
@@ -294,41 +294,6 @@ async function hashPhone(phone: string): Promise<string> {
   const normalized = phone.replace(/\D/g, '');
   const encoder = new TextEncoder();
   const data = encoder.encode(`yannis:phone:${normalized}`);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * KV dedup key. Hashes a *cart fingerprint* (sorted items × quantity × offer)
- * with phone + mediaBuyerId so that only EXACT repeats of the same cart from
- * the same MB are short-circuited at the edge (genuine double-tap protection).
- * Any change to items, quantities, or offer yields a different key and the
- * submission flows through — so a real customer placing a different order
- * within the dedup window is never silently dropped.
- *
- * Scoped by `mediaBuyerId` so a DIFFERENT MB submitting the same phone+cart is
- * NOT blocked here — that case must fall through to the API so a cross-funnel
- * attempt row can be recorded for attribution truth (Pillar 2 / per-MB
- * visibility). When mediaBuyerId is missing (legacy embeds, manual posts) we
- * fall back to an unscoped key.
- */
-async function dedupKey(
-  phone: string,
-  items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
-  mediaBuyerId?: string,
-): Promise<string> {
-  const encoder = new TextEncoder();
-  const suffix = mediaBuyerId ? `:${mediaBuyerId}` : '';
-  const itemsSig = [...items]
-    .map((i) => {
-      const qty = Math.max(1, Math.floor(Number(i.quantity ?? 1) || 1));
-      const offer = i.offerLabel ?? '';
-      return `${i.productId}x${qty}@${offer}`;
-    })
-    .sort()
-    .join('|');
-  const data = encoder.encode(`dedup:${phone}:${itemsSig}${suffix}`);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -455,9 +420,15 @@ async function checkRateLimit(ip: string, env: Env): Promise<RateLimitResult> {
     return 'blocked';
   }
 
-  await env.RATE_LIMIT_CACHE.put(key, String(count + 1), {
-    expirationTtl: RATE_LIMIT_WINDOW_SECONDS,
-  });
+  try {
+    await env.RATE_LIMIT_CACHE.put(key, String(count + 1), {
+      expirationTtl: RATE_LIMIT_WINDOW_SECONDS,
+    });
+  } catch (kvErr) {
+    // KV write quota may be exhausted — non-fatal. The submission still
+    // proceeds; rate limiting degrades to the API's own throttle layer.
+    console.error(`[rate-limit] KV put skipped: ${kvErr instanceof Error ? kvErr.message : String(kvErr)}`);
+  }
 
   if (count >= RATE_LIMIT_CAPTCHA_THRESHOLD) {
     return 'captcha_required';
@@ -481,41 +452,21 @@ async function checkRateLimit(ip: string, env: Env): Promise<RateLimitResult> {
 //   return result.success;
 // }
 
-// ── Dedup Check ────────────────────────────────────────────────
-
-async function checkDedup(
-  phone: string,
-  items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
-  env: Env,
-  mediaBuyerId?: string,
-): Promise<boolean> {
-  if (!env.DEDUP_CACHE) return false; // KV not bound (local dev)
-  const key = await dedupKey(phone, items, mediaBuyerId);
-  const existing = await env.DEDUP_CACHE.get(key);
-  return existing !== null;
-}
-
-async function markDedup(
-  phone: string,
-  items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
-  env: Env,
-  mediaBuyerId?: string,
-): Promise<void> {
-  if (!env.DEDUP_CACHE) return; // KV not bound (local dev)
-  const key = await dedupKey(phone, items, mediaBuyerId);
-  await env.DEDUP_CACHE.put(key, new Date().toISOString(), {
-    expirationTtl: DEDUP_WINDOW_SECONDS,
-  });
-}
-
 // ── Campaign Config Fetcher ────────────────────────────────────
 
 async function getCampaignConfig(campaignId: string, env: Env): Promise<CampaignConfig | null> {
-  // Check KV cache first
+  // Check KV cache first — best-effort read so a KV outage doesn't prevent
+  // the form from rendering (falls through to a live API call).
   const cacheKey = `campaign:${campaignId}`;
-  const cached = env.CAMPAIGN_CACHE ? await env.CAMPAIGN_CACHE.get(cacheKey) : null;
-  if (cached) {
-    return JSON.parse(cached) as CampaignConfig;
+  try {
+    const cached = env.CAMPAIGN_CACHE ? await env.CAMPAIGN_CACHE.get(cacheKey) : null;
+    if (cached) {
+      return JSON.parse(cached) as CampaignConfig;
+    }
+  } catch (cacheReadErr) {
+    console.error(
+      `[campaign] cache read skipped (non-fatal): ${cacheReadErr instanceof Error ? cacheReadErr.message : String(cacheReadErr)}`,
+    );
   }
 
   // Fetch from API
@@ -2509,26 +2460,10 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     // No-op: let the request through. Honeypot + rate-limit hard cap handle abuse.
   }
 
-  // 4. Dedup check (cart fingerprint + mediaBuyerId within 6hr window).
-  //    Per-MB scoping: same MB resubmitting the EXACT same cart (items, qty,
-  //    offer) → short-circuit at edge (no API call) — genuine double-tap.
-  //    Any change to items/qty/offer = different fingerprint = NOT blocked, so
-  //    a real customer placing a different order within 6h flows through.
-  //    Different MB → KV miss here, API records a cross_funnel_attempt row
-  //    for attribution truth without creating a duplicate order.
-  const isDuplicateSubmit = await checkDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
-  if (isDuplicateSubmit) {
-    return corsResponse(
-      {
-        success: true,
-        message: 'Your order has already been submitted. No need to submit again.',
-        alreadySubmitted: true,
-      },
-      200,
-    );
-  }
-
-  // 5. Hash phone number (never send raw phone to API)
+  // 4. Hash phone number (never send raw phone to API).
+  //    Duplicate submissions (double-tap / refresh / retry) are now caught by
+  //    the API's idempotency check (`findRecentIdenticalOrder` in
+  //    OrdersService.create) — the edge no longer keeps its own KV dedup.
   const phoneHash = await hashPhone(data.customerPhone);
 
   // 7. Build API payload (source: edge-form for audit trail traceability)
@@ -2569,11 +2504,6 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     const authorizationUrl = resultData?.result?.data?.authorizationUrl;
     const crossFunnelAttempt = resultData?.result?.data?.crossFunnelAttempt === true;
 
-    // Mark dedup so this same MB can't re-submit within the window.
-    // Cross-funnel attempts also mark dedup so the form doesn't keep posting
-    // through to the API on every retry.
-    await markDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
-
     if (crossFunnelAttempt) {
       // Original MB already won attribution — surface the same "already submitted"
       // UX as a same-MB duplicate. The DB row in cross_funnel_attempts is the only
@@ -2613,9 +2543,6 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     const buffered = await bufferToQStash(orderPayload, env);
 
     if (buffered) {
-      // Mark dedup even for buffered orders
-      await markDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
-
       return corsResponse({
         success: true,
         message: 'Order received, processing shortly',
@@ -2626,7 +2553,6 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     // 9b. QStash also failed — last-ditch Redis buffer (drained by healer cron).
     const redisBuffered = await bufferToRedis(orderPayload, env);
     if (redisBuffered) {
-      await markDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
       return corsResponse({
         success: true,
         message: 'Order received, processing shortly',
