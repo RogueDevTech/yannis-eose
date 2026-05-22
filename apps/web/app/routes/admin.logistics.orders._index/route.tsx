@@ -10,7 +10,7 @@ import {
   parsePerPage,
   requirePermission,
   safeStatus,
-  defaultThisMonthRange,
+  defaultTodayRange,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
@@ -38,7 +38,7 @@ const LOGISTICS_STATUS_SCOPE = [
   'REMITTED',
 ] as const;
 
-const defaultThisMonth = defaultThisMonthRange;
+const defaultToday = defaultTodayRange;
 
 export interface LogisticsOrder extends Order {
   logisticsLocationId?: string | null;
@@ -71,7 +71,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const period = url.searchParams.get('period') ?? undefined;
   const periodAllTime = period === 'all_time';
   if (!periodAllTime && !startDate && !endDate) {
-    const def = defaultThisMonth();
+    const def = defaultToday();
     startDate = def.startDate;
     endDate = def.endDate;
   }

@@ -1138,11 +1138,24 @@ export class OrdersService {
       await this.assertEdgeFormLineItemsAllowlisted(orderInput);
     }
 
-    const branchId = await this.resolveBranchIdForNewOrder({
+    let branchId = await this.resolveBranchIdForNewOrder({
       campaignId: orderInput.campaignId ?? null,
       mediaBuyerId: orderInput.mediaBuyerId ?? null,
       fallbackBranchId: null,
     });
+
+    // CS order routing: if the product is mapped to a different servicing branch,
+    // move the order there so it appears where CS will work it.
+    if (branchId) {
+      const primaryProductId = orderInput.items[0]?.productId ?? null;
+      const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
+        branchId,
+        primaryProductId,
+      );
+      if (servicingBranch) {
+        branchId = servicingBranch;
+      }
+    }
 
     // Cross-funnel attempt detection (Pillar 2 / attribution truth):
     // Records when a different MB's funnel already captured this phone+product
@@ -1440,11 +1453,24 @@ export class OrdersService {
       }
     }
 
-    const branchId = await this.resolveBranchIdForNewOrder({
+    let branchId = await this.resolveBranchIdForNewOrder({
       campaignId: input.campaignId ?? null,
       mediaBuyerId: input.mediaBuyerId ?? null,
       fallbackBranchId: sessionBranchId ?? null,
     });
+
+    // CS order routing: move order to the servicing branch if routing applies
+    if (branchId) {
+      const primaryProductId = input.items?.[0]?.productId ?? null;
+      const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
+        branchId,
+        primaryProductId,
+      );
+      if (servicingBranch) {
+        branchId = servicingBranch;
+      }
+    }
+
     // Same two-tier flagging as the edge-form create path. The strict
     // `detectDuplicates` check above already blocks offline creation when a
     // 24h match exists, so `findRecentPhoneOrder` will normally be null
@@ -3568,11 +3594,23 @@ export class OrdersService {
       const actorId = EDGE_FORM_ACTOR_ID;
 
       const { cartId, ...orderInput } = payload;
-      const paystackBranchId = await this.resolveBranchIdForNewOrder({
+      let paystackBranchId = await this.resolveBranchIdForNewOrder({
         campaignId: orderInput.campaignId ?? null,
         mediaBuyerId: orderInput.mediaBuyerId ?? null,
         fallbackBranchId: null,
       });
+
+      // CS order routing: move order to the servicing branch if routing applies
+      if (paystackBranchId) {
+        const primaryProductId = orderInput.items?.[0]?.productId ?? null;
+        const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
+          paystackBranchId,
+          primaryProductId,
+        );
+        if (servicingBranch) {
+          paystackBranchId = servicingBranch;
+        }
+      }
 
       const order = await withActor(this.db, { id: actorId }, async (tx) => {
         const rows = await tx

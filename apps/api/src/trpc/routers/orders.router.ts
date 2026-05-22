@@ -194,11 +194,27 @@ function orderListBranchId(_user: { role: string }, sessionBranchId: string | nu
  * (`orders.list`) or via `narrowOrdersAggregateFiltersForViewer`. Without that,
  * returning `null` here would expose other branches' orders to the MB.
  */
+/**
+ * True when the viewer has org-wide marketing visibility — they may read any
+ * media buyer's orders across every branch. Head of Marketing is org-wide for
+ * marketing per the RBAC matrix; admin-class sees everything.
+ */
+export function isOrgWideMarketingViewer(user: { role: string }): boolean {
+  return isAdminLevel(user) || user.role === 'HEAD_OF_MARKETING';
+}
+
 function orderListBranchIdOwnerAware(
   user: { role: string },
   sessionBranchId: string | null,
+  explicitMediaBuyerId?: string | null,
 ): string | null {
   if (user.role === 'MEDIA_BUYER') return null;
+  // An explicit single-media-buyer filter is itself an exact scope. For an
+  // org-wide marketing viewer (HoM / admin) drilling into one buyer — e.g. the
+  // "View orders" link from team analysis — keep the result org-wide so it
+  // matches the org-wide leaderboard counts instead of hiding the buyer's
+  // cross-branch orders behind the viewer's currently-selected branch.
+  if (explicitMediaBuyerId && isOrgWideMarketingViewer(user)) return null;
   return sessionBranchId;
 }
 
@@ -505,7 +521,11 @@ export const ordersRouter = router({
   list: authedProcedure
     .input(listOrdersSchema)
     .query(async ({ input, ctx }) => {
-      const branchId = orderListBranchIdOwnerAware(ctx.user, ctx.currentBranchId);
+      const branchId = orderListBranchIdOwnerAware(
+        ctx.user,
+        ctx.currentBranchId,
+        input.mediaBuyerId,
+      );
 
       // Resolve scoping (authz + effective filters) BEFORE the cache so a cache
       // hit can never bypass a permission check.
@@ -1144,7 +1164,7 @@ export const ordersRouter = router({
             )
           : Promise.resolve(null),
         input.includeCartAbandonment
-          ? getCartService().getStats()
+          ? getCartService().getStats(branchId)
           : Promise.resolve(null),
       ]);
 

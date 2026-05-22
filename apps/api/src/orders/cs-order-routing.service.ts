@@ -258,6 +258,56 @@ export class CsOrderRoutingService {
   }
 
   /**
+   * Lightweight lookup: resolves the servicing branch for a product on a given
+   * owner branch. Used at order-creation time to set `orders.branch_id` to the
+   * servicing branch so orders appear where they'll be worked.
+   *
+   * Returns null when no routing rule applies or routing keeps the same branch.
+   * For SPLIT_ALL_BRANCHES mode, returns null (order stays on campaign branch —
+   * assignment is org-wide but attribution stays).
+   * For PRODUCT_ALLOCATION with a matching rule, returns the first target's
+   * servicing branch (deterministic pick without orderId).
+   */
+  async resolveServicingBranchForProduct(
+    ownerBranchId: string,
+    productId: string | null | undefined,
+  ): Promise<string | null> {
+    const mode = await this.getRelationshipMode(ownerBranchId);
+    if (mode === 'SPLIT_ALL_BRANCHES') return null;
+    if (mode === 'PRODUCT_ALLOCATION' && !productId) return null;
+
+    const productMatch =
+      mode === 'BRANCH_DEFAULT'
+        ? isNull(schema.csOrderRoutingRules.productId)
+        : eq(schema.csOrderRoutingRules.productId, productId!);
+
+    const [rule] = await this.db
+      .select({ id: schema.csOrderRoutingRules.id })
+      .from(schema.csOrderRoutingRules)
+      .where(
+        and(
+          eq(schema.csOrderRoutingRules.ownerBranchId, ownerBranchId),
+          eq(schema.csOrderRoutingRules.enabled, true),
+          productMatch,
+        ),
+      )
+      .orderBy(desc(schema.csOrderRoutingRules.priority), asc(schema.csOrderRoutingRules.createdAt))
+      .limit(1);
+
+    if (!rule) return null;
+
+    const [target] = await this.db
+      .select({ servicingBranchId: schema.csOrderRoutingRuleTargets.servicingBranchId })
+      .from(schema.csOrderRoutingRuleTargets)
+      .where(eq(schema.csOrderRoutingRuleTargets.ruleId, rule.id))
+      .limit(1);
+
+    if (!target) return null;
+    // Only return if it's actually different from the owner branch
+    return target.servicingBranchId !== ownerBranchId ? target.servicingBranchId : null;
+  }
+
+  /**
    * Resolves which servicing branch supplies CS capacity and optional closer-id restriction
    * for auto-dispatch (load_balanced / performance).
    */

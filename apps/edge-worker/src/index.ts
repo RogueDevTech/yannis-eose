@@ -1247,6 +1247,19 @@ function getFormScript(
         });
       }
 
+      // ── Custom phone field validation (same as main phone) ──
+      document.querySelectorAll('[data-yannis-cf-type="phone"]').forEach(function(cfPhone) {
+        var cfPhoneError = cfPhone.nextElementSibling;
+        if (!cfPhoneError || !cfPhoneError.classList.contains('phone-error')) return;
+        cfPhone.addEventListener('blur', function() {
+          var v = (cfPhone.value || '').trim();
+          cfPhoneError.style.display = v.length > 0 && !isValidNgPhone(v) ? '' : 'none';
+        });
+        cfPhone.addEventListener('input', function() {
+          if (cfPhoneError.style.display !== 'none') cfPhoneError.style.display = 'none';
+        });
+      });
+
       // ── Custom dropdown (yd) initialisation ──
       document.querySelectorAll('[data-yd]').forEach(function(yd) {
         var trigger = yd.querySelector('.yd-trigger');
@@ -1440,6 +1453,22 @@ function getFormScript(
           btn.textContent = form.dataset.btnText || 'Submit Order';
           return;
         }
+        // Validate custom phone fields — same Nigerian phone check as the main phone.
+        var cfPhoneInputs = form.querySelectorAll('[data-yannis-cf-type="phone"]');
+        for (var pi = 0; pi < cfPhoneInputs.length; pi++) {
+          var cfPh = cfPhoneInputs[pi];
+          var cfPhVal = (cfPh.value || '').trim();
+          if (cfPhVal.length > 0 && !isValidNgPhone(cfPhVal)) {
+            var cfPhLabel = form.querySelector('label[for="' + cfPh.id + '"]');
+            cfPhLabel = cfPhLabel ? cfPhLabel.textContent : 'Phone';
+            msg.className = 'msg msg-error';
+            msg.textContent = (cfPhLabel || 'Phone').replace(/\\s*\\*\\s*$/, '').trim() + ': enter a valid Nigerian phone number';
+            btn.disabled = false;
+            btn.textContent = form.dataset.btnText || 'Submit Order';
+            cfPh.focus();
+            return;
+          }
+        }
 
         var orderData = {
           campaignId: '${campaignId}',
@@ -1542,7 +1571,22 @@ function getFormScript(
             selectedOffer = null;
           } else {
             msg.className = 'msg msg-error';
-            msg.textContent = result.data.error || 'Something went wrong. Please try again.';
+            // Parse validation errors into friendly messages instead of showing raw JSON
+            var rawError = result.data.error || '';
+            var friendlyError = 'Something went wrong. Please try again.';
+            if (typeof rawError === 'string' && rawError.length > 0) {
+              try {
+                var parsed = JSON.parse(rawError);
+                if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
+                  friendlyError = parsed.map(function(e) { return e.message; }).join('. ') + '.';
+                } else {
+                  friendlyError = rawError;
+                }
+              } catch(_) {
+                friendlyError = rawError;
+              }
+            }
+            msg.textContent = friendlyError;
           }
         }).catch(function() {
           // Network failed — save offline
@@ -1887,14 +1931,14 @@ function renderCustomField(field: CampaignCustomField): string {
         ${helpHtml}`;
     case 'phone':
       return `${labelHtml}
-        <input id="${id}" name="${id}" type="tel" inputmode="numeric"
+        <input id="${id}" name="${id}" type="tel" inputmode="tel"
           autocomplete="tel"
           data-yannis-cf="${escapeHtml(field.id)}" data-yannis-cf-type="phone" ${required} ${placeholder}
-          ${field.min != null ? `minlength="${Number(field.min)}"` : ''}
-          ${field.max != null ? `maxlength="${Number(field.max)}"` : ''}
-          pattern="[0-9+\\-\\s()]*"
-          title="Numbers only"
-          oninput="this.value = this.value.replace(/[^0-9+\\-\\s()]/g, '')">
+          maxlength="14"
+          pattern="^(0[789][0-9]{9}|\\+234[789][0-9]{9})$"
+          title="Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678"
+          oninput="this.value = this.value.replace(/[^0-9+]/g, '')">
+        <p class="phone-error" style="display:none;color:#dc2626;font-size:.75rem;margin:-0.5rem 0 0.75rem">Enter a valid Nigerian phone number</p>
         ${helpHtml}`;
     case 'number':
       return `${labelHtml}

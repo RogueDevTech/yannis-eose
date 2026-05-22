@@ -85,16 +85,16 @@ export function AbandonedCartDetailModal({
       setPhoneState('idle');
       return;
     }
-    if (!canReveal) {
-      setPhoneState('masked');
-      return;
-    }
-    // Inline phone preloaded in `cart.listAbandoned` for `cart.delete` holders —
-    // no extra round-trip. Fall back to the audited reveal endpoint only when the
-    // list payload doesn't carry it (older clients, partial cache, missing column).
+    // The server is the authority on whether the raw phone is exposed — if it
+    // sent one, show it (cart detail always carries the number). Falls through
+    // to masked / the audited reveal only when the payload has no raw phone.
     if (cart.customerPhone) {
       setPhone(cart.customerPhone);
       setPhoneState('idle');
+      return;
+    }
+    if (!canReveal) {
+      setPhoneState('masked');
       return;
     }
     setPhoneState('loading');
