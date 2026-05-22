@@ -707,10 +707,12 @@ export const marketingRouter = router({
       const fetchLiveActivity = async () => {
         if (!canQueryLiveActivity) return [];
         if (ctx.user.role === 'MEDIA_BUYER') {
+          // A plain MB sees ALL their own carts/orders across every branch
+          // (mediaBuyerId is itself an exact scope). Same rationale as
+          // `marketingOrdersOverviewStripFor`.
           return getCartService().listActivity({
             limit: input.liveActivityLimit,
             mediaBuyerId: ctx.user.id,
-            branchId: branchId ?? undefined,
           });
         }
         if (restrictMbIds && restrictMbIds.length > 1) {
@@ -935,12 +937,23 @@ export const marketingRouter = router({
     )
     .query(async ({ input, ctx }) => {
       const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists } = input;
-      // When an org-wide marketing viewer (HoM / admin) drills into one media
-      // buyer, run the aggregates org-wide so the stat strip + status counts
-      // match the team-analysis leaderboard (which counts that buyer's orders
-      // across every branch). Otherwise stay scoped to the viewer's branch.
+      // Branch scope must mirror `orders.list` (`orderListBranchIdOwnerAware`)
+      // so the overview strip matches the orders table:
+      //  - A plain Media Buyer always sees ALL their own orders, every branch
+      //    (the media-buyer-id filter is itself an exact scope). Staying branch-
+      //    scoped here makes the "My Orders" overview undercount — or show 0 —
+      //    for a buyer whose orders sit in a branch other than their current
+      //    one. `orders.list` already returns those rows, so the strip must too.
+      //  - An org-wide marketing viewer (HoM / admin) drilling into one buyer is
+      //    likewise org-wide (matches the team-analysis leaderboard).
+      //  - Everyone else (incl. marketing team supervisors) stays branch-scoped.
+      const isPlainMediaBuyer =
+        ctx.user.role === 'MEDIA_BUYER' &&
+        ctx.user.isMarketingTeamSupervisorOnActiveBranch !== true;
       const branchId =
-        mediaBuyerId && isOrgWideMarketingViewer(ctx.user) ? null : ctx.currentBranchId;
+        isPlainMediaBuyer || (mediaBuyerId && isOrgWideMarketingViewer(ctx.user))
+          ? null
+          : ctx.currentBranchId;
 
       const ordersScope = await narrowOrdersAggregateFiltersForViewer(ctx, branchId, {
         mediaBuyerId,
