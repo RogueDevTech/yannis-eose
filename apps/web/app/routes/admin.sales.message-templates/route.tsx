@@ -137,7 +137,7 @@ export async function action({ request }: ActionFunctionArgs) {
 }
 
 const UI_TOKEN_PREFIX = '@';
-const ALLOWED_PLACEHOLDER_KEYS = ['customer_name', 'order_id', 'product_name', 'delivery_address', 'estimated_date'] as const;
+const ALLOWED_PLACEHOLDER_KEYS = ['customer_name', 'customer_phone', 'order_id', 'product_name', 'delivery_address', 'estimated_date', 'quantity', 'total_amount', 'payment_status'] as const;
 const ALLOWED_PLACEHOLDER_SET = new Set<string>(ALLOWED_PLACEHOLDER_KEYS);
 const ALLOWED_UI_TOKENS = ALLOWED_PLACEHOLDER_KEYS.map((key) => `${UI_TOKEN_PREFIX}${key}`);
 const PLACEHOLDER_HELP = ALLOWED_UI_TOKENS.join(', ');
@@ -145,10 +145,14 @@ const PLACEHOLDER_HELP = ALLOWED_UI_TOKENS.join(', ');
 /** Sample values for “Preview all” — same placeholders as live sends use from order data. */
 const PREVIEW_SAMPLE_BY_KEY: Record<(typeof ALLOWED_PLACEHOLDER_KEYS)[number], string> = {
   customer_name: 'Jane Customer',
+  customer_phone: '08031234567',
   order_id: 'A1B2C3D4',
   product_name: '2L Mineral Water (Pack of 12)',
   delivery_address: '15 Admiralty Way, Lekki Phase 1, Lagos',
   estimated_date: 'Mon, 28 Apr 2026',
+  quantity: '2',
+  total_amount: '45000.00',
+  payment_status: 'Pay on Delivery',
 };
 
 function renderTemplateWithSampleData(body: string): string {
