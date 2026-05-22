@@ -2327,27 +2327,50 @@ function OrdersListPageImpl({
       )}
 
       {purgeConfirmOpen && (
-        <Modal open onClose={() => setPurgeConfirmOpen(false)} maxWidth="max-w-sm" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-app-fg mb-2">Clear test orders</h3>
+        <Modal open onClose={() => { if (purgeFetcher.state === 'idle') setPurgeConfirmOpen(false); }} maxWidth="max-w-sm" contentClassName="p-6">
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Delete all test orders</h3>
           <p className="text-sm text-app-fg-muted mb-4">
             This will permanently delete all orders where the customer name starts with &ldquo;test&rdquo;. Only orders that haven&rsquo;t moved stock (unprocessed, assigned, engaged, cancelled) are removed.
           </p>
+          {purgeFetcher.state === 'idle' && purgeFetcher.data ? (
+            <div className="mb-4">
+              {purgeFetcher.data.success ? (
+                <div className="rounded-lg border border-success-300 bg-success-50 dark:border-success-700 dark:bg-success-900/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-success-700 dark:text-success-300">
+                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} deleted
+                  </p>
+                  {(purgeFetcher.data.skipped ?? 0) > 0 && (
+                    <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
+                      {purgeFetcher.data.skipped} skipped (stock already moved)
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-danger-300 bg-danger-50 dark:border-danger-700 dark:bg-danger-900/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-danger-700 dark:text-danger-300">
+                    {purgeFetcher.data.error ?? 'Failed to delete test orders'}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : null}
           <div className="flex gap-2 justify-end">
-            <Button variant="secondary" onClick={() => setPurgeConfirmOpen(false)}>
-              Cancel
+            <Button variant="secondary" onClick={() => setPurgeConfirmOpen(false)} disabled={purgeFetcher.state !== 'idle'}>
+              {purgeFetcher.data?.success ? 'Done' : 'Cancel'}
             </Button>
-            <Button
-              variant="danger"
-              disabled={purgeFetcher.state !== 'idle'}
-              loading={purgeFetcher.state !== 'idle'}
-              loadingText="Clearing..."
-              onClick={() => {
-                purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
-                setPurgeConfirmOpen(false);
-              }}
-            >
-              Clear test orders
-            </Button>
+            {!purgeFetcher.data?.success && (
+              <Button
+                variant="danger"
+                disabled={purgeFetcher.state !== 'idle'}
+                loading={purgeFetcher.state !== 'idle'}
+                loadingText="Deleting..."
+                onClick={() => {
+                  purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
+                }}
+              >
+                Delete all test orders
+              </Button>
+            )}
           </div>
         </Modal>
       )}

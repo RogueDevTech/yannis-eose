@@ -2,8 +2,6 @@ import { defer, json } from '@remix-run/node';
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
-import { cachedClientLoader } from '~/lib/loader-cache';
-import { useMultiDeferredCacheSync } from '~/hooks/useMultiDeferredCacheSync';
 import { apiRequest, getSessionCookie, parsePerPage, requirePermission, defaultTodayRange } from '~/lib/api.server';
 import { canonicalPermissionCode } from '~/lib/permission-codes';
 import { isAdminLevel } from '~/lib/rbac';
@@ -291,8 +289,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   });
 }
 
-export const clientLoader = cachedClientLoader;
-clientLoader.hydrate = false;
+// NOTE: no `clientLoader` / full-loader cache here. This is a live socket page
+// (live order events + branch switcher) — client-caching the loader payload by
+// URL served stale data after a branch switch ("All branches" showed another
+// branch's numbers). Per CLAUDE.md, live socket pages are not client-cached.
 
 export async function action({ request }: ActionFunctionArgs) {
   const exportResponse = await handleExportReportAction(request);
@@ -331,13 +331,6 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function MarketingOrdersRoute() {
   const { ordersShell, listPromise, secondaryPromise } = useLoaderData<typeof loader>();
   usePageRefreshOnEvent([...MARKETING_ORDERS_LIVE_EVENTS]);
-  // Cache the full multi-deferred loader shape so `clientLoader` can serve it
-  // instantly on revisit (instant LinkedIn-style navigation). Both promises
-  // must resolve before the cache write fires.
-  useMultiDeferredCacheSync({
-    shell: { ordersShell },
-    deferred: { listPromise, secondaryPromise },
-  });
   const sharedProps = {
     page: ordersShell.page,
     limit: ordersShell.perPage,

@@ -1912,6 +1912,12 @@ export class UsersService {
     const afterMembershipBranchIds = branchesOrPrimaryPayloadTouched
       ? [...new Set(nextBranchIds)].sort((a, b) => a.localeCompare(b))
       : beforeMembershipBranchIds;
+    // Branches the user is dropping — drives campaign deactivation AND
+    // team/department roster cleanup below. Computed here so the post-commit
+    // supervisor-flag resync can see it too.
+    const removedBranchIds = beforeMembershipBranchIds.filter(
+      (b) => !afterMembershipBranchIds.includes(b),
+    );
 
     const updatedRows = await this.db.transaction(async (tx) => {
       // Audit actor for this transaction (see with-actor.ts for why SET LOCAL must be inside).
@@ -1953,9 +1959,6 @@ export class UsersService {
         // in a branch its owner no longer belongs to. The parked DEACTIVATED
         // form resurfaces under the owner's new branch and re-stamps its
         // branch_id on reactivation (see MarketingService.updateCampaign).
-        const removedBranchIds = beforeMembershipBranchIds.filter(
-          (b) => !afterMembershipBranchIds.includes(b),
-        );
         if (removedBranchIds.length > 0) {
           await tx
             .update(schema.campaigns)
@@ -1967,6 +1970,46 @@ export class UsersService {
                 eq(schema.campaigns.status, 'ACTIVE'),
               ),
             );
+
+          // ...and they must drop out of that branch's org chart entirely —
+          // both the optional team squads (`branch_team_members`) and the
+          // teamless department roster (`branch_department_members`). A user
+          // who no longer belongs to a branch must not linger as a member —
+          // or a stale supervisor — of any team in it.
+          const removedTeamRows = await tx
+            .select({ id: schema.branchTeams.id })
+            .from(schema.branchTeams)
+            .where(inArray(schema.branchTeams.branchId, removedBranchIds));
+          if (removedTeamRows.length > 0) {
+            await tx
+              .delete(schema.branchTeamMembers)
+              .where(
+                and(
+                  eq(schema.branchTeamMembers.userId, input.userId),
+                  inArray(
+                    schema.branchTeamMembers.teamId,
+                    removedTeamRows.map((t) => t.id),
+                  ),
+                ),
+              );
+          }
+          const removedDeptRows = await tx
+            .select({ id: schema.branchDepartments.id })
+            .from(schema.branchDepartments)
+            .where(inArray(schema.branchDepartments.branchId, removedBranchIds));
+          if (removedDeptRows.length > 0) {
+            await tx
+              .delete(schema.branchDepartmentMembers)
+              .where(
+                and(
+                  eq(schema.branchDepartmentMembers.userId, input.userId),
+                  inArray(
+                    schema.branchDepartmentMembers.branchDepartmentId,
+                    removedDeptRows.map((d) => d.id),
+                  ),
+                ),
+              );
+          }
         }
       }
       if (shouldRematerializePermissions && nextRoleTemplateIdForSnapshot) {
@@ -2010,8 +2053,22 @@ export class UsersService {
       });
     }
 
-    if (input.status === 'INACTIVE' || input.status === 'ARCHIVED' || input.status === 'DEACTIVATED') {
+    // `branchIds` / `currentBranchId` live on the Redis session blob, captured
+    // ONCE at login — they are NOT part of the 60s user-bundle cache, so a
+    // branch edit otherwise never reaches the user's active session (a Media
+    // Buyer removed from a branch keeps it in `ctx.user.branchIds` until they
+    // next log in). Deactivation kills the sessions outright; a plain branch
+    // change refreshes them in place so access updates without a forced logout.
+    const statusWentInactive =
+      input.status === 'INACTIVE' || input.status === 'ARCHIVED' || input.status === 'DEACTIVATED';
+    const branchMembershipChanged =
+      branchesOrPrimaryPayloadTouched &&
+      (beforeMembershipBranchIds.length !== afterMembershipBranchIds.length ||
+        beforeMembershipBranchIds.some((b, i) => b !== afterMembershipBranchIds[i]));
+    if (statusWentInactive) {
       await this.authService.killUserSessions(input.userId);
+    } else if (branchMembershipChanged) {
+      await this.authService.refreshUserBranchSessions(input.userId);
     }
 
     // Role / template / scope / permission overrides may have changed — drop
@@ -2023,6 +2080,12 @@ export class UsersService {
     // the 15-min TTL (this is the dropdown-not-showing fix).
     if (branchesOrPrimaryPayloadTouched) {
       this.invalidateBranchesListCache();
+    }
+
+    // Dropping a branch may have deleted supervisor team rows — resync the
+    // denormalised `users.is_team_supervisor` flag (and its per-branch cache).
+    if (removedBranchIds.length > 0) {
+      void this.branchTeams.syncUserSupervisorFlag(input.userId).catch(() => {});
     }
 
     const afterProductIds =

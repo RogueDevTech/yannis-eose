@@ -775,6 +775,13 @@ export class OrdersService {
       });
     });
 
+    // The order just dropped out of the active set — bust the status-count /
+    // time-series cache so marketing/CS overview strips don't keep counting
+    // it. The tRPC `softDeleteOrder` procedure also invalidates, but archiving
+    // via the order-deletion approval flow goes straight through this service
+    // method, bypassing that router call. Mirrors `invalidateOrdersAggregatesCache`.
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
     return { success: true };
   }
 

@@ -476,35 +476,40 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
       mobileGrid
       tileClassName="min-w-[6rem]"
       items={[
-        { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg' },
+        { label: 'Total Orders', value: metrics.totalOrders.toString(), valueClassName: 'text-app-fg', to: '/admin/marketing/orders' },
         {
           label: 'Delivered',
           value: metrics.deliveredOrders.toString(),
           valueClassName: metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
+          to: '/admin/marketing/orders?status=DELIVERED',
         },
-        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg' },
+        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg', to: '/admin/marketing/ad-spend' },
         {
           label: 'True ROAS',
           value: `${metrics.trueRoas.toFixed(2)}x`,
           valueClassName: metrics.trueRoas >= 2 ? 'text-success-600 dark:text-success-400' : metrics.trueRoas >= 1 ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400',
+          to: '/admin/marketing/overview',
         },
         {
           label: 'Delivery Rate',
           value: `${metrics.deliveryRate.toFixed(1)}%`,
           valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+          to: '/admin/marketing/orders?status=DELIVERED',
         },
         {
           label: 'Confirmation Rate',
           value: `${metrics.confirmationRate.toFixed(1)}%`,
           valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+          to: '/admin/marketing/orders?status=CONFIRMED',
         },
         {
           label: 'Open carts',
           value: abandonedCartCount.toString(),
           valueClassName: abandonedCartCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
           title: 'Captured carts not yet recovered (browsing + dropped off)',
+          to: '/admin/marketing/orders?fromCart=1',
         },
-        { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg' },
+        { label: 'Total Spend', value: naira(Math.round(metrics.totalSpend)), valueClassName: 'text-app-fg', to: '/admin/marketing/ad-spend' },
       ]}
     />
   );

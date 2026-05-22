@@ -76,14 +76,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     })
     .catch(() => ({ notifications: [] as Notification[], unreadCount: 0, total: 0 }));
 
-  // Fetch user's branches for the branch switcher (non-blocking)
+  // Fetch user's branches for the branch switcher (non-blocking). `status` is
+  // kept so the switcher can tag a disabled branch instead of dropping it.
+  type BranchListEntry = { id: string; name: string; code: string; status?: string };
   const branchesPromise = apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie })
     .then((res) => {
-      if (!res.ok) return [] as Array<{ id: string; name: string; code: string }>;
-      const data = (res.data as { result?: { data?: Array<{ id: string; name: string; code: string }> } })?.result?.data;
+      if (!res.ok) return [] as BranchListEntry[];
+      const data = (res.data as { result?: { data?: BranchListEntry[] } })?.result?.data;
       return data ?? [];
     })
-    .catch(() => [] as Array<{ id: string; name: string; code: string }>);
+    .catch(() => [] as BranchListEntry[]);
 
   // Stream branches like notifications — avoids blocking the document on branches.list
   return defer({ user, notifications: notificationsPromise, branches: branchesPromise });
@@ -190,7 +192,7 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminLayout() {
   const { user, notifications, branches } = useLoaderData<typeof loader>();
   const [resolvedBranches, setResolvedBranches] = useState<
-    Array<{ id: string; name: string; code: string }> | null
+    Array<{ id: string; name: string; code: string; status?: string }> | null
   >(null);
 
   useEffect(() => {
@@ -199,7 +201,7 @@ export default function AdminLayout() {
     // (a request aborted by rapid branch switching) — every user has at least
     // one branch. Keep the last-known-good non-empty list rather than blinking
     // the switcher out; the next loader run refills it.
-    const apply = (value: Array<{ id: string; name: string; code: string }>) => {
+    const apply = (value: Array<{ id: string; name: string; code: string; status?: string }>) => {
       if (cancelled) return;
       setResolvedBranches((prev) =>
         value.length === 0 && prev && prev.length > 0 ? prev : value,

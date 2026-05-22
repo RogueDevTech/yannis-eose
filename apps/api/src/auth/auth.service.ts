@@ -289,6 +289,16 @@ export class AuthService {
   }
 
   /**
+   * Push changed branch memberships onto the user's live sessions WITHOUT a
+   * forced logout — used after a branch add/remove so access reflects the new
+   * memberships on the very next request. Deactivation still uses
+   * `killUserSessions` (the user must be logged out entirely).
+   */
+  async refreshUserBranchSessions(targetUserId: string): Promise<number> {
+    return this.sessionStore.refreshUserBranchMemberships(targetUserId);
+  }
+
+  /**
    * Mirror Mode — replace the actor's session with the target user so the entire
    * app renders as that user (RLS, branch, role, permissions, sidebar). Mutations
    * are blocked at the tRPC root middleware while a `mirroredBy` field is set.

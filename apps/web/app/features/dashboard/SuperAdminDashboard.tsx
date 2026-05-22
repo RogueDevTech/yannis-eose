@@ -104,11 +104,12 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             </p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full sm:w-auto">
-            <KeyMetricTile label="Revenue" value={fmt(revenue)} />
+            <KeyMetricTile label="Revenue" value={fmt(revenue)} to="/admin/marketing/orders?status=DELIVERED" />
             <KeyMetricTile
               label="Ad Spend"
               value={fmt(marketingSafe.totalSpend)}
               valueClassName="text-danger-600 dark:text-danger-400"
+              to="/admin/marketing/ad-spend"
             />
             <KeyMetricTile
               label="Profit"
@@ -118,6 +119,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   ? 'text-success-600 dark:text-success-400'
                   : 'text-danger-600 dark:text-danger-400'
               }
+              to="/admin/ceo"
             />
           </div>
         </div>
@@ -147,8 +149,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             label="Ad Spend"
             value={fmt(marketingSafe.totalSpend)}
             valueClassName="text-danger-600 dark:text-danger-400"
+            to="/admin/marketing/ad-spend"
           />
-          <KeyMetricTile label="Order Count" value={orderPipeline.total.toLocaleString()} />
+          <KeyMetricTile label="Order Count" value={orderPipeline.total.toLocaleString()} to="/admin/marketing/orders" />
           <KeyMetricTile
             label="CPA"
             value={fmt(marketingSafe.cpa)}
@@ -159,6 +162,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   ? 'text-danger-600 dark:text-danger-400'
                   : undefined
             }
+            to="/admin/marketing/ad-spend"
           />
           <KeyMetricTile
             label="Delivery Rate"
@@ -170,8 +174,9 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
                   ? 'text-warning-600 dark:text-warning-400'
                   : 'text-danger-600 dark:text-danger-400'
             }
+            to="/admin/marketing/orders?status=DELIVERED"
           />
-          <KeyMetricTile label="Active Staff" value={activeStaffCount.toLocaleString()} />
+          <KeyMetricTile label="Active Staff" value={activeStaffCount.toLocaleString()} to="/hr/users" />
         </div>
       </div>
 
@@ -205,24 +210,35 @@ function KeyMetricTile({
   label,
   value,
   valueClassName,
+  to,
 }: {
   label: string;
   value: string;
   valueClassName?: string;
+  to?: string;
 }) {
-  return (
-    <div className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
+  const inner = (
+    <>
       <p className="text-mini font-medium text-app-fg-muted">{label}</p>
       <p
-        // No `truncate` — large currency totals (e.g. ₦1,810,452,169) have no
-        // whitespace to wrap at, so we use `break-all` to let digits flow onto
-        // the next line. `leading-tight` keeps the multi-line tile compact.
         className={`mt-1 text-sm sm:text-base font-bold tabular-nums leading-tight break-all ${
           valueClassName ?? 'text-app-fg'
         }`}
       >
         {value}
       </p>
+    </>
+  );
+  if (to) {
+    return (
+      <Link to={to} prefetch="intent" className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0 hover:bg-app-hover transition-colors">
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
+      {inner}
     </div>
   );
 }

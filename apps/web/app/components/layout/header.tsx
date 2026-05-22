@@ -26,6 +26,8 @@ interface BranchInfo {
   id: string;
   name: string;
   code: string;
+  /** Branch lifecycle status — `INACTIVE` branches stay in the switcher but are tagged. */
+  status?: string;
 }
 
 interface HeaderProps {
@@ -687,7 +689,9 @@ export function Header({
                         </button>
                       )}
 
-                      {branches.map((branch) => (
+                      {branches.map((branch) => {
+                        const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+                        return (
                         <button
                           key={branch.id}
                           type="button"
@@ -701,6 +705,11 @@ export function Header({
                         >
                           <span className="truncate">{branch.name}</span>
                           <span className="flex items-center gap-1.5 text-micro">
+                            {isInactive && (
+                              <span className="font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded">
+                                Inactive
+                              </span>
+                            )}
                             <span className="font-mono text-app-fg-muted">{branch.code}</span>
                             {branch.id === (currentBranchId ?? null) && (
                               <svg className="w-3.5 h-3.5 flex-shrink-0 text-brand-600 dark:text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -709,7 +718,8 @@ export function Header({
                             )}
                           </span>
                         </button>
-                      ))}
+                        );
+                      })}
                       {isMobileBranchSwitching && (
                         <p className="px-5 pt-1 text-mini text-app-fg-muted">
                           Switching branch...
@@ -923,7 +933,11 @@ function HeaderBranchSwitcher({
               </span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-app-fg">All Branches</p>
-                <p className="text-micro text-app-fg-muted">Global view — no branch filter</p>
+                <p className="text-micro text-app-fg-muted">
+                  {userRole === 'MEDIA_BUYER'
+                    ? 'Your orders across every branch combined'
+                    : 'Global view — no branch filter'}
+                </p>
               </div>
               {isAllBranches && (
                 <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -937,33 +951,45 @@ function HeaderBranchSwitcher({
             <div className="my-1 border-t border-app-border" />
           )}
 
-          {branches.map((branch) => (
-            <button
-              key={branch.id}
-              type="button"
-              onClick={() => handleSwitch(branch.id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-app-hover transition-colors duration-100 ${
-                branch.id === currentBranchId ? 'bg-brand-50 dark:bg-brand-900/20' : ''
-              }`}
-            >
-              <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-micro font-bold flex-shrink-0 ${
-                branch.id === currentBranchId
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-app-hover text-app-fg-muted'
-              }`}>
-                {branch.code.slice(0, 2)}
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-app-fg truncate">{branch.name}</p>
-                <p className="text-micro text-app-fg-muted">{branch.code}</p>
-              </div>
-              {branch.id === currentBranchId && (
-                <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-            </button>
-          ))}
+          {branches.map((branch) => {
+            // A disabled branch stays in the switcher (the buyer may still
+            // need to review data they created there) — just tagged Inactive.
+            const isInactive = branch.status != null && branch.status !== 'ACTIVE';
+            return (
+              <button
+                key={branch.id}
+                type="button"
+                onClick={() => handleSwitch(branch.id)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-app-hover transition-colors duration-100 ${
+                  branch.id === currentBranchId ? 'bg-brand-50 dark:bg-brand-900/20' : ''
+                }`}
+              >
+                <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-micro font-bold flex-shrink-0 ${
+                  branch.id === currentBranchId
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-app-hover text-app-fg-muted'
+                }`}>
+                  {branch.code.slice(0, 2)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-xs font-medium truncate ${isInactive ? 'text-app-fg-muted' : 'text-app-fg'}`}>
+                    {branch.name}
+                  </p>
+                  <p className="text-micro text-app-fg-muted">{branch.code}</p>
+                </div>
+                {isInactive && (
+                  <span className="text-micro font-medium uppercase tracking-wide text-app-fg-muted bg-app-hover px-1.5 py-0.5 rounded flex-shrink-0">
+                    Inactive
+                  </span>
+                )}
+                {branch.id === currentBranchId && (
+                  <svg className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

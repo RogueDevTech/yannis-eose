@@ -6,6 +6,7 @@ import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { CacheService } from '../common/cache/cache.service';
 
 /**
  * Order statuses that have NOT moved any inventory yet. Test orders past
@@ -49,7 +50,10 @@ const TEST_NAME_MATCH = sql`btrim(${schema.orders.customerName}) ~* '^test([^[:a
 export class TestOrderPurgeService {
   private readonly logger = new Logger('TestOrderPurge');
 
-  constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    private readonly cache: CacheService,
+  ) {}
 
   /** Every 2 hours, on the hour (00:00, 02:00, 04:00 … server time). */
   @Cron('0 0 */2 * * *')
@@ -161,6 +165,13 @@ export class TestOrderPurgeService {
       await tx.delete(schema.invoices).where(inArray(schema.invoices.orderId, ids));
       await tx.delete(schema.orders).where(inArray(schema.orders.id, ids));
     });
+
+    // The purge removed `orders` rows outside the tRPC mutation path, so the
+    // status-count / time-series cache (`cache:orders:aggregates:*`, populated
+    // by orders.router `getStatusCounts`) still counts the deleted orders.
+    // Bust it so marketing overview strips don't show ghost counts. Mirrors
+    // `invalidateOrdersAggregatesCache` in orders.router.ts.
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
       `Hard-deleted ${targets.length} test order(s)` +

@@ -119,7 +119,7 @@ async function mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
 export async function listBranchesForUser(user: {
   id: string;
   role: string;
-}): Promise<Array<{ id: string; name: string; code?: string }>> {
+}): Promise<Array<{ id: string; name: string; code: string; status: string }>> {
   const db = getDb();
   // Org-wide roles see every branch even without explicit branch memberships:
   // SuperAdmin / Admin manage anything; HR creates / edits staff across the
@@ -136,9 +136,19 @@ export async function listBranchesForUser(user: {
   ]);
   const seesAll = SEES_ALL_BRANCHES_ROLES.has(user.role);
 
-  const fetchRows = async (): Promise<Array<{ id: string; name: string; code?: string }>> => {
+  // Explicit projection — `status` is threaded through so the header branch
+  // switcher can tag a disabled (INACTIVE) branch instead of dropping it.
+  const branchCols = {
+    id: schema.branches.id,
+    name: schema.branches.name,
+    code: schema.branches.code,
+    status: schema.branches.status,
+  };
+  const fetchRows = async (): Promise<
+    Array<{ id: string; name: string; code: string; status: string }>
+  > => {
     if (seesAll) {
-      return db.select().from(schema.branches);
+      return db.select(branchCols).from(schema.branches);
     }
     const branchIds =
       user.role === 'MEDIA_BUYER'
@@ -151,7 +161,7 @@ export async function listBranchesForUser(user: {
           ).map((m) => m.branchId);
     if (branchIds.length === 0) return [];
     return db
-      .select()
+      .select(branchCols)
       .from(schema.branches)
       .where(
         branchIds.length === 1
@@ -797,6 +807,10 @@ export const branchesRouter = router({
         isPrimary: input.isPrimary ?? false,
       });
       await invalidateBranchesListCache();
+      // `branchIds` is captured on the Redis session at login and never
+      // refreshed live — push the new membership onto the user's active
+      // sessions so it takes effect on their next request (no forced logout).
+      await getSessionStore().refreshUserBranchMemberships(input.userId).catch(() => {});
 
       const branchRows = await db
         .select({ name: schema.branches.name })
@@ -835,6 +849,7 @@ export const branchesRouter = router({
     .mutation(async ({ input }) => {
       const db = getDb();
       const notifications = getBranchesNotificationsService();
+      const branchTeams = getBranchTeamsService();
 
       const branchRows = await db
         .select({ name: schema.branches.name })
@@ -843,18 +858,71 @@ export const branchesRouter = router({
         .limit(1);
       const branchName = branchRows[0]?.name ?? 'A branch';
 
-      const removed = await db
-        .delete(schema.userBranches)
-        .where(
-          and(
-            eq(schema.userBranches.userId, input.userId),
-            eq(schema.userBranches.branchId, input.branchId),
-          ),
-        )
-        .returning({ userId: schema.userBranches.userId });
+      // Removing a user from a branch must also drop them from that branch's
+      // org chart — the optional team squads (`branch_team_members`) and the
+      // teamless department roster (`branch_department_members`). A user who
+      // no longer belongs to the branch must not linger as a member — or a
+      // stale supervisor — of any team in it. Done in one transaction so the
+      // membership delete and the org-chart cleanup commit together.
+      const removed = await db.transaction(async (tx) => {
+        const removedRows = await tx
+          .delete(schema.userBranches)
+          .where(
+            and(
+              eq(schema.userBranches.userId, input.userId),
+              eq(schema.userBranches.branchId, input.branchId),
+            ),
+          )
+          .returning({ userId: schema.userBranches.userId });
+        if (removedRows.length === 0) return removedRows;
+
+        const teamRows = await tx
+          .select({ id: schema.branchTeams.id })
+          .from(schema.branchTeams)
+          .where(eq(schema.branchTeams.branchId, input.branchId));
+        if (teamRows.length > 0) {
+          await tx
+            .delete(schema.branchTeamMembers)
+            .where(
+              and(
+                eq(schema.branchTeamMembers.userId, input.userId),
+                inArray(
+                  schema.branchTeamMembers.teamId,
+                  teamRows.map((t) => t.id),
+                ),
+              ),
+            );
+        }
+        const deptRows = await tx
+          .select({ id: schema.branchDepartments.id })
+          .from(schema.branchDepartments)
+          .where(eq(schema.branchDepartments.branchId, input.branchId));
+        if (deptRows.length > 0) {
+          await tx
+            .delete(schema.branchDepartmentMembers)
+            .where(
+              and(
+                eq(schema.branchDepartmentMembers.userId, input.userId),
+                inArray(
+                  schema.branchDepartmentMembers.branchDepartmentId,
+                  deptRows.map((d) => d.id),
+                ),
+              ),
+            );
+        }
+        return removedRows;
+      });
 
       if (removed[0]) {
         await invalidateBranchesListCache();
+        // Supervisor team rows may have been deleted — resync the flag.
+        void branchTeams.syncUserSupervisorFlag(input.userId).catch(() => {});
+        // `branchIds` / `currentBranchId` are captured on the Redis session at
+        // login and never refreshed live. Push the removal onto the user's
+        // active sessions so access is revoked on their next request (their
+        // `currentBranchId` is reconciled if it was the removed branch) —
+        // this is the "still has access after removal" fix, no forced logout.
+        await getSessionStore().refreshUserBranchMemberships(input.userId).catch(() => {});
         notifications
           .create({
             userId: input.userId,

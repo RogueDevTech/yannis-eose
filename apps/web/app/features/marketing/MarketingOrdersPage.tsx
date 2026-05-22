@@ -312,7 +312,14 @@ export function MarketingOrdersPage({
         header: 'Customer',
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[9rem] max-w-[min(14rem,100%)]" />
-          : (order) => <span className="font-medium text-app-fg">{order.customerName}</span>,
+          : (order) => (
+              <span className="font-medium text-app-fg">
+                {order.customerName}
+                {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+                )}
+              </span>
+            ),
       },
     ];
     if (showMediaBuyerColumn) {
@@ -457,6 +464,9 @@ export function MarketingOrdersPage({
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-app-fg">
               {order.customerName || '—'}
+              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+              )}
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
           </div>
@@ -873,6 +883,8 @@ export function MarketingOrdersPage({
                       value: confirmedCount,
                       valueClassName: 'text-brand-600 dark:text-brand-400',
                       active: selectedStatus === 'CONFIRMED',
+                      to: buildQueryString({ status: 'CONFIRMED', page: 1 }),
+                      onClick: () => setSelectedStatus('CONFIRMED'),
                     },
                     {
                       label: 'Delivered',
@@ -1050,11 +1062,6 @@ export function MarketingOrdersPage({
           columns={marketingOrderColumns}
           rows={showSkeletonRows ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}
-          rowClassName={(order) =>
-            isTestOrdersView || /^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '')
-              ? 'opacity-50 bg-surface-100 dark:bg-surface-800/40'
-              : ''
-          }
           renderMobileCard={renderMarketingOrderMobileCard}
           emptyTitle={isCartAbandonmentView ? 'No abandoned carts' : 'No orders match your filters'}
           emptyDescription={
@@ -1141,27 +1148,50 @@ export function MarketingOrdersPage({
       />
 
       {purgeConfirmOpen && (
-        <Modal open onClose={() => setPurgeConfirmOpen(false)} maxWidth="max-w-sm" contentClassName="p-6">
+        <Modal open onClose={() => { if (purgeFetcher.state === 'idle') setPurgeConfirmOpen(false); }} maxWidth="max-w-sm" contentClassName="p-6">
           <h3 className="text-lg font-semibold text-app-fg mb-2">Delete all test orders</h3>
           <p className="text-sm text-app-fg-muted mb-4">
             This will permanently delete all orders where the customer name starts with &ldquo;test&rdquo;. Only orders that haven&rsquo;t moved stock (unprocessed, assigned, engaged, cancelled) are removed.
           </p>
+          {purgeFetcher.state === 'idle' && purgeFetcher.data ? (
+            <div className="mb-4">
+              {purgeFetcher.data.success ? (
+                <div className="rounded-lg border border-success-300 bg-success-50 dark:border-success-700 dark:bg-success-900/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-success-700 dark:text-success-300">
+                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} deleted
+                  </p>
+                  {(purgeFetcher.data.skipped ?? 0) > 0 && (
+                    <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
+                      {purgeFetcher.data.skipped} skipped (stock already moved)
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-danger-300 bg-danger-50 dark:border-danger-700 dark:bg-danger-900/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-danger-700 dark:text-danger-300">
+                    {purgeFetcher.data.error ?? 'Failed to delete test orders'}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : null}
           <div className="flex gap-2 justify-end">
-            <Button variant="secondary" onClick={() => setPurgeConfirmOpen(false)}>
-              Cancel
+            <Button variant="secondary" onClick={() => setPurgeConfirmOpen(false)} disabled={purgeFetcher.state !== 'idle'}>
+              {purgeFetcher.data?.success ? 'Done' : 'Cancel'}
             </Button>
-            <Button
-              variant="danger"
-              disabled={purgeFetcher.state !== 'idle'}
-              loading={purgeFetcher.state !== 'idle'}
-              loadingText="Deleting..."
-              onClick={() => {
-                purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
-                setPurgeConfirmOpen(false);
-              }}
-            >
-              Delete all test orders
-            </Button>
+            {!purgeFetcher.data?.success && (
+              <Button
+                variant="danger"
+                disabled={purgeFetcher.state !== 'idle'}
+                loading={purgeFetcher.state !== 'idle'}
+                loadingText="Deleting..."
+                onClick={() => {
+                  purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
+                }}
+              >
+                Delete all test orders
+              </Button>
+            )}
           </div>
         </Modal>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRevalidator } from '@remix-run/react';
 import { io, type Socket } from 'socket.io-client';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 
 interface RealtimeNotification {
   id: string;
@@ -280,6 +281,14 @@ export function usePageRefreshOnEvent(events: string[]): void {
     const listener = () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
+        // Bust this page's client loader cache BEFORE revalidating. Routes that
+        // use `cachedClientLoader` would otherwise serve the stale cached
+        // payload to this socket-triggered `revalidate()` — so the live event
+        // would not actually refresh the page. Clearing the entry forces the
+        // revalidation to hit the server and fetch fresh data.
+        if (typeof window !== 'undefined') {
+          invalidateCachedLoader(window.location.pathname);
+        }
         revalidateRef.current();
       }, 500);
     };

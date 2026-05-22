@@ -886,9 +886,11 @@ export const marketingRouter = router({
       const isOwnMbView = ctx.user.role === 'MEDIA_BUYER';
       let effectiveInput = isOwnMbView ? { ...input, mediaBuyerId: ctx.user.id } : input;
       effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
-      // Forms are global — a campaign created in one branch should be visible
-      // from any branch scope. The branch picker filters orders, not forms.
-      return getMarketingService().listCampaigns(effectiveInput, null);
+      // Forms are branch-scoped: a form belongs to its campaign's branch, so
+      // the selected branch filters the forms list. `null` currentBranchId
+      // ("All branches") = no filter. `listCampaigns` also surfaces a moved
+      // MB's parked (DEACTIVATED) forms under their new primary branch.
+      return getMarketingService().listCampaigns(effectiveInput, ctx.currentBranchId);
     }),
 
   /**

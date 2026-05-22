@@ -126,9 +126,16 @@ export class TrpcMiddleware implements NestMiddleware {
 
     (req as Request & { user: SessionUser }).user = merged;
 
-    // Guard: non-global users must always have a branch in their session.
+    // Guard: branch-scoped users must always have a branch in their session.
+    // EXCEPT a Media Buyer — `currentBranchId = null` is a valid, intended
+    // state for them ("All Branches" = every order they own across every
+    // branch, ownership-scoped). `switchBranch` explicitly lets an MB clear
+    // their branch; without this exemption every request would 401 while the
+    // MB is on "All Branches", zeroing dashboards and emptying lists.
     const branchId = merged.currentBranchId ?? null;
-    if (!canViewAllBranches(merged) && !branchId) {
+    const mayOperateWithoutBranch =
+      canViewAllBranches(merged) || merged.role === 'MEDIA_BUYER';
+    if (!mayOperateWithoutBranch && !branchId) {
       res.status(401).json({
         error: { message: 'Session has no branch context. Please log in again.' },
       });
