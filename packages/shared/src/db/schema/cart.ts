@@ -1,4 +1,4 @@
-import { date, integer, jsonb, uuid, pgTable, text } from 'drizzle-orm/pg-core';
+import { integer, jsonb, uuid, pgTable, text } from 'drizzle-orm/pg-core';
 import { cartStatusEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { campaigns } from './marketing';
@@ -40,7 +40,7 @@ export const cartAbandonments = pgTable('cart_abandonments', {
   deliveryState: text('delivery_state'),
   deliveryNotes: text('delivery_notes'),
   customerGender: text('customer_gender'),
-  preferredDeliveryDate: date('preferred_delivery_date'),
+  preferredDeliveryDate: text('preferred_delivery_date'),
   paymentMethod: text('payment_method'),
   quantity: integer('quantity'),
   /** Form-builder custom fields — keys/values defined by the campaign's form schema. */

@@ -886,13 +886,9 @@ export const marketingRouter = router({
       const isOwnMbView = ctx.user.role === 'MEDIA_BUYER';
       let effectiveInput = isOwnMbView ? { ...input, mediaBuyerId: ctx.user.id } : input;
       effectiveInput = await applyMarketingSupervisorScope(ctx, effectiveInput);
-      // An MB's `media_buyer_id = me` filter is exact, so a branch filter would
-      // only hide their own forms built in a branch they were since moved out
-      // of. Drop it — a Media Buyer's forms follow them across branches.
-      return getMarketingService().listCampaigns(
-        effectiveInput,
-        isOwnMbView ? null : ctx.currentBranchId,
-      );
+      // Forms are global — a campaign created in one branch should be visible
+      // from any branch scope. The branch picker filters orders, not forms.
+      return getMarketingService().listCampaigns(effectiveInput, null);
     }),
 
   /**
@@ -1060,7 +1056,7 @@ export const marketingRouter = router({
             // An MB's Form-filter dropdown lists their own forms, every branch.
             ...(ctx.user.role === 'MEDIA_BUYER' ? { mediaBuyerId: ctx.user.id } : {}),
           },
-          ctx.user.role === 'MEDIA_BUYER' ? null : ctx.currentBranchId,
+          null, // Forms are global — never branch-scoped
         ),
         // Open abandoned-cart count for the overview strip — scoped to the same
         // media buyer / branch the rest of the bundle uses.
@@ -1280,12 +1276,8 @@ export const marketingRouter = router({
 
       const [adSpendStatusCounts, campaigns, buyersResult] = await Promise.all([
         getMarketingService().adSpendStatusCounts(adSpendCountsScope, branchId),
-        // Pinned to a single MB (pinToSelf) → the branch filter is redundant;
-        // drop it so an MB's forms follow them across branches.
-        getMarketingService().listCampaigns(
-          campaignsScope,
-          campaignsScope.mediaBuyerId ? null : branchId,
-        ),
+        // Forms are global — never branch-scoped.
+        getMarketingService().listCampaigns(campaignsScope, null),
         canSeeBuyerPicklist
           ? supervisorBuyerIds
             ? getUsersService()

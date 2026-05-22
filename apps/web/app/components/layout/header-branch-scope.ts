@@ -1,6 +1,7 @@
 const ALL_BRANCHES_ROLES = new Set([
   'SUPER_ADMIN',
   'ADMIN',
+  'HEAD_OF_MARKETING',
   'HEAD_OF_CS',
   'HEAD_OF_LOGISTICS',
 ]);

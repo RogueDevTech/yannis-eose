@@ -17,6 +17,7 @@ export function buildOrderSummaryClipboardText(order: OrderDetail): string {
     totalAmount: order.totalAmount ?? null,
     preferredDeliveryDate: order.preferredDeliveryDate ?? null,
     logisticsLocationName: order.logisticsLocationName ?? null,
+    logisticsProviderName: order.logisticsProviderName ?? null,
     paymentStatus: order.paymentStatus ?? null,
     deliveryNotes: order.deliveryNotes ?? null,
     campaignCustomFieldDefs: order.campaignCustomFieldDefs,
