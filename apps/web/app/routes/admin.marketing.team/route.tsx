@@ -63,7 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Resolve URL date filters; defaults to current month so confirmation/delivery rates and
   // the "View orders" deep-link reflect the picked range.
   const url = new URL(request.url);
-  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url);
+  const { startDate, endDate, periodAllTime, filters, leaderboardPeriod } = resolveMarketingDateFilters(url, 'today');
   const leaderboardInput = buildLeaderboardInput(startDate, endDate, periodAllTime);
   // URL-driven rows-per-page — the team list is sliced client-side from the
   // full member set, so `perPage` is both the slice size and totalPages divisor.
