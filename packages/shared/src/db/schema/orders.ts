@@ -1,4 +1,5 @@
 import { uuid, pgTable, text, integer, numeric, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { orderStatusEnum, callStatusEnum, timelineEventTypeEnum } from './enums';
 import { uuidv7Pk, temporalColumns, timestampColumns } from './helpers';
 import { users } from './users';
@@ -10,6 +11,8 @@ import { campaigns } from './marketing';
 // Table 9: orders — core order records
 export const orders = pgTable('orders', {
   id: uuidv7Pk(),
+  /** Sequential human-friendly reference. Displayed as YNS-XXXXX. DB default: nextval('order_number_seq'). */
+  orderNumber: integer('order_number').default(sql`nextval('order_number_seq')`).notNull().unique(),
   campaignId: uuid('campaign_id').references(() => campaigns.id),
   mediaBuyerId: uuid('media_buyer_id').references(() => users.id),
   assignedCsId: uuid('assigned_cs_id').references(() => users.id),

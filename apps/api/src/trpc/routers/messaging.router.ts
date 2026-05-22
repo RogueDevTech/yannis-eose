@@ -104,6 +104,7 @@ function assertSupportedTemplatePlaceholders(body: string) {
 /** Resolve placeholder values from an order record. */
 function resolvePlaceholders(body: string, order: {
   id: string;
+  orderNumber?: number | null;
   customerName: string | null;
   customerPhone?: string | null;
   deliveryAddress: string | null;
@@ -117,10 +118,13 @@ function resolvePlaceholders(body: string, order: {
   const quantity = firstItem?.quantity != null ? String(firstItem.quantity) : '';
   const totalAmount = order.totalAmount != null ? String(order.totalAmount) : '';
   const paymentStatus = order.paymentStatus ?? '';
+  const orderDisplay = order.orderNumber != null
+    ? `YNS-${String(order.orderNumber).padStart(5, '0')}`
+    : order.id.slice(0, 8).toUpperCase();
   return body
     .replace(/\{\{customer_name\}\}/g, order.customerName ?? '')
     .replace(/\{\{customer_phone\}\}/g, order.customerPhone ?? '')
-    .replace(/\{\{order_id\}\}/g, order.id.slice(0, 8).toUpperCase())
+    .replace(/\{\{order_id\}\}/g, orderDisplay)
     .replace(/\{\{product_name\}\}/g, productName)
     .replace(/\{\{delivery_address\}\}/g, order.deliveryAddress ?? '')
     .replace(/\{\{estimated_date\}\}/g, order.preferredDeliveryDate ?? '')
@@ -430,6 +434,7 @@ export const messagingRouter = router({
         db
           .select({
             id: schema.orders.id,
+            orderNumber: schema.orders.orderNumber,
             customerName: schema.orders.customerName,
             customerPhone: schema.orders.customerPhone,
             deliveryAddress: schema.orders.deliveryAddress,
@@ -485,6 +490,7 @@ export const messagingRouter = router({
 
       const renderedBody = resolvePlaceholders(template.body, {
         id: order.id,
+        orderNumber: order.orderNumber,
         customerName: order.customerName,
         customerPhone: order.customerPhone,
         deliveryAddress: order.deliveryAddress,

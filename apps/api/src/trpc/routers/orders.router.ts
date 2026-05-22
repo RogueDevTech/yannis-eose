@@ -167,15 +167,28 @@ function csCloserSelfQueueListOpts(
 export function buildOrdersListOpts(
   user: SessionUser,
   input: Partial<Pick<ListOrdersInput, 'assignedCsId'>> = {},
-): { assignedCloserViewerId?: string; searchIncludeCustomerPhone?: boolean } | undefined {
+):
+  | {
+      assignedCloserViewerId?: string;
+      searchIncludeCustomerPhone?: boolean;
+      branchScope?: 'order' | 'campaign';
+    }
+  | undefined {
   const closer = csCloserSelfQueueListOpts(user, input);
   const perms = user.permissions ?? [];
   // Session stamps canonical codes (`orders.view`); legacy snapshots may still hold `orders.read`.
   const searchIncludeCustomerPhone =
     perms.some((p) => canonicalPermissionCode(p) === 'orders.view') || isAdminLevel(user);
-  const out: { assignedCloserViewerId?: string; searchIncludeCustomerPhone?: boolean } = {};
+  const out: {
+    assignedCloserViewerId?: string;
+    searchIncludeCustomerPhone?: boolean;
+    branchScope?: 'order' | 'campaign';
+  } = {};
   if (closer) Object.assign(out, closer);
   if (searchIncludeCustomerPhone) out.searchIncludeCustomerPhone = true;
+  // Head of Marketing's order lists scope by the *marketing* (campaign) branch,
+  // not the CS servicing branch on `orders.branch_id` — see OrdersService.list.
+  if (user.role === 'HEAD_OF_MARKETING') out.branchScope = 'campaign';
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -843,6 +856,10 @@ export const ordersRouter = router({
         startDate: input?.startDate,
         endDate: input?.endDate,
       });
+      // Head of Marketing scopes by the *marketing* (campaign) branch, not the CS
+      // servicing branch that `orders.branch_id` carries since the routing change.
+      const branchScope: 'order' | 'campaign' =
+        ctx.user.role === 'HEAD_OF_MARKETING' ? 'campaign' : 'order';
 
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
@@ -854,6 +871,7 @@ export const ordersRouter = router({
           effectiveBranchId,
           narrowed.statuses,
           narrowed.supervisorScope,
+          branchScope,
         );
       }
 
@@ -876,6 +894,7 @@ export const ordersRouter = router({
           effectiveBranchId,
           narrowed.statuses,
           narrowed.supervisorScope,
+          branchScope,
         ),
       );
     }),

@@ -185,7 +185,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
               <div className="flex items-start justify-between">
                 <div>
                   <p className="font-semibold text-app-fg">{order.customerName}</p>
-                  <div className="mt-0.5 text-xs text-app-fg-muted"><OrderIdBadge id={order.id} textClassName="text-app-fg-muted" /></div>
+                  <div className="mt-0.5 text-xs text-app-fg-muted"><OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg-muted" /></div>
                 </div>
                 {order.totalAmount && (
                   <span className="text-sm font-semibold text-app-fg-muted">
@@ -245,7 +245,7 @@ export function RiderDashboardPage({ orders, dispatchedOrders, total, dispatched
                   {order.customerName}
                 </p>
                 <div className="mt-0.5 text-xs text-app-fg-muted">
-                  <OrderIdBadge id={order.id} textClassName="text-app-fg-muted" />
+                  <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg-muted" />
                 </div>
               </div>
               {order.totalAmount && (

@@ -380,7 +380,7 @@ function AgentWorkloadDetailModal({
                   <span className="text-sm font-medium text-app-fg truncate min-w-0 flex-1">{ord.customerName}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <OrderIdBadge id={ord.id} linkTo={`/admin/orders/${ord.id}`} />
+                  <OrderIdBadge id={ord.id} orderNumber={ord.orderNumber} linkTo={`/admin/orders/${ord.id}`} />
                   {ord.totalAmount != null && (
                     <span className="text-xs text-app-fg-muted">
                       <NairaPrice amount={ord.totalAmount} />
@@ -483,7 +483,7 @@ function ActiveOrderDetailModal({
             <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
               <DetailRow
                 label="Order ID"
-                value={<OrderIdBadge id={order.id} uppercase ellipsis="" textClassName="text-app-fg" />}
+                value={<OrderIdBadge id={order.id} orderNumber={order.orderNumber} uppercase ellipsis="" textClassName="text-app-fg" />}
                 icon={
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -774,6 +774,7 @@ function CSDashboardPageLoaded({
       render: (order) => (
         <OrderIdBadge
           id={order.id}
+          orderNumber={order.orderNumber}
           uppercase
           ellipsis=""
           linkTo={`/admin/orders/${order.id}`}
@@ -2209,7 +2210,7 @@ function CSDashboardPageLoaded({
                 <div className="bg-app-elevated rounded-xl shadow-sm border border-app-border divide-y divide-app-border mb-4">
                   <DetailRow
                     label="Order ID"
-                    value={<OrderIdBadge id={qOrder.id} uppercase ellipsis="" textClassName="text-app-fg" />}
+                    value={<OrderIdBadge id={qOrder.id} orderNumber={qOrder.orderNumber} uppercase ellipsis="" textClassName="text-app-fg" />}
                     icon={
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -2472,6 +2473,7 @@ function CSDashboardPageLoaded({
                             </span>
                             <OrderIdBadge
                               id={order.id}
+                              orderNumber={order.orderNumber}
                               linkTo={`/admin/orders/${order.id}`}
                               textClassName="text-sm font-medium text-brand-500 hover:text-brand-600"
                             />

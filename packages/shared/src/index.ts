@@ -19,6 +19,7 @@ export * from './storage/object-storage';
 export { DEFAULT_CAMPAIGN_FORM_ACCENT_HEX } from './marketing/default-form-accent';
 export * from './orders/order-clipboard-summary';
 export * from './orders/customer-phone-display';
+export * from './orders/format-order-number';
 export * as db from './db/index';
 // `runSqlMigrations` is server-only (uses node:fs / node:path). Re-exporting it
 // from the public barrel pulls Node built-ins into Vite's web bundle and breaks

@@ -126,6 +126,8 @@ function canCopyOrderSummaryForChat(
 
 /** After allocation: roles that can copy may still need the summary on delivered / settled orders. */
 const ORDER_STATUSES_LOGISTICS_SUMMARY_COPY = new Set<string>([
+  'CS_ENGAGED',
+  'CONFIRMED',
   'AGENT_ASSIGNED',
   'DISPATCHED',
   'IN_TRANSIT',
@@ -346,8 +348,9 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   },
   {
     label: 'Delivery Address',
+    alwaysShow: true,
     getValue: (o) => o.deliveryAddress,
-    format: (v) => (v ? String(v) : ''),
+    format: (v) => (v ? String(v) : '—'),
   },
   {
     label: 'Delivery Notes',
@@ -356,8 +359,9 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   },
   {
     label: 'Delivery State',
+    alwaysShow: true,
     getValue: (o) => o.deliveryState,
-    format: (v) => (v ? String(v) : ''),
+    format: (v) => (v ? String(v) : '—'),
   },
   {
     label: 'Customer Email',
@@ -492,12 +496,19 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
     ddClassName: DETAIL_DATE_CLASS,
   },
   {
+    label: 'Order No',
+    alwaysShow: true,
+    getValue: (o) => (o.orderNumber != null ? `YNS-${String(o.orderNumber).padStart(5, '0')}` : o.id),
+    format: (v) => (v ? String(v) : ''),
+    ddClassName: DETAIL_ID_CLASS,
+    rowAccent: 'border-l-4 border-l-surface-200 dark:border-l-surface-700',
+  },
+  {
     label: 'Order ID',
     alwaysShow: true,
     getValue: (o) => o.id,
     format: (v) => (v ? String(v) : ''),
     ddClassName: DETAIL_ID_CLASS,
-    rowAccent: 'border-l-4 border-l-surface-200 dark:border-l-surface-700',
   },
 ];
 
@@ -1441,7 +1452,7 @@ export function OrderDetailPage({
         <svg className="w-4 h-4 text-app-border flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
-        <OrderIdBadge id={order.id} textClassName="text-app-fg font-medium truncate min-w-0" />
+        <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-app-fg font-medium truncate min-w-0" />
       </div>
 
       {/* Header */}

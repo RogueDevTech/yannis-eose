@@ -1594,7 +1594,7 @@ function ReturnsTab({
     {
       key: 'orderId',
       header: 'Order ID',
-      render: (order) => <OrderIdBadge id={order.id} textClassName="font-mono text-sm text-app-fg-muted" />,
+      render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="font-mono text-sm text-app-fg-muted" />,
       minWidth: 'min-w-[120px]',
     },
     {

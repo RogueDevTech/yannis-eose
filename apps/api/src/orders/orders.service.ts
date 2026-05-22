@@ -2482,18 +2482,22 @@ export class OrdersService {
 
     return buildOrderClipboardSummaryText({
       id: detail.id,
+      orderNumber: detail.orderNumber,
       status: detail.status,
       customerName: detail.customerName,
       customerPhoneForPaste: phoneForPaste,
       deliveryAddress: detail.deliveryAddress ?? null,
       customerAddress: detail.customerAddress ?? null,
+      deliveryState: detail.deliveryState ?? null,
       orderItems: detail.orderItems,
       totalAmount: detail.totalAmount ?? null,
+      createdAt: detail.createdAt ? String(detail.createdAt) : null,
       preferredDeliveryDate: detail.preferredDeliveryDate ?? null,
       logisticsLocationName: detail.logisticsLocationName ?? null,
       logisticsProviderName: detail.logisticsProviderName ?? null,
       paymentStatus: detail.paymentStatus ?? null,
       deliveryNotes: detail.deliveryNotes ?? null,
+      assignedCsName: detail.assignedCsName ?? null,
       campaignCustomFieldDefs: detail.campaignCustomFieldDefs,
       customFields: detail.customFields as Record<string, unknown> | null | undefined,
     });
@@ -2505,7 +2509,13 @@ export class OrdersService {
   async list(
     input: ListOrdersInput,
     branchId?: string | null,
-    listOpts?: { assignedCloserViewerId?: string; searchIncludeCustomerPhone?: boolean },
+    listOpts?: {
+      assignedCloserViewerId?: string;
+      searchIncludeCustomerPhone?: boolean;
+      /** `'campaign'` scopes the branch filter by campaign attribution — see
+       *  `orderBranchScopeCondition`. Marketing (HoM) viewers pass `'campaign'`. */
+      branchScope?: 'order' | 'campaign';
+    },
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
 
@@ -2583,20 +2593,32 @@ export class OrdersService {
         // Fast-path: exact ID match can use the PK index (ILIKE would force a scan).
         conditions.push(eq(schema.orders.id, trimmed));
       } else if (trimmed.length > 0) {
-        const nameMatch = ilike(schema.orders.customerName, `%${trimmed}%`);
-        const digitRun = trimmed.replace(/\D/g, '');
-        const canMatchStoredPhone =
-          listOpts?.searchIncludeCustomerPhone === true &&
-          digitRun.length >= 7 &&
-          digitRun.length <= 24;
-        if (canMatchStoredPhone) {
-          const runs = expandCustomerPhoneSearchDigitRuns(digitRun);
-          const phoneParts = runs.map((r) => ilike(schema.orders.customerPhone, `%${r}%`));
-          const phoneOr = phoneParts.length > 1 ? or(...phoneParts) : phoneParts[0];
-          const combined = phoneOr ? or(nameMatch, phoneOr) : nameMatch;
+        // Check if search looks like an order number: "YNS-00123", "YNS00123", or bare "00123"
+        const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
+        const parsedOrderNum = orderNumMatch ? parseInt(orderNumMatch[1], 10) : NaN;
+
+        if (!Number.isNaN(parsedOrderNum) && parsedOrderNum > 0) {
+          // Could be an order number OR a name/phone — OR them so both paths work.
+          const numCondition = eq(schema.orders.orderNumber, parsedOrderNum);
+          const nameMatch = ilike(schema.orders.customerName, `%${trimmed}%`);
+          const combined = or(numCondition, nameMatch);
           if (combined) conditions.push(combined);
         } else {
-          conditions.push(nameMatch);
+          const nameMatch = ilike(schema.orders.customerName, `%${trimmed}%`);
+          const digitRun = trimmed.replace(/\D/g, '');
+          const canMatchStoredPhone =
+            listOpts?.searchIncludeCustomerPhone === true &&
+            digitRun.length >= 7 &&
+            digitRun.length <= 24;
+          if (canMatchStoredPhone) {
+            const runs = expandCustomerPhoneSearchDigitRuns(digitRun);
+            const phoneParts = runs.map((r) => ilike(schema.orders.customerPhone, `%${r}%`));
+            const phoneOr = phoneParts.length > 1 ? or(...phoneParts) : phoneParts[0];
+            const combined = phoneOr ? or(nameMatch, phoneOr) : nameMatch;
+            if (combined) conditions.push(combined);
+          } else {
+            conditions.push(nameMatch);
+          }
         }
       }
     }
@@ -2619,13 +2641,16 @@ export class OrdersService {
         input.assignedCsId &&
         input.assignedCsId === listOpts.assignedCloserViewerId
       ) {
+        // CS-closer "my branch OR assigned to me" path — always servicing-branch.
         const branchOrAssigned = or(
           eq(schema.orders.branchId, branchId),
           eq(schema.orders.assignedCsId, input.assignedCsId),
         );
         if (branchOrAssigned) conditions.push(branchOrAssigned);
       } else {
-        conditions.push(eq(schema.orders.branchId, branchId));
+        conditions.push(
+          this.orderBranchScopeCondition(branchId, listOpts?.branchScope ?? 'order'),
+        );
       }
     }
 
@@ -2679,6 +2704,7 @@ export class OrdersService {
     // columns like `items` / `custom_fields` that are used only on detail screens).
     const ordersListSelect = {
       id: schema.orders.id,
+      orderNumber: schema.orders.orderNumber,
       status: schema.orders.status,
       customerName: schema.orders.customerName,
       customerPhoneHash: schema.orders.customerPhoneHash,
@@ -4276,11 +4302,37 @@ export class OrdersService {
   }
 
   /**
+   * Branch-scoping WHERE fragment for order queries.
+   *
+   * - `'order'` (default): orders physically filed on the branch — `orders.branch_id`,
+   *   which since the 2026-05-22 routing change is the **CS servicing branch**.
+   *   Correct for CS / Sales / Logistics surfaces.
+   * - `'campaign'`: orders whose **campaign** belongs to the branch — the
+   *   **marketing attribution** branch. Used by Head-of-Marketing surfaces so a
+   *   marketing order CS-routed to a different servicing branch still counts
+   *   under the branch that actually ran the campaign. Orders with no campaign
+   *   (e.g. offline orders) are not marketing-attributable and fall out.
+   */
+  private orderBranchScopeCondition(branchId: string, scope: 'order' | 'campaign') {
+    if (scope === 'campaign') {
+      return inArray(
+        schema.orders.campaignId,
+        this.db
+          .select({ id: schema.campaigns.id })
+          .from(schema.campaigns)
+          .where(eq(schema.campaigns.branchId, branchId)),
+      );
+    }
+    return eq(schema.orders.branchId, branchId);
+  }
+
+  /**
    * Get order counts by status — for dashboard stats.
    * Optional mediaBuyerId filters to that buyer's orders (for Marketing Orders page).
    * Optional assignedCsId filters to that Sales closer's orders (for Sales Orders page).
    * Optional logisticsLocationId filters to that 3PL location (for Logistics Orders page / TPL_MANAGER scoping).
    * Optional startDate/endDate filter by orders.createdAt (when provided: counts = orders created in period).
+   * `branchScope` — see `orderBranchScopeCondition`. Marketing viewers pass `'campaign'`.
    */
   async getStatusCounts(
     mediaBuyerId?: string,
@@ -4291,6 +4343,7 @@ export class OrdersService {
     branchId?: string | null,
     statuses?: Array<(typeof schema.orders.$inferSelect)['status']>,
     supervisorScope?: OrdersAggregateSupervisorScope,
+    branchScope: 'order' | 'campaign' = 'order',
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     appendOrdersAggregateScopeConditions(conditions, {
@@ -4300,7 +4353,7 @@ export class OrdersService {
     });
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
     if (endDate) {
       const end = new Date(endDate);
