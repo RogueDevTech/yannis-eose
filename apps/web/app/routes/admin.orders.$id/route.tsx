@@ -105,7 +105,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // latestCall is still loaded here (small + used for confirm gate UX). itemOffers powers the
     // Adjust order items offer picker — small + needed when the modal opens, fetched in parallel.
     // Timeline is loaded client-side after mount (resource route) to keep the main page fast.
-    const [latestCallValue, itemOffersValue] = await Promise.all([
+    const [latestCallValue, itemOffersValue, callablePhoneValue] = await Promise.all([
       apiRequest<unknown>(
         `/trpc/orders.latestCall?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
         deferredOpt,
@@ -140,6 +140,22 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           logOrderDetailLoaderWarning(orderId, 'orders.listItemOffers', msg);
           return [] as OrderItemOffers[];
         }),
+      // Callable phone is loaded with the page so the Call Customer modal has the
+      // number in memory on first render — no separate reveal fetch on modal open.
+      !voipEnabled
+        ? apiRequest<unknown>(
+            `/trpc/orders.getCallablePhone?input=${encodeURIComponent(JSON.stringify({ orderId }))}`,
+            deferredOpt,
+          )
+            .then((phoneRes) => {
+              if (!phoneRes.ok) return null;
+              const phoneData = phoneRes.data as {
+                result?: { data?: { phone: string; isDialable: boolean } | null };
+              };
+              return phoneData?.result?.data ?? null;
+            })
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
 
     return {
@@ -150,6 +166,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       voipEnabled,
       voipProviderDisplayName,
       itemOffers: itemOffersValue,
+      callablePhone: callablePhoneValue,
     };
   })();
 
@@ -918,6 +935,7 @@ export default function OrderDetailRoute() {
               voipEnabled={(orderDetail as OrderDetailStreamData).voipEnabled}
               voipProviderDisplayName={(orderDetail as OrderDetailStreamData).voipProviderDisplayName}
               itemOffers={(orderDetail as OrderDetailStreamData).itemOffers}
+              callablePhone={(orderDetail as OrderDetailStreamData).callablePhone}
               canEditOrder={canEditOrder}
               userRole={userRole}
               userId={userId}

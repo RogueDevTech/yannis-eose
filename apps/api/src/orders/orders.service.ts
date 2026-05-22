@@ -2389,6 +2389,47 @@ export class OrdersService {
   }
 
   /**
+   * Read-only phone lookup for the order detail loader. Returns the callable phone
+   * when VOIP is off and the viewer is authorised; `null` otherwise. No side effects
+   * — the CS_ENGAGED transition + MANUAL_CALL log happen via `initiateCall` on click.
+   */
+  async getCallablePhoneForViewer(
+    orderId: string,
+    actor: SessionUser,
+  ): Promise<{ phone: string; isDialable: boolean } | null> {
+    const voipSetting = await this.settingsService.get('VOIP_ENABLED');
+    if (voipSetting?.['enabled'] === true) return null;
+
+    const rows = await this.db
+      .select()
+      .from(schema.orders)
+      .where(eq(schema.orders.id, orderId))
+      .limit(1);
+    const order = rows[0];
+    if (!order) return null;
+
+    const callableStatuses = [
+      'UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED',
+      'CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT',
+    ];
+    if (!callableStatuses.includes(order.status)) return null;
+
+    const elevatedPerms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    const isElevated =
+      actor.role === 'SUPER_ADMIN' ||
+      elevatedPerms.includes(canonicalPermissionCode('cs.scope.global')) ||
+      elevatedPerms.includes(canonicalPermissionCode('orders.update.any_branch'));
+    if (!isElevated && order.assignedCsId !== actor.id) return null;
+
+    const rawPhone = order.customerPhone?.trim();
+    if (rawPhone) return { phone: rawPhone, isDialable: true };
+
+    const value = order.customerPhoneHash;
+    const isDialable = !/^[a-f0-9]{64}$/i.test(value ?? '');
+    return { phone: value ?? '', isDialable };
+  }
+
+  /**
    * Plain-text order summary for WhatsApp / logistics. Same read gate as `getById`.
    * Phone line uses the stored `customer_phone` when present; otherwise scans delivery
    * notes, address, and custom field strings for a Nigerian mobile so paste is the

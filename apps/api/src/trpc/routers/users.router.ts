@@ -314,6 +314,19 @@ export const usersRouter = router({
     }),
 
   /**
+   * Reset a user's permissions to the pure role-template defaults — strips ALL
+   * per-user overrides. The user ends up with exactly the permissions their role
+   * template provides.
+   */
+  resetPermissionsToDefaults: permissionProcedure('users.staff.update', 'rbac.templates.manage')
+    .input(z.object({ userId: z.string().uuid() }))
+    .mutation(async ({ input, ctx }) => {
+      const res = await getUsersService().resetPermissionsToDefaults(input.userId, ctx.user);
+      await invalidatePermissionsUserMatrixCache();
+      return { success: true, ...res };
+    }),
+
+  /**
    * Deactivate a staff member (sets DEACTIVATED, kills sessions).
    * Gated by `users.deactivate` (SuperAdmin always allowed in service).
    */
