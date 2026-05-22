@@ -39,22 +39,29 @@ export class EventsService {
     mediaBuyerId?: string | null;
     logisticsLocationId?: string | null;
     riderId?: string | null;
+    /** Marketing branch — scopes the `marketing-all` / `admin` rooms. */
     branchId?: string | null;
+    /**
+     * CS servicing branch — scopes the `cs-all` / `logistics` rooms. Migration
+     * 0150 split this from `branchId`; falls back to `branchId` when omitted.
+     */
+    servicingBranchId?: string | null;
   }) {
     const event = 'order:status_changed';
     const payload = { ...data, timestamp: new Date().toISOString() };
+    const csBranch = data.servicingBranchId ?? data.branchId;
 
     // Notify admin dashboard
     this.safeEmit('admin', event, payload, data.branchId);
 
-    // Notify CS
-    this.safeEmit('cs-all', event, payload, data.branchId);
+    // Notify CS — scoped to the servicing branch that works the order
+    this.safeEmit('cs-all', event, payload, csBranch);
     if (data.assignedCsId) {
       this.safeEmit(`cs-${data.assignedCsId}`, event, payload);
     }
 
-    // Notify logistics
-    this.safeEmit('logistics', event, payload, data.branchId);
+    // Notify logistics — fulfillment happens in the servicing branch
+    this.safeEmit('logistics', event, payload, csBranch);
     if (data.logisticsLocationId) {
       this.safeEmit(`3pl-${data.logisticsLocationId}`, event, payload);
     }
@@ -78,13 +85,20 @@ export class EventsService {
   emitNewOrder(data: {
     orderId: string;
     productName: string;
+    /** Marketing branch — scopes the `marketing-all` / `admin` rooms. */
     branchId?: string | null;
+    /**
+     * CS servicing branch — scopes the `cs-all` room so the CS team that
+     * actually works the order gets the dispatch ping. Migration 0150; falls
+     * back to `branchId` when omitted.
+     */
+    servicingBranchId?: string | null;
     mediaBuyerId?: string | null;
   }) {
     const event = 'order:new';
     const payload = { ...data, timestamp: new Date().toISOString() };
     this.safeEmit('admin', event, payload, data.branchId);
-    this.safeEmit('cs-all', event, payload, data.branchId);
+    this.safeEmit('cs-all', event, payload, data.servicingBranchId ?? data.branchId);
     this.safeEmit('marketing-all', event, payload, data.branchId);
     if (data.mediaBuyerId) {
       this.safeEmit(`marketing-${data.mediaBuyerId}`, event, payload);

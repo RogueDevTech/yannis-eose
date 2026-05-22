@@ -35,9 +35,10 @@ import { PermissionsService } from '../permissions/permissions.service';
 import { EventsService } from '../events/events.service';
 import { resolveRoleTemplateBaselineCodes } from '../permissions/role-template-baseline';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
-import { ADMIN_LEVEL_ROLES, isAdminLevelRole } from '../common/authz';
+import { ADMIN_LEVEL_ROLES, isAdminLevelRole, isOrgWideDepartmentHead } from '../common/authz';
 import { hasFinanceAccess } from '../common/utils/strip-finance-fields';
 import { BranchTeamsService } from '../branches/branch-teams.service';
+import { CacheService } from '../common/cache/cache.service';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 
 type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]>[0];
@@ -45,6 +46,47 @@ type DbTx = Parameters<Parameters<PostgresJsDatabase<typeof schema>['transaction
 /** Strip ILIKE metacharacters so user input cannot widen patterns (aligned with searchForPushTarget). */
 function sanitizeListUsersSearch(raw: string): string {
   return raw.replace(/[%_\\]/g, ' ').trim();
+}
+
+/** Normalize a staff name for duplicate detection: lowercased, trimmed, single-spaced. */
+function normalizeStaffName(raw: string): string {
+  return raw.toLowerCase().trim().replace(/\s+/g, ' ');
+}
+
+/** Levenshtein edit distance — used to flag typo-level name duplicates. */
+function nameEditDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const prev: number[] = [];
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prevDiag = prev[0]!;
+    prev[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = prev[j]!;
+      const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+      prev[j] = Math.min(prev[j]! + 1, prev[j - 1]! + 1, prevDiag + cost);
+      prevDiag = tmp;
+    }
+  }
+  return prev[n]!;
+}
+
+/**
+ * True when two staff names are close enough to be the same person — exact
+ * after normalization, or within a small edit distance (a typo like
+ * "Temidayo" vs "Timidayo"). The distance check is gated on length so short
+ * names don't false-positive against each other.
+ */
+function staffNamesLikelyDuplicate(a: string, b: string): boolean {
+  const na = normalizeStaffName(a);
+  const nb = normalizeStaffName(b);
+  if (na.length === 0 || nb.length === 0) return false;
+  if (na === nb) return true;
+  if (Math.min(na.length, nb.length) < 6) return false;
+  return nameEditDistance(na, nb) <= 2;
 }
 
 const BRANCH_ELIGIBLE_ROLES = new Set([
@@ -71,7 +113,20 @@ export class UsersService {
     @Inject(forwardRef(() => UserBundleCacheService))
     private readonly userBundleCache: UserBundleCacheService,
     private readonly branchTeams: BranchTeamsService,
+    private readonly cache: CacheService,
   ) {}
+
+  /**
+   * Drop the per-viewer `branches.list` cache after a staff create/update has
+   * rewritten `user_branches`. That cache (15-min TTL) feeds the header branch
+   * switcher; without this, an HR-side branch edit leaves the affected user's
+   * header showing the stale branch set — and a multi-branch user can lose the
+   * dropdown entirely. The branch router invalidates the same `cache:branches:list:*`
+   * pattern from its own assignUser/removeUser mutations.
+   */
+  private invalidateBranchesListCache(): void {
+    void this.cache.delPattern('cache:branches:list:*').catch(() => {});
+  }
 
   private defaultScopeForRole(role: string): { scopeGlobal: boolean; scopeOrgWideHead: boolean } {
     if (isAdminLevelRole(role)) {
@@ -427,7 +482,30 @@ export class UsersService {
    * Same logic as createStaff but bypasses HR scope checks.
    */
   async createStaffFromPayload(input: CreateStaffInput, actor: SessionUser) {
-    return this.createStaff(input, actor);
+    // Approval replay — the name was already vetted when HR submitted the
+    // request, so never re-trigger the interactive duplicate-name guard here.
+    return this.createStaff({ ...input, confirmDuplicateName: true }, actor);
+  }
+
+  /** Existing staff whose name is close enough to be the same person (see `staffNamesLikelyDuplicate`). */
+  private async findSimilarNamedUsers(
+    name: string,
+  ): Promise<Array<{ id: string; name: string; status: string }>> {
+    const rows = await this.db
+      .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
+      .from(schema.users);
+    return rows.filter((u) => staffNamesLikelyDuplicate(u.name, name)).slice(0, 5);
+  }
+
+  /** CONFLICT error for a taken email — points at reactivation when the existing account is deactivated. */
+  private emailTakenError(status: string): TRPCError {
+    const reactivatable = status !== 'ACTIVE' && status !== 'PENDING';
+    return new TRPCError({
+      code: 'CONFLICT',
+      message: reactivatable
+        ? 'An account with this email already exists but is deactivated. Reactivate that staff member instead of creating a new account.'
+        : 'A user with this email already exists',
+    });
   }
 
   /**
@@ -446,6 +524,24 @@ export class UsersService {
       });
     }
 
+    // Soft duplicate-name guard. A near-identical name almost always means an
+    // existing staff member is being re-created instead of reactivated — incl.
+    // a typo'd name + email, which the exact-email check below can't catch.
+    // The admin confirms past it in a modal (form resubmits with the flag);
+    // `createStaffFromPayload` (approval replay) and bulk import set the flag
+    // up front so they're never blocked.
+    if (input.confirmDuplicateName !== true) {
+      const nameDuplicates = await this.findSimilarNamedUsers(input.name);
+      if (nameDuplicates.length > 0) {
+        return {
+          requiresDuplicateConfirmation: true as const,
+          duplicates: nameDuplicates,
+          message:
+            'A staff member with a very similar name already exists. Reactivate their account instead of creating a duplicate, or confirm to continue.',
+        };
+      }
+    }
+
     // Sensitive-role approval flow: anyone other than SuperAdmin attempting to create a sensitive
     // role (ADMIN, FINANCE_OFFICER, etc.) generates a permission_request the SuperAdmin must approve.
     // This covers: HR creating any sensitive role, AND ADMIN creating another ADMIN.
@@ -462,17 +558,14 @@ export class UsersService {
       const [phoneConflictRows, existingEmailRows] = await Promise.all([
         this.selectStaffPhoneConflictRows(input.phone),
         this.db
-          .select({ id: schema.users.id })
+          .select({ id: schema.users.id, status: schema.users.status })
           .from(schema.users)
           .where(eq(schema.users.email, input.email.toLowerCase()))
           .limit(1),
       ]);
       this.throwIfStaffPhoneConflictRows(phoneConflictRows);
       if (existingEmailRows[0]) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: 'A user with this email already exists',
-        });
+        throw this.emailTakenError(existingEmailRows[0].status);
       }
       const duplicatePending = await this.selectPendingUserCreationRequestDuplicate({
         email: input.email,
@@ -556,7 +649,7 @@ export class UsersService {
     // see existing holders and confirm intent — see UserCreatePage / users.router.
     const [existingRows, phoneRows, activeBranchRows] = await Promise.all([
       this.db
-        .select({ id: schema.users.id })
+        .select({ id: schema.users.id, status: schema.users.status })
         .from(schema.users)
         .where(eq(schema.users.email, input.email.toLowerCase()))
         .limit(1),
@@ -579,10 +672,7 @@ export class UsersService {
     ]);
 
     if (existingRows[0]) {
-      throw new TRPCError({
-        code: 'CONFLICT',
-        message: 'A user with this email already exists',
-      });
+      throw this.emailTakenError(existingRows[0].status);
     }
 
     this.throwIfStaffPhoneConflictRows(phoneRows);
@@ -750,6 +840,11 @@ export class UsersService {
     // immediately instead of waiting up to the 60s TTL.
     void this.userBundleCache.invalidate(user.id);
 
+    // New user with branch memberships — refresh the header branch switcher cache.
+    if (requestedBranchIds.length > 0) {
+      this.invalidateBranchesListCache();
+    }
+
     // Send invite email with login credentials (non-blocking)
     const loginUrl = process.env['APP_URL'] ?? 'http://localhost:4001';
     this.notificationsService
@@ -904,7 +999,9 @@ export class UsersService {
       | 'supervisorOnly'
       | 'orgWideOnly'
     >,
-    actor: { id: string; role: string; permissions?: string[] } | null,
+    actor:
+      | { id: string; role: string; permissions?: string[]; branchIds?: string[]; scopeOrgWideHead?: boolean }
+      | null,
     currentBranchId: string | null,
     mode: 'list' | 'rosterBreakdown',
   ): SQL[] {
@@ -983,6 +1080,25 @@ export class UsersService {
           WHERE ub.user_id = ${schema.users.id}
             AND ub.branch_id = ${branchFilter}
         )`,
+      );
+    } else if (
+      !skipBranchScope &&
+      actor &&
+      isOrgWideDepartmentHead({ role: actor.role, scopeOrgWideHead: actor.scopeOrgWideHead }) &&
+      (actor.branchIds?.length ?? 0) > 0
+    ) {
+      // Org-wide department head on "All branches": limit the roster to the
+      // union of branches they actually belong to — NOT the whole company. A
+      // HoM/HoCS without an explicit `*.scope.global` permission only ever
+      // sees staff in their own branches.
+      conditions.push(
+        inArray(
+          schema.users.id,
+          this.db
+            .select({ userId: schema.userBranches.userId })
+            .from(schema.userBranches)
+            .where(inArray(schema.userBranches.branchId, actor.branchIds!)),
+        ),
       );
     }
 
@@ -1831,6 +1947,27 @@ export class UsersService {
             roleInBranch: null,
           })),
         );
+
+        // When a user is removed from a branch, their campaigns (sales forms)
+        // attributed to that branch are deactivated — a form must not stay live
+        // in a branch its owner no longer belongs to. The parked DEACTIVATED
+        // form resurfaces under the owner's new branch and re-stamps its
+        // branch_id on reactivation (see MarketingService.updateCampaign).
+        const removedBranchIds = beforeMembershipBranchIds.filter(
+          (b) => !afterMembershipBranchIds.includes(b),
+        );
+        if (removedBranchIds.length > 0) {
+          await tx
+            .update(schema.campaigns)
+            .set({ status: 'DEACTIVATED', updatedAt: new Date() })
+            .where(
+              and(
+                eq(schema.campaigns.mediaBuyerId, input.userId),
+                inArray(schema.campaigns.branchId, removedBranchIds),
+                eq(schema.campaigns.status, 'ACTIVE'),
+              ),
+            );
+        }
       }
       if (shouldRematerializePermissions && nextRoleTemplateIdForSnapshot) {
         const snapshotRole = input.role !== undefined ? input.role : beforeRow.role;
@@ -1880,6 +2017,13 @@ export class UsersService {
     // Role / template / scope / permission overrides may have changed — drop
     // the cached user bundle so the next tRPC call sees the latest snapshot.
     void this.userBundleCache.invalidate(input.userId);
+
+    // `user_branches` was rewritten — refresh the `branches.list` cache so the
+    // header branch switcher reflects the new memberships without waiting out
+    // the 15-min TTL (this is the dropdown-not-showing fix).
+    if (branchesOrPrimaryPayloadTouched) {
+      this.invalidateBranchesListCache();
+    }
 
     const afterProductIds =
       input.productIds !== undefined

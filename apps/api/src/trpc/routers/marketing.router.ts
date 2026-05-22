@@ -935,19 +935,15 @@ export const marketingRouter = router({
       const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists } = input;
       // Branch scope must mirror `orders.list` (`orderListBranchIdOwnerAware`)
       // so the overview strip matches the orders table:
-      //  - A plain Media Buyer always sees ALL their own orders, every branch
-      //    (the media-buyer-id filter is itself an exact scope). Staying branch-
-      //    scoped here makes the "My Orders" overview undercount — or show 0 —
-      //    for a buyer whose orders sit in a branch other than their current
-      //    one. `orders.list` already returns those rows, so the strip must too.
+      //  - A plain Media Buyer scopes by their header branch lens — the
+      //    currently-selected branch, or null ("All Branches") for all their
+      //    orders across every branch. The media-buyer-id filter keeps the
+      //    result exact either way, so the strip always matches the table.
       //  - An org-wide marketing viewer (HoM / admin) drilling into one buyer is
-      //    likewise org-wide (matches the team-analysis leaderboard).
+      //    org-wide (matches the team-analysis leaderboard).
       //  - Everyone else (incl. marketing team supervisors) stays branch-scoped.
-      const isPlainMediaBuyer =
-        ctx.user.role === 'MEDIA_BUYER' &&
-        ctx.user.isMarketingTeamSupervisorOnActiveBranch !== true;
       const branchId =
-        isPlainMediaBuyer || (mediaBuyerId && isOrgWideMarketingViewer(ctx.user))
+        mediaBuyerId && isOrgWideMarketingViewer(ctx.user)
           ? null
           : ctx.currentBranchId;
 
@@ -998,9 +994,10 @@ export const marketingRouter = router({
           branchId,
           undefined,
           ordersScope.supervisorScope,
-          // Head of Marketing scopes by the campaign (marketing) branch so the
-          // count matches the order rows (`orders.list` does the same for HoM).
-          ctx.user.role === 'HEAD_OF_MARKETING' ? 'campaign' : 'order',
+          // Marketing Orders page — every viewer (MB / HoM) scopes by the
+          // marketing branch (`orders.branch_id`) so counts match the order
+          // rows and an order CS-routed elsewhere still counts here.
+          'marketing',
         ),
         getMarketingService().getPerformanceMetrics(
           metricsBuyerId,
@@ -1011,12 +1008,19 @@ export const marketingRouter = router({
           ordersScope.assignedCsId,
           ordersScope.supervisorScope,
         ),
-        getOrdersService().getOrdersTimeSeriesByCreated(ordersScope.startDate, ordersScope.endDate, branchId, {
-          mediaBuyerId: ordersScope.mediaBuyerId,
-          csCloserId: ordersScope.assignedCsId,
-          supervisorScope: ordersScope.supervisorScope,
-          status,
-        }),
+        getOrdersService().getOrdersTimeSeriesByCreated(
+          ordersScope.startDate,
+          ordersScope.endDate,
+          branchId,
+          {
+            mediaBuyerId: ordersScope.mediaBuyerId,
+            csCloserId: ordersScope.assignedCsId,
+            supervisorScope: ordersScope.supervisorScope,
+            status,
+          },
+          // Marketing Orders page — scope the trend by the marketing branch.
+          'marketing',
+        ),
         canSeeBuyerPicklist
           ? supervisorBuyerIds && supervisorBuyerIds.length > 0
             ? // Supervisor path: only their team's MBs (the supervisor themselves
@@ -1142,7 +1146,10 @@ export const marketingRouter = router({
         restrictMbIds && restrictMbIds.length > 0 ? { restrictToReceiverIds: restrictMbIds } : undefined;
 
       const [balances, fundingSummary, leaderboard, profitabilityConfig] = await Promise.all([
-        getMarketingService().listFundingBalances(ctx.user, branchId),
+        // Team Analysis roster — ACTIVE only, so it lines up with the
+        // ACTIVE-only leaderboard and a deactivated account never shows as a
+        // metric-less ghost row.
+        getMarketingService().listFundingBalances(ctx.user, branchId, { activeOnly: true }),
         getMarketingService().getFundingSummary(branchId, fundingOpts),
         getMarketingService().getMediaBuyerLeaderboard(
           input.period,

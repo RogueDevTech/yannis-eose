@@ -167,6 +167,41 @@ const requireBranchScopeForGlobalAdminMutations = t.middleware(async ({ ctx, typ
 });
 
 /**
+ * Media Buyer branch-lens read-only guard.
+ *
+ * A Media Buyer's header branch switcher doubles as a personal data lens: it
+ * can point at "All Branches" (`currentBranchId = null`) or at a branch they
+ * were since removed from — both purely for reviewing their own historical
+ * orders. Neither is a valid *write* context. This middleware blocks every
+ * branch-scoped mutation while the buyer is in that cross-branch view, so they
+ * cannot create a form / ad spend / funding row attributed to a branch they
+ * don't currently belong to. They must switch back to one of their member
+ * branches first. Branch isolation for writes stays intact.
+ *
+ * `branches.switchBranch` is NOT branch-scoped, so the buyer can always switch
+ * back. Non-branch-scoped mutations (profile, theme, notifications) pass.
+ */
+const MEDIA_BUYER_BRANCH_LOCKED_MESSAGE =
+  "You're viewing data across branches. Switch to one of your branches to make changes.";
+
+const blockMediaBuyerMutationsOutsideMemberBranch = t.middleware(async ({ ctx, type, path, meta, next }) => {
+  if (type !== 'mutation') return next();
+  if (!ctx.user || ctx.user.role !== 'MEDIA_BUYER') return next();
+  const isBranchScopedMutation =
+    (meta as Record<string, unknown> | undefined)?.['branchScopedMutation'] === true ||
+    (typeof path === 'string' && BRANCH_SCOPED_MUTATION_PATHS.has(path));
+  if (!isBranchScopedMutation) return next();
+  // A non-null currentBranchId that IS one of the buyer's memberships is the
+  // only valid write context. null = "All Branches" lens; a non-member value =
+  // a branch they've left — both read-only.
+  const branchIds = ctx.user.branchIds ?? [];
+  if (ctx.currentBranchId !== null && branchIds.includes(ctx.currentBranchId)) {
+    return next();
+  }
+  throw new TRPCError({ code: 'FORBIDDEN', message: MEDIA_BUYER_BRANCH_LOCKED_MESSAGE });
+});
+
+/**
  * Authenticated procedure — requires a valid session.
  * Applies Column-Level Security (finance field stripping) automatically.
  * Blocks mutations when in Mirror Mode.
@@ -180,6 +215,7 @@ export const authedProcedure = t.procedure
   })
   .use(blockMutationsWhileMirroring)
   .use(requireBranchScopeForGlobalAdminMutations)
+  .use(blockMediaBuyerMutationsOutsideMemberBranch)
   .use(financeFieldsMiddleware);
 
 /**

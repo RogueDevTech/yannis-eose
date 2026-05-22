@@ -2,6 +2,8 @@ import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Button } from '~/components/ui/button';
+import { Modal } from '~/components/ui/modal';
+import { useFetcherToast } from '~/components/ui/toast';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatOrderTimestamp } from '~/lib/format-date';
@@ -73,6 +75,7 @@ const MARKETING_ORDERS_STATUS_OPTIONS_BASE = MARKETING_ORDERS_STATUSES.map((stat
 
 /** Sentinel — not a real order status. Selecting it activates the `?fromCart=1` view. */
 const FROM_CART_STATUS_VALUE = '__from_cart__';
+const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
 
 /** Streamed after `orders.list`: counts, metrics, chart series, export picklists + buyer filter options. */
 export type MarketingOrdersSecondaryPayload = {
@@ -121,6 +124,8 @@ interface MarketingOrdersPageProps {
    * `?fromCart=1`, which swaps the table to the abandoned-cart backlog.
    */
   enableFromCartStatusOption?: boolean;
+  /** Show "Test orders" filter option. Admin only. */
+  enableTestOrdersOption?: boolean;
   /**
    * Cart-abandonment mode — true when `?fromCart=1` is active and `orders`
    * has been populated with abandoned CARTS (synthetic status `'CART'`).
@@ -152,6 +157,7 @@ export function MarketingOrdersPage({
   viewerUserId,
   activeMediaBuyerFilter,
   enableFromCartStatusOption = false,
+  enableTestOrdersOption = false,
   isCartAbandonmentView = false,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
@@ -172,21 +178,36 @@ export function MarketingOrdersPage({
   );
   // The "Cart abandonment" pseudo-status is selected whenever `?fromCart=1` is on.
   const fromCartUrlActive = searchParams.get('fromCart') === '1';
+  const testOrdersUrlActive = searchParams.get('testOrders') === '1';
   const [selectedStatus, setSelectedStatus] = useState(
-    enableFromCartStatusOption && fromCartUrlActive ? FROM_CART_STATUS_VALUE : statusFilter || 'ALL',
+    enableTestOrdersOption && testOrdersUrlActive
+      ? TEST_ORDERS_STATUS_VALUE
+      : enableFromCartStatusOption && fromCartUrlActive
+        ? FROM_CART_STATUS_VALUE
+        : statusFilter || 'ALL',
   );
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showChartView, setShowChartView] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
+  const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
+  const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
+  useFetcherToast(purgeFetcher.data, {
+    successTitle: 'Test orders cleared',
+    successMessage: `${purgeFetcher.data?.deleted ?? 0} deleted${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
+    errorTitle: 'Clear failed',
+  });
 
   useEffect(() => {
     setSelectedStatus(
-      enableFromCartStatusOption && fromCartUrlActive
-        ? FROM_CART_STATUS_VALUE
-        : statusFilter || 'ALL',
+      enableTestOrdersOption && testOrdersUrlActive
+        ? TEST_ORDERS_STATUS_VALUE
+        : enableFromCartStatusOption && fromCartUrlActive
+          ? FROM_CART_STATUS_VALUE
+          : statusFilter || 'ALL',
     );
     setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive]);
+  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive, enableTestOrdersOption, testOrdersUrlActive]);
 
   // Quick-detail modal for an abandoned cart row — fetched on demand from the
   // marketing cart-detail resource route (scoped server-side to the viewer).
@@ -210,9 +231,15 @@ export function MarketingOrdersPage({
     if (overrides.status !== undefined) {
       if (overrides.status === FROM_CART_STATUS_VALUE) {
         params.delete('status');
+        params.delete('testOrders');
         params.set('fromCart', '1');
+      } else if (overrides.status === TEST_ORDERS_STATUS_VALUE) {
+        params.delete('status');
+        params.delete('fromCart');
+        params.set('testOrders', '1');
       } else {
         params.delete('fromCart');
+        params.delete('testOrders');
         if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
         else params.set('status', overrides.status);
       }
@@ -243,14 +270,16 @@ export function MarketingOrdersPage({
   // Status dropdown options shown before streamed counts hydrate — with the
   // "Cart abandonment" pseudo-option appended when the viewer may use it.
   const statusOptionsBase = useMemo(
-    () =>
-      enableFromCartStatusOption
-        ? [
-            ...MARKETING_ORDERS_STATUS_OPTIONS_BASE,
-            { value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' },
-          ]
-        : MARKETING_ORDERS_STATUS_OPTIONS_BASE,
-    [enableFromCartStatusOption],
+    () => [
+      ...MARKETING_ORDERS_STATUS_OPTIONS_BASE,
+      ...(enableFromCartStatusOption
+        ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
+        : []),
+      ...(enableTestOrdersOption
+        ? [{ value: TEST_ORDERS_STATUS_VALUE, label: 'Test orders' }]
+        : []),
+    ],
+    [enableFromCartStatusOption, enableTestOrdersOption],
   );
 
   const ordersToolbarFilterBadge = useMemo(() => {
@@ -526,6 +555,11 @@ export function MarketingOrdersPage({
                     </Await>
                   </Suspense>
                 )}
+                {isTestOrdersView && (
+                  <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
+                    Delete all test orders
+                  </Button>
+                )}
                 <PageRefreshButton />
               </>
             }
@@ -791,6 +825,9 @@ export function MarketingOrdersPage({
               ...(enableFromCartStatusOption
                 ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
                 : []),
+              ...(enableTestOrdersOption
+                ? [{ value: TEST_ORDERS_STATUS_VALUE, label: 'Test orders' }]
+                : []),
             ];
 
             return (
@@ -804,38 +841,46 @@ export function MarketingOrdersPage({
                       value: ordersInPeriodTotal,
                       valueClassName: 'text-app-fg',
                       to: buildQueryString({ status: 'ALL', page: 1 }),
+                      active: selectedStatus === 'ALL',
+                      onClick: () => setSelectedStatus('ALL'),
                     },
                     {
                       label: 'Unassigned',
                       value: unprocessedCount,
                       valueClassName: 'text-warning-600 dark:text-warning-400',
                       to: buildQueryString({ status: 'UNPROCESSED', page: 1 }),
+                      active: selectedStatus === 'UNPROCESSED',
+                      onClick: () => setSelectedStatus('UNPROCESSED'),
                     },
                     {
                       label: 'Assigned',
                       value: csAssignedCount,
                       valueClassName: 'text-info-600 dark:text-info-400',
                       to: buildQueryString({ status: 'CS_ASSIGNED', page: 1 }),
+                      active: selectedStatus === 'CS_ASSIGNED',
+                      onClick: () => setSelectedStatus('CS_ASSIGNED'),
                     },
                     {
                       label: 'Unconfirmed',
                       value: unconfirmedCount,
                       valueClassName: 'text-cyan-600 dark:text-cyan-400',
                       to: buildQueryString({ status: 'CS_ENGAGED', page: 1 }),
+                      active: selectedStatus === 'CS_ENGAGED',
+                      onClick: () => setSelectedStatus('CS_ENGAGED'),
                     },
                     {
-                      // No `to` — "Confirmed" rolls up 4 statuses, so it can't
-                      // map to a single `?status=` value without the count and
-                      // the filtered result disagreeing.
                       label: 'Confirmed',
                       value: confirmedCount,
                       valueClassName: 'text-brand-600 dark:text-brand-400',
+                      active: selectedStatus === 'CONFIRMED',
                     },
                     {
                       label: 'Delivered',
                       value: deliveredCount,
                       valueClassName: 'text-success-600 dark:text-success-400',
                       to: buildQueryString({ status: 'DELIVERED', page: 1 }),
+                      active: selectedStatus === 'DELIVERED',
+                      onClick: () => setSelectedStatus('DELIVERED'),
                     },
                     {
                       label: 'Open carts',
@@ -845,8 +890,12 @@ export function MarketingOrdersPage({
                           ? 'text-amber-600 dark:text-amber-400'
                           : 'text-app-fg',
                       title: 'Captured carts not yet recovered — tap to view the cart backlog',
+                      active: selectedStatus === FROM_CART_STATUS_VALUE,
                       ...(enableFromCartStatusOption
-                        ? { to: buildQueryString({ status: FROM_CART_STATUS_VALUE, page: 1 }) }
+                        ? {
+                            to: buildQueryString({ status: FROM_CART_STATUS_VALUE, page: 1 }),
+                            onClick: () => setSelectedStatus(FROM_CART_STATUS_VALUE),
+                          }
                         : {}),
                     },
                     { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
@@ -871,6 +920,8 @@ export function MarketingOrdersPage({
                           ? 'text-danger-600 dark:text-danger-400'
                           : 'text-app-fg',
                       to: buildQueryString({ status: 'CANCELLED', page: 1 }),
+                      active: selectedStatus === 'CANCELLED',
+                      onClick: () => setSelectedStatus('CANCELLED'),
                     },
                   ]}
                 />
@@ -999,6 +1050,11 @@ export function MarketingOrdersPage({
           columns={marketingOrderColumns}
           rows={showSkeletonRows ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}
+          rowClassName={(order) =>
+            isTestOrdersView || /^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '')
+              ? 'opacity-50 bg-surface-100 dark:bg-surface-800/40'
+              : ''
+          }
           renderMobileCard={renderMarketingOrderMobileCard}
           emptyTitle={isCartAbandonmentView ? 'No abandoned carts' : 'No orders match your filters'}
           emptyDescription={
@@ -1083,6 +1139,32 @@ export function MarketingOrdersPage({
         cartStatus="ABANDONED"
         onClose={() => setViewCartOrderId(null)}
       />
+
+      {purgeConfirmOpen && (
+        <Modal open onClose={() => setPurgeConfirmOpen(false)} maxWidth="max-w-sm" contentClassName="p-6">
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Delete all test orders</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            This will permanently delete all orders where the customer name starts with &ldquo;test&rdquo;. Only orders that haven&rsquo;t moved stock (unprocessed, assigned, engaged, cancelled) are removed.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setPurgeConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={purgeFetcher.state !== 'idle'}
+              loading={purgeFetcher.state !== 'idle'}
+              loadingText="Deleting..."
+              onClick={() => {
+                purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
+                setPurgeConfirmOpen(false);
+              }}
+            >
+              Delete all test orders
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

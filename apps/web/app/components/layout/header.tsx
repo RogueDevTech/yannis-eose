@@ -10,6 +10,7 @@ import {
   shouldShowHeaderBranchSwitcher,
 } from './header-branch-scope';
 import { getNotificationLink, getNotificationAction, formatNotificationTime, formatNotificationDate } from '~/lib/notification-links';
+import { clearLoaderCache } from '~/lib/loader-cache';
 import { useNotificationsState } from '~/contexts/notifications-state';
 interface Notification {
   id: string;
@@ -210,6 +211,10 @@ export function Header({
       return;
     }
 
+    // Every cached loader payload is branch-scoped, but the client cache key is
+    // URL-only — drop the whole cache so post-switch revalidation refetches the
+    // new branch's data instead of serving the previous branch's stale cache.
+    clearLoaderCache();
     submit(
       { intent: 'switchBranch', branchId: branchId ?? '' },
       { method: 'post', action: '/admin/branches/switch' },
@@ -263,15 +268,17 @@ export function Header({
             aria-hidden
           />
         )}
-        {branchesHydrationReady && branches && branches.length > 0 && (
-          <div className="hidden lg:flex items-center shrink-0">
-            <HeaderBranchSwitcher
-              branches={branches}
-              currentBranchId={currentBranchId ?? null}
-              userRole={user?.role ?? ''}
-            />
-          </div>
-        )}
+        {branchesHydrationReady &&
+          branches &&
+          shouldShowHeaderBranchSwitcher(branches.length, user?.role ?? '') && (
+            <div className="hidden lg:flex items-center shrink-0">
+              <HeaderBranchSwitcher
+                branches={branches}
+                currentBranchId={currentBranchId ?? null}
+                userRole={user?.role ?? ''}
+              />
+            </div>
+          )}
         {/* Mirror Mode pill — only shown when the session is mirroring another user.
             POSTs to the same /admin action that exits mirror; returns to /admin when done. */}
         {mirroredBy && (
@@ -816,6 +823,10 @@ function HeaderBranchSwitcher({
   // null branchId = "All Branches"; empty string submitted to action = null on backend
   const handleSwitch = (branchId: string | null) => {
     if (branchId === currentBranchId) { setOpen(false); return; }
+    // Every cached loader payload is branch-scoped, but the client cache key is
+    // URL-only — drop the whole cache so post-switch revalidation refetches the
+    // new branch's data instead of serving the previous branch's stale cache.
+    clearLoaderCache();
     submit(
       { intent: 'switchBranch', branchId: branchId ?? '' },
       { method: 'post', action: '/admin/branches/switch' },

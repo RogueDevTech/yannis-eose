@@ -10,6 +10,7 @@ import { isAdminLevel } from '~/lib/rbac';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { MarketingOrdersPage, type MarketingOrdersSecondaryPayload } from '~/features/marketing/MarketingOrdersPage';
 import type { Order } from '~/features/orders/types';
+import { extractApiErrorMessage } from '~/lib/api-error';
 import { handleExportReportAction } from '~/lib/export-report.server';
 import type { ExportModalPicklists } from '~/components/ui/export-modal';
 export const meta: MetaFunction = () => [
@@ -38,6 +39,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // the abandoned-cart backlog (Media Buyers see only their own campaigns'
   // carts; the backend `cart.listAbandoned` auto-scopes them).
   const fromCart = url.searchParams.get('fromCart') === '1';
+  const testOrders = url.searchParams.get('testOrders') === '1' && isAdminLevel(user);
 
   // Date filter — default to today when no params
   const periodAllTime = url.searchParams.get('period') === 'all_time';
@@ -80,8 +82,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
     mediaBuyerId,
     productId: productIdParam,
     campaignId: campaignIdParam,
+    // Marketing orders scope by the marketing branch (`orders.branch_id`), not
+    // the CS servicing branch (`orders.servicing_branch_id`) — see migration 0150.
+    branchScope: 'marketing' as const,
     ...(startDate && { startDate }),
     ...(endDate && { endDate }),
+    ...(testOrders && { testOrders: true }),
   };
   const listInputStr = encodeURIComponent(JSON.stringify(listInput));
 
@@ -122,6 +128,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Everyone who can open this page (gated on `marketing.orders`) may switch
     // to the cart-abandonment view; scope is enforced server-side per role.
     enableFromCartStatusOption: true,
+    enableTestOrdersOption:
+      isAdminLevel(user) ||
+      user.role === 'HEAD_OF_MARKETING' ||
+      user.isMarketingTeamSupervisorOnActiveBranch === true,
     isCartAbandonmentView: fromCart,
   };
 
@@ -287,6 +297,34 @@ clientLoader.hydrate = false;
 export async function action({ request }: ActionFunctionArgs) {
   const exportResponse = await handleExportReportAction(request);
   if (exportResponse) return exportResponse;
+
+  const cookie = getSessionCookie(request);
+  if (!cookie) return json({ error: 'Not authenticated' }, { status: 401 });
+
+  const form = await request.formData();
+  const intent = form.get('intent')?.toString();
+
+  if (intent === 'purgeTestOrders') {
+    const user = await requirePermission(request, 'marketing.orders');
+    const canPurge =
+      isAdminLevel(user) ||
+      user.role === 'HEAD_OF_MARKETING' ||
+      user.isMarketingTeamSupervisorOnActiveBranch === true;
+    if (!canPurge) {
+      return json({ error: 'Not authorized' }, { status: 403 });
+    }
+    const res = await apiRequest<unknown>('/trpc/orders.purgeTestOrders', {
+      method: 'POST',
+      cookie,
+      body: {},
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to clear test orders') }, { status: res.status > 599 ? 500 : res.status });
+    }
+    const data = (res.data as { result?: { data?: { deleted: number; skipped: number } } })?.result?.data;
+    return json({ success: true, deleted: data?.deleted ?? 0, skipped: data?.skipped ?? 0 });
+  }
+
   return json({ error: 'Unknown action' }, { status: 400 });
 }
 
@@ -315,6 +353,7 @@ export default function MarketingOrdersRoute() {
     viewerUserId: ordersShell.viewerUserId,
     activeMediaBuyerFilter: ordersShell.activeMediaBuyerFilter,
     enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
+    enableTestOrdersOption: ordersShell.enableTestOrdersOption,
     isCartAbandonmentView: ordersShell.isCartAbandonmentView,
   };
   return (

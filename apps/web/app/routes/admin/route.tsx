@@ -195,13 +195,19 @@ export default function AdminLayout() {
 
   useEffect(() => {
     let cancelled = false;
+    // An empty result is almost always a transient `branches.list` failure
+    // (a request aborted by rapid branch switching) — every user has at least
+    // one branch. Keep the last-known-good non-empty list rather than blinking
+    // the switcher out; the next loader run refills it.
+    const apply = (value: Array<{ id: string; name: string; code: string }>) => {
+      if (cancelled) return;
+      setResolvedBranches((prev) =>
+        value.length === 0 && prev && prev.length > 0 ? prev : value,
+      );
+    };
     Promise.resolve(branches)
-      .then((value) => {
-        if (!cancelled) setResolvedBranches(value);
-      })
-      .catch(() => {
-        if (!cancelled) setResolvedBranches([]);
-      });
+      .then((value) => apply(value))
+      .catch(() => apply([]));
     return () => {
       cancelled = true;
     };

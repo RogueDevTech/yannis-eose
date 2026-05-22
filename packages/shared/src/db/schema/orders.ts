@@ -72,8 +72,19 @@ export const orders = pgTable('orders', {
    * the order on CS / Logistics detail pages.
    */
   customFields: jsonb('custom_fields'),
-  /** Branch this order belongs to. Set on creation, enforced by RLS. */
+  /**
+   * MARKETING branch — the campaign/form branch this order is attributed to.
+   * Set once on creation, never changes. Drives MB / HoM / Team Analysis /
+   * Marketing P&L. NOT the CS servicing branch — see `servicingBranchId`.
+   */
   branchId: uuid('branch_id'),
+  /**
+   * CS SERVICING branch — which branch's CS team works this order. Resolved
+   * from CS order routing rules at creation; falls back to `branchId` when no
+   * rule matches. Drives CS queues, claim dispatch, and logistics scoping.
+   * Migration 0150.
+   */
+  servicingBranchId: uuid('servicing_branch_id'),
   /**
    * Back-link to the originating cart_abandonments row when this order was
    * recovered from a dropped-off cart (CS-led recovery OR direct edge-form

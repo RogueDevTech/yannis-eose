@@ -221,6 +221,8 @@ export function UserCreatePage({
     success?: boolean;
     requiresApproval?: boolean;
     message?: string;
+    requiresDuplicateConfirmation?: boolean;
+    duplicates?: Array<{ id: string; name: string; status: string }>;
   }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
@@ -237,6 +239,12 @@ export function UserCreatePage({
       errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [actionData?.error]);
+
+  // Open the duplicate-name modal whenever the latest submission tripped the
+  // server guard; close it on any other response (success / error).
+  useEffect(() => {
+    setDuplicateModalOpen(actionData?.requiresDuplicateConfirmation === true);
+  }, [actionData]);
 
   const [selectedRole, setSelectedRole] = useState(editingUser?.role ?? '');
   const [accountName, setAccountName] = useState(editingUser?.name ?? '');
@@ -262,11 +270,24 @@ export function UserCreatePage({
     setSelectedBranchIds([defaultMembershipBranchId]);
     setSelectedBranchId(defaultMembershipBranchId);
   }, [defaultMembershipBranchId, selectedBranchIds.length, isEditMode]);
+
+  // A changed name invalidates a prior duplicate-name confirmation — the next
+  // submit re-runs the server guard against the new value.
+  useEffect(() => {
+    setConfirmedDuplicateName(false);
+  }, [accountName]);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>(
     editingUser?.productIds ?? [],
   );
   const [compensationMode, setCompensationMode] = useState<'existing' | 'inline'>('inline');
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  // Soft duplicate-name guard. The server returns `requiresDuplicateConfirmation`
+  // when the typed name closely matches an existing staff member; the modal
+  // surfaces the matches so the admin can reactivate that account instead.
+  // `confirmedDuplicateName` flips on "Create anyway" so the resubmit carries
+  // the flag — reset whenever the name changes (a new name = re-check).
+  const [duplicateModalOpen, setDuplicateModalOpen] = useState(false);
+  const [confirmedDuplicateName, setConfirmedDuplicateName] = useState(false);
   // CEO directive 2026-05-03: head roles + HR Manager are no longer singletons.
   // The form still surfaces a conflict warning so admins see existing holders,
   // but they can confirm and proceed. `confirmedConflict` flips after the user
@@ -566,6 +587,10 @@ export function UserCreatePage({
       >
         {/* Update intent — only sent in edit mode */}
         {isEditMode && <input type="hidden" name="intent" value="update" />}
+        {/* Set after the admin confirms the duplicate-name warning modal. */}
+        {confirmedDuplicateName && (
+          <input type="hidden" name="confirmDuplicateName" value="true" />
+        )}
         {/* Hidden fields for JSON arrays */}
         {showProductAssignment && selectedProductIds.length > 0 && (
           <input type="hidden" name="productIds" value={JSON.stringify(selectedProductIds)} />
@@ -1159,6 +1184,63 @@ export function UserCreatePage({
               }}
             >
               Continue anyway
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {duplicateModalOpen && (actionData?.duplicates?.length ?? 0) > 0 && (
+        <Modal
+          open
+          onClose={() => setDuplicateModalOpen(false)}
+          maxWidth="max-w-md"
+          contentClassName="p-6"
+        >
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Possible duplicate staff member</h3>
+          <p className="text-sm text-app-fg-muted mb-3">
+            {actionData?.message ??
+              'A staff member with a very similar name already exists.'}
+          </p>
+          <ul className="mb-3 space-y-1.5 rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
+            {actionData?.duplicates?.map((d) => (
+              <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                <Link
+                  to={`${usersBasePath}/${d.id}`}
+                  className="text-brand-500 hover:text-brand-600 underline truncate"
+                  onClick={() => setDuplicateModalOpen(false)}
+                >
+                  {d.name}
+                </Link>
+                <span className="text-2xs uppercase tracking-wide text-app-fg-muted flex-shrink-0">
+                  {d.status.charAt(0) + d.status.slice(1).toLowerCase()}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-app-fg-muted mb-4">
+            If this is the same person, open their account and reactivate it instead of creating a
+            duplicate — a new account starts a separate record with its own orders and history.
+          </p>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setDuplicateModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                setConfirmedDuplicateName(true);
+                setDuplicateModalOpen(false);
+                // Resubmit once React has rendered the hidden confirm field.
+                requestAnimationFrame(() => {
+                  if (typeof document !== 'undefined') {
+                    const form = document.querySelector<HTMLFormElement>('form[data-branch-scoped-action]');
+                    form?.requestSubmit();
+                  }
+                });
+              }}
+            >
+              Create anyway
             </Button>
           </div>
         </Modal>

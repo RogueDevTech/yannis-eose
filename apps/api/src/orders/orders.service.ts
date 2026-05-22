@@ -1157,14 +1157,21 @@ export class OrdersService {
       }
     }
 
-    let branchId = await this.resolveBranchIdForNewOrder({
+    // MARKETING branch — the campaign/form branch this order is attributed to.
+    // Set once here, never changes. Drives MB / HoM / Team Analysis reporting.
+    const branchId = await this.resolveBranchIdForNewOrder({
       campaignId: orderInput.campaignId ?? null,
       mediaBuyerId: orderInput.mediaBuyerId ?? null,
       fallbackBranchId: null,
     });
 
-    // CS order routing: if the product is mapped to a different servicing branch,
-    // move the order there so it appears where CS will work it.
+    // CS SERVICING branch — which branch's CS team works this order. CS order
+    // routing may map the product to a different branch; if so the order is
+    // SERVICED there while staying ATTRIBUTED to its marketing branch above.
+    // When no routing rule matches, CS services it in the marketing branch.
+    // NOTE: routing must NEVER overwrite `branchId` — that was the cross-branch
+    // leak fixed in migration 0150.
+    let servicingBranchId = branchId;
     if (branchId) {
       const primaryProductId = orderInput.items[0]?.productId ?? null;
       const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
@@ -1172,7 +1179,7 @@ export class OrdersService {
         primaryProductId,
       );
       if (servicingBranch) {
-        branchId = servicingBranch;
+        servicingBranchId = servicingBranch;
       }
     }
 
@@ -1236,6 +1243,7 @@ export class OrdersService {
           campaignId: orderInput.campaignId ?? null,
           mediaBuyerId: orderInput.mediaBuyerId ?? null,
           branchId: branchId ?? null,
+          servicingBranchId: servicingBranchId ?? null,
           customerName: orderInput.customerName,
           customerPhoneHash: orderInput.customerPhoneHash,
           customerPhone: orderInput.customerPhone ?? null,
@@ -1288,6 +1296,7 @@ export class OrdersService {
       orderId: order.id,
       productName: 'Order created',
       branchId: order.branchId ?? null,
+      servicingBranchId: servicingBranchId ?? null,
       mediaBuyerId: order.mediaBuyerId ?? null,
     });
 
@@ -1472,13 +1481,16 @@ export class OrdersService {
       }
     }
 
-    let branchId = await this.resolveBranchIdForNewOrder({
+    // MARKETING branch — attribution. Set once, never changes.
+    const branchId = await this.resolveBranchIdForNewOrder({
       campaignId: input.campaignId ?? null,
       mediaBuyerId: input.mediaBuyerId ?? null,
       fallbackBranchId: sessionBranchId ?? null,
     });
 
-    // CS order routing: move order to the servicing branch if routing applies
+    // CS SERVICING branch — routing may service the order in a different
+    // branch, but must NEVER overwrite the marketing `branchId` (migration 0150).
+    let servicingBranchId = branchId;
     if (branchId) {
       const primaryProductId = input.items?.[0]?.productId ?? null;
       const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
@@ -1486,7 +1498,7 @@ export class OrdersService {
         primaryProductId,
       );
       if (servicingBranch) {
-        branchId = servicingBranch;
+        servicingBranchId = servicingBranch;
       }
     }
 
@@ -1514,6 +1526,7 @@ export class OrdersService {
           campaignId: input.campaignId ?? null,
           mediaBuyerId: input.mediaBuyerId ?? null,
           branchId: branchId ?? null,
+          servicingBranchId: servicingBranchId ?? null,
           assignedCsId: actorId,
           customerName: input.customerName,
           customerPhoneHash,
@@ -1566,10 +1579,11 @@ export class OrdersService {
       orderId: order.id,
       productName: 'Offline order created',
       branchId: order.branchId ?? null,
+      servicingBranchId: servicingBranchId ?? null,
       mediaBuyerId: order.mediaBuyerId ?? null,
     });
     this.events.emitToUser(actorId, 'order:assigned', { orderId: order.id });
-    this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id }, order.branchId ?? null);
+    this.events.emitToRoom('cs-all', 'order:new', { orderId: order.id }, servicingBranchId ?? null);
 
     this.notifications.enqueueCreate({
       userId: actorId,
@@ -2512,9 +2526,11 @@ export class OrdersService {
     listOpts?: {
       assignedCloserViewerId?: string;
       searchIncludeCustomerPhone?: boolean;
-      /** `'campaign'` scopes the branch filter by campaign attribution — see
-       *  `orderBranchScopeCondition`. Marketing (HoM) viewers pass `'campaign'`. */
-      branchScope?: 'order' | 'campaign';
+      /** Branch scoping — see `orderBranchScopeCondition`. `'marketing'` filters
+       *  by `orders.branch_id` (campaign branch); `'servicing'` (default) by
+       *  `orders.servicing_branch_id` (CS branch). Marketing viewers pass
+       *  `'marketing'`. */
+      branchScope?: 'servicing' | 'marketing';
     },
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
@@ -2587,6 +2603,10 @@ export class OrdersService {
       // the partial index `orders_cart_id_idx` (migration 0142).
       conditions.push(sql`${schema.orders.cartId} IS NOT NULL`);
     }
+    if (input.testOrders) {
+      // Same whole-word "test" match as TestOrderPurgeService.
+      conditions.push(sql`btrim(${schema.orders.customerName}) ~* '^test([^[:alpha:]]|$)'`);
+    }
     if (input.search) {
       const trimmed = input.search.trim();
       if (trimmedSearchLooksLikeUuid(trimmed)) {
@@ -2641,15 +2661,17 @@ export class OrdersService {
         input.assignedCsId &&
         input.assignedCsId === listOpts.assignedCloserViewerId
       ) {
-        // CS-closer "my branch OR assigned to me" path — always servicing-branch.
+        // CS-closer "my servicing branch OR assigned to me" path — a closer
+        // sees the pool of orders their branch services, plus any order
+        // assigned to them even if attributed/serviced elsewhere.
         const branchOrAssigned = or(
-          eq(schema.orders.branchId, branchId),
+          eq(schema.orders.servicingBranchId, branchId),
           eq(schema.orders.assignedCsId, input.assignedCsId),
         );
         if (branchOrAssigned) conditions.push(branchOrAssigned);
       } else {
         conditions.push(
-          this.orderBranchScopeCondition(branchId, listOpts?.branchScope ?? 'order'),
+          this.orderBranchScopeCondition(branchId, listOpts?.branchScope ?? 'servicing'),
         );
       }
     }
@@ -2857,7 +2879,8 @@ export class OrdersService {
     const lastDay = `${year}-${pad(month)}-${pad(lastDayNum)}`;
 
     const base: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
-    if (branchId) base.push(eq(schema.orders.branchId, branchId));
+    // CS schedule calendar — scope by the servicing branch (migration 0150).
+    if (branchId) base.push(eq(schema.orders.servicingBranchId, branchId));
     if (input.supervisorScope) {
       const { csUserIds, mediaBuyerIds } = input.supervisorScope;
       const orParts = [];
@@ -3415,6 +3438,7 @@ export class OrdersService {
       logisticsLocationId: updated.logisticsLocationId,
       riderId: updated.riderId,
       branchId: updated.branchId ?? null,
+      servicingBranchId: updated.servicingBranchId ?? null,
     });
 
     // Persistent notifications for logistics flow
@@ -3681,13 +3705,16 @@ export class OrdersService {
       const actorId = EDGE_FORM_ACTOR_ID;
 
       const { cartId, ...orderInput } = payload;
-      let paystackBranchId = await this.resolveBranchIdForNewOrder({
+      // MARKETING branch — attribution. Set once, never changes.
+      const paystackBranchId = await this.resolveBranchIdForNewOrder({
         campaignId: orderInput.campaignId ?? null,
         mediaBuyerId: orderInput.mediaBuyerId ?? null,
         fallbackBranchId: null,
       });
 
-      // CS order routing: move order to the servicing branch if routing applies
+      // CS SERVICING branch — routing may service the order elsewhere, but must
+      // NEVER overwrite the marketing `branchId` (migration 0150).
+      let paystackServicingBranchId = paystackBranchId;
       if (paystackBranchId) {
         const primaryProductId = orderInput.items?.[0]?.productId ?? null;
         const servicingBranch = await this.csOrderRouting.resolveServicingBranchForProduct(
@@ -3695,7 +3722,7 @@ export class OrdersService {
           primaryProductId,
         );
         if (servicingBranch) {
-          paystackBranchId = servicingBranch;
+          paystackServicingBranchId = servicingBranch;
         }
       }
 
@@ -3706,6 +3733,7 @@ export class OrdersService {
             campaignId: orderInput.campaignId ?? null,
             mediaBuyerId: orderInput.mediaBuyerId ?? null,
             branchId: paystackBranchId ?? null,
+            servicingBranchId: paystackServicingBranchId ?? null,
             customerName: orderInput.customerName,
             customerPhoneHash: orderInput.customerPhoneHash,
             customerPhone: orderInput.customerPhone ?? null,
@@ -3753,6 +3781,7 @@ export class OrdersService {
         orderId: order.id,
         productName: 'Order created',
         branchId: order.branchId ?? null,
+        servicingBranchId: paystackServicingBranchId ?? null,
         mediaBuyerId: order.mediaBuyerId ?? null,
       });
       this.notifications.enqueueCreateForRole('HEAD_OF_CS', {
@@ -3887,6 +3916,15 @@ export class OrdersService {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
     const orderRow = existingRows[0];
+
+    // Block assignment of test orders — they should be purged, not worked.
+    if (/^test([^a-zA-Z]|$)/i.test(orderRow.customerName?.trim() ?? '')) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: 'Test orders cannot be assigned to closers. Delete them from the Test orders filter instead.',
+      });
+    }
+
     const ob = orderRow.branchId;
     if (!ob) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order has no branch context' });
@@ -3916,11 +3954,11 @@ export class OrdersService {
       orderId,
       customerName: updated.customerName,
     });
-    // Notify cs-all so CS overview (Head of CS) refreshes
+    // Notify cs-all so CS overview (Head of CS) refreshes — servicing branch
     this.events.emitToRoom('cs-all', 'order:assigned', {
       orderId,
       customerName: updated.customerName,
-    }, updated.branchId ?? null);
+    }, updated.servicingBranchId ?? null);
     this.notifications.enqueueCreate({
       userId: csCloserId,
       type: 'order:assigned',
@@ -4302,28 +4340,22 @@ export class OrdersService {
   }
 
   /**
-   * Branch-scoping WHERE fragment for order queries.
+   * Branch-scoping WHERE fragment for order queries (migration 0150).
    *
-   * - `'order'` (default): orders physically filed on the branch — `orders.branch_id`,
-   *   which since the 2026-05-22 routing change is the **CS servicing branch**.
-   *   Correct for CS / Sales / Logistics surfaces.
-   * - `'campaign'`: orders whose **campaign** belongs to the branch — the
-   *   **marketing attribution** branch. Used by Head-of-Marketing surfaces so a
-   *   marketing order CS-routed to a different servicing branch still counts
-   *   under the branch that actually ran the campaign. Orders with no campaign
-   *   (e.g. offline orders) are not marketing-attributable and fall out.
+   * - `'servicing'` (default): the CS branch that works the order —
+   *   `orders.servicing_branch_id`. Correct for CS / Sales / Logistics surfaces.
+   * - `'marketing'`: the campaign/form branch the order is attributed to —
+   *   `orders.branch_id`. Used by Marketing surfaces (MB / HoM) so an order
+   *   CS-routed to a different servicing branch still counts under the branch
+   *   that actually ran the campaign. `orders.branch_id` is stamped once at
+   *   creation and never changes, so past orders correctly stay in their
+   *   original marketing branch even after the campaign is moved.
    */
-  private orderBranchScopeCondition(branchId: string, scope: 'order' | 'campaign') {
-    if (scope === 'campaign') {
-      return inArray(
-        schema.orders.campaignId,
-        this.db
-          .select({ id: schema.campaigns.id })
-          .from(schema.campaigns)
-          .where(eq(schema.campaigns.branchId, branchId)),
-      );
+  private orderBranchScopeCondition(branchId: string, scope: 'servicing' | 'marketing') {
+    if (scope === 'marketing') {
+      return eq(schema.orders.branchId, branchId);
     }
-    return eq(schema.orders.branchId, branchId);
+    return eq(schema.orders.servicingBranchId, branchId);
   }
 
   /**
@@ -4332,7 +4364,7 @@ export class OrdersService {
    * Optional assignedCsId filters to that Sales closer's orders (for Sales Orders page).
    * Optional logisticsLocationId filters to that 3PL location (for Logistics Orders page / TPL_MANAGER scoping).
    * Optional startDate/endDate filter by orders.createdAt (when provided: counts = orders created in period).
-   * `branchScope` — see `orderBranchScopeCondition`. Marketing viewers pass `'campaign'`.
+   * `branchScope` — see `orderBranchScopeCondition`. Marketing viewers pass `'marketing'`.
    */
   async getStatusCounts(
     mediaBuyerId?: string,
@@ -4343,7 +4375,7 @@ export class OrdersService {
     branchId?: string | null,
     statuses?: Array<(typeof schema.orders.$inferSelect)['status']>,
     supervisorScope?: OrdersAggregateSupervisorScope,
-    branchScope: 'order' | 'campaign' = 'order',
+    branchScope: 'servicing' | 'marketing' = 'servicing',
   ) {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     appendOrdersAggregateScopeConditions(conditions, {
@@ -4425,7 +4457,7 @@ export class OrdersService {
       isNull(schema.orders.deletedAt),
     ];
     if (branchId) {
-      conditions.push(eq(schema.orders.branchId, branchId));
+      conditions.push(eq(schema.orders.servicingBranchId, branchId));
     }
     if (onlyAgentId) {
       conditions.push(eq(schema.orders.assignedCsId, onlyAgentId));
@@ -4497,7 +4529,7 @@ export class OrdersService {
           and(
             isNull(schema.orders.deletedAt),
             inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
-            ...(branchId && !pendingCountsAcrossAllBranches ? [eq(schema.orders.branchId, branchId)] : []),
+            ...(branchId && !pendingCountsAcrossAllBranches ? [eq(schema.orders.servicingBranchId, branchId)] : []),
           ),
         )
         .groupBy(schema.orders.assignedCsId),
@@ -4530,7 +4562,7 @@ export class OrdersService {
       inArray(schema.orders.status, [...workloadStatuses]),
     ];
     if (branchId) {
-      conditions.push(eq(schema.orders.branchId, branchId));
+      conditions.push(eq(schema.orders.servicingBranchId, branchId));
     }
 
     const orderRows = await this.db
@@ -4655,7 +4687,7 @@ export class OrdersService {
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.deliveredAt, end));
     }
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
     const whereClause = and(...conditions);
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
 
@@ -4729,7 +4761,7 @@ export class OrdersService {
       eq(schema.orders.status, 'DELIVERED'),
       gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
     ];
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
 
     const rows = await this.db
       .select({
@@ -4779,7 +4811,7 @@ export class OrdersService {
       eq(schema.orders.status, 'DELIVERED'),
       gte(schema.orders.deliveredAt, monthStartUtc), // bounds scan to current month
     ];
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
 
     const [row] = await this.db
       .select({
@@ -4818,7 +4850,7 @@ export class OrdersService {
       end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.deliveredAt, end));
     }
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
       assignedCsId: extra?.csCloserId,
@@ -4869,6 +4901,7 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     extra?: OrdersAggregateScopeFilters,
+    branchScope: 'servicing' | 'marketing' = 'servicing',
   ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
     if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
@@ -4878,7 +4911,7 @@ export class OrdersService {
       if (!endDate.includes('T')) end.setHours(23, 59, 59, 999);
       conditions.push(lte(schema.orders.createdAt, end));
     }
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
       assignedCsId: extra?.csCloserId,
@@ -5031,7 +5064,7 @@ export class OrdersService {
           isNull(schema.orders.deletedAt),
           inArray(schema.orders.assignedCsId, agentIds),
           inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
-          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
         ),
       )
       .groupBy(schema.orders.assignedCsId);
@@ -5153,13 +5186,13 @@ export class OrdersService {
 
     const orderWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
-      ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+      ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(orderDateFilter ? [orderDateFilter] : []),
     );
     const deliveredWhere = and(
       inArray(schema.orders.assignedCsId, agentIds),
       deliveredOrRemitted,
-      ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+      ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
       ...(deliveredDateFilter ? [deliveredDateFilter] : []),
     );
 
@@ -5195,7 +5228,7 @@ export class OrdersService {
             .where(
               and(
                 inArray(schema.callLogs.agentId, agentIds),
-                eq(schema.orders.branchId, branchId),
+                eq(schema.orders.servicingBranchId, branchId),
                 ...(callLogsDateFilter ? [callLogsDateFilter] : []),
               ),
             )
@@ -5405,7 +5438,7 @@ export class OrdersService {
       .where(eq(schema.orders.id, orderId));
 
     this.events.emitToUser(targetAgent.agentId, 'order:assigned', { orderId });
-    this.events.emitToRoom('cs-all', 'order:assigned', { orderId }, orderRow?.branchId ?? null);
+    this.events.emitToRoom('cs-all', 'order:assigned', { orderId }, servicingBranchId ?? null);
     this.notifications.enqueueCreate({
       userId: targetAgent.agentId,
       type: 'order:assigned',
@@ -5475,8 +5508,15 @@ export class OrdersService {
     }
 
     if (strategy === 'claim') {
-      // Claim mode: leave order in UNPROCESSED, broadcast to claim queue
-      this.events.emitToRoom('cs-all', 'order:claim_available', { orderId }, branchId);
+      // Claim mode: leave order in UNPROCESSED, broadcast to claim queue.
+      // Scope to the servicing branch the routing rule resolved (falls back to
+      // the order's owner branch when no rule matched).
+      this.events.emitToRoom(
+        'cs-all',
+        'order:claim_available',
+        { orderId },
+        routing?.servicingBranchId ?? branchId,
+      );
       return;
     }
 
@@ -5520,7 +5560,10 @@ export class OrdersService {
     }
 
     const [claimedRow] = await this.db
-      .select({ customerName: schema.orders.customerName, branchId: schema.orders.branchId })
+      .select({
+        customerName: schema.orders.customerName,
+        servicingBranchId: schema.orders.servicingBranchId,
+      })
       .from(schema.orders)
       .where(eq(schema.orders.id, orderId))
       .limit(1);
@@ -5532,7 +5575,7 @@ export class OrdersService {
     this.events.emitToRoom('cs-all', 'order:assigned', {
       orderId,
       customerName: claimedRow?.customerName ?? undefined,
-    }, claimedRow?.branchId ?? actor.currentBranchId ?? null);
+    }, claimedRow?.servicingBranchId ?? actor.currentBranchId ?? null);
     this.events.emitToRoom('cs-all', 'order:status_changed', {
       orderId,
       oldStatus: 'UNPROCESSED',
@@ -5555,7 +5598,7 @@ export class OrdersService {
       actorName: actor.name,
       description: `${actor.name} claimed this order`,
       metadata: { agentId: actor.id, mode: 'claim' },
-      branchId: claimedRow?.branchId ?? actor.currentBranchId ?? null,
+      branchId: claimedRow?.servicingBranchId ?? actor.currentBranchId ?? null,
     });
 
     return { success: true };
@@ -5586,7 +5629,7 @@ export class OrdersService {
         and(
           eq(schema.orders.status, 'UNPROCESSED'),
           sql`(${schema.orders.lockedUntil} IS NULL OR ${schema.orders.lockedUntil} < NOW())`,
-          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
         ),
       )
       .orderBy(asc(schema.orders.createdAt))
@@ -6244,6 +6287,7 @@ export class OrdersService {
         logisticsLocationId: order.logisticsLocationId,
         riderId: order.riderId,
         branchId: order.branchId ?? null,
+        servicingBranchId: order.servicingBranchId ?? null,
       });
 
       // Notify Head of CS about max-retry cancellation
@@ -6251,7 +6295,7 @@ export class OrdersService {
         orderId,
         customerName: order.customerName,
         attempts: currentAttempts,
-      }, order.branchId ?? null);
+      }, order.servicingBranchId ?? null);
       void this.writeTimelineEvent({
         orderId,
         eventType: 'ORDER_CANCELLED',
@@ -6414,7 +6458,8 @@ export class OrdersService {
             eq(schema.orders.status, 'CS_ASSIGNED'),
             eq(schema.orders.status, 'CS_ENGAGED'),
           ),
-          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+          // CS callback queue — scope by the servicing branch (migration 0150).
+          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
         ),
       )
       .orderBy(asc(schema.orders.callbackScheduledAt));
@@ -6455,7 +6500,7 @@ export class OrdersService {
         });
 
         // Also push to the CS room so the queue tab refreshes
-        this.events.emitToRoom('cs-all', 'order:callback_due', { orderId: order.id }, order.branchId ?? null);
+        this.events.emitToRoom('cs-all', 'order:callback_due', { orderId: order.id }, order.servicingBranchId ?? null);
       }
     } catch {
       // Cron failure is non-fatal — will retry in 2 minutes
@@ -6499,7 +6544,7 @@ export class OrdersService {
       .where(
         and(
           inArray(schema.orders.isDuplicate, ['FLAGGED', 'POSSIBLY_DUPLICATE']),
-          ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+          ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
         ),
       )
       .orderBy(desc(schema.orders.createdAt));
@@ -6515,7 +6560,7 @@ export class OrdersService {
         .where(
           and(
             inArray(schema.orders.id, originalIds),
-            ...(branchId ? [eq(schema.orders.branchId, branchId)] : []),
+            ...(branchId ? [eq(schema.orders.servicingBranchId, branchId)] : []),
           ),
         );
       for (const row of originalRows) originalById.set(row.id, row);
@@ -7199,7 +7244,11 @@ export class OrdersService {
     for (const orderId of orderIds) {
       try {
         const [order] = await this.db
-          .select({ id: schema.orders.id, branchId: schema.orders.branchId, status: schema.orders.status })
+          .select({
+            id: schema.orders.id,
+            servicingBranchId: schema.orders.servicingBranchId,
+            status: schema.orders.status,
+          })
           .from(schema.orders)
           .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
           .limit(1);
@@ -7209,8 +7258,10 @@ export class OrdersService {
           continue;
         }
 
+        // Inter-branch CS routing moves the *servicing* branch only — marketing
+        // attribution (`branch_id` + media buyer credit) is preserved. Migration 0150.
         const updateFields: Record<string, unknown> = {
-          branchId: targetBranchId,
+          servicingBranchId: targetBranchId,
           status: 'UNPROCESSED',
           assignedCsId: null,
           updatedAt: new Date(),
@@ -7242,8 +7293,8 @@ export class OrdersService {
           actorName: actor.name ?? null,
           description,
           metadata: {
-            previousBranchId: order.branchId,
-            targetBranchId,
+            previousServicingBranchId: order.servicingBranchId,
+            targetServicingBranchId: targetBranchId,
             previousStatus: order.status,
             clearMediaBuyer: opts?.clearMediaBuyer ?? false,
           },

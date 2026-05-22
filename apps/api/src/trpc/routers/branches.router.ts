@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
-import { eq, and, inArray, count, asc, sql } from 'drizzle-orm';
+import { eq, and, or, inArray, count, asc, sql } from 'drizzle-orm';
 import { router, authedProcedure, permissionProcedure } from '../trpc';
 import { db as schema } from '@yannis/shared';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -80,9 +80,41 @@ export function getBranchTeamsService(): BranchTeamsService {
 }
 
 /**
+ * Branch IDs a Media Buyer may scope to in the header switcher: current
+ * memberships UNION every branch their own orders / campaigns are attributed
+ * to. A buyer moved off a branch keeps the branch in this set so they can
+ * still open it as a read-only data lens and review what they created there.
+ * Attribution is by ownership (`media_buyer_id`), so this never widens what a
+ * buyer can see beyond their own data.
+ */
+async function mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
+  const db = getDb();
+  const [memberships, orderBranches, campaignBranches] = await Promise.all([
+    db
+      .select({ branchId: schema.userBranches.branchId })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, userId)),
+    db
+      .selectDistinct({ branchId: schema.orders.branchId })
+      .from(schema.orders)
+      .where(eq(schema.orders.mediaBuyerId, userId)),
+    db
+      .selectDistinct({ branchId: schema.campaigns.branchId })
+      .from(schema.campaigns)
+      .where(eq(schema.campaigns.mediaBuyerId, userId)),
+  ]);
+  const ids = new Set<string>();
+  for (const r of [...memberships, ...orderBranches, ...campaignBranches]) {
+    if (r.branchId) ids.add(r.branchId);
+  }
+  return [...ids];
+}
+
+/**
  * Inline branch list for cross-router bundles. Mirrors `branches.list` (admin
- * sees all, others see their memberships only) and reuses the same Redis cache.
- * Exported so `*PageBundle` procedures can avoid a second HTTP round-trip.
+ * sees all, Media Buyers see their data-footprint branches, everyone else
+ * their memberships only) and reuses the same Redis cache. Exported so
+ * `*PageBundle` procedures can avoid a second HTTP round-trip.
  */
 export async function listBranchesForUser(user: {
   id: string;
@@ -108,12 +140,16 @@ export async function listBranchesForUser(user: {
     if (seesAll) {
       return db.select().from(schema.branches);
     }
-    const memberships = await db
-      .select({ branchId: schema.userBranches.branchId })
-      .from(schema.userBranches)
-      .where(eq(schema.userBranches.userId, user.id));
-    if (memberships.length === 0) return [];
-    const branchIds = memberships.map((m) => m.branchId);
+    const branchIds =
+      user.role === 'MEDIA_BUYER'
+        ? await mediaBuyerBranchScopeIds(user.id)
+        : (
+            await db
+              .select({ branchId: schema.userBranches.branchId })
+              .from(schema.userBranches)
+              .where(eq(schema.userBranches.userId, user.id))
+          ).map((m) => m.branchId);
+    if (branchIds.length === 0) return [];
     return db
       .select()
       .from(schema.branches)
@@ -402,7 +438,15 @@ export const branchesRouter = router({
           orderCount: count(),
         })
         .from(schema.orders)
-        .where(eq(schema.orders.branchId, input.branchId))
+        // Branch overview — count every order this branch touches, whether it
+        // ran the campaign (marketing branch) or works it (servicing branch).
+        // Migration 0150 split these into two columns.
+        .where(
+          or(
+            eq(schema.orders.branchId, input.branchId),
+            eq(schema.orders.servicingBranchId, input.branchId),
+          ),
+        )
         .groupBy(schema.orders.status);
 
       let totalOrders = 0;
@@ -1294,15 +1338,35 @@ export const branchesRouter = router({
       const db = getDb();
       const sessionStore = getSessionStore();
 
-      // null = "All Branches" — only SuperAdmin may clear branch context
+      const isAdminClass =
+        ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+      const isMediaBuyer = ctx.user.role === 'MEDIA_BUYER';
+
+      // null = "All Branches". Admin-class clears branch context org-wide; a
+      // Media Buyer clears it to view ALL of their own orders across every
+      // branch (ownership-scoped, so still only their data). Anyone else may
+      // not run unscoped.
       if (input.branchId === null) {
-        if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
+        if (!isAdminClass && !isMediaBuyer) {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'Only SuperAdmin can view all branches',
           });
         }
-      } else if (ctx.user.role !== 'SUPER_ADMIN' && ctx.user.role !== 'ADMIN') {
+      } else if (isMediaBuyer) {
+        // A Media Buyer may switch to any branch in their data footprint —
+        // current memberships PLUS branches their own orders/campaigns are
+        // attributed to. A branch they were removed from stays reachable as a
+        // read-only data lens; branch-scoped mutations are blocked server-side
+        // (see `blockMediaBuyerMutationsOutsideMemberBranch` in trpc.ts).
+        const scopeIds = await mediaBuyerBranchScopeIds(ctx.user.id);
+        if (!scopeIds.includes(input.branchId)) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'You have no orders or campaigns in this branch',
+          });
+        }
+      } else if (!isAdminClass) {
         const membership = await db
           .select({ branchId: schema.userBranches.branchId })
           .from(schema.userBranches)

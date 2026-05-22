@@ -296,7 +296,10 @@ export class FinanceService {
       orderConditions.push(lte(schema.orders.deliveredAt, new Date(input.endDate)));
     }
     if (input.branchId) {
-      orderConditions.push(eq(schema.orders.branchId, input.branchId));
+      // P&L follows the CS servicing branch — the branch that actually worked
+      // and delivered the order (migration 0150). `orders.branch_id` is the
+      // marketing attribution branch and is reported on Marketing surfaces.
+      orderConditions.push(eq(schema.orders.servicingBranchId, input.branchId));
     }
     if (input.mediaBuyerId) {
       // Optional MB filter — narrows revenue (delivered orders attributed to MB)

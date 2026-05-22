@@ -441,7 +441,9 @@ export const messagingRouter = router({
             totalAmount: schema.orders.totalAmount,
             paymentStatus: schema.orders.paymentStatus,
             preferredDeliveryDate: schema.orders.preferredDeliveryDate,
-            branchId: schema.orders.branchId,
+            // Outbound messaging is a CS/logistics action — scope the message
+            // row to the order's servicing branch (migration 0150).
+            branchId: schema.orders.servicingBranchId,
           })
           .from(schema.orders)
           .where(eq(schema.orders.id, input.orderId))

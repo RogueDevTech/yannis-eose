@@ -109,7 +109,32 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: msg, rowIndex }, { status: 400 });
     }
 
-    const result = (res.data as { result?: { data?: { requiresApproval?: boolean } } })?.result?.data;
+    const result = (
+      res.data as {
+        result?: {
+          data?: {
+            requiresApproval?: boolean;
+            requiresDuplicateConfirmation?: boolean;
+            message?: string;
+          };
+        };
+      }
+    )?.result?.data;
+    // Soft duplicate-name guard tripped — flag the row as failed rather than
+    // silently creating a duplicate account. HR reviews it and re-imports or
+    // reactivates the existing person. (Interactive Add Staff offers a
+    // "create anyway" override; a bulk import deliberately doesn't.)
+    if (result?.requiresDuplicateConfirmation) {
+      return json(
+        {
+          error:
+            result.message ??
+            'A staff member with a very similar name already exists — skipped to avoid a duplicate.',
+          rowIndex,
+        },
+        { status: 400 },
+      );
+    }
     return json({
       success: true,
       rowIndex,
