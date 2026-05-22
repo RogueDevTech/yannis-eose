@@ -269,7 +269,13 @@ function getApiTimeoutMs(apiUrl: string): number {
   }
   return CIRCUIT_BREAKER_TIMEOUT_MS;
 }
-const CAMPAIGN_CACHE_TTL = 300; // 5 min cache for campaign configs (edge)
+// 60s cache for campaign configs. Kept short on purpose: there is no
+// API→edge invalidation channel, so this TTL is the ONLY thing bounding how
+// long a public form serves a stale config after a Media Buyer edits the
+// campaign's offers. 5 min was long enough that buyers reported "the form
+// isn't showing my offers" right after setup. A proper fix is an explicit
+// purge on campaign update — see the cache-invalidation follow-up.
+const CAMPAIGN_CACHE_TTL = 60;
 
 // ── CORS Headers ───────────────────────────────────────────────
 
