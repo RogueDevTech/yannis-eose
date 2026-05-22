@@ -1163,9 +1163,9 @@ export function OrderDetailPage({
     if (fetcher.state === 'submitting') setDismissedError(false);
   }, [fetcher.state]);
 
-  // Reveal-on-click: the Copy / Call buttons trigger the reveal inline, so the modal
-  // never blocks behind a spinner. `revealPhoneForManualCall` on the server still handles
-  // the CS_ENGAGED transition + audit row.
+  // Phone is pre-fetched on modal open (useEffect below). Copy / Call read from the
+  // cached `revealData.phone` — no network call on click. The call-log fires in the
+  // background via `recordCallFetcher`.
 
   // Reset call debug log when opening the call modal (VOIP path)
   useEffect(() => {
@@ -1303,6 +1303,27 @@ export function OrderDetailPage({
     isDialable?: boolean;
     error?: string;
   } | undefined;
+
+  // Reveal the customer's number as soon as the manual-call modal opens, so the
+  // Copy / Call buttons act on an already-cached value. If the reveal fired only
+  // on the button click, the `await fetch` would run BEFORE
+  // `navigator.clipboard.writeText` and consume the browser's user-gesture
+  // window — the copy then silently fails (Safari / iOS especially). Pre-loading
+  // here keeps the clipboard write synchronous within the click. VOIP path
+  // doesn't expose Copy / Call buttons, so it's skipped.
+  useEffect(() => {
+    if (
+      callCustomerModalOpen &&
+      !voipEnabled &&
+      !revealData &&
+      revealFetcher.state === 'idle'
+    ) {
+      const fd = new FormData();
+      fd.set('intent', 'revealPhone');
+      if (order.branchId) fd.set('branchId', order.branchId);
+      revealFetcher.submit(fd, { method: 'post' });
+    }
+  }, [callCustomerModalOpen, voipEnabled, revealData, revealFetcher, order.branchId]);
 
   // Revalidate when MANUAL_CALL is recorded (after Copy or Call on my phone) so Confirm order appears.
   // Use a ref to avoid revalidation loop: only revalidate once per success.
@@ -3384,60 +3405,56 @@ export function OrderDetailPage({
                   </recordCallFetcher.Form>
                 </div>
               </>
+            ) : revealFetcher.state !== 'idle' ? (
+              <div className="flex items-center gap-2 py-4 justify-center text-sm text-app-fg-muted">
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Loading number…
+              </div>
             ) : (
               <>
+                {/* Phone is already in memory from the pre-fetch on modal open.
+                    Copy/dial reads directly — no network call. The call-log
+                    request fires as a background side-effect after the action. */}
                 {(() => {
-                  // Reveal-on-click: fire the reveal call once when Copy / Call is pressed,
-                  // grab the phone from the response (or cached revealData), then copy / dial.
-                  // No loading state on the buttons — the modal stays usable immediately.
-                  const ensureRevealedPhone = async (): Promise<string | null> => {
-                    if (revealData?.phoneRevealed && revealData?.isDialable && revealData?.phone) {
-                      return revealData.phone;
-                    }
-                    const formData = new FormData();
-                    formData.set('intent', 'revealPhone');
-                    if (order.branchId) formData.set('branchId', order.branchId);
-                    const url = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '';
-                    try {
-                      const res = await fetch(url, { method: 'POST', body: formData, credentials: 'same-origin' });
-                      const data = (await res.json().catch(() => null)) as {
-                        phone?: string;
-                        phoneRevealed?: boolean;
-                        isDialable?: boolean;
-                      } | null;
-                      if (data?.phoneRevealed && data?.isDialable && data?.phone) {
-                        // Mirror the fetcher's cached data so subsequent UI reads work.
-                        return data.phone;
-                      }
-                      return null;
-                    } catch {
-                      return null;
-                    }
-                  };
+                  const phone = revealData?.phone ?? '';
+                  const logCall = () =>
+                    ensureBranchForAction({
+                      actionLabel: 'recording customer call',
+                      onProceed: () =>
+                        recordCallFetcher.submit(
+                          {
+                            intent: 'initiateCall',
+                            ...(order.branchId ? { branchId: order.branchId } : {}),
+                          },
+                          { method: 'post' },
+                        ),
+                    });
                   return (
                     <>
                       <div className="flex flex-wrap gap-2 mb-4">
                         <Button
                           type="button"
                           variant="secondary"
-                          onClick={async () => {
-                            const phone = await ensureRevealedPhone();
-                            if (phone && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-                              await navigator.clipboard.writeText(phone);
-                              setCopyFeedback(true);
-                              setTimeout(() => setCopyFeedback(false), 2000);
+                          onClick={() => {
+                            if (!phone) {
+                              toast.error('Copy failed', 'Could not retrieve the customer number — try again.');
+                              return;
                             }
-                            ensureBranchForAction({
-                              actionLabel: 'recording customer call',
-                              onProceed: () =>
-                                recordCallFetcher.submit(
-                                  {
-                                    intent: 'initiateCall',
-                                    ...(order.branchId ? { branchId: order.branchId } : {}),
-                                  },
-                                  { method: 'post' },
-                                ),
-                            });
+                            if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+                              toast.error('Copy failed', 'Clipboard is not available in this browser.');
+                              return;
+                            }
+                            navigator.clipboard.writeText(phone).then(
+                              () => {
+                                setCopyFeedback(true);
+                                setTimeout(() => setCopyFeedback(false), 2000);
+                              },
+                              () => toast.error('Copy failed', 'Could not copy the number — try again.'),
+                            );
+                            logCall();
                           }}
                         >
                           {copyFeedback ? 'Copied' : 'Copy number'}
@@ -3446,22 +3463,11 @@ export function OrderDetailPage({
                           type="button"
                           variant="primary"
                           className="inline-flex items-center justify-center gap-2"
-                          onClick={async () => {
-                            const phone = await ensureRevealedPhone();
+                          onClick={() => {
                             if (phone) {
                               window.location.href = `tel:${phone}`;
                             }
-                            ensureBranchForAction({
-                              actionLabel: 'recording customer call',
-                              onProceed: () =>
-                                recordCallFetcher.submit(
-                                  {
-                                    intent: 'initiateCall',
-                                    ...(order.branchId ? { branchId: order.branchId } : {}),
-                                  },
-                                  { method: 'post' },
-                                ),
-                            });
+                            logCall();
                           }}
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

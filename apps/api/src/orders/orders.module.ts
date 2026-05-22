@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CsOrderRoutingService } from './cs-order-routing.service';
+import { TestOrderPurgeService } from './test-order-purge.service';
 import { SettingsModule } from '../settings/settings.module';
 import { CartModule } from '../cart/cart.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -19,7 +20,7 @@ import { CacheModule } from '../common/cache/cache.module';
     CacheModule,
     forwardRef(() => PaymentsModule),
   ],
-  providers: [OrdersService, CsOrderRoutingService],
+  providers: [OrdersService, CsOrderRoutingService, TestOrderPurgeService],
   exports: [OrdersService, CsOrderRoutingService],
 })
 export class OrdersModule {}
