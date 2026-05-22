@@ -33,7 +33,6 @@ export interface Env {
   UPSTASH_REDIS_REST_TOKEN?: string;
   DEDUP_CACHE: KVNamespace;
   RATE_LIMIT_CACHE: KVNamespace;
-  INVENTORY_CACHE: KVNamespace;
   CAMPAIGN_CACHE: KVNamespace;
 }
 
@@ -257,7 +256,6 @@ const RATE_LIMIT_CAPTCHA_THRESHOLD = 3; // After 3 submissions, require CAPTCHA
 const DEDUP_WINDOW_SECONDS = 21600; // 6 hours
 const CIRCUIT_BREAKER_TIMEOUT_MS = 20000; // 20s production (slow API/cold start still completes; short timeout caused false "busy" after successful creates)
 const CIRCUIT_BREAKER_TIMEOUT_LOCAL_MS = 30000; // 30s for localhost (cold starts, slow DB)
-const VIRTUAL_BUFFER_PCT = 0.10; // 10% stock buffer
 
 /** Use longer timeout when calling localhost so local dev doesn't 503 on slow API. */
 function getApiTimeoutMs(apiUrl: string): number {
@@ -269,13 +267,13 @@ function getApiTimeoutMs(apiUrl: string): number {
   }
   return CIRCUIT_BREAKER_TIMEOUT_MS;
 }
-// 60s cache for campaign configs. Kept short on purpose: there is no
-// API→edge invalidation channel, so this TTL is the ONLY thing bounding how
-// long a public form serves a stale config after a Media Buyer edits the
-// campaign's offers. 5 min was long enough that buyers reported "the form
-// isn't showing my offers" right after setup. A proper fix is an explicit
-// purge on campaign update — see the cache-invalidation follow-up.
-const CAMPAIGN_CACHE_TTL = 60;
+// 5 min cache for campaign configs. NOT shorter: every cache miss is a KV
+// `put()`, and the account's daily KV write quota is a hard limit — a 60s TTL
+// multiplied writes ~5x and helped exhaust it (which, before the best-effort
+// guard in getCampaignConfig, broke the form entirely). The proper fix for
+// "form shows stale offers after an edit" is an explicit purge on campaign
+// update, NOT a shorter TTL.
+const CAMPAIGN_CACHE_TTL = 300;
 
 // ── CORS Headers ───────────────────────────────────────────────
 
@@ -510,28 +508,6 @@ async function markDedup(
   });
 }
 
-// ── Inventory Budget Cap ───────────────────────────────────────
-
-async function checkInventoryCap(productIds: string[], env: Env): Promise<string | null> {
-  if (!env.INVENTORY_CACHE) return null; // KV not bound (local dev)
-  for (const productId of productIds) {
-    const cacheKey = `stock:${productId}`;
-    const stockData = await env.INVENTORY_CACHE.get(cacheKey);
-
-    if (stockData) {
-      const parsed = JSON.parse(stockData) as { total: number; pending: number; confirmed: number };
-      const bufferedTotal = Math.floor(parsed.total * (1 - VIRTUAL_BUFFER_PCT));
-      const reserved = parsed.pending + parsed.confirmed;
-
-      if (reserved >= bufferedTotal) {
-        return productId; // sold out
-      }
-    }
-    // If no cache data, allow the order — API will do the final check
-  }
-  return null;
-}
-
 // ── Campaign Config Fetcher ────────────────────────────────────
 
 async function getCampaignConfig(campaignId: string, env: Env): Promise<CampaignConfig | null> {
@@ -543,32 +519,53 @@ async function getCampaignConfig(campaignId: string, env: Env): Promise<Campaign
   }
 
   // Fetch from API
+  const encodedInput = encodeURIComponent(JSON.stringify({ campaignId }));
+  const apiUrl = `${env.API_URL}/trpc/marketing.getPublic?input=${encodedInput}`;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), getApiTimeoutMs(env.API_URL));
-    const encodedInput = encodeURIComponent(JSON.stringify({ campaignId }));
 
-    const response = await fetch(`${env.API_URL}/trpc/marketing.getPublic?input=${encodedInput}`, {
+    const response = await fetch(apiUrl, {
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      console.error(`[campaign] ${apiUrl} -> HTTP ${response.status}; body: ${body.slice(0, 240)}`);
+      return null;
+    }
 
     const result = await response.json() as { result?: { data?: CampaignConfig } };
     const config = result?.result?.data;
-    if (!config) return null;
+    if (!config) {
+      console.error(`[campaign] ${apiUrl} -> 200 but no result.data in body`);
+      return null;
+    }
 
-    // Cache for 10 minutes
+    // Cache successful configs — STRICTLY best-effort. A KV write failure
+    // (most commonly the account's daily KV `put()` quota being exhausted)
+    // must NEVER discard a config we already fetched successfully: doing so
+    // drops the public form to the offer-less fallback even though the API
+    // call worked. Isolated catch so a cache miss can't abort the render path.
     if (env.CAMPAIGN_CACHE) {
-      await env.CAMPAIGN_CACHE.put(cacheKey, JSON.stringify(config), {
-        expirationTtl: CAMPAIGN_CACHE_TTL,
-      });
+      try {
+        await env.CAMPAIGN_CACHE.put(cacheKey, JSON.stringify(config), {
+          expirationTtl: CAMPAIGN_CACHE_TTL,
+        });
+      } catch (cacheErr) {
+        console.error(
+          `[campaign] cache write skipped (non-fatal): ${cacheErr instanceof Error ? cacheErr.message : String(cacheErr)}`,
+        );
+      }
     }
 
     return config;
-  } catch {
+  } catch (err) {
+    console.error(
+      `[campaign] ${apiUrl} -> fetch threw: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+    );
     return null;
   }
 }
@@ -2302,11 +2299,6 @@ export default {
       return handleSubmission(request, env);
     }
 
-    // ── Inventory cache update (called by API, secured with API key) ──
-    if (url.pathname === '/inventory/update' && request.method === 'POST') {
-      return handleInventoryUpdate(request, env);
-    }
-
     return corsResponse({ error: 'Not Found' }, 404);
   },
 
@@ -2524,7 +2516,6 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
   //    a real customer placing a different order within 6h flows through.
   //    Different MB → KV miss here, API records a cross_funnel_attempt row
   //    for attribution truth without creating a duplicate order.
-  const productIds = data.items.map((item) => item.productId);
   const isDuplicateSubmit = await checkDedup(data.customerPhone, data.items, env, data.mediaBuyerId);
   if (isDuplicateSubmit) {
     return corsResponse(
@@ -2537,16 +2528,7 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  // 5. Inventory budget cap check
-  const soldOutProduct = await checkInventoryCap(productIds, env);
-  if (soldOutProduct) {
-    return corsResponse(
-      { error: 'Sorry, this product is currently sold out.' },
-      410,
-    );
-  }
-
-  // 6. Hash phone number (never send raw phone to API)
+  // 5. Hash phone number (never send raw phone to API)
   const phoneHash = await hashPhone(data.customerPhone);
 
   // 7. Build API payload (source: edge-form for audit trail traceability)
@@ -2677,49 +2659,3 @@ async function handleSubmission(request: Request, env: Env): Promise<Response> {
   return corsResponse({ error: errorMessage }, apiResult.status);
 }
 
-// ── Inventory Cache Update Handler (secured with API key) ─────
-
-async function handleInventoryUpdate(request: Request, env: Env): Promise<Response> {
-  // Verify API key if configured
-  if (env.EDGE_API_KEY) {
-    const apiKey = request.headers.get('X-Edge-Api-Key');
-    if (apiKey !== env.EDGE_API_KEY) {
-      return corsResponse({ error: 'Unauthorized' }, 401);
-    }
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return corsResponse({ error: 'Invalid JSON' }, 400);
-  }
-
-  const updates = body as Array<{
-    productId: string;
-    total: number;
-    pending: number;
-    confirmed: number;
-  }>;
-
-  if (!Array.isArray(updates)) {
-    return corsResponse({ error: 'Expected array of inventory updates' }, 400);
-  }
-
-  if (env.INVENTORY_CACHE) {
-    for (const update of updates) {
-      if (!update.productId) continue;
-      await env.INVENTORY_CACHE.put(
-        `stock:${update.productId}`,
-        JSON.stringify({
-          total: update.total,
-          pending: update.pending,
-          confirmed: update.confirmed,
-        }),
-        { expirationTtl: 300 }, // 5 min cache
-      );
-    }
-  }
-
-  return corsResponse({ success: true, updated: updates.length });
-}
