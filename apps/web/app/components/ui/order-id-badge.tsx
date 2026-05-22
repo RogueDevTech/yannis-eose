@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@remix-run/react';
+import { formatOrderNumber } from '@yannis/shared';
 
 export interface OrderIdBadgeProps {
   /**
@@ -7,6 +8,8 @@ export interface OrderIdBadgeProps {
    * truncated display text.
    */
   id: string;
+  /** Sequential order number — when present, shown as YNS-XXXXX instead of UUID prefix. */
+  orderNumber?: number | null;
   /** Visible characters from the start of the ID. Default 8. */
   length?: number;
   /** Uppercase the visible characters. Default false. */
@@ -46,6 +49,7 @@ export interface OrderIdBadgeProps {
  */
 export function OrderIdBadge({
   id,
+  orderNumber,
   length = 8,
   uppercase = false,
   ellipsis = '...',
@@ -55,8 +59,11 @@ export function OrderIdBadge({
   className,
   hideCopy = false,
 }: OrderIdBadgeProps) {
-  const display = `${id.slice(0, length)}${ellipsis}`;
-  const visible = uppercase ? display.toUpperCase() : display;
+  const visible = orderNumber != null
+    ? formatOrderNumber(orderNumber)
+    : uppercase
+      ? `${id.slice(0, length)}${ellipsis}`.toUpperCase()
+      : `${id.slice(0, length)}${ellipsis}`;
 
   const text = linkTo ? (
     <Link
@@ -73,7 +80,7 @@ export function OrderIdBadge({
   return (
     <span className={`inline-flex items-center gap-1 ${className ?? ''}`}>
       {text}
-      {!hideCopy && <CopyButton value={id} />}
+      {!hideCopy && <CopyButton value={orderNumber != null ? formatOrderNumber(orderNumber) : id} />}
     </span>
   );
 }

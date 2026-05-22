@@ -65,6 +65,7 @@ function OrderColumn({
           <dd className="mt-0.5">
             <OrderIdBadge
               id={order.id}
+              orderNumber={order.orderNumber}
               length={8}
               ellipsis="…"
               linkTo={`/admin/orders/${order.id}`}

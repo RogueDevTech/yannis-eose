@@ -396,7 +396,7 @@ function LogisticsOrdersPageImpl({
         key: 'orderId',
         header: 'Order ID',
         render: (order) => (
-          <OrderIdBadge id={order.id} linkTo={toOrderDetail(order.id)} />
+          <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id)} />
         ),
       },
       {
@@ -583,6 +583,7 @@ function LogisticsOrdersPageImpl({
             </span>
             <OrderIdBadge
               id={order.id}
+              orderNumber={order.orderNumber}
               linkTo={toOrderDetail(order.id)}
               textClassName="text-sm font-medium text-brand-500 hover:text-brand-600"
             />

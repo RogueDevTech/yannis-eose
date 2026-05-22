@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useMemo } from 'react';
-import { useFetcher, useSearchParams } from '@remix-run/react';
+import { useFetcher, useRevalidator, useSearchParams } from '@remix-run/react';
 import { useCloseOnFetcherSuccess } from '~/hooks/useCloseOnFetcherSuccess';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -98,10 +98,36 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     setSearchDraft(filters.search);
   }, [filters.search]);
 
+  const alreadyProcessedError = (() => {
+    const errMsg =
+      fetcher.data && typeof fetcher.data === 'object' && 'error' in fetcher.data
+        ? (fetcher.data as { error?: string }).error
+        : undefined;
+    return errMsg && /Transfer is (RECEIVED|DISPUTED|CANCELLED)/i.test(errMsg);
+  })();
   useFetcherToast(fetcher.data, {
     successMessage: 'Transfer recorded',
-    skipErrorToast: !!pendingAction,
+    // Show inline in modal unless it's an "already processed" race — then toast
+    // so the user sees the message after the modal auto-closes.
+    skipErrorToast: !!pendingAction && !alreadyProcessedError,
   });
+
+  // When the server says the transfer is already processed (race condition —
+  // another user confirmed it while this modal was open), auto-close the modal
+  // and revalidate the list so the row shows the correct status.
+  const revalidator = useRevalidator();
+  useEffect(() => {
+    const errMsg =
+      fetcher.data && typeof fetcher.data === 'object' && 'error' in fetcher.data
+        ? (fetcher.data as { error?: string }).error
+        : undefined;
+    if (errMsg && pendingAction && /Transfer is (RECEIVED|DISPUTED|CANCELLED)/i.test(errMsg)) {
+      setPendingAction(null);
+      setActionModalFieldError(null);
+      setMarkingId(null);
+      revalidator.revalidate();
+    }
+  }, [fetcher.data, pendingAction, revalidator]);
 
   // Client-side pagination — backend doesn't paginate transfer remittances yet.
   const REMITTANCES_PAGE_SIZE = 20;

@@ -52,7 +52,8 @@ import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
 import { ScheduleHeatCalendar } from '~/components/ui/schedule-heat-calendar';
 import type { ScheduleHeatDay } from '~/components/ui/schedule-heat-calendar';
-import { fetchOrdersMatchingIds, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
+import { fetchOrdersMatchingIds, fetchOrderClipboardSummary, ORDERS_DEEP_SELECT_MAX } from '~/lib/trpc-browser';
+import { useToast } from '~/components/ui/toast';
 
 /** Deferred loader bundle for `/admin/sales/orders` (counts, chart series, heat, picklists). */
 export type CsOrdersDeferredSecondary = {
@@ -82,6 +83,17 @@ import {
   isPreferredDeliveryOverdue,
   isCallbackDue,
 } from '~/lib/order-delivery-today';
+
+/** Statuses where the "Copy order" summary action is available on the list. */
+const ORDER_STATUSES_WITH_COPY_ACTION = new Set([
+  'CS_ENGAGED',
+  'CONFIRMED',
+  'AGENT_ASSIGNED',
+  'DISPATCHED',
+  'IN_TRANSIT',
+  'DELIVERED',
+  'PARTIALLY_DELIVERED',
+]);
 
 function DueTodayTag() {
   return (
@@ -319,6 +331,7 @@ function OrdersListPageImpl({
    *  Page never renders the calendar inline. */
   const [scheduleCalendarModalOpen, setScheduleCalendarModalOpen] = useState(false);
 
+  const { toast } = useToast();
   const liveState = useLiveIndicator(liveEvents ?? []);
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   /** Sentinel — not an order status, indicates the `?fromCart=1` pseudo-filter is active. */
@@ -833,7 +846,7 @@ function OrdersListPageImpl({
       {
         key: 'orderId',
         header: 'Order ID',
-        render: (order) => <OrderIdBadge id={order.id} linkTo={toOrderDetail(order.id)} />,
+        render: (order) => <OrderIdBadge id={order.id} orderNumber={order.orderNumber} linkTo={toOrderDetail(order.id)} />,
       },
       {
         key: 'customer',
@@ -951,9 +964,27 @@ function OrdersListPageImpl({
               View cart
             </TableActionButton>
           ) : (
-            <TableActionButton to={toOrderDetail(order.id)} variant="primary">
-              View
-            </TableActionButton>
+            <div className="inline-flex flex-nowrap items-center justify-center gap-1.5">
+              {ORDER_STATUSES_WITH_COPY_ACTION.has(order.status) && (
+                <TableActionButton
+                  variant="neutral"
+                  onClick={async () => {
+                    try {
+                      const { text } = await fetchOrderClipboardSummary(order.id);
+                      await navigator.clipboard.writeText(text);
+                      toast.success('Copied', 'Order summary copied to clipboard.');
+                    } catch (e) {
+                      toast.error('Copy failed', e instanceof Error ? e.message : 'Could not copy order summary.');
+                    }
+                  }}
+                >
+                  Copy
+                </TableActionButton>
+              )}
+              <TableActionButton to={toOrderDetail(order.id)} variant="primary">
+                View
+              </TableActionButton>
+            </div>
           ),
       },
     );
@@ -965,6 +996,7 @@ function OrdersListPageImpl({
     openCartDetail,
     cartDetailFetcher.state,
     viewCartOrderId,
+    toast,
   ]);
 
   // Mobile card — deliberately minimal: customer name + order ID on the first
@@ -987,7 +1019,7 @@ function OrdersListPageImpl({
             <span className="min-w-0 truncate text-sm font-medium text-app-fg">
               {order.customerName || '—'}
             </span>
-            <OrderIdBadge id={order.id} textClassName="text-sm font-medium text-app-fg" />
+            <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
           </div>
           <div className="flex items-center justify-between gap-2">
             {isCart ? (
