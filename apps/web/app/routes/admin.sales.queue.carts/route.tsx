@@ -117,58 +117,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 export async function action({ request }: ActionFunctionArgs) {
+  // `cart.delete` still gates phone reveal — both remaining intents
+  // (recoverFromCart, revealAbandonedPhone) require it.
   await requirePermission(request, 'cart.delete');
   const cookie = getSessionCookie(request);
   const formData = await request.formData();
   const intent = formData.get('intent');
-
-  if (intent === 'deleteAbandoned') {
-    const cartId = formData.get('cartId');
-    if (!cartId || typeof cartId !== 'string') {
-      return json({ ok: false, error: 'Missing cartId' }, { status: 400 });
-    }
-    const res = await apiRequest<unknown>(
-      '/trpc/cart.deleteAbandoned',
-      {
-        method: 'POST',
-        cookie,
-        // `apiRequest` calls `JSON.stringify(body)` internally — pass the object, not a string.
-        body: { cartId },
-      },
-    );
-    if (!res.ok) {
-      return json({ ok: false, error: 'Failed to delete cart' }, { status: 500 });
-    }
-    return json({ ok: true });
-  }
-
-  if (intent === 'deleteAbandonedMany') {
-    const raw = formData.get('cartIds');
-    if (!raw || typeof raw !== 'string') {
-      return json({ ok: false, error: 'Missing cartIds' }, { status: 400 });
-    }
-    const cartIds = raw.split(',').map((s) => s.trim()).filter(Boolean);
-    if (cartIds.length === 0) {
-      return json({ ok: false, error: 'No carts selected' }, { status: 400 });
-    }
-    const results = await Promise.all(
-      cartIds.map((cartId) =>
-        apiRequest<unknown>('/trpc/cart.deleteAbandoned', {
-          method: 'POST',
-          cookie,
-          body: { cartId },
-        }),
-      ),
-    );
-    const failed = results.filter((r) => !r.ok).length;
-    return json({
-      ok: failed === 0,
-      deleted: cartIds.length - failed,
-      failed,
-      total: cartIds.length,
-      error: failed > 0 ? `${failed} of ${cartIds.length} carts could not be deleted` : undefined,
-    });
-  }
 
   if (intent === 'recoverFromCart') {
     const cartId = formData.get('cartId');

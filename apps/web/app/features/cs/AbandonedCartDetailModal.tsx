@@ -13,7 +13,6 @@ export function AbandonedCartDetailModal({
   canReveal,
   canRecover,
   onClose,
-  onClear,
   cartStatus = 'ABANDONED',
   orderHref,
 }: {
@@ -22,11 +21,10 @@ export function AbandonedCartDetailModal({
   /** When true, the "Recover as order" button is shown (uses edge-form path for MB attribution). */
   canRecover?: boolean;
   onClose: () => void;
-  onClear?: (cart: PendingCart) => void;
   /** Cart status — controls badge label and timestamp wording. Defaults to ABANDONED. */
   cartStatus?: 'PENDING' | 'ABANDONED' | 'CONVERTED';
   /**
-   * When set, renders an "Open full order" link instead of Recover/Clear — used when the
+   * When set, renders an "Open full order" link instead of Recover — used when the
    * cart has already been recovered into an order (the recovered-from-cart orders list).
    */
   orderHref?: string | null;
@@ -322,7 +320,7 @@ export function AbandonedCartDetailModal({
             {phoneState === 'unavailable' && (
               <p className="text-xs text-app-fg-muted mb-3 italic">
                 This cart was captured before phone storage was enabled, so we can't reach the
-                customer directly. Use Clear to remove it.
+                customer directly.
               </p>
             )}
 
@@ -356,15 +354,6 @@ export function AbandonedCartDetailModal({
               </Link>
             )}
 
-            {onClear && (
-              <button
-                type="button"
-                onClick={() => onClear(cart)}
-                className="w-full text-xs font-medium text-danger-600 dark:text-danger-400 hover:underline py-2"
-              >
-                Clear this cart
-              </button>
-            )}
           </div>
         </div>
       )}

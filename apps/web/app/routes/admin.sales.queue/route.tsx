@@ -68,7 +68,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermission(request, 'cs.teamOverview');
   const cookie = getSessionCookie(request);
   const canCreateOffline = true;
-  const canDeleteCart = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
+  // Gates phone-reveal + recover on the abandoned-cart detail modal.
+  const canManageAbandonedCart = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
   // Cancellation is Head of CS / Branch Admin / Admin only (CEO directive 2026-05-20).
   const canCancelOrders =
     user.role === 'SUPER_ADMIN' ||
@@ -299,7 +300,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     cartStats,
     claimQueue,
     canCreateOffline,
-    canDeleteCart,
+    canManageAbandonedCart,
     canCancelOrders,
     productsForOfflineOrder,
   } as unknown as Record<string, unknown>);
@@ -652,7 +653,7 @@ export default function CSQueueRoute() {
     shell: {
       leaderboardPeriod: data.leaderboardPeriod,
       canCreateOffline: data.canCreateOffline,
-      canDeleteCart: data.canDeleteCart,
+      canManageAbandonedCart: data.canManageAbandonedCart,
       canCancelOrders: data.canCancelOrders,
     },
     deferred: {
@@ -682,7 +683,7 @@ export default function CSQueueRoute() {
         cartStats={data.cartStats}
         claimQueue={data.claimQueue}
         canCreateOffline={data.canCreateOffline}
-        canDeleteCart={data.canDeleteCart}
+        canManageAbandonedCart={data.canManageAbandonedCart}
         canCancelOrders={data.canCancelOrders}
         productsForOfflineOrder={data.productsForOfflineOrder}
       />

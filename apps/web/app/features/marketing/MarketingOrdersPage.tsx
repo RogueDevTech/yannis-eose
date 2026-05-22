@@ -772,8 +772,14 @@ export function MarketingOrdersPage({
               (statusCounts['IN_TRANSIT'] ?? 0);
             const deliveredCount = statusCounts['DELIVERED'] ?? 0;
             const cancelledCount = statusCounts['CANCELLED'] ?? 0;
+            // Overview strip is a fixed snapshot of the period — it must not
+            // shift when the table's status filter (or the cart view) changes.
+            // Everything here is derived from `statusCounts` (the period
+            // aggregate), never from `total` (the filtered list count).
             const deliveryRate =
-              total > 0 ? (((statusCounts['DELIVERED'] ?? 0) / total) * 100).toFixed(1) : '0';
+              ordersInPeriodTotal > 0
+                ? (((statusCounts['DELIVERED'] ?? 0) / ordersInPeriodTotal) * 100).toFixed(1)
+                : '0';
             const statusOptions = [
               ...MARKETING_ORDERS_STATUSES.map((status) => ({
                 value: status,
@@ -795,7 +801,7 @@ export function MarketingOrdersPage({
                   items={[
                     {
                       label: 'Total',
-                      value: total,
+                      value: ordersInPeriodTotal,
                       valueClassName: 'text-app-fg',
                       to: buildQueryString({ status: 'ALL', page: 1 }),
                     },

@@ -240,7 +240,8 @@ export interface CSDashboardPageProps {
   claimQueue?: Promise<CSOrder[]>;
   liveEvents?: string[];
   canCreateOffline?: boolean;
-  canDeleteCart?: boolean;
+  /** Gates phone-reveal + recover on the abandoned-cart detail modal. */
+  canManageAbandonedCart?: boolean;
   /**
    * Order cancellation is Head of CS / Branch Admin / Admin only — closers (and
    * teamless supervisors) can no longer cancel orders (CEO directive 2026-05-20).

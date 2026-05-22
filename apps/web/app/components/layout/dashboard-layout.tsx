@@ -206,6 +206,12 @@ const navStructure: NavGroupDef[] = [
         permission: 'cs.teamOverview',
         roles: ['CS_CLOSER'],
       },
+      {
+        label: 'Follow Up',
+        href: '/admin/cs/follow-up',
+        icon: SidebarIcons.orders,
+        permission: 'orders.followUp',
+      },
     ],
   },
   {

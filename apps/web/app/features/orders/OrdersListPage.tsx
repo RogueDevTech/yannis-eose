@@ -259,6 +259,8 @@ export interface OrdersListPageProps {
    * badge, "View cart" action only, no bulk toolbar / smart pick.
    */
   isCartAbandonmentView?: boolean;
+  /** Branches available for the "Move to branch" bulk action (Admin/HoCS only). */
+  branchesForMove?: Array<{ id: string; name: string }>;
 }
 
 type OrdersListPageImplProps = Omit<OrdersListPageProps, 'deferredSecondary'> & {
@@ -303,6 +305,7 @@ function OrdersListPageImpl({
   cartAbandonmentCount = null,
   isCartAbandonmentView = false,
   bulkSelectAllMatchingInput,
+  branchesForMove,
 }: OrdersListPageImplProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const toOrderDetail = useCallback(
@@ -449,6 +452,17 @@ function OrdersListPageImpl({
     setSelectedIds(new Set());
   });
 
+  // Move-to-branch modal state + dedicated fetcher.
+  const [moveBranchModalOpen, setMoveBranchModalOpen] = useState(false);
+  const [moveBranchId, setMoveBranchId] = useState('');
+  const moveBranchFetcher = useFetcher<{ succeeded?: number; failed?: number; error?: string }>();
+  useFetcherToast(moveBranchFetcher.data, { successMessage: 'Orders moved successfully' });
+  useCloseOnFetcherSuccess(moveBranchFetcher, () => {
+    setMoveBranchModalOpen(false);
+    setMoveBranchId('');
+    clearSelection();
+  });
+
   // Server-side filtering via URL params; orders are already filtered by loader
   const filteredOrders = orders;
 
@@ -504,9 +518,18 @@ function OrdersListPageImpl({
   const buildQueryString = (overrides: { page?: number; status?: string; search?: string; csCloserId?: string }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
+    // The "Cart abandonment" pseudo-status maps to `?fromCart=1` (and drops
+    // `status`); selecting any real status — including ALL — clears `fromCart`
+    // so the strip pills always navigate cleanly in and out of the cart view.
     if (overrides.status !== undefined) {
-      if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
-      else params.set('status', overrides.status);
+      if (overrides.status === FROM_CART_STATUS_VALUE) {
+        params.delete('status');
+        params.set('fromCart', '1');
+      } else {
+        params.delete('fromCart');
+        if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
+        else params.set('status', overrides.status);
+      }
     }
     if (overrides.search !== undefined) {
       if (overrides.search) params.set('search', overrides.search);
@@ -1383,26 +1406,21 @@ function OrdersListPageImpl({
         <OverviewStatStripSkeleton
           count={1 + STATUS_KEYS.length + (enableFromCartStatusOption ? 1 : 0)}
         />
-      ) : isCartAbandonmentView ? (
-        <OverviewStatStrip
-          mobileGrid
-          items={[
-            {
-              label: 'Abandoned carts',
-              value: total,
-              valueClassName:
-                total > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-app-fg',
-              title: 'Open abandoned carts not yet recovered',
-            },
-          ]}
-        />
       ) : (
+        // One strip in every mode — the order funnel snapshot stays put when you
+        // drill into the cart-abandonment view, so you can jump straight back to
+        // any status. The "Cart abandonment" tile is the clickable entry point.
         <OverviewStatStrip
           mobileGrid
           items={[
             {
               label: 'Total',
-              value: total,
+              // `total` counts carts while the cart view is active — keep this
+              // tile the order total (sum of status counts) so the strip never
+              // double-reads as the cart count.
+              value: isCartAbandonmentView
+                ? Object.values(statusCounts).reduce((sum, n) => sum + (n || 0), 0)
+                : total,
               valueClassName: 'text-app-fg',
               to: buildQueryString({ status: 'ALL', page: 1 }),
             },
@@ -1416,6 +1434,7 @@ function OrdersListPageImpl({
                         ? 'text-amber-600 dark:text-amber-400'
                         : 'text-app-fg',
                     title: 'Open abandoned carts not yet recovered',
+                    to: buildQueryString({ status: FROM_CART_STATUS_VALUE, page: 1 }),
                   },
                 ]
               : []),
@@ -1575,6 +1594,12 @@ function OrdersListPageImpl({
                   Export Selected
                 </Button>
               )}
+              {/* Move to branch — Admin / HoCS only, when branches are available. */}
+              {(userRole === 'SUPER_ADMIN' || userRole === 'ADMIN' || userRole === 'HEAD_OF_CS') && branchesForMove && branchesForMove.length > 0 && (
+                <Button variant="secondary" size="sm" onClick={() => setMoveBranchModalOpen(true)} disabled={isSubmitting}>
+                  Move to branch
+                </Button>
+              )}
             </div>
           </div>
           {/* Helper notes — kept on their own lines so they don't wedge between
@@ -1649,6 +1674,45 @@ function OrdersListPageImpl({
         ]}
         defaultColumns={showCSCloserColumn ? ['id', 'customer', 'assignedCs', 'status', 'amount', 'created'] : ['id', 'customer', 'status', 'amount', 'created']}
       />
+
+      {/* Move to Branch Modal */}
+      <Modal
+        open={moveBranchModalOpen}
+        onClose={() => { setMoveBranchModalOpen(false); setMoveBranchId(''); }}
+        maxWidth="max-w-sm"
+        contentClassName="p-6 space-y-4"
+      >
+        <h3 className="text-lg font-semibold text-app-fg">Move orders to branch</h3>
+        <p className="text-sm text-app-fg-muted">
+          {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''} will be moved to the selected branch. Status will reset to Unprocessed.
+        </p>
+        <SearchableSelect
+          id="move-branch-select"
+          label="Destination branch"
+          value={moveBranchId}
+          onChange={(v) => setMoveBranchId(v)}
+          options={(branchesForMove ?? []).map((b) => ({ value: b.id, label: b.name }))}
+          placeholder="Select branch"
+          searchPlaceholder="Search branches…"
+        />
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" onClick={() => { setMoveBranchModalOpen(false); setMoveBranchId(''); }}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={!moveBranchId || moveBranchFetcher.state === 'submitting'}
+            loading={moveBranchFetcher.state === 'submitting'}
+            loadingText="Moving…"
+            onClick={() => {
+              moveBranchFetcher.submit(
+                { intent: 'moveOrdersToBranch', orderIds: JSON.stringify([...selectedIds]), targetBranchId: moveBranchId },
+                { method: 'post' },
+              );
+            }}
+          >
+            Move {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
+          </Button>
+        </div>
+      </Modal>
 
       <div className="list-panel">
         <ToolbarFiltersCollapsible
