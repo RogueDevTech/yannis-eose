@@ -402,8 +402,8 @@ const ORDER_DETAIL_FIELDS: DetailFieldConfig[] = [
   {
     label: 'Duplicate of',
     getValue: (o) => o.duplicateOfId,
-    format: (v) => (v ? String(v) : ''),
-    ddClassName: 'font-mono text-xs text-app-fg-muted break-all',
+    format: (v) => (v ? String(v).slice(0, 8).toUpperCase() : ''),
+    ddClassName: 'font-mono text-xs text-app-fg-muted',
   },
   {
     label: 'Locked until',

@@ -27,11 +27,16 @@ import type { PermissionsService } from '../permissions/permissions.service';
 import type { EventsService } from '../events/events.service';
 import type { UserBundleCacheService } from '../auth/user-bundle-cache.service';
 import type { BranchTeamsService } from '../branches/branch-teams.service';
+import type { CacheService } from '../common/cache/cache.service';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 
 const SKIP_IF_NO_DB = !process.env['TEST_DATABASE_URL'] && !process.env['DATABASE_URL'];
 
 const branchTeamsStub = {} as unknown as BranchTeamsService;
+// Branch-list cache invalidation is fire-and-forget — a no-op delPattern keeps DI happy.
+const cacheStub = {
+  delPattern: async () => undefined,
+} as unknown as CacheService;
 
 describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => {
   const pgClient = getPgClient();
@@ -93,6 +98,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' },
@@ -118,6 +124,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
     const result = await svc.list(
       {
@@ -148,6 +155,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', allBranches: true },
@@ -172,6 +180,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', allBranches: true },
@@ -196,6 +205,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc' },
@@ -220,6 +230,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService.list — branch auto-scope', () => 
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
     const result = await svc.list(
       { page: 1, limit: 100, sortBy: 'name', sortOrder: 'asc', branchId: main.id },
@@ -282,6 +293,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — org-wide department heads', () 
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
 
     // Migration 0108 dropped the singleton DB index; the service no longer
@@ -343,6 +355,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — pending permission request dedu
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
 
     const input = {
@@ -394,6 +407,7 @@ describe.skipIf(SKIP_IF_NO_DB)('UsersService — pending permission request dedu
       eventsStub,
       userBundleCacheStub,
       branchTeamsStub,
+      cacheStub,
     );
 
     await expect(

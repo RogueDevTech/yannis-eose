@@ -146,6 +146,13 @@ export const createStaffSchema = z.object({
   // ADMIN / SUPER_ADMIN. CEO directive 2026-05-08.
   isProbation: z.boolean().optional(),
   probationUntil: z.coerce.date().optional(),
+
+  // Soft duplicate-name guard acknowledgement. When the create form submits a
+  // name that closely matches an existing staff member, the server returns
+  // `requiresDuplicateConfirmation` instead of creating the account; the admin
+  // confirms in a modal and the form resubmits with this flag set so the
+  // create proceeds. See `UsersService.createStaff`.
+  confirmDuplicateName: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   // Only branch-eligible roles must carry a branch + primary branch. Company-wide
   // roles (Stock Manager, Finance, HR, org-wide Heads, TPL) are not branch-scoped.

@@ -108,7 +108,13 @@ export const hrRouter = router({
         assertHasHrRead(actor);
       } else {
         const target = await getUsersService().getById(input.staffId, actor);
-        if (!canAccessStaffHrUserDetail(actor, { id: target.id, role: target.role })) {
+        if (
+          !canAccessStaffHrUserDetail(actor, {
+            id: target.id,
+            role: target.role,
+            branchIds: target.branchMemberships.map((m) => m.branchId),
+          })
+        ) {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'Not allowed to view payout records for this user.',
@@ -142,7 +148,13 @@ export const hrRouter = router({
     .query(async ({ input, ctx }) => {
       const actor = ctx.user!;
       const target = await getUsersService().getById(input.staffId, actor);
-      if (!canAccessStaffHrUserDetail(actor, { id: target.id, role: target.role })) {
+      if (
+        !canAccessStaffHrUserDetail(actor, {
+          id: target.id,
+          role: target.role,
+          branchIds: target.branchMemberships.map((m) => m.branchId),
+        })
+      ) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Not allowed to view payout estimates for this user.',

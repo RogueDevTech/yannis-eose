@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, lt, desc, count, inArray, sql } from 'drizzle-orm';
+import { eq, and, lt, desc, count, inArray, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
@@ -469,15 +469,9 @@ export class CartService {
     let page = Math.max(1, Math.floor(opts.page ?? 1));
 
     // Media Buyers / branch-scoped marketing viewers only ever see carts from
-    // their own campaigns — scoped via the campaign join, same as countAbandoned.
-    const scopeConditions = [eq(schema.cartAbandonments.status, 'ABANDONED')];
-    if (opts.mediaBuyerId) {
-      scopeConditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
-    }
-    if (opts.branchId) {
-      scopeConditions.push(eq(schema.campaigns.branchId, opts.branchId));
-    }
-    const abandonedWhere = and(...scopeConditions);
+    // their own campaigns. Uses the exact same WHERE clause as `countAbandoned`
+    // (see `openCartConditions`) so the list and the "Open carts" KPI agree.
+    const abandonedWhere = and(...this.openCartConditions(opts));
     const totalRows = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
@@ -868,25 +862,56 @@ export class CartService {
   }
 
   /**
-   * Count open (un-recovered) carts — both PENDING (still browsing) and
-   * ABANDONED (aged out by the cron) — optionally scoped to one media buyer
-   * and/or branch via the cart's campaign. Powers the "Open carts" KPI on the
-   * Marketing Orders overview strip. PENDING is included so a freshly captured
-   * cart shows immediately instead of waiting ~10-15 min for the abandonment
-   * cron to flip its status — otherwise the KPI looks frozen right after a
-   * capture. A Media Buyer sees only their own carts; HoM / admin see
-   * branch-wide or org-wide. CONVERTED carts are excluded (already recovered).
+   * WHERE conditions for an "open cart" — the SINGLE source of truth shared by
+   * the "Open carts" KPI (`countAbandoned`) and the cart list (`listAbandoned`)
+   * so the count can never disagree with what the list shows.
+   *
+   * An open cart is one that is `ABANDONED` (aged out by the cron) AND has not
+   * produced an order. Two independent "became an order" checks — a cart drops
+   * out if EITHER matches, so a completed cart can never linger as "open":
+   *   1. The hard back-link `orders.cart_id` (set when the order carried the
+   *      cartId, or via CS-led recovery).
+   *   2. A content match — an order on the SAME campaign + customer phone +
+   *      product, created at/after the cart. This catches "ghost" carts whose
+   *      cart↔order link was never recorded (edge cart-save raced the submit,
+   *      so neither `orders.cart_id` nor the `CONVERTED` flip happened). The
+   *      `created_at` bound keeps a repeat customer's brand-new cart from being
+   *      hidden by their own older order.
+   *
+   * PENDING carts (customer still typing) and CONVERTED carts are not "open".
    */
-  async countAbandoned(
-    opts: { mediaBuyerId?: string | null; branchId?: string | null } = {},
-  ): Promise<number> {
-    const conditions = [inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED'])];
+  private openCartConditions(opts: { mediaBuyerId?: string | null; branchId?: string | null }): SQL[] {
+    const conditions: SQL[] = [
+      eq(schema.cartAbandonments.status, 'ABANDONED'),
+      sql`NOT EXISTS (SELECT 1 FROM orders o WHERE o.cart_id = ${schema.cartAbandonments.id})`,
+      sql`NOT EXISTS (
+        SELECT 1 FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        WHERE o.campaign_id = ${schema.cartAbandonments.campaignId}
+          AND o.customer_phone_hash = ${schema.cartAbandonments.customerPhoneHash}
+          AND oi.product_id = ${schema.cartAbandonments.productId}
+          AND o.created_at >= ${schema.cartAbandonments.createdAt}
+      )`,
+    ];
     if (opts.mediaBuyerId) {
       conditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
     }
     if (opts.branchId) {
       conditions.push(eq(schema.campaigns.branchId, opts.branchId));
     }
+    return conditions;
+  }
+
+  /**
+   * Count open (un-recovered) carts — optionally scoped to one media buyer
+   * and/or branch via the cart's campaign. Powers the "Open carts" KPI on the
+   * Marketing Orders overview strip. Uses the exact same WHERE clause as
+   * `listAbandoned` (see `openCartConditions`) so the KPI always equals the
+   * number of rows the cart list shows.
+   */
+  async countAbandoned(
+    opts: { mediaBuyerId?: string | null; branchId?: string | null } = {},
+  ): Promise<number> {
     const res = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)
@@ -894,7 +919,7 @@ export class CartService {
         schema.campaigns,
         eq(schema.cartAbandonments.campaignId, schema.campaigns.id),
       )
-      .where(and(...conditions));
+      .where(and(...this.openCartConditions(opts)));
     return Number(res[0]?.count ?? 0);
   }
 }

@@ -21,6 +21,6 @@ import { CacheModule } from '../common/cache/cache.module';
     forwardRef(() => PaymentsModule),
   ],
   providers: [OrdersService, CsOrderRoutingService, TestOrderPurgeService],
-  exports: [OrdersService, CsOrderRoutingService],
+  exports: [OrdersService, CsOrderRoutingService, TestOrderPurgeService],
 })
 export class OrdersModule {}

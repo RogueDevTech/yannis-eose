@@ -11,6 +11,8 @@ import { useAppTheme } from '~/hooks/useAppTheme';
 import { useFontScale } from '~/hooks/useFontScale';
 import { APP_THEMES, previewRgb, THEME_PREVIEW_BRAND_HEX, THEME_PREVIEW_RGB } from '~/lib/theme';
 import { FONT_SCALES } from '~/lib/font-scale';
+import { isNotificationSoundEnabled, setNotificationSoundEnabled } from '~/lib/notification-sound-preference';
+import { playNotificationSound } from '~/lib/notification-sound';
 import { SettingsPushPanel } from './SettingsPushPanel';
 import { PageHeader } from '~/components/ui/page-header';
 import { ModalFetcherInlineError, useFetcherActionSurface } from '~/hooks/use-fetcher-action-surface';
@@ -332,6 +334,9 @@ export function SettingsPage({
   const [profileName, setProfileName] = useState(user?.name ?? '');
   const { themeId, setTheme, activeTheme } = useAppTheme();
   const { fontScaleId, setFontScale, activeScale } = useFontScale();
+  const [soundEnabled, setSoundEnabled] = useState(() =>
+    typeof window !== 'undefined' ? isNotificationSoundEnabled() : true,
+  );
   const { canInstall, install, canPromptInstall, isIosManualInstall, isInstalled } = usePwaInstall();
 
   // CS dispatch strategy: derived from settings, local state for form selection
@@ -616,6 +621,41 @@ export function SettingsPage({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          <div className="card lg:col-span-2">
+            <h3 className="text-lg font-semibold text-app-fg mb-4">Notification sound</h3>
+            <p className="text-xs text-app-fg-muted mb-3">
+              Play a chime when new notifications arrive. Saved on this device.
+            </p>
+            <div className="flex items-center justify-between rounded-lg border border-app-border px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-app-fg">{soundEnabled ? 'Sound on' : 'Sound off'}</p>
+                <p className="text-xs text-app-fg-muted mt-0.5">
+                  {soundEnabled ? 'You will hear a chime for new notifications.' : 'Notifications arrive silently.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={soundEnabled}
+                onClick={() => {
+                  const next = !soundEnabled;
+                  setSoundEnabled(next);
+                  setNotificationSoundEnabled(next);
+                  if (next) playNotificationSound();
+                }}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 ${
+                  soundEnabled ? 'bg-brand-600' : 'bg-surface-300 dark:bg-surface-600'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                    soundEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
             </div>
           </div>
 

@@ -289,6 +289,16 @@ export class AuthService {
   }
 
   /**
+   * Push changed branch memberships onto the user's live sessions WITHOUT a
+   * forced logout — used after a branch add/remove so access reflects the new
+   * memberships on the very next request. Deactivation still uses
+   * `killUserSessions` (the user must be logged out entirely).
+   */
+  async refreshUserBranchSessions(targetUserId: string): Promise<number> {
+    return this.sessionStore.refreshUserBranchMemberships(targetUserId);
+  }
+
+  /**
    * Mirror Mode — replace the actor's session with the target user so the entire
    * app renders as that user (RLS, branch, role, permissions, sidebar). Mutations
    * are blocked at the tRPC root middleware while a `mirroredBy` field is set.
@@ -652,10 +662,42 @@ export class AuthService {
   }
 
   /**
+   * Branch IDs a Media Buyer may scope their session to: current memberships
+   * UNION every branch their own orders / campaigns are attributed to. A buyer
+   * moved off a branch keeps it in this set so they can still open it as a
+   * read-only data lens. Attribution is by ownership (`media_buyer_id`), so a
+   * buyer never sees beyond their own data.
+   */
+  private async mediaBuyerBranchScopeIds(userId: string): Promise<string[]> {
+    const [memberships, orderBranches, campaignBranches] = await Promise.all([
+      this.db
+        .select({ branchId: schema.userBranches.branchId })
+        .from(schema.userBranches)
+        .where(eq(schema.userBranches.userId, userId)),
+      this.db
+        .selectDistinct({ branchId: schema.orders.branchId })
+        .from(schema.orders)
+        .where(eq(schema.orders.mediaBuyerId, userId)),
+      this.db
+        .selectDistinct({ branchId: schema.campaigns.branchId })
+        .from(schema.campaigns)
+        .where(eq(schema.campaigns.mediaBuyerId, userId)),
+    ]);
+    const ids = new Set<string>();
+    for (const r of [...memberships, ...orderBranches, ...campaignBranches]) {
+      if (r.branchId) ids.add(r.branchId);
+    }
+    return [...ids];
+  }
+
+  /**
    * Switch the active branch in the current session.
-   * User must be a member of the target branch (or admin-class).
-   * `branchId = null` clears branch context ("All Branches"); only allowed
-   * for users that can view all branches.
+   * User must be a member of the target branch (or admin-class). A Media Buyer
+   * may additionally switch to any branch in their data footprint (branches
+   * their own orders/campaigns are attributed to) as a read-only data lens.
+   * `branchId = null` clears branch context ("All Branches"); allowed for
+   * org-wide users and Media Buyers (whose orders are ownership-scoped, so
+   * "All Branches" still only ever exposes their own data).
    * Updates Redis session and returns the full updated SessionUser so the
    * controller can re-issue the bundle cookie in the same response.
    */
@@ -666,10 +708,20 @@ export class AuthService {
     }
 
     const user: SessionUser = sessionData;
+    const isMediaBuyer = user.role === 'MEDIA_BUYER';
 
     if (branchId === null) {
-      if (!canViewAllBranches(user)) {
+      if (!canViewAllBranches(user) && !isMediaBuyer) {
         throw new ForbiddenException('Only org-wide users can clear branch context');
+      }
+    } else if (isMediaBuyer) {
+      // A Media Buyer may switch to any branch in their data footprint — a
+      // branch they were removed from stays reachable as a read-only lens.
+      // Branch-scoped mutations there are blocked by the tRPC middleware
+      // `blockMediaBuyerMutationsOutsideMemberBranch`.
+      const scopeIds = await this.mediaBuyerBranchScopeIds(user.id);
+      if (!scopeIds.includes(branchId)) {
+        throw new ForbiddenException('You have no orders or campaigns in this branch');
       }
     } else if (!canViewAllBranches(user)) {
       // Scoped users must be a member of the target branch

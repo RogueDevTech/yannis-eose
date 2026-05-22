@@ -165,6 +165,9 @@ export async function action({ request }: ActionFunctionArgs) {
   const primaryBranchId = formData.get('primaryBranchId')?.toString() || undefined;
   const branchIdsStr = formData.get('branchIds')?.toString();
   const roleTemplateId = formData.get('roleTemplateId')?.toString() || undefined;
+  // Set once the admin has confirmed the duplicate-name warning modal — tells
+  // the server to skip the soft duplicate-name guard on this resubmission.
+  const confirmDuplicateName = formData.get('confirmDuplicateName') === 'true';
 
   if (!name || !email || !role) {
     return json({ error: 'Name, email, and role are required' }, { status: 400 });
@@ -206,6 +209,7 @@ export async function action({ request }: ActionFunctionArgs) {
     branchIds: [],
     roleTemplateId,
   };
+  if (confirmDuplicateName) body.confirmDuplicateName = true;
 
   if (capacityStr) body.capacity = parseInt(capacityStr, 10) || 10;
   if (logisticsLocationId) body.logisticsLocationId = logisticsLocationId;
@@ -277,6 +281,22 @@ export async function action({ request }: ActionFunctionArgs) {
       requiresApproval: true,
       requestId: payload.requestId,
       message: payload.message ?? 'User creation request submitted. SuperAdmin will review.',
+    });
+  }
+
+  // Soft duplicate-name guard tripped — the server found a near-identical
+  // existing staff member. Surface the warning so the page can show the
+  // confirm modal; the admin either reactivates that account or resubmits
+  // with `confirmDuplicateName`.
+  if (data && (data as { requiresDuplicateConfirmation?: boolean }).requiresDuplicateConfirmation) {
+    const payload = data as {
+      duplicates?: Array<{ id: string; name: string; status: string }>;
+      message?: string;
+    };
+    return json({
+      requiresDuplicateConfirmation: true,
+      duplicates: payload.duplicates ?? [],
+      message: payload.message,
     });
   }
 

@@ -1,11 +1,12 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, gte, inArray, notInArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID } from '@yannis/shared';
 import { DRIZZLE } from '../database/database.module';
 import { withActor } from '../common/db/with-actor';
+import { CacheService } from '../common/cache/cache.service';
 
 /**
  * Order statuses that have NOT moved any inventory yet. Test orders past
@@ -49,7 +50,10 @@ const TEST_NAME_MATCH = sql`btrim(${schema.orders.customerName}) ~* '^test([^[:a
 export class TestOrderPurgeService {
   private readonly logger = new Logger('TestOrderPurge');
 
-  constructor(@Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
+    private readonly cache: CacheService,
+  ) {}
 
   /** Every 2 hours, on the hour (00:00, 02:00, 04:00 … server time). */
   @Cron('0 0 */2 * * *')
@@ -64,10 +68,17 @@ export class TestOrderPurgeService {
 
   /**
    * Find test orders, skip+log the stock-moved ones, hard-delete the rest.
+   * @param forceArmed  Bypass the env-flag dry-run gate (manual UI trigger).
+   * @param allDates    When true, scan all orders; when false (cron default), only today's.
    * Returns `{ deleted, skipped }`. Safe to call manually.
    */
-  async purgeTestOrders(): Promise<{ deleted: number; skipped: number }> {
-    const armed = process.env.TEST_ORDER_PURGE_ENABLED === 'true';
+  async purgeTestOrders(forceArmed = false, allDates = false): Promise<{ deleted: number; skipped: number }> {
+    const armed = forceArmed || process.env.TEST_ORDER_PURGE_ENABLED === 'true';
+
+    // Cron scans only today's orders to avoid full-table scans; manual purge scans all.
+    const dateFilter = allDates
+      ? undefined
+      : gte(schema.orders.createdAt, new Date(new Date().setHours(0, 0, 0, 0)));
 
     // Test orders that already moved stock — never purged here; surfaced for a
     // human to clean up (so inventory can be corrected at the same time).
@@ -78,7 +89,7 @@ export class TestOrderPurgeService {
         status: schema.orders.status,
       })
       .from(schema.orders)
-      .where(and(TEST_NAME_MATCH, notInArray(schema.orders.status, [...STOCK_NEUTRAL_STATUSES])))
+      .where(and(TEST_NAME_MATCH, notInArray(schema.orders.status, [...STOCK_NEUTRAL_STATUSES]), dateFilter))
       .orderBy(schema.orders.createdAt);
 
     if (stockMoved.length > 0) {
@@ -101,7 +112,7 @@ export class TestOrderPurgeService {
         status: schema.orders.status,
       })
       .from(schema.orders)
-      .where(and(TEST_NAME_MATCH, inArray(schema.orders.status, [...STOCK_NEUTRAL_STATUSES])))
+      .where(and(TEST_NAME_MATCH, inArray(schema.orders.status, [...STOCK_NEUTRAL_STATUSES]), dateFilter))
       .orderBy(schema.orders.createdAt)
       .limit(MAX_PER_RUN);
 
@@ -154,6 +165,13 @@ export class TestOrderPurgeService {
       await tx.delete(schema.invoices).where(inArray(schema.invoices.orderId, ids));
       await tx.delete(schema.orders).where(inArray(schema.orders.id, ids));
     });
+
+    // The purge removed `orders` rows outside the tRPC mutation path, so the
+    // status-count / time-series cache (`cache:orders:aggregates:*`, populated
+    // by orders.router `getStatusCounts`) still counts the deleted orders.
+    // Bust it so marketing overview strips don't show ghost counts. Mirrors
+    // `invalidateOrdersAggregatesCache` in orders.router.ts.
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
       `Hard-deleted ${targets.length} test order(s)` +

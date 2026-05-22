@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRevalidator } from '@remix-run/react';
 import { io, type Socket } from 'socket.io-client';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
 
 interface RealtimeNotification {
   id: string;
@@ -181,28 +182,81 @@ export function useRealtimeNotifications(): {
 }
 
 /**
- * Returns connection state and a "showGreen" flag that is true for 4 seconds after any of the given events fire.
- * Used by LiveIndicator: yellow blinking (idle) → green (event just received) → back to yellow.
+ * Returns connection state and a "showGreen" flag for LiveIndicator:
+ * yellow blinking (idle) → green (a socket update is being applied) → back to yellow.
+ *
+ * `showGreen` goes true the moment a relevant event fires and stays true for the
+ * WHOLE update — through the page revalidation triggered by `usePageRefreshOnEvent`
+ * — then lingers briefly so the user sees it land. It is NOT a fixed timer: the
+ * green only clears once the revalidation has actually finished. A safety-net
+ * timeout covers pages that listen without an accompanying `usePageRefreshOnEvent`.
  */
 export function useLiveIndicator(events: string[]): { isConnected: boolean; showGreen: boolean } {
   const { isConnected } = useSocket();
+  const { state: revalidatorState } = useRevalidator();
   const [showGreen, setShowGreen] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // `pending` = an event arrived and we hold the indicator green until the
+  // revalidation it triggered has completed. `sawLoading` confirms a real
+  // revalidation cycle ran (loading → idle) before we clear.
+  const pendingRef = useRef(false);
+  const sawLoadingRef = useRef(false);
+  const lingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Socket event → go green and wait for the revalidation cycle to finish.
   useEffect(() => {
     if (!isConnected) return;
     const socket = getSocket();
     const listener = () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (lingerRef.current) {
+        clearTimeout(lingerRef.current);
+        lingerRef.current = null;
+      }
+      if (fallbackRef.current) clearTimeout(fallbackRef.current);
+      pendingRef.current = true;
+      sawLoadingRef.current = false;
       setShowGreen(true);
-      timeoutRef.current = setTimeout(() => setShowGreen(false), 4000);
+      // Safety net: if no revalidation runs (page has no usePageRefreshOnEvent),
+      // don't leave the indicator stuck green forever.
+      fallbackRef.current = setTimeout(() => {
+        if (pendingRef.current && !sawLoadingRef.current) {
+          pendingRef.current = false;
+          setShowGreen(false);
+        }
+      }, 6000);
     };
     events.forEach((event) => socket.on(event, listener));
     return () => {
       events.forEach((event) => socket.off(event, listener));
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, [events, isConnected]);
+
+  // Hold green through the revalidation; clear it shortly AFTER it completes.
+  useEffect(() => {
+    if (!pendingRef.current) return;
+    if (revalidatorState === 'loading') {
+      sawLoadingRef.current = true;
+      if (fallbackRef.current) {
+        clearTimeout(fallbackRef.current);
+        fallbackRef.current = null;
+      }
+      setShowGreen(true);
+    } else if (revalidatorState === 'idle' && sawLoadingRef.current) {
+      // Update finished — linger briefly so the green "Updated" state is visible.
+      pendingRef.current = false;
+      sawLoadingRef.current = false;
+      if (lingerRef.current) clearTimeout(lingerRef.current);
+      lingerRef.current = setTimeout(() => setShowGreen(false), 1200);
+    }
+  }, [revalidatorState]);
+
+  useEffect(() => {
+    return () => {
+      if (lingerRef.current) clearTimeout(lingerRef.current);
+      if (fallbackRef.current) clearTimeout(fallbackRef.current);
+    };
+  }, []);
 
   return { isConnected, showGreen };
 }
@@ -227,6 +281,14 @@ export function usePageRefreshOnEvent(events: string[]): void {
     const listener = () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
+        // Bust this page's client loader cache BEFORE revalidating. Routes that
+        // use `cachedClientLoader` would otherwise serve the stale cached
+        // payload to this socket-triggered `revalidate()` — so the live event
+        // would not actually refresh the page. Clearing the entry forces the
+        // revalidation to hit the server and fetch fresh data.
+        if (typeof window !== 'undefined') {
+          invalidateCachedLoader(window.location.pathname);
+        }
         revalidateRef.current();
       }, 500);
     };

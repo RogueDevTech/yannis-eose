@@ -1273,7 +1273,8 @@ export class LogisticsService {
           id: schema.orders.id,
           status: schema.orders.status,
           logisticsLocationId: schema.orders.logisticsLocationId,
-          branchId: schema.orders.branchId,
+          // Logistics works the order in its CS servicing branch (migration 0150).
+          branchId: schema.orders.servicingBranchId,
           totalAmount: schema.orders.totalAmount,
         })
         .from(schema.orders)
@@ -1874,7 +1875,7 @@ export class LogisticsService {
    */
   async deliveredOrdersByProduct(branchId?: string) {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
 
     const rows = await this.db
       .select({
@@ -1900,7 +1901,7 @@ export class LogisticsService {
    */
   async deliveredOrdersByLocation(branchId?: string) {
     const conditions: SQL[] = [sql`${schema.orders.status} IN ('DELIVERED', 'REMITTED')`];
-    if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
 
     const rows = await this.db
       .select({
@@ -2606,7 +2607,7 @@ export class LogisticsService {
     const orderConditions: SQL[] = [isNotNull(schema.orders.logisticsLocationId)];
     if (effectiveStart) orderConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
     if (effectiveEnd) orderConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
-    if (branchId) orderConditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) orderConditions.push(eq(schema.orders.servicingBranchId, branchId));
 
     const statusRows = await this.db
       .select({
@@ -2649,7 +2650,7 @@ export class LogisticsService {
     const remittanceConditions: SQL[] = [];
     if (effectiveStart) remittanceConditions.push(gte(schema.orders.allocatedAt, effectiveStart));
     if (effectiveEnd) remittanceConditions.push(lte(schema.orders.allocatedAt, effectiveEnd));
-    if (branchId) remittanceConditions.push(eq(schema.orders.branchId, branchId));
+    if (branchId) remittanceConditions.push(eq(schema.orders.servicingBranchId, branchId));
 
     const remittanceRows = await this.db
       .select({

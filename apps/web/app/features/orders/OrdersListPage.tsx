@@ -258,6 +258,8 @@ export interface OrdersListPageProps {
    * Server still enforces the role gate; this prop is just UI visibility.
    */
   enableFromCartStatusOption?: boolean;
+  /** Show "Test orders" filter option. Admin only. */
+  enableTestOrdersOption?: boolean;
   /**
    * Open abandoned-cart count — when provided, an extra "Cart abandonment" tile
    * is shown in the overview strip. Only the Sales orders route supplies it (via
@@ -314,6 +316,7 @@ function OrdersListPageImpl({
   orderDetailFrom = 'cs',
   deferredLoading = false,
   enableFromCartStatusOption = false,
+  enableTestOrdersOption = false,
   cartAbandonmentCount = null,
   isCartAbandonmentView = false,
   bulkSelectAllMatchingInput,
@@ -336,15 +339,27 @@ function OrdersListPageImpl({
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   /** Sentinel — not an order status, indicates the `?fromCart=1` pseudo-filter is active. */
   const FROM_CART_STATUS_VALUE = '__from_cart__';
+  const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
   const fromCartUrlActive = searchParams.get('fromCart') === '1';
+  const testOrdersUrlActive = searchParams.get('testOrders') === '1';
   const initialSelectedStatus =
-    enableFromCartStatusOption && fromCartUrlActive
-      ? FROM_CART_STATUS_VALUE
-      : statusFilter || 'ALL';
+    enableTestOrdersOption && testOrdersUrlActive
+      ? TEST_ORDERS_STATUS_VALUE
+      : enableFromCartStatusOption && fromCartUrlActive
+        ? FROM_CART_STATUS_VALUE
+        : statusFilter || 'ALL';
   const [selectedStatus, setSelectedStatus] = useState(initialSelectedStatus);
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showExportModal, setShowExportModal] = useState(false);
   const [showSelectedExportModal, setShowSelectedExportModal] = useState(false);
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
+  const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
+  const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
+  useFetcherToast(purgeFetcher.data, {
+    successTitle: 'Test orders cleared',
+    successMessage: `${purgeFetcher.data?.deleted ?? 0} deleted${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
+    errorTitle: 'Clear failed',
+  });
   // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
   const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
 
@@ -537,9 +552,15 @@ function OrdersListPageImpl({
     if (overrides.status !== undefined) {
       if (overrides.status === FROM_CART_STATUS_VALUE) {
         params.delete('status');
+        params.delete('testOrders');
         params.set('fromCart', '1');
+      } else if (overrides.status === TEST_ORDERS_STATUS_VALUE) {
+        params.delete('status');
+        params.delete('fromCart');
+        params.set('testOrders', '1');
       } else {
         params.delete('fromCart');
+        params.delete('testOrders');
         if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
         else params.set('status', overrides.status);
       }
@@ -1088,6 +1109,9 @@ function OrdersListPageImpl({
     ...(enableFromCartStatusOption
       ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
       : []),
+    ...(enableTestOrdersOption
+      ? [{ value: TEST_ORDERS_STATUS_VALUE, label: 'Test orders' }]
+      : []),
   ];
 
   const csCloserOptions = [
@@ -1216,9 +1240,15 @@ function OrdersListPageImpl({
                           next.set('page', '1');
                           if (v === FROM_CART_STATUS_VALUE) {
                             next.delete('status');
+                            next.delete('testOrders');
                             next.set('fromCart', '1');
+                          } else if (v === TEST_ORDERS_STATUS_VALUE) {
+                            next.delete('status');
+                            next.delete('fromCart');
+                            next.set('testOrders', '1');
                           } else {
                             next.delete('fromCart');
+                            next.delete('testOrders');
                             if (v === 'ALL') next.delete('status');
                             else next.set('status', v);
                           }
@@ -1346,6 +1376,11 @@ function OrdersListPageImpl({
                     Generate report
                   </Button>
                 )}
+                {isTestOrdersView && (
+                  <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
+                    Delete all test orders
+                  </Button>
+                )}
                 {!isCartAbandonmentView && (
                   <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
                     <DateFilterBar
@@ -1399,6 +1434,20 @@ function OrdersListPageImpl({
                     }}
                   >
                     Generate report
+                  </Button>
+                )}
+                {isTestOrdersView && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    className="h-12 w-full justify-center"
+                    disabled={purgeFetcher.state !== 'idle'}
+                    onClick={() => {
+                      closeSheet();
+                      setPurgeConfirmOpen(true);
+                    }}
+                  >
+                    Delete all test orders
                   </Button>
                 )}
                 {canBulkPick && !isCartAbandonmentView && filteredOrders.length > 0 && (
@@ -1790,9 +1839,15 @@ function OrdersListPageImpl({
                       next.set('page', '1');
                       if (v === FROM_CART_STATUS_VALUE) {
                         next.delete('status');
+                        next.delete('testOrders');
                         next.set('fromCart', '1');
+                      } else if (v === TEST_ORDERS_STATUS_VALUE) {
+                        next.delete('status');
+                        next.delete('fromCart');
+                        next.set('testOrders', '1');
                       } else {
                         next.delete('fromCart');
+                        next.delete('testOrders');
                         if (v === 'ALL') next.delete('status');
                         else next.set('status', v);
                       }
@@ -2267,6 +2322,55 @@ function OrdersListPageImpl({
                 Assign
               </Button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {purgeConfirmOpen && (
+        <Modal open onClose={() => { if (purgeFetcher.state === 'idle') setPurgeConfirmOpen(false); }} maxWidth="max-w-sm" contentClassName="p-6">
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Delete all test orders</h3>
+          <p className="text-sm text-app-fg-muted mb-4">
+            This will permanently delete all orders where the customer name starts with &ldquo;test&rdquo;. Only orders that haven&rsquo;t moved stock (unprocessed, assigned, engaged, cancelled) are removed.
+          </p>
+          {purgeFetcher.state === 'idle' && purgeFetcher.data ? (
+            <div className="mb-4">
+              {purgeFetcher.data.success ? (
+                <div className="rounded-lg border border-success-300 bg-success-50 dark:border-success-700 dark:bg-success-900/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-success-700 dark:text-success-300">
+                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} deleted
+                  </p>
+                  {(purgeFetcher.data.skipped ?? 0) > 0 && (
+                    <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
+                      {purgeFetcher.data.skipped} skipped (stock already moved)
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-danger-300 bg-danger-50 dark:border-danger-700 dark:bg-danger-900/20 px-4 py-3">
+                  <p className="text-sm font-semibold text-danger-700 dark:text-danger-300">
+                    {purgeFetcher.data.error ?? 'Failed to delete test orders'}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : null}
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setPurgeConfirmOpen(false)} disabled={purgeFetcher.state !== 'idle'}>
+              {purgeFetcher.data?.success ? 'Done' : 'Cancel'}
+            </Button>
+            {!purgeFetcher.data?.success && (
+              <Button
+                variant="danger"
+                disabled={purgeFetcher.state !== 'idle'}
+                loading={purgeFetcher.state !== 'idle'}
+                loadingText="Deleting..."
+                onClick={() => {
+                  purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
+                }}
+              >
+                Delete all test orders
+              </Button>
+            )}
           </div>
         </Modal>
       )}

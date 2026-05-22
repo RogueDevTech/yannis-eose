@@ -150,6 +150,76 @@ export class SessionStoreService {
     return tokens.length;
   }
 
+  /**
+   * Re-sync `branchIds` / `currentBranchId` on every active session of a user
+   * after their branch memberships changed — WITHOUT logging them out.
+   *
+   * These two fields are captured on the session blob at login and are not
+   * part of the 60s user-bundle cache, so a branch add/remove otherwise only
+   * takes effect on the user's next login. `currentBranchId` is reconciled:
+   * if the active branch is no longer a membership it falls back to the new
+   * primary branch, the first remaining branch, or null.
+   *
+   * Returns the number of sessions updated.
+   */
+  async refreshUserBranchMemberships(userId: string): Promise<number> {
+    const memberships = await this.db
+      .select({
+        branchId: schema.userBranches.branchId,
+        isPrimary: schema.userBranches.isPrimary,
+      })
+      .from(schema.userBranches)
+      .where(eq(schema.userBranches.userId, userId));
+    const branchIds = memberships.map((m) => m.branchId as string);
+    const primaryBranchId = memberships.find((m) => m.isPrimary)?.branchId as
+      | string
+      | undefined;
+
+    const rows = await this.db
+      .select({
+        token: schema.authSessions.token,
+        sessionData: schema.authSessions.sessionData,
+        expiresAt: schema.authSessions.expiresAt,
+      })
+      .from(schema.authSessions)
+      .where(
+        and(
+          eq(schema.authSessions.userId, userId),
+          isNull(schema.authSessions.revokedAt),
+          gt(schema.authSessions.expiresAt, new Date()),
+        ),
+      );
+    if (rows.length === 0) return 0;
+
+    let updated = 0;
+    for (const row of rows) {
+      const session = row.sessionData as unknown as SessionUser;
+      let currentBranchId = session.currentBranchId ?? null;
+      if (currentBranchId !== null && !branchIds.includes(currentBranchId)) {
+        // Active branch was removed — fall back to primary / first / null.
+        currentBranchId = primaryBranchId ?? branchIds[0] ?? null;
+      }
+      const nextSession: SessionUser = { ...session, branchIds, currentBranchId };
+      const ttlSeconds = await this.remainingTtlSeconds(row.token, row.expiresAt);
+      await this.updateSession(row.token, nextSession, ttlSeconds);
+      updated += 1;
+    }
+    return updated;
+  }
+
+  /** Remaining session TTL — Redis is authoritative (touchSession extends it there only). */
+  private async remainingTtlSeconds(token: string, dbExpiresAt: Date): Promise<number> {
+    if (this.redisHealth.isHealthy()) {
+      try {
+        const ttl = await this.redis.ttl(`${SESSION_PREFIX}${token}`);
+        if (ttl > 0) return ttl;
+      } catch {
+        // fall through to the DB-derived value
+      }
+    }
+    return Math.max(60, Math.floor((dbExpiresAt.getTime() - Date.now()) / 1000));
+  }
+
   private async tryRedisGet(token: string): Promise<SessionUser | null> {
     if (!this.redisHealth.isHealthy()) return null;
     try {
