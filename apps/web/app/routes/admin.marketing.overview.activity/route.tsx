@@ -39,14 +39,11 @@ function buildScopeInput(user: {
   currentBranchId?: string | null;
 }): ScopeInput {
   const limit = 60;
-  // Active branch selection is the source of truth for this page. Media Buyers
-  // still keep their own-funnel restriction on top of that branch scope.
+  // A plain Media Buyer sees ALL their own carts/orders across every branch
+  // (the mediaBuyerId filter is itself an exact scope). Branch-scoping here
+  // would undercount — same rationale as `marketingOrdersOverviewStripFor`.
   if (user.role === 'MEDIA_BUYER') {
-    return {
-      limit,
-      mediaBuyerId: user.id,
-      ...(user.currentBranchId ? { branchId: user.currentBranchId } : {}),
-    };
+    return { limit, mediaBuyerId: user.id };
   }
   // Selected branch should scope the live feed even for admin/global viewers.
   if (user.currentBranchId) {

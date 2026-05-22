@@ -427,7 +427,22 @@ const entries: ShellEntry[] = [
   },
   {
     match: /^\/admin\/marketing\/team$/,
-    render: (_m, sp) => <MarketingTeamLoadingShell dateFilters={parseDateFilters(sp)} />,
+    render: (_m, sp) => {
+      // Mirror the route loader's `resolveMarketingDateFilters(url, 'today')`.
+      const periodAllTime = sp.get('period') === 'all_time';
+      let startDate = sp.get('startDate') ?? '';
+      let endDate = sp.get('endDate') ?? '';
+      if (!periodAllTime && !startDate && !endDate) {
+        const d = defaultTodayRangeClient();
+        startDate = d.startDate;
+        endDate = d.endDate;
+      }
+      if (periodAllTime) {
+        startDate = '';
+        endDate = '';
+      }
+      return <MarketingTeamLoadingShell dateFilters={{ startDate, endDate, periodAllTime }} />;
+    },
   },
   {
     match: /^\/admin\/marketing\/ad-spend$/,
