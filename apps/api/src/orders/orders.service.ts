@@ -7008,4 +7008,86 @@ export class OrdersService {
 
     return Array.from(byBranch.values()).sort((a, b) => b.totalOrders - a.totalOrders);
   }
+
+  /**
+   * Move orders to a different branch. Resets status to UNPROCESSED, clears CS
+   * assignment. MB credit preserved. Timeline history stays intact.
+   * Used by HoCS/Admin for inter-branch routing.
+   */
+  async moveOrdersToBranch(
+    orderIds: string[],
+    targetBranchId: string,
+    actor: SessionUser,
+    opts?: { clearMediaBuyer?: boolean },
+  ) {
+    const results: Array<{ orderId: string; success: boolean; error?: string }> = [];
+
+    for (const orderId of orderIds) {
+      try {
+        const [order] = await this.db
+          .select({ id: schema.orders.id, branchId: schema.orders.branchId, status: schema.orders.status })
+          .from(schema.orders)
+          .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+          .limit(1);
+
+        if (!order) {
+          results.push({ orderId, success: false, error: 'Order not found' });
+          continue;
+        }
+
+        const updateFields: Record<string, unknown> = {
+          branchId: targetBranchId,
+          status: 'UNPROCESSED',
+          assignedCsId: null,
+          updatedAt: new Date(),
+        };
+        if (opts?.clearMediaBuyer) {
+          updateFields.mediaBuyerId = null;
+        }
+
+        await withActorAndBranch(
+          this.db,
+          { id: actor.id, currentBranchId: targetBranchId },
+          async (tx) => {
+            await tx
+              .update(schema.orders)
+              .set(updateFields)
+              .where(eq(schema.orders.id, orderId));
+          },
+        );
+
+        const eventType = opts?.clearMediaBuyer ? 'FOLLOW_UP_REASSIGNED' : 'BRANCH_MOVED';
+        const description = opts?.clearMediaBuyer
+          ? `Order reassigned for follow-up. Previous status: ${order.status}.`
+          : `Order moved to a different branch. Previous status: ${order.status}. Status reset to Unprocessed.`;
+
+        await this.writeTimelineEvent({
+          orderId,
+          eventType: eventType as 'STATUS_CHANGED',
+          actorId: actor.id,
+          actorName: actor.name ?? null,
+          description,
+          metadata: {
+            previousBranchId: order.branchId,
+            targetBranchId,
+            previousStatus: order.status,
+            clearMediaBuyer: opts?.clearMediaBuyer ?? false,
+          },
+          branchId: targetBranchId,
+        });
+
+        results.push({ orderId, success: true });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        results.push({ orderId, success: false, error: message });
+      }
+    }
+
+    return {
+      results,
+      succeeded: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      total: orderIds.length,
+    };
+  }
 }

@@ -245,6 +245,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       | 'isCartAbandonmentView'
       | 'bulkSelectAllMatchingInput'
       | 'deferredSecondary'
+      | 'branchesForMove'
     >
   > => {
   // Cart-abandonment view: the "Cart abandonment" status pseudo-filter swaps the
@@ -372,6 +373,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
     };
   })();
 
+  // Fetch branches for the "Move to branch" bulk action (Admin / HoCS only).
+  const canMoveToBranch =
+    user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'HEAD_OF_CS';
+  let branchesForMove: Array<{ id: string; name: string }> | undefined;
+  if (canMoveToBranch) {
+    const branchesRes = await apiRequest<unknown>('/trpc/branches.list', { method: 'GET', cookie });
+    const branchesData = branchesRes.ok
+      ? (branchesRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data
+      : null;
+    branchesForMove = (branchesData ?? []).map((b) => ({ id: b.id, name: b.name }));
+  }
+
   return {
     orders,
     total,
@@ -388,6 +401,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     canCreateOffline,
     canExport,
     canBulkPick,
+    branchesForMove,
     filters: {
       startDate: startDate ?? '',
       endDate: endDate ?? '',
@@ -610,6 +624,24 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   }
 
+  if (intent === 'moveOrdersToBranch') {
+    const orderIds = JSON.parse(form.get('orderIds')?.toString() ?? '[]');
+    const targetBranchId = form.get('targetBranchId')?.toString() ?? '';
+    if (!Array.isArray(orderIds) || orderIds.length === 0 || !targetBranchId) {
+      return json({ error: 'Order IDs and target branch are required' }, { status: 400 });
+    }
+    const res = await apiRequest('/trpc/orders.moveOrdersToBranch', {
+      method: 'POST',
+      cookie,
+      body: { orderIds, targetBranchId },
+    });
+    if (!res.ok) {
+      return json({ error: extractApiErrorMessage(res.data, 'Failed to move orders') }, { status: safeStatus(res.status) });
+    }
+    const data = (res.data as { result?: { data?: { succeeded: number; failed: number } } })?.result?.data;
+    return json({ success: true, succeeded: data?.succeeded ?? 0, failed: data?.failed ?? 0 });
+  }
+
   return json({ success: false, error: 'Unknown intent' });
 }
 
@@ -648,6 +680,7 @@ export default function CSOrdersRoute() {
         | 'isCartAbandonmentView'
         | 'bulkSelectAllMatchingInput'
         | 'deferredSecondary'
+        | 'branchesForMove'
       >
     >;
   };
