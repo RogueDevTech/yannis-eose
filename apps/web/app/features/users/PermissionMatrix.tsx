@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Checkbox } from '~/components/ui/checkbox';
 import { Collapsible } from '~/components/ui/collapsible';
+import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
 import { SearchInput } from '~/components/ui/search-input';
+import { Spinner } from '~/components/ui/spinner';
 import { formatPermissionCode, formatPermissionGroup } from '~/lib/permission-codes';
 import type { PermissionCatalogItem } from './types';
 import { PermissionCodeDetailPanel } from './PermissionCodeDetailPanel';
@@ -70,13 +72,17 @@ interface PermissionMatrixProps {
   onOverridesChange: (next: Record<string, boolean>) => void;
   /**
    * When true the matrix renders as a preview only — checkboxes are disabled, the
-   * select-all + reset controls are hidden. The "Edit permissions" CTA on the
+   * select-all + reset controls are hidden. The “Edit permissions” CTA on the
    * profile page flips this off so the same matrix becomes editable with the
    * current grants pre-loaded.
    */
   readOnly?: boolean;
   /** Human label for the role driving the template baseline (e.g. “Head of Marketing”). */
   selectedRoleLabel?: string;
+  /** Fires when the user confirms “Reset to role defaults”. Caller should submit the server action. */
+  onResetToDefaults?: () => void;
+  /** True while the reset-to-defaults fetcher is in flight. */
+  isResettingDefaults?: boolean;
 }
 
 export function PermissionMatrix({
@@ -86,10 +92,13 @@ export function PermissionMatrix({
   onOverridesChange,
   readOnly = false,
   selectedRoleLabel,
+  onResetToDefaults,
+  isResettingDefaults = false,
 }: PermissionMatrixProps) {
   const [query, setQuery] = useState('');
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [infoPermission, setInfoPermission] = useState<PermissionCatalogItem | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const templateSet = useMemo(() => new Set(templateCodes), [templateCodes]);
 
   // When the role's template changes (e.g. user just picked "Media Buyer"),
@@ -260,9 +269,47 @@ export function PermissionMatrix({
           </div>
         }
       >
-        <p className="text-xs text-app-fg-muted">
-          Checks come from the role you picked. Toggle to add or remove individual permissions for this user.
-        </p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-app-fg-muted">
+            Checks come from the role you picked. Toggle to add or remove individual permissions for this user.
+          </p>
+          {!readOnly && onResetToDefaults && (totals.explicitGrant > 0 || totals.explicitRevoke > 0) && (
+            <button
+              type="button"
+              disabled={isResettingDefaults}
+              onClick={() => setShowResetConfirm(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-hover/60 px-2.5 py-1.5 text-xs font-medium text-app-fg-muted hover:bg-app-hover hover:text-app-fg transition-colors disabled:opacity-50"
+            >
+              {isResettingDefaults ? <Spinner className="h-3.5 w-3.5" /> : (
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="h-3.5 w-3.5" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                </svg>
+              )}
+              Reset to defaults
+            </button>
+          )}
+        </div>
+
+        <ConfirmActionModal
+          open={showResetConfirm}
+          onClose={() => setShowResetConfirm(false)}
+          title="Reset permissions to role defaults?"
+          description="This will remove all per-user permission overrides and restore the pure role-template baseline."
+          details={
+            <ul className="list-disc list-inside space-y-1 text-xs text-app-fg-muted">
+              <li><span className="font-medium text-app-fg">{totals.explicitGrant}</span> extra grant{totals.explicitGrant !== 1 ? 's' : ''} will be removed</li>
+              <li><span className="font-medium text-app-fg">{totals.explicitRevoke}</span> revoke{totals.explicitRevoke !== 1 ? 's' : ''} will be removed</li>
+              <li>The user will have <span className="font-medium text-app-fg">{templateCodes.length}</span> permissions from the role template</li>
+            </ul>
+          }
+          confirmLabel="Reset to defaults"
+          variant="warning"
+          loading={isResettingDefaults}
+          onConfirm={() => {
+            setShowResetConfirm(false);
+            onResetToDefaults?.();
+          }}
+        />
 
         <form onSubmit={(e) => e.preventDefault()}>
           <SearchInput

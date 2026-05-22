@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Form, useActionData, useNavigation, Link } from '@remix-run/react';
+import { Form, useActionData, useNavigation, Link, useFetcher } from '@remix-run/react';
 import { AmountInput } from '~/components/ui/amount-input';
 import { Button } from '~/components/ui/button';
 import { InlineNotification } from '~/components/ui/inline-notification';
@@ -20,6 +20,7 @@ import type {
   UserCreateBranch,
 } from './types';
 import { formatRole, ROLE_AVATAR_GRADIENTS } from './types';
+import { useFetcherToast } from '~/components/ui/toast';
 import { PermissionMatrix } from './PermissionMatrix';
 
 // HoCS / HoM / HoLogistics + HR_MANAGER: existing ACTIVE+PENDING holders shown
@@ -298,6 +299,25 @@ export function UserCreatePage({
   const [permissionOverrides, setPermissionOverrides] = useState<Record<string, boolean>>(
     editingUser?.permissionOverrides ?? {},
   );
+
+  // Reset permissions to role defaults — standalone server action via fetcher.
+  const resetPermsFetcher = useFetcher<{ success?: boolean; error?: string; message?: string }>();
+  useFetcherToast(resetPermsFetcher.data, { successMessage: 'Permissions reset to role defaults' });
+  const isResettingPermissions = resetPermsFetcher.state !== 'idle';
+  // On success, also clear local overrides state so the matrix reflects the reset.
+  useEffect(() => {
+    if (resetPermsFetcher.data?.success) {
+      setPermissionOverrides({});
+    }
+  }, [resetPermsFetcher.data]);
+  const handleResetPermissionsToDefaults = () => {
+    if (!editingUser) return;
+    resetPermsFetcher.submit(
+      { intent: 'resetPermissionsToDefaults' },
+      { method: 'post' },
+    );
+  };
+
   const phoneIsComplete = /^[789]\d{9}$/.test(phoneLocal);
   const phoneError =
     phoneLocal.length > 0 && !phoneIsComplete
@@ -632,6 +652,8 @@ export function UserCreatePage({
                   overrides={permissionOverrides}
                   onOverridesChange={setPermissionOverrides}
                   selectedRoleLabel={selectedRole ? formatRole(selectedRole) : undefined}
+                  onResetToDefaults={isEditMode ? handleResetPermissionsToDefaults : undefined}
+                  isResettingDefaults={isResettingPermissions}
                 />
               </div>
             )}

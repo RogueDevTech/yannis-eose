@@ -1436,6 +1436,16 @@ export const ordersRouter = router({
       return res;
     }),
 
+  /**
+   * Read-only phone lookup — loaded with the order detail page so the Call
+   * Customer modal can copy/dial without a separate reveal fetch.
+   */
+  getCallablePhone: authedProcedure
+    .input(z.object({ orderId: z.string().uuid() }))
+    .query(async ({ input, ctx }) => {
+      return getOrdersService().getCallablePhoneForViewer(input.orderId, ctx.user);
+    }),
+
   // ── VOIP Procedures ────────────────────────────────────────────
 
   /**

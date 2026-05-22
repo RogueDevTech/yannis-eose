@@ -2068,6 +2068,87 @@ export class UsersService {
   }
 
   /**
+   * Reset a user's permissions to the pure role-template baseline — strips ALL
+   * per-user overrides (extra grants + explicit revokes). The user ends up with
+   * exactly the permissions their role template provides, nothing more/less.
+   */
+  async resetPermissionsToDefaults(
+    userId: string,
+    actor: SessionUser,
+  ): Promise<{ stampedGranted: number; stampedRevoked: number; templateBaselineCount: number }> {
+    const result = await withActor(this.db, actor, async (tx) => {
+      const [target] = await tx
+        .select({
+          id: schema.users.id,
+          role: schema.users.role,
+          roleTemplateId: schema.users.roleTemplateId,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+
+      if (!target) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
+      }
+      if ((target.role as string) === 'SUPER_ADMIN') {
+        return { stampedGranted: 0, stampedRevoked: 0, templateBaselineCount: 0 };
+      }
+
+      const roleTemplateId =
+        target.roleTemplateId ?? (await this.resolveRoleTemplateIdForEnumRole(target.role as string));
+      if (!roleTemplateId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message:
+            'No role template found for this user. Run `pnpm db:seed-permissions` (or restart the API) and try again.',
+        });
+      }
+
+      // Empty overrides → pure template baseline, no per-user extras or revokes.
+      await this.replaceUserPermissionSnapshot(tx, {
+        userId,
+        roleTemplateId,
+        role: target.role as string,
+        overrides: {},
+        actorId: actor.id,
+      });
+
+      const stampedRows = await tx
+        .select({ granted: schema.userPermissions.granted })
+        .from(schema.userPermissions)
+        .where(
+          and(eq(schema.userPermissions.userId, userId), isNull(schema.userPermissions.validTo)),
+        );
+      let stampedGranted = 0;
+      let stampedRevoked = 0;
+      for (const row of stampedRows) {
+        if (row.granted) stampedGranted++;
+        else stampedRevoked++;
+      }
+
+      const templateCodes = await resolveRoleTemplateBaselineCodes(
+        tx,
+        roleTemplateId,
+        target.role as string,
+      );
+
+      this.logger.log(
+        `resetPermissionsToDefaults(${userId}) by ${actor.id}: template=${roleTemplateId} baseline=${templateCodes.length} → ${stampedGranted} granted, 0 overrides`,
+      );
+
+      return {
+        stampedGranted,
+        stampedRevoked,
+        templateBaselineCount: templateCodes.length,
+      };
+    });
+
+    void this.userBundleCache.invalidate(userId);
+
+    return result;
+  }
+
+  /**
    * Deactivate a staff member (status DEACTIVATED, sessions killed).
    * Reactivation: `users.update` with `status: 'ACTIVE'` — same permission model as below.
    * - SuperAdmin may deactivate anyone (except themselves).
