@@ -2595,7 +2595,7 @@ export class OrdersService {
       } else if (trimmed.length > 0) {
         // Check if search looks like an order number: "YNS-00123", "YNS00123", or bare "00123"
         const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
-        const parsedOrderNum = orderNumMatch ? parseInt(orderNumMatch[1], 10) : NaN;
+        const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
 
         if (!Number.isNaN(parsedOrderNum) && parsedOrderNum > 0) {
           // Could be an order number OR a name/phone — OR them so both paths work.
