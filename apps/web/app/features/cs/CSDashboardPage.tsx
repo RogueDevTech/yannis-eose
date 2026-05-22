@@ -661,7 +661,7 @@ function CSDashboardPageLoaded({
   claimQueue,
   liveEvents,
   canCreateOffline = false,
-  canDeleteCart = false,
+  canManageAbandonedCart = false,
   canCancelOrders = false,
   productsForOfflineOrder,
 }: CSDashboardPageLoadedProps) {
@@ -993,8 +993,6 @@ function CSDashboardPageLoaded({
   }, [selectedQueueOrder]);
   /** Multi-select for bulk-assign on the Unassigned Queue tab. */
   const [selectedQueueIds, setSelectedQueueIds] = useState<Set<string>>(new Set());
-  /** Multi-select for bulk actions on the Cart abandonment tab. */
-  const [selectedAbandonedIds, setSelectedAbandonedIds] = useState<Set<string>>(new Set());
   /** Multi-select for bulk dismiss on the Possible duplicates tab. */
   const [selectedDuplicateIds, setSelectedDuplicateIds] = useState<Set<string>>(new Set());
   /** Multi-select for the Callbacks tab. */
@@ -1017,19 +1015,6 @@ function CSDashboardPageLoaded({
     });
   };
   const clearDuplicateSelection = () => setSelectedDuplicateIds(new Set());
-  const bulkDeleteCartsFetcher = useFetcher<{
-    ok: boolean;
-    deleted?: number;
-    failed?: number;
-    total?: number;
-    error?: string;
-  }>();
-  const [bulkDeleteCartsConfirmOpen, setBulkDeleteCartsConfirmOpen] = useState(false);
-  // Optimistic delete overlay — captures the IDs at submit time so we can hide
-  // them from the rendered list immediately, instead of waiting for the
-  // cartsFetcher reload to return. Cleared once the server data no longer
-  // contains them (or on failure).
-  const [bulkDeletingAbandonedIds, setBulkDeletingAbandonedIds] = useState<string[]>([]);
 
   const toggleCallbackSelection = (orderId: string) => {
     setSelectedCallbackIds((prev) => {
@@ -1040,15 +1025,6 @@ function CSDashboardPageLoaded({
     });
   };
 
-  const toggleAbandonedSelection = (cartId: string) => {
-    setSelectedAbandonedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(cartId)) next.delete(cartId);
-      else next.add(cartId);
-      return next;
-    });
-  };
-  const clearAbandonedSelection = () => setSelectedAbandonedIds(new Set());
   /** Selected closers inside the Unassigned "Assign" modal (assignable only). */
   const [bulkAssignAgentIds, setBulkAssignAgentIds] = useState<Set<string>>(() => new Set());
   const [assignCloserModalOpen, setAssignCloserModalOpen] = useState(false);
@@ -1115,8 +1091,6 @@ function CSDashboardPageLoaded({
     customerName: string;
     cartPrefill?: import('~/features/orders/CreateOfflineOrderModal').CartPrefill;
   } | null>(null);
-  /** Delete abandoned cart confirmation modal */
-  const [deleteCartConfirm, setDeleteCartConfirm] = useState<PendingCart | null>(null);
   /** Side-by-side compare modal opened from the Possible duplicates tab.
    *  Hosts the Merge / Dismiss actions, which hand off to the existing confirm modals below. */
   const [compareDuplicatePair, setCompareDuplicatePair] = useState<DuplicatePair | null>(null);
@@ -1162,19 +1136,7 @@ function CSDashboardPageLoaded({
     // Order-stage items → generic live activity detail modal
     setSelectedLiveCart(item);
   }, [liveActivityData.pendingCarts, liveActivityData.abandonedCarts]);
-  const deleteCartFetcher = useFetcher<{ ok: boolean; error?: string }>();
-  // Optimistic overlay: hide rows currently being deleted (single or bulk) so
-  // the UI updates the instant the user confirms, not after the refetch returns.
-  const abandonedCartsList = useMemo(() => {
-    const hidden = new Set(bulkDeletingAbandonedIds);
-    // Single delete in-flight — extract cart ID from the fetcher form data
-    if (deleteCartFetcher.formData?.get('intent') === 'deleteAbandoned') {
-      const singleId = deleteCartFetcher.formData.get('cartId')?.toString();
-      if (singleId) hidden.add(singleId);
-    }
-    if (hidden.size === 0) return serverAbandonedCartsList;
-    return serverAbandonedCartsList.filter((c) => !hidden.has(c.id));
-  }, [serverAbandonedCartsList, bulkDeletingAbandonedIds, deleteCartFetcher.formData]);
+  const abandonedCartsList = serverAbandonedCartsList;
   const abandonedTotalPages =
     abandonedPagination.total === 0 ? 0 : Math.ceil(abandonedPagination.total / abandonedPagination.limit);
   const { toast } = useToast();
@@ -1246,7 +1208,6 @@ function CSDashboardPageLoaded({
   const actionError = (fetcher.data as { error?: string })?.error;
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const bulkAssignSurface = useFetcherActionSurface(bulkAssignFetcher);
-  const deleteCartSurface = useFetcherActionSurface(deleteCartFetcher);
 
   type FetcherSubmissionMeta =
     | { intent: string; orderIdsLen?: number; newStatus?: string }
@@ -1296,15 +1257,6 @@ function CSDashboardPageLoaded({
       : 'CS action completed';
   useFetcherToast(fetcher.data, { successMessage, skipErrorToast: csMainFetcherModalOpen });
   useFetcherToast(claimFetcher.data, { successMessage: claimFetcher.data?.message ?? 'Order claimed' });
-  useFetcherToast(deleteCartFetcher.data, {
-    successMessage: 'Cart deleted',
-    skipErrorToast: deleteCartConfirm != null,
-  });
-  useFetcherToast(bulkDeleteCartsFetcher.data, {
-    successMessage: bulkDeleteCartsFetcher.data?.deleted
-      ? `${bulkDeleteCartsFetcher.data.deleted} cart(s) cleared`
-      : 'Carts cleared',
-  });
   useFetcherToast(bulkDismissDuplicatesFetcher.data, {
     successMessage: bulkDismissDuplicatesFetcher.data?.dismissed
       ? `${bulkDismissDuplicatesFetcher.data.dismissed} duplicate(s) dismissed`
@@ -1314,39 +1266,6 @@ function CSDashboardPageLoaded({
     successMessage: 'Order(s) assigned to closer',
     skipErrorToast: assignCloserModalOpen,
   });
-
-  // Close delete modal and refresh carts list after successful delete
-  useEffect(() => {
-    if (deleteCartFetcher.state === 'idle' && deleteCartFetcher.data?.ok) {
-      setDeleteCartConfirm(null);
-      cartsFetcher.load(buildCartsUrl(abandonedPageFromUrlRef.current, abandonedPerPageFromUrlRef.current));
-    }
-  }, [deleteCartFetcher.state, deleteCartFetcher.data]);
-
-  // Bulk delete carts — close confirm, clear selection, refresh
-  useEffect(() => {
-    if (bulkDeleteCartsFetcher.state !== 'idle' || !bulkDeleteCartsFetcher.data) return;
-    const succeeded =
-      bulkDeleteCartsFetcher.data.ok || (bulkDeleteCartsFetcher.data.deleted ?? 0) > 0;
-    if (succeeded) {
-      setBulkDeleteCartsConfirmOpen(false);
-      clearAbandonedSelection();
-      cartsFetcher.load(buildCartsUrl(abandonedPageFromUrlRef.current, abandonedPerPageFromUrlRef.current));
-    } else {
-      // Action errored — drop the optimistic filter so the rows reappear.
-      setBulkDeletingAbandonedIds([]);
-    }
-  }, [bulkDeleteCartsFetcher.state, bulkDeleteCartsFetcher.data]);
-
-  // Drop the optimistic delete overlay once the server-side refetch has
-  // returned and the deleted carts are no longer in the response.
-  useEffect(() => {
-    if (bulkDeletingAbandonedIds.length === 0) return;
-    if (cartsFetcher.state !== 'idle' || !cartsFetcher.data) return;
-    const stillPresent =
-      cartsFetcher.data.abandonedCarts?.some((c: PendingCart) => bulkDeletingAbandonedIds.includes(c.id)) ?? false;
-    if (!stillPresent) setBulkDeletingAbandonedIds([]);
-  }, [cartsFetcher.state, cartsFetcher.data, bulkDeletingAbandonedIds]);
 
   // Bulk dismiss duplicates — close confirm, clear selection, force loader revalidation
   useEffect(() => {
@@ -1917,11 +1836,10 @@ function CSDashboardPageLoaded({
       {/* Abandoned cart detail modal — reveals raw phone (audited) for recovery */}
       <AbandonedCartDetailModal
         cart={selectedAbandonedCart}
-        canReveal={canDeleteCart}
-        canRecover={canDeleteCart}
+        canReveal={canManageAbandonedCart}
+        canRecover={canManageAbandonedCart}
         cartStatus={selectedCartStatus}
         onClose={() => setSelectedAbandonedCart(null)}
-        onClear={canDeleteCart ? (c) => { setSelectedAbandonedCart(null); setDeleteCartConfirm(c); } : undefined}
       />
 
       {/* Active order detail modal */}
@@ -2660,37 +2578,9 @@ function CSDashboardPageLoaded({
             />
           ) : (
             <div>
-              {canDeleteCart && abandonedCartsList.length > 0 && (
-                <div className="mb-2 rounded-lg border border-app-border bg-app-elevated px-3 py-2 -mx-1 overflow-x-auto scrollbar-hide">
-                  <div className="flex min-w-max items-center gap-2 px-1">
-                    <SmartPick
-                      total={abandonedCartsList.length}
-                      selectedCount={selectedAbandonedIds.size}
-                      onPick={(count) =>
-                        setSelectedAbandonedIds(
-                          new Set(abandonedCartsList.slice(0, count).map((c) => c.id)),
-                        )
-                      }
-                      onClear={clearAbandonedSelection}
-                      itemNoun="carts"
-                      compactMobile
-                      className="shrink-0"
-                    />
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      disabled={selectedAbandonedIds.size === 0 || bulkDeleteCartsFetcher.state !== 'idle'}
-                      onClick={() => setBulkDeleteCartsConfirmOpen(true)}
-                    >
-                      Clear{selectedAbandonedIds.size > 0 ? ` (${selectedAbandonedIds.size})` : ''}
-                    </Button>
-                  </div>
-                </div>
-              )}
               <StripToolbar
                 title="Cart abandonment"
-                description={`Dropped sessions stay here until cleared. Backlog: ${abandonedPagination.total}.`}
+                description={`Dropped sessions. Backlog: ${abandonedPagination.total}.`}
                 onScrollLeft={() => scrollAbandonedStrip(-280)}
                 onScrollRight={() => scrollAbandonedStrip(280)}
                 scrollAriaSubject="abandoned carts"
@@ -2700,45 +2590,17 @@ function CSDashboardPageLoaded({
                 ref={abandonedScrollRef}
                 className="flex flex-nowrap gap-3 overflow-x-auto overflow-y-hidden scrollbar-hide pb-1"
               >
-                {abandonedCartsList.map((c: PendingCart) => {
-                  const isSelected = selectedAbandonedIds.has(c.id);
-                  return (
+                {abandonedCartsList.map((c: PendingCart) => (
                   <div
                     key={c.id}
-                    onClick={canDeleteCart ? () => toggleAbandonedSelection(c.id) : undefined}
-                    onKeyDown={canDeleteCart ? (e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        toggleAbandonedSelection(c.id);
-                      }
-                    } : undefined}
-                    role={canDeleteCart ? 'checkbox' : undefined}
-                    aria-checked={canDeleteCart ? isSelected : undefined}
-                    tabIndex={canDeleteCart ? 0 : undefined}
-                    className={`group relative shrink-0 w-48 text-left rounded-xl border bg-app-elevated transition-all duration-200 ${
-                      canDeleteCart ? 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500' : ''
-                    } ${
-                      isSelected
-                        ? 'border-brand-500 ring-1 ring-brand-500/40 shadow-md'
-                        : 'border-app-border hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700'
-                    }`}
+                    className="group relative shrink-0 w-48 text-left rounded-xl border bg-app-elevated transition-all duration-200 border-app-border hover:shadow-md hover:border-brand-300 dark:hover:border-brand-700"
                   >
                     <span className="absolute top-2 right-2 flex h-2 w-2 pointer-events-none">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-app-fg-muted/40 opacity-60" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-app-fg-muted/70" />
                     </span>
 
-                    {canDeleteCart && (
-                      <span className="absolute top-1.5 left-1.5 z-10" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                        <Checkbox
-                          checked={isSelected}
-                          onChange={() => toggleAbandonedSelection(c.id)}
-                          aria-label={`Select cart for ${c.customerName}`}
-                        />
-                      </span>
-                    )}
-
-                    <div className={`px-2.5 py-2 pr-5 ${canDeleteCart ? 'pl-7' : ''}`}>
+                    <div className="px-2.5 py-2 pr-5">
                       <div className="flex items-baseline justify-between gap-2 mb-1">
                         <p className="text-xs font-semibold text-app-fg truncate leading-tight min-w-0 flex-1">
                           {c.customerName}
@@ -2762,8 +2624,7 @@ function CSDashboardPageLoaded({
                         })}
                       </div>
 
-                      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
-                      <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => { setSelectedCartStatus('ABANDONED'); setSelectedAbandonedCart(c); }}
@@ -2771,20 +2632,10 @@ function CSDashboardPageLoaded({
                         >
                           View
                         </button>
-                        {canDeleteCart ? (
-                          <button
-                            type="button"
-                            onClick={() => setDeleteCartConfirm(c)}
-                            className="text-mini font-medium text-danger-600 dark:text-danger-400 hover:underline"
-                          >
-                            Clear
-                          </button>
-                        ) : null}
                       </div>
                     </div>
                   </div>
-                  );
-                })}
+                ))}
               </div>
               {abandonedTotalPages >= 1 ? (
                 <div className="mt-4 flex justify-center border-t border-app-border pt-4">
@@ -2802,41 +2653,6 @@ function CSDashboardPageLoaded({
             </div>
           )}
         </div>
-      )}
-
-      {/* ── Delete abandoned cart confirmation ─── */}
-      {deleteCartConfirm && (
-        <Modal open onClose={() => setDeleteCartConfirm(null)} maxWidth="max-w-sm" contentClassName="p-6">
-          <div className="flex items-start gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-app-fg">Delete abandoned cart?</h3>
-              <p className="text-sm text-app-fg-muted mt-1">
-                This will permanently remove <span className="font-medium text-app-fg">{deleteCartConfirm.customerName}</span>'s cart entry. This cannot be undone.
-              </p>
-            </div>
-          </div>
-          <ModalFetcherInlineError message={deleteCartSurface.errorMatchingIntent('deleteAbandoned')} className="mb-4" />
-          <deleteCartFetcher.Form method="post" action="/admin/sales/queue/carts" className="flex items-center justify-end gap-2">
-            <input type="hidden" name="intent" value="deleteAbandoned" />
-            <input type="hidden" name="cartId" value={deleteCartConfirm.id} />
-            <Button type="button" variant="secondary" size="sm" onClick={() => setDeleteCartConfirm(null)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="danger"
-              size="sm"
-              disabled={deleteCartFetcher.state !== 'idle'}
-            >
-              {deleteCartFetcher.state !== 'idle' ? 'Deleting…' : 'Delete'}
-            </Button>
-          </deleteCartFetcher.Form>
-        </Modal>
       )}
 
       {/* ── Bulk dismiss duplicates confirmation ─── */}
@@ -2874,43 +2690,6 @@ function CSDashboardPageLoaded({
           </bulkDismissDuplicatesFetcher.Form>
         </Modal>
       )}
-
-      {/* ── Bulk clear abandoned carts confirmation ─── */}
-      {bulkDeleteCartsConfirmOpen && (
-        <Modal open onClose={() => setBulkDeleteCartsConfirmOpen(false)} maxWidth="max-w-sm" contentClassName="p-6">
-          <div className="flex items-start gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-danger-100 dark:bg-danger-900/30 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-danger-600 dark:text-danger-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-app-fg">Clear {selectedAbandonedIds.size} abandoned cart{selectedAbandonedIds.size === 1 ? '' : 's'}?</h3>
-              <p className="text-sm text-app-fg-muted mt-1">
-                Selected carts will be permanently removed. This cannot be undone.
-              </p>
-            </div>
-          </div>
-          <bulkDeleteCartsFetcher.Form method="post" action="/admin/sales/queue/carts" className="flex items-center justify-end gap-2">
-            <input type="hidden" name="intent" value="deleteAbandonedMany" />
-            <input type="hidden" name="cartIds" value={Array.from(selectedAbandonedIds).join(',')} />
-            <Button type="button" variant="secondary" size="sm" onClick={() => setBulkDeleteCartsConfirmOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="danger"
-              size="sm"
-              loading={bulkDeleteCartsFetcher.state !== 'idle'}
-              loadingText="Clearing…"
-              onClick={() => setBulkDeletingAbandonedIds(Array.from(selectedAbandonedIds))}
-            >
-              Clear all
-            </Button>
-          </bulkDeleteCartsFetcher.Form>
-        </Modal>
-      )}
-
 
       {/* ── Reassign order modal ───────────────── */}
       {reassignOrder && (
@@ -3242,7 +3021,7 @@ export function CSDashboardPage({
   claimQueue,
   liveEvents,
   canCreateOffline,
-  canDeleteCart,
+  canManageAbandonedCart,
   canCancelOrders = false,
 }: CSDashboardPageProps) {
   const [createOfflineOpen, setCreateOfflineOpen] = useState(false);
@@ -3280,7 +3059,7 @@ export function CSDashboardPage({
               claimQueue={claimQueue}
               liveEvents={liveEvents}
               canCreateOffline={canCreateOffline}
-              canDeleteCart={canDeleteCart}
+              canManageAbandonedCart={canManageAbandonedCart}
               canCancelOrders={canCancelOrders}
             />
           )}

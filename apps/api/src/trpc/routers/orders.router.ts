@@ -1594,6 +1594,61 @@ export const ordersRouter = router({
     }),
 
   /**
+   * Move orders to a different branch. Resets to UNPROCESSED, clears CS assignment.
+   * MB credit kept. HoCS + Admin only.
+   */
+  moveOrdersToBranch: authedProcedure
+    .input(
+      z.object({
+        orderIds: z.array(z.string().uuid()).min(1).max(100),
+        targetBranchId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (
+        !isAdminLevel(ctx.user) &&
+        ctx.user.role !== 'HEAD_OF_CS'
+      ) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Only Admin or Head of CS can move orders between branches' });
+      }
+      const res = await getOrdersService().moveOrdersToBranch(
+        input.orderIds,
+        input.targetBranchId,
+        ctx.user,
+      );
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
+    }),
+
+  /**
+   * Follow-up reassign: move closed orders to a new branch for re-engagement.
+   * Clears MB credit, resets to UNPROCESSED. Permission-gated: orders.followUp.
+   */
+  followUpReassign: permissionProcedure('orders.followUp')
+    .input(
+      z.object({
+        orderIds: z.array(z.string().uuid()).min(1).max(100),
+        targetBranchId: z.string().uuid(),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const res = await getOrdersService().moveOrdersToBranch(
+        input.orderIds,
+        input.targetBranchId,
+        ctx.user,
+        { clearMediaBuyer: true },
+      );
+      await Promise.all([
+        invalidateOrdersAggregatesCache(),
+        invalidateOrderDetailCacheMany(input.orderIds),
+      ]);
+      return res;
+    }),
+
+  /**
    * Bulk assign multiple orders to a Sales closer (same gates as assignToCS).
    */
   bulkAssignToCS: authedProcedure

@@ -49,7 +49,7 @@ export const cartRouter = router({
     }),
 
   /**
-   * List ABANDONED carts until cleared (delete). Paginated (`page`, `limit` max 100).
+   * List ABANDONED carts. Paginated (`page`, `limit` max 100).
    *
    * Accepts `cart.read` (CS-side) OR `marketing.read` (Media Buyers / HoM viewing
    * cart abandonment on the Marketing orders page) — same OR-grant rationale as
@@ -69,7 +69,7 @@ export const cartRouter = router({
     )
     .query(async ({ input, ctx }) => {
       // Caller can see the raw phone inline only if they could already trigger
-      // the audited reveal endpoint (`cart.delete` is the gate for reveal/delete).
+      // the audited reveal endpoint (`cart.delete` is the gate for reveal).
       // SUPER_ADMIN bypasses permissions. CEO directive 2026-05-08.
       const canReveal =
         ctx.user.role === 'SUPER_ADMIN' ||
@@ -176,21 +176,12 @@ export const cartRouter = router({
     }),
 
   /**
-   * Delete an abandoned cart. Head of CS / SuperAdmin only.
-   */
-  deleteAbandoned: permissionProcedure('cart.delete')
-    .input(z.object({ cartId: z.string().uuid() }))
-    .mutation(async ({ input, ctx }) => {
-      return getCartService().deleteAbandoned(input.cartId, ctx.user.id);
-    }),
-
-  /**
    * Reveal the raw customer phone for a dropped-off cart so the rep can
    * Call / SMS / WhatsApp the customer (CEO directive 2026-05-08).
    *
    * Mutation, not a query — the reveal IS the action; auditing it under the
-   * acting user's session is the whole point. Same `cart.delete` gate as the
-   * Clear button so only roles trusted to act on the backlog can reveal.
+   * acting user's session is the whole point. Gated on `cart.delete` so only
+   * roles trusted to act on the backlog can reveal.
    */
   revealPhoneForAbandoned: permissionProcedure('cart.delete')
     .input(z.object({ cartId: z.string().uuid() }))

@@ -414,8 +414,10 @@ export class CartService {
   }
 
   /**
-   * List ABANDONED carts for CS dashboard — persists until cleared via {@link deleteAbandoned}.
-   * Paginated; `page` is clamped to the last page when out of range (e.g. after deletes).
+   * List ABANDONED carts for CS dashboard. Abandoned carts persist until the
+   * customer converts/returns, or the duplicate-collapse cron removes exact
+   * duplicates — they are never deletable from the UI or API.
+   * Paginated; `page` is clamped to the last page when out of range.
    *
    * When `includeRawPhone` is true (caller has `cart.delete` permission), the raw phone
    * is returned alongside the masked display so the abandoned-cart detail modal can render
@@ -781,26 +783,6 @@ export class CartService {
       totalAmount: r.totalAmount ?? null,
       updatedAt: r.updatedAt ?? new Date(),
     }));
-  }
-
-  /**
-   * Delete an abandoned cart by ID. Head of CS / SuperAdmin only.
-   * Only ABANDONED carts can be deleted (not PENDING or CONVERTED).
-   */
-  async deleteAbandoned(cartId: string, actorId: string): Promise<{ deleted: boolean }> {
-    const result = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('yannis.current_user_id', ${actorId}, true)`);
-      return tx
-        .delete(schema.cartAbandonments)
-        .where(
-          and(
-            eq(schema.cartAbandonments.id, cartId),
-            eq(schema.cartAbandonments.status, 'ABANDONED'),
-          ),
-        )
-        .returning({ id: schema.cartAbandonments.id });
-    });
-    return { deleted: result.length > 0 };
   }
 
   /**

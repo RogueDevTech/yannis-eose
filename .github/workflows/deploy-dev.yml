@@ -35,7 +35,7 @@ jobs:
           case "$PLATFORM" in
             gcp) echo "::notice::Deploying to GCP only." ;;
             aws) echo "::notice::Deploying to AWS only." ;;
-            *)   echo "::notice::DEPLOY_PLATFORM is not 'aws' or 'gcp' — deploying to BOTH." ;;
+            *)   echo "::notice::DEPLOY_PLATFORM is not 'aws' or 'gcp' — deploying to GCP only (default)." ;;
           esac
 
       - uses: pnpm/action-setup@v4
@@ -138,8 +138,8 @@ jobs:
     name: Deploy to Dev (AWS)
     runs-on: ubuntu-latest
     needs: build
-    # Runs unless DEPLOY_PLATFORM is explicitly 'gcp' (i.e. runs for 'aws', '', unset, or anything else).
-    if: ${{ vars.DEPLOY_PLATFORM != 'gcp' }}
+    # Only runs when DEPLOY_PLATFORM is explicitly 'aws'. Default (unset/empty) = GCP only.
+    if: ${{ vars.DEPLOY_PLATFORM == 'aws' }}
     environment: dev
     env:
       AWS_REGION: ${{ secrets.AWS_REGION || 'eu-north-1' }}
