@@ -2,7 +2,7 @@ import { json, redirect, defer } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 import { useLoaderData } from '@remix-run/react';
 import { CachedAwait } from '~/components/ui/cached-await';
-import { cachedClientLoader } from '~/lib/loader-cache';
+import { cachedClientLoader, invalidateCachedLoader } from '~/lib/loader-cache';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { respondToOfferTemplateIntent } from '~/lib/marketing-offer-template-actions.server';
@@ -134,19 +134,35 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   const pageData = (async () => {
-  const formsRes = await apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${listInputStr}`, {
-    method: 'GET',
-    cookie,
-  });
+  // Forms list + the product catalog that powers the "Filter by product" picker.
+  const [formsRes, productsRes] = await Promise.all([
+    apiRequest<unknown>(`/trpc/marketing.listCampaigns?input=${listInputStr}`, {
+      method: 'GET',
+      cookie,
+    }),
+    apiRequest<unknown>(
+      `/trpc/products.options?input=${encodeURIComponent(JSON.stringify({ status: 'ACTIVE' }))}`,
+      { method: 'GET', cookie },
+    ),
+  ]);
 
   const resultData = formsRes.ok ? (formsRes.data as { result?: { data?: { campaigns: Campaign[]; pagination: { total: number } } } })?.result?.data : null;
   const formsData = resultData ?? null;
 
+  const productOptionsRaw = productsRes.ok
+    ? ((productsRes.data as { result?: { data?: Array<{ id: string; name: string }> } })?.result?.data ?? [])
+    : [];
+  const products: Product[] = productOptionsRaw.map((p) => ({
+    id: p.id,
+    name: p.name,
+    baseSalePrice: '0',
+  }));
+
   return {
     forms: formsData?.campaigns ?? [],
     totalForms: formsData?.pagination?.total ?? 0,
-    products: [] as Product[],
-    productsLoadError: null,
+    products,
+    productsLoadError: productsRes.ok ? null : 'Could not load products for the filter.',
     allOfferTemplates: [] as OfferTemplateListRow[],
     offersListLoadError: null,
     offerGroups: [] as OfferGroupRow[],
@@ -167,7 +183,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ formsShell, pageData });
 }
 
-export const clientLoader = cachedClientLoader;
+// A form was just created when the create flow redirects here with `?saved=1`.
+// Drop any stale cached forms-list data first so the new form is in the very
+// first paint — not only after the background revalidate lands.
+export const clientLoader: typeof cachedClientLoader = (args) => {
+  if (new URL(args.request.url).searchParams.get('saved') === '1') {
+    invalidateCachedLoader('/admin/marketing/forms');
+  }
+  return cachedClientLoader(args);
+};
 clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {

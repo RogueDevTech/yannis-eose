@@ -43,6 +43,7 @@ import {
   applySupervisorScope,
   buildOrdersListOpts,
   getOrdersService,
+  isOrgWideMarketingViewer,
   narrowOrdersAggregateFiltersForViewer,
 } from './orders.router';
 import { getProductsService } from './products.router';
@@ -933,8 +934,13 @@ export const marketingRouter = router({
       }),
     )
     .query(async ({ input, ctx }) => {
-      const branchId = ctx.currentBranchId;
       const { mediaBuyerId, status, startDate, endDate, includeMarketingExportPicklists } = input;
+      // When an org-wide marketing viewer (HoM / admin) drills into one media
+      // buyer, run the aggregates org-wide so the stat strip + status counts
+      // match the team-analysis leaderboard (which counts that buyer's orders
+      // across every branch). Otherwise stay scoped to the viewer's branch.
+      const branchId =
+        mediaBuyerId && isOrgWideMarketingViewer(ctx.user) ? null : ctx.currentBranchId;
 
       const ordersScope = await narrowOrdersAggregateFiltersForViewer(ctx, branchId, {
         mediaBuyerId,
@@ -1058,9 +1064,30 @@ export const marketingRouter = router({
         id: c.id,
         name: c.name,
       }));
-      const mediaBuyersForFilter = buyersResult
+      let mediaBuyersForFilter = buyersResult
         ? (buyersResult.users ?? []).map((u) => ({ id: u.id, name: u.name }))
         : [];
+
+      // When the page is opened pre-filtered to a specific media buyer — e.g.
+      // the "View orders" link from team analysis — guarantee that buyer is in
+      // the picklist so the filter dropdown can render the active selection.
+      // The active-buyers query above is scoped to ACTIVE status (and the
+      // current branch), so a probation / deactivated / cross-branch buyer who
+      // still shows on the team leaderboard would otherwise be missing and the
+      // dropdown would silently fall back to "All media buyers".
+      if (
+        mediaBuyerId &&
+        canSeeBuyerPicklist &&
+        !mediaBuyersForFilter.some((b) => b.id === mediaBuyerId)
+      ) {
+        const [extraBuyer] = await getUsersService().listByIds([mediaBuyerId]);
+        if (extraBuyer) {
+          mediaBuyersForFilter = [
+            { id: extraBuyer.id, name: extraBuyer.name },
+            ...mediaBuyersForFilter,
+          ];
+        }
+      }
 
       return {
         statusCounts,

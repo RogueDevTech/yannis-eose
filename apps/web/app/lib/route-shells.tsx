@@ -153,7 +153,7 @@ function parseCsOrdersLoadingShellFromSearchParams(sp: URLSearchParams): {
   let startTime = sp.get('startTime') ?? '';
   let endTime = sp.get('endTime') ?? '';
   if (!periodAllTime && !startDate && !endDate) {
-    const d = defaultThisMonthRangeClient();
+    const d = defaultTodayRangeClient();
     startDate = d.startDate;
     endDate = d.endDate;
   }
@@ -209,7 +209,7 @@ function parseLogisticsOrdersTransitionPage(sp: URLSearchParams) {
   let startDate = sp.get('startDate') ?? '';
   let endDate = sp.get('endDate') ?? '';
   if (!periodAllTime && !startDate && !endDate) {
-    const d = defaultThisMonthRangeClient();
+    const d = defaultTodayRangeClient();
     startDate = d.startDate;
     endDate = d.endDate;
   }
@@ -495,7 +495,7 @@ const entries: ShellEntry[] = [
       let startDate = sp.get('startDate') ?? '';
       let endDate = sp.get('endDate') ?? '';
       if (!periodAllTime && !startDate && !endDate) {
-        const d = defaultThisMonthRangeClient();
+        const d = defaultTodayRangeClient();
         startDate = d.startDate;
         endDate = d.endDate;
       }

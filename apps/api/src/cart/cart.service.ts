@@ -105,7 +105,11 @@ export class CartService {
         return { id: converted.id, created: false as const };
       }
 
-      // Upsert key: campaign_id + phone_hash — one active PENDING cart per person per campaign.
+      // Upsert key: campaign_id + phone_hash — one open cart per person per
+      // campaign. Match PENDING *or* ABANDONED (latest first) so a returning
+      // customer revives their existing cart instead of spawning a duplicate
+      // row (the cron may have flipped the earlier cart to ABANDONED between
+      // visits).
       const existing = await db
         .select()
         .from(schema.cartAbandonments)
@@ -113,9 +117,10 @@ export class CartService {
           and(
             eq(schema.cartAbandonments.campaignId, input.campaignId),
             eq(schema.cartAbandonments.customerPhoneHash, input.customerPhoneHash),
-            eq(schema.cartAbandonments.status, 'PENDING'),
+            inArray(schema.cartAbandonments.status, ['PENDING', 'ABANDONED']),
           ),
         )
+        .orderBy(desc(schema.cartAbandonments.updatedAt))
         .limit(1);
 
       const now = new Date();
@@ -124,6 +129,9 @@ export class CartService {
         await db
           .update(schema.cartAbandonments)
           .set({
+            // Revive an ABANDONED cart back to PENDING — the customer is active
+            // again, so the abandonment clock restarts from this save.
+            status: 'PENDING',
             customerName: input.customerName,
             productId: input.productId,
             offerLabel: input.offerLabel ?? null,
@@ -273,6 +281,42 @@ export class CartService {
     if (count > 0) {
       console.log(`[Cart] Marked ${count} cart(s) as abandoned`);
     }
+    // Collapse any duplicate carts (e.g. from a save race) so one customer
+    // never shows twice in the cart-abandonment backlog.
+    const merged = await this.mergeDuplicateAbandonedCarts(SYSTEM_ACTOR_ID);
+    if (merged > 0) {
+      console.log(`[Cart] Merged ${merged} duplicate cart(s)`);
+    }
+  }
+
+  /**
+   * Collapse duplicate carts — one customer (campaign + phone hash) should have
+   * exactly one open cart. Deletes every non-CONVERTED cart that has a newer
+   * sibling for the same campaign + phone, keeping only the most recently
+   * updated row (the freshest captured info — "the last one stays"). Runs on the
+   * abandonment cron so duplicates from a save race never linger.
+   *
+   * CONVERTED carts are never touched — they are the audit link to a real order.
+   */
+  async mergeDuplicateAbandonedCarts(actorId?: string | null): Promise<number> {
+    const run = async (db: CartDbOrTx) => {
+      const rows = await db.execute<{ id: string }>(sql`
+        DELETE FROM cart_abandonments AS ca
+        WHERE ca.status IN ('PENDING', 'ABANDONED')
+          AND EXISTS (
+            SELECT 1 FROM cart_abandonments AS newer
+            WHERE newer.campaign_id = ca.campaign_id
+              AND newer.customer_phone_hash = ca.customer_phone_hash
+              AND newer.status IN ('PENDING', 'ABANDONED')
+              AND (newer.updated_at, newer.id) > (ca.updated_at, ca.id)
+          )
+        RETURNING ca.id
+      `);
+      return rows.length;
+    };
+    return actorId
+      ? await withActor(this.db, { id: actorId }, (tx) => run(tx))
+      : await run(this.db);
   }
 
   /**
@@ -378,7 +422,15 @@ export class CartService {
    * dialable contact details without a second per-card reveal round-trip. The reveal endpoint
    * stays as the audited fallback for cases where the list payload is stale.
    */
-  async listAbandoned(opts: { page?: number; limit?: number; includeRawPhone?: boolean } = {}): Promise<{
+  async listAbandoned(opts: {
+    page?: number;
+    limit?: number;
+    includeRawPhone?: boolean;
+    /** When set, only carts from this Media Buyer's campaigns are returned. */
+    mediaBuyerId?: string | null;
+    /** When set, only carts from this branch's campaigns are returned. */
+    branchId?: string | null;
+  } = {}): Promise<{
     items: Array<{
       id: string;
       customerName: string;
@@ -388,6 +440,10 @@ export class CartService {
       productName: string | null;
       campaignId: string;
       campaignName: string | null;
+      // Media buyer who owns the cart's campaign — surfaced so the cart-
+      // abandonment view shows attribution, same as the orders table.
+      mediaBuyerId: string | null;
+      mediaBuyerName: string | null;
       offerLabel: string | null;
       updatedAt: Date;
       // Progressive form-field capture (migration 0142). Surfaced inline so the
@@ -410,8 +466,21 @@ export class CartService {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
     let page = Math.max(1, Math.floor(opts.page ?? 1));
 
-    const abandonedWhere = eq(schema.cartAbandonments.status, 'ABANDONED');
-    const totalRows = await this.db.select({ count: count() }).from(schema.cartAbandonments).where(abandonedWhere);
+    // Media Buyers / branch-scoped marketing viewers only ever see carts from
+    // their own campaigns — scoped via the campaign join, same as countAbandoned.
+    const scopeConditions = [eq(schema.cartAbandonments.status, 'ABANDONED')];
+    if (opts.mediaBuyerId) {
+      scopeConditions.push(eq(schema.campaigns.mediaBuyerId, opts.mediaBuyerId));
+    }
+    if (opts.branchId) {
+      scopeConditions.push(eq(schema.campaigns.branchId, opts.branchId));
+    }
+    const abandonedWhere = and(...scopeConditions);
+    const totalRows = await this.db
+      .select({ count: count() })
+      .from(schema.cartAbandonments)
+      .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .where(abandonedWhere);
     const total = Number(totalRows[0]?.count ?? 0);
     const totalPages = total === 0 ? 0 : Math.ceil(total / limit);
     if (totalPages > 0 && page > totalPages) page = totalPages;
@@ -428,6 +497,9 @@ export class CartService {
         productName: schema.products.name,
         campaignId: schema.cartAbandonments.campaignId,
         campaignName: schema.campaigns.name,
+        // Prefer the cart's own media buyer; fall back to the campaign owner.
+        mediaBuyerId: sql<string | null>`coalesce(${schema.cartAbandonments.mediaBuyerId}, ${schema.campaigns.mediaBuyerId})`,
+        mediaBuyerName: schema.users.name,
         offerLabel: schema.cartAbandonments.offerLabel,
         updatedAt: schema.cartAbandonments.updatedAt,
         customerEmail: schema.cartAbandonments.customerEmail,
@@ -444,6 +516,13 @@ export class CartService {
       .from(schema.cartAbandonments)
       .leftJoin(schema.products, eq(schema.cartAbandonments.productId, schema.products.id))
       .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+      .leftJoin(
+        schema.users,
+        eq(
+          schema.users.id,
+          sql`coalesce(${schema.cartAbandonments.mediaBuyerId}, ${schema.campaigns.mediaBuyerId})`,
+        ),
+      )
       .where(abandonedWhere)
       .orderBy(desc(schema.cartAbandonments.updatedAt))
       .limit(limit)
@@ -459,6 +538,8 @@ export class CartService {
         productName: r.productName ?? null,
         campaignId: r.campaignId,
         campaignName: r.campaignName ?? null,
+        mediaBuyerId: r.mediaBuyerId ?? null,
+        mediaBuyerName: r.mediaBuyerName ?? null,
         offerLabel: r.offerLabel ?? null,
         updatedAt: r.updatedAt ?? new Date(),
         customerEmail: r.customerEmail ?? null,
@@ -489,7 +570,11 @@ export class CartService {
    */
   async getById(
     cartId: string,
-    opts: { includeRawPhone?: boolean } = {},
+    opts: {
+      includeRawPhone?: boolean;
+      /** When set, the cart is only returned if it belongs to this MB's campaign. */
+      requireMediaBuyerId?: string | null;
+    } = {},
   ): Promise<{
     id: string;
     customerName: string;
@@ -522,6 +607,7 @@ export class CartService {
         productName: schema.products.name,
         campaignId: schema.cartAbandonments.campaignId,
         campaignName: schema.campaigns.name,
+        campaignMediaBuyerId: schema.campaigns.mediaBuyerId,
         offerLabel: schema.cartAbandonments.offerLabel,
         updatedAt: schema.cartAbandonments.updatedAt,
         customerEmail: schema.cartAbandonments.customerEmail,
@@ -543,6 +629,11 @@ export class CartService {
 
     const r = rows[0];
     if (!r) return null;
+    // A Media Buyer may only inspect carts from their own campaigns — treat a
+    // cart owned by another buyer as not found rather than leaking its data.
+    if (opts.requireMediaBuyerId && r.campaignMediaBuyerId !== opts.requireMediaBuyerId) {
+      return null;
+    }
 
     return {
       id: r.id,
@@ -766,17 +857,26 @@ export class CartService {
 
   /**
    * Get cart abandonment stats for CS dashboard.
+   *
+   * Scoped to `branchId` (via the cart's campaign) when provided — so the
+   * "Cart abandonment" KPI on a branch-scoped page matches the branch the rest
+   * of the page shows. Pass `null` (org-wide head / "All branches") to count
+   * every branch.
    */
-  async getStats(): Promise<{ pending: number; abandonedOpen: number }> {
+  async getStats(
+    branchId?: string | null,
+  ): Promise<{ pending: number; abandonedOpen: number }> {
+    const branchCond = branchId ? eq(schema.campaigns.branchId, branchId) : undefined;
+    const countByStatus = (status: 'PENDING' | 'ABANDONED') =>
+      this.db
+        .select({ count: count() })
+        .from(schema.cartAbandonments)
+        .leftJoin(schema.campaigns, eq(schema.cartAbandonments.campaignId, schema.campaigns.id))
+        .where(and(eq(schema.cartAbandonments.status, status), branchCond));
+
     const [pendingRes, abandonedRes] = await Promise.all([
-      this.db
-        .select({ count: count() })
-        .from(schema.cartAbandonments)
-        .where(eq(schema.cartAbandonments.status, 'PENDING')),
-      this.db
-        .select({ count: count() })
-        .from(schema.cartAbandonments)
-        .where(eq(schema.cartAbandonments.status, 'ABANDONED')),
+      countByStatus('PENDING'),
+      countByStatus('ABANDONED'),
     ]);
 
     return {

@@ -1,5 +1,5 @@
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
-import { Await, Link, useSearchParams } from '@remix-run/react';
+import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -31,6 +31,8 @@ import { ExportModal, type ExportModalPicklists } from '~/components/ui/export-m
 import { STATUS_OPTIONS, formatStatus } from '~/features/shared/order-status';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import type { Order } from '~/features/orders/types';
+import type { PendingCart } from '~/features/cs/types';
+import { AbandonedCartDetailModal } from '~/features/cs/AbandonedCartDetailModal';
 import { orderDetailHref } from '~/lib/order-detail-return';
 import { DeferredError } from '~/components/ui/deferred-section';
 import {
@@ -68,6 +70,9 @@ const MARKETING_ORDERS_STATUS_OPTIONS_BASE = MARKETING_ORDERS_STATUSES.map((stat
   value: status,
   label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
 }));
+
+/** Sentinel — not a real order status. Selecting it activates the `?fromCart=1` view. */
+const FROM_CART_STATUS_VALUE = '__from_cart__';
 
 /** Streamed after `orders.list`: counts, metrics, chart series, export picklists + buyer filter options. */
 export type MarketingOrdersSecondaryPayload = {
@@ -112,6 +117,16 @@ interface MarketingOrdersPageProps {
   /** Active mediaBuyerId filter from the URL (null = all team). */
   activeMediaBuyerFilter?: string | null;
   /**
+   * Adds a "Cart abandonment" pseudo-option to the status dropdown. Maps to
+   * `?fromCart=1`, which swaps the table to the abandoned-cart backlog.
+   */
+  enableFromCartStatusOption?: boolean;
+  /**
+   * Cart-abandonment mode — true when `?fromCart=1` is active and `orders`
+   * has been populated with abandoned CARTS (synthetic status `'CART'`).
+   */
+  isCartAbandonmentView?: boolean;
+  /**
    * When true, the page renders its real chrome but swaps row data + pagination
    * for pulse skeletons — used as the route-level Suspense fallback so the layout
    * stays mounted while the orders list streams in.
@@ -136,6 +151,8 @@ export function MarketingOrdersPage({
   canExport = false,
   viewerUserId,
   activeMediaBuyerFilter,
+  enableFromCartStatusOption = false,
+  isCartAbandonmentView = false,
   deferredLoading = false,
 }: MarketingOrdersPageProps) {
   const dateFilters = filters ?? { startDate: '', endDate: '', periodAllTime: false };
@@ -153,23 +170,52 @@ export function MarketingOrdersPage({
     },
     [remixSetSearchParams, primeSamePathRefetch],
   );
-  const [selectedStatus, setSelectedStatus] = useState(statusFilter || 'ALL');
+  // The "Cart abandonment" pseudo-status is selected whenever `?fromCart=1` is on.
+  const fromCartUrlActive = searchParams.get('fromCart') === '1';
+  const [selectedStatus, setSelectedStatus] = useState(
+    enableFromCartStatusOption && fromCartUrlActive ? FROM_CART_STATUS_VALUE : statusFilter || 'ALL',
+  );
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showChartView, setShowChartView] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
-    setSelectedStatus(statusFilter || 'ALL');
+    setSelectedStatus(
+      enableFromCartStatusOption && fromCartUrlActive
+        ? FROM_CART_STATUS_VALUE
+        : statusFilter || 'ALL',
+    );
     setSearchQuery(searchFilter || '');
-  }, [statusFilter, searchFilter]);
+  }, [statusFilter, searchFilter, enableFromCartStatusOption, fromCartUrlActive]);
+
+  // Quick-detail modal for an abandoned cart row — fetched on demand from the
+  // marketing cart-detail resource route (scoped server-side to the viewer).
+  const cartDetailFetcher = useFetcher<{ cart: PendingCart | null }>();
+  const [viewCartOrderId, setViewCartOrderId] = useState<string | null>(null);
+  const openCartDetail = useCallback(
+    (order: Order) => {
+      if (!order.cartId) return;
+      setViewCartOrderId(order.id);
+      cartDetailFetcher.load(`/admin/marketing/cart-detail?cartId=${order.cartId}`);
+    },
+    [cartDetailFetcher],
+  );
 
   const buildQueryString = (overrides: { page?: number; status?: string; search?: string; mediaBuyerId?: string }) => {
     const params = new URLSearchParams(searchParams);
     if (overrides.page !== undefined) params.set('page', String(overrides.page));
     // Always pass `status` when changing the status filter (including ALL) so the URL stays in sync.
+    // The "Cart abandonment" pseudo-status maps to `?fromCart=1` (and drops `status`);
+    // selecting any real status clears `fromCart`.
     if (overrides.status !== undefined) {
-      if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
-      else params.set('status', overrides.status);
+      if (overrides.status === FROM_CART_STATUS_VALUE) {
+        params.delete('status');
+        params.set('fromCart', '1');
+      } else {
+        params.delete('fromCart');
+        if (overrides.status === 'ALL' || !overrides.status) params.delete('status');
+        else params.set('status', overrides.status);
+      }
     }
     // Always pass `search` when submitting the search form (including empty to clear).
     if (overrides.search !== undefined) {
@@ -194,6 +240,19 @@ export function MarketingOrdersPage({
     setSearchParams(buildQueryString({ search: searchQuery.trim(), page: 1 }));
   };
 
+  // Status dropdown options shown before streamed counts hydrate — with the
+  // "Cart abandonment" pseudo-option appended when the viewer may use it.
+  const statusOptionsBase = useMemo(
+    () =>
+      enableFromCartStatusOption
+        ? [
+            ...MARKETING_ORDERS_STATUS_OPTIONS_BASE,
+            { value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' },
+          ]
+        : MARKETING_ORDERS_STATUS_OPTIONS_BASE,
+    [enableFromCartStatusOption],
+  );
+
   const ordersToolbarFilterBadge = useMemo(() => {
     let n = 0;
     if (selectedStatus !== 'ALL') n += 1;
@@ -211,7 +270,13 @@ export function MarketingOrdersPage({
         header: 'Order ID',
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[7rem]" />
-          : (order) => <OrderIdBadge id={order.id} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />,
+          : (order) =>
+              order.status === 'CART' ? (
+                // Cart rows have no order detail page — copyable id only.
+                <OrderIdBadge id={order.id} />
+              ) : (
+                <OrderIdBadge id={order.id} linkTo={orderDetailHref('/admin/orders', order.id, 'marketing')} />
+              ),
       },
       {
         key: 'customer',
@@ -292,7 +357,14 @@ export function MarketingOrdersPage({
         header: 'Status',
         render: showSkeletonRows
           ? () => <TableCellTextPulse className="w-[5.5rem]" />
-          : (order) => <OrderStatusBadge status={order.status} />,
+          : (order) =>
+              order.status === 'CART' ? (
+                <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                  Cart
+                </span>
+              ) : (
+                <OrderStatusBadge status={order.status} />
+              ),
       },
       {
         key: 'created',
@@ -314,13 +386,21 @@ export function MarketingOrdersPage({
         mobileShowLabel: false,
         render: showSkeletonRows
           ? () => <CompactTableActionButton disabled>View</CompactTableActionButton>
-          : (order) => (
-              <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
-            ),
+          : (order) =>
+              order.status === 'CART' ? (
+                <CompactTableActionButton
+                  onClick={() => openCartDetail(order)}
+                  disabled={cartDetailFetcher.state !== 'idle' && viewCartOrderId === order.id}
+                >
+                  View cart
+                </CompactTableActionButton>
+              ) : (
+                <CompactTableActionButton to={orderDetailHref('/admin/orders', order.id, 'marketing')}>View</CompactTableActionButton>
+              ),
       },
     );
     return cols;
-  }, [showMediaBuyerColumn, showSkeletonRows]);
+  }, [showMediaBuyerColumn, showSkeletonRows, openCartDetail, cartDetailFetcher.state, viewCartOrderId]);
 
   // Mobile card — deliberately minimal: order ID (with copy), customer name,
   // status, and created time. The full label:value stack the default CompactTable
@@ -343,11 +423,8 @@ export function MarketingOrdersPage({
           </div>
         );
       }
-      return (
-        <Link
-          to={orderDetailHref('/admin/orders', order.id, 'marketing')}
-          className="-mx-3 -my-2.5 block space-y-1.5 px-3 py-2.5"
-        >
+      const body = (
+        <>
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-app-fg">
               {order.customerName || '—'}
@@ -355,15 +432,42 @@ export function MarketingOrdersPage({
             <OrderIdBadge id={order.id} textClassName="text-sm font-medium text-app-fg" />
           </div>
           <div className="flex items-center justify-between gap-2">
-            <OrderStatusBadge status={order.status} />
+            {order.status === 'CART' ? (
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                Cart
+              </span>
+            ) : (
+              <OrderStatusBadge status={order.status} />
+            )}
             <span className="whitespace-nowrap text-xs text-app-fg-muted">
               {formatOrderTimestamp(order.createdAt)}
             </span>
           </div>
+        </>
+      );
+
+      // Cart rows open the quick-detail modal; real orders link to order detail.
+      if (order.status === 'CART') {
+        return (
+          <button
+            type="button"
+            onClick={() => openCartDetail(order)}
+            className="-mx-3 -my-2.5 block w-full space-y-1.5 px-3 py-2.5 text-left"
+          >
+            {body}
+          </button>
+        );
+      }
+      return (
+        <Link
+          to={orderDetailHref('/admin/orders', order.id, 'marketing')}
+          className="-mx-3 -my-2.5 block space-y-1.5 px-3 py-2.5"
+        >
+          {body}
         </Link>
       );
     },
-    [showSkeletonRows],
+    [showSkeletonRows, openCartDetail],
   );
 
   return (
@@ -431,7 +535,7 @@ export function MarketingOrdersPage({
                 <FormSelect
                   value={selectedStatus}
                   onChange={(e) => handleStatusChange(e.target.value)}
-                  options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
+                  options={statusOptionsBase}
                   controlSize="lg"
                   className="!bg-app-hover text-center"
                   wrapperClassName="w-full"
@@ -602,7 +706,7 @@ export function MarketingOrdersPage({
               mobileGrid
               tileClassName="!py-2.5"
               items={[
-                { label: 'Total', value: total, valueClassName: 'text-app-fg' },
+                { label: 'Total', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Unprocessed', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
@@ -632,7 +736,7 @@ export function MarketingOrdersPage({
                   <FormSelect
                     value={selectedStatus}
                     onChange={(e) => handleStatusChange(e.target.value)}
-                    options={MARKETING_ORDERS_STATUS_OPTIONS_BASE}
+                    options={statusOptionsBase}
                     wrapperClassName="w-auto min-w-[11rem]"
                   />
                   {showMediaBuyerColumn ? (
@@ -670,13 +774,18 @@ export function MarketingOrdersPage({
             const cancelledCount = statusCounts['CANCELLED'] ?? 0;
             const deliveryRate =
               total > 0 ? (((statusCounts['DELIVERED'] ?? 0) / total) * 100).toFixed(1) : '0';
-            const statusOptions = MARKETING_ORDERS_STATUSES.map((status) => ({
-              value: status,
-              label:
-                status === 'ALL'
-                  ? `All Statuses (${ordersInPeriodTotal})`
-                  : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
-            }));
+            const statusOptions = [
+              ...MARKETING_ORDERS_STATUSES.map((status) => ({
+                value: status,
+                label:
+                  status === 'ALL'
+                    ? `All Statuses (${ordersInPeriodTotal})`
+                    : `${formatStatus(status)} (${statusCounts[status] ?? 0})`,
+              })),
+              ...(enableFromCartStatusOption
+                ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
+                : []),
+            ];
 
             return (
               <>
@@ -729,7 +838,10 @@ export function MarketingOrdersPage({
                         ins.abandonedCartCount > 0
                           ? 'text-amber-600 dark:text-amber-400'
                           : 'text-app-fg',
-                      title: 'Captured carts not yet recovered (browsing + dropped off)',
+                      title: 'Captured carts not yet recovered — tap to view the cart backlog',
+                      ...(enableFromCartStatusOption
+                        ? { to: buildQueryString({ status: FROM_CART_STATUS_VALUE, page: 1 }) }
+                        : {}),
                     },
                     { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
                     {
@@ -882,8 +994,12 @@ export function MarketingOrdersPage({
           rows={showSkeletonRows ? DEFERRED_PLACEHOLDER_ROWS : orders}
           rowKey={(order) => order.id}
           renderMobileCard={renderMarketingOrderMobileCard}
-          emptyTitle="No orders match your filters"
-          emptyDescription="Try adjusting your status filter or search query"
+          emptyTitle={isCartAbandonmentView ? 'No abandoned carts' : 'No orders match your filters'}
+          emptyDescription={
+            isCartAbandonmentView
+              ? 'Every captured cart has been recovered or cleared.'
+              : 'Try adjusting your status filter or search query'
+          }
         />
       </div>
       {/* Pagination — same layout as Sales Orders list; page size is fixed at 20 in the route loader.
@@ -912,9 +1028,12 @@ export function MarketingOrdersPage({
         ) : (
           <>
             <p className="text-sm text-app-fg-muted">
-              {total > 0
-                ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
-                : 'No orders'}
+              {(() => {
+                const noun = isCartAbandonmentView ? 'carts' : 'orders';
+                return total > 0
+                  ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} ${noun}`
+                  : `No ${noun}`;
+              })()}
             </p>
             <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
           </>
@@ -945,6 +1064,19 @@ export function MarketingOrdersPage({
           )}
         </Await>
       </Suspense>
+
+      {/* Quick-detail modal for an abandoned cart row (read-only on the Marketing
+          page — recover / clear / phone-reveal stay CS-side). */}
+      <AbandonedCartDetailModal
+        cart={
+          viewCartOrderId && cartDetailFetcher.state === 'idle'
+            ? cartDetailFetcher.data?.cart ?? null
+            : null
+        }
+        canReveal={false}
+        cartStatus="ABANDONED"
+        onClose={() => setViewCartOrderId(null)}
+      />
     </div>
   );
 }

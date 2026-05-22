@@ -2,6 +2,19 @@ import { useState, useEffect, useCallback, useRef, useLayoutEffect } from 'react
 import { createPortal } from 'react-dom';
 import { NavLink } from '@remix-run/react';
 import { getAppLogoSrc } from '~/lib/theme';
+import { invalidateCachedLoader } from '~/lib/loader-cache';
+
+/**
+ * Order list pages whose URL carries filter params. Clicking their sidebar
+ * entry should land on a clean, unfiltered list — so on click we drop any
+ * cached (possibly filtered) loader entry for that path, and the `<NavLink>`
+ * navigates to the bare href (no search). Together that guarantees a reset.
+ */
+const FILTER_RESET_HREFS = new Set([
+  '/admin/sales/orders',
+  '/admin/logistics/orders',
+  '/admin/marketing/orders',
+]);
 
 export interface SidebarGroup {
   group: string | null;
@@ -343,7 +356,12 @@ function SidebarNavLink({
       // broadband). `intent`-only previously meant clicks without prior hover
       // paid the full loader round-trip before the skeleton paints.
       prefetch="render"
-      onClick={onMobileClose}
+      onClick={() => {
+        // Clicking an order page's sidebar entry resets its filters: drop any
+        // cached filtered loader data so the bare-href navigation loads fresh.
+        if (FILTER_RESET_HREFS.has(item.href)) invalidateCachedLoader(item.href);
+        onMobileClose();
+      }}
       className={({ isActive }) => {
         const active = activePathname != null ? isActiveFromPath(activePathname) : isActive;
         return `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 ${

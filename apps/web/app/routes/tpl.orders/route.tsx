@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remi
 import type { ComponentProps } from 'react';
 import { Suspense } from 'react';
 import { Await, useLoaderData } from '@remix-run/react';
-import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultThisMonthRange } from '~/lib/api.server';
+import { apiRequest, getSessionCookie, requirePermission, requirePermissionOrRoles, safeStatus, defaultTodayRange } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { LogisticsOrdersPage, type RiderOption } from '~/features/logistics/LogisticsOrdersPage';
@@ -28,7 +28,7 @@ const LOGISTICS_STATUS_SCOPE = [
   'REMITTED',
 ] as const;
 
-const defaultThisMonth = defaultThisMonthRange;
+const defaultToday = defaultTodayRange;
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await requirePermissionOrRoles(request, { roles: ['TPL_MANAGER', 'SUPER_ADMIN', 'ADMIN'], permission: 'logistics.read' });
@@ -49,7 +49,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const period = url.searchParams.get('period') ?? undefined;
   const periodAllTime = period === 'all_time';
   if (!periodAllTime && !startDate && !endDate) {
-    const def = defaultThisMonth();
+    const def = defaultToday();
     startDate = def.startDate;
     endDate = def.endDate;
   }
