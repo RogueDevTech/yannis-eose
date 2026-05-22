@@ -15,8 +15,8 @@
  *
  * Placeholders MUST be in `ALLOWED_TEMPLATE_PLACEHOLDERS` (see
  * `apps/api/src/trpc/routers/messaging.router.ts`). Available keys:
- *   customer_name · order_id · product_name · delivery_address ·
- *   estimated_date · quantity · total_amount · payment_status
+ *   customer_name · customer_phone · order_id · product_name ·
+ *   delivery_address · estimated_date · quantity · total_amount · payment_status
  */
 
 export type DefaultTemplateChannel = 'SMS' | 'WHATSAPP' | 'WHATSAPP_GROUP';
@@ -53,6 +53,6 @@ export const DEFAULT_MESSAGE_TEMPLATES: DefaultMessageTemplate[] = [
   {
     name: '3PL dispatch handoff (WhatsApp Group)',
     channel: 'WHATSAPP_GROUP',
-    body: '🚚 New Order Dispatch — Customer: {{customer_name}} · {{product_name}} (qty {{quantity}}) · {{delivery_address}} · Total {{total_amount}} ({{payment_status}}) · Estimated: {{estimated_date}} · Order {{order_id}}',
+    body: '🚚 *New Order Dispatch*\n\n👤 *Customer:* {{customer_name}}\n📞 *Phone:* {{customer_phone}}\n📦 *Product:* {{product_name}} (qty {{quantity}})\n📍 *Address:* {{delivery_address}}\n💰 *Total:* {{total_amount}} ({{payment_status}})\n📅 *Estimated:* {{estimated_date}}\n🆔 *Order:* {{order_id}}',
   },
 ];

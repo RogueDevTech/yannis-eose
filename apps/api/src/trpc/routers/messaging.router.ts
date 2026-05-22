@@ -64,6 +64,7 @@ function getDb() {
 
 const ALLOWED_TEMPLATE_PLACEHOLDERS = new Set([
   'customer_name',
+  'customer_phone',
   'order_id',
   'product_name',
   'delivery_address',
@@ -104,9 +105,11 @@ function assertSupportedTemplatePlaceholders(body: string) {
 function resolvePlaceholders(body: string, order: {
   id: string;
   customerName: string | null;
+  customerPhone?: string | null;
   deliveryAddress: string | null;
   totalAmount?: string | number | null;
   paymentStatus?: string | null;
+  preferredDeliveryDate?: string | null;
   items?: Array<{ productName?: string | null; quantity?: number | null }>;
 }): string {
   const firstItem = order.items?.[0];
@@ -116,10 +119,11 @@ function resolvePlaceholders(body: string, order: {
   const paymentStatus = order.paymentStatus ?? '';
   return body
     .replace(/\{\{customer_name\}\}/g, order.customerName ?? '')
+    .replace(/\{\{customer_phone\}\}/g, order.customerPhone ?? '')
     .replace(/\{\{order_id\}\}/g, order.id.slice(0, 8).toUpperCase())
     .replace(/\{\{product_name\}\}/g, productName)
     .replace(/\{\{delivery_address\}\}/g, order.deliveryAddress ?? '')
-    .replace(/\{\{estimated_date\}\}/g, '')  // Future: add estimated delivery date
+    .replace(/\{\{estimated_date\}\}/g, order.preferredDeliveryDate ?? '')
     .replace(/\{\{quantity\}\}/g, quantity)
     .replace(/\{\{total_amount\}\}/g, totalAmount)
     .replace(/\{\{payment_status\}\}/g, paymentStatus);
@@ -340,6 +344,7 @@ export const messagingRouter = router({
         renderedBody = resolvePlaceholders(template.body, {
           id: order.id,
           customerName: order.customerName,
+          customerPhone: order.customerPhone,
           deliveryAddress: order.deliveryAddress,
         });
         templateId = template.id;
@@ -426,9 +431,11 @@ export const messagingRouter = router({
           .select({
             id: schema.orders.id,
             customerName: schema.orders.customerName,
+            customerPhone: schema.orders.customerPhone,
             deliveryAddress: schema.orders.deliveryAddress,
             totalAmount: schema.orders.totalAmount,
             paymentStatus: schema.orders.paymentStatus,
+            preferredDeliveryDate: schema.orders.preferredDeliveryDate,
             branchId: schema.orders.branchId,
           })
           .from(schema.orders)
@@ -479,9 +486,11 @@ export const messagingRouter = router({
       const renderedBody = resolvePlaceholders(template.body, {
         id: order.id,
         customerName: order.customerName,
+        customerPhone: order.customerPhone,
         deliveryAddress: order.deliveryAddress,
         totalAmount: order.totalAmount,
         paymentStatus: order.paymentStatus,
+        preferredDeliveryDate: order.preferredDeliveryDate,
         items,
       });
 
