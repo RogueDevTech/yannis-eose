@@ -1571,7 +1571,22 @@ function getFormScript(
             selectedOffer = null;
           } else {
             msg.className = 'msg msg-error';
-            msg.textContent = result.data.error || 'Something went wrong. Please try again.';
+            // Parse validation errors into friendly messages instead of showing raw JSON
+            var rawError = result.data.error || '';
+            var friendlyError = 'Something went wrong. Please try again.';
+            if (typeof rawError === 'string' && rawError.length > 0) {
+              try {
+                var parsed = JSON.parse(rawError);
+                if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
+                  friendlyError = parsed.map(function(e) { return e.message; }).join('. ') + '.';
+                } else {
+                  friendlyError = rawError;
+                }
+              } catch(_) {
+                friendlyError = rawError;
+              }
+            }
+            msg.textContent = friendlyError;
           }
         }).catch(function() {
           // Network failed — save offline

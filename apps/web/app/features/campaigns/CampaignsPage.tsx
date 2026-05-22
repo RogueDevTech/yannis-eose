@@ -11,6 +11,8 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
 import { EmptyState } from '~/components/ui/empty-state';
+import { SearchableSelect } from '~/components/ui/searchable-select';
+import { SearchInput } from '~/components/ui/search-input';
 import type { Campaign, CampaignFormConfig, FormsPageProps } from './types';
 
 function isOptionOn(value: boolean | string | undefined): boolean {
@@ -114,6 +116,7 @@ const CheckIconSm = (
 export function FormsPage({
   forms,
   totalForms,
+  products = [],
   isMediaBuyer = false,
   showMediaBuyerColumn = false,
   currentUserName: _currentUserName,
@@ -137,6 +140,29 @@ export function FormsPage({
     [],
   );
 
+  /** Product filter — client-side over the loaded forms, URL-synced (`?productId`)
+   *  via History API so it shares the tab's no-refetch behaviour. */
+  const [productFilter, setProductFilter] = useState(() => searchParams.get('productId') ?? '');
+  const applyProductFilter = useCallback((value: string) => {
+    setProductFilter(value);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set('productId', value);
+    else url.searchParams.delete('productId');
+    window.history.replaceState({}, '', url.pathname + url.search);
+  }, []);
+
+  /** Name search — client-side over the loaded forms, URL-synced (`?search`). */
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') ?? '');
+  const applySearch = useCallback((value: string) => {
+    setSearchQuery(value);
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (value.trim()) url.searchParams.set('search', value);
+    else url.searchParams.delete('search');
+    window.history.replaceState({}, '', url.pathname + url.search);
+  }, []);
+
   const allForms = forms as Campaign[];
   const mineFormsCount = currentUserId ? allForms.filter((c) => c.mediaBuyerId === currentUserId).length : 0;
   const allFormsCount = allForms.length;
@@ -158,12 +184,25 @@ export function FormsPage({
 
   /** Forms list slice for the active scope (server already scopes MB to own campaigns). */
   const displayedForms = useMemo(() => {
-    if (uiFormsScope === 'mine') {
-      if (!currentUserId) return forms as Campaign[];
-      return (forms as Campaign[]).filter((c) => c.mediaBuyerId === currentUserId);
+    let list = forms as Campaign[];
+    if (uiFormsScope === 'mine' && currentUserId) {
+      list = list.filter((c) => c.mediaBuyerId === currentUserId);
     }
-    return forms as Campaign[];
-  }, [forms, uiFormsScope, currentUserId]);
+    if (productFilter) {
+      list = list.filter(
+        (c) => Array.isArray(c.productIds) && c.productIds.includes(productFilter),
+      );
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          (c.mediaBuyerName ?? '').toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [forms, uiFormsScope, currentUserId, productFilter, searchQuery]);
 
   const showMyFormsOnly = uiFormsScope === 'mine';
 
@@ -314,12 +353,66 @@ export function FormsPage({
         }
       />
 
+      <div className="flex flex-wrap items-center gap-2">
+        <form className="w-full sm:w-72" onSubmit={(e) => e.preventDefault()}>
+          <SearchInput
+            value={searchQuery}
+            onChange={applySearch}
+            placeholder="Search forms by name…"
+            wrapperClassName="w-full"
+          />
+        </form>
+        {products.length > 0 ? (
+          <div className="w-full sm:w-72">
+            <SearchableSelect
+              id="forms-product-filter"
+              value={productFilter}
+              onChange={applyProductFilter}
+              options={[
+                { value: '', label: 'All products' },
+                ...products.map((p) => ({ value: p.id, label: p.name })),
+              ]}
+              placeholder="Filter by product"
+              searchPlaceholder="Search products…"
+            />
+          </div>
+        ) : null}
+        {productFilter || searchQuery ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              applyProductFilter('');
+              applySearch('');
+            }}
+          >
+            Clear
+          </Button>
+        ) : null}
+      </div>
+
       <div className="relative">
         <>
       {/* Empty state hint: why you might not see forms */}
       {displayedForms.length === 0 && (
         <div className="rounded-lg bg-info-50 dark:bg-info-700/20 border border-info-200 dark:border-info-700/50 px-4 py-3">
-          {isMediaBuyer ? (
+          {productFilter || searchQuery.trim() ? (
+            <p className="text-sm text-info-800 dark:text-info-200">
+              No forms match your current search or filter.{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  applyProductFilter('');
+                  applySearch('');
+                }}
+                className="font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+              >
+                Clear filters
+              </button>{' '}
+              to see all forms.
+            </p>
+          ) : isMediaBuyer ? (
             <p className="text-sm text-info-800 dark:text-info-200">
               You don&apos;t have any forms yet. Only forms you create appear here. Use{' '}
               <BranchScopedLink

@@ -1370,6 +1370,12 @@ export function MarketingFormsLoadingShell({
         }
       />
 
+      {/* Search + product filter placeholders — mirror the loaded page's filter row. */}
+      <div className="flex flex-wrap items-center gap-2" aria-hidden>
+        <div className="h-9 w-full sm:w-72 animate-pulse rounded-lg border border-app-border bg-app-hover" />
+        <div className="h-9 w-full sm:w-72 animate-pulse rounded-lg border border-app-border bg-app-hover" />
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2">
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="card space-y-3 p-4">

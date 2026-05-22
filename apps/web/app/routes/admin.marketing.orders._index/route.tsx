@@ -34,6 +34,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const status = url.searchParams.get('status') || undefined;
   const search = url.searchParams.get('search') || undefined;
   const mediaBuyerIdParam = url.searchParams.get('mediaBuyerId') || undefined;
+  // Cart-abandonment pseudo-filter — `?fromCart=1` swaps the orders table for
+  // the abandoned-cart backlog (Media Buyers see only their own campaigns'
+  // carts; the backend `cart.listAbandoned` auto-scopes them).
+  const fromCart = url.searchParams.get('fromCart') === '1';
 
   // Date filter — default to today when no params
   const periodAllTime = url.searchParams.get('period') === 'all_time';
@@ -115,11 +119,75 @@ export async function loader({ request }: LoaderFunctionArgs) {
     searchFilter: search,
     viewerUserId: user.id,
     activeMediaBuyerFilter: mediaBuyerId ?? null,
+    // Everyone who can open this page (gated on `marketing.orders`) may switch
+    // to the cart-abandonment view; scope is enforced server-side per role.
+    enableFromCartStatusOption: true,
+    isCartAbandonmentView: fromCart,
   };
 
   // Defer the orders list — page chrome renders immediately, table swaps from
   // skeleton rows to real ones when this promise resolves.
+  //
+  // Cart-abandonment view: when `?fromCart=1` is active the table is fed the
+  // un-recovered abandoned-cart backlog instead of orders. Each cart is mapped
+  // into an `Order`-shaped row with the synthetic status `'CART'` so the shared
+  // table renders it; `cartId` back-links the "View cart" quick-detail modal.
   const listPromise = (async () => {
+    if (fromCart) {
+      const cartsInput = encodeURIComponent(
+        JSON.stringify({ page, limit: ORDERS_PER_PAGE, ...(mediaBuyerId ? { mediaBuyerId } : {}) }),
+      );
+      const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
+        method: 'GET',
+        cookie,
+      });
+      const cartsData = cartsRes.ok
+        ? (
+            cartsRes.data as {
+              result?: {
+                data?: {
+                  items: Array<{
+                    id: string;
+                    customerName: string;
+                    customerPhoneDisplay: string;
+                    productId: string | null;
+                    productName: string | null;
+                    campaignId: string | null;
+                    campaignName: string | null;
+                    mediaBuyerId: string | null;
+                    mediaBuyerName: string | null;
+                    updatedAt: string;
+                    quantity: number | null;
+                  }>;
+                  total: number;
+                };
+              };
+            }
+          )?.result?.data
+        : null;
+      const total = cartsData?.total ?? 0;
+      const totalPages = total === 0 ? 0 : Math.ceil(total / ORDERS_PER_PAGE);
+      const orders: Order[] = (cartsData?.items ?? []).map((c) => ({
+        id: c.id,
+        customerName: c.customerName,
+        customerPhoneDisplay: '',
+        status: 'CART',
+        totalAmount: null,
+        createdAt: c.updatedAt,
+        assignedCsId: null,
+        primaryProductId: c.productId ?? null,
+        primaryProductName: c.productName ?? null,
+        itemCount: c.quantity ?? 0,
+        campaignId: c.campaignId ?? null,
+        campaignName: c.campaignName ?? null,
+        mediaBuyerId: c.mediaBuyerId ?? null,
+        mediaBuyerName: c.mediaBuyerName ?? null,
+        // Back-link drives the "View cart" quick-detail modal.
+        cartId: c.id,
+      }));
+      return { orders, total, totalPages };
+    }
+
     const res = await apiRequest<unknown>(`/trpc/orders.list?input=${listInputStr}`, {
       method: 'GET',
       cookie,
@@ -246,6 +314,8 @@ export default function MarketingOrdersRoute() {
     canExport: ordersShell.canExport,
     viewerUserId: ordersShell.viewerUserId,
     activeMediaBuyerFilter: ordersShell.activeMediaBuyerFilter,
+    enableFromCartStatusOption: ordersShell.enableFromCartStatusOption,
+    isCartAbandonmentView: ordersShell.isCartAbandonmentView,
   };
   return (
     <CachedAwait
