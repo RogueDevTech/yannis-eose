@@ -30,11 +30,6 @@ crons = ["* * * * *"]
 # Replace the placeholder IDs with real ones after creation
 
 [[kv_namespaces]]
-binding = "DEDUP_CACHE"
-id = "dd6aa2365f7a44c5b0d3b4825bdb8749"
-preview_id = "e73dc2a62c124f05b1029332b7596ac0"
-
-[[kv_namespaces]]
 binding = "RATE_LIMIT_CACHE"
 id = "b68391c82d004c40a9f3dfd61fd49866"
 preview_id = "47b3b79e86e0452eb202d54d883f41aa"
@@ -82,14 +77,9 @@ crons = ["* * * * *"]
 # KV namespaces — MUST be created in the hqyannis.com account. The AWS dev
 # IDs above are in the roguedevtech.com account and will fail to bind here.
 # Create with (after wrangler is authed to the new account):
-#   wrangler kv namespace create DEDUP_CACHE        --env gcp-dev
 #   wrangler kv namespace create RATE_LIMIT_CACHE   --env gcp-dev
 #   wrangler kv namespace create CAMPAIGN_CACHE     --env gcp-dev
 # Then paste the printed IDs below.
-[[env.gcp-dev.kv_namespaces]]
-binding = "DEDUP_CACHE"
-id = "851dff3f14cf450d96bc0ea97f3ece10"
-
 [[env.gcp-dev.kv_namespaces]]
 binding = "RATE_LIMIT_CACHE"
 id = "cf30819e98de4f2c83544e54398d601f"
@@ -124,10 +114,6 @@ TURNSTILE_SITE_KEY = "0x4AAAAAADR3aHUKRmTFmXR3"
 
 [env.production.triggers]
 crons = ["* * * * *"]
-
-[[env.production.kv_namespaces]]
-binding = "DEDUP_CACHE"
-id = "58fd367c161947d48cd910c44b825c40"
 
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMIT_CACHE"

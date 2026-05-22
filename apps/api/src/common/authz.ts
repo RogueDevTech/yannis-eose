@@ -30,6 +30,7 @@ export function isSuperAdminOnly(user: { role: string }): boolean {
 
 /** Department heads that keep org-wide branch visibility. */
 export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
+  'HEAD_OF_MARKETING',
   'HEAD_OF_CS',
   'HEAD_OF_LOGISTICS',
 ]);
