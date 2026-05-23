@@ -19,6 +19,8 @@ export const ORDER_STATUS = {
   WRITTEN_OFF: 'WRITTEN_OFF',
   // Renamed from COMPLETED — CEO directive 2026-05-04, migration 0110.
   REMITTED: 'REMITTED',
+  // Soft-removal: excluded from all metrics but row stays in DB. Migration 0153.
+  DELETED: 'DELETED',
 } as const;
 
 export type OrderStatus = (typeof ORDER_STATUS)[keyof typeof ORDER_STATUS];
@@ -39,6 +41,7 @@ export const USER_ROLE = {
   TPL_MANAGER: 'TPL_MANAGER',
   TPL_RIDER: 'TPL_RIDER',
   HR_MANAGER: 'HR_MANAGER',
+  SUPPORT: 'SUPPORT',
 } as const;
 
 export type UserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE];

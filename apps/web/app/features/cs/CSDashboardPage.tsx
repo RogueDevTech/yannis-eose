@@ -1241,7 +1241,7 @@ function CSDashboardPageLoaded({
     const m = fetcherSubmissionMetaRef.current;
     if (!m) return null;
     if (kind === 'cancel')
-      return m.intent === 'transition' && m.newStatus === 'CANCELLED' ? fetcherSurface.friendlyError : null;
+      return m.intent === 'transition' && m.newStatus === 'DELETED' ? fetcherSurface.friendlyError : null;
     if (kind === 'reassign')
       return m.intent === 'bulkReassign' && m.orderIdsLen === 1 ? fetcherSurface.friendlyError : null;
     return null;
@@ -1408,11 +1408,11 @@ function CSDashboardPageLoaded({
       bump('CS_ASSIGNED', inFlightAssignIds.size);
     }
 
-    // 2. Cancel order: fromStatus → CANCELLED
-    if (fetcher.formData?.get('intent') === 'transition' && fetcher.formData?.get('newStatus') === 'CANCELLED') {
+    // 2. Delete order: fromStatus → DELETED (CEO directive 2026-05-23: replaces CANCELLED)
+    if (fetcher.formData?.get('intent') === 'transition' && fetcher.formData?.get('newStatus') === 'DELETED') {
       const fromStatus = cancelConfirmOrder?.fromStatus;
       if (fromStatus) bump(fromStatus, -1);
-      bump('CANCELLED', 1);
+      bump('DELETED', 1);
     }
 
     // 3. Claim order: UNPROCESSED → CS_ASSIGNED
@@ -1431,11 +1431,11 @@ function CSDashboardPageLoaded({
   // CEO bucket count matches the OrderStatusBadge default (which collapses
   // AGENT_ASSIGNED / DISPATCHED / IN_TRANSIT into "Confirmed").
   const confirmedCount = oCount('CONFIRMED') + oCount('AGENT_ASSIGNED') + oCount('DISPATCHED') + oCount('IN_TRANSIT');
-  const cancelledCount = oCount('CANCELLED');
+  const deletedCount = oCount('DELETED');
   const overviewStatItems: OverviewStatStripItem[] = [
     { label: 'Active closers', value: workloads.length, valueClassName: 'text-app-fg' },
     {
-      label: 'Pending confirmation',
+      label: 'Unconfirmed',
       value: totalPending,
       valueClassName: 'text-warning-600 dark:text-warning-400',
     },
@@ -1489,7 +1489,7 @@ function CSDashboardPageLoaded({
       ),
       valueClassName: 'text-brand-600 dark:text-brand-400',
     },
-    { label: 'Cancelled', value: cancelledCount, valueClassName: 'text-app-fg' },
+    { label: 'Deleted', value: deletedCount, valueClassName: deletedCount > 0 ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg' },
     ...(cartStats
       ? ([
           {
@@ -1598,8 +1598,8 @@ function CSDashboardPageLoaded({
     setHotSwapOrderIds(hotSwapSourceOrders.map((o: CSOrder) => o.id));
   }
 
-  // Suppress unused variable warning — cancelledCount may be used in future stats
-  void cancelledCount;
+  // Suppress unused variable warning — deletedCount is used in the overview stats
+  void deletedCount;
 
   return (
     <div className="space-y-4">
@@ -2761,10 +2761,10 @@ function CSDashboardPageLoaded({
             Delete order for {cancelConfirmOrder.customerName}?
           </h3>
           <p className="text-sm text-app-fg-muted mb-3">
-            Please provide a reason (at least 10 characters). The order will be moved to Cancelled.
+            Please provide a reason (at least 10 characters). Deleted orders are removed from metrics but stay in the database.
           </p>
           <ModalFetcherInlineError message={fetcherCsModalError('cancel')} className="mb-3" />
-          {/* Preset reason chips — match the bulk cancel modal on the Sales Orders page. */}
+          {/* Preset reason chips — match the bulk delete modal on the Sales Orders page. */}
           <div className="flex flex-wrap gap-2 mb-3">
             {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {
               const isOther = preset === 'Other';
@@ -2790,7 +2790,7 @@ function CSDashboardPageLoaded({
           <Textarea
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value)}
-            placeholder="Enter cancellation reason..."
+            placeholder="Enter deletion reason..."
             rows={3}
           />
           <div className="flex gap-2 mt-4 justify-end">
@@ -2810,13 +2810,13 @@ function CSDashboardPageLoaded({
               className="border-danger-500 bg-danger-500 hover:bg-danger-600 text-white"
               disabled={cancelReason.trim().length < 10 || fetcher.state === 'submitting'}
               loading={fetcher.state === 'submitting'}
-              loadingText="Cancelling..."
+              loadingText="Deleting..."
               onClick={() => {
                 fetcher.submit(
                   {
                     intent: 'transition',
                     orderId: cancelConfirmOrder.orderId,
-                    newStatus: 'CANCELLED',
+                    newStatus: 'DELETED',
                     reason: cancelReason.trim(),
                     ...csMutationBranchPayload(
                       cancelConfirmOrder.branchId ? [{ branchId: cancelConfirmOrder.branchId }] : [],

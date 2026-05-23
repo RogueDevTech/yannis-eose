@@ -37,6 +37,9 @@ export const userRoleEnum = pgEnum('user_role', [
   'TPL_MANAGER',
   'TPL_RIDER',
   'HR_MANAGER',
+  // SUPPORT = read-only tech support role with full SUPER_ADMIN visibility.
+  // All tRPC mutations blocked at middleware layer. Can mirror any user.
+  'SUPPORT',
 ]);
 
 export const orderStatusEnum = pgEnum('order_status', [
@@ -60,6 +63,10 @@ export const orderStatusEnum = pgEnum('order_status', [
   // the corresponding COD batch — distinct from `DELIVERED` (CS / Logistics
   // confirmation) which only signals the customer has the goods.
   'REMITTED',
+  // Soft-removal: order excluded from ALL metrics/counts but row stays in DB.
+  // Distinct from CANCELLED (which is a legitimate business event that counts
+  // in metrics). Admin/SuperAdmin can restore to UNPROCESSED. Migration 0153.
+  'DELETED',
 ]);
 
 export const movementTypeEnum = pgEnum('movement_type', [
@@ -355,6 +362,7 @@ export const timelineEventTypeEnum = pgEnum('timeline_event_type', [
   'SUPERVISOR_WATCHING',
   'PAYMENT_RECEIVED',
   'ORDER_ARCHIVED',
+  'ORDER_DELETED',
   'LINE_PRICE_CHANGE_REQUESTED',
   'LINE_PRICE_CHANGE_APPROVED',
   'LINE_PRICE_CHANGE_REJECTED',

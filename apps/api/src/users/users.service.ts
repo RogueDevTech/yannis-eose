@@ -490,9 +490,9 @@ export class UsersService {
   /** Existing staff whose name is close enough to be the same person (see `staffNamesLikelyDuplicate`). */
   private async findSimilarNamedUsers(
     name: string,
-  ): Promise<Array<{ id: string; name: string; status: string }>> {
+  ): Promise<Array<{ id: string; name: string; email: string; status: string }>> {
     const rows = await this.db
-      .select({ id: schema.users.id, name: schema.users.name, status: schema.users.status })
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, status: schema.users.status })
       .from(schema.users);
     return rows.filter((u) => staffNamesLikelyDuplicate(u.name, name)).slice(0, 5);
   }

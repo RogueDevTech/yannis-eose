@@ -314,6 +314,7 @@ export class MarketingService {
       eq(schema.orders.campaignId, params.campaignId),
       hasProductLine,
       lte(schema.orders.createdAt, now),
+      sql`${schema.orders.status} != 'DELETED'`,
     ];
     if (params.windowStartExclusive) {
       orderConditions.push(gt(schema.orders.createdAt, params.windowStartExclusive));
@@ -691,6 +692,7 @@ export class MarketingService {
       eq(schema.orders.mediaBuyerId, params.mediaBuyerId),
       eq(schema.orders.campaignId, params.campaignId),
       lte(schema.orders.createdAt, now),
+      sql`${schema.orders.status} != 'DELETED'`,
     ];
     if (windowStartExclusive) {
       orderConditions.push(gt(schema.orders.createdAt, windowStartExclusive));
@@ -745,6 +747,7 @@ export class MarketingService {
       inArray(schema.orders.mediaBuyerId, mediaBuyerIds),
       gte(schema.orders.createdAt, rangeStart),
       lte(schema.orders.createdAt, rangeEnd),
+      sql`${schema.orders.status} != 'DELETED'`,
     ];
     if (params.branchId) {
       conditions.push(eq(schema.orders.branchId, params.branchId));
@@ -3474,7 +3477,10 @@ export class MarketingService {
       if (branchId) conditions.push(eq(schema.orders.branchId, branchId));
     };
 
-    const orderConditions: Parameters<typeof and>[0][] = [];
+    const orderConditions: Parameters<typeof and>[0][] = [
+      // Exclude DELETED orders from all marketing metrics.
+      sql`${schema.orders.status} != 'DELETED'`,
+    ];
     appendMetricsOrderScope(orderConditions);
     if (periodStart) orderConditions.push(gte(schema.orders.createdAt, periodStart));
     if (periodEnd) orderConditions.push(lte(schema.orders.createdAt, periodEnd));
@@ -3712,6 +3718,7 @@ export class MarketingService {
         .where(
           and(
             inArray(schema.orders.mediaBuyerId, buyerIds),
+            sql`${schema.orders.status} != 'DELETED'`,
             branchId ? eq(schema.orders.branchId, branchId) : undefined,
           ),
         )

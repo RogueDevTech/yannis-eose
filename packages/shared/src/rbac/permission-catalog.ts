@@ -147,6 +147,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   // Permission-first lock (CEO directive): SUPER_ADMIN is the only unconditional
   // bypass; every other gate runs through a code so admins can deputize via the
   // matrix without code changes.
+  { code: 'orders.delete', resource: 'orders', action: 'delete', description: 'Soft-delete orders (removes from metrics; row stays in DB). CEO directive 2026-05-23: replaces CANCELLED. Admin/SuperAdmin default. HoCS must request and Admin must approve.' },
   { code: 'orders.line_price.edit', resource: 'orders.line_price', action: 'edit', description: 'Edit line unit prices (and derived totals) on confirmed orders. Branch / supervisor scoping still applies.' },
   {
     code: 'orders.detail.manage',
@@ -206,6 +207,10 @@ export const ALL_PERMISSION_CODES: string[] = CANONICAL_PERMISSIONS.map((p) => p
  */
 export const ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: [],
+  // SUPPORT gets ALL_PERMISSION_CODES (like ADMIN) so the session carries
+  // every permission for both server-side and client-side gate checks.
+  // All mutations are still blocked at the tRPC middleware layer.
+  SUPPORT: ALL_PERMISSION_CODES,
   ADMIN: ALL_PERMISSION_CODES,
   BRANCH_ADMIN: [
     'orders.read',

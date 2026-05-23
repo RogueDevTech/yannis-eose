@@ -40,7 +40,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cookie,
     }),
     apiRequest<unknown>(
-      '/trpc/logistics.listLocations?input=' + encodeURIComponent(JSON.stringify({ limit: 100 })),
+      '/trpc/logistics.locationOptions?input=' + encodeURIComponent(JSON.stringify({})),
       { method: 'GET', cookie },
     ),
   ]);
@@ -69,28 +69,45 @@ export async function loader({ request }: LoaderFunctionArgs) {
       : [];
   const locations =
     locationsRes.ok
-      ? ((locationsRes.data as { result?: { data?: { locations?: Array<{ id: string; name: string; providerName?: string | null }> } } })?.result?.data?.locations ?? [])
-        .map((l) => ({ id: l.id, name: l.name, providerName: l.providerName ?? null }))
-      : [];
+      ? (
+          (locationsRes.data as { result?: { data?: Array<{ id: string; name: string; providerName?: string | null }> | { locations?: Array<{ id: string; name: string; providerName?: string | null }> } } })
+            ?.result?.data ?? []
+        )
+        : [];
+  // Normalize: listLocationOptions returns Array directly; listLocations wraps in { locations }
+  const locationsList: Array<{ id: string; name: string; providerName: string | null }> = (
+    Array.isArray(locations)
+      ? locations
+      : (locations as { locations?: Array<{ id: string; name: string; providerName?: string | null }> }).locations ?? []
+  ).map((l) => ({ id: l.id, name: l.name, providerName: l.providerName ?? null }));
 
   const productMap = new Map(products.map((p) => [p.id, p.name]));
-  const locationMap = new Map(locations.map((l) => [l.id, l.name]));
-  const providerMap = new Map(locations.map((l) => [l.id, l.providerName]));
+  const locationMap = new Map(locationsList.map((l) => [l.id, l.name]));
+  const providerMap = new Map(locationsList.map((l) => [l.id, l.providerName]));
 
-  const records = transfers.map((t) => ({
+  type TransferRow = typeof transfers[number] & {
+    fromLocationName?: string | null;
+    toLocationName?: string | null;
+    fromProviderName?: string | null;
+    toProviderName?: string | null;
+    senderName?: string | null;
+  };
+  const records = transfers.map((t: TransferRow) => ({
     ...t,
     productName: productMap.get(t.productId) ?? 'Unknown product',
-    fromLocationName: locationMap.get(t.fromLocationId) ?? 'Unknown location',
-    toLocationName: locationMap.get(t.toLocationId) ?? 'Unknown location',
-    fromProviderName: providerMap.get(t.fromLocationId) ?? null,
-    toProviderName: providerMap.get(t.toLocationId) ?? null,
-    senderName: (t as { senderName?: string | null }).senderName ?? null,
+    // Prefer server-side names (joined in listTransfers), fall back to client-side lookup
+    fromLocationName: t.fromLocationName ?? locationMap.get(t.fromLocationId) ?? 'Unknown location',
+    toLocationName: t.toLocationName ?? locationMap.get(t.toLocationId) ?? 'Unknown location',
+    fromProviderName: t.fromProviderName ?? providerMap.get(t.fromLocationId) ?? null,
+    toProviderName: t.toProviderName ?? providerMap.get(t.toLocationId) ?? null,
+    senderName: t.senderName ?? null,
   }));
 
   const statusWhitelist = new Set(['IN_TRANSIT', 'RECEIVED', 'DISPUTED']);
   const normalizedStatus = statusWhitelist.has(status) ? status : '';
-  const filteredRemittances = records.filter((r) => {
-    if (normalizedStatus && r.transferStatus !== normalizedStatus) return false;
+
+  // Date + non-status filters — applied to both stats and table rows.
+  const dateAndFieldFiltered = records.filter((r) => {
     if (locationId && r.toLocationId !== locationId && r.fromLocationId !== locationId) return false;
     if (search && !(`${r.id} ${r.productName}`.toLowerCase().includes(search))) return false;
     if (sender && !(r.senderName ?? '').toLowerCase().includes(sender)) return false;
@@ -109,6 +126,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return true;
   });
 
+  // Status filter is only for the table — stats always show all-status counts.
+  const filteredRemittances = normalizedStatus
+    ? dateAndFieldFiltered.filter((r) => r.transferStatus === normalizedStatus)
+    : dateAndFieldFiltered;
+
   const senderOptions = Array.from(
     new Set(
       records
@@ -119,7 +141,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return {
       remittances: filteredRemittances,
-      locations,
+      allRemittances: dateAndFieldFiltered,
+      locations: locationsList,
       senderOptions,
       filters: {
         status: normalizedStatus,
@@ -190,6 +213,7 @@ export default function AdminLogisticsRemittancesRoute() {
         {(data) => (
           <RemittancesAdminPage
             remittances={data.remittances}
+            allRemittances={data.allRemittances}
             locations={data.locations ?? []}
             senderOptions={data.senderOptions ?? []}
             filters={data.filters}

@@ -195,7 +195,14 @@ export class AuthService {
           'Your account has not been assigned to a branch. Contact your administrator.',
         );
       }
-      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, user.primaryBranchId);
+      // Media Buyers default to "All Branches" so they see all their orders
+      // across every branch they have a footprint in. They can narrow via the
+      // header branch switcher if needed.
+      if (user.role === 'MEDIA_BUYER') {
+        currentBranchId = null;
+      } else {
+        currentBranchId = resolveSessionBranchIdFromMemberships(memberships, user.primaryBranchId);
+      }
     } else if (memberships.length > 0) {
       // All-branch user (admin-class, org-wide head) WITH a branch assignment →
       // default to primary / first branch. Switcher still offers "All branches".
@@ -387,7 +394,11 @@ export class AuthService {
       if (targetMemberships.length === 0) {
         throw new BadRequestException('Target user has no branch — cannot mirror.');
       }
-      currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
+      if (target.role === 'MEDIA_BUYER') {
+        currentBranchId = null;
+      } else {
+        currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
+      }
     } else if (targetMemberships.length > 0) {
       currentBranchId = resolveSessionBranchIdFromMemberships(targetMemberships, target.primaryBranchId);
     }
@@ -510,7 +521,11 @@ export class AuthService {
       permissions: Array.from(actorPermSet),
     });
     if (!actorGlobal) {
-      currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
+      if (actor.role === 'MEDIA_BUYER') {
+        currentBranchId = null;
+      } else {
+        currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
+      }
     } else if (memberships.length > 0) {
       currentBranchId = resolveSessionBranchIdFromMemberships(memberships, actor.primaryBranchId);
     }

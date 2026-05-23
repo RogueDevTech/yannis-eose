@@ -29,9 +29,13 @@ import { STATUS_OPTIONS } from '~/features/shared/order-status';
 // list so the page stays consistent with what the dropdown can actually pick.
 // REMITTED is dropped here too: cash remittance is accountant-led; CS surfaces
 // shouldn't filter by it, and a stale `?status=REMITTED` bookmark should bounce.
-const CS_ORDERS_VISIBLE_STATUSES = new Set(
-  STATUS_OPTIONS.filter((s) => s !== 'ALL' && s !== 'REMITTED'),
-);
+// DELETED is added explicitly — it's not in STATUS_OPTIONS (six-bucket CEO
+// directive) but is reachable via the Deleted tab. CANCELLED is legacy-only.
+const CS_ORDERS_VISIBLE_STATUSES = new Set([
+  ...STATUS_OPTIONS.filter((s) => s !== 'ALL' && s !== 'REMITTED'),
+  'CANCELLED',
+  'DELETED',
+]);
 export const meta: MetaFunction = () => [
   { title: 'Sales Orders — Yannis EOSE' },
 ];
@@ -734,13 +738,11 @@ export default function CSOrdersRoute() {
       {(d) => (
         <OrdersListPage
           {...d}
-          statusCounts={{}}
           userRole={userRole}
           liveEvents={[...CS_ORDERS_LIVE_EVENTS]}
-          // REMITTED is accountant-only. The "Deleted" (CANCELLED) option is
-          // limited to HoCS / Admin / SuperAdmin here — CS closers don't filter
-          // their own queue by cancelled orders.
-          excludeStatuses={isHoCSPlus ? ['REMITTED'] : ['REMITTED', 'CANCELLED']}
+          // REMITTED is accountant-only. Deleted tab limited to users with
+          // orders.delete permission (HoCS / Admin / SuperAdmin by default).
+          excludeStatuses={isHoCSPlus ? ['REMITTED'] : ['REMITTED', 'DELETED']}
           enableFromCartStatusOption={isHoCSPlus}
           enableTestOrdersOption={userRole === 'SUPER_ADMIN' || userRole === 'ADMIN'}
         />

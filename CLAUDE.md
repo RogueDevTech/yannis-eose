@@ -122,8 +122,8 @@ See `.claude/docs/server-caching-pool.md` for full details. Key rules:
 UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → DISPATCHED → IN_TRANSIT → DELIVERED → REMITTED
        |            |              |
        |            |              PARTIALLY_DELIVERED / RETURNED → RESTOCKED / WRITTEN_OFF
-       |            CANCELLED
-       CANCELLED
+       |            DELETED
+       DELETED
 ```
 
 **Hard rules:** No state skipping. Every transition needs an authenticated actor. Every transition logged in temporal audit. UI disables invalid transitions.
@@ -133,8 +133,11 @@ UNPROCESSED → CS_ASSIGNED → CS_ENGAGED → CONFIRMED → AGENT_ASSIGNED → 
 - `CONFIRMED → AGENT_ASSIGNED`: 3PL location must have stock. Stock: Reserved → Allocated.
 - `AGENT_ASSIGNED/DISPATCHED/IN_TRANSIT → DELIVERED`: Stock deducted, commission triggered. deliveryNote/deliveryProofUrl both optional.
 - `DELIVERED → REMITTED`: accountant only (via cash remittance flow). CS NEVER marks REMITTED.
-- `{UNPROCESSED,CS_ASSIGNED,CS_ENGAGED} → CANCELLED`: HoCS / Branch Admin (same branch) / Admin/SuperAdmin only — CS closers can NOT cancel (CEO directive 2026-05-20). Mandatory reason ≥10 chars.
-- `CANCELLED → UNPROCESSED`: restore — Admin/SuperAdmin only. Cancelled orders are never deleted; they surface in the **Deleted** tab (`status=CANCELLED` filter on the orders list, all roles). Restore clears the closer assignment + lock so the order re-enters the pool.
+- `{UNPROCESSED,CS_ASSIGNED,CS_ENGAGED} → DELETED`: permission-gated via `orders.delete` — HoCS by default (requires Admin/SuperAdmin approval via permission request). Mandatory reason ≥10 chars. CEO directive 2026-05-23: replaces the old CANCELLED flow entirely.
+- `CANCELLED → DELETED` / `CANCELLED → UNPROCESSED`: legacy-only paths for orders cancelled before the directive. Admin/SuperAdmin only.
+- `DELETED → UNPROCESSED`: restore — Admin/SuperAdmin only. Clears closer assignment + lock + `deletedAt`.
+
+**CANCELLED is legacy-only** (CEO directive 2026-05-23). No new orders can be cancelled — the UI only offers "Delete". Existing CANCELLED orders remain in the DB and can be restored or deleted by Admin.
 
 ---
 
@@ -285,7 +288,8 @@ Flow: submit → modal stays open → server `{success: true}` → modal closes 
 ### Order Lifecycle
 - Never skip states in order lifecycle
 - Never let CS mark REMITTED — accountant only
-- Never let CS closers cancel orders — HoCS / Branch Admin (same branch) / Admin only
+- Never let CS closers delete orders — `orders.delete` permission required (HoCS by default, Admin approval needed)
+- Never use CANCELLED for new order removals — CANCELLED is legacy-only (CEO directive 2026-05-23); use DELETED
 - Never delete a cancelled order from the DB — it lives in the "Deleted" tab; only Admin/SuperAdmin restore it to UNPROCESSED
 - Never let CS closers transfer orders — HoCS/SuperAdmin only via Hot Swap
 - Never bypass order↔inventory gates (assertGlobalAvailability → assertLocationCanFulfill → reserveForAllocate → completeDelivery)

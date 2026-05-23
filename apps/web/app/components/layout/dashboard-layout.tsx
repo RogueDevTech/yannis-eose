@@ -510,7 +510,7 @@ function getNavGroupsForUser(
   const result: SidebarGroup[] = [];
   const permSet = buildCanonicalPermSet(user?.permissions);
   // Broad sidebar visibility: SuperAdmin (system role) or explicit CEO/overview capability.
-  const navBypass = user?.role === 'SUPER_ADMIN' || permSetHas(permSet, 'ceo.overview');
+  const navBypass = user?.role === 'SUPER_ADMIN' || user?.role === 'SUPPORT' || permSetHas(permSet, 'ceo.overview');
   const role = user?.role ?? '';
   const forMobile = options?.forMobile === true;
 
@@ -621,6 +621,13 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/finance/overview',
   ],
   ADMIN: [
+    '/admin',
+    '/admin/marketing/overview',
+    '/admin/sales/queue',
+    '/admin/logistics/orders',
+    '/admin/finance/overview',
+  ],
+  SUPPORT: [
     '/admin',
     '/admin/marketing/overview',
     '/admin/sales/queue',
@@ -960,6 +967,7 @@ function DashboardLayoutInner({
   // height. Rendered as a fixed overlay (not `ring-inset` on the layout div, which would
   // hug the content area and miss the bottom of long pages). The Exit pill lives in Header.
   const isMirroring = !!user?.mirroredBy;
+  const isSupportRole = user?.role === 'SUPPORT';
 
   // Expose the flag at the document root so view-only side-effect helpers can no-op without
   // each one being threaded `mirroredBy` explicitly. Source of truth: `user.mirroredBy`.
@@ -972,6 +980,33 @@ function DashboardLayoutInner({
       if (typeof document !== 'undefined') document.documentElement.removeAttribute('data-mirror');
     };
   }, [isMirroring]);
+
+  // Read-only form interception: SUPPORT role + Mirror Mode.
+  // Intercepts all POST form submissions before they reach the server and shows
+  // a modal explaining why. Mirror-mode forms (data-mirror-allow) and branch
+  // switching are exempt.
+  const isReadOnly = isSupportRole || isMirroring;
+  const [readOnlyBlockModalOpen, setReadOnlyBlockModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isReadOnly || typeof document === 'undefined') return;
+    const handler = (e: SubmitEvent) => {
+      const form = e.target as HTMLFormElement | null;
+      if (!form) return;
+      // Allow mirror start/stop and branch switching
+      if (form.hasAttribute('data-mirror-allow')) return;
+      if (form.action?.includes('switchBranch')) return;
+      // Allow logout — personal session action, not a data mutation
+      if (form.action?.includes('/auth/logout')) return;
+      // Allow search forms (GET method)
+      if (form.method?.toUpperCase() === 'GET') return;
+      e.preventDefault();
+      e.stopPropagation();
+      setReadOnlyBlockModalOpen(true);
+    };
+    document.addEventListener('submit', handler, true);
+    return () => document.removeEventListener('submit', handler, true);
+  }, [isReadOnly]);
 
   // Full-screen "Mirroring …" / "Exiting …" overlay during the start/stop transition.
   // The same DashboardLayout wraps both `/hr/*` (where Start Mirror is triggered) and `/admin/*`
@@ -991,6 +1026,43 @@ function DashboardLayoutInner({
           aria-hidden
         />
       )}
+      {isSupportRole && !isMirroring && (
+        <div
+          className="fixed inset-0 pointer-events-none z-[80] border-4 border-slate-400 dark:border-slate-500 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.2)]"
+          aria-hidden
+        />
+      )}
+      {/* Read-only block modal — SUPPORT role or Mirror Mode */}
+      <Modal
+        open={readOnlyBlockModalOpen}
+        onClose={() => setReadOnlyBlockModalOpen(false)}
+        maxWidth="max-w-sm"
+        contentClassName="p-6"
+      >
+        <div className="flex flex-col items-center text-center gap-3">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isSupportRole ? 'bg-slate-100 dark:bg-slate-800' : 'bg-success-100 dark:bg-success-900/30'}`}>
+            <svg className={`w-6 h-6 ${isSupportRole ? 'text-slate-500' : 'text-success-600 dark:text-success-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+            </svg>
+          </div>
+          <h3 className="text-lg font-semibold text-app-fg">
+            {isSupportRole ? 'Read-only mode' : 'Mirror mode is read-only'}
+          </h3>
+          <p className="text-sm text-app-fg-muted">
+            {isSupportRole
+              ? 'The Support role is view-only. You can browse all data but cannot make changes. Contact an admin if something needs to be updated.'
+              : `You are currently viewing the app as another user. Exit mirror mode to make changes.`}
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            className="mt-1"
+            onClick={() => setReadOnlyBlockModalOpen(false)}
+          >
+            Got it
+          </Button>
+        </div>
+      </Modal>
       {isMirrorTransition && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm"

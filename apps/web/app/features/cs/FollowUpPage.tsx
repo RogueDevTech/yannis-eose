@@ -44,7 +44,7 @@ interface FollowUpPageProps extends FollowUpPageData {
 }
 
 const STATUS_OPTIONS = [
-  { label: 'Cancelled', value: 'CANCELLED' },
+  { label: 'Deleted', value: 'DELETED' },
   { label: 'Delivered', value: 'DELIVERED' },
   { label: 'Remitted', value: 'REMITTED' },
   { label: 'All closed', value: 'ALL_CLOSED' },

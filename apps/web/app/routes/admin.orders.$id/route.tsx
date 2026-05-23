@@ -781,23 +781,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
     if (!newStatus) {
       return json({ error: 'Status is required' }, { status: 400 });
     }
-    const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
+    const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED'];
     if (csOnlyStatuses.includes(newStatus)) {
-      // Cancellation is Head of CS / Branch Admin / Admin only — closers may engage and
-      // confirm but no longer cancel an order (CEO directive 2026-05-20). The backend
-      // re-checks Branch Admin same-branch scope; this is the coarse UI-facing gate.
-      const allowedRoles =
-        newStatus === 'CANCELLED'
-          ? ['HEAD_OF_CS', 'BRANCH_ADMIN', 'SUPER_ADMIN', 'ADMIN']
-          : ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
+      const allowedRoles = ['CS_CLOSER', 'HEAD_OF_CS', 'SUPER_ADMIN', 'ADMIN'];
       if (!allowedRoles.includes(user.role)) {
         return json({ error: 'You are not allowed to perform this action' }, { status: 403 });
       }
     }
-    // Restore a cancelled order back to the queue — Admin / Super Admin only.
+    // DELETED: permission-gated via orders.delete (backend enforces; this is a coarse UI guard).
+    // CEO directive 2026-05-23: replaces the old CANCELLED flow. Admin always can;
+    // others need the orders.delete permission explicitly granted by Admin.
+    if (newStatus === 'DELETED') {
+      if (user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN' && !(user.permissions ?? []).includes('orders.delete')) {
+        return json({ error: 'You do not have permission to delete orders' }, { status: 403 });
+      }
+    }
+    // Restore a deleted/cancelled order back to the queue — Admin / Super Admin only.
     if (newStatus === 'UNPROCESSED' && user.role !== 'SUPER_ADMIN' && user.role !== 'ADMIN') {
       return json(
-        { error: 'Only an Admin or Super Admin can restore a cancelled order' },
+        { error: 'Only an Admin or Super Admin can restore this order' },
         { status: 403 },
       );
     }
