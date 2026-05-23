@@ -537,9 +537,9 @@ export function CEODashboardPage({
               label="CPA"
               value={fmt(marketingSafe.cpa)}
               variant={
-                marketingSafe.cpa > 0 && marketingSafe.cpa < 5000
+                marketingSafe.cpa > 0 && marketingSafe.cpa < 3000
                   ? 'highlight'
-                  : marketingSafe.cpa > 10000
+                  : marketingSafe.cpa >= 6000
                     ? 'deduction'
                     : 'default'
               }
@@ -826,7 +826,7 @@ export function CEODashboardPage({
             <MetricRow
               label="CPA"
               value={fmt(marketingSafe.cpa)}
-              highlight={marketingSafe.cpa > 0 && marketingSafe.cpa < 5000 ? 'success' : marketingSafe.cpa > 10000 ? 'danger' : undefined}
+              highlight={marketingSafe.cpa > 0 && marketingSafe.cpa < 3000 ? 'success' : marketingSafe.cpa >= 6000 ? 'danger' : marketingSafe.cpa >= 3000 ? 'warning' : undefined}
             />
             <MetricRow
               label="True ROAS"

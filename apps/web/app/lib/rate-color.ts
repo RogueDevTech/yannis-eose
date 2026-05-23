@@ -12,10 +12,10 @@
  */
 
 function colorForRate(rate: number | null | undefined, redBelow: number, amberBelow: number): string {
-  if (rate == null || !Number.isFinite(rate) || rate <= 0) return 'text-app-fg-muted';
+  if (rate == null || !Number.isFinite(rate) || rate <= 0) return 'text-danger-600 dark:text-danger-400';
   if (rate < redBelow) return 'text-danger-600 dark:text-danger-400';
   if (rate < amberBelow) return 'text-warning-600 dark:text-warning-400';
-  return 'text-app-fg';
+  return 'text-success-600 dark:text-success-400';
 }
 
 export function confirmationRateColorClass(rate: number | null | undefined): string {
@@ -30,6 +30,20 @@ export function deliveryRateColorClass(rate: number | null | undefined): string 
 export function formatRate(rate: number | null | undefined): string {
   if (rate == null || !Number.isFinite(rate) || rate <= 0) return '0%';
   return `${rate.toFixed(1)}%`;
+}
+
+/**
+ * Color signal for CPA (Cost Per Acquisition). Lower = better (inverted scale).
+ * - ≤ 0 or null → muted (no data)
+ * - < ₦3,000    → green (healthy)
+ * - < ₦6,000    → amber (watch)
+ * - ≥ ₦6,000    → red (action needed)
+ */
+export function cpaColorClass(cpa: number | null | undefined): string {
+  if (cpa == null || !Number.isFinite(cpa) || cpa <= 0) return 'text-app-fg-muted';
+  if (cpa < 3000) return 'text-success-600 dark:text-success-400';
+  if (cpa < 6000) return 'text-warning-600 dark:text-warning-400';
+  return 'text-danger-600 dark:text-danger-400';
 }
 
 /**

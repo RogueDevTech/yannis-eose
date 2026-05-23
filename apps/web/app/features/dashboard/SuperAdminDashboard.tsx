@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { StatRow, StatRowGroup } from '~/components/ui/stat-row';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
@@ -150,37 +151,19 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
           <KeyMetricTile
             label="CPA"
             value={fmt(marketingSafe.cpa)}
-            valueClassName={
-              marketingSafe.cpa > 0 && marketingSafe.cpa < 5000
-                ? 'text-success-600 dark:text-success-400'
-                : marketingSafe.cpa > 10000
-                  ? 'text-danger-600 dark:text-danger-400'
-                  : undefined
-            }
+            valueClassName={cpaColorClass(marketingSafe.cpa)}
             to="/admin/marketing/ad-spend"
           />
           <KeyMetricTile
             label="CR"
             value={pct(marketingSafe.confirmationRate)}
-            valueClassName={
-              marketingSafe.confirmationRate >= 70
-                ? 'text-success-600 dark:text-success-400'
-                : marketingSafe.confirmationRate >= 50
-                  ? 'text-warning-600 dark:text-warning-400'
-                  : 'text-danger-600 dark:text-danger-400'
-            }
+            valueClassName={confirmationRateColorClass(marketingSafe.confirmationRate)}
             to="/admin/marketing/orders"
           />
           <KeyMetricTile
             label="DR"
             value={pct(marketingSafe.deliveryRate)}
-            valueClassName={
-              marketingSafe.deliveryRate >= 70
-                ? 'text-success-600 dark:text-success-400'
-                : marketingSafe.deliveryRate >= 50
-                  ? 'text-warning-600 dark:text-warning-400'
-                  : 'text-danger-600 dark:text-danger-400'
-            }
+            valueClassName={deliveryRateColorClass(marketingSafe.deliveryRate)}
             to="/admin/marketing/orders?status=DELIVERED"
           />
         </div>

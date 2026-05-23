@@ -68,14 +68,13 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
   ) {}
 
   /**
-   * Boot-time sweep so a fresh deploy clears recent test orders right away —
-   * otherwise the first effect of a deploy would not be visible until the next
-   * 2-hour cron tick. Same 48-hour window as the cron; errors swallowed so a
-   * purge hiccup never blocks the API from coming up.
+   * Boot-time sweep — scans ALL orders (not just 48h) so a fresh deploy
+   * catches any test orders the cron missed. Errors swallowed so a purge
+   * hiccup never blocks the API from coming up.
    */
   async onApplicationBootstrap(): Promise<void> {
     try {
-      await this.purgeTestOrders();
+      await this.purgeTestOrders(true);
     } catch (err) {
       this.logger.error(
         `Boot-time test-order purge failed: ${(err as Error)?.message ?? err}`,

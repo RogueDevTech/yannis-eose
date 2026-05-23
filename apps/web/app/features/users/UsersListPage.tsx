@@ -843,6 +843,27 @@ export function UsersListPage({
                   ? 'Staff records will appear here once added in HR.'
                   : 'Try a different search or filters.'
               }
+              renderMobileCard={(user) => (
+                <Link
+                  to={`${usersBasePath}/${user.id}`}
+                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CompactUserAvatar name={user.name} />
+                      <span className="font-medium text-app-fg truncate">{user.name}</span>
+                    </div>
+                    <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-app-fg-muted truncate">
+                    {user.payoutBankName?.trim() ? <span>{user.payoutBankName}</span> : null}
+                    {user.payoutAccountNumber?.trim() ? (
+                      <span className="font-mono tabular-nums">{user.payoutAccountNumber}</span>
+                    ) : null}
+                    {!user.payoutBankName?.trim() && !user.payoutAccountNumber?.trim() ? <span>No account details</span> : null}
+                  </div>
+                </Link>
+              )}
               pagination={{
                 page,
                 totalPages: safeTotalPages,
@@ -1016,6 +1037,26 @@ export function UsersListPage({
               emptyDescription={
                 users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'
               }
+              renderMobileCard={(user) => (
+                <Link
+                  to={`${usersBasePath}/${user.id}`}
+                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <CompactUserAvatar name={user.name} />
+                      <span className="font-medium text-app-fg truncate">{user.name}</span>
+                    </div>
+                    <StatusBadge status={user.status} />
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <RoleBadge variant="text" role={user.role} label={formatRole(user.role)} />
+                    {user.isTeamSupervisor && <SupervisorBadge size="sm" />}
+                    {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" showDaysRemaining={false} />}
+                  </div>
+                  <div className="text-xs text-app-fg-muted truncate">{user.email}</div>
+                </Link>
+              )}
               pagination={{
                 page,
                 totalPages: safeTotalPages,

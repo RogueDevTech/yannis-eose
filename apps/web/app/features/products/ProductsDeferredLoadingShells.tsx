@@ -125,13 +125,32 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
           { value: 'offers', label: 'Offers' },
         ]}
       />
-      <CompactTable<{ id: string }>
-        columns={productsHubShellColumns()}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-36 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          columns={productsHubShellColumns()}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }

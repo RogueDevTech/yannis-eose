@@ -16,9 +16,9 @@ import { SortMenu } from '~/components/ui/sort-menu';
 import { SearchInput } from '~/components/ui/search-input';
 import { Pagination } from '~/components/ui/pagination';
 import { ExportModal } from '~/components/ui/export-modal';
+import { Modal } from '~/components/ui/modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { formatNaira } from '~/lib/format-amount';
-import { MediaBuyerBalanceCard } from './MediaBuyerBalanceCard';
 import type { FundingBalanceRow, MarketingTeamOverviewStats } from './types';
 import {
   confirmationRateColorClass,
@@ -165,6 +165,7 @@ export function MarketingTeamPage({
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [previewMember, setPreviewMember] = useState<FundingBalanceRow | null>(null);
 
   useEffect(() => {
     setSearchQuery(q);
@@ -447,7 +448,7 @@ export function MarketingTeamPage({
 
       <div>
         <ToolbarFiltersCollapsible
-          className="mb-4 !border-0 px-0 py-0"
+          className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={teamToolbarFilterBadge}
           sheetSubtitle={<span>Sort options apply immediately</span>}
@@ -511,28 +512,52 @@ export function MarketingTeamPage({
           </div>
         ) : (
           <>
-            {/* Mobile: always render card grid (table is unusable on a narrow viewport) */}
-            <div className="md:hidden grid grid-cols-1 gap-3">
-              {teamMembers.map((m) => (
-                <MediaBuyerBalanceCard
-                  key={m.userId}
-                  row={m}
-                  ordersDateFilters={dateFilters}
-                  profitabilityGreenThreshold={greenThreshold}
-                />
-              ))}
-            </div>
-
-            {/* Desktop: table view (Grid toggle removed per CEO directive 2026-04-26 — the
-                grid duplicated the mobile card layout for desktop with no extra info). */}
-            <div className="hidden md:block">
-              <CompactTable
-                columns={teamColumns}
-                rows={teamMembers}
-                rowKey={(m) => m.userId}
-                className="min-w-[960px]"
-              />
-            </div>
+            <CompactTable
+              columns={teamColumns}
+              rows={teamMembers}
+              rowKey={(m) => m.userId}
+              className="md:min-w-[960px]"
+              renderMobileCard={(m) => {
+                const initials = m.name
+                  .split(' ')
+                  .map((n) => n[0])
+                  .join('')
+                  .slice(0, 2)
+                  .toUpperCase();
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewMember(m)}
+                    className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+                  >
+                    {/* Row 1: avatar + name + balance */}
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+                        <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400">{initials}</span>
+                      </div>
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-app-fg">{m.name}</span>
+                      <span className="shrink-0 text-sm font-medium text-brand-600 dark:text-brand-400 tabular-nums">
+                        {formatNaira(Number(m.balance))}
+                      </span>
+                    </div>
+                    {/* Row 2: orders + CR% + DR% */}
+                    <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums pl-[calc(1.75rem+0.625rem)]">
+                      {m.totalOrders != null && <span>{m.totalOrders.toLocaleString()} orders</span>}
+                      {m.confirmationRate != null && (
+                        <span className={confirmationRateColorClass(m.confirmationRate)}>
+                          CR {Math.round(m.confirmationRate)}%
+                        </span>
+                      )}
+                      {m.deliveryRate != null && (
+                        <span className={deliveryRateColorClass(m.deliveryRate)}>
+                          DR {Math.round(m.deliveryRate)}%
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              }}
+            />
 
             {totalPages > 1 && (
               <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} align="end" />
@@ -540,6 +565,109 @@ export function MarketingTeamPage({
           </>
         )}
       </div>
+
+      {/* Mobile quick-preview modal */}
+      <Modal
+        open={!!previewMember}
+        onClose={() => setPreviewMember(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5"
+      >
+        {previewMember && (() => {
+          const m = previewMember;
+          const initials = m.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+          return (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-bold text-brand-600 dark:text-brand-400">{initials}</span>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-app-fg truncate">{m.name}</p>
+                  <p className="text-xs text-app-fg-muted">Media Buyer</p>
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Balance</span>
+                  <span className="font-medium text-brand-600 dark:text-brand-400">{formatNaira(Number(m.balance))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Received</span>
+                  <span className="text-app-fg">{formatNaira(Number(m.totalReceived))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Spent</span>
+                  <span className="text-app-fg">{formatNaira(Number(m.totalSpend))}</span>
+                </div>
+                {m.totalOrders != null && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Orders</span>
+                    <span className="font-medium tabular-nums text-app-fg">{m.totalOrders.toLocaleString()}</span>
+                  </div>
+                )}
+                {m.confirmationRate != null && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Confirmation rate</span>
+                    <span className={`font-medium tabular-nums ${confirmationRateColorClass(m.confirmationRate)}`}>
+                      {Math.round(m.confirmationRate)}%
+                    </span>
+                  </div>
+                )}
+                {m.deliveryRate != null && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Delivery rate</span>
+                    <span className={`font-medium tabular-nums ${deliveryRateColorClass(m.deliveryRate)}`}>
+                      {Math.round(m.deliveryRate)}%
+                    </span>
+                  </div>
+                )}
+                {m.cpa != null && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">CPA</span>
+                    <span className="font-medium text-app-fg">{formatNaira(m.cpa)}</span>
+                  </div>
+                )}
+                {m.profitabilityScore != null && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Profitability</span>
+                    <span className={`font-medium tabular-nums ${
+                      m.trueRoas != null && m.trueRoas >= greenThreshold
+                        ? 'text-success-600 dark:text-success-400'
+                        : 'text-danger-600 dark:text-danger-400'
+                    }`}>
+                      {m.profitabilityScore.toFixed(1)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-1 border-t border-app-border">
+                <Link
+                  to={buildOrdersQuery(m.userId, dateFilters)}
+                  prefetch="intent"
+                  className="btn-primary btn-sm inline-flex flex-1 items-center justify-center"
+                  onClick={() => setPreviewMember(null)}
+                >
+                  View orders
+                </Link>
+                <Link
+                  to={`/hr/users/${m.userId}`}
+                  prefetch="intent"
+                  className="btn-secondary btn-sm inline-flex flex-1 items-center justify-center"
+                  onClick={() => setPreviewMember(null)}
+                >
+                  View profile
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }

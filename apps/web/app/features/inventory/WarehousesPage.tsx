@@ -28,6 +28,7 @@ import { useFetcherToast } from '~/components/ui/toast';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { SortMenu } from '~/components/ui/sort-menu';
+import { StatusBadge } from '~/components/ui/status-badge';
 
 export interface WarehouseStockSummary {
   totalStock: number;
@@ -166,6 +167,9 @@ export function WarehousesPage({
     [...optimisticWarehouses, ...warehouses],
     warehousePatches,
   );
+  // Preview modal for mobile cards — shows details + all action buttons.
+  const [previewWarehouse, setPreviewWarehouse] = useState<WarehouseRow | null>(null);
+
   const ready = name.trim().length >= 2 && address.trim().length >= 2;
   const editReady =
     editName.trim().length >= 2 && editAddress.trim().length >= 2;
@@ -473,6 +477,39 @@ export function WarehousesPage({
                     : ''
                 }
                 emptyTitle="No warehouses match your filter"
+                renderMobileCard={(w) => {
+                  const available = Math.max(0, w.stockSummary.totalStock - w.stockSummary.totalReserved);
+                  const availableTone =
+                    available === 0
+                      ? 'text-danger-600 dark:text-danger-400'
+                      : 'text-success-600 dark:text-success-400';
+                  const body = (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-app-fg truncate">{w.name}</span>
+                        <StatusBadge status={w.status} />
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums">
+                        <span>{w.stockSummary.skuCount} SKUs</span>
+                        <span>{w.stockSummary.totalStock} units</span>
+                        <span className={availableTone}>{available} avail</span>
+                      </div>
+                      {w.address ? (
+                        <p className="text-xs text-app-fg-muted truncate">{w.address}</p>
+                      ) : null}
+                    </>
+                  );
+                  if (isOptimisticId(w.id)) return body;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewWarehouse(w)}
+                      className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+                    >
+                      {body}
+                    </button>
+                  );
+                }}
               />
             )}
           </TableLoadingOverlay>
@@ -487,6 +524,85 @@ export function WarehousesPage({
           </CardFooter>
         ) : null}
       </Card>
+
+      {/* Preview modal — mobile card tap */}
+      {previewWarehouse && (
+        <Modal
+          open
+          onClose={() => setPreviewWarehouse(null)}
+          maxWidth="max-w-md"
+          aria-labelledby="preview-warehouse-title"
+        >
+          <div className="space-y-4 p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h3 id="preview-warehouse-title" className="text-base font-semibold text-app-fg truncate">
+                {previewWarehouse.name}
+              </h3>
+              <StatusBadge status={previewWarehouse.status} />
+            </div>
+            <dl className="space-y-2 text-sm">
+              {previewWarehouse.address ? (
+                <div>
+                  <dt className="text-xs font-medium text-app-fg-muted">Address</dt>
+                  <dd className="mt-0.5 text-app-fg">{previewWarehouse.address}</dd>
+                </div>
+              ) : null}
+              {previewWarehouse.coordinates ? (
+                <div>
+                  <dt className="text-xs font-medium text-app-fg-muted">Coordinates</dt>
+                  <dd className="mt-0.5 text-app-fg">{previewWarehouse.coordinates}</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">SKU count</dt>
+                <dd className="mt-0.5 text-app-fg tabular-nums">{previewWarehouse.stockSummary.skuCount}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Total units</dt>
+                <dd className="mt-0.5 text-app-fg tabular-nums">{previewWarehouse.stockSummary.totalStock}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Available</dt>
+                <dd className={`mt-0.5 tabular-nums ${
+                  Math.max(0, previewWarehouse.stockSummary.totalStock - previewWarehouse.stockSummary.totalReserved) === 0
+                    ? 'text-danger-600 dark:text-danger-400'
+                    : 'text-success-600 dark:text-success-400'
+                }`}>
+                  {Math.max(0, previewWarehouse.stockSummary.totalStock - previewWarehouse.stockSummary.totalReserved)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-app-fg-muted">Created</dt>
+                <dd className="mt-0.5 text-app-fg-muted">{formatDate(previewWarehouse.createdAt)}</dd>
+              </div>
+            </dl>
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-app-border">
+              {canManage ? (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    openEdit(previewWarehouse);
+                    setPreviewWarehouse(null);
+                  }}
+                >
+                  Edit
+                </Button>
+              ) : null}
+              <Link
+                to={`/admin/inventory?locationId=${previewWarehouse.id}`}
+                className="btn-primary btn-sm"
+              >
+                View stock
+              </Link>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setPreviewWarehouse(null)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       <Modal
         open={showCreate}

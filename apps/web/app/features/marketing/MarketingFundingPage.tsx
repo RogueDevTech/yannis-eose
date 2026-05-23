@@ -1316,7 +1316,113 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
               ? { requestId: requestDetailsEntry.id }
               : { transferId: requestDetailsEntry.id })}
           />
-          <div className="flex justify-end">
+          <div className="flex flex-wrap gap-2 pt-2 border-t border-app-border">
+            {/* Approve / Reject for pending funding requests */}
+            {requestDetailsEntry.entryType === 'request' && requestDetailsEntry.status === 'PENDING' && canSendFunding && (
+              <>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    const id = requestDetailsEntry.id;
+                    setRequestDetailsEntry(null);
+                    setApprovingRequestId(id);
+                  }}
+                >
+                  Approve
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    const id = requestDetailsEntry.id;
+                    setRequestDetailsEntry(null);
+                    setRejectingRequestId(id);
+                  }}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+            {/* Receipt for transfers */}
+            {requestDetailsEntry.entryType === 'transfer' && requestDetailsEntry.receiptUrl && (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const entry = requestDetailsEntry;
+                  setRequestDetailsEntry(null);
+                  setFundingReceiptModal({
+                    id: entry.id,
+                    senderId: entry.senderId,
+                    receiverId: entry.receiverId,
+                    amount: entry.amount,
+                    receiptUrl: entry.receiptUrl,
+                    status: entry.status,
+                    sentAt: entry.createdAt,
+                    verifiedAt: null,
+                    senderName: entry.senderName,
+                    receiverName: entry.receiverName,
+                  });
+                }}
+              >
+                Receipt
+              </Button>
+            )}
+            {/* Mark received / Not received for received transfers */}
+            {requestDetailsEntry.entryType === 'transfer' && requestDetailsEntry.status === 'SENT' && requestDetailsEntry.receiverId === currentUserId && (
+              <>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    const entry = requestDetailsEntry;
+                    setRequestDetailsEntry(null);
+                    setMarkReceivedTarget({
+                      id: entry.id,
+                      senderId: entry.senderId,
+                      receiverId: entry.receiverId,
+                      amount: entry.amount,
+                      receiptUrl: entry.receiptUrl,
+                      status: entry.status,
+                      sentAt: entry.createdAt,
+                      verifiedAt: null,
+                      senderName: entry.senderName,
+                      receiverName: entry.receiverName,
+                    });
+                  }}
+                >
+                  Mark received
+                </Button>
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    const entry = requestDetailsEntry;
+                    setRequestDetailsEntry(null);
+                    setNotReceivedTarget({
+                      id: entry.id,
+                      senderId: entry.senderId,
+                      receiverId: entry.receiverId,
+                      amount: entry.amount,
+                      receiptUrl: entry.receiptUrl,
+                      status: entry.status,
+                      sentAt: entry.createdAt,
+                      verifiedAt: null,
+                      senderName: entry.senderName,
+                      receiverName: entry.receiverName,
+                    });
+                  }}
+                >
+                  Not received
+                </Button>
+              </>
+            )}
             <Button type="button" variant="secondary" size="sm" onClick={() => setRequestDetailsEntry(null)}>
               Close
             </Button>
@@ -1819,6 +1925,31 @@ function UnifiedDistributingTable({
       loadingVariant="overlay"
       emptyTitle="No entries"
       emptyDescription={emptyMessage}
+      renderMobileCard={(entry) => (
+        <button
+          type="button"
+          onClick={() => onOpenDetails(entry)}
+          className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium text-app-fg truncate">
+              {entry.entryType === 'transfer'
+                ? userNameById(entry.receiverId)
+                : entry.requesterName ?? 'Unknown'}
+            </span>
+            <StatusBadge status={entry.status} />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+            <span className="uppercase tracking-wide">{entry.entryType}</span>
+            <span className="font-medium tabular-nums text-app-fg">
+              <NairaPrice amount={Number(entry.amount)} />
+            </span>
+          </div>
+          <div className="text-xs text-app-fg-muted">
+            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </div>
+        </button>
+      )}
       pagination={
         slice.totalPages > 1
           ? { page: slice.page, totalPages: slice.totalPages, pageParam: 'page' }
@@ -2132,6 +2263,31 @@ function UnifiedReceivedTable({
       emptyTitle="No entries"
       emptyDescription={emptyMessage}
       emptyAction={emptyAction}
+      renderMobileCard={(entry) => (
+        <button
+          type="button"
+          onClick={() => onOpenDetails(entry)}
+          className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium text-app-fg truncate">
+              {entry.entryType === 'transfer'
+                ? userNameById(entry.senderId)
+                : entry.requesterName ?? 'Unknown'}
+            </span>
+            <StatusBadge status={entry.status} />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+            <span className="uppercase tracking-wide">{entry.entryType}</span>
+            <span className="font-medium tabular-nums text-app-fg">
+              <NairaPrice amount={Number(entry.amount)} />
+            </span>
+          </div>
+          <div className="text-xs text-app-fg-muted">
+            {new Date(entry.createdAt).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </div>
+        </button>
+      )}
       pagination={
         slice.totalPages > 1
           ? { page: slice.page, totalPages: slice.totalPages, pageParam: 'page' }
