@@ -30,7 +30,15 @@ import {
 
 export interface CSTeamPageProps {
   teamMembers: CSTeamMemberOverview[];
-  summary: { agentCount: number; totalPending: number; idleCount: number };
+  summary: {
+    agentCount: number;
+    totalPending: number;
+    engagedTotal: number;
+    confirmedTotal: number;
+    deliveredTotal: number;
+    confirmationRate: number | null;
+    deliveryRate: number | null;
+  };
   page?: number;
   totalPages?: number;
   totalCount?: number;
@@ -520,18 +528,40 @@ export function CSTeamPage({
               valueClassName: 'text-app-fg',
             },
             {
-              label: 'Total pending',
-              value: summary.totalPending.toString(),
+              label: 'Engaged',
+              value: summary.engagedTotal.toString(),
               valueClassName: 'text-app-fg',
+              title: 'Total orders the team engaged with in this period',
             },
             {
-              label: 'Idle',
-              value: summary.idleCount.toString(),
-              valueClassName:
-                summary.idleCount > 0
-                  ? 'text-warning-600 dark:text-warning-400'
-                  : 'text-app-fg',
-              to: buildListQuery({ activity: 'IDLE', page: 1 }),
+              label: 'Confirmed',
+              value: summary.confirmedTotal.toString(),
+              valueClassName: 'text-app-fg',
+              title: 'Total orders the team confirmed in this period',
+            },
+            {
+              label: 'Delivered',
+              value: summary.deliveredTotal.toString(),
+              valueClassName: 'text-app-fg',
+              title: 'Total orders attributed to the team that were delivered',
+            },
+            {
+              label: 'Confirm rate',
+              value: formatRate(summary.confirmationRate),
+              valueClassName: confirmationRateColorClass(summary.confirmationRate),
+              title: 'Confirmed ÷ Engaged across the whole team in this period',
+            },
+            {
+              label: 'Delivery rate',
+              value: formatRate(summary.deliveryRate),
+              valueClassName: deliveryRateColorClass(summary.deliveryRate),
+              title: 'Delivered ÷ Engaged across the whole team in this period',
+            },
+            {
+              label: 'Pending',
+              value: summary.totalPending.toString(),
+              valueClassName: 'text-app-fg',
+              title: 'Open orders currently sitting in closer queues',
             },
           ]}
         />
