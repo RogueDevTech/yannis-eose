@@ -1500,7 +1500,7 @@ function CSDashboardPageLoaded({
             valueClassName: 'text-warning-600 dark:text-warning-400',
           },
           {
-            label: 'Abandoned',
+            label: 'Cart abandonment',
             value: (
               <DeferredSection
                 resolve={cartStats}
