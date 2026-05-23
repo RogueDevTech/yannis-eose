@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { cpaColorClass } from '~/lib/rate-color';
 import { Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { useFetcherToast, useToast } from '~/components/ui/toast';
@@ -920,7 +921,7 @@ export function MarketingAdSpendPage({
             {
               label: 'CPA',
               value: <>{'\u20A6'}{Math.round(metrics.cpa).toLocaleString()}</>,
-              valueClassName: 'text-app-fg',
+              valueClassName: cpaColorClass(metrics.cpa),
               title: 'Spend / all orders',
             },
             {

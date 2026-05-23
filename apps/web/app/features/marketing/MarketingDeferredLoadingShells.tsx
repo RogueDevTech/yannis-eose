@@ -445,14 +445,33 @@ export function MarketingFundingLoadingShell({
           }
         />
 
-        <CompactTable<{ id: string }>
-          withCard={false}
-          columns={ledgerColumns}
-          rows={FUNDING_LEDGER_SHELL_ROW_DATA}
-          rowKey={(row) => row.id}
-          emptyTitle="No entries match your filters"
-          emptyDescription="Try adjusting type or status"
-        />
+        {/* Mobile skeleton cards */}
+        <div className="md:hidden space-y-2 px-3 py-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="rounded-lg border border-app-border px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="h-4 w-20 rounded bg-app-hover animate-pulse" />
+                <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="h-3 w-28 rounded bg-app-hover animate-pulse" />
+                <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden md:block">
+          <CompactTable<{ id: string }>
+            withCard={false}
+            columns={ledgerColumns}
+            rows={FUNDING_LEDGER_SHELL_ROW_DATA}
+            rowKey={(row) => row.id}
+            emptyTitle="No entries match your filters"
+            emptyDescription="Try adjusting type or status"
+          />
+        </div>
 
         <div className="flex flex-col gap-3 border-t border-app-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="m-0 flex min-h-[1.25rem] items-center text-sm">
@@ -909,7 +928,7 @@ export function MarketingTeamLoadingShell({
 
       <div>
         <ToolbarFiltersCollapsible
-          className="mb-4 !border-0 px-0 py-0"
+          className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={badgeCount}
           sheetSubtitle={<span>Sort options apply immediately</span>}

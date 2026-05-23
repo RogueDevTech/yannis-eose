@@ -14,6 +14,7 @@ import {
   CompactTable,
   CompactTableActionButton,
   type CompactTableColumn,
+  type CompactTableMobileCardHelpers,
 } from '~/components/ui/compact-table';
 import { DescriptionList } from '~/components/ui/description-list';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
@@ -748,36 +749,41 @@ export function TransfersPage({
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Transfer records', value: summaryTransfers.length, valueClassName: 'text-app-fg' },
+          { label: 'Transfer records', value: summaryTransfers.length, valueClassName: 'text-app-fg', active: !statusFilter, to: buildStatusQuery('') },
           {
             label: 'Pending',
             value: summaryStatusCounts.PENDING,
             valueClassName: 'text-warning-600 dark:text-warning-400',
             to: buildStatusQuery('PENDING'),
+            active: statusFilter === 'PENDING',
           },
           {
             label: 'In transit',
             value: summaryStatusCounts.IN_TRANSIT,
             valueClassName: 'text-brand-600 dark:text-brand-400',
             to: buildStatusQuery('IN_TRANSIT'),
+            active: statusFilter === 'IN_TRANSIT',
           },
           {
             label: 'Received',
             value: summaryStatusCounts.RECEIVED,
             valueClassName: 'text-success-600 dark:text-success-400',
             to: buildStatusQuery('RECEIVED'),
+            active: statusFilter === 'RECEIVED',
           },
           {
             label: 'Disputed',
             value: summaryStatusCounts.DISPUTED,
             valueClassName: 'text-danger-600 dark:text-danger-400',
             to: buildStatusQuery('DISPUTED'),
+            active: statusFilter === 'DISPUTED',
           },
           {
             label: 'Cancelled',
             value: summaryStatusCounts.CANCELLED,
             valueClassName: 'text-app-fg-muted',
             to: buildStatusQuery('CANCELLED'),
+            active: statusFilter === 'CANCELLED',
           },
           { label: 'Qty sent', value: summaryQuantitySent, valueClassName: 'text-app-fg' },
           {
@@ -1061,15 +1067,11 @@ export function TransfersPage({
         </Modal>
       )}
 
-      {formDataLoading && resolvedProducts.length === 0 ? (
-        <div className="card !p-4">
-          <div className="flex items-center gap-2 text-sm text-app-fg-muted">
-            <Spinner className="w-4 h-4" />
-            <span>Loading products…</span>
-          </div>
-        </div>
-      ) : (
-          (() => {
+      {(() => {
+            // Don't gate the table behind a page-level spinner while products
+            // side-load — the dropdowns already show "Loading products…" and
+            // `productName()` falls back to an ID stub until the side-fetch
+            // lands, so the table can paint immediately.
             const productName = (id: string) =>
               resolvedProducts.find((p: Product) => p.id === id)?.name ?? id.slice(0, 8) + '...';
 
@@ -1215,13 +1217,69 @@ export function TransfersPage({
                     ? 'opacity-60'
                     : ''
                 }
+                renderMobileCard={(t, _i, _helpers: CompactTableMobileCardHelpers<Transfer>) => {
+                  const midFlight =
+                    isOptimisticId(t.id) ||
+                    isOptimisticPatched(approvePatches, t.id) ||
+                    isOptimisticPatched(rejectPatches, t.id);
+                  const isPending = t.transferStatus === 'PENDING';
+                  const showApproval = isPending && t.canApprove === true;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setViewTransfer(t)}
+                      disabled={midFlight}
+                      className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left disabled:opacity-60"
+                    >
+                      {/* Row 1: Product + qty + status */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+                          {productName(t.productId)}
+                          <span className="text-app-fg-muted tabular-nums ml-1">×{t.quantityReceived ?? t.quantitySent}</span>
+                        </span>
+                        <StatusBadge status={t.transferStatus} showDot />
+                      </div>
+                      {/* Row 2: Route + date */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-xs text-app-fg-muted">
+                          {getLocationName(t.fromLocationId)} → {getLocationName(t.toLocationId)}
+                        </span>
+                        <span className="shrink-0 whitespace-nowrap text-xs text-app-fg-muted">
+                          {formatRecordedAt(t.verifiedAt ?? t.createdAt)}
+                        </span>
+                      </div>
+                      {/* Row 3: Quick actions for pending */}
+                      {showApproval && !midFlight && (
+                        <div className="flex items-center gap-2 pt-0.5" onClick={(e) => e.stopPropagation()}>
+                          <CompactTableActionButton
+                            tone="success"
+                            onClick={(e) => { e.stopPropagation(); submitApprove(t); }}
+                          >
+                            Approve
+                          </CompactTableActionButton>
+                          <CompactTableActionButton
+                            tone="danger"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRejectTarget(t);
+                              setRejectReason('');
+                              setRejectInlineError(null);
+                            }}
+                          >
+                            Reject
+                          </CompactTableActionButton>
+                        </div>
+                      )}
+                    </button>
+                  );
+                }}
                 loading={isLoaderRefetchBusy}
                 loadingVariant="overlay"
                 emptyTitle="No transfers yet"
                 emptyDescription={
                   periodAllTime
-                    ? 'No transfers match your filters, or none recorded yet. In-transit transfers stay visible until received — try the In transit tab or clear filters.'
-                    : 'No transfers in this date range. In-transit transfers are dated by when they were sent (created). Try All time or widen the range.'
+                    ? 'No transfers match your filters, or none recorded yet. Try the In transit tab or clear filters.'
+                    : 'No transfers in this date range. Try All time or widen the range.'
                 }
                 withCard={false}
                 className="overflow-hidden rounded-xl border border-app-border"
@@ -1247,8 +1305,7 @@ export function TransfersPage({
                 }
               />
             );
-          })()
-      )}
+          })()}
 
       <Modal open={!!viewTransfer} onClose={dismissTransferModal} maxWidth="max-w-lg" aria-labelledby="transfer-detail-title">
         {viewTransfer && (

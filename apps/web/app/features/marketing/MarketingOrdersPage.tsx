@@ -1,6 +1,7 @@
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
 import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { useFetcherToast } from '~/components/ui/toast';
@@ -756,7 +757,6 @@ export function MarketingOrdersPage({
                 { label: 'Confirmed', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Delivered', value: <StatValuePulse className="min-w-[2rem]" /> },
                 { label: 'Delivery Rate', value: <StatValuePulse className="min-w-[3rem]" /> },
-                { label: 'CPA', value: <StatValuePulse className="min-w-[4rem]" /> },
                 { label: 'Cancelled', value: <StatValuePulse className="min-w-[2rem]" /> },
               ]}
             />
@@ -905,25 +905,10 @@ export function MarketingOrdersPage({
                     {
                       label: 'CR',
                       value: `${confirmationRate.toFixed(1)}%`,
-                      valueClassName: confirmationRate >= 70
-                        ? 'text-success-600 dark:text-success-400'
-                        : 'text-warning-600 dark:text-warning-400',
+                      valueClassName: confirmationRateColorClass(confirmationRate),
                       title: 'Confirmation Rate — confirmed / total in period (DELETED excluded)',
                     },
-                    { label: 'DR', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg', title: 'Delivery Rate — delivered / confirmed' },
-                    {
-                      label: 'CPA',
-                      value:
-                        ins.cpa != null ? (
-                          <>
-                            {'\u20A6'}
-                            {Number(ins.cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                          </>
-                        ) : (
-                          '\u2014'
-                        ),
-                      valueClassName: 'text-app-fg',
-                    },
+                    { label: 'DR', value: <>{deliveryRate}%</>, valueClassName: deliveryRateColorClass(Number(deliveryRate)), title: 'Delivery Rate — delivered / confirmed' },
                     {
                       label: 'Open carts',
                       value: ins.abandonedCartCount,

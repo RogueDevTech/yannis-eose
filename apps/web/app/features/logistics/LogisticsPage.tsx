@@ -1004,6 +1004,19 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             >
               Edit
             </Button>
+            {(viewingLocation.totalStock ?? 0) === 0 && (
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  setDeleteLocation(viewingLocation);
+                  setViewingLocation(null);
+                }}
+              >
+                Remove
+              </Button>
+            )}
             <Button type="button" variant="secondary" size="sm" onClick={() => setViewingLocation(null)}>
               Close
             </Button>
@@ -1207,7 +1220,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               )}
             </div>
           </div>
-          <div className="flex gap-2 px-6 py-4 border-t border-app-border">
+          <div className="flex flex-wrap gap-2 px-6 py-4 border-t border-app-border">
             <Button
               type="button"
               variant="primary"
@@ -1219,6 +1232,19 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
             >
               Edit
             </Button>
+            {displayLocations.filter((l) => l.providerId === viewingProvider.id).reduce((sum, l) => sum + (l.totalStock ?? 0), 0) === 0 && (
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  setDeleteProvider(viewingProvider);
+                  setViewingProvider(null);
+                }}
+              >
+                Remove
+              </Button>
+            )}
             <Button type="button" variant="secondary" size="sm" onClick={() => setViewingProvider(null)}>
               Close
             </Button>
@@ -1296,6 +1322,31 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
           }
           emptyTitle={searchQuery ? 'No companies match your search' : 'No logistics companies yet'}
           emptyDescription={searchQuery ? 'Try a different name, contact, or coverage area.' : undefined}
+          renderMobileCard={(p) => {
+            const isOptimistic = isOptimisticId(p.id) || isOptimisticPatched(providerPatches, p.id);
+            const body = (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-app-fg truncate">{p.name}</span>
+                  <StatusBadge status={p.status} />
+                </div>
+                <div className="flex items-center gap-3 text-xs text-app-fg-muted truncate">
+                  {p.contactInfo ? <span>{p.contactInfo}</span> : null}
+                  {p.coverageArea ? <span>{p.coverageArea}</span> : null}
+                </div>
+              </>
+            );
+            if (isOptimistic) return body;
+            return (
+              <button
+                type="button"
+                onClick={() => setViewingProvider(p)}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+              >
+                {body}
+              </button>
+            );
+          }}
         />
       )}
 
@@ -1317,6 +1368,36 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               ? 'Try adjusting your search, company, or state filter.'
               : 'Add a logistics company first, then add locations.'
           }
+          renderMobileCard={(l) => {
+            const isOptimistic = isOptimisticId(l.id) || isOptimisticPatched(locationPatches, l.id);
+            const body = (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-app-fg truncate">{l.name}</span>
+                  <StatusBadge status={l.status} />
+                </div>
+                <div className="flex items-center gap-2 text-xs text-app-fg-muted truncate">
+                  <span>{l.providerName ?? 'Unknown company'}</span>
+                  {(l.totalStock ?? 0) > 0 ? (
+                    <span className="tabular-nums">{(l.totalStock ?? 0).toLocaleString()} units</span>
+                  ) : null}
+                </div>
+                {l.address ? (
+                  <p className="text-xs text-app-fg-muted truncate">{l.address}</p>
+                ) : null}
+              </>
+            );
+            if (isOptimistic) return body;
+            return (
+              <button
+                type="button"
+                onClick={() => setViewingLocation(l)}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+              >
+                {body}
+              </button>
+            );
+          }}
         />
       )}
 

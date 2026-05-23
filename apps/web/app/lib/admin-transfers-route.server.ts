@@ -14,7 +14,13 @@ export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
 
   const pageData = (async () => {
     const transfersPromise = apiRequest<unknown>('/trpc/inventory.transfers', { method: 'GET', cookie });
-    const locationsPromise = apiRequest<unknown>(`/trpc/logistics.listLocations?input=${encodeURIComponent(JSON.stringify({ limit: 100 }))}`, { method: 'GET', cookie });
+    // Use the lightweight locationOptions endpoint (unpaginated, cached) instead
+    // of the paginated listLocations (capped at 100). Transfers can reference any
+    // location — ACTIVE default is fine since inactive locations are rare.
+    const locationsPromise = apiRequest<unknown>(
+      `/trpc/logistics.locationOptions?input=${encodeURIComponent(JSON.stringify({}))}`,
+      { method: 'GET', cookie },
+    );
 
     const [transfersRes, locationsRes] = await Promise.all([transfersPromise, locationsPromise]);
 
@@ -22,29 +28,15 @@ export async function loadTransfersRouteData({ request }: LoaderFunctionArgs) {
       ? (transfersRes.data as { result?: { data?: Transfer[] } })?.result?.data
       : null;
 
+    type LocationOption = { id: string; name: string; status: string; providerId: string; providerName: string | null };
     const locationsRaw = locationsRes.ok
-      ? (
-          locationsRes.data as {
-            result?: {
-              data?: {
-                locations: {
-                  id: string;
-                  providerId: string;
-                  name: string;
-                  address: string;
-                  status: string;
-                  providerName?: string | null;
-                }[];
-              };
-            };
-          }
-        )?.result?.data?.locations ?? []
+      ? ((locationsRes.data as { result?: { data?: LocationOption[] } })?.result?.data ?? [])
       : [];
     const locationsData: Location[] = locationsRaw.map((l) => ({
       id: l.id,
       providerId: l.providerId,
       name: l.name,
-      address: l.address,
+      address: '',
       status: l.status,
       providerName: l.providerName ?? null,
     }));

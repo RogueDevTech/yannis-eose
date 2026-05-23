@@ -9,14 +9,16 @@ import { Button } from '~/components/ui/button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { shellPulsePlaceholderRows, StatValuePulse, TableCellTextPulse } from '~/components/ui/deferred-skeletons';
-import { FilterPills } from '~/components/ui/filter-pills';
 import { FormSelect } from '~/components/ui/form-select';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
+import { StatusBadge } from '~/components/ui/status-badge';
 import { Tabs } from '~/components/ui/tabs';
+import { TableActionButton } from '~/components/ui/table-action-button';
 import { TextInput } from '~/components/ui/text-input';
 import type { TransfersShellDateFilters } from '~/lib/transfers-shell-filters';
 
@@ -122,28 +124,53 @@ function logisticsTeamShellColumns(): CompactTableColumn<{ id: string }>[] {
   ];
 }
 
-/** Remittances list placeholder — not aligned 1:1 with `RemittancesAdminPage` columns. */
+/** Remittances list placeholder — mirrors `RemittancesAdminPage` `unifiedColumnsWithActions`
+ *  column-for-column so the layout doesn't shift when real data lands. */
 const LOGISTICS_REMITTANCES_SHELL_COLS: CompactTableColumn<{ id: string }>[] = [
-  { key: 'ref', header: 'Reference', render: () => <TableCellTextPulse className="w-[9rem]" /> },
-  { key: 'from', header: 'From', render: () => <TableCellTextPulse className="w-[8rem]" /> },
-  { key: 'to', header: 'To', render: () => <TableCellTextPulse className="w-[8rem]" /> },
+  { key: 'product', header: 'Product', render: () => <TableCellTextPulse className="w-[10rem]" /> },
+  {
+    key: 'route',
+    header: 'From → To',
+    minWidth: 'min-w-[200px]',
+    render: () => <TableCellTextPulse className="w-[14rem]" />,
+  },
+  { key: 'sender', header: 'Sent by', render: () => <TableCellTextPulse className="w-[8rem]" /> },
   {
     key: 'qty',
     header: 'Qty',
     align: 'right',
+    nowrap: true,
     render: () => (
       <span className="inline-flex w-full justify-end">
         <TableCellTextPulse className="w-[3rem]" />
       </span>
     ),
   },
-  { key: 'status', header: 'Status', render: () => <TableCellTextPulse className="w-[6rem]" /> },
+  {
+    key: 'status',
+    header: 'Status',
+    nowrap: true,
+    render: () => <TableCellTextPulse className="w-[5.5rem]" />,
+  },
+  {
+    key: 'created',
+    header: 'Created',
+    nowrap: true,
+    render: () => <TableCellTextPulse className="w-[8rem]" />,
+  },
   {
     key: 'actions',
-    header: '',
+    header: 'Actions',
     align: 'right',
     tight: true,
-    render: () => <CompactTableActionButton disabled>View</CompactTableActionButton>,
+    mobileShowLabel: false,
+    minWidth: 'min-w-[200px]',
+    render: () => (
+      <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
+        <TableActionButton variant="danger" disabled>Not received</TableActionButton>
+        <TableActionButton variant="primary" disabled>Receive</TableActionButton>
+      </div>
+    ),
   },
 ];
 
@@ -273,17 +300,34 @@ export function LogisticsPartnersLoadingShell() {
         className="block h-9 w-full max-w-md animate-pulse rounded-md border border-app-border bg-app-hover"
         aria-hidden
       />
-      {/* Skeleton table matching the locations CompactTable columns */}
-      <div className="overflow-hidden rounded-lg border border-app-border">
+
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop skeleton table */}
+      <div className="hidden md:block overflow-hidden rounded-lg border border-app-border">
         <table className="w-full text-sm">
           <thead className="border-b border-app-border bg-app-elevated">
             <tr>
               <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Location</th>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Address</th>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Logistics company</th>
-              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Total stock</th>
-              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Alert threshold</th>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide hidden sm:table-cell">Status</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Address</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Logistics company</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Total stock</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Alert threshold</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-app-fg-muted uppercase tracking-wide">Status</th>
               <th className="px-3 py-2 w-px" />
             </tr>
           </thead>
@@ -291,11 +335,11 @@ export function LogisticsPartnersLoadingShell() {
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <tr key={i}>
                 <td className="px-3 py-2.5"><span className="block h-4 w-28 rounded bg-app-hover animate-pulse" /></td>
-                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-36 rounded bg-app-hover animate-pulse" /></td>
-                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-24 rounded bg-app-hover animate-pulse" /></td>
-                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-12 rounded bg-app-hover animate-pulse ml-auto" /></td>
-                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-4 w-16 rounded bg-app-hover animate-pulse ml-auto" /></td>
-                <td className="px-3 py-2.5 hidden sm:table-cell"><span className="block h-5 w-14 rounded-full bg-app-hover animate-pulse" /></td>
+                <td className="px-3 py-2.5"><span className="block h-4 w-36 rounded bg-app-hover animate-pulse" /></td>
+                <td className="px-3 py-2.5"><span className="block h-4 w-24 rounded bg-app-hover animate-pulse" /></td>
+                <td className="px-3 py-2.5"><span className="block h-4 w-12 rounded bg-app-hover animate-pulse ml-auto" /></td>
+                <td className="px-3 py-2.5"><span className="block h-4 w-16 rounded bg-app-hover animate-pulse ml-auto" /></td>
+                <td className="px-3 py-2.5"><span className="block h-5 w-14 rounded-full bg-app-hover animate-pulse" /></td>
                 <td className="px-3 py-2.5"><span className="block h-6 w-12 rounded bg-app-hover animate-pulse ml-auto" /></td>
               </tr>
             ))}
@@ -306,7 +350,8 @@ export function LogisticsPartnersLoadingShell() {
   );
 }
 
-/** Stock transfer confirmations — URL-driven date + status pills + filter row; table pulse. */
+/** Stock transfer confirmations — mirrors `RemittancesAdminPage` chrome (top-spacing,
+ *  mobile sheet filters, mobile-only search, desktop-only filter card, mobile cards). */
 export function LogisticsRemittancesLoadingShell() {
   const [searchParams, setSearchParams] = useSearchParams();
   const rows = shellPulsePlaceholderRows('log_remit', 6);
@@ -351,12 +396,14 @@ export function LogisticsRemittancesLoadingShell() {
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  const statusPillOptions = useMemo(
+  // Status dropdown options — match the loaded page's FormSelect-with-counts shape,
+  // but counts pulse since real totals haven't arrived.
+  const statusFilterOptions = useMemo(
     () => [
       { value: '', label: 'All' },
-      { value: 'IN_TRANSIT', label: 'Pending', dotColor: 'bg-warning-500' },
-      { value: 'RECEIVED', label: 'Received', dotColor: 'bg-success-500' },
-      { value: 'DISPUTED', label: 'Disputed', dotColor: 'bg-danger-500' },
+      { value: 'IN_TRANSIT', label: 'Pending' },
+      { value: 'RECEIVED', label: 'Received' },
+      { value: 'DISPUTED', label: 'Disputed' },
     ],
     [],
   );
@@ -373,8 +420,84 @@ export function LogisticsRemittancesLoadingShell() {
     return base;
   }, [sender]);
 
+  const hasNonSearchFilters = !!(statusValue || locationId || sender || minQty || maxQty);
+
+  // Mobile filter sheet body — mirrors `RemittancesAdminPage.mobileFiltersBody`.
+  const mobileFilterBoxClass =
+    'flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
+  const mobileFilterSelectClass = '!bg-transparent !border-transparent !text-center';
+  const mobileFiltersBody = (
+    <div className="space-y-2">
+      <div className={mobileFilterBoxClass}>
+        <FormSelect
+          id="remit-shell-filter-status-mobile"
+          value={statusValue}
+          onChange={(e) => setFilterParam('status', e.target.value)}
+          options={statusFilterOptions}
+          controlSize="sm"
+          openAs="modal"
+          wrapperClassName="w-full"
+          className={mobileFilterSelectClass}
+        />
+      </div>
+      <SearchableSelect
+        id="remit-shell-filter-location-mobile"
+        placeholder="All locations"
+        value={locationId}
+        onChange={(v) => setFilterParam('locationId', v)}
+        options={locationOptions}
+        controlSize="sm"
+        wrapperClassName="w-full"
+      />
+      <SearchableSelect
+        id="remit-shell-filter-sender-mobile"
+        placeholder="All senders"
+        value={sender}
+        onChange={(v) => setFilterParam('sender', v)}
+        options={senderOptions}
+        controlSize="sm"
+        wrapperClassName="w-full"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <div className={mobileFilterBoxClass}>
+          <TextInput
+            type="number"
+            min={0}
+            controlSize="sm"
+            wrapperClassName="w-full"
+            placeholder="Min qty"
+            value={minQty}
+            onChange={(e) => setFilterParam('minQty', e.target.value)}
+          />
+        </div>
+        <div className={mobileFilterBoxClass}>
+          <TextInput
+            type="number"
+            min={0}
+            controlSize="sm"
+            wrapperClassName="w-full"
+            placeholder="Max qty"
+            value={maxQty}
+            onChange={(e) => setFilterParam('maxQty', e.target.value)}
+          />
+        </div>
+      </div>
+      {hasNonSearchFilters && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="h-12 w-full justify-center"
+          onClick={clearAllFilters}
+        >
+          Clear all filters
+        </Button>
+      )}
+    </div>
+  );
+
   return (
-    <div className="space-y-4" aria-busy="true" aria-live="polite">
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Stock Transfer Confirmations"
         mobileInlineActions
@@ -382,11 +505,14 @@ export function LogisticsRemittancesLoadingShell() {
         actions={
           <PageHeaderMobileTools
             sheetTitle="Transfer confirmation tools"
-            sheetSubtitle={<span>Date range</span>}
+            sheetSubtitle={<span>Date range and filters</span>}
             triggerAriaLabel="Transfer confirmation toolbar"
+            filters={mobileFiltersBody}
+            filtersBadgeCount={hasNonSearchFilters ? 1 : 0}
+            sheetCloseLabel="Done"
             desktop={
               <div className="flex items-center gap-2">
-                <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
+                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
                   <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} />
                 </div>
                 <PageRefreshButton />
@@ -395,7 +521,9 @@ export function LogisticsRemittancesLoadingShell() {
           />
         }
       />
+
       <MobileDateFilterRow startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} />
+
       <OverviewStatStrip
         mobileGrid
         items={[
@@ -408,18 +536,32 @@ export function LogisticsRemittancesLoadingShell() {
         ]}
       />
 
-      <div className="card space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <FilterPills
-            options={statusPillOptions}
-            value={statusValue}
-            onChange={(v) => setFilterParam('status', v)}
-            size="sm"
-          />
-        </div>
+      {/* Mobile-only search — matches loaded page's md:hidden search form. */}
+      <form
+        className="w-full md:hidden"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setFilterParam('search', searchDraft);
+        }}
+      >
+        <SearchInput
+          controlSize="sm"
+          wrapperClassName="w-full"
+          placeholder="Search by ID or product"
+          value={searchDraft}
+          onChange={(value) => {
+            setSearchDraft(value);
+            if (value === '') setFilterParam('search', '');
+          }}
+          withSubmitButton
+        />
+      </form>
+
+      {/* Desktop-only filter card — mirrors loaded `hidden md:block card p-4`. */}
+      <div className="hidden md:block card p-4">
         <div className="flex flex-wrap items-center gap-2">
           <form
-            className="w-full sm:w-auto sm:min-w-[16rem]"
+            className="w-64"
             onSubmit={(e) => {
               e.preventDefault();
               setFilterParam('search', searchDraft);
@@ -432,30 +574,39 @@ export function LogisticsRemittancesLoadingShell() {
               value={searchDraft}
               onChange={(value) => {
                 setSearchDraft(value);
-                if (value.trim() === '') setFilterParam('search', '');
+                if (value === '') setFilterParam('search', '');
               }}
               withSubmitButton
             />
           </form>
           <FormSelect
             controlSize="sm"
-            wrapperClassName="w-full sm:w-52"
+            wrapperClassName="w-44"
+            value={statusValue}
+            onChange={(e) => setFilterParam('status', e.target.value)}
+            options={statusFilterOptions}
+          />
+          <SearchableSelect
+            controlSize="sm"
+            wrapperClassName="w-52"
+            placeholder="All locations"
             value={locationId}
-            onChange={(e) => setFilterParam('locationId', e.target.value)}
+            onChange={(v) => setFilterParam('locationId', v)}
             options={locationOptions}
           />
-          <FormSelect
+          <SearchableSelect
             controlSize="sm"
-            wrapperClassName="w-full sm:w-48"
+            wrapperClassName="w-48"
+            placeholder="All senders"
             value={sender}
-            onChange={(e) => setFilterParam('sender', e.target.value)}
+            onChange={(v) => setFilterParam('sender', v)}
             options={senderOptions}
           />
           <TextInput
             type="number"
             min={0}
             controlSize="sm"
-            wrapperClassName="w-full sm:w-28"
+            wrapperClassName="w-28"
             placeholder="Min qty"
             value={minQty}
             onChange={(e) => setFilterParam('minQty', e.target.value)}
@@ -464,7 +615,7 @@ export function LogisticsRemittancesLoadingShell() {
             type="number"
             min={0}
             controlSize="sm"
-            wrapperClassName="w-full sm:w-28"
+            wrapperClassName="w-28"
             placeholder="Max qty"
             value={maxQty}
             onChange={(e) => setFilterParam('maxQty', e.target.value)}
@@ -481,6 +632,24 @@ export function LogisticsRemittancesLoadingShell() {
         rowKey={(r) => r.id}
         emptyTitle="Loading…"
         emptyDescription=""
+        renderMobileCard={() => (
+          <div className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1">
+                <TableCellTextPulse className="w-[8rem]" />
+              </span>
+              <StatusBadge status="IN_TRANSIT" />
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1">
+                <TableCellTextPulse className="w-[10rem]" />
+              </span>
+              <span className="shrink-0">
+                <TableCellTextPulse className="w-[4rem]" />
+              </span>
+            </div>
+          </div>
+        )}
       />
     </div>
   );
@@ -523,13 +692,33 @@ export function LogisticsTeamLoadingShell({
           { label: 'Delinquency rate', value: <StatValuePulse className="min-w-[3rem]" /> },
         ]}
       />
-      <CompactTable<{ id: string }>
-        columns={logisticsTeamShellColumns()}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-12 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          columns={logisticsTeamShellColumns()}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }
@@ -669,17 +858,35 @@ function TransfersWorkspaceLoadingShell({
         )}
       </div>
 
-      {/* Bare table — mirrors the real page (no outer card wrapper). */}
-      <CompactTable<{ id: string }>
-        caption={pageTitle}
-        columns={transfersWorkspaceTableShellColumns()}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-        withCard={false}
-        className="overflow-hidden rounded-xl border border-app-border"
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-28 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-32 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-10 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table — mirrors the real page (no outer card wrapper). */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          caption={pageTitle}
+          columns={transfersWorkspaceTableShellColumns()}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+          withCard={false}
+          className="overflow-hidden rounded-xl border border-app-border"
+        />
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { cpaColorClass } from '~/lib/rate-color';
 import { Link, useFetcher } from '@remix-run/react';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -358,7 +359,7 @@ export function MarketingOverviewPage({
     {
       label: 'Avg CPA',
       value: formatNaira(Math.round(avgCpa)),
-      valueClassName: 'text-app-fg',
+      valueClassName: cpaColorClass(avgCpa),
     },
     {
       label: 'Delivery Rate',
