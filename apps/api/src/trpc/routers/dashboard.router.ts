@@ -144,7 +144,7 @@ async function _ceoOverviewFetch(params: {
     (statusCounts['IN_TRANSIT'] ?? 0);
 
   const deliveredOrders = statusCounts['DELIVERED'] ?? 0;
-  const cancelledOrders = statusCounts['CANCELLED'] ?? 0;
+  const deletedOrders = statusCounts['DELETED'] ?? 0;
   const returnedOrders = statusCounts['RETURNED'] ?? 0;
 
   const totalCSClosers = safeCSWorkloads.length;
@@ -178,7 +178,7 @@ async function _ceoOverviewFetch(params: {
       total: totalOrders,
       active: activeOrders,
       delivered: deliveredOrders,
-      cancelled: cancelledOrders,
+      deleted: deletedOrders,
       returned: returnedOrders,
       statusCounts,
     },

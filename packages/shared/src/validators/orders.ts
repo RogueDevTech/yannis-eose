@@ -5,7 +5,7 @@ import { z } from 'zod';
 // ============================================
 
 /**
- * All 13 order statuses.
+ * All 14 order statuses.
  */
 export const orderStatusSchema = z.enum([
   'UNPROCESSED',
@@ -24,6 +24,8 @@ export const orderStatusSchema = z.enum([
   'WRITTEN_OFF',
   // Renamed from COMPLETED — CEO directive 2026-05-04, migration 0110.
   'REMITTED',
+  // Soft-removal — excluded from metrics, row stays in DB. Migration 0153.
+  'DELETED',
 ]);
 
 export type OrderStatusInput = z.infer<typeof orderStatusSchema>;

@@ -1051,6 +1051,9 @@ export class FinanceService {
 
       const statusCounts: Record<string, number> = {};
       for (const row of pipelineRows) {
+        // Exclude DELETED and legacy CANCELLED from pipeline counts —
+        // both are "removed" orders (CEO directive 2026-05-23).
+        if (row.status === 'DELETED' || row.status === 'CANCELLED') continue;
         statusCounts[row.status as string] = Number(row.order_count ?? 0);
       }
 

@@ -1141,10 +1141,11 @@ export function TransfersPage({
                   // Source-authority gate is canonical on the server; the
                   // server stamps `canApprove` per row for the viewer.
                   const showApproval = isPending && t.canApprove === true;
-                  // PENDING rows can be Cancelled by the initiator (no-op on
-                  // inventory); Cancel is hidden on REJECTED/CANCELLED.
+                  // Cancel is only available on PENDING and IN_TRANSIT transfers.
+                  // RECEIVED/DISPUTED have already moved stock; REJECTED/CANCELLED
+                  // are terminal states.
                   const canCancel =
-                    t.transferStatus !== 'CANCELLED' && t.transferStatus !== 'REJECTED';
+                    t.transferStatus === 'PENDING' || t.transferStatus === 'IN_TRANSIT';
                   return (
                     <div className="inline-flex items-center justify-end gap-1.5">
                       <CompactTableActionButton
@@ -1365,8 +1366,8 @@ export function TransfersPage({
                   </Button>
                 </>
               )}
-              {viewTransfer.transferStatus !== 'CANCELLED' &&
-                viewTransfer.transferStatus !== 'REJECTED' && (
+              {(viewTransfer.transferStatus === 'PENDING' ||
+                viewTransfer.transferStatus === 'IN_TRANSIT') && (
                   <Button
                     type="button"
                     variant="secondary"

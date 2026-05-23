@@ -393,7 +393,7 @@ export async function action({ request }: ActionFunctionArgs) {
     type OrderSnapshot = { status?: string; logisticsLocationId?: string | null; riderId?: string | null };
     let current: OrderSnapshot | undefined = updateRes.data?.result?.data;
     let status = current?.status;
-    const terminal = ['DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'];
+    const terminal = ['DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED', 'DELETED'];
     if (status && terminal.includes(status)) {
       return json({ success: true, intent: 'updateDeliveryDate' });
     }

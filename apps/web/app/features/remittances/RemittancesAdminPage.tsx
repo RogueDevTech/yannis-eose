@@ -16,6 +16,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { NumberInput } from '~/components/ui/number-input';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
@@ -53,6 +54,8 @@ export interface TransferConfirmationRecord {
 
 export interface RemittancesAdminPageProps {
   remittances: TransferConfirmationRecord[];
+  /** All records matching date/field filters (before status filter). Used for stat strip totals. */
+  allRemittances?: TransferConfirmationRecord[];
   locations: Array<{ id: string; name: string; providerName?: string | null }>;
   senderOptions: string[];
   filters: {
@@ -77,7 +80,7 @@ function isPendingTransfer(r: TransferConfirmationRecord): boolean {
   return r.transferStatus === 'IN_TRANSIT';
 }
 
-export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
+export function RemittancesAdminPage({ remittances, allRemittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
   const bulkFetcher = useFetcher();
   const fetcherSurface = useFetcherActionSurface(fetcher);
@@ -146,15 +149,16 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   }, [fetcher.data, pendingAction, revalidator]);
 
   // Client-side pagination — backend doesn't paginate transfer remittances yet.
-  const REMITTANCES_PAGE_SIZE = 20;
+  const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+  const [remitPageSize, setRemitPageSize] = useState(20);
   const [remitPage, setRemitPage] = useState(1);
-  const remitTotalPages = Math.max(1, Math.ceil(remittances.length / REMITTANCES_PAGE_SIZE));
+  const remitTotalPages = Math.max(1, Math.ceil(remittances.length / remitPageSize));
   const safeRemitPage = Math.min(remitPage, remitTotalPages);
   const pagedRemittances = useMemo(
     () =>
       remittances.slice(
-        (safeRemitPage - 1) * REMITTANCES_PAGE_SIZE,
-        safeRemitPage * REMITTANCES_PAGE_SIZE,
+        (safeRemitPage - 1) * remitPageSize,
+        safeRemitPage * remitPageSize,
       ),
     [remittances, safeRemitPage],
   );
@@ -179,11 +183,15 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     [pendingRemittances, selectedIds],
   );
 
-  const sentRemittances = remittances.filter((r) => r.transferStatus === 'IN_TRANSIT');
-  const receivedCount = remittances.filter((r) => r.outcomeStatus === 'APPROVED').length;
-  const disputedCount = remittances.filter((r) => r.outcomeStatus === 'DISPUTED').length;
-  const totalQuantitySent = remittances.reduce((sum, r) => sum + r.quantitySent, 0);
-  const totalQuantityReceived = remittances.reduce((sum, r) => {
+  // Stats use allRemittances (date/field filtered, before status filter) so the
+  // overview strip stays stable when a status pill is selected. The table rows
+  // use `remittances` which includes the status filter.
+  const statsSource = allRemittances ?? remittances;
+  const sentRemittances = statsSource.filter((r) => r.transferStatus === 'IN_TRANSIT');
+  const receivedCount = statsSource.filter((r) => r.outcomeStatus === 'APPROVED').length;
+  const disputedCount = statsSource.filter((r) => r.outcomeStatus === 'DISPUTED').length;
+  const totalQuantitySent = statsSource.reduce((sum, r) => sum + r.quantitySent, 0);
+  const totalQuantityReceived = statsSource.reduce((sum, r) => {
     if (r.outcomeStatus === 'APPROVED') return sum + (r.outcomeQuantity ?? 0);
     return sum;
   }, 0);
@@ -193,12 +201,12 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   const statusValue = filters.status; // '' | IN_TRANSIT | RECEIVED | DISPUTED
   const statusPillOptions: FilterPillOption[] = useMemo(
     () => [
-      { value: '', label: 'All', count: remittances.length },
+      { value: '', label: 'All', count: statsSource.length },
       { value: 'IN_TRANSIT', label: 'Pending', count: sentRemittances.length, dotColor: 'bg-warning-500' },
       { value: 'RECEIVED', label: 'Received', count: receivedCount, dotColor: 'bg-success-500' },
       { value: 'DISPUTED', label: 'Disputed', count: disputedCount, dotColor: 'bg-danger-500' },
     ],
-    [remittances.length, sentRemittances.length, receivedCount, disputedCount],
+    [statsSource.length, sentRemittances.length, receivedCount, disputedCount],
   );
 
   const handleRemittanceFetcherSuccess = useCallback(() => {
@@ -496,39 +504,33 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           className={mobileFilterSelectClass}
         />
       </div>
-      <div className={mobileFilterBoxClass}>
-        <FormSelect
-          id="remit-filter-location-mobile"
-          value={filters.locationId}
-          onChange={(e) => setFilterParam('locationId', e.target.value)}
-          options={[
-            { value: '', label: 'All locations' },
-            ...locations.map((loc) => ({
-              value: loc.id,
-              label: loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name,
-            })),
-          ]}
-          controlSize="sm"
-          openAs="modal"
-          wrapperClassName="w-full"
-          className={mobileFilterSelectClass}
-        />
-      </div>
-      <div className={mobileFilterBoxClass}>
-        <FormSelect
-          id="remit-filter-sender-mobile"
-          value={filters.sender}
-          onChange={(e) => setFilterParam('sender', e.target.value)}
-          options={[
-            { value: '', label: 'All senders' },
-            ...senderOptions.map((name) => ({ value: name, label: name })),
-          ]}
-          controlSize="sm"
-          openAs="modal"
-          wrapperClassName="w-full"
-          className={mobileFilterSelectClass}
-        />
-      </div>
+      <SearchableSelect
+        id="remit-filter-location-mobile"
+        placeholder="All locations"
+        value={filters.locationId}
+        onChange={(v) => setFilterParam('locationId', v)}
+        options={[
+          { value: '', label: 'All locations' },
+          ...locations.map((loc) => ({
+            value: loc.id,
+            label: loc.providerName ? `${loc.name} • ${loc.providerName}` : loc.name,
+          })),
+        ]}
+        controlSize="sm"
+        wrapperClassName="w-full"
+      />
+      <SearchableSelect
+        id="remit-filter-sender-mobile"
+        placeholder="All senders"
+        value={filters.sender}
+        onChange={(v) => setFilterParam('sender', v)}
+        options={[
+          { value: '', label: 'All senders' },
+          ...senderOptions.map((name) => ({ value: name, label: name })),
+        ]}
+        controlSize="sm"
+        wrapperClassName="w-full"
+      />
       <div className="grid grid-cols-2 gap-2">
         <div className={mobileFilterBoxClass}>
           <NumberInput
@@ -608,7 +610,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Total transfers', value: remittances.length, valueClassName: 'text-app-fg' },
+          { label: 'Total transfers', value: statsSource.length, valueClassName: 'text-app-fg' },
           { label: 'Pending', value: sentRemittances.length, valueClassName: 'text-warning-600 dark:text-warning-400', to: buildStatusHref('IN_TRANSIT') },
           { label: 'Received', value: receivedCount, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusHref('RECEIVED') },
           { label: 'Disputed', value: disputedCount, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusHref('DISPUTED') },
@@ -671,11 +673,12 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               label: `${o.label} (${o.count ?? 0})`,
             }))}
           />
-          <FormSelect
+          <SearchableSelect
             controlSize="sm"
             wrapperClassName="w-52"
+            placeholder="All locations"
             value={filters.locationId}
-            onChange={(e) => setFilterParam('locationId', e.target.value)}
+            onChange={(v) => setFilterParam('locationId', v)}
             options={[
               { value: '', label: 'All locations' },
               ...locations.map((loc) => ({
@@ -684,11 +687,12 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               })),
             ]}
           />
-          <FormSelect
+          <SearchableSelect
             controlSize="sm"
             wrapperClassName="w-48"
+            placeholder="All senders"
             value={filters.sender}
-            onChange={(e) => setFilterParam('sender', e.target.value)}
+            onChange={(v) => setFilterParam('sender', v)}
             options={[
               { value: '', label: 'All senders' },
               ...senderOptions.map((name) => ({ value: name, label: name })),
@@ -789,12 +793,25 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                   totalPages: remitTotalPages,
                   onPageChange: setRemitPage,
                   summary: (
-                    <p className="text-sm text-app-fg-muted">
-                      Showing {(safeRemitPage - 1) * REMITTANCES_PAGE_SIZE + 1}–
-                      {Math.min(safeRemitPage * REMITTANCES_PAGE_SIZE, remittances.length)} of{' '}
-                      {remittances.length}
-                      <span className="text-app-fg-muted/90"> · {REMITTANCES_PAGE_SIZE} per page</span>
-                    </p>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                      <p className="text-sm text-app-fg-muted">
+                        Showing {(safeRemitPage - 1) * remitPageSize + 1}–
+                        {Math.min(safeRemitPage * remitPageSize, remittances.length)} of{' '}
+                        {remittances.length}
+                      </p>
+                      <select
+                        className="rounded-md border border-app-border bg-app-elevated px-2 py-1 text-xs text-app-fg"
+                        value={remitPageSize}
+                        onChange={(e) => {
+                          setRemitPageSize(Number(e.target.value));
+                          setRemitPage(1);
+                        }}
+                      >
+                        {PAGE_SIZE_OPTIONS.map((n) => (
+                          <option key={n} value={n}>{n} per page</option>
+                        ))}
+                      </select>
+                    </div>
                   ),
                   wrapperClassName:
                     'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
@@ -817,20 +834,20 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
 
             const body = (
               <>
-                {/* Row 1: Product name + status */}
+                {/* Row 1: Product name + qty + status */}
                 <div className="flex items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-sm font-medium text-app-fg">
-                    {r.productName}
+                    {r.productName} <span className="text-app-fg-muted tabular-nums">×{qty}</span>
                   </span>
                   <StatusBadge status={displayStatus} />
                 </div>
-                {/* Row 2: Route + qty + date */}
+                {/* Row 2: Route + date */}
                 <div className="flex items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-xs text-app-fg-muted">
                     {r.fromLocationName} → {r.toLocationName}
                   </span>
-                  <span className="shrink-0 whitespace-nowrap text-xs text-app-fg-muted tabular-nums">
-                    ×{qty} · {new Date(r.createdAt).toLocaleDateString()}
+                  <span className="shrink-0 whitespace-nowrap text-xs text-app-fg-muted">
+                    {new Date(r.createdAt).toLocaleDateString()}
                   </span>
                 </div>
               </>
@@ -845,7 +862,7 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               }
             };
 
-            if (rowSelection) {
+            if (rowSelection && pending) {
               return (
                 <div className="-mx-3 -my-2.5 flex items-stretch">
                   {/* Checkbox zone — tapping here only toggles the checkbox */}

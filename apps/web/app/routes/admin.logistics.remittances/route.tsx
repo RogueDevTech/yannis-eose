@@ -40,7 +40,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       cookie,
     }),
     apiRequest<unknown>(
-      '/trpc/logistics.listLocationOptions?input=' + encodeURIComponent(JSON.stringify({})),
+      '/trpc/logistics.locationOptions?input=' + encodeURIComponent(JSON.stringify({})),
       { method: 'GET', cookie },
     ),
   ]);
@@ -105,8 +105,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   const statusWhitelist = new Set(['IN_TRANSIT', 'RECEIVED', 'DISPUTED']);
   const normalizedStatus = statusWhitelist.has(status) ? status : '';
-  const filteredRemittances = records.filter((r) => {
-    if (normalizedStatus && r.transferStatus !== normalizedStatus) return false;
+
+  // Date + non-status filters — applied to both stats and table rows.
+  const dateAndFieldFiltered = records.filter((r) => {
     if (locationId && r.toLocationId !== locationId && r.fromLocationId !== locationId) return false;
     if (search && !(`${r.id} ${r.productName}`.toLowerCase().includes(search))) return false;
     if (sender && !(r.senderName ?? '').toLowerCase().includes(sender)) return false;
@@ -125,6 +126,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     return true;
   });
 
+  // Status filter is only for the table — stats always show all-status counts.
+  const filteredRemittances = normalizedStatus
+    ? dateAndFieldFiltered.filter((r) => r.transferStatus === normalizedStatus)
+    : dateAndFieldFiltered;
+
   const senderOptions = Array.from(
     new Set(
       records
@@ -135,6 +141,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return {
       remittances: filteredRemittances,
+      allRemittances: dateAndFieldFiltered,
       locations: locationsList,
       senderOptions,
       filters: {
@@ -206,6 +213,7 @@ export default function AdminLogisticsRemittancesRoute() {
         {(data) => (
           <RemittancesAdminPage
             remittances={data.remittances}
+            allRemittances={data.allRemittances}
             locations={data.locations ?? []}
             senderOptions={data.senderOptions ?? []}
             filters={data.filters}

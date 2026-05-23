@@ -8,6 +8,7 @@ const TERMINAL_FOR_DUE_TAG = new Set([
   'DELIVERED',
   'REMITTED',
   'CANCELLED',
+  'DELETED',
   'RETURNED',
   'WRITTEN_OFF',
   'RESTOCKED',

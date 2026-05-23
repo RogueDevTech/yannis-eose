@@ -149,13 +149,14 @@ function getPipelineIndex(status: string): number {
     RESTOCKED: 5,
     WRITTEN_OFF: 5,
     CANCELLED: -1,
+    DELETED: -1,
   };
   if (status in terminalStatuses) return terminalStatuses[status]!;
   return TPL_PIPELINE.indexOf(status as typeof TPL_PIPELINE[number]);
 }
 
 function isTerminalStatus(status: string): boolean {
-  return ['RETURNED', 'PARTIALLY_DELIVERED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'].includes(status);
+  return ['RETURNED', 'PARTIALLY_DELIVERED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED', 'DELETED'].includes(status);
 }
 
 function computeDiff(
@@ -620,7 +621,7 @@ export function LogisticsOrderDetailPage({
   // Delivery urgency: days since creation or since preferred date
   const daysSinceCreated = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 86400000);
   const isOverdue = order.preferredDeliveryDate && new Date(order.preferredDeliveryDate + 'T23:59:59') < new Date() &&
-    !['DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED'].includes(order.status);
+    !['DELIVERED', 'REMITTED', 'RETURNED', 'RESTOCKED', 'WRITTEN_OFF', 'CANCELLED', 'DELETED'].includes(order.status);
 
   // Has any active action?
   const hasAction = ['CONFIRMED', 'AGENT_ASSIGNED', 'DISPATCHED', 'IN_TRANSIT', 'RETURNED'].includes(order.status);

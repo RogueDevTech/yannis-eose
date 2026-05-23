@@ -114,6 +114,7 @@ function statusBgClass(status: string): string {
     case 'AGENT_ASSIGNED':
       return 'bg-app-fg-muted';
     case 'CANCELLED':
+    case 'DELETED':
       return 'bg-app-border';
     case 'RESTOCKED':
       return 'bg-success-300';

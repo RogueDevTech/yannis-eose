@@ -147,6 +147,7 @@ export const PERMISSIONS: PermissionCatalogEntry[] = [
   // Permission-first lock (CEO directive): SUPER_ADMIN is the only unconditional
   // bypass; every other gate runs through a code so admins can deputize via the
   // matrix without code changes.
+  { code: 'orders.delete', resource: 'orders', action: 'delete', description: 'Soft-delete orders (removes from metrics; row stays in DB). CEO directive 2026-05-23: replaces CANCELLED. Admin/SuperAdmin default. HoCS must request and Admin must approve.' },
   { code: 'orders.line_price.edit', resource: 'orders.line_price', action: 'edit', description: 'Edit line unit prices (and derived totals) on confirmed orders. Branch / supervisor scoping still applies.' },
   {
     code: 'orders.detail.manage',

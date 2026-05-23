@@ -59,12 +59,13 @@ const DEFERRED_PLACEHOLDER_ROWS: Order[] = Array.from(
 
 /**
  * Status filter list for the Marketing orders page: the shared CS-funnel buckets
- * plus Cancelled, minus Cash Remitted — remittance is accountant-only and never
+ * plus Deleted, minus Cash Remitted — remittance is accountant-only and never
  * relevant to a marketing view of the funnel.
+ * CEO directive 2026-05-23: CANCELLED replaced by DELETED.
  */
 const MARKETING_ORDERS_STATUSES = [
   ...STATUS_OPTIONS.filter((status) => status !== 'REMITTED'),
-  'CANCELLED',
+  'DELETED',
 ];
 
 /** Status dropdown labels before streamed counts hydrate (same order as full options). */
@@ -316,7 +317,7 @@ export function MarketingOrdersPage({
               <span className="font-medium text-app-fg">
                 {order.customerName}
                 {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
-                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+                  <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
                 )}
               </span>
             ),
@@ -465,7 +466,7 @@ export function MarketingOrdersPage({
             <span className="min-w-0 truncate text-sm font-medium text-app-fg">
               {order.customerName || '—'}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
@@ -567,7 +568,7 @@ export function MarketingOrdersPage({
                 )}
                 {isTestOrdersView && (
                   <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
-                    Cancel all test orders
+                    Delete all test orders
                   </Button>
                 )}
                 <PageRefreshButton />
@@ -803,7 +804,7 @@ export function MarketingOrdersPage({
               ...ins.mediaBuyersForFilter.map((b) => ({ value: b.id, label: b.name })),
             ];
             const statusCounts = ins.statusCounts;
-            const ordersInPeriodTotal = Object.values(statusCounts).reduce((sum, n) => sum + n, 0);
+            const ordersInPeriodTotal = Object.entries(statusCounts).filter(([k]) => k !== 'DELETED').reduce((sum, [, n]) => sum + n, 0);
             const unprocessedCount = statusCounts['UNPROCESSED'] ?? 0;
             const csAssignedCount = statusCounts['CS_ASSIGNED'] ?? 0;
             const unconfirmedCount = statusCounts['CS_ENGAGED'] ?? 0;
@@ -815,7 +816,7 @@ export function MarketingOrdersPage({
               (statusCounts['DISPATCHED'] ?? 0) +
               (statusCounts['IN_TRANSIT'] ?? 0);
             const deliveredCount = statusCounts['DELIVERED'] ?? 0;
-            const cancelledCount = statusCounts['CANCELLED'] ?? 0;
+            const deletedCount = statusCounts['DELETED'] ?? 0;
             // Overview strip is a fixed snapshot of the period — it must not
             // shift when the table's status filter (or the cart view) changes.
             // Everything here is derived from `statusCounts` (the period
@@ -824,6 +825,17 @@ export function MarketingOrdersPage({
               ordersInPeriodTotal > 0
                 ? (((statusCounts['DELIVERED'] ?? 0) / ordersInPeriodTotal) * 100).toFixed(1)
                 : '0';
+            // CR = confirmed-or-beyond / (confirmed-or-beyond + deleted)
+            const confirmedPlus =
+              confirmedCount +
+              (statusCounts['DELIVERED'] ?? 0) +
+              (statusCounts['PARTIALLY_DELIVERED'] ?? 0) +
+              (statusCounts['REMITTED'] ?? 0) +
+              (statusCounts['RETURNED'] ?? 0) +
+              (statusCounts['RESTOCKED'] ?? 0) +
+              (statusCounts['WRITTEN_OFF'] ?? 0);
+            const crDenom = confirmedPlus + deletedCount;
+            const confirmationRate = crDenom > 0 ? (confirmedPlus / crDenom) * 100 : 0;
             const statusOptions = [
               ...MARKETING_ORDERS_STATUSES.map((status) => ({
                 value: status,
@@ -895,6 +907,28 @@ export function MarketingOrdersPage({
                       onClick: () => setSelectedStatus('DELIVERED'),
                     },
                     {
+                      label: 'CR',
+                      value: `${confirmationRate.toFixed(1)}%`,
+                      valueClassName: confirmationRate >= 70
+                        ? 'text-success-600 dark:text-success-400'
+                        : 'text-warning-600 dark:text-warning-400',
+                      title: 'Confirmation Rate — confirmed / (confirmed + deleted)',
+                    },
+                    { label: 'DR', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg', title: 'Delivery Rate — delivered / confirmed' },
+                    {
+                      label: 'CPA',
+                      value:
+                        ins.cpa != null ? (
+                          <>
+                            {'\u20A6'}
+                            {Number(ins.cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                          </>
+                        ) : (
+                          '\u2014'
+                        ),
+                      valueClassName: 'text-app-fg',
+                    },
+                    {
                       label: 'Open carts',
                       value: ins.abandonedCartCount,
                       valueClassName:
@@ -910,30 +944,15 @@ export function MarketingOrdersPage({
                           }
                         : {}),
                     },
-                    { label: 'Delivery Rate', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg' },
                     {
-                      label: 'CPA',
-                      value:
-                        ins.cpa != null ? (
-                          <>
-                            {'\u20A6'}
-                            {Number(ins.cpa).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                          </>
-                        ) : (
-                          '\u2014'
-                        ),
-                      valueClassName: 'text-app-fg',
-                    },
-                    {
-                      label: 'Cancelled',
-                      value: cancelledCount,
-                      valueClassName:
-                        cancelledCount > 0
-                          ? 'text-danger-600 dark:text-danger-400'
-                          : 'text-app-fg',
-                      to: buildQueryString({ status: 'CANCELLED', page: 1 }),
-                      active: selectedStatus === 'CANCELLED',
-                      onClick: () => setSelectedStatus('CANCELLED'),
+                      label: 'Deleted',
+                      value: deletedCount,
+                      valueClassName: deletedCount > 0
+                        ? 'text-danger-600 dark:text-danger-400'
+                        : 'text-app-fg',
+                      to: buildQueryString({ status: 'DELETED', page: 1 }),
+                      active: selectedStatus === 'DELETED',
+                      onClick: () => setSelectedStatus('DELETED'),
                     },
                   ]}
                 />
@@ -1149,16 +1168,16 @@ export function MarketingOrdersPage({
 
       {purgeConfirmOpen && (
         <Modal open onClose={() => { if (purgeFetcher.state === 'idle') setPurgeConfirmOpen(false); }} maxWidth="max-w-sm" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-app-fg mb-2">Cancel all test orders</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Delete all test orders</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            This will cancel all orders where the customer name contains &ldquo;test&rdquo;. Only pre-confirmation orders (unprocessed, assigned, engaged) are affected &mdash; stock-moved orders are skipped.
+            This will delete all orders where the customer name contains &ldquo;test&rdquo;. Deleted orders are removed from metrics but stay in the database. Pre-confirmation and cancelled orders are affected &mdash; stock-moved orders are skipped.
           </p>
           {purgeFetcher.state === 'idle' && purgeFetcher.data ? (
             <div className="mb-4">
               {purgeFetcher.data.success ? (
                 <div className="rounded-lg border border-success-300 bg-success-50 dark:border-success-700 dark:bg-success-900/20 px-4 py-3">
                   <p className="text-sm font-semibold text-success-700 dark:text-success-300">
-                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} cancelled
+                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} deleted
                   </p>
                   {(purgeFetcher.data.skipped ?? 0) > 0 && (
                     <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
@@ -1169,7 +1188,7 @@ export function MarketingOrdersPage({
               ) : (
                 <div className="rounded-lg border border-danger-300 bg-danger-50 dark:border-danger-700 dark:bg-danger-900/20 px-4 py-3">
                   <p className="text-sm font-semibold text-danger-700 dark:text-danger-300">
-                    {purgeFetcher.data.error ?? 'Failed to cancel test orders'}
+                    {purgeFetcher.data.error ?? 'Failed to delete test orders'}
                   </p>
                 </div>
               )}
@@ -1189,7 +1208,7 @@ export function MarketingOrdersPage({
                   purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
                 }}
               >
-                Cancel all test orders
+                Delete all test orders
               </Button>
             )}
           </div>

@@ -996,6 +996,8 @@ function DashboardLayoutInner({
       // Allow mirror start/stop and branch switching
       if (form.hasAttribute('data-mirror-allow')) return;
       if (form.action?.includes('switchBranch')) return;
+      // Allow logout — personal session action, not a data mutation
+      if (form.action?.includes('/auth/logout')) return;
       // Allow search forms (GET method)
       if (form.method?.toUpperCase() === 'GET') return;
       e.preventDefault();

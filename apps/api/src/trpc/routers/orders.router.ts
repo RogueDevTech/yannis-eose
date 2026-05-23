@@ -607,12 +607,12 @@ export const ordersRouter = router({
       const opts = Object.keys(baseOpts).length > 0 ? baseOpts : undefined;
       const fetchList = () => getOrdersService().list(effectiveInput, branchId, opts);
 
-      // Cache page 1 only — the dominant traffic for the hottest CS/marketing
-      // list, and bounding to page 1 keeps the keyspace small. Lives under the
-      // `cache:orders:aggregates:*` namespace so every existing
-      // `invalidateOrdersAggregatesCache()` call (create / createOffline /
-      // transition / bulk / edits) already drops it.
-      if (input.page !== 1 || !ordersCacheService) {
+      // Cache all pages — the 15s TTL keeps the keyspace bounded and every
+      // existing `invalidateOrdersAggregatesCache()` call (create / createOffline
+      // / transition / bulk / edits) already drops the `cache:orders:aggregates:*`
+      // namespace. Extending beyond page 1 avoids the full DB round-trip when
+      // users paginate or switch to limit=100.
+      if (!ordersCacheService) {
         return fetchList();
       }
       const key =
@@ -855,6 +855,7 @@ export const ordersRouter = router({
             'RESTOCKED',
             'WRITTEN_OFF',
             'REMITTED',
+            'DELETED',
           ])).min(1).optional(),
           // Accept ISO datetime in addition to date — see listOrdersSchema.
           startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
@@ -944,6 +945,7 @@ export const ordersRouter = router({
             'RESTOCKED',
             'WRITTEN_OFF',
             'REMITTED',
+            'DELETED',
           ])).min(1).optional(),
           // Accept ISO datetime alongside date — see listOrdersSchema.
           startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/).optional(),
@@ -1122,6 +1124,7 @@ export const ordersRouter = router({
             'RESTOCKED',
             'WRITTEN_OFF',
             'REMITTED',
+            'DELETED',
           ])
           .optional(),
         // Capability flags from the loader.
@@ -1167,7 +1170,8 @@ export const ordersRouter = router({
               status: input.heatStatus,
             };
 
-      const [
+      const fetchBundle = async () => {
+        const [
         statusCounts,
         myWorkload,
         dailyCounts,
@@ -1241,6 +1245,28 @@ export const ordersRouter = router({
           ? (cartStats as { abandonedOpen: number }).abandonedOpen
           : null,
       };
+      }; // end fetchBundle
+
+      // Cache the bundle — same 15s TTL and `cache:orders:aggregates:*` namespace
+      // as the list cache, so `invalidateOrdersAggregatesCache()` drops both.
+      if (!ordersCacheService) {
+        return fetchBundle();
+      }
+      const bundleCacheKey =
+        'cache:orders:aggregates:csBundle:' +
+        CacheService.hashInput({
+          userId: ctx.user.id,
+          branchId,
+          scope,
+          trendFilters,
+          scheduleHeatInput,
+          bundleBranchScope,
+          isCSCloser: input.isCSCloser,
+          showCSCloserColumn: input.showCSCloserColumn,
+          canCreateOffline: input.canCreateOffline,
+          includeCartAbandonment: input.includeCartAbandonment,
+        });
+      return ordersCacheService.getOrSet(bundleCacheKey, ORDERS_AGG_TTL_SECONDS, fetchBundle);
     }),
 
   /**
@@ -1384,6 +1410,7 @@ export const ordersRouter = router({
             'RESTOCKED',
             'WRITTEN_OFF',
             'REMITTED',
+            'DELETED',
           ])
           .optional(),
         statuses: z
@@ -1403,6 +1430,7 @@ export const ordersRouter = router({
               'RESTOCKED',
               'WRITTEN_OFF',
               'REMITTED',
+              'DELETED',
             ]),
           )
           .optional(),
