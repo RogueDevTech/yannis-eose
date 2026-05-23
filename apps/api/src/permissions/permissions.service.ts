@@ -7,7 +7,7 @@ import { canonicalPermissionCode, legacyAliasesForCanonical } from '@yannis/shar
 import { DRIZZLE } from '../database/database.module';
 
 /** Roles that HR cannot assign directly — require SuperAdmin approval */
-export const SENSITIVE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER'] as const;
+export const SENSITIVE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'FINANCE_OFFICER', 'SUPPORT'] as const;
 
 /** Permissions that HR cannot grant directly — require SuperAdmin approval */
 export const SENSITIVE_PERMISSIONS = [
@@ -47,7 +47,7 @@ export async function computeEffectivePermissionsLegacyUnion(
     .limit(1);
 
   if (!userRow) return new Set();
-  if ((userRow.role as string) === 'SUPER_ADMIN') {
+  if ((userRow.role as string) === 'SUPER_ADMIN' || (userRow.role as string) === 'SUPPORT') {
     const all = await dbOrTx.select({ code: schema.permissions.code }).from(schema.permissions);
     const effective = new Set<string>();
     for (const row of all) {
@@ -151,7 +151,7 @@ export class PermissionsService {
       .limit(1);
 
     if (!userRow) return new Set();
-    if ((userRow.role as string) === 'SUPER_ADMIN') {
+    if ((userRow.role as string) === 'SUPER_ADMIN' || (userRow.role as string) === 'SUPPORT') {
       const all = await this.db.select({ code: schema.permissions.code }).from(schema.permissions);
       const effective = new Set<string>();
       for (const row of all) {
@@ -200,7 +200,7 @@ export class PermissionsService {
    * Check if user has a permission. SUPER_ADMIN always returns true.
    */
   async hasPermission(userId: string, role: string, permissionCode: string): Promise<boolean> {
-    if (role === 'SUPER_ADMIN') return true;
+    if (role === 'SUPER_ADMIN' || role === 'SUPPORT') return true;
     const perms = await this.getEffectivePermissions(userId);
     return perms.has(canonicalPermissionCode(permissionCode));
   }

@@ -53,7 +53,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // SuperAdmin: full CEO metrics directly on /admin (CEO directive 2026-05-18).
   // Uses ceoOverview which includes ROAS, revenue by period, deliveries by product,
   // stock per product, ad spend, CPA, delivery rate, active staff — all in one call.
-  if (role && isSuperAdminOnly({ role })) {
+  if (role && (isSuperAdminOnly({ role }) || role === 'SUPPORT')) {
     const deferredOpt = { method: 'GET' as const, cookie, timeoutMs: DEFERRED_LOADER_TIMEOUT_MS };
     const ceoInput = JSON.stringify({ startDate, endDate });
     const pageData = apiRequest<{ result?: { data?: CEODashboardData } }>(
