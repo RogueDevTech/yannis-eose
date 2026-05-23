@@ -338,7 +338,7 @@ function OrdersListPageImpl({
 
   const { toast } = useToast();
   const liveState = useLiveIndicator(liveEvents ?? []);
-  const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
+  const { busy: isLoaderRefetchBusy, primeSamePathRefetch } = useLoaderRefetchBusy();
   /** Sentinel — not an order status, indicates the `?fromCart=1` pseudo-filter is active. */
   const FROM_CART_STATUS_VALUE = '__from_cart__';
   const TEST_ORDERS_STATUS_VALUE = '__test_orders__';
@@ -446,6 +446,7 @@ function OrdersListPageImpl({
   /** Update selected status + URL params without triggering a full route navigation.
    *  Stat strip items use this so the strip never flickers with a skeleton. */
   const handleStatusSelect = useCallback((v: string) => {
+    primeSamePathRefetch();
     setSelectedStatus(v);
     setSelectedIds(new Set());
     setBulkResult(null);
@@ -468,7 +469,7 @@ function OrdersListPageImpl({
       }
       return next;
     });
-  }, [setSearchParams]);
+  }, [setSearchParams, primeSamePathRefetch]);
   const [selectAllMatchingLoading, setSelectAllMatchingLoading] = useState(false);
   const [selectAllMatchingCapped, setSelectAllMatchingCapped] = useState(false);
   const [selectAllMatchingError, setSelectAllMatchingError] = useState<string | null>(null);
@@ -633,8 +634,10 @@ function OrdersListPageImpl({
       }
     : null;
 
-  // CR = confirmed-or-beyond / (confirmed-or-beyond + deleted)
-  // DR = delivered-or-remitted / confirmed-or-beyond
+  // CR = confirmed-or-beyond / total orders in period (DELETED excluded)
+  // DR = delivered-or-remitted / total orders in period (DELETED excluded)
+  // DELETED is an editorial action (test/fake/mistake orders), not a business
+  // outcome — it never enters any rate calc.
   const confirmedPlus =
     (statusCounts['CONFIRMED'] ?? 0) +
     (statusCounts['AGENT_ASSIGNED'] ?? 0) +
@@ -646,11 +649,14 @@ function OrdersListPageImpl({
     (statusCounts['RETURNED'] ?? 0) +
     (statusCounts['RESTOCKED'] ?? 0) +
     (statusCounts['WRITTEN_OFF'] ?? 0);
-  const deletedTotal = statusCounts['DELETED'] ?? 0;
   const deliveredPlus = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
-  const crDenom = confirmedPlus + deletedTotal;
-  const confirmationRate = crDenom > 0 ? (confirmedPlus / crDenom) * 100 : 0;
-  const deliveryRate = confirmedPlus > 0 ? (deliveredPlus / confirmedPlus) * 100 : 0;
+  const periodTotalExclDeleted = Object.entries(statusCounts)
+    .filter(([k]) => k !== 'DELETED')
+    .reduce((sum, [, n]) => sum + (n ?? 0), 0);
+  const confirmationRate =
+    periodTotalExclDeleted > 0 ? (confirmedPlus / periodTotalExclDeleted) * 100 : 0;
+  const deliveryRate =
+    periodTotalExclDeleted > 0 ? (deliveredPlus / periodTotalExclDeleted) * 100 : 0;
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('Customer not picking');

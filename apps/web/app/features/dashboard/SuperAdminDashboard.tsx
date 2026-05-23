@@ -38,6 +38,7 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
     totalSpend: data?.marketing?.totalSpend ?? 0,
     cpa: data?.marketing?.cpa ?? 0,
     roas: data?.marketing?.roas ?? 0,
+    confirmationRate: (data?.marketing as Record<string, number> | undefined)?.confirmationRate ?? 0,
     deliveryRate: data?.marketing?.deliveryRate ?? 0,
   };
   const orderPipeline = {
@@ -103,14 +104,8 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
               Revenue / Ad Spend = {fmt(revenue)} / {fmt(marketingSafe.totalSpend)}
             </p>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
             <KeyMetricTile label="Revenue" value={fmt(revenue)} to="/admin/marketing/orders?status=DELIVERED" />
-            <KeyMetricTile
-              label="Ad Spend"
-              value={fmt(marketingSafe.totalSpend)}
-              valueClassName="text-danger-600 dark:text-danger-400"
-              to="/admin/marketing/ad-spend"
-            />
             <KeyMetricTile
               label="Profit"
               value={fmt(trueProfit)}
@@ -165,7 +160,19 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             to="/admin/marketing/ad-spend"
           />
           <KeyMetricTile
-            label="Delivery Rate"
+            label="CR"
+            value={pct(marketingSafe.confirmationRate)}
+            valueClassName={
+              marketingSafe.confirmationRate >= 70
+                ? 'text-success-600 dark:text-success-400'
+                : marketingSafe.confirmationRate >= 50
+                  ? 'text-warning-600 dark:text-warning-400'
+                  : 'text-danger-600 dark:text-danger-400'
+            }
+            to="/admin/marketing/orders"
+          />
+          <KeyMetricTile
+            label="DR"
             value={pct(marketingSafe.deliveryRate)}
             valueClassName={
               marketingSafe.deliveryRate >= 70
@@ -176,7 +183,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             }
             to="/admin/marketing/orders?status=DELIVERED"
           />
-          <KeyMetricTile label="Active Staff" value={activeStaffCount.toLocaleString()} to="/hr/users" />
         </div>
       </div>
 
