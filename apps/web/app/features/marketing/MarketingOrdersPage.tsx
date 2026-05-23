@@ -825,7 +825,9 @@ export function MarketingOrdersPage({
               ordersInPeriodTotal > 0
                 ? (((statusCounts['DELIVERED'] ?? 0) / ordersInPeriodTotal) * 100).toFixed(1)
                 : '0';
-            // CR = confirmed-or-beyond / (confirmed-or-beyond + deleted)
+            // CR = confirmed-or-beyond / total orders in period (DELETED already excluded
+            // from ordersInPeriodTotal). DELETED is an editorial "this order shouldn't
+            // exist" action, not a business outcome — it never enters any rate calc.
             const confirmedPlus =
               confirmedCount +
               (statusCounts['DELIVERED'] ?? 0) +
@@ -834,8 +836,8 @@ export function MarketingOrdersPage({
               (statusCounts['RETURNED'] ?? 0) +
               (statusCounts['RESTOCKED'] ?? 0) +
               (statusCounts['WRITTEN_OFF'] ?? 0);
-            const crDenom = confirmedPlus + deletedCount;
-            const confirmationRate = crDenom > 0 ? (confirmedPlus / crDenom) * 100 : 0;
+            const confirmationRate =
+              ordersInPeriodTotal > 0 ? (confirmedPlus / ordersInPeriodTotal) * 100 : 0;
             const statusOptions = [
               ...MARKETING_ORDERS_STATUSES.map((status) => ({
                 value: status,
@@ -862,49 +864,43 @@ export function MarketingOrdersPage({
                       label: 'Total',
                       value: ordersInPeriodTotal,
                       valueClassName: 'text-app-fg',
-                      to: buildQueryString({ status: 'ALL', page: 1 }),
                       active: selectedStatus === 'ALL',
-                      onClick: () => setSelectedStatus('ALL'),
+                      onClick: () => handleStatusChange('ALL'),
                     },
                     {
                       label: 'Unassigned',
                       value: unprocessedCount,
                       valueClassName: 'text-warning-600 dark:text-warning-400',
-                      to: buildQueryString({ status: 'UNPROCESSED', page: 1 }),
                       active: selectedStatus === 'UNPROCESSED',
-                      onClick: () => setSelectedStatus('UNPROCESSED'),
+                      onClick: () => handleStatusChange('UNPROCESSED'),
                     },
                     {
                       label: 'Assigned',
                       value: csAssignedCount,
                       valueClassName: 'text-info-600 dark:text-info-400',
-                      to: buildQueryString({ status: 'CS_ASSIGNED', page: 1 }),
                       active: selectedStatus === 'CS_ASSIGNED',
-                      onClick: () => setSelectedStatus('CS_ASSIGNED'),
+                      onClick: () => handleStatusChange('CS_ASSIGNED'),
                     },
                     {
                       label: 'Unconfirmed',
                       value: unconfirmedCount,
                       valueClassName: 'text-cyan-600 dark:text-cyan-400',
-                      to: buildQueryString({ status: 'CS_ENGAGED', page: 1 }),
                       active: selectedStatus === 'CS_ENGAGED',
-                      onClick: () => setSelectedStatus('CS_ENGAGED'),
+                      onClick: () => handleStatusChange('CS_ENGAGED'),
                     },
                     {
                       label: 'Confirmed',
                       value: confirmedCount,
                       valueClassName: 'text-brand-600 dark:text-brand-400',
                       active: selectedStatus === 'CONFIRMED',
-                      to: buildQueryString({ status: 'CONFIRMED', page: 1 }),
-                      onClick: () => setSelectedStatus('CONFIRMED'),
+                      onClick: () => handleStatusChange('CONFIRMED'),
                     },
                     {
                       label: 'Delivered',
                       value: deliveredCount,
                       valueClassName: 'text-success-600 dark:text-success-400',
-                      to: buildQueryString({ status: 'DELIVERED', page: 1 }),
                       active: selectedStatus === 'DELIVERED',
-                      onClick: () => setSelectedStatus('DELIVERED'),
+                      onClick: () => handleStatusChange('DELIVERED'),
                     },
                     {
                       label: 'CR',
@@ -912,7 +908,7 @@ export function MarketingOrdersPage({
                       valueClassName: confirmationRate >= 70
                         ? 'text-success-600 dark:text-success-400'
                         : 'text-warning-600 dark:text-warning-400',
-                      title: 'Confirmation Rate — confirmed / (confirmed + deleted)',
+                      title: 'Confirmation Rate — confirmed / total in period (DELETED excluded)',
                     },
                     { label: 'DR', value: <>{deliveryRate}%</>, valueClassName: 'text-app-fg', title: 'Delivery Rate — delivered / confirmed' },
                     {
@@ -938,10 +934,7 @@ export function MarketingOrdersPage({
                       title: 'Captured carts not yet recovered — tap to view the cart backlog',
                       active: selectedStatus === FROM_CART_STATUS_VALUE,
                       ...(enableFromCartStatusOption
-                        ? {
-                            to: buildQueryString({ status: FROM_CART_STATUS_VALUE, page: 1 }),
-                            onClick: () => setSelectedStatus(FROM_CART_STATUS_VALUE),
-                          }
+                        ? { onClick: () => handleStatusChange(FROM_CART_STATUS_VALUE) }
                         : {}),
                     },
                     {
@@ -950,9 +943,8 @@ export function MarketingOrdersPage({
                       valueClassName: deletedCount > 0
                         ? 'text-danger-600 dark:text-danger-400'
                         : 'text-app-fg',
-                      to: buildQueryString({ status: 'DELETED', page: 1 }),
                       active: selectedStatus === 'DELETED',
-                      onClick: () => setSelectedStatus('DELETED'),
+                      onClick: () => handleStatusChange('DELETED'),
                     },
                   ]}
                 />

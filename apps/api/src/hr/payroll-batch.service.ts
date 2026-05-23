@@ -491,11 +491,14 @@ export class PayrollBatchService {
           or(eq(schema.orders.assignedCsId, member.id), eq(schema.orders.mediaBuyerId, member.id)),
         ),
       );
+    // DELETED orders are editorial removals (test/fake/mistake), not real
+    // workload — never count them in the delivery-rate denominator.
     const totalOrdersRows = await tx
       .select({ count: count() })
       .from(schema.orders)
       .where(
         and(
+          sql`${schema.orders.status} <> 'DELETED'`,
           gte(schema.orders.createdAt, periodStart),
           lte(schema.orders.createdAt, periodEnd),
           or(eq(schema.orders.assignedCsId, member.id), eq(schema.orders.mediaBuyerId, member.id)),

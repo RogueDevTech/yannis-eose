@@ -4472,7 +4472,14 @@ export class OrdersService {
       undefined,
       undefined,
     );
-    const volume = Object.values(counts).reduce((sum, c) => sum + (c ?? 0), 0);
+    // `volume` is the funnel's top-of-stack count. DELETED orders are editorial
+    // removals (test/fake/mistake), never real business volume — exclude them.
+    // `getStatusCounts` intentionally returns DELETED so the strip can show its
+    // own pill, but every aggregate over `counts` must filter it out here.
+    const volume = Object.entries(counts).reduce(
+      (sum, [status, c]) => (status === 'DELETED' ? sum : sum + (c ?? 0)),
+      0,
+    );
     return {
       volume,
       unconfirmed: counts['CS_ENGAGED'] ?? 0,
@@ -5195,7 +5202,11 @@ export class OrdersService {
     // Predicate templates — Postgres `FILTER (WHERE …)` evaluates per row inside
     // a single grouped aggregate, so we never materialize per-agent subqueries.
     const confirmedOrBeyond = sql`${schema.orders.status} IN ('CONFIRMED','AGENT_ASSIGNED','DISPATCHED','IN_TRANSIT','DELIVERED','PARTIALLY_DELIVERED','REMITTED','RETURNED','RESTOCKED','WRITTEN_OFF')`;
-    const deletedStatus = sql`${schema.orders.status} IN ('CANCELLED','DELETED')`;
+    // DELETED is an editorial action (test/fake/mistake orders), never a business
+    // outcome — it must NOT appear in any rate's numerator or denominator. We still
+    // surface legacy CANCELLED rejections (pre-2026-05-23 directive) as a real outcome.
+    const legacyCancelled = sql`${schema.orders.status} = 'CANCELLED'`;
+    const notDeleted = sql`${schema.orders.status} <> 'DELETED'`;
     const deliveredOrRemitted = sql`${schema.orders.status} IN ('DELIVERED','REMITTED')`;
     const callCompleted = sql`${schema.callLogs.callStatus} = 'COMPLETED'`;
 
@@ -5232,9 +5243,12 @@ export class OrdersService {
       this.db
         .select({
           agentId: schema.orders.assignedCsId,
-          engaged: sql<number>`COUNT(*)::int`,
+          // `engaged` = all orders this CS handled in period, with DELETED excluded.
+          // Without the filter, DELETED test/fake orders silently inflate the
+          // workload denominator and drag every CS's CR down.
+          engaged: sql<number>`COUNT(*) FILTER (WHERE ${notDeleted})::int`,
           confirmed: sql<number>`COUNT(*) FILTER (WHERE ${confirmedOrBeyond})::int`,
-          cancelled: sql<number>`COUNT(*) FILTER (WHERE ${deletedStatus})::int`,
+          cancelled: sql<number>`COUNT(*) FILTER (WHERE ${legacyCancelled})::int`,
         })
         .from(schema.orders)
         .where(orderWhere)
@@ -5312,8 +5326,10 @@ export class OrdersService {
       const ordersDelivered = deliveredByAgent.get(agent.id) ?? 0;
       const callAgg = callsByAgent.get(agent.id) ?? { callsMade: 0, avgDurationSeconds: 0 };
 
-      const engagedOrCancelled = ord.confirmed + ord.cancelled;
-      const confirmationRate = engagedOrCancelled > 0 ? (ord.confirmed / engagedOrCancelled) * 100 : 0;
+      // CR = confirmed / total real workload (DELETED already excluded from
+      // `engaged`). DR = delivered / confirmed — measures the post-confirmation
+      // landing rate without conflating CS quality with rider performance.
+      const confirmationRate = ord.engaged > 0 ? (ord.confirmed / ord.engaged) * 100 : 0;
       const deliveryRate = ord.confirmed > 0 ? (ordersDelivered / ord.confirmed) * 100 : 0;
 
       return {

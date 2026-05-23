@@ -129,8 +129,11 @@ async function _ceoOverviewFetch(params: {
   const safePayoutSummary = payoutSummary ?? { totalPaid: 0, totalPending: 0, staffCount: 0 };
   const safeCSWorkloads = csWorkloads ?? [];
 
-  const totalOrders = Object.values(statusCounts).reduce(
-    (sum, count) => sum + (count ?? 0),
+  // DELETED + legacy CANCELLED orders are editorial removals (test/fake/mistake),
+  // never business volume — they must not appear in the dashboard's totalOrders.
+  // CEO directive 2026-05-23: CANCELLED is legacy-only, merged into DELETED.
+  const totalOrders = Object.entries(statusCounts).reduce(
+    (sum, [status, count]) => (status === 'DELETED' || status === 'CANCELLED' ? sum : sum + (count ?? 0)),
     0,
   );
 
@@ -186,6 +189,7 @@ async function _ceoOverviewFetch(params: {
       totalSpend: safeMarketingMetrics.totalSpend ?? 0,
       cpa: safeMarketingMetrics.cpa ?? 0,
       roas: safeMarketingMetrics.trueRoas ?? 0,
+      confirmationRate: safeMarketingMetrics.confirmationRate ?? 0,
       deliveryRate: safeMarketingMetrics.deliveryRate ?? 0,
     },
     csTeam: {
@@ -419,7 +423,14 @@ export const dashboardRouter = router({
     return {
       marketing: {
         today: {
-          newOrders: Object.values(today).reduce((sum, n) => sum + (n ?? 0), 0),
+          // Exclude DELETED + legacy CANCELLED from "new orders" — both are
+          // editorial removals (CEO directive 2026-05-23), not real volume.
+          // `today` retains them so consumers can show them independently.
+          newOrders: Object.entries(today).reduce(
+            (sum, [status, n]) =>
+              status === 'DELETED' || status === 'CANCELLED' ? sum : sum + (n ?? 0),
+            0,
+          ),
           confirmed: today['CONFIRMED'] ?? 0,
           delivered: today['DELIVERED'] ?? 0,
           cancelled: today['CANCELLED'] ?? 0,
