@@ -356,9 +356,9 @@ function OrdersListPageImpl({
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders cleared',
-    successMessage: `${purgeFetcher.data?.deleted ?? 0} deleted${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Clear failed',
+    successTitle: 'Test orders cancelled',
+    successMessage: `${purgeFetcher.data?.deleted ?? 0} cancelled${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
+    errorTitle: 'Cancel failed',
   });
   // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
   const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
@@ -874,7 +874,12 @@ function OrdersListPageImpl({
         header: 'Customer',
         render: (order) => (
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-medium text-app-fg">{order.customerName}</span>
+            <span className="font-medium text-app-fg">
+              {order.customerName}
+              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+              )}
+            </span>
             {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
             {isPreferredDeliveryOverdue(order.preferredDeliveryDate, order.status) ? <OverdueTag /> : null}
             {isCallbackDue(order.callbackScheduledAt, order.status) ? <CallbackDueTag /> : null}
@@ -1039,6 +1044,9 @@ function OrdersListPageImpl({
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-app-fg">
               {order.customerName || '—'}
+              {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+              )}
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
           </div>
@@ -1378,7 +1386,7 @@ function OrdersListPageImpl({
                 )}
                 {isTestOrdersView && (
                   <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
-                    Delete all test orders
+                    Cancel all test orders
                   </Button>
                 )}
                 {!isCartAbandonmentView && (
@@ -1447,7 +1455,7 @@ function OrdersListPageImpl({
                       setPurgeConfirmOpen(true);
                     }}
                   >
-                    Delete all test orders
+                    Cancel all test orders
                   </Button>
                 )}
                 {canBulkPick && !isCartAbandonmentView && filteredOrders.length > 0 && (
@@ -2328,16 +2336,16 @@ function OrdersListPageImpl({
 
       {purgeConfirmOpen && (
         <Modal open onClose={() => { if (purgeFetcher.state === 'idle') setPurgeConfirmOpen(false); }} maxWidth="max-w-sm" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-app-fg mb-2">Delete all test orders</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Cancel all test orders</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            This will permanently delete all orders where the customer name starts with &ldquo;test&rdquo;. Only orders that haven&rsquo;t moved stock (unprocessed, assigned, engaged, cancelled) are removed.
+            This will cancel all orders where the customer name contains &ldquo;test&rdquo;. Only pre-confirmation orders (unprocessed, assigned, engaged) are affected &mdash; stock-moved orders are skipped.
           </p>
           {purgeFetcher.state === 'idle' && purgeFetcher.data ? (
             <div className="mb-4">
               {purgeFetcher.data.success ? (
                 <div className="rounded-lg border border-success-300 bg-success-50 dark:border-success-700 dark:bg-success-900/20 px-4 py-3">
                   <p className="text-sm font-semibold text-success-700 dark:text-success-300">
-                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} deleted
+                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} cancelled
                   </p>
                   {(purgeFetcher.data.skipped ?? 0) > 0 && (
                     <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
@@ -2348,7 +2356,7 @@ function OrdersListPageImpl({
               ) : (
                 <div className="rounded-lg border border-danger-300 bg-danger-50 dark:border-danger-700 dark:bg-danger-900/20 px-4 py-3">
                   <p className="text-sm font-semibold text-danger-700 dark:text-danger-300">
-                    {purgeFetcher.data.error ?? 'Failed to delete test orders'}
+                    {purgeFetcher.data.error ?? 'Failed to cancel test orders'}
                   </p>
                 </div>
               )}
@@ -2363,12 +2371,12 @@ function OrdersListPageImpl({
                 variant="danger"
                 disabled={purgeFetcher.state !== 'idle'}
                 loading={purgeFetcher.state !== 'idle'}
-                loadingText="Deleting..."
+                loadingText="Cancelling..."
                 onClick={() => {
                   purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
                 }}
               >
-                Delete all test orders
+                Cancel all test orders
               </Button>
             )}
           </div>
