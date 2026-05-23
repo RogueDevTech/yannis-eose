@@ -2116,7 +2116,7 @@ export function OrderDetailPage({
                       }}
                       disabled={fetcher.state === 'submitting'}
                     >
-                      Cancel order
+                      Delete order
                     </Button>
                   )}
 
@@ -2731,7 +2731,7 @@ export function OrderDetailPage({
       {/* Cancel order modal (transition to CANCELLED) */}
       {cancelModalOpen && (
         <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
-            <h3 className="text-lg font-semibold text-app-fg mb-1">Cancel order</h3>
+            <h3 className="text-lg font-semibold text-app-fg mb-1">Delete order</h3>
             <p className="text-sm text-app-fg-muted mb-3">
               Please provide a reason (at least 10 characters). This will move the order to Cancelled.
             </p>

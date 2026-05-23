@@ -15,6 +15,7 @@ import type {
 import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { withActorAndBranch } from '../common/db/with-actor';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import type { SessionUser } from '../common/decorators/current-user.decorator';
 import { isAdminLevel } from '../common/authz';
 import { canonicalPermissionCode } from '@yannis/shared';
@@ -216,12 +217,10 @@ export class ShipmentsService {
       );
     }
     if (input.fromDate) {
-      baseConditions.push(gte(schema.shipments.createdAt, new Date(input.fromDate)));
+      baseConditions.push(gte(schema.shipments.createdAt, nigeriaDayStart(input.fromDate)));
     }
     if (input.toDate) {
-      const to = new Date(input.toDate);
-      to.setHours(23, 59, 59, 999);
-      baseConditions.push(lte(schema.shipments.createdAt, to));
+      baseConditions.push(lte(schema.shipments.createdAt, nigeriaDayEnd(input.toDate)));
     }
 
     const branchFilter = await this.resolveBranchFilter(actor, currentBranchId);

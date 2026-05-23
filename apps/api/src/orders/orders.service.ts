@@ -23,6 +23,7 @@ import {
 import { EDGE_FORM_ACTOR_ID, canonicalPermissionCode, buildOrderClipboardSummaryText, formatNigerianPhoneForClipboardPaste, formatOrderCustomerPhoneDisplay, resolveOrderClipboardPhone } from '@yannis/shared';
 import { DRIZZLE, REDIS } from '../database/database.module';
 import { withActor, withActorAndBranch } from '../common/db/with-actor';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { isAdminLevel } from '../common/authz';
 import { permissionRequestTypeTextEq } from '../common/db/permission-request-type-sql';
 import { EventsService } from '../events/events.service';
@@ -2650,17 +2651,10 @@ export class OrdersService {
       }
     }
     if (input.startDate) {
-      conditions.push(gte(schema.orders.createdAt, new Date(input.startDate)));
+      conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      // Bare `YYYY-MM-DD` is interpreted as start-of-day; bump to 23:59:59.999
-      // so the inclusive day filter actually covers the whole calendar day.
-      // ISO datetimes (`YYYY-MM-DDTHH:MM[:SS]`) carry an explicit moment from
-      // the new time-aware filter — leave them as-is so the user gets the
-      // exact upper bound they picked.
-      if (!input.endDate.includes('T')) end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.orders.createdAt, end));
+      conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(input.endDate)));
     }
     if (branchId) {
       if (
@@ -4393,12 +4387,8 @@ export class OrdersService {
     if (logisticsLocationId) conditions.push(eq(schema.orders.logisticsLocationId, logisticsLocationId));
     if (statuses?.length) conditions.push(inArray(schema.orders.status, statuses));
     if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
-    if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
-    if (endDate) {
-      const end = new Date(endDate);
-      if (!endDate.includes('T')) end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.orders.createdAt, end));
-    }
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const results = await this.db
@@ -4688,12 +4678,8 @@ export class OrdersService {
       eq(schema.orders.status, 'DELIVERED'),
       sql`${schema.orders.deliveredAt} IS NOT NULL`,
     ];
-    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.orders.deliveredAt, end));
-    }
+    if (startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(endDate)));
     if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
     const whereClause = and(...conditions);
     const dateTrunc = sql`DATE_TRUNC('day', ${schema.orders.deliveredAt})::date`;
@@ -4851,12 +4837,8 @@ export class OrdersService {
       eq(schema.orders.status, 'DELIVERED'),
       sql`${schema.orders.deliveredAt} IS NOT NULL`,
     ];
-    if (startDate) conditions.push(gte(schema.orders.deliveredAt, new Date(startDate)));
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.orders.deliveredAt, end));
-    }
+    if (startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(endDate)));
     if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
@@ -4911,13 +4893,8 @@ export class OrdersService {
     branchScope: 'servicing' | 'marketing' = 'servicing',
   ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
-    if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
-    if (endDate) {
-      const end = new Date(endDate);
-      // Skip the end-of-day bump for ISO datetimes — see listOrders for full reasoning.
-      if (!endDate.includes('T')) end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.orders.createdAt, end));
-    }
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
@@ -5130,12 +5107,11 @@ export class OrdersService {
   ) {
     const useCustomRange = startDate && endDate;
     const periodStart = useCustomRange
-      ? new Date(startDate)
+      ? nigeriaDayStart(startDate)
       : period === 'this_month'
         ? new Date(new Date().getFullYear(), new Date().getMonth(), 1)
         : null;
-    let periodEnd: Date | null = useCustomRange ? new Date(endDate) : null;
-    if (periodEnd) periodEnd.setHours(23, 59, 59, 999);
+    const periodEnd: Date | null = useCustomRange ? nigeriaDayEnd(endDate) : null;
 
     const agents = await (branchId
       ? this.db
@@ -7187,12 +7163,8 @@ export class OrdersService {
     activeOrders: number;
   }>> {
     const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
-    if (startDate) conditions.push(gte(schema.orders.createdAt, new Date(startDate)));
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.orders.createdAt, end));
-    }
+    if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
+    if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const whereClause = and(...conditions);
 
     // Join orders with branches to get per-branch counts
