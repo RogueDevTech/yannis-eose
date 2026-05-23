@@ -380,6 +380,29 @@ export function ProductsListPage({
         columns={productColumns}
         rows={filteredProducts}
         rowKey={(p) => p.id}
+        renderMobileCard={(product) => (
+          <button
+            type="button"
+            onClick={() => setViewProduct(product)}
+            className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-app-fg truncate">{product.name}</span>
+              <StatusBadge status={product.status} size="sm" />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-app-fg-muted">
+              <span className="truncate">{getDisplayCategory(product)}</span>
+              <span className="font-medium tabular-nums text-app-fg shrink-0">
+                <NairaPrice amount={Number(product.baseSalePrice)} />
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-xs text-app-fg-muted">
+              <span className={`tabular-nums ${(product.totalStock ?? 0) <= 0 ? 'text-danger-600 dark:text-danger-400' : ''}`}>
+                Stock: {(product.totalStock ?? 0).toLocaleString()}
+              </span>
+            </div>
+          </button>
+        )}
         emptyTitle={
           productsLoadError
             ? 'Unable to load products'
@@ -498,7 +521,12 @@ export function ProductsListPage({
         <ProductViewModal
           product={viewProduct}
           canEditProduct={canEditProduct}
+          canInstantArchiveProduct={canInstantArchiveProduct}
           onClose={() => setViewProduct(null)}
+          onArchive={(p) => {
+            setArchiveReason('');
+            setArchiveTarget(p);
+          }}
         />
       )}
     </div>

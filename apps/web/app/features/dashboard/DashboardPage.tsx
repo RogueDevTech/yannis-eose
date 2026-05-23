@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from '@remix-run/react';
 import { BranchScopedLink } from '~/components/ui/branch-scoped-link';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
+import { confirmationRateColorClass, deliveryRateColorClass, cpaColorClass } from '~/lib/rate-color';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeader } from '~/components/ui/page-header';
@@ -344,12 +345,12 @@ function CSDashboard({
                 {
                   label: 'Confirmation Rate',
                   value: `${metrics.confirmationRate.toFixed(1)}%`,
-                  valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+                  valueClassName: confirmationRateColorClass(metrics.confirmationRate),
                 },
                 {
                   label: 'Delivery Rate',
                   value: `${metrics.deliveryRate.toFixed(1)}%`,
-                  valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+                  valueClassName: deliveryRateColorClass(metrics.deliveryRate),
                 },
               ]}
             />
@@ -404,7 +405,7 @@ function CSDashboard({
               {
                 label: 'Delivery Rate',
                 value: `${metrics.deliveryRate.toFixed(1)}%`,
-                valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+                valueClassName: deliveryRateColorClass(metrics.deliveryRate),
               },
             ]}
           />
@@ -483,7 +484,7 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
           valueClassName: metrics.deliveredOrders > 0 ? 'text-success-600 dark:text-success-400' : 'text-app-fg',
           to: '/admin/marketing/orders?status=DELIVERED',
         },
-        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: 'text-app-fg', to: '/admin/marketing/ad-spend' },
+        { label: 'CPA', value: naira(Math.round(metrics.cpa)), valueClassName: cpaColorClass(metrics.cpa), to: '/admin/marketing/ad-spend' },
         {
           label: 'True ROAS',
           value: `${metrics.trueRoas.toFixed(2)}x`,
@@ -493,13 +494,13 @@ function MarketingMetricsStrip({ metrics, naira, abandonedCartCount = 0 }: { met
         {
           label: 'Delivery Rate',
           value: `${metrics.deliveryRate.toFixed(1)}%`,
-          valueClassName: metrics.deliveryRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+          valueClassName: deliveryRateColorClass(metrics.deliveryRate),
           to: '/admin/marketing/orders?status=DELIVERED',
         },
         {
           label: 'Confirmation Rate',
           value: `${metrics.confirmationRate.toFixed(1)}%`,
-          valueClassName: metrics.confirmationRate >= 70 ? 'text-success-600 dark:text-success-400' : 'text-warning-600 dark:text-warning-400',
+          valueClassName: confirmationRateColorClass(metrics.confirmationRate),
           to: '/admin/marketing/orders?status=CONFIRMED',
         },
         {

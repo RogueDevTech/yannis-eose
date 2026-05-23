@@ -404,13 +404,13 @@ function ShipmentsIndexContent(data: {
       <OverviewStatStrip
         mobileGrid
         items={[
-          { label: 'Total', value: data.summary.total, valueClassName: 'text-app-fg', to: buildStatusQuery('') },
-          { label: 'Created', value: data.summary.created, valueClassName: 'text-app-fg', to: buildStatusQuery('CREATED') },
-          { label: 'In transit', value: data.summary.inTransit, valueClassName: 'text-warning-600 dark:text-warning-400', to: buildStatusQuery('IN_TRANSIT') },
-          { label: 'Arrived', value: data.summary.arrived, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('ARRIVED') },
-          { label: 'Verified', value: data.summary.verified, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('VERIFIED') },
-          { label: 'Closed', value: data.summary.closed, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('CLOSED') },
-          { label: 'Cancelled', value: data.summary.cancelled, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusQuery('CANCELLED') },
+          { label: 'Total', value: data.summary.total, valueClassName: 'text-app-fg', to: buildStatusQuery(''), active: !data.filters.status },
+          { label: 'Created', value: data.summary.created, valueClassName: 'text-app-fg', to: buildStatusQuery('CREATED'), active: data.filters.status === 'CREATED' },
+          { label: 'In transit', value: data.summary.inTransit, valueClassName: 'text-warning-600 dark:text-warning-400', to: buildStatusQuery('IN_TRANSIT'), active: data.filters.status === 'IN_TRANSIT' },
+          { label: 'Arrived', value: data.summary.arrived, valueClassName: 'text-brand-600 dark:text-brand-400', to: buildStatusQuery('ARRIVED'), active: data.filters.status === 'ARRIVED' },
+          { label: 'Verified', value: data.summary.verified, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('VERIFIED'), active: data.filters.status === 'VERIFIED' },
+          { label: 'Closed', value: data.summary.closed, valueClassName: 'text-success-600 dark:text-success-400', to: buildStatusQuery('CLOSED'), active: data.filters.status === 'CLOSED' },
+          { label: 'Cancelled', value: data.summary.cancelled, valueClassName: 'text-danger-600 dark:text-danger-400', to: buildStatusQuery('CANCELLED'), active: data.filters.status === 'CANCELLED' },
         ]}
       />
 

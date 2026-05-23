@@ -8,6 +8,7 @@ import { AssignCloserModal } from '~/components/ui/assign-closer-modal';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { formatOrderTimestamp } from '~/lib/format-date';
+import { confirmationRateColorClass, deliveryRateColorClass } from '~/lib/rate-color';
 import { LiveIndicator } from '~/components/ui/live-indicator';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { OverviewStatStrip, OverviewStatStripSkeleton } from '~/components/ui/overview-stat-strip';
@@ -741,14 +742,50 @@ function OrdersListPageImpl({
   // and the mobile Smart-pick modal (opened from the tools sheet).
   function renderSmartPickToolbar() {
     if (!canBulkPick || isCartAbandonmentView || filteredOrders.length === 0) return null;
+    // Smart pick operates over the FULL filter, not just the current page, so
+    // picking 50 of 179 unassigned isn't silently clamped to the 20 visible on
+    // the page. Server bulk-action cap is `ORDERS_DEEP_SELECT_MAX` (100), so
+    // that's the hard ceiling we expose.
+    const smartPickCeiling = Math.min(total, ORDERS_DEEP_SELECT_MAX);
     return (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <SmartPick
-          total={filteredOrders.length}
+          total={smartPickCeiling}
           selectedCount={selectedIds.size}
-          onPick={(count) =>
-            setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)))
-          }
+          onPick={async (count) => {
+            // Fast path: requested count fits on the current page — slice locally.
+            if (count <= filteredOrders.length) {
+              if (selectAllMatchingActive) {
+                setSelectAllMatchingActive(false);
+                setSelectAllMatchingCapped(false);
+              }
+              setSelectedIds(new Set(filteredOrders.slice(0, count).map((o) => o.id)));
+              return;
+            }
+            // Cross-page path: fetch matching IDs from the server (same authz
+            // and scope as the visible list), then slice to the requested count.
+            if (!bulkSelectAllMatchingInput) {
+              setSelectedIds(new Set(filteredOrders.map((o) => o.id)));
+              return;
+            }
+            setSelectAllMatchingLoading(true);
+            setSelectAllMatchingError(null);
+            try {
+              const { ids, capped } = await fetchOrdersMatchingIds(bulkSelectAllMatchingInput);
+              if (ids.length === 0) {
+                setSelectAllMatchingError('Could not load matching orders. Try again.');
+                return;
+              }
+              const picked = ids.slice(0, count);
+              setSelectedIds(new Set(picked));
+              setSelectAllMatchingActive(true);
+              setSelectAllMatchingCapped(capped && count >= ids.length);
+            } catch {
+              setSelectAllMatchingError('Could not load matching orders. Try again.');
+            } finally {
+              setSelectAllMatchingLoading(false);
+            }
+          }}
           onClear={clearSelection}
           itemNoun="orders"
         />
@@ -1558,17 +1595,13 @@ function OrdersListPageImpl({
             {
               label: 'CR',
               value: `${confirmationRate.toFixed(1)}%`,
-              valueClassName: confirmationRate >= 70
-                ? 'text-success-600 dark:text-success-400'
-                : 'text-warning-600 dark:text-warning-400',
+              valueClassName: confirmationRateColorClass(confirmationRate),
               title: 'Confirmation Rate — confirmed / (confirmed + deleted)',
             },
             {
               label: 'DR',
               value: `${deliveryRate.toFixed(1)}%`,
-              valueClassName: deliveryRate >= 70
-                ? 'text-success-600 dark:text-success-400'
-                : 'text-warning-600 dark:text-warning-400',
+              valueClassName: deliveryRateColorClass(deliveryRate),
               title: 'Delivery Rate — delivered / confirmed',
             },
             ...(enableFromCartStatusOption

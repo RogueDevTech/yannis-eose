@@ -980,16 +980,7 @@ export function UserDetailPage({
         <div className="px-4 sm:px-6 pb-5 -mt-10 sm:-mt-12 relative">
           <div className="rounded-[1.25rem] border border-app-border/80 bg-app-elevated shadow-sm">
             <div className="px-4 sm:px-5 py-4">
-              <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-                {/* Avatar */}
-                <div
-                  className={`w-20 h-20 sm:w-24 sm:h-24 rounded-2xl ${profileAvatarTone} ring-4 ring-white dark:ring-surface-900 flex items-center justify-center shadow-lg flex-shrink-0`}
-                >
-                  <span className="text-2xl sm:text-3xl font-bold text-white tracking-wide">
-                    {initials}
-                  </span>
-                </div>
-
+              <div>
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                     <div className="min-w-0">

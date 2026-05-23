@@ -511,7 +511,7 @@ export function LogisticsTeamPage({
 
       <div>
         <ToolbarFiltersCollapsible
-          className="mb-4 !border-0 px-0 py-0"
+          className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={logisticsTeamToolbarFilterBadge}
           sheetSubtitle={<span>Sort options apply immediately</span>}

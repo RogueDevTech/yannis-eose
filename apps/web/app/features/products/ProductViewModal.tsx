@@ -1,4 +1,5 @@
 import { Link } from '@remix-run/react';
+import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { PRODUCT_STATUS_COLORS } from './types';
 import type { Product } from './types';
@@ -7,9 +8,12 @@ export interface ProductViewModalProps {
   product: Product;
   canEditProduct: boolean;
   onClose: () => void;
+  /** When set, show an archive button. Label adapts to instant vs request. */
+  canInstantArchiveProduct?: boolean;
+  onArchive?: (product: Product) => void;
 }
 
-export function ProductViewModal({ product, canEditProduct, onClose }: ProductViewModalProps) {
+export function ProductViewModal({ product, canEditProduct, onClose, canInstantArchiveProduct, onArchive }: ProductViewModalProps) {
   return (
     <Modal
       open
@@ -117,11 +121,32 @@ export function ProductViewModal({ product, canEditProduct, onClose }: ProductVi
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-app-border shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="flex flex-wrap items-center gap-2 p-4 border-t border-app-border shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {canEditProduct && (
+            <Link
+              to={`/admin/products/${product.id}?mode=edit`}
+              className="btn-primary btn-sm inline-flex items-center gap-1.5 sm:hidden"
+            >
+              Edit
+            </Link>
+          )}
+          {canEditProduct && product.status !== 'ARCHIVED' && onArchive && (
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                onClose();
+                onArchive(product);
+              }}
+            >
+              {canInstantArchiveProduct ? 'Archive' : 'Request archive'}
+            </Button>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="btn-secondary w-full sm:w-auto"
+            className="btn-secondary btn-sm"
           >
             Close
           </button>

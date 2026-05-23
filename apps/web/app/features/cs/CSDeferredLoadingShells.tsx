@@ -816,7 +816,7 @@ export function CSTeamLoadingShell({
       />
       <div>
         <ToolbarFiltersCollapsible
-          className="mb-4 !border-0 px-0 py-0"
+          className="mb-4 !border-0 !px-0 !py-0"
           hideMobileSheet
           badgeCount={filtersBadgeCount}
           sheetSubtitle={<span>Filter closers by live activity and backlog</span>}
@@ -1063,13 +1063,29 @@ export function CSMessageTemplatesLoadingShell() {
           { value: 'WHATSAPP', label: 'WhatsApp' },
         ]}
       />
-      <CompactTable<{ id: string }>
-        rows={rows}
-        rowKey={(r) => r.id}
-        columns={MSG_TEMPLATE_SHELL_COLS}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="h-3 w-48 rounded bg-app-hover animate-pulse" />
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          rows={rows}
+          rowKey={(r) => r.id}
+          columns={MSG_TEMPLATE_SHELL_COLS}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }

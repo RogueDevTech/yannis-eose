@@ -268,13 +268,33 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
         <div className="h-9 w-28 rounded-md bg-app-hover animate-pulse" aria-hidden />
         <div className="h-9 w-28 rounded-md bg-app-hover animate-pulse" aria-hidden />
       </div>
-      <CompactTable<{ id: string }>
-        columns={hrUsersShellColumns(staffAccounts)}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-full bg-app-hover animate-pulse shrink-0" />
+              <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
+              <div className="ml-auto h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 pl-[calc(1.75rem+0.625rem)]">
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          columns={hrUsersShellColumns(staffAccounts)}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }

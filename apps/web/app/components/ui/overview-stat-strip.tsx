@@ -178,27 +178,29 @@ export function OverviewStatStrip({
   const gridTile = [
     'rounded-lg',
     'bg-app-hover',
-    'px-2',
-    'py-1',
+    'px-3',
+    'py-1.5',
     'text-center',
+    'min-w-0',
+    'overflow-hidden',
     tileClassName,
   ].join(' ');
 
   const mobileGridContent = mobileGrid ? (
     <div className="md:hidden">
       <div
-        className="gap-1 px-1.5 py-1.5"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(6.5rem, 1fr))' }}
+        className="gap-1.5 px-1.5 py-1.5"
+        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(8.5rem, 100%), 1fr))' }}
       >
       {items.map((item, i) => {
         const inner = (
           <>
-            <p className="whitespace-nowrap text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
+            <p className="truncate text-micro font-medium text-app-fg-muted uppercase tracking-wider">{item.label}</p>
             {item.plainValue ? (
               <div className="mt-0.5 flex justify-center">{item.value}</div>
             ) : (
               <p
-                className={`mt-0.5 text-lg font-bold leading-tight ${item.valueClassName ?? 'text-app-fg'}`}
+                className={`mt-0.5 truncate text-lg font-bold leading-tight ${item.valueClassName ?? 'text-app-fg'}`}
               >
                 {item.value}
               </p>
@@ -211,7 +213,7 @@ export function OverviewStatStrip({
             {inner}
           </Link>
         ) : item.onClick ? (
-          <button key={i} type="button" onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} text-left`} title={item.title}>
+          <button key={i} type="button" onClick={item.onClick} className={`${gridTile} ${clickableTileClass} ${activeClass} text-center`} title={item.title}>
             {inner}
           </button>
         ) : (

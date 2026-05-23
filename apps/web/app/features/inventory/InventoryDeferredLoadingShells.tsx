@@ -536,13 +536,33 @@ export function WarehousesListLoadingShell() {
           { label: 'Total available units', value: <StatValuePulse className="min-w-[3rem]" /> },
         ]}
       />
-      <CompactTable<{ id: string }>
-        columns={warehousesShellColumns()}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-28 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          columns={warehousesShellColumns()}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }
@@ -703,13 +723,32 @@ export function ShipmentsListLoadingShell() {
         </form>
       </div>
 
-      <CompactTable<{ id: string }>
-        columns={SHIPMENTS_SHELL_COLS}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-24 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-28 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          columns={SHIPMENTS_SHELL_COLS}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }
@@ -1013,13 +1052,31 @@ export function CategoriesLoadingShell() {
         </form>
       </div>
 
-      <CompactTable<{ id: string }>
-        columns={CATEGORIES_SHELL_COLS}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="Loading…"
-        emptyDescription=""
-      />
+      {/* Mobile skeleton cards */}
+      <div className="md:hidden space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
+              <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block">
+        <CompactTable<{ id: string }>
+          columns={CATEGORIES_SHELL_COLS}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="Loading…"
+          emptyDescription=""
+        />
+      </div>
     </div>
   );
 }

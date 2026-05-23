@@ -532,38 +532,21 @@ function MessageTemplatesPage({
         emptyTitle="No templates yet"
         emptyDescription="Create one to enable SMS/WhatsApp messaging."
         renderMobileCard={(tpl) => (
-          <div className="space-y-3">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-medium text-app-fg truncate">{tpl.name}</p>
-                <span
-                  className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${channelPillClass(tpl.channel)}`}
-                >
-                  {tpl.channel}
-                </span>
-              </div>
+          <button
+            type="button"
+            onClick={() => setViewTemplate(tpl)}
+            className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-app-fg truncate">{tpl.name}</span>
               <span
-                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusPillClass(tpl.status)}`}
+                className={`inline-flex shrink-0 items-center px-2 py-0.5 rounded-full text-xs font-medium ${channelPillClass(tpl.channel)}`}
               >
-                {tpl.status}
+                {tpl.channel}
               </span>
             </div>
-            <p className="text-xs text-app-fg-muted line-clamp-3 break-words">{toUiBody(tpl.body)}</p>
-            <div className="flex flex-nowrap items-stretch justify-end gap-2">
-              <CompactTableActionButton onClick={() => setViewTemplate(tpl)}>View</CompactTableActionButton>
-              {canEditTemplate(tpl) ? (
-                <CompactTableActionButton
-                  className="!text-app-fg-muted hover:!text-brand-500 dark:hover:!text-brand-400"
-                  onClick={() => setEditTemplate(tpl)}
-                >
-                  Edit
-                </CompactTableActionButton>
-              ) : null}
-            </div>
-            {!canEditTemplate(tpl) ? (
-              <p className="text-center text-xs text-app-fg-muted">Read-only — created by another user</p>
-            ) : null}
-          </div>
+            <p className="text-xs text-app-fg-muted line-clamp-2 break-words">{toUiBody(tpl.body)}</p>
+          </button>
         )}
       />
 
@@ -601,7 +584,21 @@ function MessageTemplatesPage({
               {renderTemplateWithSampleData(viewTemplate.body)}
             </div>
           </div>
-          <div className="mt-5 flex justify-end border-t border-app-border pt-4">
+          <div className="mt-5 flex flex-wrap gap-2 justify-end border-t border-app-border pt-4">
+            {canEditTemplate(viewTemplate) && (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const tpl = viewTemplate;
+                  setViewTemplate(null);
+                  setEditTemplate(tpl);
+                }}
+              >
+                Edit
+              </Button>
+            )}
             <Button type="button" variant="secondary" size="sm" onClick={() => setViewTemplate(null)}>
               Close
             </Button>

@@ -479,6 +479,21 @@ export function CategoriesPage({ categories, total, actionData }: CategoriesPage
             </Button>
           }
           withCard={false}
+          renderMobileCard={(cat) => (
+            <button
+              type="button"
+              onClick={() => setViewCategory(cat)}
+              className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-app-fg truncate">{cat.name}</span>
+                <StatusBadge status={cat.status} />
+              </div>
+              <div className="text-xs text-app-fg-muted truncate">
+                {cat.brandName}
+              </div>
+            </button>
+          )}
         />
       </div>
 

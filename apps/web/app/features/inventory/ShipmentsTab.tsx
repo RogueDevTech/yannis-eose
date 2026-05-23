@@ -154,6 +154,40 @@ export function ShipmentsTab({
           rowKey={(r) => r.id}
           rowClassName={(s) => (isOptimisticId(s.id) ? 'opacity-60' : '')}
           emptyTitle="No shipments yet"
+          renderMobileCard={(s) => {
+            const body = (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-sm font-medium text-app-fg truncate">{s.referenceLabel}</span>
+                  <StatusBadge
+                    status={s.status}
+                    label={formatShipmentStatus(s.status)}
+                    variant={SHIPMENT_STATUS_VARIANT[s.status]}
+                  />
+                </div>
+                <div className="flex items-center gap-2 text-xs text-app-fg-muted truncate">
+                  <span>{s.supplierName ?? '—'}</span>
+                  <span className="text-app-fg-muted/50">→</span>
+                  <span>{s.destinationLocationName ?? '—'}</span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums">
+                  <span>{s.lineCount} line{s.lineCount === 1 ? '' : 's'} ({s.totalExpected} units)</span>
+                  <span>{formatNaira(s.totalLandingCost)}</span>
+                  {s.expectedArrivalAt ? <span>{formatDate(s.expectedArrivalAt)}</span> : null}
+                </div>
+              </>
+            );
+            if (isOptimisticId(s.id)) return body;
+            return (
+              <Link
+                to={`/admin/shipments/${s.id}`}
+                prefetch="intent"
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+              >
+                {body}
+              </Link>
+            );
+          }}
         />
       )}
     </div>
