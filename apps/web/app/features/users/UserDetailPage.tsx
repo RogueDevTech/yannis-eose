@@ -1041,7 +1041,7 @@ export function UserDetailPage({
                                   </Button>
                                 </span>
                               ) : (
-                                <Form method="post" data-branch-scoped-action="true">
+                                <Form method="post" data-branch-scoped-action="true" data-mirror-allow="">
                                   <input type="hidden" name="intent" value="mirror" />
                                   <Button
                                     type="submit"

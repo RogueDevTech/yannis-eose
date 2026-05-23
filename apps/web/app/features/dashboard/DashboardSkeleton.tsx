@@ -110,7 +110,7 @@ export function SuperAdminDashboardLoadingShell({
           Key Metrics
         </h2>
         <div className="card p-3 grid grid-cols-2 md:grid-cols-5 gap-2">
-          {['Ad Spend', 'Order Count', 'CPA', 'Delivery Rate', 'Active Staff'].map((label) => (
+          {['Ad Spend', 'Order Count', 'CPA', 'CR', 'DR'].map((label) => (
             <div key={label} className="rounded-lg bg-app-hover/50 px-2.5 py-2 text-center min-w-0">
               <p className="text-mini font-medium text-app-fg-muted">{label}</p>
               <p className="mt-1">

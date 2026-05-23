@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { TRPCError } from '@trpc/server';
-import { eq, and, or, desc, gte, lte, isNull, count, sum, inArray } from 'drizzle-orm';
+import { eq, and, or, desc, gte, lte, isNull, count, sum, inArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import type {
@@ -207,12 +207,15 @@ export class HrService {
           ),
         );
 
-      // Get total orders (all statuses) for delivery rate calculation
+      // Get total orders for delivery rate calculation — DELETED orders are
+      // editorial removals (test/fake/mistake), not real workload, so they
+      // never enter a rate denominator.
       const totalOrdersRows = await tx
         .select({ count: count() })
         .from(schema.orders)
         .where(
           and(
+            sql`${schema.orders.status} <> 'DELETED'`,
             gte(schema.orders.createdAt, periodStart),
             lte(schema.orders.createdAt, periodEnd),
             or(
@@ -555,6 +558,7 @@ export class HrService {
       .from(schema.orders)
       .where(
         and(
+          sql`${schema.orders.status} <> 'DELETED'`,
           gte(schema.orders.createdAt, start),
           lte(schema.orders.createdAt, end),
           or(
