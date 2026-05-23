@@ -39,6 +39,7 @@ export const USER_ROLE = {
   TPL_MANAGER: 'TPL_MANAGER',
   TPL_RIDER: 'TPL_RIDER',
   HR_MANAGER: 'HR_MANAGER',
+  SUPPORT: 'SUPPORT',
 } as const;
 
 export type UserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE];

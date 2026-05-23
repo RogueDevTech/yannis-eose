@@ -510,7 +510,7 @@ function getNavGroupsForUser(
   const result: SidebarGroup[] = [];
   const permSet = buildCanonicalPermSet(user?.permissions);
   // Broad sidebar visibility: SuperAdmin (system role) or explicit CEO/overview capability.
-  const navBypass = user?.role === 'SUPER_ADMIN' || permSetHas(permSet, 'ceo.overview');
+  const navBypass = user?.role === 'SUPER_ADMIN' || user?.role === 'SUPPORT' || permSetHas(permSet, 'ceo.overview');
   const role = user?.role ?? '';
   const forMobile = options?.forMobile === true;
 
@@ -621,6 +621,13 @@ const BOTTOM_NAV_PRIORITY_BY_ROLE: Record<string, string[]> = {
     '/admin/finance/overview',
   ],
   ADMIN: [
+    '/admin',
+    '/admin/marketing/overview',
+    '/admin/sales/queue',
+    '/admin/logistics/orders',
+    '/admin/finance/overview',
+  ],
+  SUPPORT: [
     '/admin',
     '/admin/marketing/overview',
     '/admin/sales/queue',

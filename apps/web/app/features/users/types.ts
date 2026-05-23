@@ -43,6 +43,7 @@ export const ROLE_COLORS: Record<string, string> = {
   TPL_MANAGER: 'badge-warning',
   TPL_RIDER: 'badge-warning',
   HR_MANAGER: 'badge-brand',
+  SUPPORT: 'badge-info',
 };
 
 export const USER_STATUS_COLORS: Record<string, string> = {
@@ -68,6 +69,7 @@ export const ROLE_OPTIONS = [
   'TPL_MANAGER',
   'TPL_RIDER',
   'HR_MANAGER',
+  'SUPPORT',
 ];
 
 export function formatRole(role: string): string {
@@ -415,6 +417,7 @@ export const ROLE_AVATAR_GRADIENTS: Record<string, string> = {
   TPL_MANAGER: 'from-orange-400 to-amber-600',
   TPL_RIDER: 'from-yellow-400 to-orange-500',
   HR_MANAGER: 'from-pink-400 to-rose-600',
+  SUPPORT: 'from-slate-400 to-gray-600',
 };
 
 export const ROLE_ICONS: Record<string, string> = {
@@ -431,4 +434,5 @@ export const ROLE_ICONS: Record<string, string> = {
   TPL_MANAGER: 'building',
   TPL_RIDER: 'bicycle',
   HR_MANAGER: 'users',
+  SUPPORT: 'eye',
 };

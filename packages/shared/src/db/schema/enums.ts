@@ -37,6 +37,9 @@ export const userRoleEnum = pgEnum('user_role', [
   'TPL_MANAGER',
   'TPL_RIDER',
   'HR_MANAGER',
+  // SUPPORT = read-only tech support role with full SUPER_ADMIN visibility.
+  // All tRPC mutations blocked at middleware layer. Can mirror any user.
+  'SUPPORT',
 ]);
 
 export const orderStatusEnum = pgEnum('order_status', [
