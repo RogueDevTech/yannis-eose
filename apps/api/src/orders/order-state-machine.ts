@@ -25,13 +25,19 @@ const ALLOWED_TRANSITIONS: TransitionRule[] = [
   // CS engagement flow
   { from: 'UNPROCESSED', to: 'CS_ENGAGED' },
   { from: 'CS_ASSIGNED', to: 'CS_ENGAGED' },
-  { from: 'CS_ASSIGNED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
   { from: 'CS_ENGAGED', to: 'CONFIRMED', gate: 'VOIP call_duration > 15 seconds' },
-  { from: 'CS_ENGAGED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
-  { from: 'UNPROCESSED', to: 'CANCELLED', gate: 'Mandatory reason note (min 10 chars)' },
-  // Restore — a cancelled order is never deleted; an Admin / Super Admin can send it
-  // back to the unassigned queue (it returns to UNPROCESSED, closer assignment cleared).
+
+  // Soft-delete — replaces the old CANCELLED flow (CEO directive 2026-05-23).
+  // Removes order from all metrics/counts but row stays in DB for audit.
+  // Permission-gated via `orders.delete` — HoCS by default (requires Admin approval).
+  { from: 'UNPROCESSED', to: 'DELETED', gate: 'Mandatory reason note (min 10 chars) + orders.delete permission' },
+  { from: 'CS_ASSIGNED', to: 'DELETED', gate: 'Mandatory reason note (min 10 chars) + orders.delete permission' },
+  { from: 'CS_ENGAGED', to: 'DELETED', gate: 'Mandatory reason note (min 10 chars) + orders.delete permission' },
+  // Legacy: CANCELLED orders from before the directive can still be deleted or restored.
+  { from: 'CANCELLED', to: 'DELETED', gate: 'orders.delete permission' },
   { from: 'CANCELLED', to: 'UNPROCESSED', gate: 'Admin / Super Admin only' },
+  // Restore from DELETED — Admin/SuperAdmin only.
+  { from: 'DELETED', to: 'UNPROCESSED', gate: 'Admin / Super Admin only' },
 
   // Logistics flow
   { from: 'CONFIRMED', to: 'AGENT_ASSIGNED', gate: '3PL location must have available stock' },
@@ -85,7 +91,7 @@ export function getTransitionRule(from: OrderStatus, to: OrderStatus): Transitio
 /**
  * Statuses that represent terminal states (no further transitions).
  */
-export const TERMINAL_STATUSES: OrderStatus[] = ['REMITTED', 'WRITTEN_OFF', 'RESTOCKED'];
+export const TERMINAL_STATUSES: OrderStatus[] = ['REMITTED', 'WRITTEN_OFF', 'RESTOCKED', 'DELETED'];
 
 /**
  * Statuses where stock reservation should be triggered.

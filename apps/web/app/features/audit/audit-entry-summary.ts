@@ -107,6 +107,7 @@ export const STATUS_LABELS: Record<string, string> = {
   RESTOCKED: 'Restocked',
   WRITTEN_OFF: 'Written Off',
   REMITTED: 'Remitted',
+  DELETED: 'Deleted',
   PENDING: 'Pending',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',

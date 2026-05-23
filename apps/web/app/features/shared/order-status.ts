@@ -98,6 +98,12 @@ const ORDER_STATUS_THEMES: Record<
     text: 'text-green-600 dark:text-green-400',
     hex: '#22c55e',
   },
+  DELETED: {
+    badge: 'badge bg-slate-100 text-slate-600 dark:bg-slate-800/50 dark:text-slate-400',
+    dot: 'bg-slate-400',
+    text: 'text-slate-500 dark:text-slate-400',
+    hex: '#94a3b8',
+  },
 };
 
 /** Badge class string (bg + text, light + dark) for order status badges. */
@@ -136,15 +142,17 @@ export const STATUS_LABELS: Record<string, string> = {
   RESTOCKED: 'Restocked',
   WRITTEN_OFF: 'Written Off',
   REMITTED: 'Cash Remitted',
+  DELETED: 'Deleted',
 };
 
 /**
  * The six top-level order buckets the CEO wants visible across admin order
  * surfaces (CEO directive 2026-05-09). Logistics-flow sub-stages
- * (AGENT_ASSIGNED, DISPATCHED, IN_TRANSIT) and exception states (CANCELLED,
- * RETURNED, PARTIALLY_DELIVERED, RESTOCKED, WRITTEN_OFF) are still real enum
- * values — they're rendered in detail pages, timelines, audit log — but they
- * no longer appear in the top-level filter row or status dropdown.
+ * (AGENT_ASSIGNED, DISPATCHED, IN_TRANSIT) and exception states (RETURNED,
+ * PARTIALLY_DELIVERED, RESTOCKED, WRITTEN_OFF) are still real enum values —
+ * they're rendered in detail pages, timelines, audit log — but they no longer
+ * appear in the top-level filter row or status dropdown. CANCELLED is legacy
+ * only (CEO directive 2026-05-23: replaced by DELETED).
  *
  * The Logistics module's own page (`/admin/logistics/orders`) and the TPL
  * portal define their own scoped option list and intentionally keep the

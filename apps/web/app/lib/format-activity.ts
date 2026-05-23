@@ -52,6 +52,7 @@ const STATUS_LABELS: Record<string, string> = {
   RESTOCKED: 'Restocked',
   WRITTEN_OFF: 'Written Off',
   REMITTED: 'Remitted',
+  DELETED: 'Deleted',
   PENDING: 'Pending',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
@@ -126,6 +127,10 @@ export function formatActivityDescription(entry: ActivityEntryLike): string {
     if (status === 'CANCELLED') {
       const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
       return `Cancelled order${customer}${reason}`;
+    }
+    if (status === 'DELETED') {
+      const reason = data.cancel_reason ? ` — ${data.cancel_reason}` : '';
+      return `Deleted order${customer}${reason}`;
     }
     if (status === 'AGENT_ASSIGNED') return `Order${customer} assigned for delivery (logistics company)`;
     if (status === 'DISPATCHED') return `Dispatched order${customer}`;

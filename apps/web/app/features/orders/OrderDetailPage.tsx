@@ -1252,14 +1252,16 @@ export function OrderDetailPage({
   function canTransitionTo(newStatus: string): boolean {
     const allowed = order.allowedTransitions ?? [];
     if (!allowed.includes(newStatus)) return false;
-    const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED', 'CANCELLED'];
+    // DELETED: permission-gated via `orders.delete`. Admin/SuperAdmin always can;
+    // others (HoCS, etc.) only if explicitly granted. CEO directive 2026-05-23.
+    if (newStatus === 'DELETED') {
+      return isAdminLevel({ role: userRole }) || (permissions ?? []).includes('orders.delete');
+    }
+    const csOnlyStatuses = ['CS_ENGAGED', 'CONFIRMED'];
     if (!csOnlyStatuses.includes(newStatus)) return true;
     if (!isCSOrHoS) return false;
     if (userRole === 'HEAD_OF_CS' || isAdminLevel({ role: userRole }) || branchAdminSameBranch) return true;
     if (userRole === 'CS_CLOSER') {
-      // Closers can no longer cancel an order — that is Head of CS / Branch Admin /
-      // Admin only (CEO directive 2026-05-20). They still engage and confirm.
-      if (newStatus === 'CANCELLED') return false;
       if (newStatus === 'CS_ENGAGED') {
         return isAssignedToMe || (order.status === 'UNPROCESSED' && !order.assignedCsId);
       }
@@ -2102,10 +2104,10 @@ export function OrderDetailPage({
                     </div>
                   ) : null}
 
-                  {/* Cancel order — lifecycle transition to CANCELLED. Restricted to
-                      Head of CS / Branch Admin / Admin: hidden entirely for closers
-                      rather than shown disabled (CEO directive 2026-05-20). */}
-                  {canTransitionTo('CANCELLED') && (
+                  {/* Delete order — lifecycle transition to DELETED. Restricted to
+                      HoCS / Branch Admin / Admin (permission-gated via orders.delete).
+                      CEO directive 2026-05-23: replaces the old CANCELLED flow. */}
+                  {canTransitionTo('DELETED') && (
                     <Button
                       type="button"
                       variant="secondary"
@@ -2191,15 +2193,17 @@ export function OrderDetailPage({
               </div>
             )}
 
-            {/* Restore — a cancelled order is never deleted from the database. It stays
-                visible under the "Deleted" tab and an Admin / Super Admin can send it
-                back to the unprocessed queue (CEO directive 2026-05-20). */}
-            {canEditOrder && order.status === 'CANCELLED' && isAdminLevel({ role: userRole }) && (
+            {/* Restore — cancelled and deleted orders stay in the database. Admin /
+                Super Admin can send them back to the unprocessed queue. */}
+            {canEditOrder && (order.status === 'CANCELLED' || order.status === 'DELETED') && isAdminLevel({ role: userRole }) && (
               <div className="card">
-                <h2 className="text-lg font-semibold text-app-fg mb-1">Cancelled order</h2>
+                <h2 className="text-lg font-semibold text-app-fg mb-1">
+                  {order.status === 'DELETED' ? 'Deleted order' : 'Cancelled order'}
+                </h2>
                 <p className="text-sm text-app-fg-muted mb-3">
-                  This order was cancelled. Restoring sends it back to the unprocessed
-                  queue for re-assignment — it is not deleted.
+                  {order.status === 'DELETED'
+                    ? 'This order was deleted and excluded from metrics. Restoring sends it back to the unprocessed queue.'
+                    : 'This order was cancelled. Restoring sends it back to the unprocessed queue for re-assignment.'}
                 </p>
                 <Button
                   type="button"
@@ -2412,8 +2416,8 @@ export function OrderDetailPage({
             })()}
 
             {/* Communication Panel — unified Call/SMS/WhatsApp panel for Sales closers.
-                Hidden once the order leaves the CS lifecycle (DELIVERED / COMPLETED /
-                CANCELLED / RETURNED / WRITTEN_OFF / RESTOCKED / PARTIALLY_DELIVERED) —
+                Hidden once the order leaves the CS lifecycle (DELIVERED / REMITTED /
+                CANCELLED / DELETED / RETURNED / WRITTEN_OFF / RESTOCKED / PARTIALLY_DELIVERED) —
                 customer engagement is already done at that point and the panel
                 just clutters the post-delivery view. */}
             {canEditOrder &&
@@ -2422,6 +2426,7 @@ export function OrderDetailPage({
               order.status !== 'DELIVERED' &&
               order.status !== 'REMITTED' &&
               order.status !== 'CANCELLED' &&
+              order.status !== 'DELETED' &&
               order.status !== 'RETURNED' &&
               order.status !== 'WRITTEN_OFF' &&
               order.status !== 'RESTOCKED' &&
@@ -2739,14 +2744,14 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      {/* Cancel order modal (transition to CANCELLED) */}
+      {/* Delete order modal (transition to DELETED) — CEO directive 2026-05-23 */}
       {cancelModalOpen && (
         <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-app-fg mb-1">Delete order</h3>
             <p className="text-sm text-app-fg-muted mb-3">
-              Please provide a reason (at least 10 characters). This will move the order to Cancelled.
+              Please provide a reason (at least 10 characters). Deleted orders are removed from metrics but stay in the database.
             </p>
-            <ModalFetcherInlineError message={fetcherErrorForTransition('CANCELLED')} />
+            <ModalFetcherInlineError message={fetcherErrorForTransition('DELETED')} />
             <div className="flex flex-wrap gap-2 mb-3">
               {['Customer not picking', 'Wrong number', 'Customer refused', 'Duplicate', 'Other'].map((preset) => {
                 const isOther = preset === 'Other';
@@ -2772,7 +2777,7 @@ export function OrderDetailPage({
             <Textarea
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="Customer not picking"
+              placeholder="Enter deletion reason..."
               rows={3}
             />
             <div className="flex gap-2 mt-4 justify-end">
@@ -2790,7 +2795,7 @@ export function OrderDetailPage({
                 method="post"
               >
                 <input type="hidden" name="intent" value="transition" />
-                <input type="hidden" name="newStatus" value="CANCELLED" />
+                <input type="hidden" name="newStatus" value="DELETED" />
                 {order.branchId ? <input type="hidden" name="branchId" value={order.branchId} /> : null}
                 <input type="hidden" name="reason" value={cancelReason} />
                 <Button
@@ -2808,10 +2813,12 @@ export function OrderDetailPage({
         </Modal>
       )}
 
-      {/* Restore order modal (CANCELLED → UNPROCESSED) — Admin / Super Admin only */}
+      {/* Restore order modal (CANCELLED/DELETED → UNPROCESSED) — Admin / Super Admin only */}
       {restoreModalOpen && (
         <Modal open onClose={() => setRestoreModalOpen(false)} maxWidth="max-w-md" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-app-fg mb-1">Restore cancelled order</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-1">
+            Restore {order.status === 'DELETED' ? 'deleted' : 'cancelled'} order
+          </h3>
           <p className="text-sm text-app-fg-muted mb-4">
             This order moves back to <strong>Unprocessed</strong> and returns to the
             unassigned queue. The previous closer assignment is cleared.

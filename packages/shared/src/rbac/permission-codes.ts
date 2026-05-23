@@ -78,6 +78,7 @@ export const LEGACY_PERMISSION_CODE_MAP: Record<string, string> = {
   'finance.cashRemittance.markReceived': 'finance.cash_remittance.mark_received',
   // Phase 21 — capabilities split out from inline router/service role lists.
   'orders.createOffline': 'orders.createOffline',
+  'orders.delete': 'orders.delete',
   'messaging.templates.create': 'messaging.templates.create',
   'messaging.templates.update': 'messaging.templates.update',
   'logistics.transferRemittance.markReceived': 'logistics.transfer_remittance.mark_received',

@@ -136,10 +136,12 @@ function addMonthsYm(ym: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// Status transitions that make sense for bulk operations
+// Status transitions that make sense for bulk operations.
+// CEO directive 2026-05-23: CANCELLED removed — only DELETED (permission-gated).
 const BULK_TRANSITIONS: Record<string, string[]> = {
-  UNPROCESSED: ['CANCELLED'],
-  CS_ASSIGNED: ['CANCELLED'],
+  UNPROCESSED: ['DELETED'],
+  CS_ASSIGNED: ['DELETED'],
+  CS_ENGAGED: ['DELETED'],
   CONFIRMED: ['AGENT_ASSIGNED'],
   AGENT_ASSIGNED: ['DISPATCHED'],
   DISPATCHED: ['IN_TRANSIT'],
@@ -149,7 +151,7 @@ const BULK_TRANSITIONS: Record<string, string[]> = {
 // Falls back to the generic "Transition to <STATUS>" form for any status not listed.
 function bulkTransitionLabel(targetStatus: string): string {
   switch (targetStatus) {
-    case 'CANCELLED':
+    case 'DELETED':
       return 'Delete orders';
     case 'AGENT_ASSIGNED':
       return 'Assign for delivery';
@@ -356,9 +358,9 @@ function OrdersListPageImpl({
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
   useFetcherToast(purgeFetcher.data, {
-    successTitle: 'Test orders cancelled',
-    successMessage: `${purgeFetcher.data?.deleted ?? 0} cancelled${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
-    errorTitle: 'Cancel failed',
+    successTitle: 'Test orders deleted',
+    successMessage: `${purgeFetcher.data?.deleted ?? 0} deleted${(purgeFetcher.data?.skipped ?? 0) > 0 ? `, ${purgeFetcher.data?.skipped} skipped (stock moved)` : ''}`,
+    errorTitle: 'Delete failed',
   });
   // Mobile-only: Smart pick lives in the tools sheet and opens its own modal.
   const [smartPickModalOpen, setSmartPickModalOpen] = useState(false);
@@ -440,6 +442,33 @@ function OrdersListPageImpl({
   // chose to extend the page-only selection to every order matching the
   // current filter (server-fetched, capped at ORDERS_DEEP_SELECT_MAX).
   const [selectAllMatchingActive, setSelectAllMatchingActive] = useState(false);
+
+  /** Update selected status + URL params without triggering a full route navigation.
+   *  Stat strip items use this so the strip never flickers with a skeleton. */
+  const handleStatusSelect = useCallback((v: string) => {
+    setSelectedStatus(v);
+    setSelectedIds(new Set());
+    setBulkResult(null);
+    setSearchParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('page', '1');
+      if (v === FROM_CART_STATUS_VALUE) {
+        next.delete('status');
+        next.delete('testOrders');
+        next.set('fromCart', '1');
+      } else if (v === TEST_ORDERS_STATUS_VALUE) {
+        next.delete('status');
+        next.delete('fromCart');
+        next.set('testOrders', '1');
+      } else {
+        next.delete('fromCart');
+        next.delete('testOrders');
+        if (v === 'ALL') next.delete('status');
+        else next.set('status', v);
+      }
+      return next;
+    });
+  }, [setSearchParams]);
   const [selectAllMatchingLoading, setSelectAllMatchingLoading] = useState(false);
   const [selectAllMatchingCapped, setSelectAllMatchingCapped] = useState(false);
   const [selectAllMatchingError, setSelectAllMatchingError] = useState<string | null>(null);
@@ -582,15 +611,46 @@ function OrdersListPageImpl({
   // Unprocessed / Confirmed / Delivered. `excludeStatuses` is honoured here too so
   // Sales (which excludes REMITTED — cash remittance is accountant-only) doesn't get
   // a "Cash Remitted" tile the closer can't act on.
-  const STATUS_KEYS = STATUS_OPTIONS.filter(
+  // Pipeline statuses (excluding DELETED — it goes after CR/DR).
+  const PIPELINE_KEYS = STATUS_OPTIONS.filter(
     (s) => s !== 'ALL' && !excludeStatuses?.includes(s),
   );
-  const statusItems = STATUS_KEYS.map((status) => ({
+  const pipelineItems = PIPELINE_KEYS.map((status) => ({
     label: STATUS_LABELS[status] ?? formatStatus(status),
     value: statusCounts[status] ?? 0,
     valueClassName: STATUS_TEXT_CLASS[status] ?? 'text-app-fg',
-    to: buildQueryString({ status, page: 1 }),
+    active: selectedStatus === status,
+    onClick: () => handleStatusSelect(status),
   }));
+  // Deleted item — placed after rates for logical grouping.
+  const deletedItem = !excludeStatuses?.includes('DELETED')
+    ? {
+        label: 'Deleted',
+        value: statusCounts['DELETED'] ?? 0,
+        valueClassName: 'text-danger-600 dark:text-danger-400',
+        active: selectedStatus === 'DELETED',
+        onClick: () => handleStatusSelect('DELETED'),
+      }
+    : null;
+
+  // CR = confirmed-or-beyond / (confirmed-or-beyond + deleted)
+  // DR = delivered-or-remitted / confirmed-or-beyond
+  const confirmedPlus =
+    (statusCounts['CONFIRMED'] ?? 0) +
+    (statusCounts['AGENT_ASSIGNED'] ?? 0) +
+    (statusCounts['DISPATCHED'] ?? 0) +
+    (statusCounts['IN_TRANSIT'] ?? 0) +
+    (statusCounts['DELIVERED'] ?? 0) +
+    (statusCounts['PARTIALLY_DELIVERED'] ?? 0) +
+    (statusCounts['REMITTED'] ?? 0) +
+    (statusCounts['RETURNED'] ?? 0) +
+    (statusCounts['RESTOCKED'] ?? 0) +
+    (statusCounts['WRITTEN_OFF'] ?? 0);
+  const deletedTotal = statusCounts['DELETED'] ?? 0;
+  const deliveredPlus = (statusCounts['DELIVERED'] ?? 0) + (statusCounts['REMITTED'] ?? 0);
+  const crDenom = confirmedPlus + deletedTotal;
+  const confirmationRate = crDenom > 0 ? (confirmedPlus / crDenom) * 100 : 0;
+  const deliveryRate = confirmedPlus > 0 ? (deliveredPlus / confirmedPlus) * 100 : 0;
 
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('Customer not picking');
@@ -754,7 +814,7 @@ function OrdersListPageImpl({
   }, [fetcher.data, requiresBranchSelection, ensureBranchForAction]);
 
   const submitBulkTransition = (newStatus: string) => {
-    if (newStatus === 'CANCELLED') {
+    if (newStatus === 'DELETED') {
       setCancelModalOpen(true);
       return;
     }
@@ -842,13 +902,13 @@ function OrdersListPageImpl({
     setBulkResult(null);
     setCancelModalOpen(false);
     ensureBranchForAction({
-      actionLabel: 'cancelling selected orders',
+      actionLabel: 'deleting selected orders',
       onProceed: () =>
         fetcher.submit(
           {
             intent: 'bulkTransition',
             orderIds: JSON.stringify([...selectedIds]),
-            newStatus: 'CANCELLED',
+            newStatus: 'DELETED',
             reason: cancelReason,
           },
           { method: 'post' },
@@ -877,7 +937,7 @@ function OrdersListPageImpl({
             <span className="font-medium text-app-fg">
               {order.customerName}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
             </span>
             {isPreferredDeliveryDueToday(order.preferredDeliveryDate, order.status) ? <DueTodayTag /> : null}
@@ -1045,7 +1105,7 @@ function OrdersListPageImpl({
             <span className="min-w-0 truncate text-sm font-medium text-app-fg">
               {order.customerName || '—'}
               {/^test([^a-zA-Z]|$)/i.test(order.customerName?.trim() ?? '') && (
-                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-surface-300/80 bg-surface-100 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-surface-500 dark:border-surface-600/50 dark:bg-surface-800/50 dark:text-surface-400">Test</span>
+                <span className="ml-1.5 inline-flex shrink-0 items-center rounded-full border border-danger-300 bg-danger-50 px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide text-danger-600 dark:border-danger-700 dark:bg-danger-900/30 dark:text-danger-400">Test</span>
               )}
             </span>
             <OrderIdBadge id={order.id} orderNumber={order.orderNumber} textClassName="text-sm font-medium text-app-fg" />
@@ -1107,12 +1167,11 @@ function OrdersListPageImpl({
       value: status,
       label: status === 'ALL' ? 'All Statuses' : formatStatus(status),
     })),
-    // "Deleted" tab — cancelled orders are never removed from the database; this
-    // surfaces them so admins can review (and restore) them. CANCELLED is kept out
-    // of the shared STATUS_OPTIONS by the six-bucket CEO directive, so it is
-    // appended here explicitly. Visible to every role (CEO directive 2026-05-20).
-    ...(!excludeStatuses?.includes('CANCELLED')
-      ? [{ value: 'CANCELLED', label: 'Deleted' }]
+    // "Deleted" tab — soft-removed orders excluded from all metrics/counts.
+    // CEO directive 2026-05-23: DELETED replaces the old CANCELLED flow.
+    // Row stays in DB; Admin/SuperAdmin can restore. Migration 0153.
+    ...(!excludeStatuses?.includes('DELETED')
+      ? [{ value: 'DELETED', label: 'Deleted' }]
       : []),
     ...(enableFromCartStatusOption
       ? [{ value: FROM_CART_STATUS_VALUE, label: 'Cart abandonment' }]
@@ -1238,31 +1297,7 @@ function OrdersListPageImpl({
                   <div className={mobileFilterBoxClass}>
                     <FormSelect
                       value={selectedStatus}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setSelectedStatus(v);
-                        setSelectedIds(new Set());
-                        setBulkResult(null);
-                        setSearchParams((p) => {
-                          const next = new URLSearchParams(p);
-                          next.set('page', '1');
-                          if (v === FROM_CART_STATUS_VALUE) {
-                            next.delete('status');
-                            next.delete('testOrders');
-                            next.set('fromCart', '1');
-                          } else if (v === TEST_ORDERS_STATUS_VALUE) {
-                            next.delete('status');
-                            next.delete('fromCart');
-                            next.set('testOrders', '1');
-                          } else {
-                            next.delete('fromCart');
-                            next.delete('testOrders');
-                            if (v === 'ALL') next.delete('status');
-                            else next.set('status', v);
-                          }
-                          return next;
-                        });
-                      }}
+                      onChange={(e) => handleStatusSelect(e.target.value)}
                       options={statusOptions}
                       controlSize="sm"
                       openAs="modal"
@@ -1386,7 +1421,7 @@ function OrdersListPageImpl({
                 )}
                 {isTestOrdersView && (
                   <Button variant="danger" size="sm" onClick={() => setPurgeConfirmOpen(true)} disabled={purgeFetcher.state !== 'idle'}>
-                    Cancel all test orders
+                    Delete all test orders
                   </Button>
                 )}
                 {!isCartAbandonmentView && (
@@ -1455,7 +1490,7 @@ function OrdersListPageImpl({
                       setPurgeConfirmOpen(true);
                     }}
                   >
-                    Cancel all test orders
+                    Delete all test orders
                   </Button>
                 )}
                 {canBulkPick && !isCartAbandonmentView && filteredOrders.length > 0 && (
@@ -1491,9 +1526,9 @@ function OrdersListPageImpl({
       {/* Status totals — moved above My Workload so the funnel snapshot reads first.
           For HoCS+ the strip leads with a "Cart abandonment" KPI (open un-recovered
           carts) so the recovery backlog is visible without opening the filter. */}
-      {deferredLoading ? (
+      {deferredLoading && Object.keys(statusCounts).length === 0 ? (
         <OverviewStatStripSkeleton
-          count={1 + STATUS_KEYS.length + (enableFromCartStatusOption ? 1 : 0)}
+          count={1 + PIPELINE_KEYS.length + (enableFromCartStatusOption ? 1 : 0) + 3}
         />
       ) : (
         // One strip in every mode — the order funnel snapshot stays put when you
@@ -1504,14 +1539,31 @@ function OrdersListPageImpl({
           items={[
             {
               label: 'Total',
-              // `total` counts carts while the cart view is active — keep this
-              // tile the order total (sum of status counts) so the strip never
-              // double-reads as the cart count.
-              value: isCartAbandonmentView
-                ? Object.values(statusCounts).reduce((sum, n) => sum + (n || 0), 0)
-                : total,
+              // Always derive from statusCounts (the source of truth) so
+              // search/filter changes don't make the overview strip fluctuate.
+              value: Object.entries(statusCounts)
+                .filter(([k]) => k !== 'DELETED')
+                .reduce((sum, [, n]) => sum + (n || 0), 0),
               valueClassName: 'text-app-fg',
-              to: buildQueryString({ status: 'ALL', page: 1 }),
+              active: selectedStatus === 'ALL',
+              onClick: () => handleStatusSelect('ALL'),
+            },
+            ...pipelineItems,
+            {
+              label: 'CR',
+              value: `${confirmationRate.toFixed(1)}%`,
+              valueClassName: confirmationRate >= 70
+                ? 'text-success-600 dark:text-success-400'
+                : 'text-warning-600 dark:text-warning-400',
+              title: 'Confirmation Rate — confirmed / (confirmed + deleted)',
+            },
+            {
+              label: 'DR',
+              value: `${deliveryRate.toFixed(1)}%`,
+              valueClassName: deliveryRate >= 70
+                ? 'text-success-600 dark:text-success-400'
+                : 'text-warning-600 dark:text-warning-400',
+              title: 'Delivery Rate — delivered / confirmed',
             },
             ...(enableFromCartStatusOption
               ? [
@@ -1523,11 +1575,12 @@ function OrdersListPageImpl({
                         ? 'text-amber-600 dark:text-amber-400'
                         : 'text-app-fg',
                     title: 'Open abandoned carts not yet recovered',
-                    to: buildQueryString({ status: FROM_CART_STATUS_VALUE, page: 1 }),
+                    onClick: () => handleStatusSelect(FROM_CART_STATUS_VALUE),
+                    active: selectedStatus === FROM_CART_STATUS_VALUE,
                   },
                 ]
               : []),
-            ...statusItems,
+            ...(deletedItem ? [deletedItem] : []),
           ]}
         />
       )}
@@ -1837,31 +1890,7 @@ function OrdersListPageImpl({
               <div className="hidden shrink-0 items-center gap-3 md:flex">
                 <FormSelect
                   value={selectedStatus}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setSelectedStatus(v);
-                    setSelectedIds(new Set());
-                    setBulkResult(null);
-                    setSearchParams((p) => {
-                      const next = new URLSearchParams(p);
-                      next.set('page', '1');
-                      if (v === FROM_CART_STATUS_VALUE) {
-                        next.delete('status');
-                        next.delete('testOrders');
-                        next.set('fromCart', '1');
-                      } else if (v === TEST_ORDERS_STATUS_VALUE) {
-                        next.delete('status');
-                        next.delete('fromCart');
-                        next.set('testOrders', '1');
-                      } else {
-                        next.delete('fromCart');
-                        next.delete('testOrders');
-                        if (v === 'ALL') next.delete('status');
-                        else next.set('status', v);
-                      }
-                      return next;
-                    });
-                  }}
+                  onChange={(e) => handleStatusSelect(e.target.value)}
                   options={statusOptions}
                   wrapperClassName="w-full min-w-0 sm:w-48"
                 />
@@ -2191,7 +2220,7 @@ function OrdersListPageImpl({
               Delete {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}?
             </h3>
             <p className="text-sm text-app-fg-muted mb-3">
-              Please provide a reason (at least 10 characters). Selected orders will be moved to Cancelled.
+              Please provide a reason (at least 10 characters). Deleted orders are removed from metrics but stay in the database.
             </p>
             {/* Preset reason buttons */}
             <div className="flex flex-wrap gap-2 mb-3">
@@ -2220,7 +2249,7 @@ function OrdersListPageImpl({
             <Textarea
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="Enter cancellation reason..."
+              placeholder="Enter deletion reason..."
               rows={3}
             />
             {/* Modal actions */}
@@ -2240,7 +2269,7 @@ function OrdersListPageImpl({
                 variant="danger"
                 disabled={cancelReason.trim().length < 10 || isSubmitting}
                 loading={isSubmitting}
-                loadingText="Cancelling..."
+                loadingText="Deleting..."
                 onClick={submitBulkCancel}
               >
                 Delete {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
@@ -2336,16 +2365,16 @@ function OrdersListPageImpl({
 
       {purgeConfirmOpen && (
         <Modal open onClose={() => { if (purgeFetcher.state === 'idle') setPurgeConfirmOpen(false); }} maxWidth="max-w-sm" contentClassName="p-6">
-          <h3 className="text-lg font-semibold text-app-fg mb-2">Cancel all test orders</h3>
+          <h3 className="text-lg font-semibold text-app-fg mb-2">Delete all test orders</h3>
           <p className="text-sm text-app-fg-muted mb-4">
-            This will cancel all orders where the customer name contains &ldquo;test&rdquo;. Only pre-confirmation orders (unprocessed, assigned, engaged) are affected &mdash; stock-moved orders are skipped.
+            This will delete all orders where the customer name contains &ldquo;test&rdquo;. Deleted orders are removed from metrics but stay in the database. Pre-confirmation and cancelled orders are affected &mdash; stock-moved orders are skipped.
           </p>
           {purgeFetcher.state === 'idle' && purgeFetcher.data ? (
             <div className="mb-4">
               {purgeFetcher.data.success ? (
                 <div className="rounded-lg border border-success-300 bg-success-50 dark:border-success-700 dark:bg-success-900/20 px-4 py-3">
                   <p className="text-sm font-semibold text-success-700 dark:text-success-300">
-                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} cancelled
+                    {purgeFetcher.data.deleted ?? 0} test order{(purgeFetcher.data.deleted ?? 0) !== 1 ? 's' : ''} deleted
                   </p>
                   {(purgeFetcher.data.skipped ?? 0) > 0 && (
                     <p className="text-xs text-success-600 dark:text-success-400 mt-0.5">
@@ -2356,7 +2385,7 @@ function OrdersListPageImpl({
               ) : (
                 <div className="rounded-lg border border-danger-300 bg-danger-50 dark:border-danger-700 dark:bg-danger-900/20 px-4 py-3">
                   <p className="text-sm font-semibold text-danger-700 dark:text-danger-300">
-                    {purgeFetcher.data.error ?? 'Failed to cancel test orders'}
+                    {purgeFetcher.data.error ?? 'Failed to delete test orders'}
                   </p>
                 </div>
               )}
@@ -2371,12 +2400,12 @@ function OrdersListPageImpl({
                 variant="danger"
                 disabled={purgeFetcher.state !== 'idle'}
                 loading={purgeFetcher.state !== 'idle'}
-                loadingText="Cancelling..."
+                loadingText="Deleting..."
                 onClick={() => {
                   purgeFetcher.submit({ intent: 'purgeTestOrders' }, { method: 'post' });
                 }}
               >
-                Cancel all test orders
+                Delete all test orders
               </Button>
             )}
           </div>

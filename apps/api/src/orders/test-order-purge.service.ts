@@ -12,16 +12,17 @@ import { CacheService } from '../common/cache/cache.service';
  * Order statuses that have NOT moved any inventory yet. Test orders past
  * CONFIRMED have reserved / allocated / deducted stock from batches — the
  * cron skips them and logs them for manual review instead (CEO directive
- * 2026-05-22). CANCELLED is also stock-neutral because the lifecycle only
- * allows cancellation from the pre-confirmation states.
+ * 2026-05-22). CANCELLED and DELETED are also stock-neutral because the
+ * lifecycle only allows them from pre-confirmation states.
  */
-const STOCK_NEUTRAL_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CANCELLED'] as const;
+const STOCK_NEUTRAL_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CANCELLED', 'DELETED'] as const;
 
 /**
- * Pre-cancellation statuses the cron actually transitions to CANCELLED.
- * Excludes CANCELLED itself (no-op) and every stock-moved status.
+ * Pre-deletion statuses the cron actually transitions to DELETED.
+ * Excludes DELETED itself (no-op), CANCELLED (already terminal), and every
+ * stock-moved status.
  */
-const PRE_CANCEL_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
+const PRE_DELETE_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CANCELLED'] as const;
 
 /**
  * Hard cap on orders cancelled per run — a guardrail so a mis-firing match
@@ -42,17 +43,17 @@ const MAX_PER_RUN = 200;
 const TEST_NAME_MATCH = sql`btrim(${schema.orders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
 
 /**
- * TestOrderPurgeService — scheduled auto-cancellation of test orders.
+ * TestOrderPurgeService — scheduled auto-deletion of test orders.
  *
  * Every 2 hours it scans the **last 48 hours** of orders, finds the ones
  * whose customer name contains the whole word "test" anywhere (see
- * `TEST_NAME_MATCH`), and **transitions** the pre-confirmation ones to
- * `CANCELLED` inside one SYSTEM-attributed transaction — same shape as the
- * manual Cancel flow. Per CEO directive (2026-05-23) **no order ever leaves
- * the DB**; test orders simply surface in the Deleted tab via their normal
- * cancelled state, and Admin/SuperAdmin can restore them like any other
- * cancelled order. Stock-moved test orders are never auto-cancelled — they
- * are surfaced as a warning for a human to clean up alongside inventory.
+ * `TEST_NAME_MATCH`), and **transitions** the pre-confirmation + cancelled
+ * ones to `DELETED` inside one SYSTEM-attributed transaction. DELETED orders
+ * are excluded from ALL metrics/counts but the row stays in the DB (audit
+ * trail preserved). Admin/SuperAdmin can restore to UNPROCESSED.
+ *
+ * Stock-moved test orders are never auto-deleted — they are surfaced as a
+ * warning for a human to clean up alongside inventory.
  *
  * The matcher's deliberately wide and the per-run cap (`MAX_PER_RUN`) is the
  * guardrail: a mis-firing run can't sweep more than that in one tick.
@@ -95,13 +96,11 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
 
   /**
    * Find test orders, skip+log the stock-moved ones, transition the rest to
-   * CANCELLED. Per CEO directive 2026-05-23, no `orders` row is ever deleted
-   * — they go to the Deleted tab via their cancelled state and can be
-   * restored by Admin/SuperAdmin like any other cancelled order.
+   * DELETED. Per CEO directive 2026-05-23, no `orders` row is ever hard-deleted
+   * — they go to the Deleted tab and can be restored by Admin/SuperAdmin.
    *
    * @param allDates    When true, scan every order; when false (cron default),
    *                    only those created in the last 48 hours.
-   * Returns `{ cancelled, skipped }` (see `deleted` alias for back-compat).
    */
   async purgeTestOrders(
     allDates = false,
@@ -113,8 +112,8 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       ? undefined
       : gte(schema.orders.createdAt, new Date(Date.now() - 48 * 60 * 60 * 1000));
 
-    // Test orders that already moved stock — never auto-cancelled here; the
-    // lifecycle forbids CANCELLED from those states because real inventory
+    // Test orders that already moved stock — never auto-deleted here; the
+    // lifecycle forbids DELETED from those states because real inventory
     // would have to be reversed. Surface them so a human can correct stock
     // and decide what to do with the row.
     const stockMoved = await this.db
@@ -133,14 +132,14 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         .map((o) => `${o.id} (${o.customerName} · ${o.status})`)
         .join('; ');
       this.logger.warn(
-        `${stockMoved.length} test order(s) already moved stock — NOT auto-cancelled, ` +
+        `${stockMoved.length} test order(s) already moved stock — NOT auto-deleted, ` +
           `need manual review (correct inventory + decide by hand): ${preview}` +
           (stockMoved.length > 30 ? ` … +${stockMoved.length - 30} more` : ''),
       );
     }
 
-    // Cancellable test orders — pre-confirmation statuses only (already-CANCELLED
-    // skipped: it's a no-op and would emit a spurious timeline event).
+    // Deletable test orders — pre-confirmation + CANCELLED statuses.
+    // Already-DELETED orders are skipped (no-op).
     const targets = await this.db
       .select({
         id: schema.orders.id,
@@ -149,7 +148,7 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         branchId: schema.orders.branchId,
       })
       .from(schema.orders)
-      .where(and(TEST_NAME_MATCH, inArray(schema.orders.status, [...PRE_CANCEL_STATUSES]), dateFilter))
+      .where(and(TEST_NAME_MATCH, inArray(schema.orders.status, [...PRE_DELETE_STATUSES]), dateFilter))
       .orderBy(schema.orders.createdAt)
       .limit(MAX_PER_RUN);
 
@@ -163,53 +162,50 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
       .map((t) => `${t.id} (${t.customerName} · ${t.status})`)
       .join('; ');
 
-    // One SYSTEM-attributed transaction: flip status → CANCELLED and emit an
-    // ORDER_CANCELLED timeline event per order so the Deleted tab and audit
-    // trail look identical to a manual cancel. Pre-confirmation statuses are
-    // stock-neutral by lifecycle, so there's nothing to release.
+    // One SYSTEM-attributed transaction: flip status → DELETED and set
+    // deleted_at for backward compat with isNull(deleted_at) filters.
+    // Emit ORDER_DELETED timeline events for audit trail.
     const now = new Date();
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
       await tx
         .update(schema.orders)
-        .set({ status: 'CANCELLED', updatedAt: now })
+        .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
         .where(
           and(
             inArray(schema.orders.id, ids),
             // Defense in depth — never let a concurrent state change push a
-            // stock-moved order into CANCELLED via this UPDATE.
-            inArray(schema.orders.status, [...PRE_CANCEL_STATUSES]),
+            // stock-moved order into DELETED via this UPDATE.
+            inArray(schema.orders.status, [...PRE_DELETE_STATUSES]),
           ),
         );
       await tx.insert(schema.orderTimelineEvents).values(
         targets.map((t) => ({
           orderId: t.id,
-          eventType: 'ORDER_CANCELLED' as const,
+          eventType: 'ORDER_DELETED' as const,
           // SYSTEM_ACTOR_ID is a reserved UUID that doesn't exist in the users
           // table — the FK on actor_id would reject it. Use null + actorName
           // instead; null actor_id is the established convention for system and
           // edge-form events in the timeline.
           actorId: null,
           actorName: 'System' as const,
-          description: 'Auto-cancelled: test-order purge (customer name contains "test")',
+          description: 'Auto-deleted: test-order purge (customer name contains "test")',
           branchId: t.branchId ?? null,
         })),
       );
     });
 
-    // The cancellation happened outside the tRPC mutation path, so the
+    // The deletion happened outside the tRPC mutation path, so the
     // status-count / time-series cache (`cache:orders:aggregates:*`, populated
     // by orders.router `getStatusCounts`) still has the old counts. Bust it so
-    // marketing overview strips reflect the cancelled state on the next read.
+    // marketing overview strips reflect the deleted state on the next read.
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
-      `Cancelled ${targets.length} test order(s) → Deleted tab` +
+      `Deleted ${targets.length} test order(s) → Deleted tab` +
         (stockMoved.length > 0 ? ` (${stockMoved.length} stock-moved skipped)` : '') +
         `. Targets: ${preview}` +
         (targets.length > 30 ? ` … +${targets.length - 30} more` : ''),
     );
-    // `deleted` is retained for backward compat with existing toast UIs that
-    // read that field — same count, just sourced from the cancellation now.
     return { deleted: targets.length, cancelled: targets.length, skipped: stockMoved.length };
   }
 }

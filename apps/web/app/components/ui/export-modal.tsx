@@ -269,7 +269,7 @@ export function ExportModal({ open, onClose, config, initialFilters = {}, pickli
                 { value: 'AGENT_ASSIGNED', label: 'Agent assigned' },
                 { value: 'DELIVERED', label: 'Delivered' },
                 { value: 'REMITTED', label: 'Cash Remitted' },
-                { value: 'CANCELLED', label: 'Cancelled' },
+                { value: 'DELETED', label: 'Deleted' },
               ]}
             />
             {csCloserOptions.length > 0 && (
