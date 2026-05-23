@@ -202,9 +202,31 @@ const blockMediaBuyerMutationsOutsideMemberBranch = t.middleware(async ({ ctx, t
 });
 
 /**
+ * SUPPORT role read-only guard.
+ *
+ * SUPPORT has full SUPER_ADMIN visibility (all pages, branches, finance
+ * fields, mirror access) but CANNOT mutate any data. Same escape hatch as
+ * mirror mode: `.meta({ viewOnlyOk: true })` allows session-only mutations
+ * like `branches.switchBranch`.
+ */
+const blockMutationsForSupportRole = t.middleware(async ({ ctx, type, meta, next }) => {
+  if (type === 'mutation' && ctx.user?.role === 'SUPPORT') {
+    const viewOnlyOk =
+      (meta as Record<string, unknown> | undefined)?.['viewOnlyOk'] === true;
+    if (!viewOnlyOk) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Support role is read-only. Contact an admin to make changes.',
+      });
+    }
+  }
+  return next();
+});
+
+/**
  * Authenticated procedure — requires a valid session.
  * Applies Column-Level Security (finance field stripping) automatically.
- * Blocks mutations when in Mirror Mode.
+ * Blocks mutations when in Mirror Mode or for SUPPORT role.
  */
 export const authedProcedure = t.procedure
   .use(async ({ ctx, next }) => {
@@ -214,6 +236,7 @@ export const authedProcedure = t.procedure
     return next({ ctx: { ...ctx, user: ctx.user } });
   })
   .use(blockMutationsWhileMirroring)
+  .use(blockMutationsForSupportRole)
   .use(requireBranchScopeForGlobalAdminMutations)
   .use(blockMediaBuyerMutationsOutsideMemberBranch)
   .use(financeFieldsMiddleware);
@@ -242,7 +265,7 @@ export function rolesProcedure(...roles: UserRole[]) {
  */
 export function permissionProcedure(...permissionCodes: string[]) {
   return authedProcedure.use(async ({ ctx, next }) => {
-    if (ctx.user.role === 'SUPER_ADMIN') {
+    if (ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'SUPPORT') {
       return next({ ctx });
     }
     const required = permissionCodes.map((code) => canonicalPermissionCode(code));

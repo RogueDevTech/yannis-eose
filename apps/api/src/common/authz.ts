@@ -9,7 +9,7 @@ import { hasFinanceAccess } from './utils/strip-finance-fields';
  * Legacy admin-class role labels (still stored on `users.role`).
  * Authorization is permission-first — do NOT treat these as automatic bypass.
  */
-export const ADMIN_LEVEL_ROLES = new Set<string>(['SUPER_ADMIN', 'ADMIN']);
+export const ADMIN_LEVEL_ROLES = new Set<string>(['SUPER_ADMIN', 'ADMIN', 'SUPPORT']);
 
 /**
  * Returns true for SUPER_ADMIN or ADMIN role strings — convenience for HR/promotion
@@ -44,6 +44,7 @@ export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
 const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
   'SUPER_ADMIN',
   'ADMIN',
+  'SUPPORT',
   'FINANCE_OFFICER',
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
@@ -172,6 +173,9 @@ export function canEditUser(
 ): EditUserAccessLevel {
   // Self-edit goes through /admin/profile, not the staff-management form.
   if (viewer.id === target.id) return 'none';
+
+  // SUPPORT is read-only — all mutations blocked at tRPC layer.
+  if (viewer.role === 'SUPPORT') return 'none';
 
   // SuperAdmin reaches every target including admin-class.
   if (viewer.role === 'SUPER_ADMIN') return 'full';
@@ -342,6 +346,7 @@ export function canMirror(
   if (ADMIN_LEVEL_ROLES.has(target.role)) return false;
 
   if (actor.role === 'SUPER_ADMIN') return true;
+  if (actor.role === 'SUPPORT') return true;
 
   const perms = actor.permissions ?? [];
   if (perms.includes('mirror.any')) return true;

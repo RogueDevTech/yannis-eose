@@ -41,6 +41,8 @@ const ROLE_COLOR_MAP: Record<string, RoleColor> = {
   FINANCE_OFFICER: 'indigo',
   // HR
   HR_MANAGER: 'purple',
+  // Tech support (read-only admin visibility)
+  SUPPORT: 'slate',
 };
 
 /** Returns the canonical color for a role string. Unknown roles fall back to slate. */

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFetcher, useRevalidator } from '@remix-run/react';
 
 /**
@@ -69,9 +69,36 @@ export function useOptimisticListMerge<T>(
 ): T[] {
   const { state: revalidatorState } = useRevalidator();
   const awaitSuccess = options?.awaitSuccess ?? true;
+
+  // Track whether THIS fetcher triggered a mutation so we only show optimistic
+  // rows during the revalidation window that belongs to our own submit — not
+  // during unrelated background revalidations (e.g. CachedAwait on-mount
+  // refresh). Without this guard, any `revalidatorState !== 'idle'` keeps
+  // phantom optimistic rows alive indefinitely.
+  const didMutateRef = useRef(false);
+  useEffect(() => {
+    if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
+      didMutateRef.current = true;
+    }
+    if (fetcher.state === 'idle') {
+      // Fetcher finished its full submit→load cycle. Clear the flag after a
+      // short delay so the revalidator window (which may still be in-flight on
+      // the same tick) can use it.
+      const id = setTimeout(() => {
+        didMutateRef.current = false;
+      }, 500);
+      return () => clearTimeout(id);
+    }
+  }, [fetcher.state]);
+
   return useMemo<T[]>(() => {
-    const isMutating = fetcher.state !== 'idle' || revalidatorState !== 'idle';
-    if (!isMutating) return [];
+    // Show optimistic rows only while the fetcher itself is mid-flight, OR
+    // while the revalidator is catching up from OUR mutation. The `didMutateRef`
+    // flag prevents unrelated revalidations from resurrecting phantom rows.
+    const fetcherBusy = fetcher.state !== 'idle';
+    const revalidatingAfterOurMutation =
+      revalidatorState !== 'idle' && didMutateRef.current;
+    if (!fetcherBusy && !revalidatingAfterOurMutation) return [];
 
     // Gate on success when caller opted in (default). `fetcher.data` is set
     // as soon as the action returns (state transitions submitting → loading),

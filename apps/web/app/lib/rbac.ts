@@ -5,7 +5,7 @@ import { canonicalPermissionCode } from './permission-codes';
  * when you mean "admin-class user" — use `isAdminLevel` so ADMIN also passes.
  */
 
-export const ADMIN_LEVEL_ROLES = new Set<string>(['SUPER_ADMIN', 'ADMIN']);
+export const ADMIN_LEVEL_ROLES = new Set<string>(['SUPER_ADMIN', 'ADMIN', 'SUPPORT']);
 
 /**
  * True for SUPER_ADMIN or ADMIN. These are legacy "admin-class" role labels; access control is
@@ -41,6 +41,7 @@ export const ORG_WIDE_DEPARTMENT_HEAD_ROLES = new Set<string>([
 const NON_BRANCH_ASSIGNED_ROLES = new Set<string>([
   'SUPER_ADMIN',
   'ADMIN',
+  'SUPPORT',
   'FINANCE_OFFICER',
   'HEAD_OF_LOGISTICS',
   'STOCK_MANAGER',
@@ -84,6 +85,7 @@ export function hasFinanceAccess(user: {
 } | null | undefined): boolean {
   if (!user) return false;
   if (user.role === 'SUPER_ADMIN') return true;
+  if (user.role === 'SUPPORT') return true;
   if ((user.permissions ?? []).map((p) => canonicalPermissionCode(p)).includes('finance.costs.view')) return true;
   if (user.role === 'FINANCE_OFFICER') return true;
   return false;
@@ -128,6 +130,9 @@ export function canEditUser(
 ): EditUserAccessLevel {
   if (!viewer) return 'none';
   if (actorUserIdsMatch(viewer.id, target.id)) return 'none';
+
+  // SUPPORT is read-only — hide edit buttons entirely (mutations blocked at tRPC layer).
+  if (viewer.role === 'SUPPORT') return 'none';
 
   // SuperAdmin can edit anyone, including admin-class accounts
   // (CLAUDE.md → "SuperAdmin-only: manage admin-level users"). The earlier
@@ -204,6 +209,7 @@ export function canMirror(
   if (actor.id === target.id) return false;
   if (ADMIN_LEVEL_ROLES.has(target.role)) return false;
   if (actor.role === 'SUPER_ADMIN') return true;
+  if (actor.role === 'SUPPORT') return true;
 
   const perms = actor.permissions ?? [];
   const normalized = perms.map((p) => canonicalPermissionCode(p));
