@@ -4831,6 +4831,7 @@ export class OrdersService {
     endDate?: string,
     branchId?: string | null,
     extra?: OrdersAggregateScopeFilters,
+    branchScope: 'servicing' | 'marketing' = 'servicing',
   ): Promise<{ date: string; deliveredCount: number }[]> {
     const conditions: Parameters<typeof and>[0][] = [
       isNull(schema.orders.deletedAt),
@@ -4839,7 +4840,7 @@ export class OrdersService {
     ];
     if (startDate) conditions.push(gte(schema.orders.deliveredAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.deliveredAt, nigeriaDayEnd(endDate)));
-    if (branchId) conditions.push(eq(schema.orders.servicingBranchId, branchId));
+    if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId: extra?.mediaBuyerId,
       assignedCsId: extra?.csCloserId,
@@ -4929,7 +4930,7 @@ export class OrdersService {
     // because it was a single 1-RTT-per-step waterfall with `db ≈ total`.
     const [createdRows, delivered] = await Promise.all([
       createdQuery.groupBy(dateTrunc).orderBy(asc(dateTrunc)),
-      this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra),
+      this.getOrdersTimeSeriesByDelivered(startDate, endDate, branchId, extra, branchScope),
     ]);
 
     const created = createdRows.map((r) => ({
