@@ -162,11 +162,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
             type="submit"
             aria-label={submitButtonLabel}
             title={submitButtonLabel}
-            className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/50 ${
-              hasValue
-                ? 'bg-brand-500 text-white hover:bg-brand-600'
-                : 'bg-app-hover text-app-fg-muted hover:bg-app-border'
-            }`}
+            className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex h-7 w-9 items-center justify-center rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500/50 bg-brand-500 text-white hover:bg-brand-600"
           >
             {/* Arrow-right "go" — iOS-style search submit. Compact, universally
                 read as "execute the current input". */}

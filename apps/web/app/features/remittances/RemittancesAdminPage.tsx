@@ -79,6 +79,7 @@ function isPendingTransfer(r: TransferConfirmationRecord): boolean {
 
 export function RemittancesAdminPage({ remittances, locations, senderOptions, filters }: RemittancesAdminPageProps) {
   const fetcher = useFetcher();
+  const bulkFetcher = useFetcher();
   const fetcherSurface = useFetcherActionSurface(fetcher);
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -92,6 +93,20 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   } | null>(null);
   const [actionModalFieldError, setActionModalFieldError] = useState<string | null>(null);
   const [viewTarget, setViewTarget] = useState<TransferConfirmationRecord | null>(null);
+
+  // ── Bulk selection ─────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkConfirmModalOpen, setBulkConfirmModalOpen] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; errors: string[] } | null>(null);
+
+  // Track IDs that have been successfully processed this session so we can
+  // immediately disable their action buttons — prevents the "Transfer is
+  // RECEIVED, cannot verify" race when clicking fast before revalidation lands.
+  const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
+  // Clear processed set when data reloads (revalidation brings fresh statuses)
+  useEffect(() => {
+    setProcessedIds(new Set());
+  }, [remittances]);
 
   const [searchDraft, setSearchDraft] = useState(filters.search);
   useEffect(() => {
@@ -107,9 +122,10 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   })();
   useFetcherToast(fetcher.data, {
     successMessage: 'Transfer recorded',
-    // Show inline in modal unless it's an "already processed" race — then toast
-    // so the user sees the message after the modal auto-closes.
-    skipErrorToast: !!pendingAction && !alreadyProcessedError,
+    // Show inline in modal when open, BUT suppress "already processed" errors
+    // entirely — they're a harmless race from clicking fast; the row updates on
+    // revalidation. Without this, user sees a scary red toast for no reason.
+    skipErrorToast: alreadyProcessedError || (!!pendingAction && !alreadyProcessedError),
   });
 
   // When the server says the transfer is already processed (race condition —
@@ -149,6 +165,20 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     setRemitPage(1);
   }, [remittances.length]);
 
+  // Clear selection when data reloads (e.g. after bulk action completes)
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [remittances]);
+
+  const pendingRemittances = useMemo(
+    () => remittances.filter((r) => r.transferStatus === 'IN_TRANSIT'),
+    [remittances],
+  );
+  const selectedPendingCount = useMemo(
+    () => pendingRemittances.filter((r) => selectedIds.has(r.id)).length,
+    [pendingRemittances, selectedIds],
+  );
+
   const sentRemittances = remittances.filter((r) => r.transferStatus === 'IN_TRANSIT');
   const receivedCount = remittances.filter((r) => r.outcomeStatus === 'APPROVED').length;
   const disputedCount = remittances.filter((r) => r.outcomeStatus === 'DISPUTED').length;
@@ -172,10 +202,15 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
   );
 
   const handleRemittanceFetcherSuccess = useCallback(() => {
+    // Mark the ID as processed so its action buttons are immediately disabled
+    // even before the revalidation round-trip replaces the row data.
+    if (markingId) {
+      setProcessedIds((prev) => new Set([...prev, markingId]));
+    }
     setPendingAction(null);
     setActionModalFieldError(null);
     setMarkingId(null);
-  }, []);
+  }, [markingId]);
   useCloseOnFetcherSuccess(fetcher, handleRemittanceFetcherSuccess);
 
   const openPendingActionModal = useCallback((row: TransferConfirmationRecord, mode: 'receive' | 'reject') => {
@@ -235,6 +270,63 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
     setActionModalFieldError(null);
     handleMarkNotReceived(r);
   };
+
+  // ── Bulk receive — calls the tRPC endpoint directly for each selected transfer ──
+  const handleBulkReceive = useCallback(async () => {
+    const targets = pendingRemittances.filter((r) => selectedIds.has(r.id));
+    if (targets.length === 0) return;
+    // Validate all rows before starting
+    for (const t of targets) {
+      const qty = quantityReceived[t.id] ?? String(t.quantitySent);
+      const qtyNum = parseInt(qty, 10);
+      if (Number.isNaN(qtyNum) || qtyNum < 0 || qtyNum > t.quantitySent) {
+        setBulkFieldError(`${t.productName}: quantity must be 0–${t.quantitySent}`);
+        return;
+      }
+    }
+    setBulkFieldError(null);
+    setBulkProgress({ done: 0, total: targets.length, errors: [] });
+    const errors: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i]!;
+      const qty = quantityReceived[t.id] ?? String(t.quantitySent);
+      const qtyNum = parseInt(qty, 10);
+      const body: Record<string, unknown> = {
+        transferId: t.id,
+        quantityReceived: qtyNum,
+      };
+      const reason = shrinkageReason[t.id]?.trim();
+      if (reason) body.shrinkageReason = reason;
+      const notes = receiverNotes[t.id]?.trim();
+      if (notes) body.receiverNotes = notes;
+      try {
+        const res = await fetch('/trpc/inventory.verifyTransfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+        // tRPC wraps errors in result.error or returns { result: { data: ... } }
+        const errMsg =
+          json?.error?.message ??
+          json?.result?.error?.message ??
+          (json?.error && typeof json.error === 'string' ? json.error : null);
+        if (errMsg) errors.push(`${t.productName}: ${errMsg}`);
+        else if (!res.ok) errors.push(`${t.productName}: Server error (${res.status})`);
+      } catch (err) {
+        errors.push(`${t.productName}: ${err instanceof Error ? err.message : 'Network error'}`);
+      }
+      setBulkProgress({ done: i + 1, total: targets.length, errors: [...errors] });
+    }
+    if (errors.length === 0) {
+      setBulkConfirmModalOpen(false);
+      setBulkProgress(null);
+      setSelectedIds(new Set());
+      revalidator.revalidate();
+    }
+  }, [pendingRemittances, selectedIds, quantityReceived, shrinkageReason, receiverNotes, revalidator]);
+  const [bulkFieldError, setBulkFieldError] = useState<string | null>(null);
 
   const setFilterParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -334,7 +426,8 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
         minWidth: 'min-w-[200px]',
         render: (r) => {
           const isBusy = markingId === r.id || fetcher.state === 'submitting';
-          if (isPendingTransfer(r)) {
+          const justProcessed = processedIds.has(r.id);
+          if (isPendingTransfer(r) && !justProcessed) {
             return (
               <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
                 <TableActionButton
@@ -356,15 +449,19 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           }
           return (
             <div className="inline-flex items-center justify-end">
-              <TableActionButton variant="primary" onClick={() => setViewTarget(r)}>
-                View
-              </TableActionButton>
+              {justProcessed ? (
+                <StatusBadge status="RECEIVED" />
+              ) : (
+                <TableActionButton variant="primary" onClick={() => setViewTarget(r)}>
+                  View
+                </TableActionButton>
+              )}
             </div>
           );
         },
       },
     ];
-  }, [markingId, fetcher.state, openPendingActionModal]);
+  }, [markingId, fetcher.state, openPendingActionModal, processedIds]);
 
   const emptyDescription = useMemo(() => {
     if (statusValue === 'IN_TRANSIT') {
@@ -623,6 +720,34 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedPendingCount > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 rounded-lg border border-brand-200 dark:border-brand-700/50 bg-brand-50 dark:bg-brand-900/20 px-4 py-2.5">
+          <p className="text-sm font-medium text-brand-800 dark:text-brand-200 sm:flex-1">
+            {selectedPendingCount} pending transfer{selectedPendingCount !== 1 ? 's' : ''} selected
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              onClick={() => setBulkConfirmModalOpen(true)}
+            >
+              Receive all
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
       <TableLoadingOverlay show={isLoaderRefetchBusy} minHeightClassName="min-h-[16rem]">
       {/* Single table: pending rows get Receive / Not received; completed rows get View. */}
       {remittances.length === 0 ? (
@@ -632,7 +757,31 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           columns={unifiedColumnsWithActions}
           rows={pagedRemittances}
           rowKey={(r) => r.id}
-          rowClassName={(r) => (markingId === r.id ? 'opacity-60' : '')}
+          rowClassName={(r) =>
+            [
+              markingId === r.id ? 'opacity-60' : '',
+              selectedIds.has(r.id) ? 'bg-brand-50/50 dark:bg-brand-900/10' : '',
+            ].filter(Boolean).join(' ')
+          }
+          selection={{
+            selectedIds,
+            onToggle: (id, selected) => {
+              setSelectedIds((prev) => {
+                const next = new Set(prev);
+                if (selected) next.add(id);
+                else next.delete(id);
+                return next;
+              });
+            },
+            onToggleAll: (selectAll) => {
+              if (selectAll) {
+                setSelectedIds(new Set(pagedRemittances.filter((r) => isPendingTransfer(r)).map((r) => r.id)));
+              } else {
+                setSelectedIds(new Set());
+              }
+            },
+            isSelectable: (r) => isPendingTransfer(r),
+          }}
           pagination={
             remittances.length > 0
               ? {
@@ -653,76 +802,80 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
                 }
               : undefined
           }
-          renderMobileCard={(r) => {
-            const isBusy = markingId === r.id || fetcher.state === 'submitting';
-            if (isPendingTransfer(r)) {
-              return (
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="font-medium text-app-fg truncate">{r.productName}</p>
-                      <p className="text-sm text-app-fg-muted">
-                        {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} →{' '}
-                        {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
-                      </p>
-                      <p className="text-sm text-app-fg-muted">
-                        Qty sent: <span className="tabular-nums">{r.quantitySent}</span> ·{' '}
-                        {new Date(r.createdAt).toLocaleString()}
-                      </p>
-                      <p className="text-sm text-app-fg-muted">Sent by: {r.senderName ?? 'Unknown user'}</p>
-                    </div>
-                    <StatusBadge status={r.transferStatus} />
-                  </div>
+          renderMobileCard={(r, _i, helpers) => {
+            const { rowSelection } = helpers;
+            const justProcessed = processedIds.has(r.id);
+            const pending = isPendingTransfer(r) && !justProcessed;
+            const displayStatus = justProcessed
+              ? 'RECEIVED'
+              : pending
+                ? r.transferStatus
+                : r.outcomeStatus === 'APPROVED'
+                  ? 'RECEIVED'
+                  : (r.outcomeStatus ?? r.transferStatus);
+            const qty = pending ? r.quantitySent : (r.outcomeQuantity ?? r.quantityReceived ?? 0);
 
-                  <div className="flex flex-wrap items-center justify-end gap-1.5">
-                    <TableActionButton
-                      variant="danger"
-                      disabled={isBusy}
-                      onClick={() => openPendingActionModal(r, 'reject')}
-                    >
-                      Not received
-                    </TableActionButton>
-                    <TableActionButton
-                      variant="primary"
-                      disabled={isBusy}
-                      onClick={() => openPendingActionModal(r, 'receive')}
-                    >
-                      Receive
-                    </TableActionButton>
+            const body = (
+              <>
+                {/* Row 1: Product name + status */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+                    {r.productName}
+                  </span>
+                  <StatusBadge status={displayStatus} />
+                </div>
+                {/* Row 2: Route + qty + date */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-xs text-app-fg-muted">
+                    {r.fromLocationName} → {r.toLocationName}
+                  </span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-app-fg-muted tabular-nums">
+                    ×{qty} · {new Date(r.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+              </>
+            );
+
+            const handleTap = () => {
+              if (justProcessed) return;
+              if (pending) {
+                openPendingActionModal(r, 'receive');
+              } else {
+                setViewTarget(r);
+              }
+            };
+
+            if (rowSelection) {
+              return (
+                <div className="-mx-3 -my-2.5 flex items-stretch">
+                  {/* Checkbox zone — tapping here only toggles the checkbox */}
+                  <div
+                    className="flex items-center px-2.5 border-r border-app-border/60 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {rowSelection}
                   </div>
+                  {/* Card body — tapping here opens the modal */}
+                  <button
+                    type="button"
+                    onClick={handleTap}
+                    disabled={justProcessed}
+                    className="flex-1 min-w-0 px-3 py-2.5 space-y-1.5 text-left disabled:opacity-60"
+                  >
+                    {body}
+                  </button>
                 </div>
               );
             }
             return (
-              <div className="space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium text-app-fg truncate">{r.productName}</p>
-                    <p className="text-sm text-app-fg-muted">
-                      {formatLocationWithProvider(r.fromLocationName, r.fromProviderName)} →{' '}
-                      {formatLocationWithProvider(r.toLocationName, r.toProviderName)}
-                    </p>
-                    <p className="text-sm text-app-fg-muted">
-                      Qty:{' '}
-                      <span className="tabular-nums">{r.outcomeQuantity ?? r.quantityReceived ?? '—'}</span>
-                      {' · '}
-                      {new Date(r.createdAt).toLocaleString()}
-                    </p>
-                    <p className="text-sm text-app-fg-muted">Sent by: {r.senderName ?? 'Unknown user'}</p>
-                  </div>
-                  <StatusBadge
-                    status={
-                      r.outcomeStatus === 'APPROVED' ? 'RECEIVED' : (r.outcomeStatus ?? r.transferStatus)
-                    }
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-end">
-                  <TableActionButton variant="primary" onClick={() => setViewTarget(r)}>
-                    View
-                  </TableActionButton>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={handleTap}
+                disabled={justProcessed}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left disabled:opacity-60"
+              >
+                {body}
+              </button>
             );
           }}
         />
@@ -742,15 +895,32 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
           contentClassName="p-6 space-y-4 bg-app-elevated"
         >
           <ModalFetcherInlineError message={fetcherSurface.errorMatchingIntent('markTransferReceived')} />
-          <div className="space-y-1">
-            <h3 className="text-lg font-semibold text-app-fg">
-              {pendingAction.mode === 'reject' ? 'Mark as not received' : 'Mark transfer received'}
-            </h3>
-            <p className="text-sm text-app-fg-muted">
-              {pendingAction.mode === 'reject'
-                ? 'Record a dispute when goods did not arrive as expected. A clear reason is required.'
-                : 'Enter how many units arrived. If fewer than sent, add a shrinkage reason.'}
-            </p>
+          {/* Header with close X */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1 min-w-0">
+              <h3 className="text-lg font-semibold text-app-fg">
+                {pendingAction.mode === 'reject' ? 'Mark as not received' : 'Mark transfer received'}
+              </h3>
+              <p className="text-sm text-app-fg-muted">
+                {pendingAction.mode === 'reject'
+                  ? 'Record a dispute when goods did not arrive as expected. A clear reason is required.'
+                  : 'Enter how many units arrived. If fewer than sent, add a shrinkage reason.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-lg p-1.5 text-app-fg-muted hover:text-app-fg hover:bg-app-hover transition-colors"
+              aria-label="Close"
+              disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
+              onClick={() => {
+                setPendingAction(null);
+                setActionModalFieldError(null);
+              }}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
           <div className="rounded-lg border border-app-border bg-app-hover p-3 text-sm space-y-1.5">
@@ -826,19 +996,34 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
             </p>
           ) : null}
 
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setPendingAction(null);
-                setActionModalFieldError(null);
-              }}
-              disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
-            >
-              Cancel
-            </Button>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            {pendingAction.mode === 'receive' ? (
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
+                onClick={() => {
+                  setActionModalFieldError(null);
+                  setPendingAction({ row: pendingAction.row, mode: 'reject' });
+                }}
+              >
+                Not received
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={fetcher.state === 'submitting' && markingId === pendingAction.row.id}
+                onClick={() => {
+                  setActionModalFieldError(null);
+                  setPendingAction({ row: pendingAction.row, mode: 'receive' });
+                }}
+              >
+                Back to receive
+              </Button>
+            )}
             <Button
               type="button"
               variant={pendingAction.mode === 'reject' ? 'danger' : 'primary'}
@@ -941,6 +1126,161 @@ export function RemittancesAdminPage({ remittances, locations, senderOptions, fi
               Close
             </Button>
           </div>
+        </Modal>
+      )}
+
+      {/* Bulk receive review modal */}
+      {bulkConfirmModalOpen && (
+        <Modal
+          open
+          onClose={() => {
+            if (bulkProgress && bulkProgress.done < bulkProgress.total) return;
+            setBulkConfirmModalOpen(false);
+            setBulkProgress(null);
+            setBulkFieldError(null);
+          }}
+          maxWidth="max-w-2xl"
+          role="dialog"
+          contentClassName="p-6 space-y-4 bg-app-elevated"
+        >
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-app-fg">Review &amp; receive transfers</h3>
+            <p className="text-sm text-app-fg-muted">
+              Review each transfer below. Adjust quantity and add notes where needed.
+            </p>
+          </div>
+
+          {bulkProgress ? (
+            <div className="space-y-3">
+              <div className="w-full bg-surface-200 dark:bg-surface-700 rounded-full h-2">
+                <div
+                  className="bg-brand-500 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }}
+                />
+              </div>
+              <p className="text-sm text-app-fg-muted">
+                {bulkProgress.done} of {bulkProgress.total} processed
+                {bulkProgress.errors.length > 0 && (
+                  <span className="text-danger-600 dark:text-danger-400">
+                    {' '}· {bulkProgress.errors.length} error{bulkProgress.errors.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </p>
+              {bulkProgress.errors.length > 0 && (
+                <div className="max-h-32 overflow-y-auto rounded border border-danger-200 dark:border-danger-700 bg-danger-50 dark:bg-danger-900/20 p-2 space-y-1">
+                  {bulkProgress.errors.map((e, i) => (
+                    <p key={i} className="text-xs text-danger-700 dark:text-danger-300">{e}</p>
+                  ))}
+                </div>
+              )}
+              {bulkProgress.done === bulkProgress.total && bulkProgress.errors.length > 0 && (
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setBulkConfirmModalOpen(false);
+                      setBulkProgress(null);
+                      setBulkFieldError(null);
+                      setSelectedIds(new Set());
+                      revalidator.revalidate();
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-1">
+                {pendingRemittances
+                  .filter((r) => selectedIds.has(r.id))
+                  .map((r) => {
+                    const qtyVal = quantityReceived[r.id] ?? String(r.quantitySent);
+                    const qtyNum = parseInt(qtyVal, 10);
+                    const hasShrinkage = !Number.isNaN(qtyNum) && qtyNum < r.quantitySent;
+                    return (
+                      <div key={r.id} className="rounded-lg border border-app-border bg-app-hover p-3 space-y-2.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-medium text-app-fg truncate">{r.productName}</p>
+                            <p className="text-xs text-app-fg-muted">
+                              {r.fromLocationName} → {r.toLocationName}
+                              {r.senderName ? ` · ${r.senderName}` : ''}
+                            </p>
+                          </div>
+                          <span className="shrink-0 tabular-nums text-sm text-app-fg-muted">
+                            Sent: {r.quantitySent}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <TextInput
+                            label="Qty received"
+                            type="number"
+                            min={0}
+                            max={r.quantitySent}
+                            value={qtyVal}
+                            onChange={(e) => {
+                              setBulkFieldError(null);
+                              setQuantityReceived((prev) => ({ ...prev, [r.id]: e.target.value }));
+                            }}
+                          />
+                          <TextInput
+                            label={hasShrinkage ? 'Shrinkage reason (required)' : 'Shrinkage reason'}
+                            type="text"
+                            placeholder={hasShrinkage ? 'Required — why is it short?' : 'Optional'}
+                            value={shrinkageReason[r.id] ?? ''}
+                            onChange={(e) => {
+                              setBulkFieldError(null);
+                              setShrinkageReason((prev) => ({ ...prev, [r.id]: e.target.value }));
+                            }}
+                          />
+                        </div>
+                        <TextInput
+                          label="Comments"
+                          type="text"
+                          placeholder="Optional notes…"
+                          value={receiverNotes[r.id] ?? ''}
+                          onChange={(e) =>
+                            setReceiverNotes((prev) => ({ ...prev, [r.id]: e.target.value }))
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {bulkFieldError && (
+                <p className="text-sm text-danger-600 dark:text-danger-400" role="alert">
+                  {bulkFieldError}
+                </p>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1 border-t border-app-border">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setBulkConfirmModalOpen(false);
+                    setBulkFieldError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void handleBulkReceive()}
+                >
+                  Receive {selectedPendingCount} transfer{selectedPendingCount !== 1 ? 's' : ''}
+                </Button>
+              </div>
+            </>
+          )}
         </Modal>
       )}
 

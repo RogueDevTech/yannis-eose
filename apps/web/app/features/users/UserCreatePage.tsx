@@ -124,6 +124,11 @@ const ROLES = [
     label: 'HR Manager',
     description: 'Manages payroll, commissions, and staff',
   },
+  {
+    value: 'SUPPORT',
+    label: 'Support',
+    description: 'Read-only tech support — full visibility, no mutations. For the dev/ops team.',
+  },
 ];
 
 // ─── Component ──────────────────────────────────────────
@@ -222,7 +227,7 @@ export function UserCreatePage({
     requiresApproval?: boolean;
     message?: string;
     requiresDuplicateConfirmation?: boolean;
-    duplicates?: Array<{ id: string; name: string; status: string }>;
+    duplicates?: Array<{ id: string; name: string; email?: string; status: string }>;
   }>();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
@@ -1204,13 +1209,18 @@ export function UserCreatePage({
           <ul className="mb-3 space-y-1.5 rounded-lg border border-app-border bg-app-hover/40 px-3 py-2">
             {actionData?.duplicates?.map((d) => (
               <li key={d.id} className="flex items-center justify-between gap-2 text-sm">
-                <Link
-                  to={`${usersBasePath}/${d.id}`}
-                  className="text-brand-500 hover:text-brand-600 underline truncate"
-                  onClick={() => setDuplicateModalOpen(false)}
-                >
-                  {d.name}
-                </Link>
+                <div className="min-w-0">
+                  <Link
+                    to={`${usersBasePath}/${d.id}`}
+                    className="text-brand-500 hover:text-brand-600 underline truncate block"
+                    onClick={() => setDuplicateModalOpen(false)}
+                  >
+                    {d.name}
+                  </Link>
+                  {d.email && (
+                    <span className="text-2xs text-app-fg-muted truncate block">{d.email}</span>
+                  )}
+                </div>
                 <span className="text-2xs uppercase tracking-wide text-app-fg-muted flex-shrink-0">
                   {d.status.charAt(0) + d.status.slice(1).toLowerCase()}
                 </span>
