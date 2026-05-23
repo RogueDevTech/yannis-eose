@@ -67,8 +67,8 @@ export function expandCustomerPhoneSearchDigitRuns(digitRun: string): string[] {
 const PENDING_PAYMENT_PREFIX = 'pending_payment:';
 const PENDING_PAYMENT_TTL_SECONDS = 3600; // 1 hour
 
-/** Pre-confirmation orders only — avoids inventory side effects on soft-archive. */
-const ARCHIVABLE_ORDER_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
+/** Pre-confirmation + CANCELLED orders — avoids inventory side effects on soft-delete. */
+const ARCHIVABLE_ORDER_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CANCELLED'] as const;
 
 /** ISO YYYY-MM-DD on `preferred_delivery_date` (excludes edge-form option strings). */
 const PREFERRED_DELIVERY_ISO_SQL = sql`${schema.orders.preferredDeliveryDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`;
@@ -120,6 +120,7 @@ const DELIVERY_OVERDUE_EXCLUDED_STATUSES = [
   'DELIVERED',
   'REMITTED',
   'CANCELLED',
+  'DELETED',
   'RETURNED',
   'RESTOCKED',
   'WRITTEN_OFF',
@@ -707,7 +708,11 @@ export class OrdersService {
   }
 
   /**
-   * Soft-delete (archive): sets `deleted_at`; order row and temporal history remain. Privileged roles only.
+   * Soft-delete: transitions order to DELETED status and sets `deleted_at`.
+   * DELETED orders are excluded from ALL metrics/counts but the row stays in
+   * the DB for audit trail. Admin/SuperAdmin can restore to UNPROCESSED.
+   * The `deleted_at` timestamp is also set for backward compat with existing
+   * `isNull(deleted_at)` filters throughout the codebase.
    */
   async softDeleteOrder(
     orderId: string,
@@ -717,57 +722,54 @@ export class OrdersService {
     const existingRows = await this.db
       .select()
       .from(schema.orders)
-      .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+      .where(eq(schema.orders.id, orderId))
       .limit(1);
     const order = existingRows[0];
     if (!order) {
       throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
     }
 
+    if (order.status === 'DELETED') {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Order is already deleted.' });
+    }
+
     if (!ARCHIVABLE_ORDER_STATUSES.includes(order.status as (typeof ARCHIVABLE_ORDER_STATUSES)[number])) {
       throw new TRPCError({
         code: 'BAD_REQUEST',
         message:
-          'Only unprocessed or CS-stage orders can be archived this way. Cancel the order first if it is already confirmed.',
+          'Only pre-confirmation or cancelled orders can be deleted. Orders past confirmation have inventory side effects.',
       });
     }
 
-    const mayArchive = await this.canActorEditOrderLinePrices(actor, {
-      branchId: order.branchId ?? null,
-      assignedCsId: order.assignedCsId ?? null,
-    });
-    if (!mayArchive) {
+    // Permission-gated: `orders.delete` — Admin/SuperAdmin by default, can be
+    // delegated to other roles via the permission matrix (CEO directive 2026-05-23).
+    const perms = (actor.permissions ?? []).map((p) => canonicalPermissionCode(p));
+    if (!isAdminLevel(actor) && !perms.includes(canonicalPermissionCode('orders.delete'))) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message:
-          'Only Head of CS, Head of Logistics, Branch Admin, a Sales team supervisor for the assignee, or an Admin may archive this order.',
+        message: 'You do not have permission to delete orders. Contact an Admin to get the orders.delete permission.',
       });
     }
-
-    await this.assertActorMayUpdateOrder(actor, {
-      branchId: order.branchId ?? null,
-      assignedCsId: order.assignedCsId ?? null,
-      status: order.status,
-    });
 
     const note = opts?.approverNote?.trim();
     const actorLabel = actor.name ?? 'Staff';
     const description = note
-      ? `Order archived (removed from active lists). Note: ${note.slice(0, 500)}`
-      : `Order archived (removed from active lists) by ${actorLabel}.`;
+      ? `Order deleted (removed from metrics). Note: ${note.slice(0, 500)}`
+      : `Order deleted (removed from metrics) by ${actorLabel}.`;
 
+    const now = new Date();
     await withActor(this.db, actor, async (tx) => {
       const updatedRows = await tx
         .update(schema.orders)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(schema.orders.id, orderId), isNull(schema.orders.deletedAt)))
+        .set({ status: 'DELETED', deletedAt: now, updatedAt: now })
+        .where(eq(schema.orders.id, orderId))
         .returning({ id: schema.orders.id });
       if (!updatedRows[0]) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found or already archived' });
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Order not found' });
       }
       await tx.insert(schema.orderTimelineEvents).values({
         orderId,
-        eventType: 'ORDER_ARCHIVED',
+        eventType: 'ORDER_DELETED',
         actorId: actor.id,
         actorName: actor.name ?? null,
         description,
@@ -2541,13 +2543,30 @@ export class OrdersService {
       branchScope?: 'servicing' | 'marketing';
     },
   ) {
-    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
+    // Skip the exclusion gate when explicitly querying DELETED orders —
+    // otherwise the isNull(deletedAt) + status != CANCELLED filter would exclude them.
+    // CEO directive 2026-05-23: CANCELLED is legacy-deleted, excluded from default views.
+    const wantsDeleted =
+      input.status === 'DELETED' || (input.statuses?.includes('DELETED') ?? false);
+    const conditions: Parameters<typeof and>[0][] = wantsDeleted
+      ? []
+      : [isNull(schema.orders.deletedAt), sql`${schema.orders.status} != 'CANCELLED'`];
 
     if (input.status) {
-      conditions.push(eq(schema.orders.status, input.status));
+      // CEO directive 2026-05-23: CANCELLED is legacy — merge into DELETED tab.
+      // When user requests DELETED, show both DELETED and legacy CANCELLED.
+      if (input.status === 'DELETED') {
+        conditions.push(inArray(schema.orders.status, ['DELETED', 'CANCELLED']));
+      } else {
+        conditions.push(eq(schema.orders.status, input.status));
+      }
     }
     if (input.statuses?.length) {
-      conditions.push(inArray(schema.orders.status, input.statuses));
+      // Expand DELETED → [DELETED, CANCELLED] in multi-status queries too.
+      const expanded = input.statuses.includes('DELETED')
+        ? [...new Set([...input.statuses, 'CANCELLED' as typeof input.statuses[number]])]
+        : input.statuses;
+      conditions.push(inArray(schema.orders.status, expanded));
     }
     // Mirrors `appendOrdersAggregateScopeConditions` / `narrowOrdersAggregateFiltersForViewer`:
     // supervisor OR-scope replaces single-ID filters — AND-ing `assignedCsId` would hide
@@ -3063,12 +3082,12 @@ export class OrdersService {
     const sameBranchAsOrder =
       !!order.branchId && !!actor.currentBranchId && order.branchId === actor.currentBranchId;
 
-    // CS-only transitions (engagement, confirm, cancel): assigned Sales closer, anyone with
+    // CS-only transitions (engagement, confirm): assigned Sales closer, anyone with
     // Sales scope (`cs.scope.global`), or branch admin (`branches.manage` + same-branch).
     const csOnlyTransitions =
-      (currentStatus === 'UNPROCESSED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
-      (currentStatus === 'CS_ASSIGNED' && (newStatus === 'CS_ENGAGED' || newStatus === 'CANCELLED')) ||
-      (currentStatus === 'CS_ENGAGED' && (newStatus === 'CONFIRMED' || newStatus === 'CANCELLED'));
+      (currentStatus === 'UNPROCESSED' && newStatus === 'CS_ENGAGED') ||
+      (currentStatus === 'CS_ASSIGNED' && newStatus === 'CS_ENGAGED') ||
+      (currentStatus === 'CS_ENGAGED' && newStatus === 'CONFIRMED');
     if (csOnlyTransitions) {
       const isElevated =
         actor.role === 'SUPER_ADMIN' ||
@@ -3080,17 +3099,6 @@ export class OrdersService {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message: 'You do not have CS access required to take this order.',
-          });
-        }
-      } else if (newStatus === 'CANCELLED') {
-        // Cancellation is restricted to Head of CS, a Branch Admin (same branch), or an
-        // Admin. The assigned Sales closer can engage and confirm an order but can no
-        // longer cancel it themselves (CEO directive 2026-05-20).
-        if (!isElevated) {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message:
-              'Only Head of CS, a Branch Admin (same branch), or an Admin can cancel an order.',
           });
         }
       } else {
@@ -3105,14 +3113,35 @@ export class OrdersService {
       }
     }
 
-    // CANCELLED → UNPROCESSED: restore a cancelled order back to the queue. Admin-only —
-    // the order was never deleted from the database; it returns to the unassigned pool
-    // for re-distribution (closer assignment cleared below). CEO directive 2026-05-20.
+    // {UNPROCESSED|CS_ASSIGNED|CS_ENGAGED|CANCELLED} → DELETED: soft-delete.
+    // Permission-gated via `orders.delete` — HoCS gets it by default (requires Admin
+    // approval via permission request). CEO directive 2026-05-23: no more CANCELLED,
+    // only DELETED. Replaces the old cancel flow entirely.
+    if (newStatus === 'DELETED') {
+      if (!isAdminLevel(actor) && !hasPerm('orders.delete')) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'You do not have permission to delete orders. Request the orders.delete permission from an Admin.',
+        });
+      }
+    }
+
+    // CANCELLED → UNPROCESSED: restore legacy cancelled orders. Admin-only.
     if (currentStatus === 'CANCELLED' && newStatus === 'UNPROCESSED') {
       if (!isAdminLevel(actor)) {
         throw new TRPCError({
           code: 'FORBIDDEN',
           message: 'Only an Admin or Super Admin can restore a cancelled order.',
+        });
+      }
+    }
+
+    // DELETED → UNPROCESSED: restore a deleted order back to the queue.
+    if (currentStatus === 'DELETED' && newStatus === 'UNPROCESSED') {
+      if (!isAdminLevel(actor)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Only an Admin or Super Admin can restore a deleted order.',
         });
       }
     }
@@ -3230,12 +3259,18 @@ export class OrdersService {
       updateFields['lockedBy'] = null;
     }
 
-    // Restoring a cancelled order — send it back to the unassigned pool: drop the
-    // previous closer + any stale lock so it re-enters CS distribution cleanly.
-    if (currentStatus === 'CANCELLED' && newStatus === 'UNPROCESSED') {
+    // Restoring a cancelled or deleted order — send it back to the unassigned pool:
+    // drop the previous closer + any stale lock so it re-enters CS distribution cleanly.
+    if ((currentStatus === 'CANCELLED' || currentStatus === 'DELETED') && newStatus === 'UNPROCESSED') {
       updateFields['assignedCsId'] = null;
       updateFields['lockedUntil'] = null;
       updateFields['lockedBy'] = null;
+      updateFields['deletedAt'] = null;
+    }
+
+    // Soft-delete: set deletedAt for backward compat with isNull(deletedAt) filters.
+    if (newStatus === 'DELETED') {
+      updateFields['deletedAt'] = new Date();
     }
 
     // Update agent's lastActionAt for dispatch tiebreaker + inactivity tracking.
@@ -4378,7 +4413,11 @@ export class OrdersService {
     supervisorScope?: OrdersAggregateSupervisorScope,
     branchScope: 'servicing' | 'marketing' = 'servicing',
   ) {
-    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
+    // Status counts always include every status (including DELETED) so the
+    // stat strip can show the Deleted count. CANCELLED is merged into DELETED
+    // post-query (CEO directive 2026-05-23). The frontend excludes DELETED
+    // from the "Total" by using `total` from listOrders (which filters them).
+    const conditions: Parameters<typeof and>[0][] = [];
     appendOrdersAggregateScopeConditions(conditions, {
       mediaBuyerId,
       assignedCsId,
@@ -4403,6 +4442,11 @@ export class OrdersService {
     const counts: Record<string, number> = {};
     for (const row of results) {
       counts[row.status] = row.count;
+    }
+    // CEO directive 2026-05-23: merge legacy CANCELLED into DELETED count.
+    if (counts['CANCELLED']) {
+      counts['DELETED'] = (counts['DELETED'] ?? 0) + counts['CANCELLED'];
+      delete counts['CANCELLED'];
     }
     return counts;
   }
@@ -4893,7 +4937,11 @@ export class OrdersService {
     extra?: OrdersAggregateScopeFilters,
     branchScope: 'servicing' | 'marketing' = 'servicing',
   ): Promise<{ date: string; orderCount: number; deliveredCount: number }[]> {
-    const conditions: Parameters<typeof and>[0][] = [isNull(schema.orders.deletedAt)];
+    // CEO directive 2026-05-23: exclude both DELETED and legacy CANCELLED from default views.
+    const conditions: Parameters<typeof and>[0][] = [
+      isNull(schema.orders.deletedAt),
+      sql`${schema.orders.status} != 'CANCELLED'`,
+    ];
     if (startDate) conditions.push(gte(schema.orders.createdAt, nigeriaDayStart(startDate)));
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     if (branchId) conditions.push(this.orderBranchScopeCondition(branchId, branchScope));
@@ -5147,7 +5195,7 @@ export class OrdersService {
     // Predicate templates — Postgres `FILTER (WHERE …)` evaluates per row inside
     // a single grouped aggregate, so we never materialize per-agent subqueries.
     const confirmedOrBeyond = sql`${schema.orders.status} IN ('CONFIRMED','AGENT_ASSIGNED','DISPATCHED','IN_TRANSIT','DELIVERED','PARTIALLY_DELIVERED','REMITTED','RETURNED','RESTOCKED','WRITTEN_OFF')`;
-    const cancelledStatus = sql`${schema.orders.status} = 'CANCELLED'`;
+    const deletedStatus = sql`${schema.orders.status} IN ('CANCELLED','DELETED')`;
     const deliveredOrRemitted = sql`${schema.orders.status} IN ('DELIVERED','REMITTED')`;
     const callCompleted = sql`${schema.callLogs.callStatus} = 'COMPLETED'`;
 
@@ -5186,7 +5234,7 @@ export class OrdersService {
           agentId: schema.orders.assignedCsId,
           engaged: sql<number>`COUNT(*)::int`,
           confirmed: sql<number>`COUNT(*) FILTER (WHERE ${confirmedOrBeyond})::int`,
-          cancelled: sql<number>`COUNT(*) FILTER (WHERE ${cancelledStatus})::int`,
+          cancelled: sql<number>`COUNT(*) FILTER (WHERE ${deletedStatus})::int`,
         })
         .from(schema.orders)
         .where(orderWhere)
@@ -6153,7 +6201,8 @@ export class OrdersService {
         break;
       }
 
-      case 'CANCELLED': {
+      case 'CANCELLED':
+      case 'DELETED': {
         if (previousOrder.status === 'CONFIRMED') {
           for (const item of orderItems) {
             await this.db.insert(schema.stockMovements).values({
@@ -6161,7 +6210,7 @@ export class OrdersService {
               movementType: 'ADJUSTMENT',
               quantity: item.quantity,
               referenceId: updatedOrder.id,
-              reason: `Released: order ${updatedOrder.id} cancelled`,
+              reason: `Released: order ${updatedOrder.id} deleted`,
               actorId: actor.id,
             });
           }
@@ -6249,14 +6298,15 @@ export class OrdersService {
     const delayMinutes = options?.delayMinutes ?? 120; // default: 2 hours
 
     if (currentAttempts >= maxAttempts) {
-      // Auto-cancel: max callback attempts reached
+      // Auto-delete: max callback attempts reached (CEO directive 2026-05-23: DELETED replaces CANCELLED)
       await withActor(this.db, actor, async (tx) =>
         tx
           .update(schema.orders)
           .set({
-            status: 'CANCELLED',
+            status: 'DELETED',
+            deletedAt: new Date(),
             callbackScheduledAt: null,
-            callbackNotes: `Auto-cancelled: max callback attempts (${maxAttempts}) reached`,
+            callbackNotes: `Auto-deleted: max callback attempts (${maxAttempts}) reached`,
             updatedAt: new Date(),
           })
           .where(eq(schema.orders.id, orderId)),
@@ -6265,7 +6315,7 @@ export class OrdersService {
       this.events.emitOrderStatusChange({
         orderId,
         oldStatus: order.status,
-        newStatus: 'CANCELLED',
+        newStatus: 'DELETED',
         assignedCsId: order.assignedCsId,
         mediaBuyerId: order.mediaBuyerId,
         logisticsLocationId: order.logisticsLocationId,
@@ -6274,7 +6324,7 @@ export class OrdersService {
         servicingBranchId: order.servicingBranchId ?? null,
       });
 
-      // Notify Head of CS about max-retry cancellation
+      // Notify Head of CS about max-retry deletion
       this.events.emitToRoom('cs-all', 'callback:max_reached', {
         orderId,
         customerName: order.customerName,
@@ -6282,14 +6332,14 @@ export class OrdersService {
       }, order.servicingBranchId ?? null);
       void this.writeTimelineEvent({
         orderId,
-        eventType: 'ORDER_CANCELLED',
+        eventType: 'ORDER_DELETED',
         actorId: actor.id,
         actorName: actor.name ?? null,
-        description: `Order cancelled after ${currentAttempts} callback attempts`,
+        description: `Order deleted after ${currentAttempts} callback attempts`,
         branchId: order.branchId ?? null,
       });
 
-      return { action: 'auto_cancelled', attempts: currentAttempts, maxAttempts };
+      return { action: 'auto_deleted', attempts: currentAttempts, maxAttempts };
     }
 
     const scheduledAt = new Date(Date.now() + delayMinutes * 60 * 1000);
@@ -7119,8 +7169,10 @@ export class OrdersService {
           : 'Order confirmed';
       case 'CANCELLED':
         return `Order cancelled${reasonSuffix}`;
+      case 'DELETED':
+        return `Order deleted${reasonSuffix}`;
       case 'UNPROCESSED':
-        return 'Cancelled order restored to the unprocessed queue';
+        return 'Order restored to the unprocessed queue';
       case 'AGENT_ASSIGNED':
         if (
           options?.reallocatedFromName &&

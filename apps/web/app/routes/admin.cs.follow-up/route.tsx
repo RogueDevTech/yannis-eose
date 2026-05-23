@@ -27,7 +27,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getCurrentUser(request);
   const url = new URL(request.url);
 
-  const status = url.searchParams.get('status') || 'CANCELLED';
+  const status = url.searchParams.get('status') || 'DELETED';
   const branchId = url.searchParams.get('branchId') || undefined;
   const search = url.searchParams.get('search') || undefined;
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
@@ -42,14 +42,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 
   // Map follow-up status categories to actual order statuses
-  if (status === 'CANCELLED') {
-    listInput.status = 'CANCELLED';
+  if (status === 'DELETED') {
+    listInput.status = 'DELETED';
   } else if (status === 'DELIVERED') {
     listInput.status = 'DELIVERED';
   } else if (status === 'REMITTED') {
     listInput.status = 'REMITTED';
   } else if (status === 'ALL_CLOSED') {
-    listInput.statuses = ['CANCELLED', 'DELIVERED', 'REMITTED'];
+    listInput.statuses = ['DELETED', 'DELIVERED', 'REMITTED'];
   }
 
   if (branchId) listInput.branchId = branchId;

@@ -267,7 +267,7 @@ function SuperAdminDashboard({ data, naira }: { data: DashboardPageData; naira: 
             },
             { label: 'Delivered', value: counts['DELIVERED'] ?? 0, valueClassName: 'text-success-600 dark:text-success-400' },
             { label: 'Cash Remitted', value: counts['REMITTED'] ?? 0, valueClassName: 'text-green-600 dark:text-green-400' },
-            { label: 'Cancelled', value: counts['CANCELLED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
+            { label: 'Deleted', value: counts['DELETED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
             { label: 'Returned', value: counts['RETURNED'] ?? 0, valueClassName: 'text-danger-600 dark:text-danger-400' },
           ]}
         />

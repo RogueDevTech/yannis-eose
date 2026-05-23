@@ -16,11 +16,11 @@ describe('isTransitionAllowed — valid transitions', () => {
   const validTransitions: [OrderStatus, OrderStatus][] = [
     ['UNPROCESSED', 'CS_ASSIGNED'],
     ['UNPROCESSED', 'CS_ENGAGED'],
-    ['UNPROCESSED', 'CANCELLED'],
+    ['UNPROCESSED', 'DELETED'],
     ['CS_ASSIGNED', 'CS_ENGAGED'],
-    ['CS_ASSIGNED', 'CANCELLED'],
+    ['CS_ASSIGNED', 'DELETED'],
     ['CS_ENGAGED', 'CONFIRMED'],
-    ['CS_ENGAGED', 'CANCELLED'],
+    ['CS_ENGAGED', 'DELETED'],
     ['CONFIRMED', 'AGENT_ASSIGNED'],
     ['AGENT_ASSIGNED', 'AGENT_ASSIGNED'],
     ['AGENT_ASSIGNED', 'DISPATCHED'],
@@ -93,15 +93,17 @@ describe('isTransitionAllowed — forbidden skips', () => {
 // ---------------------------------------------------------------------------
 
 describe('TERMINAL_STATUSES', () => {
-  it('contains exactly COMPLETED, WRITTEN_OFF, RESTOCKED', () => {
-    expect(TERMINAL_STATUSES).toHaveLength(3);
+  it('contains exactly REMITTED, WRITTEN_OFF, RESTOCKED, DELETED', () => {
+    expect(TERMINAL_STATUSES).toHaveLength(4);
     expect(TERMINAL_STATUSES).toContain('REMITTED');
     expect(TERMINAL_STATUSES).toContain('WRITTEN_OFF');
     expect(TERMINAL_STATUSES).toContain('RESTOCKED');
+    expect(TERMINAL_STATUSES).toContain('DELETED');
   });
 
-  it('returns empty array of next statuses for every terminal state', () => {
-    for (const status of TERMINAL_STATUSES) {
+  it('returns empty array of next statuses for REMITTED, WRITTEN_OFF, RESTOCKED', () => {
+    // DELETED has a restore path (→ UNPROCESSED) so it's not fully terminal.
+    for (const status of ['REMITTED', 'WRITTEN_OFF', 'RESTOCKED'] as OrderStatus[]) {
       expect(getAllowedNextStatuses(status)).toHaveLength(0);
     }
   });
@@ -116,7 +118,8 @@ describe('getAllowedNextStatuses', () => {
     const result = getAllowedNextStatuses('UNPROCESSED');
     expect(result).toContain('CS_ASSIGNED');
     expect(result).toContain('CS_ENGAGED');
-    expect(result).toContain('CANCELLED');
+    expect(result).toContain('DELETED');
+    expect(result).not.toContain('CANCELLED');
     expect(result).not.toContain('CONFIRMED');
     expect(result).not.toContain('DELIVERED');
   });
@@ -124,7 +127,8 @@ describe('getAllowedNextStatuses', () => {
   it('returns correct options from CS_ENGAGED', () => {
     const result = getAllowedNextStatuses('CS_ENGAGED');
     expect(result).toContain('CONFIRMED');
-    expect(result).toContain('CANCELLED');
+    expect(result).toContain('DELETED');
+    expect(result).not.toContain('CANCELLED');
     expect(result).not.toContain('AGENT_ASSIGNED');
   });
 
@@ -143,10 +147,12 @@ describe('getAllowedNextStatuses', () => {
     expect(result).not.toContain('DELIVERED');
   });
 
-  it('returns the restore path for CANCELLED (Admin can reopen to UNPROCESSED)', () => {
-    // A cancelled order is never deleted — Admin / SuperAdmin can send it back to
-    // the unassigned queue. UNPROCESSED is the only allowed next status.
-    expect(getAllowedNextStatuses('CANCELLED')).toEqual(['UNPROCESSED']);
+  it('returns the restore + delete paths for CANCELLED (legacy orders)', () => {
+    // Legacy CANCELLED orders can be deleted or restored by Admin.
+    // CEO directive 2026-05-23: no new orders reach CANCELLED.
+    const result = getAllowedNextStatuses('CANCELLED');
+    expect(result).toContain('DELETED');
+    expect(result).toContain('UNPROCESSED');
   });
 
   it('returns ALLOCATED from ALLOCATED (reallocate to another 3PL)', () => {
@@ -166,8 +172,8 @@ describe('getTransitionRule', () => {
     expect(rule?.gate).toMatch(/voip|call_duration|15/i);
   });
 
-  it('returns rule with gate for cancel requiring reason note', () => {
-    const rule = getTransitionRule('CS_ENGAGED', 'CANCELLED');
+  it('returns rule with gate for delete requiring reason note + permission', () => {
+    const rule = getTransitionRule('CS_ENGAGED', 'DELETED');
     expect(rule).toBeDefined();
     expect(rule?.gate).toMatch(/reason/i);
   });
