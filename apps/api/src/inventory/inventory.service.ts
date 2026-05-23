@@ -1989,6 +1989,27 @@ export class InventoryService {
 
     if (transfers.length === 0) return transfers;
 
+    // Batch-resolve location names so the frontend never sees "Unknown location".
+    const allLocationIds = Array.from(
+      new Set(transfers.flatMap((t) => [t.fromLocationId, t.toLocationId])),
+    );
+    const locationNameRows = allLocationIds.length
+      ? await this.db
+          .select({
+            id: schema.logisticsLocations.id,
+            name: schema.logisticsLocations.name,
+            providerName: schema.logisticsProviders.name,
+          })
+          .from(schema.logisticsLocations)
+          .leftJoin(
+            schema.logisticsProviders,
+            eq(schema.logisticsProviders.id, schema.logisticsLocations.providerId),
+          )
+          .where(inArray(schema.logisticsLocations.id, allLocationIds))
+      : [];
+    const locationNameMap = new Map(locationNameRows.map((r) => [r.id, r.name]));
+    const locationProviderMap = new Map(locationNameRows.map((r) => [r.id, r.providerName ?? null]));
+
     const transferIds = transfers.map((t) => t.id);
     // Sender preference: TRANSFER_OUT movement actor (set on initiate fast-path
     // and on approve), then fall back to `initiated_by` (set on every initiate)
@@ -2104,6 +2125,10 @@ export class InventoryService {
         viewer && transfer.transferStatus === 'PENDING'
           ? this.canApproveSourceTransfer(viewer, sourceProviderKind)
           : false;
+      const fromLocationName = locationNameMap.get(transfer.fromLocationId) ?? null;
+      const toLocationName = locationNameMap.get(transfer.toLocationId) ?? null;
+      const fromProviderName = locationProviderMap.get(transfer.fromLocationId) ?? null;
+      const toProviderName = locationProviderMap.get(transfer.toLocationId) ?? null;
       if (outcomes.length === 0) {
         return [
           {
@@ -2111,6 +2136,10 @@ export class InventoryService {
             senderName,
             sourceProviderKind,
             canApprove,
+            fromLocationName,
+            toLocationName,
+            fromProviderName,
+            toProviderName,
             outcomeStatus: transfer.transferStatus === 'RECEIVED' ? 'APPROVED' : transfer.transferStatus,
             outcomeQuantity: transfer.quantityReceived,
             outcomeReason: transfer.shrinkageReason,
@@ -2122,6 +2151,10 @@ export class InventoryService {
         senderName,
         sourceProviderKind,
         canApprove,
+        fromLocationName,
+        toLocationName,
+        fromProviderName,
+        toProviderName,
         outcomeStatus: outcome.outcomeStatus,
         outcomeQuantity: outcome.outcomeQuantity,
         outcomeReason: outcome.outcomeReason,

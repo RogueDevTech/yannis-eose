@@ -206,9 +206,10 @@ export const ALL_PERMISSION_CODES: string[] = CANONICAL_PERMISSIONS.map((p) => p
  */
 export const ROLE_PERMISSIONS: Record<string, string[]> = {
   SUPER_ADMIN: [],
-  // SUPPORT bypasses all permission gates at the middleware layer (like
-  // SUPER_ADMIN), but all mutations are blocked. Empty array = no seed needed.
-  SUPPORT: [],
+  // SUPPORT gets ALL_PERMISSION_CODES (like ADMIN) so the session carries
+  // every permission for both server-side and client-side gate checks.
+  // All mutations are still blocked at the tRPC middleware layer.
+  SUPPORT: ALL_PERMISSION_CODES,
   ADMIN: ALL_PERMISSION_CODES,
   BRANCH_ADMIN: [
     'orders.read',

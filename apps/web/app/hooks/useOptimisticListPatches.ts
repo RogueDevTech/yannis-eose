@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useFetcher, useRevalidator } from '@remix-run/react';
 
 /**
@@ -60,9 +60,28 @@ export function useOptimisticListPatches<T extends { id: string }>(
 ): OptimisticPatch<T>[] {
   const { state: revalidatorState } = useRevalidator();
   const awaitSuccess = options?.awaitSuccess ?? true;
+
+  // Track whether THIS fetcher triggered a mutation — same guard as
+  // useOptimisticListMerge to prevent unrelated background revalidations
+  // (e.g. CachedAwait on-mount refresh) from keeping phantom patches alive.
+  const didMutateRef = useRef(false);
+  useEffect(() => {
+    if (fetcher.state === 'submitting' || fetcher.state === 'loading') {
+      didMutateRef.current = true;
+    }
+    if (fetcher.state === 'idle') {
+      const id = setTimeout(() => {
+        didMutateRef.current = false;
+      }, 500);
+      return () => clearTimeout(id);
+    }
+  }, [fetcher.state]);
+
   return useMemo<OptimisticPatch<T>[]>(() => {
-    const isMutating = fetcher.state !== 'idle' || revalidatorState !== 'idle';
-    if (!isMutating) return [];
+    const fetcherBusy = fetcher.state !== 'idle';
+    const revalidatingAfterOurMutation =
+      revalidatorState !== 'idle' && didMutateRef.current;
+    if (!fetcherBusy && !revalidatingAfterOurMutation) return [];
 
     if (awaitSuccess) {
       if (fetcher.state === 'submitting') return [];
