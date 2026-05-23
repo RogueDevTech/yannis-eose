@@ -49,15 +49,18 @@ Decoupled monorepo (TurboRepo + pnpm). Frontend (Remix) and backend (NestJS) com
 
 ```
 yannis-eose/
-├── apps/web/          # Remix PWA (65+ routes)
-├── apps/api/          # NestJS (22 modules, 19 tRPC routers)
+├── apps/web/          # Remix PWA (150+ routes, 30 feature modules, ~90 shared UI components)
+├── apps/api/          # NestJS (22 business modules, 23 tRPC routers)
 ├── apps/edge-worker/  # Cloudflare Worker (form + circuit breaker)
-├── packages/shared/   # Drizzle schema, Zod validators, enums
+├── packages/shared/   # Drizzle schema, Zod validators, enums (~151 migrations, latest 0151)
 ├── packages/ui/       # Shared Tailwind components
 └── packages/config/   # ESLint, TS, Tailwind configs
 ```
 
 Rider dashboard lives in `apps/web` at `/rider/` (not a separate app). Local development does not require Docker — Postgres 18 + Redis can be reached via remote connection strings in `.env`.
+
+### Current State Snapshot (2026-05-23)
+All 7 phases complete + Phase 8 (Feature Batch 2), Phase 14/14b (Push + App Theme) complete. Phase 16 (Perf/Scalability) and Phase 22 (Round-Trip Latency) queued. Live infra drift to resolve: prod Cloud SQL still in `europe-north2` (rebuild → `europe-west2` Private IP + HA, import into Terraform). Detailed build history lives in MEMORY.md — don't duplicate it here.
 
 ### Deployment Standard (Locked)
 
@@ -433,6 +436,21 @@ Paste the slow URL + slowest request into the PR description. No "feels faster" 
 - Never block paint on optional data — defer everything that isn't critical-path
 - Never add an index without confirming the query plan needs it
 - Never trust "feels faster" — ship with before/after Lighthouse numbers
+
+---
+
+## Strategic TODOs
+
+### AI CEO Assistant (proposed, not yet scoped)
+Conversational analytics surface for CEO / Heads — natural-language questions over the DB ("net profit this month by branch?", "worst-performing media buyer this week?").
+
+- **Approach:** Tool-calling agent over existing tRPC read procedures (`dashboard.ceoOverview`, `finance.*`, `marketing.teamAnalysis`, etc.) — NOT raw text-to-SQL. Reuses RBAC, branch scoping, FIFO COGS, and Pillar 2 phone masking already enforced by the procedures.
+- **Why not text-to-SQL:** RLS is inert (API connects as table owner), temporal/branch joins are hallucination-prone, customer phone leakage into prompts would breach Pillar 2. Keep SQL escape hatch as a later phase against a hardened read replica.
+- **Model:** Anthropic SDK (Sonnet 4.6 default, Opus 4.7 for hard analysis) with prompt caching on the system prompt + tool schema.
+- **Cost:** ~$0.01–0.03 per question with caching → ~$10–50/month at expected CEO volume. Not a budget concern.
+- **Perf:** Zero impact on app — calls go to Anthropic API. DB load = same as a CEO clicking through `/admin/ceo`. Guardrails: cap tool calls per turn (e.g., 8), 10s timeout per tool call.
+- **Non-negotiables:** PII scrub before any prompt leaves the VM (no raw phones / addresses); every Q+tool-call+answer logged for audit (Pillar 4); SUPER_ADMIN/Heads only at v1.
+- **Status:** Idea phase. Needs a scoped tool list (8–10 procedures), prompt design, chat UI on `/admin/ceo`, and audit table before any code.
 
 ---
 

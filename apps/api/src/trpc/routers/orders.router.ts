@@ -194,7 +194,7 @@ export function buildOrdersListOpts(
   if (searchIncludeCustomerPhone) out.searchIncludeCustomerPhone = true;
   // Head of Marketing's order lists scope by the *marketing* branch
   // (`orders.branch_id`), not the CS servicing branch — see OrdersService.list.
-  if (user.role === 'HEAD_OF_MARKETING') out.branchScope = 'marketing';
+  if (user.role === 'HEAD_OF_MARKETING' || user.role === 'MEDIA_BUYER') out.branchScope = 'marketing';
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -872,10 +872,10 @@ export const ordersRouter = router({
         startDate: input?.startDate,
         endDate: input?.endDate,
       });
-      // Head of Marketing scopes by the *marketing* branch (`orders.branch_id`);
+      // Marketing roles (HoM + MB) scope by the *marketing* branch (`orders.branch_id`);
       // every other role scopes by the CS servicing branch.
       const branchScope: 'servicing' | 'marketing' =
-        ctx.user.role === 'HEAD_OF_MARKETING' ? 'marketing' : 'servicing';
+        ctx.user.role === 'HEAD_OF_MARKETING' || ctx.user.role === 'MEDIA_BUYER' ? 'marketing' : 'servicing';
 
       if (!ordersCacheService) {
         return getOrdersService().getStatusCounts(
@@ -971,9 +971,9 @@ export const ordersRouter = router({
         statuses: narrowed.statuses,
         supervisorScope: narrowed.supervisorScope,
       };
-      // HoM trend follows the marketing branch; everyone else the servicing branch.
+      // Marketing roles (HoM + MB) trend follows the marketing branch; everyone else the servicing branch.
       const tsBranchScope: 'servicing' | 'marketing' =
-        ctx.user.role === 'HEAD_OF_MARKETING' ? 'marketing' : 'servicing';
+        ctx.user.role === 'HEAD_OF_MARKETING' || ctx.user.role === 'MEDIA_BUYER' ? 'marketing' : 'servicing';
 
       if (!ordersCacheService) {
         return getOrdersService().getOrdersTimeSeriesByCreated(
@@ -1148,10 +1148,10 @@ export const ordersRouter = router({
         supervisorScope: scope.supervisorScope,
         status: input.trendStatus,
       };
-      // HoM order surfaces scope by the marketing branch; everyone else by the
+      // Marketing roles (HoM + MB) scope by the marketing branch; everyone else by the
       // CS servicing branch (matches the standalone statusCounts procedure).
       const bundleBranchScope: 'servicing' | 'marketing' =
-        ctx.user.role === 'HEAD_OF_MARKETING' ? 'marketing' : 'servicing';
+        ctx.user.role === 'HEAD_OF_MARKETING' || ctx.user.role === 'MEDIA_BUYER' ? 'marketing' : 'servicing';
 
       const scheduleHeatInput =
         scope.supervisorScope != null

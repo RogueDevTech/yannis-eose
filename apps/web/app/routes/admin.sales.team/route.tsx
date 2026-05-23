@@ -153,7 +153,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const totalPending = filteredMembers.reduce((sum, member) => sum + (member.workload?.pendingCount ?? 0), 0);
-    const idleCount = filteredMembers.filter((member) => member.isIdle).length;
+
+    // Team-level totals from the full leaderboard (not the filtered subset)
+    // so the overview reflects how the whole CS team did in the period — not
+    // just the search/activity slice the table is currently showing.
+    const teamTotals = leaderboard.reduce(
+      (acc, entry) => ({
+        engaged: acc.engaged + (entry.ordersEngaged ?? 0),
+        confirmed: acc.confirmed + (entry.ordersConfirmed ?? 0),
+        delivered: acc.delivered + (entry.ordersDelivered ?? 0),
+      }),
+      { engaged: 0, confirmed: 0, delivered: 0 },
+    );
+    const confirmationRate =
+      teamTotals.engaged > 0 ? (teamTotals.confirmed / teamTotals.engaged) * 100 : null;
+    const deliveryRate =
+      teamTotals.engaged > 0 ? (teamTotals.delivered / teamTotals.engaged) * 100 : null;
 
     const PAGE_SIZE = 20;
     const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
@@ -169,7 +184,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       summary: {
         agentCount: totalCount,
         totalPending,
-        idleCount,
+        engagedTotal: teamTotals.engaged,
+        confirmedTotal: teamTotals.confirmed,
+        deliveredTotal: teamTotals.delivered,
+        confirmationRate,
+        deliveryRate,
       },
       page,
       totalPages,
