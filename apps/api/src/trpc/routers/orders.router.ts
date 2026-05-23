@@ -1878,6 +1878,7 @@ export const ordersRouter = router({
     if (!testOrderPurgeInstance) {
       throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'TestOrderPurgeService not initialized' });
     }
-    return testOrderPurgeInstance.purgeTestOrders(true, true);
+    // Manual trigger — scan every order (not just the cron's 48h window).
+    return testOrderPurgeInstance.purgeTestOrders(true);
   }),
 });

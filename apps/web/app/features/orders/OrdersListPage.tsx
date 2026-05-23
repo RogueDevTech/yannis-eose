@@ -150,7 +150,7 @@ const BULK_TRANSITIONS: Record<string, string[]> = {
 function bulkTransitionLabel(targetStatus: string): string {
   switch (targetStatus) {
     case 'CANCELLED':
-      return 'Cancel orders';
+      return 'Delete orders';
     case 'AGENT_ASSIGNED':
       return 'Assign for delivery';
     case 'DISPATCHED':
@@ -2180,7 +2180,7 @@ function OrdersListPageImpl({
       {cancelModalOpen && (
         <Modal open onClose={() => { setCancelModalOpen(false); setCancelReason(''); }} maxWidth="max-w-md" contentClassName="p-6">
             <h3 className="text-lg font-semibold text-app-fg mb-1">
-              Cancel {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}?
+              Delete {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}?
             </h3>
             <p className="text-sm text-app-fg-muted mb-3">
               Please provide a reason (at least 10 characters). Selected orders will be moved to Cancelled.
@@ -2235,7 +2235,7 @@ function OrdersListPageImpl({
                 loadingText="Cancelling..."
                 onClick={submitBulkCancel}
               >
-                Cancel {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
+                Delete {selectedIds.size} order{selectedIds.size !== 1 ? 's' : ''}
               </Button>
             </div>
         </Modal>

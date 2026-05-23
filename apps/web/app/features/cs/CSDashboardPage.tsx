@@ -557,7 +557,7 @@ function ActiveOrderDetailModal({
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                  Cancel Order
+                  Delete Order
                 </button>
               )}
             </div>
@@ -2382,7 +2382,7 @@ function CSDashboardPageLoaded({
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
-                      Cancel Order
+                      Delete Order
                     </button>
                   )}
                 </div>
@@ -2758,7 +2758,7 @@ function CSDashboardPageLoaded({
           contentClassName="p-6"
         >
           <h3 className="text-lg font-semibold text-app-fg mb-1">
-            Cancel order for {cancelConfirmOrder.customerName}?
+            Delete order for {cancelConfirmOrder.customerName}?
           </h3>
           <p className="text-sm text-app-fg-muted mb-3">
             Please provide a reason (at least 10 characters). The order will be moved to Cancelled.
@@ -2826,7 +2826,7 @@ function CSDashboardPageLoaded({
                 );
               }}
             >
-              Cancel order
+              Delete order
             </Button>
           </div>
         </Modal>

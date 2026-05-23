@@ -289,11 +289,18 @@ export interface MarketingDateFilterResult {
 
 type MarketingDefaultDatePreset = 'this_month' | 'last_48_hours' | 'today';
 
+// YYYY-MM-DD in the company's operational TZ. Server-local `getFullYear/
+// getMonth/getDate` resolves to the wrong Nigeria date around UTC midnight
+// (server in UTC → at 00:00-01:00 WAT the "Today" filter became yesterday).
+// Mirrors `toLocalDateString` in api.server.ts.
+const NIGERIA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Africa/Lagos',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 function formatDateForQuery(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return NIGERIA_DATE_FORMATTER.format(date);
 }
 
 function defaultLast48HoursRange(): { startDate: string; endDate: string } {
