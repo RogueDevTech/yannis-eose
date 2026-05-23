@@ -1460,7 +1460,7 @@ export function OrderDetailPage({
         <div className="min-w-0">
           <h1 className="text-xl sm:text-2xl font-bold text-app-fg truncate">{order.customerName}</h1>
           <p className="text-sm text-app-fg-muted font-mono mt-0.5 break-all">
-            {phoneUnmasked && callablePhone?.phone ? callablePhone.phone : order.customerPhoneDisplay}
+            {callablePhone?.phone ? callablePhone.phone : order.customerPhoneDisplay}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -2132,6 +2132,17 @@ export function OrderDetailPage({
                       disabled={csCommentFetcher.state === 'submitting'}
                     >
                       Add comment
+                    </Button>
+                  )}
+
+                  {showCopyOrderSummary && canPerformCSActionsOnOrder && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => void handleCopyOrderSummary()}
+                    >
+                      Copy order
                     </Button>
                   )}
 
