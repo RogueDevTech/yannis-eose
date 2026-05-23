@@ -184,7 +184,11 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         targets.map((t) => ({
           orderId: t.id,
           eventType: 'ORDER_CANCELLED' as const,
-          actorId: SYSTEM_ACTOR_ID,
+          // SYSTEM_ACTOR_ID is a reserved UUID that doesn't exist in the users
+          // table — the FK on actor_id would reject it. Use null + actorName
+          // instead; null actor_id is the established convention for system and
+          // edge-form events in the timeline.
+          actorId: null,
           actorName: 'System' as const,
           description: 'Auto-cancelled: test-order purge (customer name contains "test")',
           branchId: t.branchId ?? null,
