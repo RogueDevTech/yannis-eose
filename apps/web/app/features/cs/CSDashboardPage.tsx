@@ -1435,11 +1435,6 @@ function CSDashboardPageLoaded({
   const overviewStatItems: OverviewStatStripItem[] = [
     { label: 'Active closers', value: workloads.length, valueClassName: 'text-app-fg' },
     {
-      label: 'Unconfirmed',
-      value: totalPending,
-      valueClassName: 'text-warning-600 dark:text-warning-400',
-    },
-    {
       label: 'Unassigned',
       value: optimisticUnassigned,
       valueClassName: 'text-danger-600 dark:text-danger-400',
@@ -1465,11 +1460,6 @@ function CSDashboardPageLoaded({
       valueClassName: 'text-success-600 dark:text-success-400',
     },
     {
-      label: 'Cash Remitted',
-      value: oCount('REMITTED'),
-      valueClassName: 'text-green-600 dark:text-green-400',
-    },
-    {
       label: 'Backlog / cap',
       value: (
         <>
@@ -1480,7 +1470,7 @@ function CSDashboardPageLoaded({
       valueClassName: 'text-app-fg',
     },
     {
-      label: 'Duty today · Lagos',
+      label: 'Duty today',
       value: (
         <>
           {totalClosesToday}
