@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { and, gte, inArray, notInArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -10,50 +10,77 @@ import { CacheService } from '../common/cache/cache.service';
 
 /**
  * Order statuses that have NOT moved any inventory yet. Test orders past
- * CONFIRMED have reserved / allocated / deducted stock from batches — purging
- * those silently would leave stock counts wrong, so the cron skips them and
- * logs them for manual review instead (CEO directive 2026-05-22).
- *
- * CANCELLED is stock-neutral: the lifecycle only allows cancellation from the
- * pre-confirmation states, so a cancelled order never reserved stock.
+ * CONFIRMED have reserved / allocated / deducted stock from batches — the
+ * cron skips them and logs them for manual review instead (CEO directive
+ * 2026-05-22). CANCELLED is also stock-neutral because the lifecycle only
+ * allows cancellation from the pre-confirmation states.
  */
 const STOCK_NEUTRAL_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED', 'CANCELLED'] as const;
 
 /**
- * Hard cap on orders removed per run — a guardrail so a mis-firing match can
- * never wipe the table in one pass. A genuine backlog drains across runs.
+ * Pre-cancellation statuses the cron actually transitions to CANCELLED.
+ * Excludes CANCELLED itself (no-op) and every stock-moved status.
+ */
+const PRE_CANCEL_STATUSES = ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED'] as const;
+
+/**
+ * Hard cap on orders cancelled per run — a guardrail so a mis-firing match
+ * can never sweep the table in one pass. A genuine backlog drains across runs.
  */
 const MAX_PER_RUN = 200;
 
 /**
- * Whole-word "test" match on the customer name: the name IS "test", or "test"
- * followed by a non-letter (`test`, `Test 1`, `test-order`, `TEST2`). The
- * trailing `[^[:alpha:]]` is the safety net — it means a real customer named
- * "Testimony" or "Tester" can never match. `~*` is case-insensitive; `btrim`
- * tolerates stray leading/trailing whitespace in the stored name.
+ * Whole-word "test" match anywhere in the customer name: catches `test`,
+ * `Test 1`, `test-order`, `TEST2`, `Abraham test`, `test Abraham`, and
+ * `John test doe`. The leading `(^|[^[:alpha:]])` and trailing
+ * `([^[:alpha:]]|$)` are the safety net — a real customer named
+ * `Testimony`, `Tester`, `latest`, or `contest` can never match because
+ * "test" must be flanked by a non-letter on each side (start/end of name
+ * counts). `~*` is case-insensitive; `btrim` tolerates stray leading or
+ * trailing whitespace in the stored name.
  */
-const TEST_NAME_MATCH = sql`btrim(${schema.orders.customerName}) ~* '^test([^[:alpha:]]|$)'`;
+const TEST_NAME_MATCH = sql`btrim(${schema.orders.customerName}) ~* '(^|[^[:alpha:]])test([^[:alpha:]]|$)'`;
 
 /**
- * TestOrderPurgeService — scheduled hard-delete of test orders.
+ * TestOrderPurgeService — scheduled auto-cancellation of test orders.
  *
- * Every 2 hours it finds orders whose customer name is the whole word "test"
- * and removes the stock-neutral ones (order + all FK children) inside one
- * SYSTEM-attributed transaction. The `orders` temporal history table retains
- * the purged rows, so the database-level audit trail survives the delete.
+ * Every 2 hours it scans the **last 48 hours** of orders, finds the ones
+ * whose customer name contains the whole word "test" anywhere (see
+ * `TEST_NAME_MATCH`), and **transitions** the pre-confirmation ones to
+ * `CANCELLED` inside one SYSTEM-attributed transaction — same shape as the
+ * manual Cancel flow. Per CEO directive (2026-05-23) **no order ever leaves
+ * the DB**; test orders simply surface in the Deleted tab via their normal
+ * cancelled state, and Admin/SuperAdmin can restore them like any other
+ * cancelled order. Stock-moved test orders are never auto-cancelled — they
+ * are surfaced as a warning for a human to clean up alongside inventory.
  *
- * **Safety:** ships disarmed — runs as a DRY RUN (logs the exact orders it
- * would delete, deletes nothing) until `TEST_ORDER_PURGE_ENABLED=true` is set
- * in the API environment. Review one dry-run log before arming.
+ * The matcher's deliberately wide and the per-run cap (`MAX_PER_RUN`) is the
+ * guardrail: a mis-firing run can't sweep more than that in one tick.
  */
 @Injectable()
-export class TestOrderPurgeService {
+export class TestOrderPurgeService implements OnApplicationBootstrap {
   private readonly logger = new Logger('TestOrderPurge');
 
   constructor(
     @Inject(DRIZZLE) private readonly db: PostgresJsDatabase<typeof schema>,
     private readonly cache: CacheService,
   ) {}
+
+  /**
+   * Boot-time sweep so a fresh deploy clears recent test orders right away —
+   * otherwise the first effect of a deploy would not be visible until the next
+   * 2-hour cron tick. Same 48-hour window as the cron; errors swallowed so a
+   * purge hiccup never blocks the API from coming up.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      await this.purgeTestOrders();
+    } catch (err) {
+      this.logger.error(
+        `Boot-time test-order purge failed: ${(err as Error)?.message ?? err}`,
+      );
+    }
+  }
 
   /** Every 2 hours, on the hour (00:00, 02:00, 04:00 … server time). */
   @Cron('0 0 */2 * * *')
@@ -67,21 +94,29 @@ export class TestOrderPurgeService {
   }
 
   /**
-   * Find test orders, skip+log the stock-moved ones, hard-delete the rest.
-   * @param forceArmed  Bypass the env-flag dry-run gate (manual UI trigger).
-   * @param allDates    When true, scan all orders; when false (cron default), only today's.
-   * Returns `{ deleted, skipped }`. Safe to call manually.
+   * Find test orders, skip+log the stock-moved ones, transition the rest to
+   * CANCELLED. Per CEO directive 2026-05-23, no `orders` row is ever deleted
+   * — they go to the Deleted tab via their cancelled state and can be
+   * restored by Admin/SuperAdmin like any other cancelled order.
+   *
+   * @param allDates    When true, scan every order; when false (cron default),
+   *                    only those created in the last 48 hours.
+   * Returns `{ cancelled, skipped }` (see `deleted` alias for back-compat).
    */
-  async purgeTestOrders(forceArmed = false, allDates = false): Promise<{ deleted: number; skipped: number }> {
-    const armed = forceArmed || process.env.TEST_ORDER_PURGE_ENABLED === 'true';
-
-    // Cron scans only today's orders to avoid full-table scans; manual purge scans all.
+  async purgeTestOrders(
+    allDates = false,
+  ): Promise<{ deleted: number; cancelled: number; skipped: number }> {
+    // Cron scans a 48-hour window to catch yesterday's late and early-morning
+    // test orders too, without sweeping the whole table on every tick. Manual
+    // trigger (UI) passes `allDates=true` for a one-shot full sweep.
     const dateFilter = allDates
       ? undefined
-      : gte(schema.orders.createdAt, new Date(new Date().setHours(0, 0, 0, 0)));
+      : gte(schema.orders.createdAt, new Date(Date.now() - 48 * 60 * 60 * 1000));
 
-    // Test orders that already moved stock — never purged here; surfaced for a
-    // human to clean up (so inventory can be corrected at the same time).
+    // Test orders that already moved stock — never auto-cancelled here; the
+    // lifecycle forbids CANCELLED from those states because real inventory
+    // would have to be reversed. Surface them so a human can correct stock
+    // and decide what to do with the row.
     const stockMoved = await this.db
       .select({
         id: schema.orders.id,
@@ -98,26 +133,28 @@ export class TestOrderPurgeService {
         .map((o) => `${o.id} (${o.customerName} · ${o.status})`)
         .join('; ');
       this.logger.warn(
-        `${stockMoved.length} test order(s) already moved stock — NOT purged, ` +
-          `need manual review (delete + correct inventory by hand): ${preview}` +
+        `${stockMoved.length} test order(s) already moved stock — NOT auto-cancelled, ` +
+          `need manual review (correct inventory + decide by hand): ${preview}` +
           (stockMoved.length > 30 ? ` … +${stockMoved.length - 30} more` : ''),
       );
     }
 
-    // Purgeable test orders — stock-neutral statuses only, capped per run.
+    // Cancellable test orders — pre-confirmation statuses only (already-CANCELLED
+    // skipped: it's a no-op and would emit a spurious timeline event).
     const targets = await this.db
       .select({
         id: schema.orders.id,
         customerName: schema.orders.customerName,
         status: schema.orders.status,
+        branchId: schema.orders.branchId,
       })
       .from(schema.orders)
-      .where(and(TEST_NAME_MATCH, inArray(schema.orders.status, [...STOCK_NEUTRAL_STATUSES]), dateFilter))
+      .where(and(TEST_NAME_MATCH, inArray(schema.orders.status, [...PRE_CANCEL_STATUSES]), dateFilter))
       .orderBy(schema.orders.createdAt)
       .limit(MAX_PER_RUN);
 
     if (targets.length === 0) {
-      return { deleted: 0, skipped: stockMoved.length };
+      return { deleted: 0, cancelled: 0, skipped: stockMoved.length };
     }
 
     const ids = targets.map((t) => t.id);
@@ -126,59 +163,49 @@ export class TestOrderPurgeService {
       .map((t) => `${t.id} (${t.customerName} · ${t.status})`)
       .join('; ');
 
-    if (!armed) {
-      this.logger.warn(
-        `DRY RUN — would hard-delete ${targets.length} test order(s). ` +
-          `Set TEST_ORDER_PURGE_ENABLED=true to arm. Targets: ${preview}` +
-          (targets.length > 30 ? ` … +${targets.length - 30} more` : ''),
-      );
-      return { deleted: 0, skipped: stockMoved.length };
-    }
-
-    // Hard delete — one SYSTEM-attributed transaction, children before parent
-    // so every foreign key is satisfied. The `orders` temporal history table
-    // keeps the removed rows, attributed to SYSTEM.
+    // One SYSTEM-attributed transaction: flip status → CANCELLED and emit an
+    // ORDER_CANCELLED timeline event per order so the Deleted tab and audit
+    // trail look identical to a manual cancel. Pre-confirmation statuses are
+    // stock-neutral by lifecycle, so there's nothing to release.
+    const now = new Date();
     await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
-      // Unlink rows that merely *reference* an order (don't delete the record).
       await tx
-        .update(schema.cartAbandonments)
-        .set({ convertedOrderId: null })
-        .where(inArray(schema.cartAbandonments.convertedOrderId, ids));
-      await tx
-        .update(schema.crossFunnelAttempts)
-        .set({ originalOrderId: null })
-        .where(inArray(schema.crossFunnelAttempts.originalOrderId, ids));
-
-      // Delete FK children, then the orders themselves.
-      await tx.delete(schema.orderItems).where(inArray(schema.orderItems.orderId, ids));
-      await tx
-        .delete(schema.orderTimelineEvents)
-        .where(inArray(schema.orderTimelineEvents.orderId, ids));
-      await tx.delete(schema.callLogs).where(inArray(schema.callLogs.orderId, ids));
-      await tx.delete(schema.outboundMessages).where(inArray(schema.outboundMessages.orderId, ids));
-      await tx
-        .delete(schema.deliveryRemittanceOrders)
-        .where(inArray(schema.deliveryRemittanceOrders.orderId, ids));
-      await tx
-        .delete(schema.deliveryConfirmationRequests)
-        .where(inArray(schema.deliveryConfirmationRequests.orderId, ids));
-      await tx.delete(schema.invoices).where(inArray(schema.invoices.orderId, ids));
-      await tx.delete(schema.orders).where(inArray(schema.orders.id, ids));
+        .update(schema.orders)
+        .set({ status: 'CANCELLED', updatedAt: now })
+        .where(
+          and(
+            inArray(schema.orders.id, ids),
+            // Defense in depth — never let a concurrent state change push a
+            // stock-moved order into CANCELLED via this UPDATE.
+            inArray(schema.orders.status, [...PRE_CANCEL_STATUSES]),
+          ),
+        );
+      await tx.insert(schema.orderTimelineEvents).values(
+        targets.map((t) => ({
+          orderId: t.id,
+          eventType: 'ORDER_CANCELLED' as const,
+          actorId: SYSTEM_ACTOR_ID,
+          actorName: 'System' as const,
+          description: 'Auto-cancelled: test-order purge (customer name contains "test")',
+          branchId: t.branchId ?? null,
+        })),
+      );
     });
 
-    // The purge removed `orders` rows outside the tRPC mutation path, so the
+    // The cancellation happened outside the tRPC mutation path, so the
     // status-count / time-series cache (`cache:orders:aggregates:*`, populated
-    // by orders.router `getStatusCounts`) still counts the deleted orders.
-    // Bust it so marketing overview strips don't show ghost counts. Mirrors
-    // `invalidateOrdersAggregatesCache` in orders.router.ts.
+    // by orders.router `getStatusCounts`) still has the old counts. Bust it so
+    // marketing overview strips reflect the cancelled state on the next read.
     await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
 
     this.logger.log(
-      `Hard-deleted ${targets.length} test order(s)` +
+      `Cancelled ${targets.length} test order(s) → Deleted tab` +
         (stockMoved.length > 0 ? ` (${stockMoved.length} stock-moved skipped)` : '') +
         `. Targets: ${preview}` +
         (targets.length > 30 ? ` … +${targets.length - 30} more` : ''),
     );
-    return { deleted: targets.length, skipped: stockMoved.length };
+    // `deleted` is retained for backward compat with existing toast UIs that
+    // read that field — same count, just sourced from the cancellation now.
+    return { deleted: targets.length, cancelled: targets.length, skipped: stockMoved.length };
   }
 }

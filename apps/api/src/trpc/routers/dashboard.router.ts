@@ -6,6 +6,7 @@ import type { MarketingService } from '../../marketing/marketing.service';
 import type { HrService } from '../../hr/hr.service';
 import type { InventoryService } from '../../inventory/inventory.service';
 import { CacheService } from '../../common/cache/cache.service';
+import { nigeriaToday, nigeriaDayStart, nigeriaDayEnd } from '../../common/utils/date-range';
 
 // Factory pattern: services injected from NestJS module
 let ordersService: OrdersService | null = null;
@@ -401,12 +402,12 @@ export const dashboardRouter = router({
     if (!ordersService || !financeService) {
       throw new Error('Dashboard services not initialized');
     }
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 999);
-    const startIso = todayStart.toISOString();
-    const endIso = todayEnd.toISOString();
+    // "Today" must mean the Nigeria calendar day — the server runs in UTC, so
+    // `setHours(0, 0, 0, 0)` would give a UTC day boundary off by an hour from
+    // the business day. nigeriaDayStart/End pin the bounds to Africa/Lagos.
+    const todayWat = nigeriaToday();
+    const startIso = nigeriaDayStart(todayWat).toISOString();
+    const endIso = nigeriaDayEnd(todayWat).toISOString();
 
     const [todayCounts, pendingApprovals] = await Promise.all([
       ordersService.getStatusCounts(undefined, startIso, endIso, undefined, undefined, ctx.currentBranchId).catch(() => ({})),

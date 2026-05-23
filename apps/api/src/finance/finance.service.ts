@@ -18,6 +18,7 @@ import type {
 import { DRIZZLE, PG_CLIENT } from '../database/database.module';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 
 @Injectable()
 export class FinanceService {
@@ -1004,12 +1005,8 @@ export class FinanceService {
       const fulfillmentConditions = [
         inArray(schema.stockTransfers.transferStatus, ['RECEIVED', 'DISPUTED']),
       ];
-      if (startDate) fulfillmentConditions.push(gte(schema.stockTransfers.verifiedAt, new Date(startDate)));
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        fulfillmentConditions.push(lte(schema.stockTransfers.verifiedAt, end));
-      }
+      if (startDate) fulfillmentConditions.push(gte(schema.stockTransfers.verifiedAt, nigeriaDayStart(startDate)));
+      if (endDate) fulfillmentConditions.push(lte(schema.stockTransfers.verifiedAt, nigeriaDayEnd(endDate)));
       const fulfillmentWhere = and(...fulfillmentConditions);
 
       // Get ad spend, commission, pipeline from MVs; fulfillment from direct sum (lightweight, no correlated subquery)

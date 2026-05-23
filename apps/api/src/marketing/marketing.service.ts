@@ -51,6 +51,7 @@ import { DRIZZLE } from '../database/database.module';
 import { EventsService } from '../events/events.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withActor } from '../common/db/with-actor';
+import { nigeriaDayStart, nigeriaDayEnd } from '../common/utils/date-range';
 import { trimmedSearchLooksLikeUuid } from '../common/utils/uuid-search';
 import { BranchTeamsService } from '../branches/branch-teams.service';
 import { SettingsService } from '../settings/settings.service';
@@ -983,12 +984,10 @@ export class MarketingService {
       conditions.push(eq(schema.marketingFunding.senderId, input.senderId));
     }
     if (input.startDate) {
-      conditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
+      conditions.push(gte(schema.marketingFunding.sentAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.marketingFunding.sentAt, end));
+      conditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
     // Ledger rows have no branch_id. Do not filter by active-branch membership here — it
     // drifted from `fundingByDirectionSummary` (actor + period only) and hid rows when the
@@ -1053,12 +1052,10 @@ export class MarketingService {
       conditions.push(eq(schema.marketingFunding.senderId, input.senderId));
     }
     if (input.startDate) {
-      conditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
+      conditions.push(gte(schema.marketingFunding.sentAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.marketingFunding.sentAt, end));
+      conditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
     void branchId;
     const searchTrimmed = input.search?.trim();
@@ -1161,12 +1158,10 @@ export class MarketingService {
       );
     }
     if (input.startDate) {
-      conditions.push(gte(schema.marketingFundingRequests.createdAt, new Date(input.startDate)));
+      conditions.push(gte(schema.marketingFundingRequests.createdAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.marketingFundingRequests.createdAt, end));
+      conditions.push(lte(schema.marketingFundingRequests.createdAt, nigeriaDayEnd(input.endDate)));
     }
     void branchId;
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1257,12 +1252,10 @@ export class MarketingService {
   ) {
     const dateConditions: SQL[] = [];
     if (input.startDate) {
-      dateConditions.push(gte(schema.marketingFunding.sentAt, new Date(input.startDate)));
+      dateConditions.push(gte(schema.marketingFunding.sentAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      dateConditions.push(lte(schema.marketingFunding.sentAt, end));
+      dateConditions.push(lte(schema.marketingFunding.sentAt, nigeriaDayEnd(input.endDate)));
     }
 
     // Total received (any status) — gives the headline number HoMs/MBs see.
@@ -1888,12 +1881,10 @@ export class MarketingService {
       );
     }
     if (input.startDate) {
-      conditions.push(gte(schema.marketingFundingRequests.createdAt, new Date(input.startDate)));
+      conditions.push(gte(schema.marketingFundingRequests.createdAt, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.marketingFundingRequests.createdAt, end));
+      conditions.push(lte(schema.marketingFundingRequests.createdAt, nigeriaDayEnd(input.endDate)));
     }
     if (input.status) {
       conditions.push(eq(schema.marketingFundingRequests.status, input.status));
@@ -2958,12 +2949,10 @@ export class MarketingService {
       conditions.push(eq(schema.adSpendLogs.status, input.status));
     }
     if (input.startDate) {
-      conditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
+      conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.adSpendLogs.spendDate, end));
+      conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
@@ -3091,12 +3080,10 @@ export class MarketingService {
       conditions.push(eq(schema.adSpendLogs.status, input.status));
     }
     if (input.startDate) {
-      conditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
+      conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.adSpendLogs.spendDate, end));
+      conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
@@ -3370,12 +3357,10 @@ export class MarketingService {
       conditions.push(eq(schema.adSpendLogs.campaignId, input.campaignId));
     }
     if (input.startDate) {
-      conditions.push(gte(schema.adSpendLogs.spendDate, new Date(input.startDate)));
+      conditions.push(gte(schema.adSpendLogs.spendDate, nigeriaDayStart(input.startDate)));
     }
     if (input.endDate) {
-      const end = new Date(input.endDate);
-      end.setHours(23, 59, 59, 999);
-      conditions.push(lte(schema.adSpendLogs.spendDate, end));
+      conditions.push(lte(schema.adSpendLogs.spendDate, nigeriaDayEnd(input.endDate)));
     }
     const branchCampaignIds = await this.getBranchCampaignIds(branchId);
     if (branchCampaignIds && branchCampaignIds.length === 0) {
@@ -3434,9 +3419,8 @@ export class MarketingService {
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
     if (startDate && endDate) {
-      periodStart = new Date(startDate);
-      periodEnd = new Date(endDate);
-      periodEnd.setHours(23, 59, 59, 999);
+      periodStart = nigeriaDayStart(startDate);
+      periodEnd = nigeriaDayEnd(endDate);
     } else if (period === 'this_month') {
       periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     }
@@ -3644,9 +3628,8 @@ export class MarketingService {
     let periodStart: Date | null = null;
     let periodEnd: Date | null = null;
     if (startDate && endDate) {
-      periodStart = new Date(startDate);
-      periodEnd = new Date(endDate);
-      periodEnd.setHours(23, 59, 59, 999);
+      periodStart = nigeriaDayStart(startDate);
+      periodEnd = nigeriaDayEnd(endDate);
     } else if (period === 'this_month') {
       periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     }

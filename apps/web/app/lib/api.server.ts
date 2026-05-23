@@ -79,21 +79,39 @@ function resolveServerApiBase(_resolvedPath: string): string {
   return DEV_NEST_ORIGIN;
 }
 
-/** Format a Date as YYYY-MM-DD in local time (avoids UTC offset bugs from toISOString). */
+/**
+ * YYYY-MM-DD formatter pinned to the company's operational TZ (Africa/Lagos).
+ * The server runs in UTC, so server-local `getFullYear/getMonth/getDate` gives
+ * the wrong calendar date for 00:00–01:00 WAT (= 23:00–00:00 UTC the previous
+ * day) — the "Today" filter resolved to yesterday in Nigeria right after
+ * midnight. Africa/Lagos pins the date to business hours regardless of where
+ * the server is deployed.
+ */
+const NIGERIA_TZ = 'Africa/Lagos';
+const NIGERIA_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: NIGERIA_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** Format a Date as YYYY-MM-DD in Africa/Lagos (see formatter doc above). */
 export function toLocalDateString(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return NIGERIA_DATE_FORMATTER.format(d);
 }
 
-/** Returns { startDate, endDate } for the current month in local time. */
+/** Returns { startDate, endDate } for the current month in Africa/Lagos. */
 export function defaultThisMonthRange(): { startDate: string; endDate: string } {
-  const now = new Date();
-  return {
-    startDate: toLocalDateString(new Date(now.getFullYear(), now.getMonth(), 1)),
-    endDate: toLocalDateString(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
-  };
+  // Resolve "now" to a Nigeria calendar date, then build the month bounds
+  // straight from that — no Date constructor in server-local TZ to drift.
+  const [yStr, mStr] = toLocalDateString(new Date()).split('-');
+  const year = parseInt(yStr!, 10);
+  const month = parseInt(mStr!, 10);
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  // Day-count per month is pure calendar arithmetic — same in every TZ.
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { startDate, endDate };
 }
 
 /**
