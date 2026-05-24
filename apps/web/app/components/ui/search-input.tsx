@@ -12,6 +12,7 @@
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
+import { CONTROL_HEIGHT_CLASS } from './_control-heights';
 
 interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'size'> {
   onChange?: (value: string) => void;
@@ -39,7 +40,7 @@ interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEleme
 
 const sizeClasses = {
   sm: 'h-8 pl-7 pr-3 text-xs placeholder:text-xs',
-  md: 'h-9 pl-8 pr-3 text-sm placeholder:text-sm',
+  md: `${CONTROL_HEIGHT_CLASS} pl-8 pr-3 text-sm placeholder:text-sm`,
   lg: 'h-10 pl-9 pr-3 text-base placeholder:text-base',
 };
 
@@ -132,9 +133,16 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
           value={displayValue as string}
           onChange={handleChange}
           className={[
-            'input w-full rounded-lg border appearance-none transition-colors',
-            'bg-app-canvas text-app-fg placeholder:text-app-fg-muted',
-            'border-app-border focus:border-brand-500 focus:ring-1 focus:ring-brand-500 focus:outline-none',
+            'input w-full rounded-lg appearance-none transition-shadow',
+            'text-app-fg placeholder:text-app-fg-muted',
+            // Mobile: subtle shadow + inset ring (no border) for clear presence on small screens
+            'border-0 bg-app-elevated shadow-sm ring-1 ring-inset ring-app-fg-muted/35',
+            'hover:shadow hover:ring-app-fg-muted/55',
+            'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500 focus:shadow',
+            // Desktop (md+): revert to subtle hairline border, no shadow/ring chrome
+            'md:border md:border-app-border md:bg-app-canvas md:shadow-none md:ring-0',
+            'md:hover:shadow-none md:hover:ring-0',
+            'md:focus:border-brand-500 md:focus:ring-1 md:focus:ring-brand-500 md:focus:shadow-none',
             sizeClasses[controlSize],
             rightPaddingClass,
             className,

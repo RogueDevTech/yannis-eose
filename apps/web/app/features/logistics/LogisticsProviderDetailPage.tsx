@@ -163,13 +163,10 @@ export function LogisticsProviderDetailPage({
             triggerAriaLabel="Provider toolbar"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={periodAllTime}
-                  />
-                </div>
+                    periodAllTime={periodAllTime} chrome="pill" />
                 <Link
                   to={backHref}
                   className="btn-secondary btn-sm inline-flex items-center justify-center"

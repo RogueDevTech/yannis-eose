@@ -250,39 +250,95 @@ export function HRUsersListLoadingShell({ staffAccounts = false }: { staffAccoun
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
         title={staffAccounts ? 'Staff Accounts' : 'Users'}
+        mobileInlineActions
         description={
           staffAccounts
             ? 'Review staff payout details.'
             : 'Manage team members and roles.'
         }
         actions={
-          <div className="flex items-center gap-2">
-            <PageRefreshButton />
-            <Button variant="primary" size="sm" disabled className="opacity-60">
-              {staffAccounts ? 'Add staff' : 'Add User'}
-            </Button>
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle={staffAccounts ? 'Staff accounts' : 'Users tools'}
+            sheetSubtitle={
+              <span>{staffAccounts ? 'Filters, refresh and export' : 'Filters, refresh and add user'}</span>
+            }
+            triggerAriaLabel={staffAccounts ? 'Staff accounts toolbar' : 'Users toolbar'}
+            desktop={
+              <>
+                <PageRefreshButton />
+                <Button variant="primary" size="sm" disabled className="opacity-60">
+                  {staffAccounts ? 'Export' : '+ Add User'}
+                </Button>
+              </>
+            }
+            sheet={
+              <Button variant="primary" size="sm" className="w-full justify-center" disabled>
+                {staffAccounts ? 'Export' : '+ Add User'}
+              </Button>
+            }
+          />
         }
       />
-      <div className="flex flex-wrap gap-2">
-        <div className="h-9 w-28 rounded-md bg-app-hover animate-pulse" aria-hidden />
-        <div className="h-9 w-28 rounded-md bg-app-hover animate-pulse" aria-hidden />
-      </div>
+
+      <OverviewStatStrip
+        mobileGrid
+        tileClassName="min-w-[6.5rem]"
+        items={
+          staffAccounts
+            ? [
+                { label: 'Total matching', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Page', value: <StatValuePulse className="min-w-[2rem]" /> },
+              ]
+            : [
+                { label: 'Total Users', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Active', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Pending', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Inactive / Archived', value: <StatValuePulse className="min-w-[2rem]" /> },
+                { label: 'Roles', value: <StatValuePulse className="min-w-[2rem]" /> },
+              ]
+        }
+      />
+
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="card px-3 py-2.5 space-y-1.5">
-            <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-full bg-app-hover animate-pulse shrink-0" />
-              <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
-              <div className="ml-auto h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+        {staffAccounts ? (
+          /* Staff accounts: avatar + name + role, bank + account number */
+          Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="card px-3 py-2.5 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-app-hover animate-pulse shrink-0" />
+                  <div className="h-4 w-28 rounded bg-app-hover animate-pulse" />
+                </div>
+                <div className="h-4 w-16 rounded bg-app-hover animate-pulse" />
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+                <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
+              </div>
             </div>
-            <div className="flex items-center gap-3 pl-[calc(1.75rem+0.625rem)]">
-              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
-              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+          ))
+        ) : (
+          /* HR users: avatar + name + status, role badges, email */
+          Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="card px-3 py-2.5 space-y-1.5">
+              {/* Row 1: avatar + name + status */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-app-hover animate-pulse shrink-0" />
+                  <div className="h-4 w-28 rounded bg-app-hover animate-pulse" />
+                </div>
+                <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
+              </div>
+              {/* Row 2: role badge */}
+              <div className="flex items-center gap-1.5">
+                <div className="h-4 w-20 rounded bg-app-hover animate-pulse" />
+              </div>
+              {/* Row 3: email */}
+              <div className="h-3 w-36 rounded bg-app-hover animate-pulse" />
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {/* Desktop table */}

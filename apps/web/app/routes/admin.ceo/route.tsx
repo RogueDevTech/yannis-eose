@@ -6,13 +6,11 @@ import { CachedAwait } from '~/components/ui/cached-await';
 import { cachedClientLoader } from '~/lib/loader-cache';
 import {
   apiRequest,
-  getCurrentUser,
   getSessionCookie,
   requirePermission,
   defaultThisMonthRange,
   safeStatus,
 } from '~/lib/api.server';
-import { canAccessGlobalAuditLog } from '~/lib/rbac';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { usePageRefreshOnEvent } from '~/hooks/useSocket';
 import { CEODashboardPage } from '~/features/ceo/CEODashboardPage';
@@ -30,14 +28,17 @@ interface BranchBreakdownRow {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   await requirePermission(request, 'ceo.overview');
-  const me = await getCurrentUser(request);
-  const canViewAuditLink = me ? canAccessGlobalAuditLog(me) : false;
   const cookie = getSessionCookie(request);
 
   const url = new URL(request.url);
   const periodAllTime = url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
+  // Marketing branch (campaign attribution) is the default view because the
+  // existing "Branch Breakdown" sat above the Marketing block and CEO read it
+  // as a media-buyer scoreboard. Servicing toggle is an additive lens.
+  const branchScope: 'marketing' | 'servicing' =
+    url.searchParams.get('branchScope') === 'servicing' ? 'servicing' : 'marketing';
 
   if (!periodAllTime && !startDate && !endDate) {
     const range = defaultThisMonthRange();
@@ -49,9 +50,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     endDate = undefined;
   }
 
-  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime };
+  const filters = { startDate: startDate ?? '', endDate: endDate ?? '', periodAllTime, branchScope };
 
-  const input = JSON.stringify({ startDate, endDate });
+  const input = JSON.stringify({ startDate, endDate, branchScope });
 
   const pageData = (async (): Promise<{
     data: CEODashboardData;
@@ -92,7 +93,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   })();
 
   return defer({
-    ceoShell: { filters, canViewAuditLink },
+    ceoShell: { filters },
     pageData,
   });
 }
@@ -149,8 +150,8 @@ export default function CEODashboardRoute() {
             data={p.data as CEODashboardData}
             filters={ceoShell.filters}
             branchBreakdown={p.branchBreakdown as BranchBreakdownRow[]}
+            branchScope={ceoShell.filters.branchScope}
             showBackToDashboard
-            canViewAuditLink={ceoShell.canViewAuditLink}
           />
         )}
       </CachedAwait>

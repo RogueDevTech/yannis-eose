@@ -81,7 +81,7 @@ export function ToolbarFiltersCollapsible({
 
   return (
     <>
-      <div className={['border-b border-app-border px-4 py-3', className].filter(Boolean).join(' ')}>
+      <div className={['border-b border-app-border py-3 md:px-4', className].filter(Boolean).join(' ')}>
         <div className={rowClasses(bp)}>
           {hideMobileSheet ? null : (
             <Button

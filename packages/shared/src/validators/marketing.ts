@@ -45,7 +45,7 @@ export const listFundingSchema = z.object({
   endDate: z.string().date().optional(),
   search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListFundingInput = z.infer<typeof listFundingSchema>;
 
@@ -105,7 +105,7 @@ export const listFundingRequestsSchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   search: z.string().max(200).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListFundingRequestsInput = z.infer<typeof listFundingRequestsSchema>;
 
@@ -266,7 +266,7 @@ export const listAdSpendSchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   search: z.string().trim().max(200).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListAdSpendInput = z.infer<typeof listAdSpendSchema>;
 

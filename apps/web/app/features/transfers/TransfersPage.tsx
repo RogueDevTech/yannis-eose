@@ -34,6 +34,7 @@ import { Textarea } from '~/components/ui/textarea';
 import { FormSelect } from '~/components/ui/form-select';
 import { Tabs } from '~/components/ui/tabs';
 import { Spinner } from '~/components/ui/spinner';
+import { Pagination } from '~/components/ui/pagination';
 import type { Transfer, Location, Product, InventoryLevel, TransfersStreamData } from './types';
 
 /** Status options shown as filter pills. Order matches the lifecycle. */
@@ -452,18 +453,18 @@ export function TransfersPage({
 
   // Client-side pagination — backend `inventory.transfers` does not paginate;
   // 20/page keeps the table light without losing the existing date/status filters.
-  const TRANSFERS_PAGE_SIZE = 20;
+  const [transfersPageSize, setTransfersPageSize] = useState(20);
   const [transfersPage, setTransfersPage] = useState(1);
   const transfersTotalPages = Math.max(
     1,
-    Math.ceil(filteredTransfers.length / TRANSFERS_PAGE_SIZE),
+    Math.ceil(filteredTransfers.length / transfersPageSize),
   );
   const safeTransfersPage = Math.min(transfersPage, transfersTotalPages);
   const pagedTransfers = useMemo(
     () =>
       filteredTransfers.slice(
-        (safeTransfersPage - 1) * TRANSFERS_PAGE_SIZE,
-        safeTransfersPage * TRANSFERS_PAGE_SIZE,
+        (safeTransfersPage - 1) * transfersPageSize,
+        safeTransfersPage * transfersPageSize,
       ),
     [filteredTransfers, safeTransfersPage],
   );
@@ -681,13 +682,10 @@ export function TransfersPage({
             filtersBadgeCount={hasFilters ? 1 : 0}
             desktop={
               <>
-                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={periodAllTime ? '' : effectiveDateRange.startDate}
                     endDate={periodAllTime ? '' : effectiveDateRange.endDate}
-                    periodAllTime={periodAllTime}
-                  />
-                </div>
+                    periodAllTime={periodAllTime} chrome="pill" />
                 {canInitiate && (
                   <>
                     <Button variant="primary" size="sm" onClick={openTransferForm}>
@@ -1283,29 +1281,19 @@ export function TransfersPage({
                 }
                 withCard={false}
                 className="overflow-hidden rounded-xl border border-app-border"
-                pagination={
-                  filteredTransfers.length > 0
-                    ? {
-                        page: safeTransfersPage,
-                        totalPages: transfersTotalPages,
-                        onPageChange: setTransfersPage,
-                        summary: (
-                          <p className="text-sm text-app-fg-muted">
-                            Showing {(safeTransfersPage - 1) * TRANSFERS_PAGE_SIZE + 1}–
-                            {Math.min(safeTransfersPage * TRANSFERS_PAGE_SIZE, filteredTransfers.length)} of{' '}
-                            {filteredTransfers.length}
-                            <span className="text-app-fg-muted/90"> · {TRANSFERS_PAGE_SIZE} per page</span>
-                          </p>
-                        ),
-                        wrapperClassName:
-                          'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
-                        controlsClassName: 'sm:justify-end',
-                      }
-                    : undefined
-                }
               />
             );
           })()}
+
+      {filteredTransfers.length > 0 && (
+        <Pagination
+          page={safeTransfersPage}
+          totalPages={transfersTotalPages}
+          onPageChange={setTransfersPage}
+          pageSize={transfersPageSize}
+          onPageSizeChange={(size) => { setTransfersPageSize(size); setTransfersPage(1); }}
+        />
+      )}
 
       <Modal open={!!viewTransfer} onClose={dismissTransferModal} maxWidth="max-w-lg" aria-labelledby="transfer-detail-title">
         {viewTransfer && (

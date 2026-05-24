@@ -9,6 +9,8 @@
  *   <FilterPills options={[...]} value={statuses} onChange={setStatuses} multiple />
  */
 
+import { CONTROL_HEIGHT_CLASS } from './_control-heights';
+
 export interface FilterPillOption {
   value: string;
   label: string;
@@ -45,7 +47,10 @@ type FilterPillsProps = FilterPillsSingleProps | FilterPillsMultiProps;
 export function FilterPills(props: FilterPillsProps) {
   const { options, variant = 'pill', size = 'md', name, className = '' } = props;
 
-  const sizeClass = size === 'sm' ? 'h-7 px-2.5 text-xs gap-1' : 'h-8 px-3 text-sm gap-1.5';
+  const sizeClass =
+    size === 'sm'
+      ? 'h-7 px-2.5 text-xs gap-1'
+      : `${CONTROL_HEIGHT_CLASS} px-3 text-sm gap-1.5`;
 
   function isActive(val: string): boolean {
     if (props.multiple) return (props.value as string[]).includes(val);

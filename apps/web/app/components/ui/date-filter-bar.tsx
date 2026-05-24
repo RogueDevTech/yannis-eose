@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '~/components/ui/button';
 import { Modal } from '~/components/ui/modal';
 import { DateInput } from '~/components/ui/date-input';
+import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 import { useSearchParams, useNavigation, useLocation } from '@remix-run/react';
 
 export interface DateFilterBarProps {
@@ -23,6 +24,14 @@ export interface DateFilterBarProps {
    * `blockCenter` — full-width row with icon + label centered (e.g. mobile sheet next to full-width buttons).
    */
   triggerLayout?: 'inline' | 'blockCenter';
+  /**
+   * Wrap the trigger in the standard pill chrome (canonical control height, bg,
+   * border / shadow + ring on mobile). Pages used to declare this wrapper inline;
+   * passing `chrome="pill"` is the supported way to get it now — they should
+   * NOT also wrap `<DateFilterBar />` in a styled `<div>`. Default `'none'` keeps
+   * call sites that haven't migrated yet visually unchanged.
+   */
+  chrome?: 'pill' | 'none';
 }
 
 /** Stable fingerprint of date-related query params (ignores page, sort, etc.). */
@@ -59,6 +68,10 @@ function formatPeriodLabel(
     if (startDate === today) return 'Today';
     const yesterday = toYMD(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
     if (startDate === yesterday) return 'Yesterday';
+    const twoDaysAgo = toYMD(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2));
+    if (startDate === twoDaysAgo) return '2 days ago';
+    const threeDaysAgo = toYMD(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3));
+    if (startDate === threeDaysAgo) return '3 days ago';
     return new Date(startDate).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', year: 'numeric' });
   }
   // Preset matching only applies to whole-day ranges (no time refinement).
@@ -71,6 +84,8 @@ function formatPeriodLabel(
     lastMonday.setDate(thisMonday.getDate() - 7);
     const lastSunday = new Date(lastMonday);
     lastSunday.setDate(lastMonday.getDate() + 6);
+    const thisWeekStart = toYMD(thisMonday);
+    if (startDate === thisWeekStart && endDate === today) return 'This week';
     const lastWeekStart = toYMD(lastMonday);
     const lastWeekEnd = toYMD(lastSunday);
     if (startDate === lastWeekStart && endDate === lastWeekEnd) return 'Last week';
@@ -88,7 +103,7 @@ function formatPeriodLabel(
   return `${startBit} – ${endBit}`;
 }
 
-type DatePreset = 'today' | 'yesterday' | 'last_week' | 'this_month' | 'last_month';
+type DatePreset = 'today' | 'yesterday' | '2_days_ago' | '3_days_ago' | 'this_week' | 'last_week' | 'this_month' | 'last_month';
 
 type DraftSelectionId = DatePreset | 'all_time' | 'custom' | null;
 
@@ -101,7 +116,7 @@ function getActiveDraftSelectionId(
   if (draftPeriodAllTime) return 'all_time';
   if (!draftStart && !draftEnd) return null;
   if (!draftStart || !draftEnd) return 'custom';
-  const presets: DatePreset[] = ['today', 'yesterday', 'last_week', 'this_month', 'last_month'];
+  const presets: DatePreset[] = ['today', 'yesterday', '2_days_ago', '3_days_ago', 'this_week', 'last_week', 'this_month', 'last_month'];
   for (const p of presets) {
     const { startDate, endDate } = getPresetRange(p);
     if (draftStart === startDate && draftEnd === endDate) return p;
@@ -121,6 +136,26 @@ function getPresetRange(preset: DatePreset): { startDate: string; endDate: strin
       d.setDate(now.getDate() - 1);
       const ymd = toYMD(d);
       return { startDate: ymd, endDate: ymd };
+    }
+    case '2_days_ago': {
+      const d = new Date(now);
+      d.setDate(now.getDate() - 2);
+      const ymd = toYMD(d);
+      return { startDate: ymd, endDate: ymd };
+    }
+    case '3_days_ago': {
+      const d = new Date(now);
+      d.setDate(now.getDate() - 3);
+      const ymd = toYMD(d);
+      return { startDate: ymd, endDate: ymd };
+    }
+    case 'this_week': {
+      // Monday → today
+      const day = now.getDay();
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + mondayOffset);
+      return { startDate: toYMD(monday), endDate: today };
     }
     case 'last_week': {
       const day = now.getDay();
@@ -155,6 +190,7 @@ export function DateFilterBar({
   endTime = '',
   periodAllTime = false,
   triggerLayout = 'inline',
+  chrome = 'none',
 }: DateFilterBarProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
@@ -278,17 +314,48 @@ export function DateFilterBar({
 
   const triggerClassName =
     triggerLayout === 'blockCenter'
-      ? 'flex w-full min-w-0 items-center justify-center gap-1.5 text-xs text-app-fg-muted hover:text-app-fg transition-colors'
-      : 'inline-flex items-center gap-1.5 text-xs text-app-fg-muted hover:text-app-fg-muted hover:text-app-fg transition-colors';
+      ? // Mobile (used inside MobileDateFilterRow) — bold dark label so it reads against the shadow chrome
+        'flex w-full min-w-0 items-center justify-center gap-1.5 text-sm font-medium text-app-fg hover:text-app-fg transition-colors'
+      : // Desktop inline — small muted secondary control next to other page chrome
+        'inline-flex items-center gap-1.5 text-xs text-app-fg-muted hover:text-app-fg transition-colors';
+  const triggerIconClassName =
+    triggerLayout === 'blockCenter' ? 'w-4 h-4 text-app-fg-muted' : 'w-3.5 h-3.5';
+
+  /**
+   * Pill chrome — canonical control height, bg + border on desktop, shadow + ring
+   * on mobile. Mirrors the recipe used in MobileDateFilterRow and the inline
+   * wrappers feature pages used to declare by hand (CEO directive 2026-05-24:
+   * dropdowns / filters / search / date pickers share the same height + chrome).
+   */
+  const chromeClass =
+    chrome === 'pill'
+      ? [
+          'flex items-center rounded-lg px-3',
+          CONTROL_HEIGHT_CLASS,
+          // Mobile: shadow + inset ring on elevated surface
+          'bg-app-elevated shadow-sm ring-1 ring-inset ring-app-fg-muted/35',
+          'hover:shadow hover:ring-app-fg-muted/55 transition-shadow',
+          // Desktop: quieter — soft hover surface + hairline border, no shadow/ring
+          'md:bg-app-hover md:shadow-none md:ring-0 md:border md:border-app-border',
+          'md:hover:shadow-none',
+          triggerLayout === 'blockCenter' ? 'w-full' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : '';
+
+  const triggerButton = (
+    <button type="button" onClick={() => setModalOpen(true)} className={triggerClassName}>
+      <svg className={triggerIconClassName} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+      </svg>
+      <span>{periodLabel}</span>
+    </button>
+  );
 
   return (
     <>
-      <button type="button" onClick={() => setModalOpen(true)} className={triggerClassName}>
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-        </svg>
-        <span>{periodLabel}</span>
-      </button>
+      {chrome === 'pill' ? <div className={chromeClass}>{triggerButton}</div> : triggerButton}
 
       {modalOpen && (
         <Modal open onClose={closeModal} maxWidth="max-w-sm" backdropBlur contentClassName="flex flex-col gap-4 p-5">
@@ -309,6 +376,9 @@ export function DateFilterBar({
                   [
                     { id: 'today' as const, label: 'Today' },
                     { id: 'yesterday' as const, label: 'Yesterday' },
+                    { id: '2_days_ago' as const, label: '2 days ago' },
+                    { id: '3_days_ago' as const, label: '3 days ago' },
+                    { id: 'this_week' as const, label: 'This week' },
                     { id: 'last_week' as const, label: 'Last week' },
                     { id: 'this_month' as const, label: 'This month' },
                     { id: 'last_month' as const, label: 'Last month' },

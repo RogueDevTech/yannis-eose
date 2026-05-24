@@ -46,13 +46,10 @@ export function TplDashboardPage({ data, userName }: TplDashboardPageProps) {
             desktop={
               <>
                 <PageRefreshButton />
-                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={data.filters.startDate}
                     endDate={data.filters.endDate}
-                    periodAllTime={data.filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={data.filters.periodAllTime} chrome="pill" />
               </>
             }
           />

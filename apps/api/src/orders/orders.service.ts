@@ -1152,16 +1152,44 @@ export class OrdersService {
     // the API's job (the edge worker no longer keeps its own KV dedup). A
     // double-tap / refresh / retry / QStash replay can deliver the identical
     // submission more than once; if an identical order already landed in the
-    // last few minutes, return THAT order instead of inserting a second. We
+    // last 24 hours, return THAT order instead of inserting a second. We
     // return idempotently, never reject: rejecting edge-form orders is what
     // caused the 2026-05-19 false-positive incident, and an idempotent return
-    // cannot lose a sale.
+    // cannot lose a sale. Window extended from 15 min → 24h (CEO 2026-05-24).
     if (orderSource === 'edge-form') {
       const existingIdentical = await this.findRecentIdenticalOrder(orderInput);
       if (existingIdentical) {
+        // If the duplicate came from a different MB/form, record a cross-funnel
+        // attempt so the runner-up MB still sees it in their analytics. The
+        // first order is the real one — CS only sees that one.
+        const isCrossMb =
+          orderInput.mediaBuyerId &&
+          existingIdentical.mediaBuyerId &&
+          existingIdentical.mediaBuyerId !== orderInput.mediaBuyerId;
+        if (isCrossMb && orderInput.customerPhoneHash) {
+          const productIds = orderInput.items.map((i) => i.productId);
+          await this.db.insert(schema.crossFunnelAttempts).values(
+            productIds.map((productId) => ({
+              customerPhoneHash: orderInput.customerPhoneHash!,
+              customerName: orderInput.customerName,
+              productId,
+              mediaBuyerId: orderInput.mediaBuyerId!,
+              campaignId: orderInput.campaignId ?? null,
+              branchId: null as string | null,
+              originalOrderId: existingIdentical.id,
+              originalMediaBuyerId: existingIdentical.mediaBuyerId,
+            })),
+          ).catch((err) => {
+            this.logger.warn({ err }, 'cross-funnel attempt insert on idempotency hit failed');
+          });
+        }
         this.logger.warn(
-          { existingOrderId: existingIdentical.id, phoneHash: orderInput.customerPhoneHash },
-          'edge-form idempotency: identical order within window — returning existing, not creating a duplicate',
+          {
+            existingOrderId: existingIdentical.id,
+            phoneHash: orderInput.customerPhoneHash,
+            crossFunnel: !!isCrossMb,
+          },
+          'edge-form idempotency: identical order within 24h window — returning existing, not creating a duplicate',
         );
         return { id: existingIdentical.id };
       }
@@ -6835,23 +6863,30 @@ export class OrdersService {
     campaignId?: string | null;
     mediaBuyerId?: string | null;
     items: Array<{ productId: string; quantity?: number; offerLabel?: string }>;
-  }): Promise<{ id: string } | null> {
+  }): Promise<{ id: string; mediaBuyerId: string | null } | null> {
     if (!input.customerPhoneHash || input.items.length === 0) return null;
 
+    // Match on phone + items fingerprint only — intentionally ignores campaignId
+    // and mediaBuyerId so the same customer submitting the same product via a
+    // different form/MB within 24h is caught as a duplicate. The runner-up MB
+    // still gets a crossFunnelAttempts row for attribution visibility.
     const conditions = [
       eq(schema.orders.customerPhoneHash, input.customerPhoneHash),
-      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '15 minutes'`,
+      sql`${schema.orders.createdAt} >= NOW() - INTERVAL '24 hours'`,
       sql`${schema.orders.status} != 'CANCELLED'`,
+      sql`${schema.orders.status} != 'DELETED'`,
     ];
-    if (input.campaignId) conditions.push(eq(schema.orders.campaignId, input.campaignId));
-    if (input.mediaBuyerId) conditions.push(eq(schema.orders.mediaBuyerId, input.mediaBuyerId));
 
     const candidates = await this.db
-      .select({ id: schema.orders.id, items: schema.orders.items })
+      .select({
+        id: schema.orders.id,
+        items: schema.orders.items,
+        mediaBuyerId: schema.orders.mediaBuyerId,
+      })
       .from(schema.orders)
       .where(and(...conditions))
       .orderBy(desc(schema.orders.createdAt))
-      .limit(5);
+      .limit(10);
 
     const fingerprint = (
       items: Array<{ productId: string; quantity?: number; offerLabel?: string }>,
@@ -6867,7 +6902,7 @@ export class OrdersService {
         ? (candidate.items as Array<{ productId: string; quantity?: number; offerLabel?: string }>)
         : [];
       if (candidateItems.length > 0 && fingerprint(candidateItems) === target) {
-        return { id: candidate.id };
+        return { id: candidate.id, mediaBuyerId: candidate.mediaBuyerId };
       }
     }
     return null;
@@ -7222,8 +7257,20 @@ export class OrdersService {
    * Get per-branch order and revenue breakdown for the CEO dashboard.
    * SuperAdmin only — bypasses RLS, queries all branches directly.
    * Returns branches sorted by total orders descending.
+   *
+   * `branchScope` picks which column drives the grouping:
+   *   - `'marketing'` (default) → `orders.branch_id` (campaign / form attribution)
+   *   - `'servicing'`           → `orders.servicing_branch_id` (CS team that worked the order)
+   *
+   * Same order can land in two different rows depending on the scope (e.g. funnel
+   * branded to Lagos but CS-routed to Abuja). The split exists because migration
+   * 0150 separated attribution from servicing — see `cs_routing_sets_branch` memory.
    */
-  async getBranchBreakdown(startDate?: string, endDate?: string): Promise<Array<{
+  async getBranchBreakdown(
+    startDate?: string,
+    endDate?: string,
+    branchScope: 'marketing' | 'servicing' = 'marketing',
+  ): Promise<Array<{
     branchId: string;
     branchName: string;
     branchCode: string;
@@ -7236,7 +7283,11 @@ export class OrdersService {
     if (endDate) conditions.push(lte(schema.orders.createdAt, nigeriaDayEnd(endDate)));
     const whereClause = and(...conditions);
 
-    // Join orders with branches to get per-branch counts
+    const branchJoinColumn =
+      branchScope === 'servicing' ? schema.orders.servicingBranchId : schema.orders.branchId;
+
+    // Join orders with branches to get per-branch counts. Scope determines whether
+    // we group by marketing branch (attribution) or servicing branch (CS work).
     const rows = await this.db
       .select({
         branchId: schema.branches.id,
@@ -7246,7 +7297,7 @@ export class OrdersService {
         orderCount: count(),
       })
       .from(schema.orders)
-      .innerJoin(schema.branches, eq(schema.orders.branchId, schema.branches.id))
+      .innerJoin(schema.branches, eq(branchJoinColumn, schema.branches.id))
       .where(whereClause)
       .groupBy(schema.branches.id, schema.branches.name, schema.branches.code, schema.orders.status);
 

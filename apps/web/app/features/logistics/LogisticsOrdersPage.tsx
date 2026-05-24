@@ -1,5 +1,5 @@
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react';
-import { Await, useFetcher, useSearchParams } from '@remix-run/react';
+import { Await, Link, useFetcher, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { Modal } from '~/components/ui/modal';
@@ -238,6 +238,7 @@ function LogisticsOrdersPageImpl({
   const [rowDispatchRiderByOrder, setRowDispatchRiderByOrder] = useState<Record<string, string>>({});
   const [bulkResult, setBulkResult] = useState<{ succeeded: number; failed: number; errors: string[] } | null>(null);
 
+  const [peekOrder, setPeekOrder] = useState<LogisticsOrderRow | null>(null);
   const [deliverConfirm, setDeliverConfirm] = useState<{ orderId: string; customerName: string } | null>(null);
   const [deliverConfirmDiscount, setDeliverConfirmDiscount] = useState('');
   const [deliverConfirmDeliveryCost, setDeliverConfirmDeliveryCost] = useState('');
@@ -567,120 +568,31 @@ function LogisticsOrdersPageImpl({
     _index: number,
     _helpers: CompactTableMobileCardHelpers<LogisticsOrderRow>,
   ) => {
-    const ridersForOrder =
-      order.logisticsLocationId && order.status === 'AGENT_ASSIGNED'
-        ? riders.filter((r) => r.logisticsLocationId === order.logisticsLocationId)
-        : [];
-    const companyLine = order.locationProviderName
-      ? `${order.locationProviderName} · ${order.locationName}`
-      : order.locationName;
     return (
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="min-w-0 truncate text-sm font-medium text-app-fg">
-              {order.customerName || '—'}
-            </span>
-            <OrderIdBadge
-              id={order.id}
-              orderNumber={order.orderNumber}
-              linkTo={toOrderDetail(order.id)}
-              textClassName="text-sm font-medium text-brand-500 hover:text-brand-600"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-2">
-            <OrderStatusBadge status={order.status} expanded />
-            <span className="whitespace-nowrap text-xs text-app-fg-muted">
-              {formatOrderTimestamp(order.createdAt)}
-            </span>
-          </div>
+      <button
+        type="button"
+        onClick={() => setPeekOrder(order)}
+        className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+      >
+        {/* Row 1: customer + order ID */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate text-sm font-medium text-app-fg">
+            {order.customerName || '—'}
+          </span>
+          <OrderIdBadge
+            id={order.id}
+            orderNumber={order.orderNumber}
+            textClassName="text-sm font-medium text-app-fg"
+          />
         </div>
-        <div className="flex flex-col gap-1 text-sm text-app-fg-muted">
-          <span>{companyLine}</span>
-          {order.preferredDeliveryDate && (
-            <span>
-              <span className="text-app-fg-muted">Delivery: </span>
-              <DeliveryDateCell date={order.preferredDeliveryDate} status={order.status} />
-            </span>
-          )}
+        {/* Row 2: status + date */}
+        <div className="flex items-center justify-between gap-2">
+          <OrderStatusBadge status={order.status} expanded />
+          <span className="whitespace-nowrap text-xs text-app-fg-muted">
+            {formatOrderTimestamp(order.createdAt)}
+          </span>
         </div>
-        <div className="flex flex-wrap gap-2 pt-2">
-          <TableActionButton to={toOrderDetail(order.id)} variant="primary">
-            View
-          </TableActionButton>
-          {canEditDeliveryDate && order.status === 'CONFIRMED' && (
-            <TableActionButton
-              variant="neutral"
-              onClick={() =>
-                setEditDeliveryDateOrder({
-                  orderId: order.id,
-                  customerName: order.customerName,
-                  preferredDeliveryDate: order.preferredDeliveryDate ?? null,
-                })
-              }
-            >
-              Resolve order
-            </TableActionButton>
-          )}
-          {order.status === 'IN_TRANSIT' && !allocationOnDetailOnly && (
-            <Button variant="success" size="sm" onClick={() => setDeliverConfirm({ orderId: order.id, customerName: order.customerName })}>
-              Mark Delivered
-            </Button>
-          )}
-          {order.status === 'CONFIRMED' && !allocationOnDetailOnly && (
-            <fetcher.Form method="post" className="flex flex-wrap gap-1">
-              <input type="hidden" name="intent" value="allocate" />
-              <input type="hidden" name="orderId" value={order.id} />
-              <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[order.id] ?? ''} />
-              <SearchableSelect
-                id={`logistics-mobile-allocate-${order.id}`}
-                value={rowAllocateLocationByOrder[order.id] ?? ''}
-                onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                placeholder="Location"
-                searchPlaceholder="Search locations..."
-                options={allocatableLocations.map((loc) => ({
-                  value: loc.id,
-                  label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
-                }))}
-                wrapperClassName="min-w-0 flex-1"
-                controlSize="sm"
-              />
-              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[order.id] ?? '')}>
-                Assign
-              </Button>
-            </fetcher.Form>
-          )}
-          {order.status === 'AGENT_ASSIGNED' && !allocationOnDetailOnly && ridersForOrder.length > 0 && (
-            <fetcher.Form method="post" className="flex gap-1">
-              <input type="hidden" name="intent" value="dispatch" />
-              <input type="hidden" name="orderId" value={order.id} />
-              <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[order.id] ?? ''} />
-              <SearchableSelect
-                id={`logistics-mobile-dispatch-${order.id}`}
-                value={rowDispatchRiderByOrder[order.id] ?? ''}
-                onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [order.id]: value }))}
-                placeholder="Rider"
-                searchPlaceholder="Search riders..."
-                options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
-                controlSize="sm"
-              />
-              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowDispatchRiderByOrder[order.id] ?? '')}>
-                Dispatch
-              </Button>
-            </fetcher.Form>
-          )}
-          {order.status === 'DISPATCHED' && !allocationOnDetailOnly && (
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="transition" />
-              <input type="hidden" name="orderId" value={order.id} />
-              <input type="hidden" name="newStatus" value="IN_TRANSIT" />
-              <Button type="submit" variant="primary" size="sm" disabled={isSubmitting}>
-                {markInTransitLabel}
-              </Button>
-            </fetcher.Form>
-          )}
-        </div>
-      </div>
+      </button>
     );
   };
 
@@ -706,13 +618,10 @@ function LogisticsOrdersPageImpl({
                   >
                     {showChartView ? 'View as data' : 'View data in chart'}
                   </button>
-                  <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                    <DateFilterBar
+                  <DateFilterBar
                       startDate={filters.startDate}
                       endDate={filters.endDate}
-                      periodAllTime={filters.periodAllTime}
-                    />
-                  </div>
+                      periodAllTime={filters.periodAllTime} chrome="pill" />
                 </>
               }
               filters={
@@ -1031,7 +940,7 @@ function LogisticsOrdersPageImpl({
           totalPages={totalPages}
           pageParam="page"
           pageSize={limit}
-          pageSizeOptions={[20, 40, 50, 100]}
+          pageSizeOptions={[20, 40, 50, 100, 200, 500, 1000]}
           showWhenSinglePage
         />
       )}
@@ -1126,6 +1035,146 @@ function LogisticsOrdersPageImpl({
           }}
         />
       )}
+
+      {/* Mobile peek modal */}
+      <Modal
+        open={!!peekOrder}
+        onClose={() => setPeekOrder(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5"
+      >
+        {peekOrder && (() => {
+          const o = peekOrder;
+          const companyLine = o.locationProviderName
+            ? `${o.locationProviderName} · ${o.locationName}`
+            : o.locationName;
+          const ridersForOrder =
+            o.logisticsLocationId && o.status === 'AGENT_ASSIGNED'
+              ? riders.filter((r) => r.logisticsLocationId === o.logisticsLocationId)
+              : [];
+          return (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-app-fg truncate min-w-0">{o.customerName || '—'}</p>
+                <OrderIdBadge id={o.id} orderNumber={o.orderNumber} textClassName="text-sm font-medium text-app-fg" />
+              </div>
+
+              {/* Details */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Status</span>
+                  <OrderStatusBadge status={o.status} expanded />
+                </div>
+                {companyLine && companyLine !== '—' && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Company</span>
+                    <span className="text-app-fg text-right truncate max-w-[60%]">{companyLine}</span>
+                  </div>
+                )}
+                {o.preferredDeliveryDate && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Delivery date</span>
+                    <DeliveryDateCell date={o.preferredDeliveryDate} status={o.status} />
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Created</span>
+                  <span className="text-app-fg">{formatOrderTimestamp(o.createdAt)}</span>
+                </div>
+                {o.riderName && o.riderName !== '—' && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Rider</span>
+                    <span className="text-app-fg">{o.riderName}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Inline actions */}
+              {!allocationOnDetailOnly && (
+                <div className="space-y-2">
+                  {o.status === 'CONFIRMED' && (
+                    <fetcher.Form method="post" className="flex gap-1.5">
+                      <input type="hidden" name="intent" value="allocate" />
+                      <input type="hidden" name="orderId" value={o.id} />
+                      <input type="hidden" name="logisticsLocationId" value={rowAllocateLocationByOrder[o.id] ?? ''} />
+                      <SearchableSelect
+                        value={rowAllocateLocationByOrder[o.id] ?? ''}
+                        onChange={(value) => setRowAllocateLocationByOrder((prev) => ({ ...prev, [o.id]: value }))}
+                        placeholder="Select location"
+                        searchPlaceholder="Search locations..."
+                        options={allocatableLocations.map((loc) => ({
+                          value: loc.id,
+                          label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
+                        }))}
+                        wrapperClassName="min-w-0 flex-1"
+                        controlSize="sm"
+                      />
+                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowAllocateLocationByOrder[o.id] ?? '')}>
+                        Assign
+                      </Button>
+                    </fetcher.Form>
+                  )}
+                  {o.status === 'AGENT_ASSIGNED' && ridersForOrder.length > 0 && (
+                    <fetcher.Form method="post" className="flex gap-1.5">
+                      <input type="hidden" name="intent" value="dispatch" />
+                      <input type="hidden" name="orderId" value={o.id} />
+                      <input type="hidden" name="riderId" value={rowDispatchRiderByOrder[o.id] ?? ''} />
+                      <SearchableSelect
+                        value={rowDispatchRiderByOrder[o.id] ?? ''}
+                        onChange={(value) => setRowDispatchRiderByOrder((prev) => ({ ...prev, [o.id]: value }))}
+                        placeholder="Select rider"
+                        searchPlaceholder="Search riders..."
+                        options={ridersForOrder.map((r) => ({ value: r.id, label: r.name }))}
+                        controlSize="sm"
+                        wrapperClassName="min-w-0 flex-1"
+                      />
+                      <Button type="submit" variant="primary" size="sm" disabled={isSubmitting || !(rowDispatchRiderByOrder[o.id] ?? '')}>
+                        Dispatch
+                      </Button>
+                    </fetcher.Form>
+                  )}
+                  {o.status === 'DISPATCHED' && (
+                    <fetcher.Form method="post">
+                      <input type="hidden" name="intent" value="transition" />
+                      <input type="hidden" name="orderId" value={o.id} />
+                      <input type="hidden" name="newStatus" value="IN_TRANSIT" />
+                      <Button type="submit" variant="primary" size="sm" className="w-full" disabled={isSubmitting}>
+                        {markInTransitLabel}
+                      </Button>
+                    </fetcher.Form>
+                  )}
+                  {o.status === 'IN_TRANSIT' && (
+                    <Button
+                      variant="success"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => {
+                        setPeekOrder(null);
+                        setDeliverConfirm({ orderId: o.id, customerName: o.customerName });
+                      }}
+                    >
+                      Mark Delivered
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* View order link */}
+              <div className="pt-1 border-t border-app-border">
+                <Link
+                  to={toOrderDetail(o.id)}
+                  prefetch="intent"
+                  className="btn-primary btn-sm inline-flex w-full items-center justify-center"
+                  onClick={() => setPeekOrder(null)}
+                >
+                  View order
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }

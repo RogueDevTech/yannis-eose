@@ -1468,15 +1468,12 @@ function OrdersListPageImpl({
                   </Button>
                 )}
                 {!isCartAbandonmentView && (
-                  <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                    <DateFilterBar
+                  <DateFilterBar
                       startDate={filters?.startDate ?? ''}
                       endDate={filters?.endDate ?? ''}
                       startTime={filters?.startTime ?? ''}
                       endTime={filters?.endTime ?? ''}
-                      periodAllTime={filters?.periodAllTime ?? false}
-                    />
-                  </div>
+                      periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
                 )}
               </>
             }

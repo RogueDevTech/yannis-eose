@@ -850,13 +850,10 @@ export function MarketingAdSpendPage({
             }
             desktop={
               <>
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <BranchScopedLink
                   to="/admin/marketing/ad-spend/new"
                   actionLabel="adding ad spend"

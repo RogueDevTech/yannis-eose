@@ -65,15 +65,12 @@ export function FinancePage({ data }: { data: FinanceOverviewLoaderData }) {
             desktop={
               <>
                 <PageRefreshButton />
-                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     startTime={filters.startTime ?? ''}
                     endTime={filters.endTime ?? ''}
-                    periodAllTime={filters.periodAllTime ?? false}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
               </>
             }
           />

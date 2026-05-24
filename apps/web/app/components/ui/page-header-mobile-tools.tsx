@@ -99,8 +99,8 @@ export function PageHeaderMobileTools({
             type="button"
             variant="ghost"
             size="sm"
-            // Grey-filled chrome to mirror PageRefreshButton (CEO 2026-05-19).
-            className="relative h-9 w-9 shrink-0 rounded-lg bg-surface-100 dark:bg-surface-800 p-0 text-app-fg-muted hover:bg-surface-200 hover:text-brand-600 dark:hover:bg-surface-700"
+            // Primary brand filled on mobile — mirrors PageRefreshButton. !h-9 !min-h-0 override .btn-sm mobile min-h-10.
+            className="relative !h-9 w-9 !min-h-0 shrink-0 rounded-lg !p-0 bg-brand-500 text-white border-0 hover:bg-brand-600"
             aria-label={triggerAriaLabel}
             aria-haspopup="dialog"
             aria-expanded={open}
@@ -130,8 +130,12 @@ export function PageHeaderMobileTools({
           </div>
           <div
             className={[
-              'flex flex-col gap-3 overflow-y-auto p-4',
+              'flex flex-col gap-2.5 overflow-y-auto p-4',
               sheetBodyMaxHeightClassName,
+              // Normalize all buttons/links inside the sheet to consistent size + font.
+              '[&_button]:w-full [&_button]:justify-center [&_button]:text-sm [&_button]:font-medium [&_button]:min-h-[2.75rem]',
+              '[&_a.btn-primary]:w-full [&_a.btn-primary]:justify-center [&_a.btn-primary]:text-sm [&_a.btn-primary]:font-medium [&_a.btn-primary]:min-h-[2.75rem]',
+              '[&_a.btn-secondary]:w-full [&_a.btn-secondary]:justify-center [&_a.btn-secondary]:text-sm [&_a.btn-secondary]:font-medium [&_a.btn-secondary]:min-h-[2.75rem]',
             ].join(' ')}
           >
             {/* Filters + actions flow as one balanced column — no divider

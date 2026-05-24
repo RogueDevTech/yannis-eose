@@ -410,13 +410,10 @@ export function MarketingOverviewPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
-                    periodAllTime={filters?.periodAllTime ?? false}
-                  />
-                </div>
+                    periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
                 <PageRefreshButton />
               </>
             }

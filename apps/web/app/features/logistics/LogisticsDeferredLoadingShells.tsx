@@ -287,6 +287,15 @@ export function LogisticsPartnersLoadingShell() {
           />
         }
       />
+      <OverviewStatStrip
+        mobileGrid
+        showScrollControls={false}
+        items={[
+          { label: 'Logistics companies', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Locations', value: <StatValuePulse className="min-w-[2rem]" /> },
+        ]}
+      />
+
       <Tabs
         value="locations"
         onChange={() => {}}
@@ -305,14 +314,18 @@ export function LogisticsPartnersLoadingShell() {
       <div className="md:hidden space-y-2">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            {/* Row 1: name + status */}
             <div className="flex items-center justify-between gap-2">
               <div className="h-4 w-32 rounded bg-app-hover animate-pulse" />
               <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
             </div>
-            <div className="flex items-center gap-3 text-xs">
+            {/* Row 2: company + units */}
+            <div className="flex items-center gap-2 text-xs">
               <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
               <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
             </div>
+            {/* Row 3: address */}
+            <div className="h-3 w-36 rounded bg-app-hover animate-pulse" />
           </div>
         ))}
       </div>
@@ -512,9 +525,7 @@ export function LogisticsRemittancesLoadingShell() {
             sheetCloseLabel="Done"
             desktop={
               <div className="flex items-center gap-2">
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-                  <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} />
-                </div>
+                <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </div>
             }
@@ -634,18 +645,20 @@ export function LogisticsRemittancesLoadingShell() {
         emptyDescription=""
         renderMobileCard={() => (
           <div className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="min-w-0 flex-1">
-                <TableCellTextPulse className="w-[8rem]" />
-              </span>
-              <StatusBadge status="IN_TRANSIT" />
-            </div>
+            {/* Row 1: Product + qty + status */}
             <div className="flex items-center justify-between gap-2">
               <span className="min-w-0 flex-1">
                 <TableCellTextPulse className="w-[10rem]" />
               </span>
+              <span className="h-5 w-16 rounded-full bg-app-hover animate-pulse shrink-0" aria-hidden />
+            </div>
+            {/* Row 2: Route + date */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 flex-1">
+                <TableCellTextPulse className="w-[12rem]" />
+              </span>
               <span className="shrink-0">
-                <TableCellTextPulse className="w-[4rem]" />
+                <TableCellTextPulse className="w-[5rem]" />
               </span>
             </div>
           </div>
@@ -670,13 +683,10 @@ export function LogisticsTeamLoadingShell({
         description="Provider performance for the selected period."
         actions={
           <>
-            <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-              <DateFilterBar
+            <DateFilterBar
                 startDate={dateFilters.startDate}
                 endDate={dateFilters.endDate}
-                periodAllTime={dateFilters.periodAllTime}
-              />
-            </div>
+                periodAllTime={dateFilters.periodAllTime} chrome="pill" />
             <PageRefreshButton />
           </>
         }
@@ -762,11 +772,11 @@ function TransfersWorkspaceLoadingShell({
   variant: 'stock' | 'logistics';
 }) {
   const rows = shellPulsePlaceholderRows(variant === 'logistics' ? 'xfer_partner' : 'xfer', 8);
-  const pageTitle = variant === 'logistics' ? 'Partner stock transfers' : 'Stock transfers';
+  const pageTitle = variant === 'logistics' ? 'Partner Transfers' : 'Stock Transfers';
   const pageDescription =
     variant === 'logistics'
-      ? 'Request stock moves from one logistics location to another (including between 3PL partners). Sent transfers stay In transit until the receiving location confirms receipt under Logistics → Stock Transfer Confirmations.'
-      : 'Send stock between locations. Transfers stay on this list as In transit until the destination confirms receipt (Logistics → Stock Transfer Confirmations).';
+      ? 'Request stock moves between logistics locations.'
+      : 'Move stock between locations and track receipt.';
   const initiateCta = variant === 'logistics' ? '+ Request transfer' : '+ Record transfer';
 
   return (
@@ -782,13 +792,10 @@ function TransfersWorkspaceLoadingShell({
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
             desktop={
               <>
-                <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.periodAllTime ? '' : filters.startDate}
                     endDate={filters.periodAllTime ? '' : filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <Button variant="primary" size="sm" disabled>
                   {initiateCta}
                 </Button>

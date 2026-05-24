@@ -11,9 +11,11 @@
  */
 
 import { Link, useSearchParams } from '@remix-run/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { useIsMobile } from '~/hooks/useIsMobile';
 import { Modal } from '~/components/ui/modal';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
+import { CONTROL_HEIGHT_CLASS } from '~/components/ui/_control-heights';
 
 interface PaginationProps {
   page: number;
@@ -105,10 +107,16 @@ export function Pagination({
   // We default the choices to [20, 50, 100] so individual list pages don't need to repeat
   // the options array — just pass `pageSize={limit}` and the picker appears. Pages can
   // still override with `pageSizeOptions` when they want a different set.
-  const resolvedPageSizeOptions =
-    Array.isArray(pageSizeOptions) && pageSizeOptions.length > 0
-      ? pageSizeOptions
-      : [20, 50, 100];
+  const isMobile = useIsMobile();
+  // Mobile caps at 500 rows; desktop allows up to 1000.
+  const MOBILE_MAX = 500;
+  const resolvedPageSizeOptions = useMemo(() => {
+    const base =
+      Array.isArray(pageSizeOptions) && pageSizeOptions.length > 0
+        ? pageSizeOptions
+        : [20, 50, 100, 200, 400, 500, 600, 800, 1000];
+    return isMobile ? base.filter((n) => n <= MOBILE_MAX) : base;
+  }, [pageSizeOptions, isMobile]);
   const showPageSizePicker = typeof pageSize === 'number';
 
   if (totalPages < 1 && !showPageSizePicker) return null;
@@ -143,7 +151,7 @@ export function Pagination({
     const isActive = p === page;
     const content = label ?? p;
     const btnClass = [
-      'flex h-8 min-w-[2rem] items-center justify-center rounded-lg px-2 text-sm font-medium transition-colors',
+      `flex ${CONTROL_HEIGHT_CLASS} min-w-[2.5rem] md:min-w-[2.25rem] items-center justify-center rounded-lg px-2 text-sm font-medium transition-colors`,
       isActive
         ? 'bg-brand-500 text-white'
         : 'text-app-fg hover:bg-app-hover',
@@ -180,7 +188,7 @@ export function Pagination({
 
   function NavBtn({ p, label, disabled }: { p: number; label: React.ReactNode; disabled: boolean }) {
     const btnClass = [
-      'flex h-8 items-center gap-1 rounded-lg px-2.5 text-sm font-medium transition-colors',
+      `flex ${CONTROL_HEIGHT_CLASS} items-center gap-1 rounded-lg px-3 md:px-2.5 text-sm font-medium transition-colors`,
       disabled
         ? 'cursor-not-allowed text-app-fg-muted opacity-40'
         : 'text-app-fg hover:bg-app-hover',
@@ -217,17 +225,10 @@ export function Pagination({
 
   const pages = buildPages(page, totalPages, siblingCount);
 
-  return (
-    <nav
-      aria-label="Pagination"
-      className={[
-        'flex flex-wrap items-center gap-1',
-        align === 'end' ? 'justify-end' : align === 'start' ? 'justify-start' : 'justify-center',
-        className,
-      ]
-        .filter(Boolean)
-        .join(' ')}
-    >
+  const alignClass = align === 'end' ? 'justify-end' : align === 'start' ? 'justify-start' : 'justify-center';
+
+  const navControls = (
+    <div className={`flex items-center gap-1 ${isMobile ? 'justify-between w-full' : alignClass}`}>
       {showEdgeButtons && (
         <NavBtn p={1} label="«" disabled={page === 1} />
       )}
@@ -246,16 +247,25 @@ export function Pagination({
       />
 
       {showLabel ? (
-        <span className="px-3 text-sm text-app-fg-muted inline-flex items-center gap-2">
-          Page <span className="font-semibold text-app-fg">{page}</span> of{' '}
-          <span className="font-semibold text-app-fg">{totalPages}</span>
-          {isPaginating ? <PaginationSpinner /> : null}
-        </span>
+        <PageJumpTrigger
+          page={page}
+          totalPages={totalPages}
+          isPaginating={isPaginating}
+          onSelect={(p) => {
+            if (onPageChange) {
+              armCallbackNavigating();
+              onPageChange(p);
+            } else {
+              refetchBusy.primeSamePathRefetch();
+            }
+          }}
+          buildHref={onPageChange ? undefined : buildHref}
+        />
       ) : (
         <>
           {pages.map((p, i) =>
             p === '...' ? (
-              <span key={`ellipsis-${i}`} className="flex h-8 w-8 items-center justify-center text-sm text-app-fg-muted">
+              <span key={`ellipsis-${i}`} className={`flex ${CONTROL_HEIGHT_CLASS} w-10 md:w-9 items-center justify-center text-sm text-app-fg-muted`}>
                 …
               </span>
             ) : (
@@ -286,6 +296,39 @@ export function Pagination({
       {showEdgeButtons && (
         <NavBtn p={totalPages} label="»" disabled={page === totalPages} />
       )}
+    </div>
+  );
+
+  // On mobile, stack nav controls and per-page picker vertically for a cleaner layout.
+  // On desktop, keep everything inline.
+  if (isMobile && showPageSizePicker) {
+    return (
+      <nav
+        aria-label="Pagination"
+        className={['flex flex-col items-center gap-0.5', className].filter(Boolean).join(' ')}
+      >
+        {navControls}
+        <PageSizePicker
+          pageSize={pageSize as number}
+          options={resolvedPageSizeOptions}
+          onSelect={commitPageSize}
+        />
+      </nav>
+    );
+  }
+
+  return (
+    <nav
+      aria-label="Pagination"
+      className={[
+        'flex flex-wrap items-center gap-1',
+        alignClass,
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {navControls}
 
       {showPageSizePicker ? (
         <PageSizePicker
@@ -295,6 +338,113 @@ export function Pagination({
         />
       ) : null}
     </nav>
+  );
+}
+
+/**
+ * Page jump trigger — tappable "Page X of Y" label that opens a modal listing all pages.
+ * Uses Link navigation in URL mode, callback in controlled mode.
+ */
+function PageJumpTrigger({
+  page,
+  totalPages,
+  isPaginating,
+  onSelect,
+  buildHref,
+}: {
+  page: number;
+  totalPages: number;
+  isPaginating: boolean;
+  onSelect: (p: number) => void;
+  /** When provided (URL mode), renders Links instead of buttons. */
+  buildHref?: (p: number) => string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="px-2 text-sm text-app-fg-muted inline-flex items-center gap-1.5 rounded-lg transition-colors hover:bg-app-hover"
+        aria-haspopup="dialog"
+      >
+        {/* Grid icon — visual hint that the label is tappable */}
+        <svg className="h-3.5 w-3.5 text-app-fg-muted" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <rect x="1" y="1" width="6" height="6" rx="1" />
+          <rect x="9" y="1" width="6" height="6" rx="1" />
+          <rect x="1" y="9" width="6" height="6" rx="1" />
+          <rect x="9" y="9" width="6" height="6" rx="1" />
+        </svg>
+        <span>
+          Page <span className="font-semibold text-app-fg">{page}</span> of{' '}
+          <span className="font-semibold text-app-fg">{totalPages}</span>
+        </span>
+        {isPaginating ? <PaginationSpinner /> : null}
+      </button>
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        maxWidth="max-w-sm"
+        aria-labelledby="page-jump-title"
+      >
+        <div className="px-5 pb-1 pt-5">
+          <h2 id="page-jump-title" className="text-base font-semibold text-app-fg">
+            Go to page
+          </h2>
+          <p className="mt-0.5 text-sm text-app-fg-muted">
+            {totalPages} {totalPages === 1 ? 'page' : 'pages'} available.
+          </p>
+        </div>
+        <div className="p-3 max-h-72 overflow-y-auto">
+          <div className="grid grid-cols-4 gap-1.5">
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
+              const isActive = p === page;
+              const cls = [
+                'flex items-center justify-center rounded-lg py-2.5 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-brand-500 text-white'
+                  : 'text-app-fg hover:bg-app-hover',
+              ].join(' ');
+
+              if (buildHref && !isActive) {
+                return (
+                  <Link
+                    key={p}
+                    to={buildHref(p)}
+                    className={cls}
+                    prefetch="intent"
+                    onClick={() => {
+                      onSelect(p);
+                      setOpen(false);
+                    }}
+                  >
+                    {p}
+                  </Link>
+                );
+              }
+
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  disabled={isActive}
+                  onClick={() => {
+                    onSelect(p);
+                    setOpen(false);
+                  }}
+                  className={cls}
+                  aria-current={isActive ? 'page' : undefined}
+                >
+                  {p}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 }
 
@@ -319,7 +469,7 @@ function PageSizePicker({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="ml-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-app-border px-2.5 text-xs font-medium text-app-fg transition-colors hover:bg-app-hover"
+        className={`ml-3 inline-flex ${CONTROL_HEIGHT_CLASS} items-center gap-1.5 rounded-lg border border-app-border px-2.5 text-xs font-medium text-app-fg transition-colors hover:bg-app-hover`}
         aria-haspopup="dialog"
       >
         <span className="text-app-fg-muted">Per page</span>

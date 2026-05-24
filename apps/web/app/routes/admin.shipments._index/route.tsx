@@ -465,7 +465,7 @@ function ShipmentsIndexContent(data: {
       {/* Mobile search bar — search stays on the page; the other filters live
           in the page-header kebab. Hidden fields carry the active filters so a
           search submit does not drop them. */}
-      <form method="get" className="md:hidden">
+      <form method="get" className="w-full md:hidden">
         <input type="hidden" name="status" defaultValue={data.filters.status} />
         <input type="hidden" name="destinationLocationId" defaultValue={data.filters.destinationLocationId} />
         <input type="hidden" name="fromDate" defaultValue={data.filters.fromDate} />
