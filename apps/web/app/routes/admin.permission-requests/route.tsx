@@ -128,7 +128,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // UI affordance flags — drive button visibility on each row. The actual gate is
   // enforced server-side in `assertApproverMayProcessRequest`, so these checks just
   // hide buttons for codes the user doesn't hold (avoids dead clicks).
-  const isAdminClass = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN';
+  const isAdminClass = user.role === 'SUPER_ADMIN' || user.role === 'ADMIN' || user.role === 'SUPPORT';
   const userPerms = (user.permissions ?? []).map((p) => canonicalPermissionCode(p));
   const hasCode = (code: string) =>
     isAdminClass || userPerms.includes(canonicalPermissionCode(code));

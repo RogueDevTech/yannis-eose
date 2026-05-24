@@ -129,6 +129,7 @@ export async function listBranchesForUser(user: {
   const SEES_ALL_BRANCHES_ROLES = new Set([
     'SUPER_ADMIN',
     'ADMIN',
+    'SUPPORT',
     'HR_MANAGER',
     'FINANCE_OFFICER',
     'HEAD_OF_LOGISTICS',
@@ -1407,7 +1408,7 @@ export const branchesRouter = router({
       const sessionStore = getSessionStore();
 
       const isAdminClass =
-        ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN';
+        ctx.user.role === 'SUPER_ADMIN' || ctx.user.role === 'ADMIN' || ctx.user.role === 'SUPPORT';
       const isMediaBuyer = ctx.user.role === 'MEDIA_BUYER';
 
       // null = "All Branches". Admin-class clears branch context org-wide; a

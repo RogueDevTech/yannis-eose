@@ -27,7 +27,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const locationsInput = encodeURIComponent(JSON.stringify({ page: 1, limit: 20 }));
   const plansInput = encodeURIComponent(JSON.stringify({ activeOnly: true }));
 
-  const isAdminClass = currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'ADMIN';
+  const isAdminClass = currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'ADMIN' || currentUser.role === 'SUPPORT';
 
   const [productsRes, roleTemplatesRes, locationsRes, plansRes, pendingEmailRes, pushStatusRes] =
     await Promise.all([

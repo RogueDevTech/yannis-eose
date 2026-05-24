@@ -22,6 +22,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { type FilterPillOption } from '~/components/ui/filter-pills';
 import { Textarea } from '~/components/ui/textarea';
+import { getBrowserApiBaseUrl } from '~/lib/browser-api-base';
 import {
   CompactTable,
   type CompactTableColumn,
@@ -308,10 +309,11 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
       const notes = receiverNotes[t.id]?.trim();
       if (notes) body.receiverNotes = notes;
       try {
-        const res = await fetch('/trpc/inventory.verifyTransfer', {
+        const base = getBrowserApiBaseUrl();
+        const res = await fetch(`${base}/trpc/inventory.verifyTransfer`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
+          credentials: 'include',
           body: JSON.stringify(body),
         });
         const json = await res.json();
