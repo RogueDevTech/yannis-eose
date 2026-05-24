@@ -247,10 +247,17 @@ export default function App() {
               // updateViaCache:'none' — never let the HTTP cache serve a stale
               // /sw.js, so a new deploy's service worker is always detected.
               navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(function(reg) {
-                // If there's already a waiting worker on load (e.g. tab was kept open), fire immediately
-                if (reg.waiting && navigator.serviceWorker.controller) {
-                  window.dispatchEvent(new CustomEvent('yannis:sw-update-ready'));
+                // Re-surface the prompt whenever a waiting worker exists. We want
+                // the user to ALWAYS see "Update Required" while one is pending —
+                // not just on first detection — so they feel the update is being
+                // applied rather than wondering if anything's happening.
+                function surfaceIfWaiting() {
+                  if (reg.waiting && navigator.serviceWorker.controller) {
+                    window.dispatchEvent(new CustomEvent('yannis:sw-update-ready'));
+                  }
                 }
+                // If there's already a waiting worker on load (e.g. tab was kept open), fire immediately
+                surfaceIfWaiting();
                 reg.addEventListener('updatefound', function() {
                   var newWorker = reg.installing;
                   if (newWorker) {
@@ -265,12 +272,24 @@ export default function App() {
                 // A backgrounded PWA only checks for a new service worker on
                 // cold start. Re-check every time the app returns to the
                 // foreground so a long-lived installed session still picks up
-                // deploys without the user fully quitting the app.
+                // deploys without the user fully quitting the app. Also
+                // re-surface the prompt if a waiting worker already exists —
+                // the foreground return is exactly when the user is most likely
+                // to act on it.
                 document.addEventListener('visibilitychange', function() {
                   if (document.visibilityState === 'visible') {
                     reg.update().catch(function() {});
+                    surfaceIfWaiting();
                   }
                 });
+                // Foreground heartbeat: every 60s re-check for an update AND
+                // re-surface the prompt if one is already waiting. Keeps a
+                // long-lived foreground tab from going stale or losing the
+                // modal between user interactions.
+                setInterval(function() {
+                  reg.update().catch(function() {});
+                  surfaceIfWaiting();
+                }, 60000);
               });
               // Listen for sync completion messages from SW
               navigator.serviceWorker.addEventListener('message', function(event) {
