@@ -14,6 +14,7 @@ import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { SortMenu } from '~/components/ui/sort-menu';
 import { SearchInput } from '~/components/ui/search-input';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { Pagination } from '~/components/ui/pagination';
 import { ExportModal } from '~/components/ui/export-modal';
 import { Modal } from '~/components/ui/modal';
@@ -42,6 +43,12 @@ export interface MarketingTeamPageProps {
   /** Org-wide profitability thresholds — colors the Profitability column. */
   profitabilityConfig?: { targetRoas: number; greenThreshold: number };
   overviewStats: MarketingTeamOverviewStats;
+  /**
+   * Full team roster (id + name only) for the Media Buyer SearchableSelect.
+   * Sourced from the pre-search team set so the dropdown shows every buyer,
+   * even when `q` has already narrowed the visible rows.
+   */
+  allMembersForFilter?: Array<{ id: string; name: string }>;
 }
 
 /** Green if trueRoas ≥ green threshold, red below. Neutral when no spend/data. */
@@ -160,6 +167,7 @@ export function MarketingTeamPage({
   sortDir: sortDirFromLoader = 'asc',
   profitabilityConfig = { targetRoas: 3, greenThreshold: 2.5 },
   overviewStats,
+  allMembersForFilter = [],
 }: MarketingTeamPageProps) {
   const greenThreshold = profitabilityConfig.greenThreshold;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -464,25 +472,74 @@ export function MarketingTeamPage({
             </form>
           }
           desktopInlineFilters={
-            <SortMenu
-              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-              onChange={(next) =>
-                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-              }
-              defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
-              options={TEAM_SORT_MENU_OPTIONS}
-            />
+            <>
+              {allMembersForFilter.length > 0 ? (
+                <SearchableSelect
+                  id="marketing-team-filter-buyer"
+                  value={(() => {
+                    const match = allMembersForFilter.find((m) => m.name === q);
+                    return match ? match.id : 'ALL';
+                  })()}
+                  onChange={(v) => {
+                    const picked = allMembersForFilter.find((m) => m.id === v);
+                    // Picking a buyer drives the existing `q` filter to that exact
+                    // name. "All" / clear resets `q`. Reuses the loader's name
+                    // filter — no new URL param or backend change needed.
+                    mergeListParams({ q: picked ? picked.name : '', page: 1 });
+                  }}
+                  options={[
+                    { value: 'ALL', label: 'All media buyers' },
+                    ...allMembersForFilter.map((m) => ({ value: m.id, label: m.name })),
+                  ]}
+                  placeholder="All media buyers"
+                  searchPlaceholder="Search buyers…"
+                  wrapperClassName="w-auto min-w-[12rem] sm:w-56"
+                />
+              ) : null}
+              <SortMenu
+                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                onChange={(next) =>
+                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                }
+                defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
+                options={TEAM_SORT_MENU_OPTIONS}
+              />
+            </>
           }
           sheetFilterBody={
-            <SortMenu
-              value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
-              onChange={(next) =>
-                mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
-              }
-              defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
-              options={TEAM_SORT_MENU_OPTIONS}
-              className="w-full justify-center"
-            />
+            <div className="flex flex-col gap-3">
+              {allMembersForFilter.length > 0 ? (
+                <SearchableSelect
+                  id="marketing-team-filter-buyer-sheet"
+                  value={(() => {
+                    const match = allMembersForFilter.find((m) => m.name === q);
+                    return match ? match.id : 'ALL';
+                  })()}
+                  onChange={(v) => {
+                    const picked = allMembersForFilter.find((m) => m.id === v);
+                    mergeListParams({ q: picked ? picked.name : '', page: 1 });
+                  }}
+                  options={[
+                    { value: 'ALL', label: 'All media buyers' },
+                    ...allMembersForFilter.map((m) => ({ value: m.id, label: m.name })),
+                  ]}
+                  placeholder="All media buyers"
+                  searchPlaceholder="Search buyers…"
+                  controlSize="lg"
+                  triggerClassName="!bg-app-hover text-center"
+                  wrapperClassName="w-full"
+                />
+              ) : null}
+              <SortMenu
+                value={{ sortBy: sortByFromLoader, sortDir: sortDirFromLoader }}
+                onChange={(next) =>
+                  mergeListParams({ sortBy: next.sortBy, sortDir: next.sortDir, page: 1 })
+                }
+                defaultValue={{ sortBy: 'name', sortDir: 'asc' }}
+                options={TEAM_SORT_MENU_OPTIONS}
+                className="w-full justify-center"
+              />
+            </div>
           }
         />
 

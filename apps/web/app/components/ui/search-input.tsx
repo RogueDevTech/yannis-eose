@@ -100,32 +100,48 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
 
     const hasValue = String(displayValue ?? '').length > 0;
 
-    // Right-side button accounting: how many in-input buttons sit on the right
-    // edge, so we can reserve enough padding-right on the input itself.
+    // Left-edge icon doubles as the clear button when there's content
+    // (CEO directive 2026-05-24): the typical right-side × was easy to miss, so
+    // we now swap the leading search glyph for a red × that clears the input.
     const showClear = clearable && hasValue;
-    const rightButtonCount = (withSubmitButton ? 1 : 0) + (showClear ? 1 : 0);
-    const rightPaddingClass =
-      rightButtonCount === 2 ? 'pr-14' : rightButtonCount === 1 ? 'pr-8' : '';
-    // When both submit + clear are visible, slide clear to the LEFT of submit.
-    const clearRightOffset = withSubmitButton ? 'right-8' : 'right-2.5';
+
+    // Right-side button accounting: only the submit button can sit on the right
+    // edge now — clear lives on the left.
+    const rightPaddingClass = withSubmitButton ? 'pr-12' : '';
 
     return (
       <div className={['relative', wrapperClassName].filter(Boolean).join(' ')}>
-        <span
-          className={[
-            'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
-            iconSizeClasses[controlSize],
-          ].join(' ')}
-          aria-hidden="true"
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" className="w-full h-full">
-            <path
-              fillRule="evenodd"
-              d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </span>
+        {showClear ? (
+          <button
+            type="button"
+            onClick={handleClear}
+            aria-label="Clear search"
+            className={[
+              'absolute top-1/2 -translate-y-1/2 text-danger-600 hover:text-danger-700 dark:text-danger-400 dark:hover:text-danger-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-danger-500/60 rounded-sm',
+              iconSizeClasses[controlSize],
+            ].join(' ')}
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="w-full h-full" aria-hidden="true">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+            </svg>
+          </button>
+        ) : (
+          <span
+            className={[
+              'pointer-events-none absolute top-1/2 -translate-y-1/2 text-app-fg-muted',
+              iconSizeClasses[controlSize],
+            ].join(' ')}
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 20 20" fill="currentColor" className="w-full h-full">
+              <path
+                fillRule="evenodd"
+                d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </span>
+        )}
 
         <input
           ref={ref}
@@ -151,19 +167,6 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
             .join(' ')}
           {...rest}
         />
-
-        {showClear && (
-          <button
-            type="button"
-            onClick={handleClear}
-            aria-label="Clear search"
-            className={`absolute ${clearRightOffset} top-1/2 -translate-y-1/2 text-app-fg-muted hover:text-app-fg transition-colors`}
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-            </svg>
-          </button>
-        )}
 
         {withSubmitButton && (
           <button
