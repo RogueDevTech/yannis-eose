@@ -1949,7 +1949,20 @@ function UnifiedDistributingTable({
       )}
       pagination={
         slice.totalPages > 1
-          ? { page: slice.page, totalPages: slice.totalPages, pageParam: 'page' }
+          ? {
+              page: slice.page,
+              totalPages: slice.totalPages,
+              pageParam: 'page',
+              wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
+              controlsClassName: 'sm:justify-end',
+              summary: (
+                <span className="text-app-fg-muted">
+                  {slice.total > 0
+                    ? `Showing ${slice.records.length} of ${slice.total} entries`
+                    : 'No entries'}
+                </span>
+              ),
+            }
           : undefined
       }
     />
@@ -2287,7 +2300,20 @@ function UnifiedReceivedTable({
       )}
       pagination={
         slice.totalPages > 1
-          ? { page: slice.page, totalPages: slice.totalPages, pageParam: 'page' }
+          ? {
+              page: slice.page,
+              totalPages: slice.totalPages,
+              pageParam: 'page',
+              wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
+              controlsClassName: 'sm:justify-end',
+              summary: (
+                <span className="text-app-fg-muted">
+                  {slice.total > 0
+                    ? `Showing ${slice.records.length} of ${slice.total} entries`
+                    : 'No entries'}
+                </span>
+              ),
+            }
           : undefined
       }
     />

@@ -186,12 +186,19 @@ export function NotificationsPage({
 
         {pagination.totalPages > 1 && (
           <div className="px-4 py-3 border-t border-app-border">
-            <Pagination
-              page={pagination.page}
-              totalPages={pagination.totalPages}
-              pageParam="page"
-              pageSize={pagination.limit}
-            />
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-sm text-app-fg-muted">
+                {pagination.total > 0
+                  ? `Showing ${(pagination.page - 1) * pagination.limit + 1}–${Math.min(pagination.page * pagination.limit, pagination.total)} of ${pagination.total} notifications`
+                  : 'No notifications'}
+              </p>
+              <Pagination
+                page={pagination.page}
+                totalPages={pagination.totalPages}
+                pageParam="page"
+                pageSize={pagination.limit}
+              />
+            </div>
           </div>
         )}
       </div>

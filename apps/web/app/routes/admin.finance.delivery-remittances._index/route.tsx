@@ -50,15 +50,14 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const locationFilter = url.searchParams.get('location') ?? undefined;
   const sentByFilter = url.searchParams.get('sentBy') ?? undefined;
 
-  // Date filtering — default to this month
-  const periodAllTime = url.searchParams.get('period') === 'all_time';
+  // Date filtering — default to all time
+  const hasExplicitDateParams =
+    url.searchParams.has('startDate') ||
+    url.searchParams.has('endDate') ||
+    url.searchParams.has('period');
+  const periodAllTime = !hasExplicitDateParams || url.searchParams.get('period') === 'all_time';
   let startDate = url.searchParams.get('startDate') ?? undefined;
   let endDate = url.searchParams.get('endDate') ?? undefined;
-  if (!periodAllTime && !startDate && !endDate) {
-    const range = defaultThisMonthRange();
-    startDate = range.startDate;
-    endDate = range.endDate;
-  }
   if (periodAllTime) {
     startDate = undefined;
     endDate = undefined;
@@ -265,10 +264,18 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ error: 'Upload at least one payment receipt' }, { status: 400 });
     }
 
+    let deliveryFees: Record<string, string> | undefined;
+    const deliveryFeesRaw = formData.get('deliveryFees')?.toString();
+    if (deliveryFeesRaw) {
+      try {
+        deliveryFees = JSON.parse(deliveryFeesRaw);
+      } catch { /* ignore invalid JSON */ }
+    }
+
     const res = await apiRequest<unknown>('/trpc/logistics.createDeliveryRemittance', {
       method: 'POST',
       cookie,
-      body: { orderIds, receiptUrls, notes, markReceivedNow },
+      body: { orderIds, receiptUrls, notes, markReceivedNow, deliveryFees },
     });
     if (!res.ok) {
       return json(

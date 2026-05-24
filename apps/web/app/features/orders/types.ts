@@ -32,6 +32,8 @@ export interface Order {
    * for cart-recovered orders — drives the "View cart" quick-detail row action.
    */
   cartId?: string | null;
+  /** Duplicate flag: FLAGGED | POSSIBLY_DUPLICATE | MERGED | DISMISSED | null */
+  isDuplicate?: string | null;
 }
 
 export interface CallLogEntry {

@@ -537,6 +537,7 @@ export function MarketingOrdersPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
@@ -571,7 +572,6 @@ export function MarketingOrdersPage({
                     Delete all test orders
                   </Button>
                 )}
-                <PageRefreshButton />
               </>
             }
             filtersBadgeCount={ordersToolbarFilterBadge}
@@ -767,7 +767,7 @@ export function MarketingOrdersPage({
               searchRow={
                 <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
                   <SearchInput
-                    placeholder="Search by customer or order ID..."
+                    placeholder="Search by name, order number, or ID..."
                     value={searchQuery}
                     onChange={(val) => setSearchQuery(val)}
                     withSubmitButton
@@ -971,7 +971,7 @@ export function MarketingOrdersPage({
                   searchRow={
                     <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
                       <SearchInput
-                        placeholder="Search by customer or order ID..."
+                        placeholder="Search by name, order number, or ID..."
                         value={searchQuery}
                         onChange={(val) => setSearchQuery(val)}
                         withSubmitButton

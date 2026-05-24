@@ -557,10 +557,13 @@ export function UsersListPage({
                 </div>
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Role</span>
-                  <FormSelect
+                  <SearchableSelect
+                    id="users-role-filter-kebab"
                     value={currentRoleParam}
-                    onChange={(e) => handleRoleChange(e.target.value)}
+                    onChange={handleRoleChange}
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                    placeholder="All Roles"
+                    searchPlaceholder="Search roles…"
                     wrapperClassName="w-full"
                   />
                 </div>
@@ -733,10 +736,13 @@ export function UsersListPage({
                   ]}
                   wrapperClassName="w-full min-w-0 sm:w-40"
                 />
-                <FormSelect
+                <SearchableSelect
+                  id="users-role-filter-staff-desktop"
                   value={currentRoleParam}
-                  onChange={(e) => handleRoleChange(e.target.value)}
+                  onChange={handleRoleChange}
                   options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                  placeholder="All Roles"
+                  searchPlaceholder="Search roles…"
                   wrapperClassName="w-full min-w-0 sm:w-48"
                 />
                 {branchPickerVisible ? (
@@ -772,10 +778,13 @@ export function UsersListPage({
                 </div>
                 <div className="space-y-1.5">
                   <span className="text-xs font-medium text-app-fg-muted">Role</span>
-                  <FormSelect
+                  <SearchableSelect
+                    id="users-role-filter-staff-sheet"
                     value={currentRoleParam}
-                    onChange={(e) => handleRoleChange(e.target.value)}
+                    onChange={handleRoleChange}
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                    placeholder="All Roles"
+                    searchPlaceholder="Search roles…"
                     wrapperClassName="w-full"
                   />
                 </div>
@@ -894,10 +903,13 @@ export function UsersListPage({
                     ]}
                     wrapperClassName="w-full min-w-0 sm:w-40"
                   />
-                  <FormSelect
+                  <SearchableSelect
+                    id="users-role-filter-hr-desktop"
                     value={currentRoleParam}
-                    onChange={(e) => handleRoleChange(e.target.value)}
+                    onChange={handleRoleChange}
                     options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                    placeholder="All Roles"
+                    searchPlaceholder="Search roles…"
                     wrapperClassName="w-full min-w-0 sm:w-48"
                   />
                   {branchPickerVisible ? (
@@ -955,10 +967,13 @@ export function UsersListPage({
                   </div>
                   <div className="space-y-1.5">
                     <span className="text-xs font-medium text-app-fg-muted">Role</span>
-                    <FormSelect
+                    <SearchableSelect
+                      id="users-role-filter-hr-sheet"
                       value={currentRoleParam}
-                      onChange={(e) => handleRoleChange(e.target.value)}
+                      onChange={handleRoleChange}
                       options={ROLE_OPTIONS.map((r) => ({ value: r, label: r === 'ALL' ? 'All Roles' : formatRole(r) }))}
+                      placeholder="All Roles"
+                      searchPlaceholder="Search roles…"
                       wrapperClassName="w-full"
                     />
                   </div>

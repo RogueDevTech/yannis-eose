@@ -935,14 +935,21 @@ function LogisticsOrdersPageImpl({
       )}
 
       {!showChartView && (
-        <Pagination
-          page={page}
-          totalPages={totalPages}
-          pageParam="page"
-          pageSize={limit}
-          pageSizeOptions={[20, 40, 50, 100, 200, 500, 1000]}
-          showWhenSinglePage
-        />
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            {total > 0
+              ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total} orders`
+              : 'No orders'}
+          </p>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            pageParam="page"
+            pageSize={limit}
+            pageSizeOptions={[20, 40, 50, 100, 200, 500, 1000]}
+            showWhenSinglePage
+          />
+        </div>
       )}
 
       {/* Mark Delivered confirmation modal */}

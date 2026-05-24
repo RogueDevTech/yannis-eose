@@ -2,13 +2,12 @@ import { defer, json } from '@remix-run/node';
 import type { LoaderFunctionArgs, ActionFunctionArgs, MetaFunction } from '@remix-run/node';
 
 import { Await, useLoaderData } from '@remix-run/react';
+import { Suspense } from 'react';
 import { apiRequest, getSessionCookie, requirePermission, safeStatus } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { RemittancesAdminPage } from '~/features/remittances/RemittancesAdminPage';
 import { LogisticsRemittancesLoadingShell } from '~/features/logistics/LogisticsDeferredLoadingShells';
 import type { TransferConfirmationRecord } from '~/features/remittances/RemittancesAdminPage';
-import { CachedAwait } from '~/components/ui/cached-await';
-import { cachedClientLoader } from '~/lib/loader-cache';
 
 export const meta: MetaFunction = () => [
   { title: 'Stock Transfer Confirmations — Yannis EOSE' },
@@ -161,8 +160,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
   return defer({ pageData });
 }
 
-export const clientLoader = cachedClientLoader;
-clientLoader.hydrate = false;
 
 export async function action({ request }: ActionFunctionArgs) {
   const cookie = getSessionCookie(request);
@@ -204,12 +201,8 @@ export async function action({ request }: ActionFunctionArgs) {
 export default function AdminLogisticsRemittancesRoute() {
   const { pageData } = useLoaderData<typeof loader>();
   return (
-    <CachedAwait
-      resolve={pageData}
-      fallback={<LogisticsRemittancesLoadingShell />}
-      loaderShell={{}}
-      deferredKey="pageData"
-    >
+    <Suspense fallback={<LogisticsRemittancesLoadingShell />}>
+      <Await resolve={pageData}>
         {(data) => (
           <RemittancesAdminPage
             remittances={data.remittances}
@@ -219,6 +212,7 @@ export default function AdminLogisticsRemittancesRoute() {
             filters={data.filters}
           />
         )}
-      </CachedAwait>
+      </Await>
+    </Suspense>
   );
 }

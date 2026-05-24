@@ -160,7 +160,7 @@ const DEFAULT_AD_SPEND_STATUS_COUNTS: AdSpendStatusCounts = {
 
 export function MarketingAdSpendPage({
   adSpend,
-  totalAdSpend: _totalRowCount,
+  totalAdSpend,
   page,
   totalPages,
   limit,
@@ -850,6 +850,7 @@ export function MarketingAdSpendPage({
             }
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
@@ -861,7 +862,6 @@ export function MarketingAdSpendPage({
                 >
                   + Add Expense
                 </BranchScopedLink>
-                <PageRefreshButton />
               </>
             }
             sheet={({ closeSheet }) => (
@@ -1474,7 +1474,14 @@ export function MarketingAdSpendPage({
 
               {totalPages > 1 && (
                 <div className="border-t border-app-border px-4 py-3">
-                  <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <p className="text-sm text-app-fg-muted">
+                      {totalAdSpend > 0
+                        ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, totalAdSpend)} of ${totalAdSpend} entries`
+                        : 'No entries'}
+                    </p>
+                    <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+                  </div>
                 </div>
               )}
             </>

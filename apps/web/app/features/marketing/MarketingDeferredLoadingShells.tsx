@@ -329,11 +329,11 @@ export function MarketingFundingLoadingShell({
                     + Send Funding
                   </Button>
                 )}
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
             sheet={({ closeSheet }) => (
@@ -622,6 +622,7 @@ export function MarketingAdSpendLoadingShell({
             triggerAriaLabel="Date, add expense, and more"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
@@ -633,7 +634,6 @@ export function MarketingAdSpendLoadingShell({
                 >
                   + Add Expense
                 </BranchScopedLink>
-                <PageRefreshButton />
               </>
             }
             sheet={({ closeSheet }) => (
@@ -886,6 +886,7 @@ export function MarketingTeamLoadingShell({
             triggerAriaLabel="Team analysis toolbar and date range"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
@@ -893,7 +894,6 @@ export function MarketingTeamLoadingShell({
                 <Button type="button" variant="secondary" size="sm" disabled className="opacity-70">
                   Generate report
                 </Button>
-                <PageRefreshButton />
               </>
             }
             sheet={
@@ -1076,11 +1076,11 @@ export function MarketingLeaderboardLoadingShell({
             triggerAriaLabel="Leaderboard toolbar and date range"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />
@@ -1208,11 +1208,11 @@ export function MarketingCrossFunnelLoadingShell({
             triggerAriaLabel="Cross-funnel toolbar and date range"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />
@@ -1587,6 +1587,7 @@ export function MarketingOrdersLoadingShell({
             triggerAriaLabel="Marketing orders tools"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
@@ -1594,7 +1595,6 @@ export function MarketingOrdersLoadingShell({
                 <Button type="button" variant="secondary" size="sm" disabled>
                   View data in chart
                 </Button>
-                <PageRefreshButton />
               </>
             }
           />

@@ -691,11 +691,13 @@ export function ShipmentsListLoadingShell() {
               wrapperClassName="w-full sm:w-48"
               options={SHIPMENT_STATUS_FILTER_OPTIONS}
             />
-            <FormSelect
+            <SearchableSelect
               label="Warehouse"
-              name="destinationLocationId"
-              defaultValue={destinationLocationId}
+              value={destinationLocationId}
+              onChange={() => {}}
               wrapperClassName="w-full sm:w-56"
+              placeholder="All warehouses"
+              searchPlaceholder="Search warehouses..."
               options={warehouseOptions}
             />
             <div className="w-full sm:w-40">

@@ -223,40 +223,6 @@ function transfersWorkspaceTableShellColumns(): CompactTableColumn<{ id: string 
   ];
 }
 
-function TransferFilterValueShell({ widthClassName }: { widthClassName: string }) {
-  return <div className={`h-3 rounded bg-app-hover animate-pulse ${widthClassName}`} aria-hidden />;
-}
-
-function TransfersStockFilterControlShell({
-  label,
-  widthClassName,
-}: {
-  label: string;
-  widthClassName: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <div className="text-xs font-medium text-app-fg">{label}</div>
-      <div className="relative">
-        <div className="flex h-9 items-center rounded-lg border border-app-border bg-app-canvas px-2.5 pr-7">
-          <TransferFilterValueShell widthClassName={widthClassName} />
-        </div>
-        <span
-          className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-app-fg-muted"
-          aria-hidden
-        >
-          <svg viewBox="0 0 20 20" fill="currentColor" className="h-full w-full">
-            <path
-              fillRule="evenodd"
-              d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </span>
-      </div>
-    </div>
-  );
-}
 
 /** Logistics companies + locations hub. */
 export function LogisticsPartnersLoadingShell() {
@@ -304,11 +270,29 @@ export function LogisticsPartnersLoadingShell() {
           { value: 'providers', label: 'Companies' },
         ]}
       />
-      {/* Search input placeholder — mirrors the live partners search */}
-      <span
-        className="block h-9 w-full max-w-md animate-pulse rounded-md border border-app-border bg-app-hover"
-        aria-hidden
-      />
+      {/* Search + filter row — mirrors the live partners search + location filters */}
+      <div className="flex flex-wrap items-end gap-2">
+        <span
+          className="block h-9 w-full flex-1 min-w-0 md:min-w-[12rem] md:max-w-md animate-pulse rounded-md border border-app-border bg-app-hover"
+          aria-hidden
+        />
+        <SearchableSelect
+          value=""
+          onChange={() => {}}
+          placeholder="All companies"
+          searchPlaceholder="Search companies..."
+          options={[{ value: '', label: 'All companies' }]}
+          wrapperClassName="w-40 sm:w-48"
+        />
+        <SearchableSelect
+          value=""
+          onChange={() => {}}
+          placeholder="All states"
+          searchPlaceholder="Search states..."
+          options={[{ value: '', label: 'All states' }]}
+          wrapperClassName="w-36 sm:w-44"
+        />
+      </div>
 
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">
@@ -525,8 +509,8 @@ export function LogisticsRemittancesLoadingShell() {
             sheetCloseLabel="Done"
             desktop={
               <div className="flex items-center gap-2">
-                <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />
                 <PageRefreshButton />
+                <DateFilterBar startDate={startDate} endDate={endDate} periodAllTime={periodAllTime} chrome="pill" />
               </div>
             }
           />
@@ -792,6 +776,7 @@ function TransfersWorkspaceLoadingShell({
             triggerAriaLabel={`${pageTitle} toolbar and date range`}
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.periodAllTime ? '' : filters.startDate}
                     endDate={filters.periodAllTime ? '' : filters.endDate}
@@ -799,7 +784,6 @@ function TransfersWorkspaceLoadingShell({
                 <Button variant="primary" size="sm" disabled>
                   {initiateCta}
                 </Button>
-                <PageRefreshButton />
               </>
             }
             sheet={
@@ -847,22 +831,35 @@ function TransfersWorkspaceLoadingShell({
 
       {/* Desktop-only — on mobile the real page moves filters into the kebab. */}
       <div className="card space-y-3 p-3 sm:p-4 hidden md:block">
-        {variant === 'stock' ? (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <TransfersStockFilterControlShell label="From location" widthClassName="w-24" />
-            <TransfersStockFilterControlShell label="To location" widthClassName="w-24" />
-            <TransfersStockFilterControlShell label="Product" widthClassName="w-20" />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {(['From location', 'To location', 'Product'] as const).map((label) => (
-              <div key={label} className="space-y-1">
-                <div className="text-xs font-medium text-app-fg">{label}</div>
-                <div className="h-9 animate-pulse rounded-md border border-app-border bg-app-hover" aria-hidden />
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <SearchableSelect
+            id="transfer-shell-from"
+            label="From location"
+            value=""
+            onChange={() => {}}
+            placeholder="All locations"
+            searchPlaceholder="Search locations..."
+            options={[{ value: '', label: 'All locations' }]}
+          />
+          <SearchableSelect
+            id="transfer-shell-to"
+            label="To location"
+            value=""
+            onChange={() => {}}
+            placeholder="All locations"
+            searchPlaceholder="Search locations..."
+            options={[{ value: '', label: 'All locations' }]}
+          />
+          <SearchableSelect
+            id="transfer-shell-product"
+            label="Product"
+            value=""
+            onChange={() => {}}
+            placeholder="All products"
+            searchPlaceholder="Search products..."
+            options={[{ value: '', label: 'All products' }]}
+          />
+        </div>
       </div>
 
       {/* Mobile skeleton cards */}

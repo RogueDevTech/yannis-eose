@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useFetcher } from '@remix-run/react';
 import { Modal } from './modal';
-import { FormSelect } from './form-select';
+import { SearchableSelect } from './searchable-select';
 import { Textarea } from './textarea';
 
 interface MessageTemplate {
@@ -539,11 +539,10 @@ export function CSMessagingPanel({
                   })}
                 </div>
               ) : (
-                <FormSelect
+                <SearchableSelect
                   id="cs-msg-template-select"
                   value={selectedTemplateId}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  onChange={(v) => {
                     setSelectedTemplateId(v);
                     if (v) {
                       const tpl = channelTemplates.find((t) => t.id === v);
@@ -551,6 +550,7 @@ export function CSMessagingPanel({
                     }
                   }}
                   placeholder="Pick a template…"
+                  searchPlaceholder="Search templates..."
                   options={channelTemplates.map((tpl) => ({ value: tpl.id, label: tpl.name }))}
                   controlSize="md"
                   wrapperClassName="w-full"

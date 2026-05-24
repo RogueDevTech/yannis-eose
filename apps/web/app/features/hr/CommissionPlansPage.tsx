@@ -6,6 +6,7 @@ import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import { TextInput } from '~/components/ui/text-input';
 import { AmountInput } from '~/components/ui/amount-input';
 import { EmptyState } from '~/components/ui/empty-state';
@@ -311,10 +312,10 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
       {/* Filter bar */}
       {plans.length > 0 && (
         <div className="card flex flex-col sm:flex-row gap-3">
-          <FormSelect
+          <SearchableSelect
             label="Role"
             value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
+            onChange={(v) => setRoleFilter(v)}
             options={[
               { value: 'ALL', label: 'All plans' },
               ...(hasUniversalPlans
@@ -322,7 +323,8 @@ export function CommissionPlansPage({ plans, total, manageableRoles, viewer }: C
                 : []),
               ...visibleRoles.map((r) => ({ value: r, label: formatRoleLabel(r) })),
             ]}
-            className="sm:w-56"
+            searchPlaceholder="Search roles..."
+            wrapperClassName="sm:w-56"
           />
           <FormSelect
             label="Status"
@@ -683,16 +685,20 @@ function PlanForm({
             <input type="hidden" name="role" value={assignmentScope === 'universal' ? '' : onlyRole!} />
           </div>
         ) : mode === 'create' ? (
-          <FormSelect
-            label="Default role (optional)"
-            name="role"
-            defaultValue=""
-            onChange={(e) => setCreateRoleDraft(e.target.value)}
-            options={[
-              { value: '', label: 'None — assign plan on staff profile only' },
-              ...manageableRoles.map((r) => ({ value: r, label: formatRoleLabel(r) })),
-            ]}
-          />
+          <>
+            <input type="hidden" name="role" value={createRoleDraft} />
+            <SearchableSelect
+              label="Default role (optional)"
+              value={createRoleDraft}
+              onChange={(v) => setCreateRoleDraft(v)}
+              options={[
+                { value: '', label: 'None — assign plan on staff profile only' },
+                ...manageableRoles.map((r) => ({ value: r, label: formatRoleLabel(r) })),
+              ]}
+              searchPlaceholder="Search roles..."
+            />
+          </>
+
         ) : (
           <div>
             <p className="block text-sm font-medium text-app-fg-muted mb-1">Role default</p>

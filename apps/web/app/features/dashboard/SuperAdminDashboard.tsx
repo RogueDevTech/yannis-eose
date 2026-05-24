@@ -125,20 +125,6 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
         </div>
       </div>
 
-      {/* ── Revenue Generated: stacked column ── */}
-      <div>
-        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Revenue Generated
-        </h2>
-        <div className="card px-4 py-2">
-          <StatRowGroup divided>
-            <StatRow label="Today" value={fmt(revenueByPeriod.today)} />
-            <StatRow label="This Week" value={fmt(revenueByPeriod.thisWeek)} />
-            <StatRow label="This Month" value={fmt(revenueByPeriod.thisMonth)} variant="highlight" />
-          </StatRowGroup>
-        </div>
-      </div>
-
       {/* ── Key Metrics: 2-per-row on mobile, 5-per-row from md: up ── */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
@@ -170,6 +156,20 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             valueClassName={deliveryRateColorClass(marketingSafe.deliveryRate)}
             to="/admin/marketing/orders?status=DELIVERED"
           />
+        </div>
+      </div>
+
+      {/* ── Revenue Generated: stacked column ── */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          Revenue Generated
+        </h2>
+        <div className="card px-4 py-2">
+          <StatRowGroup divided>
+            <StatRow label="Today" value={fmt(revenueByPeriod.today)} />
+            <StatRow label="This Week" value={fmt(revenueByPeriod.thisWeek)} />
+            <StatRow label="This Month" value={fmt(revenueByPeriod.thisMonth)} variant="highlight" />
+          </StatRowGroup>
         </div>
       </div>
 

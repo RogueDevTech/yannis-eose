@@ -163,6 +163,7 @@ export function LogisticsProviderDetailPage({
             triggerAriaLabel="Provider toolbar"
             desktop={
               <div className="flex flex-wrap items-center gap-2">
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
@@ -173,7 +174,6 @@ export function LogisticsProviderDetailPage({
                 >
                   ← Back to team analysis
                 </Link>
-                <PageRefreshButton />
               </div>
             }
             sheet={({ closeSheet }) => (

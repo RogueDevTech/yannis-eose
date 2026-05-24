@@ -23,7 +23,6 @@ import { Tabs } from '~/components/ui/tabs';
 import { FilterPills } from '~/components/ui/filter-pills';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
-import { FormSelect } from '~/components/ui/form-select';
 import { SearchInput } from '~/components/ui/search-input';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { CashRemittanceCreateModal, type EligibleOrder } from './CashRemittanceCreateModal';
@@ -575,11 +574,11 @@ export function DeliveryRemittancesPage({
             }
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
                 <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                   Generate report
                 </Button>
@@ -819,6 +818,8 @@ export function DeliveryRemittancesPage({
               totalPages,
               pageParam: 'page',
               showWhenSinglePage: true,
+              wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
+              controlsClassName: 'sm:justify-end',
               summary: (
                 <span className="text-app-fg-muted">
                   {pagination.total === 0
@@ -902,20 +903,20 @@ export function DeliveryRemittancesPage({
                 controlSize="md"
               />
             </form>
-            <FormSelect
+            <SearchableSelect
               id="eligible-remittance-location"
-              aria-label="Filter by logistics location"
-              value={filters.location || 'ALL'}
-              onChange={(e) => handleLocationChange(e.target.value)}
+              value={filters.location}
+              onChange={handleLocationChange}
+              wrapperClassName="w-full sm:w-52"
               placeholder="All locations"
+              searchPlaceholder="Search locations..."
               options={[
-                { value: 'ALL', label: 'All locations' },
+                { value: '', label: 'All locations' },
                 ...locations.map((loc) => ({
                   value: loc.id,
                   label: loc.providerName ? `${loc.name} — ${loc.providerName}` : loc.name,
                 })),
               ]}
-              controlSize="md"
             />
           </div>
 
@@ -999,6 +1000,8 @@ export function DeliveryRemittancesPage({
               totalPages: eligibleTotalPages,
               pageParam: 'eligiblePage',
               showWhenSinglePage: true,
+              wrapperClassName: 'mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between',
+              controlsClassName: 'sm:justify-end',
               summary: (
                 <span className="text-app-fg-muted">
                   {eligibleTotal === 0

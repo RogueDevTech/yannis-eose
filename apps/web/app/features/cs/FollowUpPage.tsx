@@ -314,15 +314,22 @@ export function FollowUpPage({
       )}
 
       {totalPages > 1 && (
-        <Pagination
-          currentPage={filters.page}
-          totalPages={totalPages}
-          buildHref={(p) => {
-            const params = new URLSearchParams(searchParams);
-            params.set('page', String(p));
-            return `?${params.toString()}`;
-          }}
-        />
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            {total > 0
+              ? `Showing ${orders.length} of ${total} orders`
+              : 'No orders'}
+          </p>
+          <Pagination
+            currentPage={filters.page}
+            totalPages={totalPages}
+            buildHref={(p) => {
+              const params = new URLSearchParams(searchParams);
+              params.set('page', String(p));
+              return `?${params.toString()}`;
+            }}
+          />
+        </div>
       )}
 
       {/* Reassign Modal */}

@@ -173,6 +173,8 @@ export const createDeliveryRemittanceSchema = z.object({
    * marks Received later from the detail page.
    */
   markReceivedNow: z.boolean().optional().default(false),
+  /** Per-order delivery fee overrides. Keys are order UUIDs, values are fee amounts as strings (numeric). */
+  deliveryFees: z.record(z.string()).optional(),
 });
 export type CreateDeliveryRemittanceInput = z.infer<typeof createDeliveryRemittanceSchema>;
 

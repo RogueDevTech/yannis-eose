@@ -97,6 +97,7 @@ export function MarketingOverviewLoadingShell({
     'Confirmation Rate',
     'True ROAS',
     'Del. Revenue',
+    'Open carts',
   ];
 
   return (
@@ -120,11 +121,11 @@ export function MarketingOverviewLoadingShell({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
                     periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />

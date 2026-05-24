@@ -92,11 +92,11 @@ export function TplOrdersLoadingShell({
             triggerAriaLabel="Orders toolbar"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />

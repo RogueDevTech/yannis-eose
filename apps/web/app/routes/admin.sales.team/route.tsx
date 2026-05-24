@@ -162,13 +162,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         engaged: acc.engaged + (entry.ordersEngaged ?? 0),
         confirmed: acc.confirmed + (entry.ordersConfirmed ?? 0),
         delivered: acc.delivered + (entry.ordersDelivered ?? 0),
+        cancelled: acc.cancelled + (entry.ordersCancelled ?? 0),
+        callsMade: acc.callsMade + (entry.callsMade ?? 0),
+        totalCallDuration: acc.totalCallDuration + ((entry.avgCallDurationSeconds ?? 0) * (entry.callsMade ?? 0)),
       }),
-      { engaged: 0, confirmed: 0, delivered: 0 },
+      { engaged: 0, confirmed: 0, delivered: 0, cancelled: 0, callsMade: 0, totalCallDuration: 0 },
     );
     const confirmationRate =
       teamTotals.engaged > 0 ? (teamTotals.confirmed / teamTotals.engaged) * 100 : null;
     const deliveryRate =
       teamTotals.engaged > 0 ? (teamTotals.delivered / teamTotals.engaged) * 100 : null;
+    const avgCallDuration =
+      teamTotals.callsMade > 0 ? Math.round(teamTotals.totalCallDuration / teamTotals.callsMade) : null;
 
     const PAGE_SIZE = 20;
     const pageRaw = parseInt(url.searchParams.get('page') ?? '1', 10);
@@ -187,6 +192,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         engagedTotal: teamTotals.engaged,
         confirmedTotal: teamTotals.confirmed,
         deliveredTotal: teamTotals.delivered,
+        cancelledTotal: teamTotals.cancelled,
+        callsMadeTotal: teamTotals.callsMade,
+        avgCallDuration,
         confirmationRate,
         deliveryRate,
       },

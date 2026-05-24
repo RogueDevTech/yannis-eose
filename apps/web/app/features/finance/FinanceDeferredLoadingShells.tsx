@@ -716,11 +716,11 @@ export function DeliveryRemittancesLoadingShell({
             triggerAriaLabel="Cash remittances toolbar and date range"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
                 <Button type="button" variant="secondary" size="sm" disabled className="opacity-70">
                   Generate report
                 </Button>

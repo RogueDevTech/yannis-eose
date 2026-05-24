@@ -52,6 +52,7 @@ export interface DeliveryRemittanceEligibleOrder {
   id: string;
   customerName: string;
   totalAmount: string | null;
+  deliveryFee: string | null;
   deliveredAt: string | null;
   logisticsLocationId?: string | null;
   logisticsLocationName?: string | null;

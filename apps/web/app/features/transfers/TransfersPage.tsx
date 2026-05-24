@@ -31,7 +31,6 @@ import {
 } from '~/hooks/useOptimisticListPatches';
 import { isOptimisticId, optimisticId } from '~/lib/optimistic';
 import { Textarea } from '~/components/ui/textarea';
-import { FormSelect } from '~/components/ui/form-select';
 import { Tabs } from '~/components/ui/tabs';
 import { Spinner } from '~/components/ui/spinner';
 import { Pagination } from '~/components/ui/pagination';
@@ -466,7 +465,7 @@ export function TransfersPage({
         (safeTransfersPage - 1) * transfersPageSize,
         safeTransfersPage * transfersPageSize,
       ),
-    [filteredTransfers, safeTransfersPage],
+    [filteredTransfers, safeTransfersPage, transfersPageSize],
   );
   // Reset when the filtered set shrinks past the current page or filters change.
   useEffect(() => {
@@ -534,11 +533,13 @@ export function TransfersPage({
   const transferFiltersBody = (
     <div className="space-y-3">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        <FormSelect
+        <SearchableSelect
           id="transfer-filter-from"
           label="From location"
           value={fromLocationFilter}
-          onChange={(e) => updateFilter('fromLocationId', e.target.value)}
+          onChange={(v) => updateFilter('fromLocationId', v)}
+          placeholder="All locations"
+          searchPlaceholder="Search locations..."
           options={[
             { value: '', label: 'All locations' },
             ...locations.map((l: Location) => ({
@@ -546,13 +547,14 @@ export function TransfersPage({
               label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
             })),
           ]}
-          controlSize="sm"
         />
-        <FormSelect
+        <SearchableSelect
           id="transfer-filter-to"
           label="To location"
           value={toLocationFilter}
-          onChange={(e) => updateFilter('toLocationId', e.target.value)}
+          onChange={(v) => updateFilter('toLocationId', v)}
+          placeholder="All locations"
+          searchPlaceholder="Search locations..."
           options={[
             { value: '', label: 'All locations' },
             ...locations.map((l: Location) => ({
@@ -560,19 +562,18 @@ export function TransfersPage({
               label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
             })),
           ]}
-          controlSize="sm"
         />
-        <FormSelect
+        <SearchableSelect
           id="transfer-filter-product"
           label="Product"
           value={productFilter}
-          onChange={(e) => updateFilter('productId', e.target.value)}
+          onChange={(v) => updateFilter('productId', v)}
+          placeholder={formDataLoading ? 'Loading products…' : 'All products'}
+          searchPlaceholder="Search products..."
           options={[
             { value: '', label: formDataLoading ? 'Loading products…' : 'All products' },
             ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
           ]}
-          controlSize="sm"
-          disabled={formDataLoading && resolvedProducts.length === 0}
         />
       </div>
       {hasFilters && (
@@ -598,14 +599,15 @@ export function TransfersPage({
   // so the tools sheet reads as one evenly-spaced column.
   const mobileFilterBoxClass =
     'flex h-12 w-full items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5';
-  const mobileFilterSelectClass = '!bg-transparent !border-transparent !text-center';
   const mobileTransferFiltersBody = (
     <div className="space-y-2">
       <div className={mobileFilterBoxClass}>
-        <FormSelect
+        <SearchableSelect
           id="transfer-filter-from-mobile"
           value={fromLocationFilter}
-          onChange={(e) => updateFilter('fromLocationId', e.target.value)}
+          onChange={(v) => updateFilter('fromLocationId', v)}
+          placeholder="From location"
+          searchPlaceholder="Search locations..."
           options={[
             { value: '', label: 'From location' },
             ...locations.map((l: Location) => ({
@@ -613,17 +615,16 @@ export function TransfersPage({
               label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
             })),
           ]}
-          controlSize="sm"
-          openAs="modal"
           wrapperClassName="w-full"
-          className={mobileFilterSelectClass}
         />
       </div>
       <div className={mobileFilterBoxClass}>
-        <FormSelect
+        <SearchableSelect
           id="transfer-filter-to-mobile"
           value={toLocationFilter}
-          onChange={(e) => updateFilter('toLocationId', e.target.value)}
+          onChange={(v) => updateFilter('toLocationId', v)}
+          placeholder="To location"
+          searchPlaceholder="Search locations..."
           options={[
             { value: '', label: 'To location' },
             ...locations.map((l: Location) => ({
@@ -631,26 +632,21 @@ export function TransfersPage({
               label: l.providerName ? `${l.name} — ${l.providerName}` : l.name,
             })),
           ]}
-          controlSize="sm"
-          openAs="modal"
           wrapperClassName="w-full"
-          className={mobileFilterSelectClass}
         />
       </div>
       <div className={mobileFilterBoxClass}>
-        <FormSelect
+        <SearchableSelect
           id="transfer-filter-product-mobile"
           value={productFilter}
-          onChange={(e) => updateFilter('productId', e.target.value)}
+          onChange={(v) => updateFilter('productId', v)}
+          placeholder={formDataLoading ? 'Loading products…' : 'All products'}
+          searchPlaceholder="Search products..."
           options={[
             { value: '', label: formDataLoading ? 'Loading products…' : 'All products' },
             ...resolvedProducts.map((p: Product) => ({ value: p.id, label: p.name })),
           ]}
-          controlSize="sm"
-          openAs="modal"
           wrapperClassName="w-full"
-          className={mobileFilterSelectClass}
-          disabled={formDataLoading && resolvedProducts.length === 0}
         />
       </div>
       {hasFilters && (
@@ -682,6 +678,7 @@ export function TransfersPage({
             filtersBadgeCount={hasFilters ? 1 : 0}
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={periodAllTime ? '' : effectiveDateRange.startDate}
                     endDate={periodAllTime ? '' : effectiveDateRange.endDate}
@@ -696,7 +693,6 @@ export function TransfersPage({
                     </Link>
                   </>
                 )}
-                <PageRefreshButton />
               </>
             }
             sheet={({ closeSheet }) => (
@@ -1286,13 +1282,18 @@ export function TransfersPage({
           })()}
 
       {filteredTransfers.length > 0 && (
-        <Pagination
-          page={safeTransfersPage}
-          totalPages={transfersTotalPages}
-          onPageChange={setTransfersPage}
-          pageSize={transfersPageSize}
-          onPageSizeChange={(size) => { setTransfersPageSize(size); setTransfersPage(1); }}
-        />
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            {`Showing ${(safeTransfersPage - 1) * transfersPageSize + 1}–${Math.min(safeTransfersPage * transfersPageSize, filteredTransfers.length)} of ${filteredTransfers.length} transfers`}
+          </p>
+          <Pagination
+            page={safeTransfersPage}
+            totalPages={transfersTotalPages}
+            onPageChange={setTransfersPage}
+            pageSize={transfersPageSize}
+            onPageSizeChange={(size) => { setTransfersPageSize(size); setTransfersPage(1); }}
+          />
+        </div>
       )}
 
       <Modal open={!!viewTransfer} onClose={dismissTransferModal} maxWidth="max-w-lg" aria-labelledby="transfer-detail-title">

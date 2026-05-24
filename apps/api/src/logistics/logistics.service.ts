@@ -1372,6 +1372,18 @@ export class LogisticsService {
         })),
       );
 
+      // Apply per-order delivery fees when provided.
+      if (input.deliveryFees && Object.keys(input.deliveryFees).length > 0) {
+        for (const [orderId, feeStr] of Object.entries(input.deliveryFees)) {
+          const fee = parseFloat(feeStr);
+          if (!Number.isFinite(fee) || fee < 0) continue;
+          await tx
+            .update(schema.orders)
+            .set({ deliveryFee: sql`${fee.toFixed(2)}::numeric`, updatedAt: now })
+            .where(eq(schema.orders.id, orderId));
+        }
+      }
+
       // Cascade DELIVERED → REMITTED in the same transaction when the
       // accountant is marking received now. This is the canonical "remittance
       // received and reconciled" signal that CLAUDE.md → Order Lifecycle ties
@@ -1981,9 +1993,19 @@ export class LogisticsService {
     const provAlias = alias(schema.logisticsProviders, 'eligible_loc_provider');
 
     if (input.search && input.search.trim()) {
-      const term = `%${input.search.trim()}%`;
+      const trimmed = input.search.trim();
+      const term = `%${trimmed}%`;
+      // Parse "YNS-00123", "YNS00123", or bare "00123" → exact order_number match.
+      // Mirrors orders.service.ts so the placeholder's "order ID" promise is real
+      // (the visible YNS-XXXXX ref, not the internal UUID).
+      const orderNumMatch = trimmed.match(/^(?:YNS[- ]?)?(\d{1,7})$/i);
+      const parsedOrderNum = orderNumMatch?.[1] ? parseInt(orderNumMatch[1], 10) : NaN;
+      const orderNumberClause =
+        !Number.isNaN(parsedOrderNum) && parsedOrderNum > 0
+          ? sql` OR ${schema.orders.orderNumber} = ${parsedOrderNum}`
+          : sql``;
       conditions.push(
-        sql`(${schema.orders.customerName} ILIKE ${term} OR ${schema.orders.id}::text ILIKE ${term} OR (${schema.invoices.id} IS NOT NULL AND ${schema.invoices.referenceNumber}::text ILIKE ${term}) OR (${schema.invoices.recipientInfo} IS NOT NULL AND ${schema.invoices.recipientInfo}->>'name' ILIKE ${term}) OR ${locAlias.name} ILIKE ${term} OR ${provAlias.name} ILIKE ${term})`,
+        sql`(${schema.orders.customerName} ILIKE ${term} OR ${schema.orders.id}::text ILIKE ${term}${orderNumberClause} OR (${schema.invoices.id} IS NOT NULL AND ${schema.invoices.referenceNumber}::text ILIKE ${term}) OR (${schema.invoices.recipientInfo} IS NOT NULL AND ${schema.invoices.recipientInfo}->>'name' ILIKE ${term}) OR ${locAlias.name} ILIKE ${term} OR ${provAlias.name} ILIKE ${term})`,
       );
     }
 
@@ -1997,6 +2019,7 @@ export class LogisticsService {
           customerName: schema.orders.customerName,
           totalAmount: schema.orders.totalAmount,
           deliveredAt: schema.orders.deliveredAt,
+          deliveryFee: schema.orders.deliveryFee,
           logisticsLocationId: schema.orders.logisticsLocationId,
           logisticsLocationName: locAlias.name,
           logisticsLocationProviderName: provAlias.name,
@@ -2032,6 +2055,7 @@ export class LogisticsService {
         id: o.id,
         customerName: o.customerName,
         totalAmount: o.totalAmount != null ? String(o.totalAmount) : null,
+        deliveryFee: o.deliveryFee != null ? String(o.deliveryFee) : null,
         deliveredAt: o.deliveredAt?.toISOString() ?? null,
         logisticsLocationId: o.logisticsLocationId ?? null,
         logisticsLocationName: o.logisticsLocationName ?? null,

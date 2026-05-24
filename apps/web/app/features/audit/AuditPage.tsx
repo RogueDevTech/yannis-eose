@@ -12,7 +12,6 @@ import { formatNaira } from '~/lib/format-amount';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { PageHeader } from '~/components/ui/page-header';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
-import { FormSelect } from '~/components/ui/form-select';
 import { SearchableSelect } from '~/components/ui/searchable-select';
 import { EmptyState } from '~/components/ui/empty-state';
 import { Pagination } from '~/components/ui/pagination';
@@ -973,12 +972,14 @@ function TimeTravelPanel({
       <fetcher.Form method="post">
         <input type="hidden" name="intent" value="timeTravel" />
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-          <FormSelect
-            name="tableName"
+          <SearchableSelect
             value={ttTable}
-            onChange={(e) => setTtTable(e.target.value)}
+            onChange={(v) => setTtTable(v)}
+            placeholder="Select table"
+            searchPlaceholder="Search tables..."
             options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) }))}
           />
+          <input type="hidden" name="tableName" value={ttTable} />
           <TextInput
             name="recordId"
             type="text"
@@ -1227,11 +1228,11 @@ export function AuditPage({
             triggerAriaLabel="Audit toolbar and date range"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime ?? false} chrome="pill" />
-                <PageRefreshButton />
                 <PollingStatusIndicator state={pollState} countdown={countdown} />
                 {rows.length > 0 && canExport && (
                   <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
@@ -1283,11 +1284,15 @@ export function AuditPage({
           are merged in client-side after `audit.actorNames`. */}
       <div className="card">
         <div className="flex flex-col sm:flex-row gap-3">
-          <FormSelect
+          <SearchableSelect
             value={filters.tableName}
-            onChange={(e) => updateFilter('tableName', e.target.value)}
+            onChange={(v) => updateFilter('tableName', v)}
             placeholder="All Tables"
-            options={AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) }))}
+            searchPlaceholder="Search tables..."
+            options={[
+              { value: '', label: 'All Tables' },
+              ...AUDITABLE_TABLES.map((t) => ({ value: t, label: formatAuditTableName(t) })),
+            ]}
             wrapperClassName="w-full sm:w-56"
           />
           {actorPickerOptions.length > 0 ? (
@@ -1519,13 +1524,20 @@ export function AuditPage({
       </TableLoadingOverlay>
 
       {/* Pagination */}
-      <Pagination
-        page={filters.page}
-        totalPages={totalPages}
-        pageParam="page"
-        pageSize={filters.limit}
-        showWhenSinglePage
-      />
+      <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <p className="text-sm text-app-fg-muted">
+          {total > 0
+            ? `Showing ${(filters.page - 1) * filters.limit + 1}–${Math.min(filters.page * filters.limit, total)} of ${total} entries`
+            : 'No entries'}
+        </p>
+        <Pagination
+          page={filters.page}
+          totalPages={totalPages}
+          pageParam="page"
+          pageSize={filters.limit}
+          showWhenSinglePage
+        />
+      </div>
 
       {/* Time Travel Panel — actor names loaded post-mount */}
       <TimeTravelPanel

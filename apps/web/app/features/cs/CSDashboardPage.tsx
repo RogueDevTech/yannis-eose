@@ -2630,7 +2630,12 @@ function CSDashboardPageLoaded({
                 ))}
               </div>
               {abandonedTotalPages >= 1 ? (
-                <div className="mt-4 flex justify-center border-t border-app-border pt-4">
+                <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-app-border pt-4">
+                  <p className="text-sm text-app-fg-muted">
+                    {abandonedPagination.total && abandonedPagination.total > 0
+                      ? `Showing ${(abandonedPagination.page - 1) * abandonedPagination.limit + 1}–${Math.min(abandonedPagination.page * abandonedPagination.limit, abandonedPagination.total)} of ${abandonedPagination.total} carts`
+                      : 'No carts'}
+                  </p>
                   <Pagination
                     page={abandonedPagination.page}
                     totalPages={abandonedTotalPages}
