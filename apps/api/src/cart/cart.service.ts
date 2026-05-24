@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, lt, desc, count, inArray, ilike, sql, type SQL } from 'drizzle-orm';
+import { eq, and, lt, gte, lte, desc, count, inArray, ilike, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
@@ -434,6 +434,10 @@ export class CartService {
     branchId?: string | null;
     /** Customer-name substring match (case-insensitive). Mirrors `orders.list` search. */
     search?: string;
+    /** ISO date string — only carts updated on or after this date. */
+    startDate?: string | null;
+    /** ISO date string — only carts updated on or before this date. */
+    endDate?: string | null;
   } = {}): Promise<{
     items: Array<{
       id: string;
@@ -886,7 +890,12 @@ export class CartService {
    *
    * PENDING carts (customer still typing) and CONVERTED carts are not "open".
    */
-  private openCartConditions(opts: { mediaBuyerId?: string | null; branchId?: string | null }): SQL[] {
+  private openCartConditions(opts: {
+    mediaBuyerId?: string | null;
+    branchId?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  }): SQL[] {
     const conditions: SQL[] = [
       eq(schema.cartAbandonments.status, 'ABANDONED'),
       sql`NOT EXISTS (SELECT 1 FROM orders o WHERE o.cart_id = ${schema.cartAbandonments.id})`,
@@ -904,6 +913,12 @@ export class CartService {
     }
     if (opts.branchId) {
       conditions.push(eq(schema.campaigns.branchId, opts.branchId));
+    }
+    if (opts.startDate) {
+      conditions.push(gte(schema.cartAbandonments.updatedAt, new Date(`${opts.startDate}T00:00:00`)));
+    }
+    if (opts.endDate) {
+      conditions.push(lte(schema.cartAbandonments.updatedAt, new Date(`${opts.endDate}T23:59:59`)));
     }
     return conditions;
   }
