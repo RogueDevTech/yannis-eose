@@ -79,6 +79,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }>;
       };
       liveActivity: LiveActivityItem[];
+      abandonedCartCount: number;
     };
     const bundle = bundleRes.ok
       ? ((bundleRes.data as { result?: { data?: BundleData } })?.result?.data ?? null)
@@ -108,6 +109,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
     );
     const liveActivity: LiveActivityItem[] = bundle?.liveActivity ?? [];
+    const abandonedCartCount: number = bundle?.abandonedCartCount ?? 0;
 
     return {
       metrics,
@@ -115,6 +117,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       balancesList,
       recentOrders,
       liveActivity,
+      abandonedCartCount,
     };
   });
 

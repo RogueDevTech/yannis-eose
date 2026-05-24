@@ -52,11 +52,11 @@ export function AuditLoadingShell({
             triggerAriaLabel="Audit toolbar and date range"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />

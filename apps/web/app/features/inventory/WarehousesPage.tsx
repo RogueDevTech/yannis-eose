@@ -553,10 +553,14 @@ export function WarehousesPage({
 
         {totalPages > 1 ? (
           <div className="border-t border-app-border pt-4 mt-0 md:px-0 px-1">
-            <Pagination page={page} totalPages={totalPages} pageSize={limit} />
-            <span className="text-xs text-app-fg-muted">
-              {limit} per page · {totalWarehouses} total
-            </span>
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <p className="text-sm text-app-fg-muted">
+                {totalWarehouses > 0
+                  ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, totalWarehouses)} of ${totalWarehouses} warehouses`
+                  : 'No warehouses'}
+              </p>
+              <Pagination page={page} totalPages={totalPages} pageSize={limit} />
+            </div>
           </div>
         ) : null}
       </div>

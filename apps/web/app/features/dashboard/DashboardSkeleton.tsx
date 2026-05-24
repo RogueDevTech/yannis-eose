@@ -17,7 +17,7 @@ function dashboardGreeting(): string {
 
 /**
  * Loading shell for the Super-Admin executive dashboard (`SuperAdminDashboard`).
- * Mirrors that layout exactly — ROAS hero, Revenue Generated, Key Metrics,
+ * Mirrors that layout exactly — ROAS hero, Key Metrics, Revenue Generated,
  * Quick Navigation — so there's no flash of the *quick* dashboard layout
  * while `dashboard.ceoOverview` resolves. CEO 2026-05-19: the prior fallback
  * (`AdminQuickDashboardLoadingShell`) was the wrong shell for this variant.
@@ -86,21 +86,6 @@ export function SuperAdminDashboardLoadingShell({
         </div>
       </div>
 
-      {/* Revenue Generated */}
-      <div>
-        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
-          Revenue Generated
-        </h2>
-        <div className="card px-4 py-2">
-          {['Today', 'This Week', 'This Month'].map((label) => (
-            <div key={label} className="flex items-center justify-between py-2">
-              <span className="text-sm text-app-fg-muted">{label}</span>
-              <StatValuePulse />
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* Key Metrics */}
       <div>
         <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
@@ -113,6 +98,21 @@ export function SuperAdminDashboardLoadingShell({
               <p className="mt-1">
                 <StatValuePulse />
               </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Revenue Generated */}
+      <div>
+        <h2 className="text-xs font-semibold text-app-fg-muted uppercase tracking-wider mb-3">
+          Revenue Generated
+        </h2>
+        <div className="card px-4 py-2">
+          {['Today', 'This Week', 'This Month'].map((label) => (
+            <div key={label} className="flex items-center justify-between py-2">
+              <span className="text-sm text-app-fg-muted">{label}</span>
+              <StatValuePulse />
             </div>
           ))}
         </div>

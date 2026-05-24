@@ -161,7 +161,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
         (safeRemitPage - 1) * remitPageSize,
         safeRemitPage * remitPageSize,
       ),
-    [remittances, safeRemitPage],
+    [remittances, safeRemitPage, remitPageSize],
   );
   useEffect(() => {
     if (remitPage > remitTotalPages) setRemitPage(1);
@@ -308,24 +308,41 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
       if (reason) body.shrinkageReason = reason;
       const notes = receiverNotes[t.id]?.trim();
       if (notes) body.receiverNotes = notes;
-      try {
-        const base = getBrowserApiBaseUrl();
-        const res = await fetch(`${base}/trpc/inventory.verifyTransfer`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(body),
-        });
-        const json = await res.json();
-        // tRPC wraps errors in result.error or returns { result: { data: ... } }
-        const errMsg =
-          json?.error?.message ??
-          json?.result?.error?.message ??
-          (json?.error && typeof json.error === 'string' ? json.error : null);
-        if (errMsg) errors.push(`${t.productName}: ${errMsg}`);
-        else if (!res.ok) errors.push(`${t.productName}: Server error (${res.status})`);
-      } catch (err) {
-        errors.push(`${t.productName}: ${err instanceof Error ? err.message : 'Network error'}`);
+      const base = getBrowserApiBaseUrl();
+      let lastErr: unknown = null;
+      let succeeded = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt));
+        try {
+          const res = await fetch(`${base}/trpc/inventory.verifyTransfer`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(body),
+          });
+          const json = await res.json();
+          const errMsg =
+            json?.error?.message ??
+            json?.result?.error?.message ??
+            (json?.error && typeof json.error === 'string' ? json.error : null);
+          if (errMsg) {
+            // On retry, "already RECEIVED/DISPUTED" means a prior attempt succeeded
+            if (attempt > 0 && /is (RECEIVED|DISPUTED)/i.test(errMsg)) {
+              // prior attempt went through — treat as success
+            } else {
+              errors.push(`${t.productName}: ${errMsg}`);
+            }
+          } else if (!res.ok) {
+            errors.push(`${t.productName}: Server error (${res.status})`);
+          }
+          succeeded = true;
+          break;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      if (!succeeded) {
+        errors.push(`${t.productName}: ${lastErr instanceof Error ? lastErr.message : 'Network error'}`);
       }
       setBulkProgress({ done: i + 1, total: targets.length, errors: [...errors] });
     }
@@ -589,11 +606,11 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
             sheetCloseLabel="Done"
             desktop={
               <div className="flex items-center gap-2">
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </div>
             }
           />
@@ -866,13 +883,18 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
       </TableLoadingOverlay>
 
       {remittances.length > 0 && (
-        <Pagination
-          page={safeRemitPage}
-          totalPages={remitTotalPages}
-          onPageChange={setRemitPage}
-          pageSize={remitPageSize}
-          onPageSizeChange={(size) => { setRemitPageSize(size); setRemitPage(1); }}
-        />
+        <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p className="text-sm text-app-fg-muted">
+            {`Showing ${(safeRemitPage - 1) * remitPageSize + 1}–${Math.min(safeRemitPage * remitPageSize, remittances.length)} of ${remittances.length} remittances`}
+          </p>
+          <Pagination
+            page={safeRemitPage}
+            totalPages={remitTotalPages}
+            onPageChange={setRemitPage}
+            pageSize={remitPageSize}
+            onPageSizeChange={(size) => { setRemitPageSize(size); setRemitPage(1); }}
+          />
+        </div>
       )}
 
       {pendingAction && (

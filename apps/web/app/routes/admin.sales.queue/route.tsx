@@ -8,7 +8,7 @@ import {
   getSessionCookie,
   requirePermission,
   safeStatus,
-  defaultTodayRange,
+  defaultThisMonthRange,
 } from '~/lib/api.server';
 import { extractApiErrorMessage } from '~/lib/api-error';
 import { describeApiFetchFailure } from '~/lib/loader-api-fetch';
@@ -145,9 +145,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
       `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'UNPROCESSED', limit: 20 }))}`,
       { method: 'GET', cookie },
     ),
-    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify(defaultTodayRange()))}`, { method: 'GET', cookie }),
+    apiRequest<unknown>(`/trpc/orders.statusCounts?input=${encodeURIComponent(JSON.stringify(defaultThisMonthRange()))}`, { method: 'GET', cookie }),
     apiRequest<unknown>(
-      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'CS_ENGAGED', limit: 20, ...defaultTodayRange() }))}`,
+      `/trpc/orders.list?input=${encodeURIComponent(JSON.stringify({ status: 'CS_ENGAGED', limit: 20, ...defaultThisMonthRange() }))}`,
       { method: 'GET', cookie },
     ),
     apiRequest<unknown>(

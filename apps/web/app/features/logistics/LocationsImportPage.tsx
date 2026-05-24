@@ -12,7 +12,7 @@ import {
   type ImportColumn,
   importCellInputClass,
 } from '~/components/ui/import-bulk-data';
-import { FormSelect } from '~/components/ui/form-select';
+import { SearchableSelect } from '~/components/ui/searchable-select';
 import {
   type ParsedRow,
   type ProviderInfo,
@@ -47,18 +47,18 @@ export function LocationsImportPage({ providers }: LocationsImportPageProps) {
         errorLabel: 'Provider',
         getDisplayValue: (row) => row.providerInput,
         renderCell: ({ row, disabled, errored, patch }) => (
-          <FormSelect
+          <SearchableSelect
             value={row.providerId ?? ''}
-            onChange={(e) => {
-              const id = e.target.value;
+            onChange={(id) => {
               const provider = providers.find((p) => p.id === id);
               patch({ providerInput: provider?.name ?? '' } as Partial<ResolvedRow>);
             }}
             disabled={disabled || providers.length === 0}
             controlSize="sm"
             wrapperClassName="w-full"
-            className={importSelectClass(errored)}
+            triggerClassName={importSelectClass(errored)}
             placeholder="— Pick provider —"
+            searchPlaceholder="Search providers..."
             options={providers.map((p) => ({ value: p.id, label: p.name }))}
           />
         ),

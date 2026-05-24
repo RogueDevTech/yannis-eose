@@ -496,13 +496,13 @@ export function CSOrdersLoadingShell({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={false} showGreen={false} />
                 )}
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     startTime={filters.startTime ?? ''}
                     endTime={filters.endTime ?? ''}
                     periodAllTime={filters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />
@@ -785,11 +785,11 @@ export function CSTeamLoadingShell({
             triggerAriaLabel="Sales team toolbar"
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
                     periodAllTime={dateFilters.periodAllTime} chrome="pill" />
-                <PageRefreshButton />
               </>
             }
           />
@@ -804,8 +804,15 @@ export function CSTeamLoadingShell({
         mobileGrid
         items={[
           { label: 'Closers', value: <StatValuePulse className="min-w-[2rem]" /> },
-          { label: 'Total pending', value: <StatValuePulse className="min-w-[2.5rem]" /> },
-          { label: 'Idle', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Total orders', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Confirmed', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Delivered', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Cancelled', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Confirm rate', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Delivery rate', value: <StatValuePulse className="min-w-[2.5rem]" /> },
+          { label: 'Calls made', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Avg call', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Pending', value: <StatValuePulse className="min-w-[2rem]" /> },
         ]}
       />
       <div>

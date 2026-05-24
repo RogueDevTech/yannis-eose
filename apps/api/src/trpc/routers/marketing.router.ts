@@ -743,7 +743,10 @@ export const marketingRouter = router({
         });
       };
 
-      const [metrics, leaderboard, balancesList, recentOrders, liveActivity] = await Promise.all([
+      const abandonedCartMbId =
+        ctx.user.role === 'MEDIA_BUYER' ? ctx.user.id : undefined;
+
+      const [metrics, leaderboard, balancesList, recentOrders, liveActivity, abandonedCartCount] = await Promise.all([
         getMarketingService().getPerformanceMetrics(
           undefined,
           input.startDate && input.endDate ? 'this_month' : 'all_time',
@@ -763,6 +766,7 @@ export const marketingRouter = router({
         getMarketingService().listFundingBalances(ctx.user, branchId),
         getOrdersService().list(recentOrdersInput, branchId, buildOrdersListOpts(ctx.user)),
         fetchLiveActivity(),
+        getCartService().countAbandoned({ mediaBuyerId: abandonedCartMbId, branchId: branchId ?? undefined }),
       ]);
 
       return {
@@ -771,6 +775,7 @@ export const marketingRouter = router({
         balancesList,
         recentOrders,
         liveActivity,
+        abandonedCartCount,
       };
     }),
 

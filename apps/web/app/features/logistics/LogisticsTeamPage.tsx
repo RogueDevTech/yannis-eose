@@ -456,6 +456,7 @@ export function LogisticsTeamPage({
             }
             desktop={
               <>
+                <PageRefreshButton />
                 <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
@@ -463,7 +464,6 @@ export function LogisticsTeamPage({
                 <Button type="button" variant="secondary" size="sm" disabled title="Export coming soon">
                   Generate report
                 </Button>
-                <PageRefreshButton />
               </>
             }
           />
@@ -602,7 +602,16 @@ export function LogisticsTeamPage({
             />
 
             {totalPages > 1 && (
-              <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+              <div className="mt-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <p className="text-sm text-app-fg-muted">
+                  {totalCount > 0 && limit
+                    ? `Showing ${(page - 1) * limit + 1}–${Math.min(page * limit, totalCount)} of ${totalCount} providers`
+                    : totalCount > 0
+                      ? `Showing ${providers.length} of ${totalCount} providers`
+                      : 'No providers'}
+                </p>
+                <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
+              </div>
             )}
           </>
         )}

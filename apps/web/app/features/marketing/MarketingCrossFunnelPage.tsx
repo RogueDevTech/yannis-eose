@@ -1,5 +1,5 @@
-import { Suspense } from 'react';
-import { Await, Link } from '@remix-run/react';
+import { Suspense, useState } from 'react';
+import { Await } from '@remix-run/react';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { DeferredError } from '~/components/ui/deferred-section';
 import { StatValuePulse } from '~/components/ui/deferred-skeletons';
@@ -10,7 +10,14 @@ import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { Card, CardBody, CardHeader } from '~/components/ui/card';
-import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import {
+  CompactTable,
+  CompactTableActionButton,
+  type CompactTableColumn,
+} from '~/components/ui/compact-table';
+import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
+import { Modal } from '~/components/ui/modal';
+import { orderDetailHref } from '~/lib/order-detail-return';
 
 export interface CrossFunnelAttemptRow {
   id: string;
@@ -57,8 +64,79 @@ function formatDate(iso: string): string {
   }
 }
 
+/** Single compact stat tile — mirrors `MarketingTeamCompactStat` for visual parity with the team peek. */
+function CrossFunnelCompactStat({
+  label,
+  value,
+  valueClassName = 'text-app-fg',
+}: {
+  label: string;
+  value: React.ReactNode;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-app-border bg-app-hover/40 px-2.5 py-2">
+      <span className={['block text-sm font-semibold leading-tight tabular-nums truncate', valueClassName].filter(Boolean).join(' ')}>
+        {value}
+      </span>
+      <span className="mt-1 block text-micro font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Cross-funnel attempt peek card — opened by tapping a row on mobile.
+ * Header (customer + when) → 4 stat tiles → "View winning order" link.
+ * Pass `embedded` when rendering inside the modal so the outer `card` chrome
+ * isn't doubled with the modal surface.
+ */
+function CrossFunnelAttemptCard({ row, embedded }: { row: CrossFunnelAttemptRow; embedded?: boolean }) {
+  return (
+    <div className={embedded ? 'space-y-3' : 'card space-y-3'}>
+      <div className="flex items-start gap-3">
+        <CompactUserAvatar name={row.customerName} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-app-fg">{row.customerName}</p>
+          <p className="text-mini font-medium uppercase tracking-[0.14em] text-app-fg-muted">
+            Cross-funnel · {formatDate(row.attemptedAt)}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <CrossFunnelCompactStat
+          label="Product"
+          value={row.productName ?? '—'}
+          valueClassName="text-brand-600 dark:text-brand-400"
+        />
+        <CrossFunnelCompactStat label="Your funnel" value={row.mediaBuyerName ?? '—'} />
+        <CrossFunnelCompactStat
+          label="Credited to"
+          value={row.originalMediaBuyerName ?? <em className="not-italic text-app-fg-muted">unknown</em>}
+        />
+        <CrossFunnelCompactStat label="Form" value={row.campaignId ? 'Linked' : '—'} />
+      </div>
+
+      {row.originalOrderId ? (
+        <div className="border-t border-app-border pt-3">
+          <CompactTableActionButton
+            to={orderDetailHref('/admin/marketing/orders', row.originalOrderId, 'marketing')}
+            className="w-full justify-center"
+            tone="brand"
+          >
+            View winning order
+          </CompactTableActionButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
   const isLoaderRefetchBusy = useLoaderRefetchBusy().busy;
+  const [previewAttempt, setPreviewAttempt] = useState<CrossFunnelAttemptRow | null>(null);
 
   const columns: CompactTableColumn<CrossFunnelAttemptRow>[] = [
     {
@@ -105,8 +183,8 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
             triggerAriaLabel="Cross-funnel toolbar and date range"
             desktop={
               <>
-                <DateFilterBar chrome="pill" />
                 <PageRefreshButton />
+                <DateFilterBar chrome="pill" />
               </>
             }
           />
@@ -200,17 +278,46 @@ export function MarketingCrossFunnelPage({ list, secondary }: PageProps) {
                 ? { page: list.page, totalPages: list.totalPages }
                 : undefined
             }
+            renderMobileCard={(row) => (
+              <button
+                type="button"
+                onClick={() => setPreviewAttempt(row)}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+              >
+                {/* Row 1: customer + attempted-at */}
+                <div className="flex items-center gap-2.5">
+                  <CompactUserAvatar name={row.customerName} />
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-app-fg">
+                    {row.customerName}
+                  </span>
+                  <span className="shrink-0 text-mini text-app-fg-muted tabular-nums">
+                    {formatDate(row.attemptedAt)}
+                  </span>
+                </div>
+                {/* Row 2: product · credited-to MB */}
+                <div className="flex items-center gap-2 text-xs text-app-fg-muted pl-[calc(1.75rem+0.625rem)]">
+                  <span className="truncate">{row.productName ?? '—'}</span>
+                  <span aria-hidden>·</span>
+                  <span className="truncate">
+                    credited to {row.originalMediaBuyerName ?? 'unknown'}
+                  </span>
+                </div>
+              </button>
+            )}
           />
         </CardBody>
       </Card>
 
-      <p className="text-xs text-app-fg-muted">
-        These rows are visible only to you and your Head of Marketing. CS does not see them.{' '}
-        <Link to="/admin/marketing/overview" className="underline">
-          Back to marketing overview
-        </Link>
-        .
-      </p>
+      {/* Mobile peek modal — full attempt detail + "view winning order" link.
+          Mirrors MarketingTeamPage / Sales peek pattern for visual consistency. */}
+      <Modal
+        open={!!previewAttempt}
+        onClose={() => setPreviewAttempt(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-4"
+      >
+        {previewAttempt && <CrossFunnelAttemptCard row={previewAttempt} embedded />}
+      </Modal>
     </div>
   );
 }

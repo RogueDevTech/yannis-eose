@@ -131,7 +131,7 @@ export function defaultThisMonthRange(): { startDate: string; endDate: string } 
  * picker writes its own search param (the matching `<Pagination pageSizeParam>` must agree):
  *   const { perPage: requestsPerPage } = parsePerPage(url.searchParams, { param: 'requestsPerPage' });
  */
-const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [20, 50, 100, 200, 500, 1000];
+const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [20, 50, 100, 200, 400, 500, 600, 800, 1000];
 
 export function parsePerPage(
   searchParams: URLSearchParams,

@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, gte, inArray, notInArray, sql } from 'drizzle-orm';
+import { and, gte, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID } from '@yannis/shared';
@@ -80,6 +80,13 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         `Boot-time test-order purge failed: ${(err as Error)?.message ?? err}`,
       );
     }
+    try {
+      await this.purgeDuplicateOrders(true);
+    } catch (err) {
+      this.logger.error(
+        `Boot-time duplicate-order purge failed: ${(err as Error)?.message ?? err}`,
+      );
+    }
   }
 
   /** Every 2 hours, on the hour (00:00, 02:00, 04:00 … server time). */
@@ -88,8 +95,12 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
     try {
       await this.purgeTestOrders();
     } catch (err) {
-      // Never let a purge failure bubble — log and let the next run retry.
       this.logger.error(`Test-order purge run failed: ${(err as Error)?.message ?? err}`);
+    }
+    try {
+      await this.purgeDuplicateOrders();
+    } catch (err) {
+      this.logger.error(`Duplicate-order purge run failed: ${(err as Error)?.message ?? err}`);
     }
   }
 
@@ -206,5 +217,109 @@ export class TestOrderPurgeService implements OnApplicationBootstrap {
         (targets.length > 30 ? ` … +${targets.length - 30} more` : ''),
     );
     return { deleted: targets.length, cancelled: targets.length, skipped: stockMoved.length };
+  }
+
+  /**
+   * Exact-duplicate purge — finds orders with identical phone hash + items
+   * fingerprint + same campaign submitted within 24 hours of each other,
+   * keeps the earliest, and DELETES the rest. Only touches stock-neutral
+   * statuses (same safety as test-order purge).
+   *
+   * Orders that arrive >24h apart are treated as legitimate repeat customers
+   * and are NOT purged — only rapid-fire duplicates from the race condition
+   * window (before the advisory-lock fix of 2026-05-24) are cleaned up.
+   */
+  async purgeDuplicateOrders(
+    allDates = false,
+  ): Promise<{ deleted: number; skipped: number }> {
+    const dateFilter = allDates
+      ? sql`TRUE`
+      : sql`o1.created_at >= NOW() - INTERVAL '48 hours'`;
+
+    // Find duplicate groups: same phone hash, same campaign, same items JSONB,
+    // created within 24 hours of each other, both in stock-neutral statuses.
+    // For each group, keep the earliest (min id by created_at) and mark the
+    // rest for deletion. >24h apart = legitimate repeat order, leave it alone.
+    const duplicateIds = await this.db.execute<{ id: string; customer_name: string; status: string; branch_id: string | null }>(sql`
+      WITH ranked AS (
+        SELECT
+          o1.id,
+          o1.customer_name,
+          o1.status,
+          o1.branch_id,
+          o1.created_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY o1.customer_phone_hash, o1.campaign_id, o1.items::text
+            ORDER BY o1.created_at ASC
+          ) AS rn
+        FROM orders o1
+        WHERE o1.customer_phone_hash IS NOT NULL
+          AND o1.status IN ('UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED')
+          AND o1.deleted_at IS NULL
+          AND ${dateFilter}
+          AND EXISTS (
+            SELECT 1 FROM orders o2
+            WHERE o2.customer_phone_hash = o1.customer_phone_hash
+              AND o2.campaign_id IS NOT DISTINCT FROM o1.campaign_id
+              AND o2.items::text = o1.items::text
+              AND o2.id != o1.id
+              AND o2.deleted_at IS NULL
+              AND o2.status NOT IN ('CANCELLED', 'DELETED')
+              AND o2.created_at < o1.created_at
+              AND o1.created_at - o2.created_at < INTERVAL '24 hours'
+          )
+      )
+      SELECT id, customer_name, status, branch_id
+      FROM ranked
+      WHERE rn > 1
+      LIMIT ${MAX_PER_RUN}
+    `);
+
+    if (duplicateIds.length === 0) {
+      return { deleted: 0, skipped: 0 };
+    }
+
+    const ids = duplicateIds.map((r) => r.id);
+    const preview = duplicateIds
+      .slice(0, 20)
+      .map((r) => `${r.id} (${r.customer_name} · ${r.status})`)
+      .join('; ');
+
+    const now = new Date();
+    await withActor(this.db, { id: SYSTEM_ACTOR_ID }, async (tx) => {
+      await tx
+        .update(schema.orders)
+        .set({
+          status: 'DELETED',
+          deletedAt: now,
+          updatedAt: now,
+          isDuplicate: 'FLAGGED',
+        })
+        .where(
+          and(
+            inArray(schema.orders.id, ids),
+            inArray(schema.orders.status, ['UNPROCESSED', 'CS_ASSIGNED', 'CS_ENGAGED']),
+            isNull(schema.orders.deletedAt),
+          ),
+        );
+      await tx.insert(schema.orderTimelineEvents).values(
+        duplicateIds.map((r) => ({
+          orderId: r.id,
+          eventType: 'ORDER_DELETED' as const,
+          actorId: null,
+          actorName: 'System' as const,
+          description: 'Auto-deleted: exact duplicate order (same customer, form, and items within 24 hours)',
+          branchId: r.branch_id ?? null,
+        })),
+      );
+    });
+
+    await this.cache.delPattern('cache:orders:aggregates:*').catch(() => {});
+
+    this.logger.log(
+      `Deleted ${ids.length} duplicate order(s) → Deleted tab. Targets: ${preview}` +
+        (ids.length > 20 ? ` … +${ids.length - 20} more` : ''),
+    );
+    return { deleted: ids.length, skipped: 0 };
   }
 }
