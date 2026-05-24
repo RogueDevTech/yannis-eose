@@ -143,7 +143,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const listPromise = (async () => {
     if (fromCart) {
       const cartsInput = encodeURIComponent(
-        JSON.stringify({ page, limit: ORDERS_PER_PAGE, ...(mediaBuyerId ? { mediaBuyerId } : {}) }),
+        JSON.stringify({
+          page,
+          limit: ORDERS_PER_PAGE,
+          ...(mediaBuyerId ? { mediaBuyerId } : {}),
+          ...(search ? { search } : {}),
+        }),
       );
       const cartsRes = await apiRequest<unknown>(`/trpc/cart.listAbandoned?input=${cartsInput}`, {
         method: 'GET',

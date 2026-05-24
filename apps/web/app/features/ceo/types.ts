@@ -3,6 +3,12 @@ export interface CEODashboardFilters {
   endDate: string;
   periodAllTime?: boolean;
   topic?: 'orders' | 'media_buyers' | 'cs';
+  /**
+   * Which branch column drives the Branch Breakdown table:
+   *   - `'marketing'` — `orders.branch_id` (campaign attribution, default)
+   *   - `'servicing'` — `orders.servicing_branch_id` (CS team that worked it)
+   */
+  branchScope?: 'marketing' | 'servicing';
 }
 
 export interface CEODashboardData {

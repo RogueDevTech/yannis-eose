@@ -34,7 +34,9 @@ const OVERLAY_CLOSE_DELAY_MS = 500;
 
 const MoreIcon = (
   <svg fill="currentColor" viewBox="0 0 24 24" aria-hidden>
-    <path d="M12 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 18.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+    <circle cx="12" cy="6" r="2" />
+    <circle cx="12" cy="12" r="2" />
+    <circle cx="12" cy="18" r="2" />
   </svg>
 );
 
@@ -273,15 +275,15 @@ export function BottomNav({
             type="button"
             onClick={handleOpenMore}
             className={[
-              'flex shrink-0 min-w-[2.75rem] min-h-[2.875rem] flex-col items-center justify-center rounded-xl border transition-[transform,box-shadow] touch-manipulation text-white shadow-md shadow-black/15 dark:shadow-black/50',
+              'flex shrink-0 min-w-[2.75rem] min-h-[2.875rem] flex-col items-center justify-center rounded-xl border transition-[transform,box-shadow] touch-manipulation shadow-sm shadow-black/5 dark:shadow-black/40',
               moreOpen
-                ? 'border-white/25 bg-[#1565C0] dark:bg-[#4d8bf1] ring-1 ring-white/20 dark:ring-white/15'
-                : 'border-[#0d47a1]/40 dark:border-[#74a4f5]/35 bg-[#1565C0] dark:bg-[#4d8bf1] hover:bg-[#0d47a1] dark:hover:bg-[#5b8ef0] active:scale-[0.98] active:bg-[#0a3a85] dark:active:bg-[#1565C0]',
+                ? 'border-brand-600 bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 ring-1 ring-brand-500/20'
+                : 'border-brand-500 bg-white dark:bg-surface-800 text-brand-500 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-500/10 active:scale-[0.98]',
             ].join(' ')}
             aria-label="More options"
             aria-expanded={moreOpen}
           >
-            <span className="w-6 h-6 flex items-center justify-center [&>svg]:w-6 [&>svg]:h-6 text-white drop-shadow-sm">
+            <span className="w-6 h-6 flex items-center justify-center [&>svg]:w-6 [&>svg]:h-6">
               {MoreIcon}
             </span>
           </button>

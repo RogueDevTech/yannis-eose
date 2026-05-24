@@ -274,6 +274,19 @@
     @apply md:shadow-none;
   }
 
+  /* Mobile-bleed card — phone-sized goes edge-to-edge as a banded surface
+     (cancels the layout's `p-4`), sm+ restores full card chrome. Padding is
+     intentionally NOT included so callers can choose `p-4`, `p-5`, `px-4 py-2`,
+     `p-0`, etc. — matches CEO mobile-density directive. */
+  .card-mobile-bleed {
+    @apply -mx-4 bg-app-elevated border-y border-app-border overflow-hidden text-app-fg
+           sm:mx-0 sm:rounded-xl sm:border sm:shadow-card;
+  }
+
+  .dark .card-mobile-bleed {
+    @apply sm:shadow-none;
+  }
+
   /* Calm theme: barely-there elevation so surfaces feel quieter */
   [data-app-theme='soft'] .card {
     box-shadow:
@@ -336,9 +349,13 @@
     @apply bg-brand-700/20 text-brand-400;
   }
 
-  /* Button variants — Ghost-style rim: soft app-border + brand hover (filled variants keep a light keyed edge) */
+  /* Button variants — Ghost-style rim: soft app-border + brand hover (filled variants keep a light keyed edge).
+     Canonical control height (40px mobile → 36px desktop) enforced via `min-h` so every size
+     (.btn-sm / md / .btn-lg) is at least the platform standard — matches SearchInput, FormSelect,
+     SearchableSelect, DateInput, FilterPills, Pagination buttons, DateFilterBar pill chrome,
+     and the ToolbarFiltersCollapsible "Filters" trigger. See `components/ui/_control-heights.ts`. */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-app-border hover:border-brand-500/40 dark:hover:border-brand-400/45;
+    @apply inline-flex min-h-10 md:min-h-9 items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed border-2 border-app-border hover:border-brand-500/40 dark:hover:border-brand-400/45;
   }
 
   .btn-primary {

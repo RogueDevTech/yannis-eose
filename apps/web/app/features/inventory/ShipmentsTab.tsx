@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from '@remix-run/react';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { EmptyState } from '~/components/ui/empty-state';
+import { Modal } from '~/components/ui/modal';
 import { StatusBadge } from '~/components/ui/status-badge';
 import { isOptimisticId } from '~/lib/optimistic';
 import type { ShipmentRow, ShipmentStatus } from './types';
@@ -32,6 +33,7 @@ export function ShipmentsTab({
   totalShipments,
   canIntake,
 }: ShipmentsTabProps) {
+  const [peekShipment, setPeekShipment] = useState<ShipmentRow | null>(null);
   const display = shipments;
 
   const columns = useMemo<CompactTableColumn<ShipmentRow>[]>(
@@ -179,16 +181,91 @@ export function ShipmentsTab({
             );
             if (isOptimisticId(s.id)) return body;
             return (
-              <Link
-                to={`/admin/shipments/${s.id}`}
-                prefetch="intent"
+              <button
+                type="button"
+                onClick={() => setPeekShipment(s)}
                 className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
               >
                 {body}
-              </Link>
+              </button>
             );
           }}
         />
+      )}
+
+      {/* Peek modal — mobile card tap shows shipment details + actions */}
+      {peekShipment && (
+        <Modal
+          open
+          onClose={() => setPeekShipment(null)}
+          maxWidth="max-w-sm"
+          contentClassName="p-5 space-y-4 bg-app-elevated"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold font-mono text-app-fg leading-snug">
+                {peekShipment.referenceLabel}
+              </h3>
+              <div className="mt-1">
+                <StatusBadge
+                  status={peekShipment.status}
+                  label={formatShipmentStatus(peekShipment.status)}
+                  variant={SHIPMENT_STATUS_VARIANT[peekShipment.status]}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPeekShipment(null)}
+              aria-label="Close"
+              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Key details */}
+          <dl className="space-y-2 text-sm">
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-app-fg-muted">Supplier</dt>
+              <dd className="font-medium text-app-fg text-right truncate">{peekShipment.supplierName ?? '—'}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-app-fg-muted">Destination</dt>
+              <dd className="font-medium text-app-fg text-right truncate">{peekShipment.destinationLocationName ?? '—'}</dd>
+            </div>
+            {peekShipment.expectedArrivalAt && (
+              <div className="flex items-baseline justify-between gap-2">
+                <dt className="text-app-fg-muted">Expected arrival</dt>
+                <dd className="font-medium text-app-fg tabular-nums">{formatDate(peekShipment.expectedArrivalAt)}</dd>
+              </div>
+            )}
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-app-fg-muted">Lines / units</dt>
+              <dd className="font-medium text-app-fg tabular-nums">
+                {peekShipment.lineCount} line{peekShipment.lineCount === 1 ? '' : 's'} ({peekShipment.totalExpected} units)
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-app-fg-muted">Landing cost</dt>
+              <dd className="font-medium text-app-fg tabular-nums">{formatNaira(peekShipment.totalLandingCost)}</dd>
+            </div>
+          </dl>
+
+          {/* Actions */}
+          <div className="pt-2 border-t border-app-border">
+            <Link
+              to={`/admin/shipments/${peekShipment.id}`}
+              prefetch="intent"
+              className="btn-primary btn-sm w-full text-center inline-flex items-center justify-center"
+              onClick={() => setPeekShipment(null)}
+            >
+              View details
+            </Link>
+          </div>
+        </Modal>
       )}
     </div>
   );

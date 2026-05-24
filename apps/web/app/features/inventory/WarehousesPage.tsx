@@ -17,6 +17,7 @@ import { TextInput } from '~/components/ui/text-input';
 import { Textarea } from '~/components/ui/textarea';
 import { FormField } from '~/components/ui/form-field';
 import { PageHeader } from '~/components/ui/page-header';
+import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -324,42 +325,44 @@ export function WarehousesPage({
               />
               <input type="hidden" name="page" value="1" />
             </Form>
-            <SortMenu
-              value={{ sortBy, sortDir }}
-              onChange={(next) =>
-                updateWarehouseSort(
-                  next.sortBy as 'createdAt' | 'name' | 'available',
-                  next.sortDir,
-                )
-              }
-              defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
-              options={[
-                {
-                  value: 'createdAt',
-                  label: 'Recently added',
-                  description: 'When the warehouse was created.',
-                  ascLabel: 'Oldest first',
-                  descLabel: 'Newest first',
-                  defaultDir: 'desc',
-                },
-                {
-                  value: 'name',
-                  label: 'Name',
-                  description: 'Alphabetical.',
-                  ascLabel: 'A → Z',
-                  descLabel: 'Z → A',
-                  defaultDir: 'asc',
-                },
-                {
-                  value: 'available',
-                  label: 'Available units',
-                  description: 'Stock count minus reserved units across the warehouse.',
-                  ascLabel: 'Lowest first',
-                  descLabel: 'Highest first',
-                  defaultDir: 'desc',
-                },
-              ]}
-            />
+            <div className="hidden md:inline-flex">
+              <SortMenu
+                value={{ sortBy, sortDir }}
+                onChange={(next) =>
+                  updateWarehouseSort(
+                    next.sortBy as 'createdAt' | 'name' | 'available',
+                    next.sortDir,
+                  )
+                }
+                defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
+                options={[
+                  {
+                    value: 'createdAt',
+                    label: 'Recently added',
+                    description: 'When the warehouse was created.',
+                    ascLabel: 'Oldest first',
+                    descLabel: 'Newest first',
+                    defaultDir: 'desc',
+                  },
+                  {
+                    value: 'name',
+                    label: 'Name',
+                    description: 'Alphabetical.',
+                    ascLabel: 'A → Z',
+                    descLabel: 'Z → A',
+                    defaultDir: 'asc',
+                  },
+                  {
+                    value: 'available',
+                    label: 'Available units',
+                    description: 'Stock count minus reserved units across the warehouse.',
+                    ascLabel: 'Lowest first',
+                    descLabel: 'Highest first',
+                    defaultDir: 'desc',
+                  },
+                ]}
+              />
+            </div>
           </div>
         }
         desktopInlineFilters={<div />}
@@ -377,15 +380,48 @@ export function WarehousesPage({
       <PageHeader
         title="Our warehouses"
         description="Company sites used for intake, adjustments, and inbound shipments."
+        mobileInlineActions
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <PageRefreshButton />
-            {canManage ? (
-              <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
-                Add warehouse
-              </Button>
-            ) : null}
-          </div>
+          <PageHeaderMobileTools
+            sheetTitle="Warehouse tools"
+            sheetSubtitle={<span>Sort, search, and manage</span>}
+            triggerAriaLabel="Warehouse toolbar"
+            desktop={
+              <div className="flex flex-wrap items-center gap-2">
+                <PageRefreshButton />
+                {canManage ? (
+                  <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>
+                    Add warehouse
+                  </Button>
+                ) : null}
+              </div>
+            }
+            sheet={({ closeSheet }) => (
+              <>
+                <SortMenu
+                  value={{ sortBy, sortDir }}
+                  onChange={(next) => {
+                    updateWarehouseSort(
+                      next.sortBy as 'createdAt' | 'name' | 'available',
+                      next.sortDir,
+                    );
+                    closeSheet();
+                  }}
+                  defaultValue={{ sortBy: 'createdAt', sortDir: 'desc' }}
+                  options={[
+                    { value: 'createdAt', label: 'Recently added', ascLabel: 'Oldest first', descLabel: 'Newest first', defaultDir: 'desc' },
+                    { value: 'name', label: 'Name', ascLabel: 'A → Z', descLabel: 'Z → A', defaultDir: 'asc' },
+                    { value: 'available', label: 'Available units', ascLabel: 'Lowest first', descLabel: 'Highest first', defaultDir: 'desc' },
+                  ]}
+                />
+                {canManage ? (
+                  <Button variant="primary" size="sm" className="w-full justify-center" onClick={() => { closeSheet(); setShowCreate(true); }}>
+                    Add warehouse
+                  </Button>
+                ) : null}
+              </>
+            )}
+          />
         }
       />
 
@@ -425,10 +461,10 @@ export function WarehousesPage({
         ]}
       />
 
-      <Card variant="default" padding="md">
+      {/* Card chrome hidden on mobile — listing goes edge-to-edge. Desktop keeps the card wrapper. */}
+      <div className="md:card md:p-4">
         <div className="mb-4">{toolbar}</div>
-
-        <CardBody className="p-0">
+        <div>
           <TableLoadingOverlay show={isRefetching} minHeightClassName={display.length === 0 ? 'min-h-[14rem]' : 'min-h-[12rem]'}>
             {display.length === 0 ? (
               <div className="p-4">
@@ -513,17 +549,17 @@ export function WarehousesPage({
               />
             )}
           </TableLoadingOverlay>
-        </CardBody>
+        </div>
 
         {totalPages > 1 ? (
-          <CardFooter className="border-t border-app-border pt-4 mt-0">
+          <div className="border-t border-app-border pt-4 mt-0 md:px-0 px-1">
             <Pagination page={page} totalPages={totalPages} pageSize={limit} />
             <span className="text-xs text-app-fg-muted">
               {limit} per page · {totalWarehouses} total
             </span>
-          </CardFooter>
+          </div>
         ) : null}
-      </Card>
+      </div>
 
       {/* Preview modal — mobile card tap */}
       {previewWarehouse && (

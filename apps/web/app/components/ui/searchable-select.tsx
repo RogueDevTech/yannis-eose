@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SearchInput } from './search-input';
 import { Spinner } from './spinner';
+import { CONTROL_HEIGHT_CLASS } from './_control-heights';
 
 type SearchableSelectSize = 'sm' | 'md' | 'lg';
 
@@ -36,7 +37,7 @@ interface SearchableSelectProps {
 
 const sizeClasses: Record<SearchableSelectSize, string> = {
   sm: 'h-8 px-2.5 pr-7 text-xs',
-  md: 'h-9 px-3 pr-8 text-sm',
+  md: `${CONTROL_HEIGHT_CLASS} px-3 pr-8 text-sm`,
   lg: 'h-10 px-3.5 pr-9 text-base',
 };
 

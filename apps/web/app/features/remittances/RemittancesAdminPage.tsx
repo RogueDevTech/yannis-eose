@@ -27,6 +27,7 @@ import {
   type CompactTableColumn,
 } from '~/components/ui/compact-table';
 import { TableActionButton } from '~/components/ui/table-action-button';
+import { Pagination } from '~/components/ui/pagination';
 
 export interface TransferConfirmationRecord {
   id: string;
@@ -149,7 +150,6 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
   }, [fetcher.data, pendingAction, revalidator]);
 
   // Client-side pagination — backend doesn't paginate transfer remittances yet.
-  const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
   const [remitPageSize, setRemitPageSize] = useState(20);
   const [remitPage, setRemitPage] = useState(1);
   const remitTotalPages = Math.max(1, Math.ceil(remittances.length / remitPageSize));
@@ -587,13 +587,10 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
             sheetCloseLabel="Done"
             desktop={
               <div className="flex items-center gap-2">
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </div>
             }
@@ -645,7 +642,7 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
       <div className="hidden md:block card p-4">
         <div className="flex flex-wrap items-center gap-2">
           <form
-            className="w-64"
+            className="w-full md:w-64"
             onSubmit={(e) => {
               e.preventDefault();
               setFilterParam('search', searchDraft);
@@ -786,39 +783,6 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
             },
             isSelectable: (r) => isPendingTransfer(r),
           }}
-          pagination={
-            remittances.length > 0
-              ? {
-                  page: safeRemitPage,
-                  totalPages: remitTotalPages,
-                  onPageChange: setRemitPage,
-                  summary: (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                      <p className="text-sm text-app-fg-muted">
-                        Showing {(safeRemitPage - 1) * remitPageSize + 1}–
-                        {Math.min(safeRemitPage * remitPageSize, remittances.length)} of{' '}
-                        {remittances.length}
-                      </p>
-                      <select
-                        className="rounded-md border border-app-border bg-app-elevated px-2 py-1 text-xs text-app-fg"
-                        value={remitPageSize}
-                        onChange={(e) => {
-                          setRemitPageSize(Number(e.target.value));
-                          setRemitPage(1);
-                        }}
-                      >
-                        {PAGE_SIZE_OPTIONS.map((n) => (
-                          <option key={n} value={n}>{n} per page</option>
-                        ))}
-                      </select>
-                    </div>
-                  ),
-                  wrapperClassName:
-                    'flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-app-border px-4 py-3',
-                  controlsClassName: 'sm:justify-end',
-                }
-              : undefined
-          }
           renderMobileCard={(r, _i, helpers) => {
             const { rowSelection } = helpers;
             const justProcessed = processedIds.has(r.id);
@@ -898,6 +862,16 @@ export function RemittancesAdminPage({ remittances, allRemittances, locations, s
         />
       )}
       </TableLoadingOverlay>
+
+      {remittances.length > 0 && (
+        <Pagination
+          page={safeRemitPage}
+          totalPages={remitTotalPages}
+          onPageChange={setRemitPage}
+          pageSize={remitPageSize}
+          onPageSizeChange={(size) => { setRemitPageSize(size); setRemitPage(1); }}
+        />
+      )}
 
       {pendingAction && (
         <Modal

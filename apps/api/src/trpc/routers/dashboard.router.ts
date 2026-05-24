@@ -254,6 +254,13 @@ export const dashboardRouter = router({
       z.object({
         startDate: z.string().date().optional(),
         endDate: z.string().date().optional(),
+        /**
+         * Which branch column drives the Branch Breakdown table:
+         *   - `'marketing'` (default) — `orders.branch_id` (campaign attribution)
+         *   - `'servicing'`           — `orders.servicing_branch_id` (CS team)
+         * Only affects `branchBreakdown`. `overview` is unscoped (all branches).
+         */
+        branchScope: z.enum(['marketing', 'servicing']).optional(),
       }).optional(),
     )
     .query(async ({ input, ctx }) => {
@@ -263,19 +270,20 @@ export const dashboardRouter = router({
 
       const startDate = input?.startDate;
       const endDate = input?.endDate;
+      const branchScope = input?.branchScope ?? 'marketing';
       const branchId = ctx.currentBranchId;
       const ordersSvc = ordersService;
 
       const fetchBundle = async () => {
         const [overview, branchBreakdown] = await Promise.all([
           _ceoOverviewFetch({ startDate, endDate, branchId }),
-          ordersSvc.getBranchBreakdown(startDate, endDate),
+          ordersSvc.getBranchBreakdown(startDate, endDate, branchScope),
         ]);
         return { overview, branchBreakdown };
       };
 
       if (cacheService) {
-        const cacheKey = `cache:ceo:bundle:${branchId ?? 'global'}:${CacheService.hashInput({ startDate, endDate })}`;
+        const cacheKey = `cache:ceo:bundle:${branchId ?? 'global'}:${branchScope}:${CacheService.hashInput({ startDate, endDate })}`;
         return cacheService.getOrSet(cacheKey, 60, fetchBundle);
       }
 

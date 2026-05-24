@@ -918,13 +918,10 @@ export function DisbursementsPage({
             desktop={
               <div className="flex flex-wrap items-center gap-2">
                 <PageRefreshButton />
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <Button variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                   Generate report
                 </Button>

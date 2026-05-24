@@ -1274,7 +1274,7 @@ export function LogisticsPage({ providers, totalProviders, locations, totalLocat
               ? 'Search companies by name, contact, or coverage…'
               : 'Search locations by name, address, or company…'
           }
-          wrapperClassName="flex-1 min-w-[12rem] max-w-md"
+          wrapperClassName="w-full flex-1 min-w-0 md:min-w-[12rem] md:max-w-md"
           className="!bg-app-elevated"
         />
         {activeTab === 'locations' && (

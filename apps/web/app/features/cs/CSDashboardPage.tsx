@@ -2637,7 +2637,7 @@ function CSDashboardPageLoaded({
                     pageParam="abandonedPage"
                     pageSize={abandonedPagination.limit}
                     pageSizeParam="abandonedPerPage"
-                    pageSizeOptions={[ABANDONED_CARTS_PAGE_SIZE, 50, 100]}
+                    pageSizeOptions={[ABANDONED_CARTS_PAGE_SIZE, 50, 100, 200, 500]}
                     showWhenSinglePage
                   />
                 </div>

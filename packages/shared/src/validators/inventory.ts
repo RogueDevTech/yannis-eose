@@ -122,7 +122,7 @@ export const listInventorySchema = z.object({
   sortBy: z.enum(['updatedAt', 'available']).default('updatedAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 
 export type ListInventoryInput = z.infer<typeof listInventorySchema>;
@@ -151,7 +151,7 @@ export const listMovementsSchema = z.object({
    */
   shipmentId: z.string().uuid().optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 
 export type ListMovementsInput = z.infer<typeof listMovementsSchema>;
@@ -277,7 +277,7 @@ export const listShipmentsSchema = z.object({
   fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
   toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListShipmentsInput = z.infer<typeof listShipmentsSchema>;
 
@@ -318,6 +318,6 @@ export const listWarehousesSchema = z.object({
   sortBy: z.enum(['createdAt', 'name', 'available']).default('createdAt'),
   sortOrder: z.enum(['asc', 'desc']).default('desc'),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  limit: z.number().int().min(1).max(1000).default(50),
 });
 export type ListWarehousesInput = z.infer<typeof listWarehousesSchema>;

@@ -347,13 +347,10 @@ export function MarketingTeamPage({
             }
             desktop={
               <>
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                   Generate report
                 </Button>

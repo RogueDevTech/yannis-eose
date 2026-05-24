@@ -15,7 +15,7 @@ export const listInvoicesSchema = z.object({
   startDate: z.string().date().optional(),
   endDate: z.string().date().optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListInvoicesInput = z.infer<typeof listInvoicesSchema>;
 
@@ -42,7 +42,7 @@ export const listApprovalRequestsSchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'QUERIED']).optional(),
   approverId: z.string().uuid().optional(),
   page: z.number().min(1).default(1),
-  limit: z.number().min(1).max(100).default(20),
+  limit: z.number().min(1).max(1000).default(20),
 });
 export type ListApprovalRequestsInput = z.infer<typeof listApprovalRequestsSchema>;
 

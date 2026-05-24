@@ -519,7 +519,7 @@ export function WarehousesListLoadingShell() {
       <PageHeader
         title="Our warehouses"
         mobileInlineActions
-        description="Track stock and reservations."
+        description="Company sites used for intake, adjustments, and inbound shipments."
         actions={
           <>
             <PageRefreshButton className="hidden md:inline-flex" />
@@ -540,15 +540,19 @@ export function WarehousesListLoadingShell() {
       <div className="md:hidden space-y-2">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            {/* Row 1: name + status */}
             <div className="flex items-center justify-between gap-2">
               <div className="h-4 w-28 rounded bg-app-hover animate-pulse" />
               <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
             </div>
+            {/* Row 2: SKUs + units + available */}
             <div className="flex items-center gap-3 text-xs">
               <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
               <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
               <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
             </div>
+            {/* Row 3: address */}
+            <div className="h-3 w-40 rounded bg-app-hover animate-pulse" />
           </div>
         ))}
       </div>
@@ -727,12 +731,21 @@ export function ShipmentsListLoadingShell() {
       <div className="md:hidden space-y-2">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            {/* Row 1: reference + status */}
             <div className="flex items-center justify-between gap-2">
               <div className="h-4 w-24 rounded bg-app-hover animate-pulse" />
               <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
             </div>
+            {/* Row 2: supplier -> destination */}
+            <div className="flex items-center gap-2 text-xs">
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-4 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
+            </div>
+            {/* Row 3: lines + cost + date */}
             <div className="flex items-center gap-3 text-xs">
               <div className="h-3 w-28 rounded bg-app-hover animate-pulse" />
+              <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
               <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
             </div>
           </div>
@@ -1004,7 +1017,7 @@ export function CategoriesLoadingShell() {
   return (
     <div className="space-y-4" aria-busy="true" aria-live="polite">
       <PageHeader
-        title="Categories"
+        title="Product Categories"
         mobileInlineActions
         description="Manage product categories."
         actions={
@@ -1034,23 +1047,21 @@ export function CategoriesLoadingShell() {
         ]}
       />
 
-      <div className="card">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            applySearch();
-          }}
-          className="flex flex-col gap-2 sm:flex-row sm:items-center"
-        >
-          <SearchInput
-            value={draft}
-            onChange={setDraft}
-            placeholder="Search categories or brand names…"
-            withSubmitButton
-            wrapperClassName="min-w-0 flex-1"
-          />
-        </form>
-      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          applySearch();
+        }}
+        className="flex items-center gap-2"
+      >
+        <SearchInput
+          value={draft}
+          onChange={setDraft}
+          placeholder="Search categories or brand names..."
+          withSubmitButton
+          wrapperClassName="flex-1 min-w-0"
+        />
+      </form>
 
       {/* Mobile skeleton cards */}
       <div className="md:hidden space-y-2">

@@ -38,7 +38,7 @@ export function PageHeader({
   className = '',
 }: PageHeaderProps) {
   return (
-    <div className={['flex flex-col gap-2', className].filter(Boolean).join(' ')}>
+    <div className={['flex flex-col gap-2 pb-3 md:pb-0', className].filter(Boolean).join(' ')}>
       {breadcrumb && <div className="text-xs text-app-fg-muted">{breadcrumb}</div>}
 
       {/*

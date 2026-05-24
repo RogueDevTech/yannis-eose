@@ -52,13 +52,10 @@ export function AuditLoadingShell({
             triggerAriaLabel="Audit toolbar and date range"
             desktop={
               <>
-                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </>
             }

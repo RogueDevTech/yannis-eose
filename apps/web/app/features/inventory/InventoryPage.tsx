@@ -421,6 +421,9 @@ export function InventoryPage(props: InventoryStreamData) {
     skipErrorToast: showThresholdModal,
   });
 
+  // ── Peek modal state (mobile card tap → detail sheet) ──
+  const [peekLevel, setPeekLevel] = useState<InventoryLevel | null>(null);
+
   const pageStockSum = levels.reduce((sum, l) => sum + l.stockCount, 0);
   const pageReservedSum = levels.reduce((sum, l) => sum + l.reservedCount, 0);
   const totalStock = levelsTotals?.totalStock ?? pageStockSum;
@@ -1176,6 +1179,128 @@ export function InventoryPage(props: InventoryStreamData) {
         </Modal>
       )}
 
+      {/* Peek modal — mobile card tap shows row details + actions */}
+      {peekLevel && (
+        <Modal
+          open
+          onClose={() => setPeekLevel(null)}
+          maxWidth="max-w-sm"
+          contentClassName="p-5 space-y-4 bg-app-elevated"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-base font-semibold text-app-fg leading-snug">
+                {productName(peekLevel.productId)}
+              </h3>
+              <p className="text-sm text-app-fg-muted mt-0.5 truncate">
+                {locationName(peekLevel.locationId)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPeekLevel(null)}
+              aria-label="Close"
+              className="p-1.5 rounded-lg text-app-fg-muted hover:bg-app-hover transition-colors shrink-0"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Status */}
+          <div>
+            {isEmptyLocationRow(peekLevel.id) ? (
+              <StatusBadge status="Low stock" />
+            ) : (() => {
+              const avail = peekLevel.stockCount - peekLevel.reservedCount;
+              return <StatusBadge status={avail < lowStockThreshold ? 'Low stock' : peekLevel.status} />;
+            })()}
+          </div>
+
+          {/* Stock figures */}
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="rounded-lg border border-app-border bg-app-bg p-2.5">
+              <p className="text-xs text-app-fg-muted">Stock</p>
+              <p className="text-lg font-semibold tabular-nums text-app-fg">{peekLevel.stockCount}</p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-bg p-2.5">
+              <p className="text-xs text-app-fg-muted">Reserved</p>
+              <p className="text-lg font-semibold tabular-nums text-warning-600 dark:text-warning-400">{peekLevel.reservedCount}</p>
+            </div>
+            <div className="rounded-lg border border-app-border bg-app-bg p-2.5">
+              <p className="text-xs text-app-fg-muted">Available</p>
+              <p className={`text-lg font-semibold tabular-nums ${
+                (peekLevel.stockCount - peekLevel.reservedCount) < lowStockThreshold
+                  ? 'text-danger-600 dark:text-danger-400'
+                  : 'text-success-600 dark:text-success-400'
+              }`}>
+                {peekLevel.stockCount - peekLevel.reservedCount}
+              </p>
+            </div>
+          </div>
+
+          {/* Shipment references */}
+          {((peekLevel.shipmentLayers ?? []).length > 0 || peekLevel.hasManualFifoRemaining) && (
+            <div>
+              <p className="text-xs font-medium text-app-fg-muted mb-1.5">Shipment (FIFO)</p>
+              <div className="flex flex-wrap gap-1.5">
+                {(peekLevel.shipmentLayers ?? []).map((s) =>
+                  canReadShipments ? (
+                    <Link
+                      key={s.id}
+                      to={`/admin/shipments/${s.id}`}
+                      prefetch="intent"
+                      className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline whitespace-nowrap"
+                      onClick={() => setPeekLevel(null)}
+                    >
+                      {s.referenceLabel}
+                    </Link>
+                  ) : (
+                    <span key={s.id} className="text-xs font-medium text-app-fg-muted whitespace-nowrap">
+                      {s.referenceLabel}
+                    </span>
+                  ),
+                )}
+                {peekLevel.hasManualFifoRemaining && (
+                  <span className="text-xs rounded px-1.5 py-0.5 border border-app-border bg-app-hover text-app-fg-muted whitespace-nowrap">
+                    Manual intake
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 pt-2 border-t border-app-border">
+            {!isEmptyLocationRow(peekLevel.id) && (
+              <Link
+                to={`/admin/inventory/${peekLevel.id}`}
+                prefetch="intent"
+                className="btn-primary btn-sm flex-1 text-center"
+                onClick={() => setPeekLevel(null)}
+              >
+                View details
+              </Link>
+            )}
+            {canAdjust && !isEmptyLocationRow(peekLevel.id) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="flex-1"
+                onClick={() => {
+                  const lvl = peekLevel;
+                  setPeekLevel(null);
+                  openAdjustModal(lvl);
+                }}
+              >
+                Reconcile
+              </Button>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {/* Overview stats — stock posture for the current filtered result set. */}
       <OverviewStatStrip
         mobileGrid
@@ -1415,6 +1540,31 @@ export function InventoryPage(props: InventoryStreamData) {
                 ? 'Add products, then receive supplier stock from the Shipments page and verify it to post into inventory.'
                 : 'Try changing filters (product, location, shipment) or sort.'
           }
+          renderMobileCard={(level) => {
+            const available = level.stockCount - level.reservedCount;
+            const isLow = available < lowStockThreshold;
+            const isEmpty = isEmptyLocationRow(level.id);
+            return (
+              <button
+                type="button"
+                onClick={() => setPeekLevel(level)}
+                className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-sm font-medium truncate ${isEmpty ? 'text-app-fg-muted italic' : 'text-app-fg'}`}>
+                    {productName(level.productId)}
+                  </span>
+                  <span className={`text-sm font-semibold tabular-nums shrink-0 ${isLow ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400'}`}>
+                    {available} avail
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-app-fg-muted">
+                  <span className="truncate">{locationName(level.locationId)}</span>
+                  <span className="shrink-0 tabular-nums">Stock: {level.stockCount}</span>
+                </div>
+              </button>
+            );
+          }}
         />
 
         {/* Pagination — server-side, drives `page` URL param. */}
