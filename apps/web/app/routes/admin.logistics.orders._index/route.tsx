@@ -24,7 +24,7 @@ export const meta: MetaFunction = () => [
 
 /** Default page size for the logistics orders table — historical default is 40. The user
  *  can switch via `?perPage=`. Keeps 40 in the allowed set so the default URL works. */
-const LOGISTICS_PAGE_SIZE_OPTIONS = [20, 40, 50, 100];
+const LOGISTICS_PAGE_SIZE_OPTIONS = [20, 40, 50, 100, 200, 500, 1000];
 const LOGISTICS_STATUS_SCOPE = [
   'CONFIRMED',
   'AGENT_ASSIGNED',

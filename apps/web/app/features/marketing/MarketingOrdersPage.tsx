@@ -191,6 +191,7 @@ export function MarketingOrdersPage({
   const [searchQuery, setSearchQuery] = useState(searchFilter || '');
   const [showChartView, setShowChartView] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [peekOrder, setPeekOrder] = useState<Order | null>(null);
   const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
   const purgeFetcher = useFetcher<{ success?: boolean; deleted?: number; skipped?: number; error?: string }>();
   const isTestOrdersView = selectedStatus === TEST_ORDERS_STATUS_VALUE;
@@ -487,7 +488,7 @@ export function MarketingOrdersPage({
         </>
       );
 
-      // Cart rows open the quick-detail modal; real orders link to order detail.
+      // Cart rows open the quick-detail modal; real orders open the peek modal.
       if (order.status === 'CART') {
         return (
           <button
@@ -500,15 +501,16 @@ export function MarketingOrdersPage({
         );
       }
       return (
-        <Link
-          to={orderDetailHref('/admin/orders', order.id, 'marketing')}
-          className="-mx-3 -my-2.5 block space-y-1.5 px-3 py-2.5"
+        <button
+          type="button"
+          onClick={() => setPeekOrder(order)}
+          className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] space-y-1.5 px-3 py-2.5 text-left"
         >
           {body}
-        </Link>
+        </button>
       );
     },
-    [showSkeletonRows, openCartDetail],
+    [showSkeletonRows, openCartDetail, setPeekOrder],
   );
 
   return (
@@ -535,13 +537,10 @@ export function MarketingOrdersPage({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={liveState.isConnected} showGreen={liveState.showGreen} />
                 )}
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <Button
                   type="button"
                   variant="secondary"
@@ -766,7 +765,7 @@ export function MarketingOrdersPage({
               badgeCount={ordersToolbarFilterBadge}
               sheetSubtitle={<span>Status and media buyer apply immediately</span>}
               searchRow={
-                <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+                <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
                   <SearchInput
                     placeholder="Search by customer or order ID..."
                     value={searchQuery}
@@ -939,7 +938,7 @@ export function MarketingOrdersPage({
                   badgeCount={ordersToolbarFilterBadge}
                   sheetSubtitle={<span>Status and media buyer apply immediately</span>}
                   searchRow={
-                    <form onSubmit={handleSearchSubmit} className="flex min-w-0 gap-2 md:min-w-0 md:flex-1">
+                    <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-1 gap-2">
                       <SearchInput
                         placeholder="Search by customer or order ID..."
                         value={searchQuery}
@@ -1191,6 +1190,76 @@ export function MarketingOrdersPage({
           </div>
         </Modal>
       )}
+
+      {/* Mobile peek modal — shows order details + actions */}
+      <Modal
+        open={!!peekOrder}
+        onClose={() => setPeekOrder(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5"
+      >
+        {peekOrder && (() => {
+          const o = peekOrder;
+          return (
+            <div className="space-y-4">
+              {/* Header: customer + order ID */}
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-app-fg truncate min-w-0">{o.customerName || '—'}</p>
+                <OrderIdBadge id={o.id} orderNumber={o.orderNumber} textClassName="text-sm font-medium text-app-fg" />
+              </div>
+
+              {/* Details */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Status</span>
+                  <OrderStatusBadge status={o.status} />
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Product</span>
+                  <span className="text-app-fg text-right truncate max-w-[60%]">
+                    {o.primaryProductName?.trim() || '—'}
+                    {(o.itemCount ?? 0) > 1 ? <span className="text-app-fg-muted"> +{(o.itemCount ?? 0) - 1}</span> : null}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Amount</span>
+                  <span className="font-medium">
+                    <NairaPrice amount={o.totalAmount ? Number(o.totalAmount) : null} />
+                  </span>
+                </div>
+                {o.campaignName?.trim() && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Form</span>
+                    <span className="text-app-fg text-right truncate max-w-[60%]">{o.campaignName}</span>
+                  </div>
+                )}
+                {o.mediaBuyerName && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Media buyer</span>
+                    <span className="text-app-fg text-right truncate max-w-[60%]">{o.mediaBuyerName}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Created</span>
+                  <span className="text-app-fg">{formatOrderTimestamp(o.createdAt)}</span>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-1 border-t border-app-border">
+                <Link
+                  to={orderDetailHref('/admin/orders', o.id, 'marketing')}
+                  prefetch="intent"
+                  className="btn-primary btn-sm inline-flex flex-1 items-center justify-center"
+                  onClick={() => setPeekOrder(null)}
+                >
+                  View order
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }

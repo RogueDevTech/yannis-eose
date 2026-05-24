@@ -174,6 +174,7 @@ export function UserDetailPage({
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [showReactivateConfirm, setShowReactivateConfirm] = useState(false);
+  const [mobileProfileSheetOpen, setMobileProfileSheetOpen] = useState(false);
   const [showEmailChangeModal, setShowEmailChangeModal] = useState<{
     requestId: string;
     action: 'APPROVED' | 'REJECTED';
@@ -962,16 +963,33 @@ export function UserDetailPage({
 
       {/* ─── Profile Header Card ─────────────────────────── */}
       <div className="card p-0 overflow-hidden">
-        {/* Profile banner — executive hero with a single identity headline. */}
+        {/* Profile banner — executive hero with a single identity headline.
+            Mobile: action kebab sits top-right of the banner so it's always reachable. */}
         <div className={`relative isolate overflow-hidden ${profileHeaderTone}`}>
           <div className="relative px-4 sm:px-6 pt-5 sm:pt-7 pb-16 sm:pb-20">
-            <div className="max-w-3xl min-w-0">
-              <p className="text-mini font-semibold uppercase tracking-[0.22em] text-white/75">
-                {profileHeroLabel}
-              </p>
-              <h1 className="mt-2 text-3xl sm:text-4xl font-bold text-white leading-tight break-words">
-                {user.name}
-              </h1>
+            <div className="flex items-start justify-between gap-3">
+              <div className="max-w-3xl min-w-0">
+                <p className="text-mini font-semibold uppercase tracking-[0.22em] text-white/75">
+                  {profileHeroLabel}
+                </p>
+                <h1 className="mt-2 text-3xl sm:text-4xl font-bold text-white leading-tight break-words">
+                  {user.name}
+                </h1>
+              </div>
+              {/* Mobile-only: refresh + action kebab in the banner — primary blue bg for visibility */}
+              <div className="md:hidden flex items-center gap-2 shrink-0 mt-1">
+                <PageRefreshButton iconOnly />
+                <button
+                  type="button"
+                  onClick={() => setMobileProfileSheetOpen(true)}
+                  className="h-9 w-9 shrink-0 rounded-lg bg-brand-600 border border-brand-500 hover:bg-brand-700 flex items-center justify-center text-white"
+                  aria-label="Profile actions"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -989,7 +1007,7 @@ export function UserDetailPage({
                         {ROLE_DESCRIPTIONS[user.role] ?? ''}
                       </p>
                     </div>
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 hidden md:block">
                       <PageHeaderMobileTools
                         sheetTitle="Profile tools"
                         sheetSubtitle={<span>Refresh and account actions</span>}
@@ -1818,6 +1836,38 @@ export function UserDetailPage({
               )}
             </DeferredSection>
           </div>
+        </Modal>
+      )}
+
+      {/* ─── Mobile Profile Actions Sheet ─────────────────── */}
+      {mobileProfileSheetOpen && (
+        <Modal open onClose={() => setMobileProfileSheetOpen(false)} maxWidth="max-w-sm" contentClassName="p-4 space-y-2">
+          <h3 className="text-base font-semibold text-app-fg mb-2">Profile tools</h3>
+          {!isSelfView && viewerShowsMirror && (
+            mirrorSubmitDisabled ? (
+              <Button type="button" variant="secondary" size="sm" disabled className="w-full justify-center opacity-70 cursor-not-allowed">Mirror user</Button>
+            ) : (
+              <Form method="post" data-branch-scoped-action="true" className="w-full">
+                <input type="hidden" name="intent" value="mirror" />
+                <Button type="submit" variant="secondary" size="sm" className="w-full justify-center border-success-300 text-success-700 hover:border-success-400 dark:border-success-700 dark:text-success-400 dark:hover:border-success-600" loading={isSubmitting && navigation.formData?.get('intent') === 'mirror'} loadingText="Entering...">Mirror user</Button>
+              </Form>
+            )
+          )}
+          {!isSelfView && !isSuperAdminProfile && (canOpenSettingsTab || canEditLimited) && (
+            <BranchScopedLink to={`/hr/users/${user.id}/edit`} actionLabel="editing this user" prefetch="intent" className="btn-primary btn-sm w-full justify-center" onClick={() => setMobileProfileSheetOpen(false)}>Edit user</BranchScopedLink>
+          )}
+          {!isSelfView && !isSuperAdminProfile && !restrictHeadView && (
+            <>
+              <Button type="button" variant="secondary" size="sm" className="w-full justify-center" onClick={() => { setMobileProfileSheetOpen(false); setShowResetPassword(true); }}>Reset Password</Button>
+              {(user.status === 'ACTIVE' || user.status === 'PENDING') && isSuperAdmin && (
+                <Button type="button" variant="danger" size="sm" className="w-full justify-center bg-danger-600 hover:bg-danger-700 text-white border-danger-600 hover:border-danger-700 dark:bg-danger-600 dark:hover:bg-danger-700 dark:border-danger-600 dark:hover:border-danger-700" onClick={() => { setMobileProfileSheetOpen(false); setShowDeactivateConfirm(true); }}>Deactivate</Button>
+              )}
+              {(user.status === 'INACTIVE' || user.status === 'ARCHIVED' || (user.status === 'DEACTIVATED' && canReactivateDeactivatedStaff)) && (
+                <Button type="button" variant="secondary" size="sm" className="w-full justify-center text-success-600 dark:text-success-400 hover:text-success-700 border-success-200 dark:border-success-700 hover:border-success-300" onClick={() => { setMobileProfileSheetOpen(false); setShowReactivateConfirm(true); }}>Reactivate</Button>
+              )}
+            </>
+          )}
+          <Button type="button" variant="secondary" size="sm" className="w-full justify-center mt-2" onClick={() => setMobileProfileSheetOpen(false)}>Close</Button>
         </Modal>
       )}
 

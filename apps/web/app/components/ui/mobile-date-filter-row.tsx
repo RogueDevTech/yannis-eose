@@ -29,7 +29,7 @@ export function MobileDateFilterRow({
   periodAllTime,
 }: MobileDateFilterRowProps) {
   return (
-    <div className="md:hidden flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2">
+    <div className="md:hidden">
       <DateFilterBar
         startDate={startDate}
         endDate={endDate}
@@ -37,6 +37,7 @@ export function MobileDateFilterRow({
         endTime={endTime}
         periodAllTime={periodAllTime}
         triggerLayout="blockCenter"
+        chrome="pill"
       />
     </div>
   );

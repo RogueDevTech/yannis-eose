@@ -329,13 +329,10 @@ export function MarketingFundingLoadingShell({
                     + Send Funding
                   </Button>
                 )}
-                <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2 md:min-h-[2rem] md:w-auto md:flex-row md:items-center md:justify-start md:py-1 md:pl-2.5 md:pr-2">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </>
             }
@@ -449,14 +446,18 @@ export function MarketingFundingLoadingShell({
         <div className="md:hidden space-y-2 px-3 py-2">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="rounded-lg border border-app-border px-3 py-2.5 space-y-1.5">
+              {/* Row 1: name + status */}
               <div className="flex items-center justify-between gap-2">
-                <div className="h-4 w-20 rounded bg-app-hover animate-pulse" />
+                <div className="h-4 w-24 rounded bg-app-hover animate-pulse" />
                 <div className="h-5 w-16 rounded-full bg-app-hover animate-pulse" />
               </div>
+              {/* Row 2: type + amount */}
               <div className="flex items-center justify-between gap-2">
-                <div className="h-3 w-28 rounded bg-app-hover animate-pulse" />
                 <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+                <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
               </div>
+              {/* Row 3: date */}
+              <div className="h-3 w-24 rounded bg-app-hover animate-pulse" />
             </div>
           ))}
         </div>
@@ -621,13 +622,10 @@ export function MarketingAdSpendLoadingShell({
             triggerAriaLabel="Date, add expense, and more"
             desktop={
               <>
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <BranchScopedLink
                   to="/admin/marketing/ad-spend/new"
                   actionLabel="adding ad spend"
@@ -888,13 +886,10 @@ export function MarketingTeamLoadingShell({
             triggerAriaLabel="Team analysis toolbar and date range"
             desktop={
               <>
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <Button type="button" variant="secondary" size="sm" disabled className="opacity-70">
                   Generate report
                 </Button>
@@ -920,6 +915,10 @@ export function MarketingTeamLoadingShell({
         mobileGrid
         showScrollControls={false}
         items={[
+          { label: 'Team members', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Total orders', value: <StatValuePulse className="min-w-[2rem]" /> },
+          { label: 'Avg confirmation %', value: <StatValuePulse className="min-w-[3rem]" /> },
+          { label: 'Avg delivery %', value: <StatValuePulse className="min-w-[3rem]" /> },
           { label: 'Total Sent', value: <StatValuePulse className="min-w-[5rem]" /> },
           { label: 'Completed', value: <StatValuePulse className="min-w-[5rem]" /> },
           { label: 'Disputed', value: <StatValuePulse className="min-w-[4rem]" /> },
@@ -1003,23 +1002,24 @@ export function MarketingTeamLoadingShell({
           }
         />
 
-        <div className="md:hidden grid grid-cols-1 gap-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="card space-y-3 p-4">
+        {/* Mobile skeleton cards — mirrors the slim 2-row renderMobileCard */}
+        <div className="md:hidden space-y-2">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="card px-3 py-2.5 space-y-1.5">
+              {/* Row 1: avatar + name + balance */}
               <div className="flex items-center gap-2.5">
                 <div
-                  className="h-10 w-10 shrink-0 rounded-full bg-app-border/80 dark:bg-app-border/65 animate-pulse"
+                  className="w-7 h-7 shrink-0 rounded-full bg-app-hover animate-pulse"
                   aria-hidden
                 />
-                <TableCellTextPulse className="min-w-0 flex-1 max-w-[12rem]" />
+                <div className="min-w-0 flex-1 h-4 w-28 rounded bg-app-hover animate-pulse" />
+                <div className="shrink-0 h-4 w-16 rounded bg-app-hover animate-pulse" />
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {[1, 2, 3, 4].map((j) => (
-                  <div key={j} className="flex flex-col gap-1">
-                    <TableCellTextPulse className="w-16" />
-                    <TableCellTextPulse className="w-full max-w-[7rem]" />
-                  </div>
-                ))}
+              {/* Row 2: orders + CR% + DR% */}
+              <div className="flex items-center gap-3 text-xs pl-[calc(1.75rem+0.625rem)]">
+                <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+                <div className="h-3 w-12 rounded bg-app-hover animate-pulse" />
+                <div className="h-3 w-12 rounded bg-app-hover animate-pulse" />
               </div>
             </div>
           ))}
@@ -1076,13 +1076,10 @@ export function MarketingLeaderboardLoadingShell({
             triggerAriaLabel="Leaderboard toolbar and date range"
             desktop={
               <>
-                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </>
             }
@@ -1096,8 +1093,8 @@ export function MarketingLeaderboardLoadingShell({
         periodAllTime={filters.periodAllTime}
       />
 
-      <div className="card p-0">
-        <div className="space-y-3 px-3 py-3 md:space-y-4 md:px-4 md:py-4">
+      <div className="-mx-4 bg-app-elevated border-y border-app-border overflow-hidden sm:mx-0 sm:rounded-xl sm:border sm:shadow-card">
+        <div className="space-y-1.5 px-2 py-2 md:space-y-3 md:px-4 md:py-4">
           {[1, 2, 3, 4, 5].map((rank) => {
             const isTopThree = rank <= 3;
             return (
@@ -1211,13 +1208,10 @@ export function MarketingCrossFunnelLoadingShell({
             triggerAriaLabel="Cross-funnel toolbar and date range"
             desktop={
               <>
-                <div className="flex w-fit shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </>
             }
@@ -1593,13 +1587,10 @@ export function MarketingOrdersLoadingShell({
             triggerAriaLabel="Marketing orders tools"
             desktop={
               <>
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <Button type="button" variant="secondary" size="sm" disabled>
                   View data in chart
                 </Button>

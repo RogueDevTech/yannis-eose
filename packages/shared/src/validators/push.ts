@@ -69,7 +69,7 @@ export const getPushDeliveryLogSchema = z.object({
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(50),
+  limit: z.number().int().min(1).max(1000).default(50),
 });
 
 export type GetPushDeliveryLogInput = z.infer<typeof getPushDeliveryLogSchema>;

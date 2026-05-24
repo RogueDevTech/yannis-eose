@@ -675,14 +675,11 @@ export function MarketingFundingPage(props: MarketingFundingLoaderData) {
           </Button>
         )}
         {includeDateFilter && (
-          <div className="flex w-full min-h-[2.5rem] flex-col items-center justify-center rounded-md border border-app-border bg-app-hover px-2.5 py-2 md:min-h-[2rem] md:w-auto md:flex-row md:items-center md:justify-start md:py-1 md:pl-2.5 md:pr-2">
-            <DateFilterBar
+          <DateFilterBar
               startDate={filters.startDate}
               endDate={filters.endDate}
               periodAllTime={filters.periodAllTime}
-              triggerLayout={dateTriggerLayout}
-            />
-          </div>
+              triggerLayout={dateTriggerLayout} chrome="pill" />
         )}
         {showRefresh && (
           <div className="flex w-full justify-center md:inline-flex md:w-auto">

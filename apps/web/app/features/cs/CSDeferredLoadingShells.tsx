@@ -496,15 +496,12 @@ export function CSOrdersLoadingShell({
                 {liveEvents != null && liveEvents.length > 0 && (
                   <LiveIndicator isConnected={false} showGreen={false} />
                 )}
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
                     startTime={filters.startTime ?? ''}
                     endTime={filters.endTime ?? ''}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </>
             }
@@ -788,13 +785,10 @@ export function CSTeamLoadingShell({
             triggerAriaLabel="Sales team toolbar"
             desktop={
               <>
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <PageRefreshButton />
               </>
             }
@@ -895,7 +889,7 @@ export function CSLeaderboardLoadingShell({
   filters: { startDate: string; endDate: string; periodAllTime: boolean };
 }) {
   return (
-    <div className="space-y-6 px-3 sm:px-0" aria-busy="true" aria-live="polite">
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
       <PageHeader
         title="Sales Leaderboard"
         mobileInlineActions
@@ -908,13 +902,10 @@ export function CSLeaderboardLoadingShell({
             desktop={
               <>
                 <PageRefreshButton />
-                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters.startDate}
                     endDate={filters.endDate}
-                    periodAllTime={filters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={filters.periodAllTime} chrome="pill" />
               </>
             }
           />
@@ -927,8 +918,8 @@ export function CSLeaderboardLoadingShell({
         periodAllTime={filters.periodAllTime}
       />
 
-      <div className="card p-0">
-        <div className="space-y-3 px-3 py-3 md:space-y-4 md:px-4 md:py-4">
+      <div className="-mx-4 bg-app-elevated border-y border-app-border overflow-hidden sm:mx-0 sm:rounded-xl sm:border sm:shadow-card">
+        <div className="space-y-1.5 px-2 py-2 md:space-y-3 md:px-4 md:py-4">
           {[1, 2, 3, 4, 5].map((rank) => {
             const isTopThree = rank <= 3;
             return (
@@ -1056,9 +1047,10 @@ export function CSMessageTemplatesLoadingShell() {
         }
       />
       <Tabs
-        value="SMS"
+        value="ALL"
         onChange={() => {}}
         tabs={[
+          { value: 'ALL', label: 'All' },
           { value: 'SMS', label: 'SMS' },
           { value: 'WHATSAPP', label: 'WhatsApp' },
         ]}

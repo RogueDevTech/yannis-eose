@@ -28,7 +28,7 @@ export const listProvidersSchema = z.object({
   /** Filter by kind. The Logistics Partners page passes `THIRD_PARTY` to hide Yannis warehouses. */
   kind: z.enum(['THIRD_PARTY', 'WAREHOUSE']).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListProvidersInput = z.infer<typeof listProvidersSchema>;
 
@@ -71,7 +71,7 @@ export const listLocationsSchema = z.object({
   /** Filter by parent provider's kind — used by the shipment destination dropdown to show warehouses only. */
   providerKind: z.enum(['THIRD_PARTY', 'WAREHOUSE']).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListLocationsInput = z.infer<typeof listLocationsSchema>;
 
@@ -101,7 +101,7 @@ export const listRemittancesSchema = z.object({
   locationId: z.string().uuid().optional(),
   status: z.enum(['SENT', 'RECEIVED', 'DISPUTED']).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListRemittancesInput = z.infer<typeof listRemittancesSchema>;
 
@@ -142,7 +142,7 @@ export type SubmitDeliveryConfirmationInput = z.infer<typeof submitDeliveryConfi
 export const listDeliveryConfirmationRequestsSchema = z.object({
   status: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListDeliveryConfirmationRequestsInput = z.infer<typeof listDeliveryConfirmationRequestsSchema>;
 
@@ -184,7 +184,7 @@ export const listDeliveryRemittancesSchema = z.object({
   startDate: z.string().optional(),
   endDate: z.string().optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListDeliveryRemittancesInput = z.infer<typeof listDeliveryRemittancesSchema>;
 

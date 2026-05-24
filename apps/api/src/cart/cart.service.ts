@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { eq, and, lt, desc, count, inArray, sql, type SQL } from 'drizzle-orm';
+import { eq, and, lt, desc, count, inArray, ilike, sql, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { db as schema } from '@yannis/shared';
 import { SYSTEM_ACTOR_ID, formatOrderCustomerPhoneDisplay } from '@yannis/shared';
@@ -432,6 +432,8 @@ export class CartService {
     mediaBuyerId?: string | null;
     /** When set, only carts from this branch's campaigns are returned. */
     branchId?: string | null;
+    /** Customer-name substring match (case-insensitive). Mirrors `orders.list` search. */
+    search?: string;
   } = {}): Promise<{
     items: Array<{
       id: string;
@@ -471,7 +473,11 @@ export class CartService {
     // Media Buyers / branch-scoped marketing viewers only ever see carts from
     // their own campaigns. Uses the exact same WHERE clause as `countAbandoned`
     // (see `openCartConditions`) so the list and the "Open carts" KPI agree.
-    const abandonedWhere = and(...this.openCartConditions(opts));
+    const trimmedSearch = opts.search?.trim();
+    const searchClause = trimmedSearch
+      ? ilike(schema.cartAbandonments.customerName, `%${trimmedSearch}%`)
+      : undefined;
+    const abandonedWhere = and(...this.openCartConditions(opts), searchClause);
     const totalRows = await this.db
       .select({ count: count() })
       .from(schema.cartAbandonments)

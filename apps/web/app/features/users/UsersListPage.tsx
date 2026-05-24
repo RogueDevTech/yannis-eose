@@ -17,6 +17,7 @@ import { Button } from '~/components/ui/button';
 import { Checkbox } from '~/components/ui/checkbox';
 import { useLoaderRefetchBusy } from '~/hooks/use-loader-refetch-busy';
 import { useFetcherToast } from '~/components/ui/toast';
+import { Modal } from '~/components/ui/modal';
 import { ConfirmActionModal } from '~/components/ui/confirm-action-modal';
 import { LocalExportModal } from '~/components/ui/local-export-modal';
 import type { User } from './types';
@@ -169,6 +170,7 @@ export function UsersListPage({
   // generated and emailed) which invalidates any older invite link. Easy to fire by accident
   // from a long table, so confirm before sending.
   const [resendConfirm, setResendConfirm] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [previewUser, setPreviewUser] = useState<User | null>(null);
   const isResending = resendFetcher.state !== 'idle';
   /** Single open-menu id for the page-header split-button (Add user ▾). */
   const [openHeaderMenuId, setOpenHeaderMenuId] = useState<string | null>(null);
@@ -204,10 +206,7 @@ export function UsersListPage({
     },
     [setSearchParams],
   );
-  const hasDraftSearch = draftSearch.trim().length > 0;
   const hasAppliedSearch = searchFromUrl.trim().length > 0;
-  const searchActionVisible = hasDraftSearch || hasAppliedSearch;
-  const searchActionLabel = hasDraftSearch ? 'Search' : 'Cancel';
   const handleSearchDraftChange = useCallback(
     (value: string) => {
       setDraftSearch(value);
@@ -219,23 +218,19 @@ export function UsersListPage({
   );
   const searchRow = (
     <form
+      className="min-w-0 flex-1"
       onSubmit={(event) => {
         event.preventDefault();
         submitSearchToUrl(draftSearch);
       }}
-      className="flex items-center gap-2"
     >
       <SearchInput
         value={draftSearch}
         onChange={handleSearchDraftChange}
         placeholder="Search by name, email, or phone…"
-        wrapperClassName="min-w-0 flex-1 md:min-w-0"
+        withSubmitButton
+        wrapperClassName="min-w-0 w-full flex-1 md:min-w-0"
       />
-      {searchActionVisible ? (
-        <Button type="submit" variant="secondary" size="sm" className="shrink-0">
-          {searchActionLabel}
-        </Button>
-      ) : null}
     </form>
   );
 
@@ -613,12 +608,13 @@ export function UsersListPage({
               </>
             }
             sheet={({ closeSheet }) => (
-              <div className="flex flex-col gap-2 w-full">
+              <>
                 {staffAccounts ? (
                   canExport ? (
                     <Button
                       variant="secondary"
-                      className="w-full"
+                      size="sm"
+                      className="w-full justify-center"
                       onClick={() => {
                         closeSheet();
                         setShowExportModal(true);
@@ -626,38 +622,28 @@ export function UsersListPage({
                     >
                       Export staff accounts
                     </Button>
-                  ) : (
-                    <p className="text-sm text-app-fg-muted">
-                      Staff accounts are added through Staff onboarding.
-                    </p>
-                  )
+                  ) : null
                 ) : (
                   <>
+                    <BranchScopedLink
+                      to={`${usersBasePath}/new`}
+                      actionLabel="creating a user"
+                      className="btn-primary btn-sm w-full justify-center"
+                      onClick={() => closeSheet()}
+                    >
+                      Add User
+                    </BranchScopedLink>
                     <Link
                       to="/hr/users/import"
                       prefetch="intent"
                       onClick={closeSheet}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-app-border bg-app-surface px-3 py-2 text-sm font-medium text-app-fg hover:bg-app-hover"
+                      className="btn-secondary btn-sm w-full justify-center"
                     >
-                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
-                      </svg>
                       Import users
                     </Link>
-                    <BranchScopedLink
-                      to={`${usersBasePath}/new`}
-                      actionLabel="creating a user"
-                      className="btn-primary inline-flex w-full items-center justify-center gap-2"
-                      onClick={() => closeSheet()}
-                    >
-                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                      </svg>
-                      Add User
-                    </BranchScopedLink>
                   </>
                 )}
-              </div>
+              </>
             )}
           />
         }
@@ -844,8 +830,9 @@ export function UsersListPage({
                   : 'Try a different search or filters.'
               }
               renderMobileCard={(user) => (
-                <Link
-                  to={`${usersBasePath}/${user.id}`}
+                <button
+                  type="button"
+                  onClick={() => setPreviewUser(user)}
                   className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -862,7 +849,7 @@ export function UsersListPage({
                     ) : null}
                     {!user.payoutBankName?.trim() && !user.payoutAccountNumber?.trim() ? <span>No account details</span> : null}
                   </div>
-                </Link>
+                </button>
               )}
               pagination={{
                 page,
@@ -1038,8 +1025,9 @@ export function UsersListPage({
                 users.length === 0 ? 'Add your first team member.' : 'Try adjusting your search or filters.'
               }
               renderMobileCard={(user) => (
-                <Link
-                  to={`${usersBasePath}/${user.id}`}
+                <button
+                  type="button"
+                  onClick={() => setPreviewUser(user)}
                   className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -1055,7 +1043,7 @@ export function UsersListPage({
                     {user.isProbation && <ProbationBadge until={user.probationUntil ?? null} size="sm" showDaysRemaining={false} />}
                   </div>
                   <div className="text-xs text-app-fg-muted truncate">{user.email}</div>
-                </Link>
+                </button>
               )}
               pagination={{
                 page,
@@ -1127,6 +1115,117 @@ export function UsersListPage({
           alongside the new dedicated /hr/users/import page (CEO directive
           2026-05-11). The list auto-refreshes when the user navigates back
           from /hr/users/import via Remix's normal loader cycle. */}
+
+      {/* Mobile user preview modal */}
+      <Modal
+        open={!!previewUser}
+        onClose={() => setPreviewUser(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5"
+      >
+        {previewUser && (() => {
+          const u = previewUser;
+          return (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center gap-3">
+                <CompactUserAvatar name={u.name} size="lg" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-app-fg truncate">{u.name}</p>
+                  <p className="text-xs text-app-fg-muted truncate">{u.email}</p>
+                </div>
+                <StatusBadge status={u.status} />
+              </div>
+
+              {/* Details */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Role</span>
+                  <RoleBadge variant="text" role={u.role} label={formatRole(u.role)} />
+                </div>
+                {u.branchMemberships && u.branchMemberships.length > 0 && (
+                  <div>
+                    <span className="text-app-fg-muted text-sm">Branches</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      <UserBranchBadges branches={u.branchMemberships} />
+                    </div>
+                  </div>
+                )}
+                {u.isTeamSupervisor && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Supervisor</span>
+                    <SupervisorBadge size="sm" />
+                  </div>
+                )}
+                {u.isProbation && (
+                  <div className="flex justify-between">
+                    <span className="text-app-fg-muted">Probation</span>
+                    <ProbationBadge until={u.probationUntil ?? null} size="sm" showDaysRemaining />
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Joined</span>
+                  <span className="text-app-fg">
+                    {new Date(u.createdAt).toLocaleDateString('en-NG', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </span>
+                </div>
+                {staffAccounts && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-app-fg-muted">Bank</span>
+                      <span className="text-app-fg">{u.payoutBankName?.trim() || '—'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-app-fg-muted">Account name</span>
+                      <span className="text-app-fg">{u.payoutAccountName?.trim() || '—'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-app-fg-muted">Account number</span>
+                      <span className="font-mono tabular-nums text-app-fg">{u.payoutAccountNumber?.trim() || '—'}</span>
+                    </div>
+                    {u.payoutBankCode?.trim() && (
+                      <div className="flex justify-between">
+                        <span className="text-app-fg-muted">Bank code</span>
+                        <span className="font-mono tabular-nums text-app-fg-muted">{u.payoutBankCode}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 pt-1 border-t border-app-border">
+                {!staffAccounts && u.status === 'PENDING' && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="flex-1"
+                    disabled={isResending}
+                    onClick={() => {
+                      setPreviewUser(null);
+                      setResendConfirm({ id: u.id, name: u.name, email: u.email });
+                    }}
+                  >
+                    Resend invite
+                  </Button>
+                )}
+                <Link
+                  to={`${usersBasePath}/${u.id}`}
+                  prefetch="intent"
+                  className="btn-primary btn-sm inline-flex flex-1 items-center justify-center"
+                  onClick={() => setPreviewUser(null)}
+                >
+                  View details
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }

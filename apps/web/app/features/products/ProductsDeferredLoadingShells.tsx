@@ -129,13 +129,19 @@ export function ProductsHubLoadingShell({ initialTab }: { initialTab: 'product' 
       <div className="md:hidden space-y-2">
         {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className="card px-3 py-2.5 space-y-1.5">
+            {/* Row 1: name + status */}
             <div className="flex items-center justify-between gap-2">
               <div className="h-4 w-36 rounded bg-app-hover animate-pulse" />
               <div className="h-5 w-14 rounded-full bg-app-hover animate-pulse" />
             </div>
-            <div className="flex items-center gap-3 text-xs">
+            {/* Row 2: category + price */}
+            <div className="flex items-center justify-between gap-2 text-xs">
               <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
               <div className="h-3 w-16 rounded bg-app-hover animate-pulse" />
+            </div>
+            {/* Row 3: stock */}
+            <div className="flex items-center gap-3 text-xs">
+              <div className="h-3 w-20 rounded bg-app-hover animate-pulse" />
             </div>
           </div>
         ))}

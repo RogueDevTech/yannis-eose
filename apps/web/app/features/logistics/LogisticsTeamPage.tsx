@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from '@remix-run/react';
+import { Link, useSearchParams } from '@remix-run/react';
 import { Button } from '~/components/ui/button';
 import { OverviewStatStrip } from '~/components/ui/overview-stat-strip';
 import { PageHeader } from '~/components/ui/page-header';
@@ -18,6 +18,7 @@ import {
 } from '~/lib/rate-color';
 import type { LogisticsProviderRow } from './team-types';
 import { CompactTable, type CompactTableColumn } from '~/components/ui/compact-table';
+import { Modal } from '~/components/ui/modal';
 import { TableActionButton } from '~/components/ui/table-action-button';
 import { NairaPrice } from '~/components/ui/naira-price';
 
@@ -258,6 +259,7 @@ export function LogisticsTeamPage({
     return qs ? `?${qs}` : '';
   }, [searchParams]);
   const [searchQuery, setSearchQuery] = useState(q);
+  const [peekProvider, setPeekProvider] = useState<LogisticsProviderRow | null>(null);
 
   useEffect(() => {
     setSearchQuery(q);
@@ -454,13 +456,10 @@ export function LogisticsTeamPage({
             }
             desktop={
               <>
-                <div className="flex shrink-0 items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                 <Button type="button" variant="secondary" size="sm" disabled title="Export coming soon">
                   Generate report
                 </Button>
@@ -574,26 +573,33 @@ export function LogisticsTeamPage({
           </div>
         ) : (
           <>
-            {/* Mobile: card layout */}
-            <div className="md:hidden grid grid-cols-1 gap-3">
-              {providers.map((p) => (
-                <ProviderCard
-                  key={p.providerId}
-                  row={p}
-                  detailTo={`/admin/logistics/team/${p.providerId}${listQuerySuffix}`}
-                />
-              ))}
-            </div>
-
-            {/* Desktop: table */}
-            <div className="hidden md:block">
-              <CompactTable
-                columns={providerColumns}
-                rows={providers}
-                rowKey={(p) => p.providerId}
-                className="min-w-[1100px]"
-              />
-            </div>
+            <CompactTable
+              columns={providerColumns}
+              rows={providers}
+              rowKey={(p) => p.providerId}
+              className="md:min-w-[1100px]"
+              renderMobileCard={(p) => (
+                <button
+                  type="button"
+                  onClick={() => setPeekProvider(p)}
+                  className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+                >
+                  {/* Row 1: name + delivery rate */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-sm font-semibold text-app-fg">{p.providerName}</span>
+                    <span className={`shrink-0 text-xs font-bold tabular-nums ${deliveryRateColorClass(p.deliveryRate)}`}>
+                      {p.totalAssigned > 0 ? `${Math.round(p.deliveryRate)}% DR` : '—'}
+                    </span>
+                  </div>
+                  {/* Row 2: assigned + delivered + locations */}
+                  <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums">
+                    <span>{p.totalAssigned} assigned</span>
+                    <span>{p.delivered} delivered</span>
+                    <span>{p.locationCount} loc.</span>
+                  </div>
+                </button>
+              )}
+            />
 
             {totalPages > 1 && (
               <Pagination page={page} totalPages={totalPages} pageParam="page" pageSize={limit} />
@@ -601,6 +607,84 @@ export function LogisticsTeamPage({
           </>
         )}
       </div>
+
+      {/* Mobile peek modal */}
+      <Modal
+        open={!!peekProvider}
+        onClose={() => setPeekProvider(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5"
+      >
+        {peekProvider && (() => {
+          const p = peekProvider;
+          return (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-app-fg">{p.providerName}</p>
+                <p className="text-xs text-app-fg-muted">{p.locationCount} location{p.locationCount === 1 ? '' : 's'}</p>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Assigned</span>
+                  <span className="font-medium tabular-nums">{p.totalAssigned}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Delivered</span>
+                  <span className="font-medium tabular-nums">{p.delivered}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Returned</span>
+                  <span className="font-medium tabular-nums">{p.returned}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Delivery rate</span>
+                  <span className={`font-medium tabular-nums ${deliveryRateColorClass(p.deliveryRate)}`}>
+                    {p.totalAssigned > 0 ? `${Math.round(p.deliveryRate)}%` : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Delinquency</span>
+                  <span className={`font-medium tabular-nums ${delinquencyRateColorClass(p.delinquencyRate)}`}>
+                    {p.totalAssigned > 0 ? `${Math.round(p.delinquencyRate)}%` : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Remitted</span>
+                  <span className="font-medium"><NairaPrice amount={p.remittedAmount} zeroAsDash /></span>
+                </div>
+                {(Number(p.pendingRemittanceAmount) > 0 || Number(p.disputedRemittanceAmount) > 0) && (
+                  <div className="flex flex-wrap gap-1 text-micro">
+                    {Number(p.pendingRemittanceAmount) > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-400">
+                        Pending <NairaPrice amount={p.pendingRemittanceAmount} />
+                      </span>
+                    )}
+                    {Number(p.disputedRemittanceAmount) > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-danger-100 dark:bg-danger-900/30 text-danger-700 dark:text-danger-400">
+                        Disputed <NairaPrice amount={p.disputedRemittanceAmount} />
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-xs text-app-fg-muted mb-1">Order status split</div>
+                <StatusMixBar breakdown={p.statusBreakdown} totalAssigned={p.totalAssigned} />
+              </div>
+              <div className="pt-1 border-t border-app-border">
+                <Link
+                  to={`/admin/logistics/team/${p.providerId}${listQuerySuffix}`}
+                  prefetch="intent"
+                  className="btn-primary btn-sm inline-flex w-full items-center justify-center"
+                  onClick={() => setPeekProvider(null)}
+                >
+                  View details
+                </Link>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }

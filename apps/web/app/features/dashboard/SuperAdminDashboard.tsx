@@ -64,13 +64,10 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             desktop={
               <>
                 <PageRefreshButton />
-                <div className="flex min-h-[2rem] items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={filters?.startDate ?? ''}
                     endDate={filters?.endDate ?? ''}
-                    periodAllTime={filters?.periodAllTime ?? false}
-                  />
-                </div>
+                    periodAllTime={filters?.periodAllTime ?? false} chrome="pill" />
               </>
             }
           />
@@ -104,6 +101,13 @@ export function SuperAdminDashboard({ data, userName, filters }: SuperAdminDashb
             <p className="text-sm text-app-fg-muted mt-1">
               Revenue / Ad Spend = {fmt(revenue)} / {fmt(marketingSafe.totalSpend)}
             </p>
+            <Link
+              to="/admin/ceo"
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-500 hover:text-brand-600"
+            >
+              Deep Analysis
+              <span aria-hidden>→</span>
+            </Link>
           </div>
           <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
             <KeyMetricTile label="Revenue" value={fmt(revenue)} to="/admin/marketing/orders?status=DELIVERED" />

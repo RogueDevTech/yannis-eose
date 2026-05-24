@@ -1,4 +1,5 @@
 import { forwardRef } from 'react';
+import { CONTROL_HEIGHT_CLASS } from './_control-heights';
 
 type TextInputSize = 'sm' | 'md' | 'lg';
 
@@ -33,7 +34,7 @@ interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
 
 const sizeClasses: Record<TextInputSize, string> = {
   sm: 'h-8 px-2.5 text-xs',
-  md: 'h-9 px-3 text-sm',
+  md: `${CONTROL_HEIGHT_CLASS} px-3 text-sm`,
   lg: 'h-10 px-3.5 text-base',
 };
 

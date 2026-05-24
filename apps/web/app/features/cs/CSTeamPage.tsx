@@ -16,6 +16,7 @@ import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { ToolbarFiltersCollapsible } from '~/components/ui/toolbar-filters-collapsible';
 import { Button } from '~/components/ui/button';
 import { ExportModal } from '~/components/ui/export-modal';
+import { Modal } from '~/components/ui/modal';
 import { EXPORT_CONFIGS } from '~/lib/export-config';
 import { CompactUserAvatar } from '~/components/ui/compact-user-avatar';
 import { SearchInput } from '~/components/ui/search-input';
@@ -220,6 +221,7 @@ export function CSTeamPage({
   dateFilters,
 }: CSTeamPageProps) {
   const [showExportModal, setShowExportModal] = useState(false);
+  const [peekMember, setPeekMember] = useState<CSTeamMemberOverview | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(q);
 
@@ -456,13 +458,10 @@ export function CSTeamPage({
               }
               desktop={
                 <>
-                  <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1">
-                    <DateFilterBar
+                  <DateFilterBar
                       startDate={dateFilters.startDate}
                       endDate={dateFilters.endDate}
-                      periodAllTime={dateFilters.periodAllTime}
-                    />
-                  </div>
+                      periodAllTime={dateFilters.periodAllTime} chrome="pill" />
                   <Button type="button" variant="secondary" size="sm" onClick={() => setShowExportModal(true)}>
                     Generate report
                   </Button>
@@ -661,7 +660,46 @@ export function CSTeamPage({
               columns={teamColumns}
               rows={teamMembers}
               rowKey={(m) => m.id}
-              renderMobileCard={(m) => <CSTeamMemberCard member={m} embedded />}
+              renderMobileCard={(m) => {
+                const workload = m.workload;
+                const leaderboard = m.leaderboardEntry;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setPeekMember(m)}
+                    className="-mx-3 -my-2.5 block w-[calc(100%+1.5rem)] px-3 py-2.5 space-y-1.5 text-left"
+                  >
+                    {/* Row 1: avatar + name + backlog/idle */}
+                    <div className="flex items-center gap-2.5">
+                      <CompactUserAvatar name={m.name} />
+                      <span className="min-w-0 flex-1 truncate text-sm font-semibold text-app-fg">{m.name}</span>
+                      {m.isIdle ? (
+                        <span className="shrink-0 text-xs font-semibold text-warning-600 dark:text-warning-400">Idle</span>
+                      ) : workload ? (
+                        <span className="shrink-0 text-xs tabular-nums text-app-fg-muted">
+                          {workload.pendingCount} pending
+                        </span>
+                      ) : null}
+                    </div>
+                    {/* Row 2: duty + CR + DR */}
+                    <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums pl-[calc(1.75rem+0.625rem)]">
+                      {workload && (
+                        <span>{workload.todayClosesCount ?? 0}/{workload.capacity} duty</span>
+                      )}
+                      {leaderboard?.confirmationRate != null && (
+                        <span className={confirmationRateColorClass(leaderboard.confirmationRate)}>
+                          CR {Math.round(leaderboard.confirmationRate)}%
+                        </span>
+                      )}
+                      {leaderboard?.deliveryRate != null && (
+                        <span className={deliveryRateColorClass(leaderboard.deliveryRate)}>
+                          DR {Math.round(leaderboard.deliveryRate)}%
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              }}
               pagination={
                 totalPages > 1 ? { page, totalPages, pageParam: 'page' } : undefined
               }
@@ -678,6 +716,18 @@ export function CSTeamPage({
           {' — '}dashboard with workloads, unassigned orders, and leaderboard.
         </p>
       </div>
+
+      {/* Mobile peek modal — full closer detail + actions */}
+      <Modal
+        open={!!peekMember}
+        onClose={() => setPeekMember(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-4"
+      >
+        {peekMember && (
+          <CSTeamMemberCard member={peekMember} />
+        )}
+      </Modal>
     </div>
   );
 }

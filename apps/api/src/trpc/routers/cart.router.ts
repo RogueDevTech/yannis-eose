@@ -64,6 +64,7 @@ export const cartRouter = router({
           limit: z.number().int().min(1).max(100).default(25),
           mediaBuyerId: z.string().uuid().optional(),
           branchId: z.string().uuid().optional(),
+          search: z.string().trim().min(1).max(120).optional(),
         })
         .optional(),
     )
@@ -93,6 +94,7 @@ export const cartRouter = router({
         includeRawPhone: canReveal,
         mediaBuyerId,
         branchId,
+        search: input?.search,
       });
     }),
 

@@ -1,10 +1,10 @@
 import { DeferredSection } from '~/components/ui/deferred-section';
-import { Collapsible } from '~/components/ui/collapsible';
 import { DateFilterBar } from '~/components/ui/date-filter-bar';
 import { MobileDateFilterRow } from '~/components/ui/mobile-date-filter-row';
 import { PageHeaderMobileTools } from '~/components/ui/page-header-mobile-tools';
 import { LeaderboardTrophy } from '~/components/ui/leaderboard-trophy';
 import { PageHeader } from '~/components/ui/page-header';
+import { Modal } from '~/components/ui/modal';
 import { PageRefreshButton } from '~/components/ui/page-refresh-button';
 import { Pagination } from '~/components/ui/pagination';
 import { TableLoadingOverlay } from '~/components/ui/table-loading-overlay';
@@ -43,6 +43,7 @@ export function MarketingLeaderboardPage({
   const pageParam = Number(searchParams.get('page') ?? '1');
   const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
   const [pageSize, setPageSize] = useState(10);
+  const [peekEntry, setPeekEntry] = useState<(LeaderboardEntry & { rank: number }) | null>(null);
 
   const goToPage = (nextPage: number) => {
     const next = new URLSearchParams(searchParams);
@@ -64,13 +65,10 @@ export function MarketingLeaderboardPage({
             desktop={
               <>
                 <PageRefreshButton />
-                <div className="flex items-center min-h-[2rem] rounded-md border border-app-border bg-app-hover pl-2.5 pr-2 py-1 shrink-0">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime} chrome="pill" />
               </>
             }
           />
@@ -101,8 +99,8 @@ export function MarketingLeaderboardPage({
           const pagedLb = lb.slice(startIdx, startIdx + pageSize);
           return (
             <TableLoadingOverlay show={isFilterLoading}>
-            <div className="card p-0">
-              <div className="space-y-3 px-3 py-3 md:space-y-4 md:px-4 md:py-4">
+            <div className="-mx-4 bg-app-elevated border-y border-app-border overflow-hidden sm:mx-0 sm:rounded-xl sm:border sm:shadow-card">
+              <div className="space-y-1.5 px-2 py-2 md:space-y-3 md:px-4 md:py-4">
                 {pagedLb.map((b, idx) => {
                   const rank = startIdx + idx + 1;
                   const isTopThree = rank <= 3;
@@ -166,19 +164,33 @@ export function MarketingLeaderboardPage({
                   return (
                     <div
                       key={b.mediaBuyerId}
-                      className={`rounded-lg border border-app-border bg-app-elevated p-3 md:p-4 ${
+                      className={`rounded-lg border border-app-border bg-app-elevated md:p-4 ${
                         isTopThree ? 'bg-app-hover' : ''
                       } ${isHighCpa ? 'border-warning-200 bg-warning-50/50 dark:border-warning-800/50 dark:bg-warning-900/10' : ''}`}
                     >
-                      <div className="md:hidden">
-                        <Collapsible
-                          trigger={trigger}
-                          triggerClassName="items-start sm:items-center hover:opacity-100"
-                          contentClassName="pt-2.5"
-                        >
-                          {details}
-                        </Collapsible>
-                      </div>
+                      {/* Mobile: slim tappable card → peek modal */}
+                      <button
+                        type="button"
+                        onClick={() => setPeekEntry({ ...b, rank })}
+                        className="md:hidden w-full p-3 text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-xs font-medium text-app-fg-muted">
+                            #{rank}
+                          </span>
+                          {isTopThree && <LeaderboardTrophy rank={rank as 1 | 2 | 3} />}
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-app-fg">{b.name}</span>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${roasClass}`}>
+                            {b.trueRoas.toFixed(2)}x
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-app-fg-muted tabular-nums mt-1 pl-[calc(1.75rem+0.5rem)]">
+                          <span>{b.totalOrders} orders</span>
+                          <span>{b.deliveredOrders} delivered</span>
+                          <span>CR {b.confirmationRate.toFixed(0)}%</span>
+                        </div>
+                      </button>
+                      {/* Desktop: full inline layout */}
                       <div className="hidden md:block">
                         {trigger}
                         {details}
@@ -207,6 +219,75 @@ export function MarketingLeaderboardPage({
           );
         }}
       </DeferredSection>
+
+      {/* Mobile peek modal */}
+      <Modal
+        open={!!peekEntry}
+        onClose={() => setPeekEntry(null)}
+        maxWidth="max-w-sm"
+        contentClassName="p-5"
+      >
+        {peekEntry && (() => {
+          const b = peekEntry;
+          const roasClass = roasPillClass(b.trueRoas, greenThreshold);
+          const isHighCpa = b.cpa > HIGH_CPA_THRESHOLD && b.totalOrders > 0;
+          return (
+            <div className="space-y-4">
+              {/* Header */}
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-app-hover font-mono text-sm font-bold text-app-fg-muted">
+                  #{b.rank}
+                </span>
+                {b.rank <= 3 && <LeaderboardTrophy rank={b.rank as 1 | 2 | 3} />}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-app-fg truncate">{b.name}</p>
+                </div>
+                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${roasClass}`}>
+                  {b.trueRoas.toFixed(2)}x ROAS
+                </span>
+              </div>
+
+              {/* Stats */}
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Ad spend</span>
+                  <span className="font-medium text-app-fg">{'\u20A6'}{Math.round(b.totalSpend).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Revenue</span>
+                  <span className="font-medium text-app-fg">{'\u20A6'}{Math.round(b.deliveredRevenue).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Orders</span>
+                  <span className="font-medium text-app-fg">{b.totalOrders}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Confirmed</span>
+                  <span className="font-medium text-success-600 dark:text-success-400">{b.confirmedOrders}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Delivered</span>
+                  <span className="font-medium text-success-600 dark:text-success-400">{b.deliveredOrders}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">CPA</span>
+                  <span className={`font-medium ${isHighCpa ? 'text-danger-600 dark:text-danger-400' : 'text-app-fg'}`}>
+                    {'\u20A6'}{Math.round(b.cpa).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Confirmation rate</span>
+                  <span className="font-medium text-app-fg">{b.confirmationRate.toFixed(1)}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-app-fg-muted">Delivery rate</span>
+                  <span className="font-medium text-app-fg">{b.deliveryRate.toFixed(1)}%</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }

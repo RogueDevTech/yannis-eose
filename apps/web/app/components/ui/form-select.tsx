@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { CONTROL_HEIGHT_CLASS } from './_control-heights';
 
 type FormSelectSize = 'sm' | 'md' | 'lg';
 
@@ -52,7 +53,7 @@ interface FormSelectProps extends Omit<React.SelectHTMLAttributes<HTMLSelectElem
 
 const sizeClasses: Record<FormSelectSize, string> = {
   sm: 'h-8 px-2.5 pr-7 text-xs',
-  md: 'h-9 px-3 pr-8 text-sm',
+  md: `${CONTROL_HEIGHT_CLASS} px-3 pr-8 text-sm`,
   lg: 'h-10 px-3.5 pr-9 text-base',
 };
 

@@ -73,13 +73,10 @@ export function DashboardPage({
             desktop={
               <>
                 <PageRefreshButton />
-                <div className="flex min-h-[2rem] shrink-0 items-center rounded-md border border-app-border bg-app-hover py-1 pl-2.5 pr-2">
-                  <DateFilterBar
+                <DateFilterBar
                     startDate={dateFilters.startDate}
                     endDate={dateFilters.endDate}
-                    periodAllTime={dateFilters.periodAllTime ?? false}
-                  />
-                </div>
+                    periodAllTime={dateFilters.periodAllTime ?? false} chrome="pill" />
               </>
             }
           />

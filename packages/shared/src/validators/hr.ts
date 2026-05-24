@@ -91,7 +91,7 @@ export const listCommissionPlansSchema = z.object({
   unassignedRoleOnly: z.boolean().optional(),
   activeOnly: z.boolean().default(true),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListCommissionPlansInput = z.infer<typeof listCommissionPlansSchema>;
 
@@ -118,7 +118,7 @@ export const listPayoutsSchema = z.object({
   periodStart: z.string().date().optional(),
   periodEnd: z.string().date().optional(),
   page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(20),
+  limit: z.number().int().min(1).max(1000).default(20),
 });
 export type ListPayoutsInput = z.infer<typeof listPayoutsSchema>;
 
